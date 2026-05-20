@@ -3,6 +3,7 @@
 #include "display_list_bounds.hpp"
 #include "display_list_storage.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
@@ -31,18 +32,7 @@ struct RetainedDisplayListCache {
     uint32_t epoch;
 };
 
-static uint64_t retained_dl_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RetainedDisplayListEntry* entry = (const RetainedDisplayListEntry*)item;
-    return hashmap_murmur(&entry->view_id, sizeof(uint32_t), seed0, seed1);
-}
-
-static int retained_dl_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RetainedDisplayListEntry* ea = (const RetainedDisplayListEntry*)a;
-    const RetainedDisplayListEntry* eb = (const RetainedDisplayListEntry*)b;
-    if (ea->view_id == eb->view_id) return 0;
-    return ea->view_id < eb->view_id ? -1 : 1;
-}
+HASHMAP_DEFINE_INTKEY(retained_dl_entry, RetainedDisplayListEntry, view_id)
 
 static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
                                               DlClipShapeStack* out,
@@ -221,11 +211,7 @@ RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
 
     cache->pool = pool;
     cache->arena = arena_create_default(pool);
-    cache->map = hashmap_new(sizeof(RetainedDisplayListEntry), 128,
-                             0x72646c31, 0x72646c32,
-                             retained_dl_entry_hash,
-                             retained_dl_entry_compare,
-                             NULL, NULL);
+    cache->map = retained_dl_entry_new(128);
     if (!cache->arena || !cache->map) {
         retained_dl_cache_destroy(cache);
         return nullptr;

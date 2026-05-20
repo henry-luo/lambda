@@ -11,11 +11,22 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/sort.h"
 #include <cstring>
 #include <cstdio>
 #include "../../lib/mem.h"
 #include <cmath>
 #include <cctype>
+
+// Insertion-sort comparator for Items using Python lt semantics.
+static int py_item_lt_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    Item ia = *(const Item*)a;
+    Item ib = *(const Item*)b;
+    if (it2b(py_lt(ia, ib))) return -1;
+    if (it2b(py_lt(ib, ia))) return 1;
+    return 0;
+}
 
 extern Input* py_input;
 
@@ -354,16 +365,8 @@ extern "C" Item py_builtin_sorted(Item iterable) {
         array_push(result, src->items[i]);
     }
 
-    // insertion sort
-    for (int i = 1; i < result->length; i++) {
-        Item key = result->items[i];
-        int j = i - 1;
-        while (j >= 0 && it2b(py_lt(key, result->items[j]))) {
-            result->items[j + 1] = result->items[j];
-            j--;
-        }
-        result->items[j + 1] = key;
-    }
+    insertion_sort(result->items, (size_t)result->length, sizeof(Item),
+                   py_item_lt_cmp, NULL);
     return (Item){.array = result};
 }
 
@@ -1532,16 +1535,8 @@ extern "C" Item py_list_method(Item list_item, Item method_name, Item* args, int
         return ItemNull;
     }
     if (strcmp(method->chars, "sort") == 0) {
-        // insertion sort in-place
-        for (int i = 1; i < arr->length; i++) {
-            Item key = arr->items[i];
-            int j = i - 1;
-            while (j >= 0 && it2b(py_lt(key, arr->items[j]))) {
-                arr->items[j + 1] = arr->items[j];
-                j--;
-            }
-            arr->items[j + 1] = key;
-        }
+        insertion_sort(arr->items, (size_t)arr->length, sizeof(Item),
+                       py_item_lt_cmp, NULL);
         return ItemNull;
     }
     if (strcmp(method->chars, "copy") == 0) {

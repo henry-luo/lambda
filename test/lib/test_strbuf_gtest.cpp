@@ -617,3 +617,38 @@ TEST_F(StrBufTest, TestFreeRegularMemory) {
     strbuf_free(sb); // This should call free() on both sb->str and sb
     // Note: Cannot test memory deallocation directly, but absence of crash indicates success
 }
+
+TEST_F(StrBufTest, StartsWith) {
+    StrBuf* sb = strbuf_create("hello, world!");
+    EXPECT_TRUE(strbuf_starts_with(sb, "hello"));
+    EXPECT_TRUE(strbuf_starts_with(sb, "h"));
+    EXPECT_TRUE(strbuf_starts_with(sb, ""));   // empty prefix always matches
+    EXPECT_FALSE(strbuf_starts_with(sb, "world"));
+    EXPECT_FALSE(strbuf_starts_with(sb, "hello, world!!!"));  // longer than buf
+    EXPECT_FALSE(strbuf_starts_with(sb, nullptr));
+    strbuf_free(sb);
+
+    EXPECT_FALSE(strbuf_starts_with(nullptr, "x"));
+}
+
+TEST_F(StrBufTest, EndsWith) {
+    StrBuf* sb = strbuf_create("hello, world!");
+    EXPECT_TRUE(strbuf_ends_with(sb, "world!"));
+    EXPECT_TRUE(strbuf_ends_with(sb, "!"));
+    EXPECT_TRUE(strbuf_ends_with(sb, ""));   // empty suffix always matches
+    EXPECT_FALSE(strbuf_ends_with(sb, "hello"));
+    EXPECT_FALSE(strbuf_ends_with(sb, "very hello, world!"));  // longer than buf
+    EXPECT_FALSE(strbuf_ends_with(sb, nullptr));
+    strbuf_free(sb);
+
+    EXPECT_FALSE(strbuf_ends_with(nullptr, "x"));
+}
+
+TEST_F(StrBufTest, StartsEndsWithEmpty) {
+    StrBuf* sb = strbuf_new();
+    EXPECT_TRUE(strbuf_starts_with(sb, ""));
+    EXPECT_TRUE(strbuf_ends_with(sb, ""));
+    EXPECT_FALSE(strbuf_starts_with(sb, "x"));
+    EXPECT_FALSE(strbuf_ends_with(sb, "x"));
+    strbuf_free(sb);
+}

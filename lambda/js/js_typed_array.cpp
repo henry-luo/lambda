@@ -1779,6 +1779,8 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     case JS_TYPED_UINT32:  ((uint32_t*)data)[idx] = (uint32_t)js_typed_array_to_int_n(num_val, 32, false); break;
     case JS_TYPED_FLOAT32: ((float*)data)[idx] = (float)num_val; break;
     case JS_TYPED_FLOAT64: ((double*)data)[idx] = num_val; break;
+    case JS_TYPED_BIGINT64:  ((int64_t*)data)[idx] = (int64_t)num_val; break;
+    case JS_TYPED_BIGUINT64: ((uint64_t*)data)[idx] = (uint64_t)num_val; break;
     }
 
     return value;

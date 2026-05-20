@@ -19,6 +19,86 @@
 #include <stdlib.h>
 #include <string.h>
 
+static bool css_parser_is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static unsigned int css_parser_hex_value(char c) {
+    if (c >= '0' && c <= '9') return (unsigned int)(c - '0');
+    if (c >= 'a' && c <= 'f') return (unsigned int)(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return (unsigned int)(c - 'A' + 10);
+    return 0;
+}
+
+static int css_parser_append_utf8(char* out, unsigned int codepoint) {
+    if (codepoint == 0 || codepoint > 0x10FFFF ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        codepoint = 0xFFFD;
+    }
+    if (codepoint <= 0x7F) {
+        out[0] = (char)codepoint;
+        return 1;
+    }
+    if (codepoint <= 0x7FF) {
+        out[0] = (char)(0xC0 | (codepoint >> 6));
+        out[1] = (char)(0x80 | (codepoint & 0x3F));
+        return 2;
+    }
+    if (codepoint <= 0xFFFF) {
+        out[0] = (char)(0xE0 | (codepoint >> 12));
+        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (codepoint >> 18));
+    out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (codepoint & 0x3F));
+    return 4;
+}
+
+static char* css_parser_unescape_url_component(const char* str, size_t len, Pool* pool) {
+    if (!pool) return NULL;
+    char* result = (char*)pool_calloc(pool, len * 4 + 1);
+    if (!result) return NULL;
+    if (!str || len == 0) {
+        result[0] = '\0';
+        return result;
+    }
+
+    size_t out_pos = 0;
+    size_t i = 0;
+    while (i < len) {
+        if (str[i] != '\\') {
+            result[out_pos++] = str[i++];
+            continue;
+        }
+        i++;
+        if (i >= len) {
+            out_pos += (size_t)css_parser_append_utf8(result + out_pos, 0xFFFD);
+            break;
+        }
+        if (css_parser_is_hex_digit(str[i])) {
+            unsigned int codepoint = 0;
+            int hex_count = 0;
+            while (i < len && hex_count < 6 && css_parser_is_hex_digit(str[i])) {
+                codepoint = (codepoint << 4) | css_parser_hex_value(str[i]);
+                i++;
+                hex_count++;
+            }
+            if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' ||
+                            str[i] == '\r' || str[i] == '\f')) {
+                i++;
+            }
+            out_pos += (size_t)css_parser_append_utf8(result + out_pos, codepoint);
+        } else {
+            result[out_pos++] = str[i++];
+        }
+    }
+    result[out_pos] = '\0';
+    return result;
+}
+
 // helper: map a functional pseudo-class name to its selector type
 static CssSelectorType css_functional_pseudo_type(const char* func_name) {
     if (strcmp(func_name, "nth-child") == 0)         return CSS_SELECTOR_PSEUDO_NTH_CHILD;
@@ -625,11 +705,6 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
             last_token_pos--;
         }
 
-        func_value->data.function->name = func_name ? pool_strdup(pool, func_name) : "url";
-        func_value->data.function->arg_count = 1;
-        func_value->data.function->args = (CssValue**)pool_calloc(pool, sizeof(CssValue*));
-        if (!func_value->data.function->args) return NULL;
-
         CssValue* url_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         if (!url_value) return NULL;
         url_value->type = CSS_VALUE_TYPE_URL;
@@ -644,21 +719,16 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
                 raw_end--;
             }
             size_t url_len = raw_end > raw_start ? (size_t)(raw_end - raw_start) : 0;
-            char* url_buf = (char*)pool_calloc(pool, url_len + 1);
-            if (url_buf && url_len > 0) {
-                memcpy(url_buf, raw_start, url_len);
-                url_buf[url_len] = '\0';
-            }
-            url_value->data.url = url_buf ? url_buf : "";
+            url_value->data.url = css_parser_unescape_url_component(raw_start, url_len, pool);
+            if (!url_value->data.url) url_value->data.url = "";
         } else {
             url_value->data.url = "";
         }
-        func_value->data.function->args[0] = url_value;
         *pos = url_end_pos;
         if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
             (*pos)++;
         }
-        return func_value;
+        return url_value;
     }
 
     // Count arguments by counting top-level commas + 1 (or 0 if empty)

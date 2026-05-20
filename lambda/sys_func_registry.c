@@ -71,6 +71,7 @@ extern double js_get_number_import(Item value);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
 extern Item js_number_function(Item value);
+extern double js_get_number_mir(Item value);
 // BigInt creation (lambda-decimal.cpp)
 extern Item bigint_from_int64(int64_t val);
 extern Item bigint_from_string(const char* str, int len);
@@ -1323,7 +1324,7 @@ JitImport jit_runtime_imports[] = {
     // JavaScript runtime functions
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
-    {"js_get_number", FPTR(js_get_number_import)},
+    {"js_get_number", FPTR(js_get_number_mir)},
     {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},

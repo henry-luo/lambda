@@ -2057,7 +2057,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                     // Phase 3.4: override with TS type annotation if present
                     if (d->ts_type && d->ts_type->type_expr &&
-                        d->ts_type->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        (int)d->ts_type->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
                         TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)d->ts_type->type_expr;
                         TypeId ann_type = pt->predefined_id;
                         if (ann_type == LMD_TYPE_FLOAT || ann_type == LMD_TYPE_INT ||
@@ -2178,7 +2178,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         // Phase 3.4: if annotated with a non-predefined TS type (e.g. interface/type alias),
                         // resolve it and store TypeMap in full_type for member access inference.
                         if (d->ts_type && d->ts_type->type_expr && mt->tp &&
-                            d->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            (int)d->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
                             Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, d->ts_type->type_expr);
                             if (resolved && resolved->type_id == LMD_TYPE_MAP) {
                                 JsMirVarEntry* var_entry = jm_find_var(mt, vname);
@@ -4871,7 +4871,7 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    MIR_reg_t obj;
+    MIR_reg_t obj = 0;
     if (ctor_fc && ctor_fc->ctor_prop_count > 0) {
         // Emit static arrays of property name pointers and lengths.
         // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64.

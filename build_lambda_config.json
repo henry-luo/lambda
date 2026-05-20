@@ -413,7 +413,9 @@
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
+                "lib/hashmap_helpers.c",
                 "lib/lru_cache.c",
+                "lib/thread_pool.c",
                 "lib/file.c",
                 "lib/log.c",
                 "lib/memtrack.c",
@@ -485,7 +487,30 @@
     "flags": [
         "pedantic",
         "fdiagnostics-color=auto",
-        "fno-omit-frame-pointer"
+        "fno-omit-frame-pointer",
+        "Werror=return-type",
+        "Werror=sometimes-uninitialized",
+        "Werror=varargs",
+        "Werror=format",
+        "Werror=switch",
+        "Werror=tautological-constant-out-of-range-compare",
+        "Werror=invalid-offsetof",
+        "Werror=enum-compare",
+        "Wno-return-type-c-linkage",
+        "Wno-c99-extensions",
+        "Wno-gnu-anonymous-struct",
+        "Wno-nested-anon-types",
+        "Wno-non-c-typedef-for-linkage",
+        "Wno-gnu-include-next",
+        "Wno-include-next-absolute-path",
+        "Wno-strict-prototypes",
+        "Wno-ignored-qualifiers",
+        "Wno-newline-eof",
+        "Wno-mismatched-tags",
+        "Wno-extra-semi",
+        "Wno-missing-field-initializers",
+        "Wno-missing-braces",
+        "Wno-unused-parameter"
     ],
     "build_dir": "build",
     "platforms": {
@@ -1636,6 +1661,42 @@
                         ],
                         "binary": "test_hash_gtest.exe",
                         "icon": "#️⃣"
+                    },
+                    {
+                        "source": "lib/test_hex_gtest.cpp",
+                        "name": "Hex Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_hex_gtest.exe",
+                        "icon": "🔢"
+                    },
+                    {
+                        "source": "lib/test_time_util_gtest.cpp",
+                        "name": "Time Util Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_time_util_gtest.exe",
+                        "icon": "⏱️"
+                    },
+                    {
+                        "source": "lib/test_atomic_gtest.cpp",
+                        "name": "Atomic Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_atomic_gtest.exe",
+                        "icon": "⚛️"
                     },
                     {
                         "source": "lib/test_hashmap_helpers_gtest.cpp",

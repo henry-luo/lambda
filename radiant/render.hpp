@@ -61,6 +61,7 @@ typedef struct RenderElementMarkerScope {
 } RenderElementMarkerScope;
 
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block);
+bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block);
 bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block);

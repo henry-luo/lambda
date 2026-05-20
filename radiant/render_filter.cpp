@@ -31,6 +31,10 @@ static inline uint8_t clamp_byte(float v) {
     return (uint8_t)(v + 0.5f);  // Round to nearest
 }
 
+static inline uint32_t clamp_u8_uint(uint32_t v) {
+    return v > 255u ? 255u : v;
+}
+
 // Alias for lib/math_utils.h clamp_unit (same semantics).
 static inline float clamp_01(float v) { return clamp_unit(v); }
 
@@ -517,21 +521,24 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             uint32_t* shadow_px = (uint32_t*)scratch_alloc(sa, (size_t)ew * eh * sizeof(uint32_t));
             if (!shadow_px) { ds_func = ds_func->next; continue; }
 
-            // Fill shadow buffer: shadow color with alpha = elem_alpha * color.a / 255
-            // ABGR layout: A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7
+            // Fill shadow buffer in premultiplied ABGR. The filter result is
+            // composited back with render_composite_source_over_premul().
             for (int row = 0; row < eh; row++) {
                 for (int col = 0; col < ew; col++) {
                     uint32_t ep = pixels[(top + row) * pitch + (left + col)];
                     uint8_t elem_a = (ep >> 24) & 0xFF;
                     uint8_t sha = (uint8_t)((int)elem_a * sc.a / 255);
+                    uint8_t sr = (uint8_t)(((int)sc.r * sha + 127) / 255);
+                    uint8_t sg = (uint8_t)(((int)sc.g * sha + 127) / 255);
+                    uint8_t sb = (uint8_t)(((int)sc.b * sha + 127) / 255);
                     shadow_px[row * ew + col] = ((uint32_t)sha  << 24)
-                                              | ((uint32_t)sc.b << 16)
-                                              | ((uint32_t)sc.g <<  8)
-                                              |  (uint32_t)sc.r;
+                                              | ((uint32_t)sb << 16)
+                                              | ((uint32_t)sg <<  8)
+                                              |  (uint32_t)sr;
                 }
             }
 
-            // Blur the shadow alpha (and RGB, though RGB is constant across the shadow)
+            // Blur premultiplied alpha and color together.
             if (blur_r > 0) {
                 ImageSurface shadow_surf;
                 memset(&shadow_surf, 0, sizeof(shadow_surf));
@@ -561,25 +568,16 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                     uint8_t ea = (ep >> 24) & 0xFF;
                     if (ea == 255) continue;  // fully opaque existing pixel hides shadow
 
-                    // Porter-Duff destination-over: src=shadow (behind), dst=existing (in front)
-                    // result.a = dst.a + src.a * (1 - dst.a)
-                    // result.rgb = (dst.rgb * dst.a + src.rgb * src.a * (1 - dst.a)) / result.a
-                    float fa  = ea  / 255.0f;
-                    float fsa = shadow_a  / 255.0f;
-                    float res_af = fa + fsa * (1.0f - fa);
-                    uint8_t new_a = (uint8_t)(res_af * 255.0f + 0.5f);
-                    if (new_a == 0) continue;
+                    uint32_t inv_ea = 255 - ea;
+                    uint32_t new_a = ea + (shadow_a * inv_ea + 127) / 255;
+                    uint32_t new_r = (ep & 0xFF) + ((sp & 0xFF) * inv_ea + 127) / 255;
+                    uint32_t new_g = ((ep >> 8) & 0xFF) + (((sp >> 8) & 0xFF) * inv_ea + 127) / 255;
+                    uint32_t new_b = ((ep >> 16) & 0xFF) + (((sp >> 16) & 0xFF) * inv_ea + 127) / 255;
 
-                    float sc_contrib = fsa * (1.0f - fa);
-                    uint8_t er = ep & 0xFF,          sr = sp & 0xFF;
-                    uint8_t eg = (ep >> 8) & 0xFF,   sg = (sp >> 8) & 0xFF;
-                    uint8_t eb = (ep >> 16) & 0xFF,  sb = (sp >> 16) & 0xFF;
-
-                    uint8_t new_r = (uint8_t)(((float)er * fa + (float)sr * sc_contrib) / res_af + 0.5f);
-                    uint8_t new_g = (uint8_t)(((float)eg * fa + (float)sg * sc_contrib) / res_af + 0.5f);
-                    uint8_t new_b = (uint8_t)(((float)eb * fa + (float)sb * sc_contrib) / res_af + 0.5f);
-
-                    *dst = ((uint32_t)new_a << 24) | ((uint32_t)new_b << 16) | ((uint32_t)new_g << 8) | new_r;
+                    *dst = (clamp_u8_uint(new_a) << 24) |
+                           (clamp_u8_uint(new_b) << 16) |
+                           (clamp_u8_uint(new_g) << 8) |
+                           clamp_u8_uint(new_r);
                 }
             }
 

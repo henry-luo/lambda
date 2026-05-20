@@ -98,3 +98,55 @@ TEST(BinsearchTest, RecordsGeneric) {
     EXPECT_EQ(binsearch_records(kRecords, kRecordCount, sizeof(Record),
                                  &q, cmp_record_by_key, nullptr), -1);
 }
+
+// ───────── binsearch_range ─────────
+
+namespace {
+
+// Sorted disjoint ranges:  [0,100)  [200,300)  [500,1000)
+struct AddrRange { uint32_t start; uint32_t end; const char* label; };
+const AddrRange kRanges[] = {
+    {0,    100,  "first"},
+    {200,  300,  "second"},
+    {500,  1000, "third"},
+};
+constexpr int kRangeCount = sizeof(kRanges) / sizeof(kRanges[0]);
+
+// range_cmp:
+//   -1 if record entirely < key   (search higher)
+//    0 if key is in [start, end)
+//   +1 if record entirely > key   (search lower)
+int range_cmp_addr(const void* record, const void* key, void* udata) {
+    (void)udata;
+    const AddrRange* r = (const AddrRange*)record;
+    uint32_t q = *(const uint32_t*)key;
+    if (q < r->start) return 1;
+    if (q >= r->end)  return -1;
+    return 0;
+}
+
+}  // namespace
+
+TEST(BinsearchTest, RangeHit) {
+    uint32_t q;
+    q = 0;    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 0);
+    q = 50;   EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 0);
+    q = 99;   EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 0);
+    q = 200;  EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 1);
+    q = 250;  EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 1);
+    q = 999;  EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), 2);
+}
+
+TEST(BinsearchTest, RangeMiss) {
+    uint32_t q;
+    q = 100;  // gap between first and second
+    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), -1);
+    q = 150;
+    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), -1);
+    q = 300;  // gap between second and third
+    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), -1);
+    q = 1000; // past last range
+    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), -1);
+    q = 99999;
+    EXPECT_EQ(binsearch_range(kRanges, kRangeCount, sizeof(AddrRange), &q, range_cmp_addr, nullptr), -1);
+}

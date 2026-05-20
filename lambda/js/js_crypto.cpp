@@ -18,6 +18,7 @@ extern "C" Item js_get_current_this(void);
 #include "../../lib/log.h"
 #include <cstring>
 #include "../../lib/mem.h"
+#include "../../lib/hex.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -404,13 +405,12 @@ extern "C" Item js_crypto_randomUUID(Item options) {
     bytes[6] = (bytes[6] & 0x0F) | 0x40;
     bytes[8] = (bytes[8] & 0x3F) | 0x80;
 
-    static const char hex[] = "0123456789abcdef";
     char uuid[37];
     int p = 0;
     for (int i = 0; i < 16; i++) {
         if (i == 4 || i == 6 || i == 8 || i == 10) uuid[p++] = '-';
-        uuid[p++] = hex[bytes[i] >> 4];
-        uuid[p++] = hex[bytes[i] & 0x0F];
+        uuid[p++] = hex_encode_nibble(bytes[i] >> 4);
+        uuid[p++] = hex_encode_nibble(bytes[i] & 0x0F);
     }
     uuid[p] = '\0';
     return make_string_item_crypto(uuid);
@@ -494,15 +494,9 @@ static void hmac_compute(const uint8_t* key, int key_len,
 // Encoding helpers
 // ============================================================================
 
-static const char hex_chars[] = "0123456789abcdef";
-
 static Item bytes_to_hex_string(const uint8_t* bytes, int len) {
     char* hex = (char*)mem_alloc((size_t)(len * 2 + 1), MEM_CAT_JS_RUNTIME);
-    for (int i = 0; i < len; i++) {
-        hex[i*2] = hex_chars[bytes[i] >> 4];
-        hex[i*2+1] = hex_chars[bytes[i] & 0x0F];
-    }
-    hex[len*2] = '\0';
+    hex_encode(bytes, (size_t)len, hex);
     Item result = make_string_item_crypto(hex);
     mem_free(hex);
     return result;

@@ -16,6 +16,57 @@
  * Main background rendering dispatch
  */
 
+static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view);
+static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+                                         BackgroundProp* bg, LinearGradient* gradient,
+                                         Rect position_rect, Rect paint_rect);
+static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+                                         BackgroundProp* bg, RadialGradient* gradient,
+                                         Rect position_rect, Rect paint_rect);
+
+static Corner background_corner_scaled(const Corner* radius, float scale) {
+    Corner out = *radius;
+    out.top_left *= scale;
+    out.top_right *= scale;
+    out.bottom_right *= scale;
+    out.bottom_left *= scale;
+    out.top_left_y *= scale;
+    out.top_right_y *= scale;
+    out.bottom_right_y *= scale;
+    out.bottom_left_y *= scale;
+    return out;
+}
+
+static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
+                                          const BorderProp* border,
+                                          const Spacing* padding,
+                                          float scale) {
+    Corner out = background_corner_scaled(radius, scale);
+    float top = 0.0f, right = 0.0f, bottom = 0.0f, left = 0.0f;
+    if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
+        top += border ? border->width.top * scale : 0.0f;
+        right += border ? border->width.right * scale : 0.0f;
+        bottom += border ? border->width.bottom * scale : 0.0f;
+        left += border ? border->width.left * scale : 0.0f;
+    }
+    if (box == CSS_VALUE_CONTENT_BOX && padding) {
+        top += padding->top * scale;
+        right += padding->right * scale;
+        bottom += padding->bottom * scale;
+        left += padding->left * scale;
+    }
+
+    out.top_left = max(0.0f, out.top_left - left);
+    out.top_right = max(0.0f, out.top_right - right);
+    out.bottom_right = max(0.0f, out.bottom_right - right);
+    out.bottom_left = max(0.0f, out.bottom_left - left);
+    out.top_left_y = max(0.0f, out.top_left_y - top);
+    out.top_right_y = max(0.0f, out.top_right_y - top);
+    out.bottom_right_y = max(0.0f, out.bottom_right_y - bottom);
+    out.bottom_left_y = max(0.0f, out.bottom_left_y - bottom);
+    return out;
+}
+
 void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->bound->background) return;
 
@@ -48,9 +99,18 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         rdcon->block.clip = render_geometry_intersect_bound_rect(orig_clip, paint_rect);
     }
 
+    Corner orig_radius = {};
+    bool swapped_radius = false;
+    if (border && corner_has_radius(&border->radius)) {
+        orig_radius = border->radius;
+        border->radius = background_corner_inset_box(&orig_radius, clip_box, border, padding, s);
+        constrain_corner_radii(&border->radius, paint_rect.width, paint_rect.height);
+        swapped_radius = true;
+    }
+
     // Render base color first (if any), clipped to paint area
     if (bg->color.a > 0) {
-        render_background_color(rdcon, view, bg->color, rect);
+        render_background_color(rdcon, view, bg->color, paint_rect);
     }
 
     // Check if background-blend-mode requires special compositing
@@ -98,7 +158,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         for (int i = 0; i < bg->linear_layer_count; i++) {
             if (bg->linear_layers[i]) {
                 log_debug("[GRADIENT] Rendering linear gradient layer %d/%d", i + 1, bg->linear_layer_count);
-                render_linear_gradient(rdcon, view, bg->linear_layers[i], paint_rect);
+                render_linear_gradient_layer(rdcon, view, bg, bg->linear_layers[i], pos_rect, paint_rect);
             }
         }
     }
@@ -108,7 +168,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         for (int i = 0; i < bg->radial_layer_count; i++) {
             if (bg->radial_layers[i]) {
                 log_debug("[GRADIENT] Rendering radial gradient layer %d/%d", i + 1, bg->radial_layer_count);
-                render_radial_gradient(rdcon, view, bg->radial_layers[i], paint_rect);
+                render_radial_gradient_layer(rdcon, view, bg, bg->radial_layers[i], pos_rect, paint_rect);
             }
         }
     }
@@ -117,7 +177,13 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (bg->gradient_type != GRADIENT_NONE &&
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
-        render_background_gradient(rdcon, view, bg, paint_rect);
+        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient) {
+            render_linear_gradient_layer(rdcon, view, bg, bg->linear_gradient, pos_rect, paint_rect);
+        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient) {
+            render_radial_gradient_layer(rdcon, view, bg, bg->radial_gradient, pos_rect, paint_rect);
+        } else {
+            render_background_gradient(rdcon, view, bg, paint_rect);
+        }
     }
 
     // Apply background-blend-mode: composite upper layers onto saved backdrop
@@ -138,6 +204,9 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Restore original clip
+    if (swapped_radius) {
+        border->radius = orig_radius;
+    }
     rdcon->block.clip = orig_clip;
 }
 
@@ -219,37 +288,51 @@ static void calc_linear_gradient_points(float angle, Rect rect,
 /**
  * Render linear gradient
  */
-void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+static RdtPath* background_gradient_clip_path(ViewBlock* view, Rect clip_rect) {
+    RdtPath* clip = nullptr;
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (border && corner_has_radius(&border->radius)) {
+        Corner radius = border->radius;
+        constrain_corner_radii(&radius, clip_rect.width, clip_rect.height);
+        clip = render_path_create_rounded_rect(clip_rect, &radius);
+    } else {
+        clip = rdt_path_new();
+        rdt_path_add_rect(clip, clip_rect.x, clip_rect.y, clip_rect.width, clip_rect.height, 0, 0);
+    }
+    return clip;
+}
+
+static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
+                                        LinearGradient* gradient, Rect tile_rect,
+                                        Rect clip_rect) {
     if (!gradient || gradient->stop_count < 2) {
         log_debug("[GRADIENT] Invalid gradient (need at least 2 stops)");
         return;
     }
 
     log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
-              view->node_name(), rect.x, rect.y, rect.width, rect.height);
+              view->node_name(), tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height);
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
-    // Build shape path
     RdtPath* p = rdt_path_new();
-    bool has_radius = false;
-    BorderProp* border = nullptr;
-    if (view->bound && view->bound->border) {
-        border = view->bound->border;
-        has_radius = corner_has_radius(&border->radius);
-    }
-
-    if (has_radius) {
-        constrain_border_radii(border, rect.width, rect.height);
+    bool same_rect = fabsf(tile_rect.x - clip_rect.x) < 0.001f &&
+                     fabsf(tile_rect.y - clip_rect.y) < 0.001f &&
+                     fabsf(tile_rect.width - clip_rect.width) < 0.001f &&
+                     fabsf(tile_rect.height - clip_rect.height) < 0.001f;
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (same_rect && border && corner_has_radius(&border->radius)) {
         rdt_path_free(p);
-        p = render_path_create_rounded_rect(rect, &border->radius);
+        Corner radius = border->radius;
+        constrain_corner_radii(&radius, tile_rect.width, tile_rect.height);
+        p = render_path_create_rounded_rect(tile_rect, &radius);
     } else {
-        rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
+        rdt_path_add_rect(p, tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height, 0, 0);
     }
 
     // Calculate gradient line
     float x1, y1, x2, y2;
-    calc_linear_gradient_points(gradient->angle, rect, &x1, &y1, &x2, &y2);
+    calc_linear_gradient_points(gradient->angle, tile_rect, &x1, &y1, &x2, &y2);
 
     // Build gradient stops
     int stop_count = gradient->stop_count;
@@ -265,21 +348,21 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
                   i, stops[i].offset, stops[i].r, stops[i].g, stops[i].b, stops[i].a);
     }
 
+    if (gradient->stops_in_px) {
+        float grad_len = sqrtf((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+        if (grad_len > 0.0f) {
+            for (int i = 0; i < stop_count; i++) {
+                if (gradient->stops[i].position >= 0.0f) {
+                    stops[i].offset = gradient->stops[i].position / grad_len;
+                }
+            }
+        }
+    }
+
     // Handle repeating-linear-gradient: convert px positions and replicate stops
     RdtGradientStop* final_stops = stops;
     int final_stop_count = stop_count;
     if (gradient->is_repeating && stop_count >= 2) {
-        // Convert px positions to fractions of gradient line length
-        if (gradient->stops_in_px) {
-            float grad_len = sqrtf((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
-            if (grad_len > 0) {
-                for (int i = 0; i < stop_count; i++) {
-                    if (gradient->stops[i].position >= 0) {
-                        stops[i].offset = gradient->stops[i].position / grad_len;
-                    }
-                }
-            }
-        }
         float first_pos = stops[0].offset;
         float last_pos = stops[stop_count - 1].offset;
         float unit = last_pos - first_pos;
@@ -309,13 +392,18 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         }
     }
 
-    RdtPath* clip = render_path_create_clip_path(rdcon);
+    RdtPath* clip = same_rect ? render_path_create_clip_path(rdcon)
+                              : background_gradient_clip_path(view, clip_rect);
     rc_push_clip(rdcon, clip, NULL);
     rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, final_stops, final_stop_count,
                              RDT_FILL_WINDING, xform);
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
+}
+
+void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+    render_linear_gradient_tile(rdcon, view, gradient, rect, rect);
 }
 
 /**
@@ -542,10 +630,6 @@ void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Backgroun
 }
 
 /**
- * Render CSS box-shadow for an element
- *
- * Box shadows are rendered BEFORE the background (underneath the element).
-/**
  * Apply a 3-pass box blur on a region of the surface pixels.
  * 3 passes of box blur approximate Gaussian blur (per W3C CSS Backgrounds Level 3).
  * The blur_radius is the CSS blur radius (σ); box size = ceil(σ * 2 / 3) * 2 + 1.
@@ -577,7 +661,6 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
     // creating visible halos around shadows that should be tight to the element.
     int box_r = (int)roundf(0.5f * (-1.0f + sqrtf(1.0f + blur_radius * blur_radius)));
     if (box_r < 1) box_r = 1;
-    int box_w = box_r * 2 + 1;
 
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int stride = surface->pitch / 4;  // pitch is in bytes, pixels are 4 bytes
@@ -990,6 +1073,82 @@ void render_outer_shadow_blur_composite(
     }
 }
 
+static uint32_t* render_outer_shadow_blur_image(
+    ScratchArena* sa, ImageSurface* surface,
+    float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+    float sr_tl, float sr_tr, float sr_br, float sr_bl,
+    Color shadow_color, float blur_radius,
+    int exclude_type, const float* exclude_params,
+    int* out_x, int* out_y, int* out_w, int* out_h)
+{
+    if (out_x) *out_x = 0;
+    if (out_y) *out_y = 0;
+    if (out_w) *out_w = 0;
+    if (out_h) *out_h = 0;
+    if (!sa || !surface || shadow_color.a == 0) return nullptr;
+
+    float pad = blur_radius < 0 ? 0 : blur_radius;
+    int br_x0 = (int)floorf(shadow_x - pad);
+    int br_y0 = (int)floorf(shadow_y - pad);
+    int br_x1 = (int)ceilf(shadow_x + shadow_w + pad);
+    int br_y1 = (int)ceilf(shadow_y + shadow_h + pad);
+    if (br_x0 < 0) br_x0 = 0;
+    if (br_y0 < 0) br_y0 = 0;
+    if (br_x1 > surface->width) br_x1 = surface->width;
+    if (br_y1 > surface->height) br_y1 = surface->height;
+    int br_w = br_x1 - br_x0;
+    int br_h = br_y1 - br_y0;
+    if (br_w <= 0 || br_h <= 0) return nullptr;
+
+    size_t buf_n = (size_t)br_w * br_h;
+    uint32_t* shadow_buf = (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
+    if (!shadow_buf) return nullptr;
+    memset(shadow_buf, 0, buf_n * sizeof(uint32_t));
+
+    uint32_t sa_b = shadow_color.a;
+    uint32_t sr_b = ((uint32_t)shadow_color.r * sa_b + 127) / 255;
+    uint32_t sg_b = ((uint32_t)shadow_color.g * sa_b + 127) / 255;
+    uint32_t sb_b = ((uint32_t)shadow_color.b * sa_b + 127) / 255;
+    uint32_t shadow_px = (sa_b << 24) | (sb_b << 16) | (sg_b << 8) | sr_b;
+
+    rasterise_rounded_rect_into_buffer(shadow_buf, br_w, br_h, br_x0, br_y0,
+                                        shadow_x, shadow_y, shadow_w, shadow_h,
+                                        sr_tl, sr_tr, sr_br, sr_bl, shadow_px);
+
+    if (blur_radius >= 1.0f) {
+        ImageSurface tmp = {};
+        tmp.pixels = (void*)shadow_buf;
+        tmp.width = br_w;
+        tmp.height = br_h;
+        tmp.pitch = br_w * 4;
+        box_blur_region(sa, &tmp, 0, 0, br_w, br_h, blur_radius);
+    }
+
+    bool has_exclude = (exclude_type != 0);
+    ClipShape exclude_cs = has_exclude
+        ? clip_shape_from_params(exclude_type, exclude_params)
+        : ClipShape{};
+    if (has_exclude) {
+        for (int row = 0; row < br_h; row++) {
+            int sy = br_y0 + row;
+            for (int col = 0; col < br_w; col++) {
+                int sx = br_x0 + col;
+                float fx = (float)sx + 0.5f;
+                float fy = (float)sy + 0.5f;
+                if (clip_point_in_shape(&exclude_cs, fx, fy)) {
+                    shadow_buf[row * br_w + col] = 0;
+                }
+            }
+        }
+    }
+
+    if (out_x) *out_x = br_x0;
+    if (out_y) *out_y = br_y0;
+    if (out_w) *out_w = br_w;
+    if (out_h) *out_h = br_h;
+    return shadow_buf;
+}
+
 /**
  * Render box-shadow effects for an element (CSS Backgrounds Level 3 §7)
  *
@@ -1088,7 +1247,25 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         if (s_blur >= 1.0f) {
             // Blur > 0: use isolated temp-buffer pipeline (rasterise + blur +
             // composite) so the blur kernel doesn't smear neighbouring pixels.
-            if (rdcon->dl) {
+            if (xform && rdcon->ui_context->surface) {
+                ScratchArena* shadow_arena = rdcon->dl ? &rdcon->dl->arena : &rdcon->scratch;
+                int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
+                uint32_t* shadow_pixels = render_outer_shadow_blur_image(
+                    shadow_arena, rdcon->ui_context->surface,
+                    shadow_x, shadow_y, shadow_w, shadow_h,
+                    sr_tl, sr_tr, sr_br, sr_bl,
+                    s->color, s_blur,
+                    exclude_type, exclude_params,
+                    &sh_x, &sh_y, &sh_w, &sh_h);
+                if (shadow_pixels && sh_w > 0 && sh_h > 0) {
+                    rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w * 4,
+                                  (float)sh_x, (float)sh_y, (float)sh_w, (float)sh_h,
+                                  255, xform);
+                    if (!rdcon->dl) {
+                        scratch_free(&rdcon->scratch, shadow_pixels);
+                    }
+                }
+            } else if (rdcon->dl) {
                 dl_outer_shadow(rdcon->dl,
                                 shadow_x, shadow_y, shadow_w, shadow_h,
                                 sr_tl, sr_tr, sr_br, sr_bl,
@@ -1489,6 +1666,169 @@ static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img
     }
 }
 
+static bool background_size_unspecified(BackgroundProp* bg) {
+    return !bg->bg_size_type &&
+           !bg->bg_size_width_auto &&
+           !bg->bg_size_height_auto &&
+           !bg->bg_size_width_is_percent &&
+           !bg->bg_size_height_is_percent &&
+           bg->bg_size_width == 0.0f &&
+           bg->bg_size_height == 0.0f;
+}
+
+typedef struct {
+    float origin_x;
+    float origin_y;
+    float tile_w;
+    float tile_h;
+    int start_col;
+    int end_col;
+    int start_row;
+    int end_row;
+    float space_gap_x;
+    float space_gap_y;
+    CssEnum repeat_x;
+    CssEnum repeat_y;
+} BackgroundTilePlan;
+
+static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect, Rect coverage_rect,
+                                         float intrinsic_w, float intrinsic_h,
+                                         BackgroundTilePlan* plan) {
+    if (!bg || !plan ||
+        position_rect.width <= 0.0f || position_rect.height <= 0.0f ||
+        coverage_rect.width <= 0.0f || coverage_rect.height <= 0.0f) {
+        return false;
+    }
+
+    if (background_size_unspecified(bg)) {
+        plan->tile_w = position_rect.width;
+        plan->tile_h = position_rect.height;
+    } else {
+        compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
+                              position_rect.width, position_rect.height,
+                              &plan->tile_w, &plan->tile_h);
+    }
+    if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
+
+    float pos_x = 0.0f;
+    float pos_y = 0.0f;
+    compute_bg_image_position(bg, plan->tile_w, plan->tile_h,
+                              position_rect.width, position_rect.height, &pos_x, &pos_y);
+
+    plan->repeat_x = bg->bg_repeat_x ? bg->bg_repeat_x : CSS_VALUE_REPEAT;
+    plan->repeat_y = bg->bg_repeat_y ? bg->bg_repeat_y : CSS_VALUE_REPEAT;
+    plan->origin_x = position_rect.x + pos_x;
+    plan->origin_y = position_rect.y + pos_y;
+    plan->space_gap_x = 0.0f;
+    plan->space_gap_y = 0.0f;
+
+    if (plan->repeat_x == CSS_VALUE_ROUND && plan->tile_w > 0.0f) {
+        int count = (int)(position_rect.width / plan->tile_w + 0.5f);
+        if (count < 1) count = 1;
+        plan->tile_w = position_rect.width / count;
+    }
+    if (plan->repeat_y == CSS_VALUE_ROUND && plan->tile_h > 0.0f) {
+        int count = (int)(position_rect.height / plan->tile_h + 0.5f);
+        if (count < 1) count = 1;
+        plan->tile_h = position_rect.height / count;
+    }
+
+    if (plan->repeat_x == CSS_VALUE_NO_REPEAT) {
+        plan->start_col = 0; plan->end_col = 0;
+    } else if (plan->repeat_x == CSS_VALUE_SPACE) {
+        plan->start_col = 0;
+        plan->end_col = (plan->tile_w > 0.0f) ? (int)(position_rect.width / plan->tile_w) - 1 : 0;
+        if (plan->end_col < 0) plan->end_col = 0;
+    } else {
+        plan->start_col = (int)floorf((coverage_rect.x - plan->origin_x) / plan->tile_w);
+        plan->end_col = (int)ceilf((coverage_rect.x + coverage_rect.width - plan->origin_x) / plan->tile_w) - 1;
+    }
+
+    if (plan->repeat_y == CSS_VALUE_NO_REPEAT) {
+        plan->start_row = 0; plan->end_row = 0;
+    } else if (plan->repeat_y == CSS_VALUE_SPACE) {
+        plan->start_row = 0;
+        plan->end_row = (plan->tile_h > 0.0f) ? (int)(position_rect.height / plan->tile_h) - 1 : 0;
+        if (plan->end_row < 0) plan->end_row = 0;
+    } else {
+        plan->start_row = (int)floorf((coverage_rect.y - plan->origin_y) / plan->tile_h);
+        plan->end_row = (int)ceilf((coverage_rect.y + coverage_rect.height - plan->origin_y) / plan->tile_h) - 1;
+    }
+
+    if (plan->repeat_x == CSS_VALUE_SPACE && plan->end_col > 0) {
+        plan->space_gap_x = (position_rect.width - plan->tile_w * (plan->end_col + 1)) / plan->end_col;
+    }
+    if (plan->repeat_y == CSS_VALUE_SPACE && plan->end_row > 0) {
+        plan->space_gap_y = (position_rect.height - plan->tile_h * (plan->end_row + 1)) / plan->end_row;
+    }
+    return true;
+}
+
+static void background_tile_rect(const BackgroundTilePlan* plan, Rect rect,
+                                 int row, int col, Rect* tile_rect) {
+    if (plan->repeat_x == CSS_VALUE_SPACE) {
+        tile_rect->x = rect.x + col * (plan->tile_w + plan->space_gap_x);
+    } else {
+        tile_rect->x = plan->origin_x + col * plan->tile_w;
+    }
+    if (plan->repeat_y == CSS_VALUE_SPACE) {
+        tile_rect->y = rect.y + row * (plan->tile_h + plan->space_gap_y);
+    } else {
+        tile_rect->y = plan->origin_y + row * plan->tile_h;
+    }
+    tile_rect->width = plan->tile_w;
+    tile_rect->height = plan->tile_h;
+}
+
+static bool background_tile_outside_rect(const Rect* tile_rect, const Rect* rect) {
+    return tile_rect->x + tile_rect->width <= rect->x ||
+           tile_rect->x >= rect->x + rect->width ||
+           tile_rect->y + tile_rect->height <= rect->y ||
+           tile_rect->y >= rect->y + rect->height;
+}
+
+static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+                                         BackgroundProp* bg, LinearGradient* gradient,
+                                         Rect position_rect, Rect paint_rect) {
+    if (!gradient) return;
+    Rect tile_basis_rect = gradient->is_repeating ? position_rect : paint_rect;
+    BackgroundTilePlan plan = {};
+    if (!compute_background_tile_plan(bg, tile_basis_rect, paint_rect,
+                                      tile_basis_rect.width, tile_basis_rect.height, &plan)) {
+        return;
+    }
+
+    for (int row = plan.start_row; row <= plan.end_row; row++) {
+        for (int col = plan.start_col; col <= plan.end_col; col++) {
+            Rect tile_rect;
+            background_tile_rect(&plan, tile_basis_rect, row, col, &tile_rect);
+            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
+            render_linear_gradient_tile(rdcon, view, gradient, tile_rect, paint_rect);
+        }
+    }
+}
+
+static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+                                         BackgroundProp* bg, RadialGradient* gradient,
+                                         Rect position_rect, Rect paint_rect) {
+    if (!gradient) return;
+    (void)position_rect;
+    BackgroundTilePlan plan = {};
+    if (!compute_background_tile_plan(bg, paint_rect, paint_rect,
+                                      paint_rect.width, paint_rect.height, &plan)) {
+        return;
+    }
+
+    for (int row = plan.start_row; row <= plan.end_row; row++) {
+        for (int col = plan.start_col; col <= plan.end_col; col++) {
+            Rect tile_rect;
+            background_tile_rect(&plan, paint_rect, row, col, &tile_rect);
+            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
+            render_radial_gradient(rdcon, view, gradient, tile_rect);
+        }
+    }
+}
+
 /**
  * Render a single tile of a background image using the raster blit path.
  */
@@ -1498,17 +1838,69 @@ static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* 
     render_painter_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
 }
 
+static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
+                                        ClipShape* rounded_shape,
+                                        ClipShape** out_shapes) {
+    int depth = 0;
+    if (!rdcon || !out_shapes) return 0;
+
+    for (int i = 0; i < rdcon->clip_shape_depth && depth < RDT_MAX_CLIP_SHAPES; i++) {
+        out_shapes[depth++] = rdcon->clip_shapes[i];
+    }
+
+    if (!view || !view->bound || !view->bound->border ||
+        !corner_has_radius(&view->bound->border->radius) ||
+        depth >= RDT_MAX_CLIP_SHAPES) {
+        return depth;
+    }
+
+    Bound* clip = &rdcon->block.clip;
+    float clip_w = clip->right - clip->left;
+    float clip_h = clip->bottom - clip->top;
+    if (clip_w <= 0 || clip_h <= 0) return depth;
+
+    Corner radius = view->bound->border->radius;
+    constrain_corner_radii(&radius, clip_w, clip_h);
+    rounded_shape->type = CLIP_SHAPE_ROUNDED_RECT;
+    rounded_shape->rounded_rect = {
+        clip->left, clip->top, clip_w, clip_h,
+        radius.top_left, radius.top_right, radius.bottom_right, radius.bottom_left
+    };
+    out_shapes[depth++] = rounded_shape;
+    return depth;
+}
+
+static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view) {
+    if (!rdcon) return nullptr;
+    if (!view || !view->bound || !view->bound->border ||
+        !corner_has_radius(&view->bound->border->radius)) {
+        return render_path_create_clip_path(rdcon);
+    }
+
+    Bound* clip = &rdcon->block.clip;
+    float clip_w = clip->right - clip->left;
+    float clip_h = clip->bottom - clip->top;
+    if (clip_w <= 0 || clip_h <= 0) {
+        return render_path_create_clip_path(rdcon);
+    }
+
+    Corner radius = view->bound->border->radius;
+    constrain_corner_radii(&radius, clip_w, clip_h);
+    Rect clip_rect = {clip->left, clip->top, clip_w, clip_h};
+    return render_path_create_rounded_rect(clip_rect, &radius);
+}
+
 /**
  * Render a single tile of a background image using the vector API (for SVG images).
  */
-static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* tile_rect) {
+static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurface* img, Rect* tile_rect) {
     if (!img->pic) return;
 
     RdtPicture* pic = rdt_picture_dup(img->pic);
     if (!pic) return;
 
     // Clip to block clip region (clip path is already in absolute coordinates, no transform needed)
-    RdtPath* clip_path = render_path_create_clip_path(rdcon);
+    RdtPath* clip_path = background_image_clip_path(rdcon, view);
     rc_push_clip(rdcon, clip_path, NULL);
     render_painter_draw_picture_rect(rdcon, pic, tile_rect, NULL, 255);
     rc_pop_clip(rdcon);
@@ -1633,6 +2025,9 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
     bool is_repeating = (repeat_x != CSS_VALUE_NO_REPEAT && repeat_x != CSS_VALUE_SPACE) ||
                         (repeat_y != CSS_VALUE_NO_REPEAT && repeat_y != CSS_VALUE_SPACE);
     ScaleMode tile_scale_mode = (is_repeating && !is_svg) ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
+    ClipShape rounded_clip_shape = {};
+    ClipShape* clip_shape_stack[RDT_MAX_CLIP_SHAPES];
+    int clip_shape_depth = background_image_clip_shapes(rdcon, view, &rounded_clip_shape, clip_shape_stack);
 
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
@@ -1657,10 +2052,10 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
             }
 
             if (is_svg) {
-                render_bg_tile_tvg(rdcon, img, &tile_rect);
+                render_bg_tile_tvg(rdcon, view, img, &tile_rect);
             } else {
                 blit_bg_tile(rdcon, img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
-                             tile_scale_mode, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                             tile_scale_mode, clip_shape_stack, clip_shape_depth);
             }
         }
     }

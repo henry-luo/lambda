@@ -234,7 +234,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
             if (possible_unary->op == OPERATOR_ONE_MORE && length < 1) {
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg),
-                        "Array with '+' occurrence operator requires at least one element, got %ld", length);
+                        "Array with '+' occurrence operator requires at least one element, got %lld", (long long)length);
                 add_validation_error(result, create_validation_error(
                     AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool()));
                 return result;
@@ -242,7 +242,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
             else if (possible_unary->op == OPERATOR_OPTIONAL && length > 1) {
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg),
-                        "Array with '?' occurrence operator requires at most one element, got %ld", length);
+                        "Array with '?' occurrence operator requires at most one element, got %lld", (long long)length);
                 add_validation_error(result, create_validation_error(
                     AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool()));
                 return result;

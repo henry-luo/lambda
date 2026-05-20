@@ -4681,7 +4681,8 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         for (int i = 0; i < len; i++) {
             Item code_item = (Item){0};
             switch (ta->element_type) {
-            case JS_TYPED_UINT8:   code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
+            case JS_TYPED_UINT8:
+            case JS_TYPED_UINT8_CLAMPED: code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
             case JS_TYPED_INT8:    code_item = (Item){.item = i2it(((int8_t*)ta->data)[i])}; break;
             case JS_TYPED_UINT16:  code_item = (Item){.item = i2it(((uint16_t*)ta->data)[i])}; break;
             case JS_TYPED_INT16:   code_item = (Item){.item = i2it(((int16_t*)ta->data)[i])}; break;
@@ -4689,13 +4690,16 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             case JS_TYPED_INT32:   code_item = (Item){.item = i2it(((int32_t*)ta->data)[i])}; break;
             case JS_TYPED_FLOAT32: code_item = push_d((double)((float*)ta->data)[i]); break;
             case JS_TYPED_FLOAT64: code_item = push_d(((double*)ta->data)[i]); break;
+            case JS_TYPED_BIGINT64:  code_item = (Item){.item = i2it((int64_t)((int64_t*)ta->data)[i])}; break;
+            case JS_TYPED_BIGUINT64: code_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i])}; break;
             }
             int code = js_from_char_code_to_uint16(code_item);
             // combine adjacent surrogate pairs into a single supplementary codepoint
             if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
                 Item lo_item = (Item){0};
                 switch (ta->element_type) {
-                case JS_TYPED_UINT8:   lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_UINT8:
+                case JS_TYPED_UINT8_CLAMPED: lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_INT8:    lo_item = (Item){.item = i2it(((int8_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_UINT16:  lo_item = (Item){.item = i2it(((uint16_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_INT16:   lo_item = (Item){.item = i2it(((int16_t*)ta->data)[i+1])}; break;
@@ -4703,6 +4707,8 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
                 case JS_TYPED_INT32:   lo_item = (Item){.item = i2it(((int32_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_FLOAT32: lo_item = push_d((double)((float*)ta->data)[i+1]); break;
                 case JS_TYPED_FLOAT64: lo_item = push_d(((double*)ta->data)[i+1]); break;
+                case JS_TYPED_BIGINT64:  lo_item = (Item){.item = i2it((int64_t)((int64_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_BIGUINT64: lo_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i+1])}; break;
                 }
                 int lo = js_from_char_code_to_uint16(lo_item);
                 if (lo >= 0xDC00 && lo <= 0xDFFF) {

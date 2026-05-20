@@ -167,7 +167,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     if (!schema_file) {
         is_lambda_file = true;
     } else {
-        const char* ext = strrchr(data_file, '.');
+        const char* ext = file_path_ext(data_file);
         if (ext && (strcmp(ext, ".ls") == 0)) {
             is_lambda_file = true;
         }
@@ -483,7 +483,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
 
     // Auto-detect format if not specified
     if (!input_format) {
-        const char* ext = strrchr(data_file, '.');
+        const char* ext = file_path_ext(data_file);
         if (ext) {
             size_t ext_len = strlen(ext);
             if (str_ieq_const(ext, ext_len, ".html") || str_ieq_const(ext, ext_len, ".htm")) {
@@ -532,7 +532,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
     // Determine schema file if not explicitly set
     if (!schema_explicitly_set) {
         // Check if this is a Lambda file first
-        const char* ext = strrchr(data_file, '.');
+        const char* ext = file_path_ext(data_file);
         if (ext && strcmp(ext, ".ls") == 0) {
             // Lambda files use AST validation - no schema needed
             schema_file = nullptr;

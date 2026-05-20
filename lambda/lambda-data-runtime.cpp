@@ -708,7 +708,7 @@ Map* map_fill(Map* map, ...) {
     }
     // set map fields
     va_list args;
-    va_start(args, map_type->length);
+    va_start(args, map);
     set_fields(map_type, map->data, args);
     va_end(args);
     return map;
@@ -948,7 +948,7 @@ Object* object_fill(Object* obj, ...) {
     }
     // set object fields (same layout as map)
     va_list args;
-    va_start(args, obj_type->length);
+    va_start(args, obj);
     set_fields((TypeMap*)obj_type, obj->data, args);
     va_end(args);
     return obj;
@@ -1020,9 +1020,8 @@ Element* elmt_fill(Element* elmt, ...) {
         }
     }
     // set attributes
-    long count = elmt_type->length;
     va_list args;
-    va_start(args, count);
+    va_start(args, elmt);
     set_fields((TypeMap*)elmt_type, elmt->data, args);
     va_end(args);
     return elmt;

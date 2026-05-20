@@ -9,6 +9,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/str.h"
 #include "../../lib/mem.h"
+#include "../../lib/hex.h"
 #include <string.h>
 #include <errno.h>
 #include <mbedtls/sha256.h>
@@ -43,14 +44,11 @@ static void compute_sha256(const char* input, unsigned char* output) {
     mbedtls_sha256_free(&ctx);
 }
 
-// convert hash to hex
+// convert hash to hex (delegates to lib/hex.h; caller frees the result)
 static char* sha256_to_hex(const unsigned char* hash) {
     char* hex = (char*)mem_alloc(65, MEM_CAT_NETWORK);
     if (!hex) return NULL;
-    for (int i = 0; i < 32; i++) {
-        str_fmt(&hex[i * 2], 65 - i * 2, "%02x", hash[i]);
-    }
-    hex[64] = '\0';
+    hex_encode(hash, 32, hex);
     return hex;
 }
 

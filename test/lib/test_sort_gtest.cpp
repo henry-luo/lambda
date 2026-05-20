@@ -117,3 +117,88 @@ TEST(SortTest, SortPtrsEmptyAndSingle) {
     sort_ptrs_by_int_key(arr, 0, item_priority_key, nullptr);
     sort_ptrs_by_int_key(arr, 1, item_priority_key, nullptr);
 }
+
+// ───────── Standard comparator tests ─────────
+
+#include <cstdlib>  // qsort
+#include <cstring>
+
+TEST(SortTest, StdCmpIntWithQsort) {
+    int arr[] = {5, 3, 8, 1, 9, 2, 7, 4, 6, 0};
+    qsort(arr, 10, sizeof(int), sort_cmp_int_asc);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(arr[i], i);
+
+    qsort(arr, 10, sizeof(int), sort_cmp_int_desc);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(arr[i], 9 - i);
+}
+
+TEST(SortTest, StdCmpInt64WithQsort) {
+    int64_t arr[] = {-5, 3, INT64_MAX, INT64_MIN, 0, 42};
+    qsort(arr, 6, sizeof(int64_t), sort_cmp_int64_asc);
+    EXPECT_EQ(arr[0], INT64_MIN);
+    EXPECT_EQ(arr[1], -5);
+    EXPECT_EQ(arr[2], 0);
+    EXPECT_EQ(arr[3], 3);
+    EXPECT_EQ(arr[4], 42);
+    EXPECT_EQ(arr[5], INT64_MAX);
+
+    qsort(arr, 6, sizeof(int64_t), sort_cmp_int64_desc);
+    EXPECT_EQ(arr[0], INT64_MAX);
+    EXPECT_EQ(arr[5], INT64_MIN);
+}
+
+TEST(SortTest, StdCmpUint64WithQsort) {
+    uint64_t arr[] = {5, 0, UINT64_MAX, 7, 1};
+    qsort(arr, 5, sizeof(uint64_t), sort_cmp_uint64_asc);
+    EXPECT_EQ(arr[0], 0u);
+    EXPECT_EQ(arr[1], 1u);
+    EXPECT_EQ(arr[2], 5u);
+    EXPECT_EQ(arr[3], 7u);
+    EXPECT_EQ(arr[4], UINT64_MAX);
+}
+
+TEST(SortTest, StdCmpDoubleWithQsort) {
+    double arr[] = {3.5, -1.0, 0.0, 2.7, 1e-9};
+    qsort(arr, 5, sizeof(double), sort_cmp_double_asc);
+    EXPECT_LT(arr[0], arr[4]);
+    EXPECT_DOUBLE_EQ(arr[0], -1.0);
+    EXPECT_DOUBLE_EQ(arr[4], 3.5);
+
+    qsort(arr, 5, sizeof(double), sort_cmp_double_desc);
+    EXPECT_DOUBLE_EQ(arr[0], 3.5);
+    EXPECT_DOUBLE_EQ(arr[4], -1.0);
+}
+
+TEST(SortTest, StdCmpFloatWithQsort) {
+    float arr[] = {3.5f, -1.0f, 0.0f};
+    qsort(arr, 3, sizeof(float), sort_cmp_float_asc);
+    EXPECT_FLOAT_EQ(arr[0], -1.0f);
+    EXPECT_FLOAT_EQ(arr[2], 3.5f);
+}
+
+TEST(SortTest, StdCmpCstrWithQsort) {
+    const char* arr[] = {"banana", "apple", "cherry", "Apple"};
+    qsort(arr, 4, sizeof(const char*), sort_cmp_cstr_asc);
+    // case-sensitive ASCII: 'A' < 'a' so "Apple" first
+    EXPECT_STREQ(arr[0], "Apple");
+    EXPECT_STREQ(arr[1], "apple");
+    EXPECT_STREQ(arr[2], "banana");
+    EXPECT_STREQ(arr[3], "cherry");
+
+    // case-insensitive: "apple"/"Apple" tie, others fall in
+    qsort(arr, 4, sizeof(const char*), sort_cmp_cstr_ci_asc);
+    EXPECT_EQ(0, strcasecmp(arr[0], "apple"));
+    EXPECT_EQ(0, strcasecmp(arr[1], "apple"));
+    EXPECT_STREQ(arr[2], "banana");
+    EXPECT_STREQ(arr[3], "cherry");
+}
+
+// SORT_CMP_AS_R adapter — wraps a 2-arg cmp into 3-arg for insertion_sort.
+SORT_CMP_AS_R(sort_cmp_int_asc)
+
+TEST(SortTest, AsRAdapterWorksWithInsertionSort) {
+    int arr[] = {5, 3, 8, 1, 9};
+    insertion_sort(arr, 5, sizeof(int), sort_cmp_int_asc_r, nullptr);
+    EXPECT_EQ(arr[0], 1);
+    EXPECT_EQ(arr[4], 9);
+}

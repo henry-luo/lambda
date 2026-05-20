@@ -7,6 +7,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
+#include "../../lib/binsearch.h"
 #include <re2/unicode_casefold.h>
 
 extern "C" Item js_to_property_key(Item key);
@@ -12066,20 +12067,19 @@ static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int c
     return false;
 }
 
+// range_cmp for binsearch_range: ranges use inclusive [first, last] intervals.
+static int js_regex_range_cmp(const void* record, const void* key, void* udata) {
+    (void)udata;
+    const JsRegexRange* r = (const JsRegexRange*)record;
+    int cp = *(const int*)key;
+    if (cp < r->first) return 1;   // record interval is after key
+    if (cp > r->last)  return -1;  // record interval is before key
+    return 0;                       // cp ∈ [first, last]
+}
+
 static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
-    int lo = 0;
-    int hi = count - 1;
-    while (lo <= hi) {
-        int mid = lo + ((hi - lo) / 2);
-        if (cp < ranges[mid].first) {
-            hi = mid - 1;
-        } else if (cp > ranges[mid].last) {
-            lo = mid + 1;
-        } else {
-            return true;
-        }
-    }
-    return false;
+    return binsearch_range(ranges, count, sizeof(JsRegexRange),
+                           &cp, js_regex_range_cmp, NULL) >= 0;
 }
 
 #include "js_regex_generated_property_tables.inc"
@@ -16653,6 +16653,16 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
 
+    // Computed style wrappers are MAP_KIND_DOM host objects, but their methods
+    // are CSSStyleDeclaration methods rather than DOM element methods.
+    if (js_is_computed_style_item(obj)) {
+        String* method = it2s(method_name);
+        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
+            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+            return js_computed_style_get_property(obj, args[0]);
+        }
+    }
+
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
@@ -16696,14 +16706,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
     if (js_is_rule_style_decl(obj)) {
         return js_cssom_rule_decl_method(obj, method_name, args, argc);
-    }
-    // Computed style getPropertyValue
-    if (js_is_computed_style_item(obj)) {
-        String* method = it2s(method_name);
-        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
-            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-            return js_computed_style_get_property(obj, args[0]);
-        }
     }
     // DataView methods
     if (js_is_dataview(obj)) {
@@ -17716,7 +17718,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
                 case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
-                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
                 }
                 memcpy(dst->data, ta->data, len * elem_size);
                 if (len > 1) {

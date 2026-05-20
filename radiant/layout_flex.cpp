@@ -457,18 +457,94 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             }
         }
 
+        // A min-height that raises the used height gives column flex a definite
+        // main size for flex-grow distribution. Keep auto-height containers
+        // without min-height indefinite; this is what prevents normal content
+        // columns from distributing against the large wrap sentinel.
+        if (!has_definite_height && has_min_height) {
+            float min_height_value = container->blk->given_min_height;
+            float min_content_height = min_height_value;
+            if (container->blk && container->blk->box_sizing == CSS_VALUE_BORDER_BOX && container->bound) {
+                min_content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+                if (container->bound->border) {
+                    min_content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
+                }
+                if (min_content_height < 0.0f) min_content_height = 0.0f;
+            }
+            if (min_content_height > 0.0f && (float)content_height <= min_content_height + 0.5f) {
+                flex->main_axis_size = min_content_height;
+                has_definite_height = true;
+                log_debug("%s init_flex_container: min-height supplies definite main size %.1f", container->source_loc(),
+                          min_content_height);
+            }
+        }
+
         // Absolutely positioned elements have definite height only if both top and bottom are specified
         if (is_absolute && container->position) {
             has_definite_height = has_definite_height ||
                 (container->position->has_top && container->position->has_bottom);
         }
 
-        // CRITICAL FIX: If this container already has a height set by a parent flex algorithm,
-        // treat it as definite. This happens when a flex item with flex-grow > 0 is also a
-        // flex container - the parent sizes it first, then we need to recognize that size as definite.
-        if (!has_definite_height && container->height > 0) {
+        // If this container is a flex/grid item and its parent actually assigned a
+        // height, treat that height as definite. Do not use a generic positive
+        // container->height here: normal-flow auto-height column flex containers can
+        // temporarily carry a fallback/content height, and treating that as definite
+        // makes flex-grow distribute against the wrap sentinel used for indefinite
+        // column flexboxes.
+        bool height_assigned_by_parent = false;
+        if (container->height > 0) {
+            bool is_grid_item_col = (container->item_prop_type == DomElement::ITEM_PROP_GRID) &&
+                                    container->gi && container->gi->computed_grid_row_start > 0;
+            if (is_grid_item_col) {
+                height_assigned_by_parent = true;
+            } else if (container->fi && container->parent) {
+                DomElement* parent_elem = container->parent->as_element();
+                bool parent_is_flex = parent_elem && (parent_elem->display.inner == CSS_VALUE_FLEX);
+                if (parent_is_flex) {
+                    ViewBlock* parent_block = lam::view_as_block(parent_elem);
+                    int parent_dir = parent_block && parent_block->embed && parent_block->embed->flex ?
+                        parent_block->embed->flex->direction : DIR_ROW;
+                    bool parent_is_row = (parent_dir == DIR_ROW || parent_dir == DIR_ROW_REVERSE);
+                    if (container->fi->main_size_from_flex ||
+                        (!parent_is_row && container->fi->flex_basis >= 0)) {
+                        height_assigned_by_parent = true;
+                    } else if (!parent_is_row && parent_block) {
+                        bool parent_is_absolute = parent_block->position &&
+                            (parent_block->position->position == CSS_VALUE_ABSOLUTE ||
+                             parent_block->position->position == CSS_VALUE_FIXED);
+                        bool parent_has_definite_main_height =
+                            (parent_block->blk && parent_block->blk->given_height >= 0) ||
+                            (parent_is_absolute && parent_block->position &&
+                             parent_block->position->has_top && parent_block->position->has_bottom);
+                        if (!parent_has_definite_main_height &&
+                            parent_block->blk && parent_block->blk->given_min_height > 0 &&
+                            parent_block->height <= parent_block->blk->given_min_height + 0.5f) {
+                            parent_has_definite_main_height = true;
+                        }
+                        if (!parent_has_definite_main_height &&
+                            parent_block->blk && parent_block->blk->given_max_height > 0 &&
+                            fabs(parent_block->height - parent_block->blk->given_max_height) < 1.0f) {
+                            parent_has_definite_main_height = true;
+                        }
+                        if (parent_has_definite_main_height) {
+                            height_assigned_by_parent = true;
+                        }
+                    } else if (parent_is_row) {
+                        int effective_align = (int)container->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
+                            container->fi->align_self :
+                            (parent_block && parent_block->embed && parent_block->embed->flex ?
+                                parent_block->embed->flex->align_items : ALIGN_STRETCH);
+                        bool has_item_explicit_height = container->blk && container->blk->given_height >= 0;
+                        if (!has_item_explicit_height && effective_align == ALIGN_STRETCH) {
+                            height_assigned_by_parent = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (!has_definite_height && height_assigned_by_parent) {
             has_definite_height = true;
-            log_debug("%s init_flex_container: using height set by parent (%.1f)", container->source_loc(),
+            log_debug("%s init_flex_container: height is definite from parent layout (%.1f)", container->source_loc(),
                       container->height);
         }
 
@@ -1143,6 +1219,39 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Phase 3: Create flex lines (handle wrapping)
     int line_count = create_flex_lines(flex_layout, items, item_count);
 
+    // For auto-height column flex containers, flex-wrap does not create columns
+    // unless there is a definite height/max-height. We use a large main-axis
+    // sentinel above only for line-breaking, then restore the natural content
+    // height before flexing and justify-content alignment so flex-grow and
+    // space-between do not distribute against the sentinel.
+    if (!is_main_axis_horizontal(flex_layout) &&
+        flex_layout->main_axis_is_indefinite &&
+        flex_layout->wrap != WRAP_NOWRAP &&
+        !(container->blk && container->blk->given_max_height > 0)) {
+        float natural_main_size = 0.0f;
+        for (int i = 0; i < line_count; i++) {
+            if (flex_layout->lines[i].main_size > natural_main_size) {
+                natural_main_size = flex_layout->lines[i].main_size;
+            }
+        }
+        if (natural_main_size > 0.0f) {
+            flex_layout->main_axis_size = natural_main_size;
+            for (int i = 0; i < line_count; i++) {
+                flex_layout->lines[i].free_space = flex_layout->main_axis_size - flex_layout->lines[i].main_size;
+            }
+            float padding_border_height = 0.0f;
+            if (container->bound) {
+                padding_border_height += container->bound->padding.top + container->bound->padding.bottom;
+                if (container->bound->border) {
+                    padding_border_height += container->bound->border->width.top + container->bound->border->width.bottom;
+                }
+            }
+            container->height = flex_layout->main_axis_size + padding_border_height;
+            log_debug("%s COLUMN FLEX: restored auto main size to %.1f after wrap line-breaking", container->source_loc(),
+                      flex_layout->main_axis_size);
+        }
+    }
+
     // Save pre-Phase-4 main_axis_size to detect if Phase 5b increases it
     float pre_phase4_main_axis_size = flex_layout->main_axis_size;
 
@@ -1477,10 +1586,15 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
 
         if (total_line_main > 0) {
+            float used_line_main = total_line_main;
+            if (flex_layout->main_axis_size > used_line_main &&
+                flex_layout->main_axis_size < 100000000.0f) {
+                used_line_main = flex_layout->main_axis_size;
+            }
             if (!has_explicit_height) {
                 log_debug("%s Phase 7: (Column) Updating main_axis_size from %.1f to %.1f (auto-height)", container->source_loc(),
-                         flex_layout->main_axis_size, total_line_main);
-                flex_layout->main_axis_size = (float)total_line_main;
+                         flex_layout->main_axis_size, used_line_main);
+                flex_layout->main_axis_size = used_line_main;
                 // Container height should be content + padding + border (not just content)
                 float padding_height = 0;
                 float border_height = 0;
@@ -1490,7 +1604,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         border_height = container->bound->border->width.top + container->bound->border->width.bottom;
                     }
                 }
-                container->height = total_line_main + padding_height + border_height;
+                container->height = used_line_main + padding_height + border_height;
             } else {
                 log_debug("%s Phase 7: (Column) Container has explicit height, not updating", container->source_loc());
             }
@@ -1752,7 +1866,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
                 bool is_baseline_item = false;
                 {
-                    int align = (item->fi && item->fi->align_self != ALIGN_AUTO) ?
+                    int align = (item->fi && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                         item->fi->align_self : flex_layout->align_items;
                     is_baseline_item = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
                 }
@@ -1838,7 +1952,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (!has_baseline_child) {
             for (int i = 0; i < first_line->item_count; i++) {
                 ViewElement* item = lam::view_as_element(first_line->items[i]);
-                if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
+                if (item && item->fi && (int)item->fi->align_self == ALIGN_BASELINE) { // INT_CAST_OK: enum comparison
                     has_baseline_child = true;
                     break;
                 }
@@ -2376,7 +2490,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             // 1. Parent is column flex (cross-axis is width)
             // 2. align-items is stretch (or auto which defaults to stretch)
             // 3. Item has no explicit align-self override
-            int align_type = (item->fi && item->fi->align_self != ALIGN_AUTO) ?
+            int align_type = (item->fi && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                              item->fi->align_self : flex_layout->align_items;
             bool should_stretch = (align_type == ALIGN_STRETCH);
 
@@ -2424,14 +2538,20 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         if (form_flex_basis >= 0) {
             // Explicit flex-basis (including 0 from "flex: 1")
             if (item->form->flex_basis_is_percent) {
-                // CSS Flexbox: flex-basis % resolves against container's inner main size
-                float container_size = flex_layout->main_axis_size;
-                float basis = form_flex_basis * container_size / 100.0f;
-                log_debug("calculate_flex_basis - form control explicit percent: %.1f%% = %.1f", form_flex_basis, basis);
-                return basis;
+                if (flex_layout->main_axis_is_indefinite) {
+                    log_debug("calculate_flex_basis - form control percent %.1f%% is auto because main axis is indefinite",
+                              form_flex_basis);
+                } else {
+                    // CSS Flexbox: flex-basis % resolves against container's inner main size
+                    float container_size = flex_layout->main_axis_size;
+                    float basis = form_flex_basis * container_size / 100.0f;
+                    log_debug("calculate_flex_basis - form control explicit percent: %.1f%% = %.1f", form_flex_basis, basis);
+                    return basis;
+                }
+            } else {
+                log_debug("calculate_flex_basis - form control explicit basis: %.1f", form_flex_basis);
+                return form_flex_basis;
             }
-            log_debug("calculate_flex_basis - form control explicit basis: %.1f", form_flex_basis);
-            return form_flex_basis;
         }
 
         // CSS Flexbox §7.2.3: flex-basis:auto retrieves the used main-size
@@ -2502,15 +2622,21 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
     // Case 1: Explicit flex-basis value (not auto)
     if (item->fi->flex_basis >= 0) {
         if (item->fi->flex_basis_is_percent) {
-            // CSS Flexbox: flex-basis % resolves against container's inner main size
-            float container_size = flex_layout->main_axis_size;
-            float basis = item->fi->flex_basis * container_size / 100.0f;
-            log_info("%s FLEX_BASIS - explicit percent: %.1f%% of %.1f = %.1f", item->source_loc(),
-                     item->fi->flex_basis, container_size, basis);
-            return basis;
+            if (flex_layout->main_axis_is_indefinite) {
+                log_debug("%s FLEX_BASIS - percent %.1f%% is auto because main axis is indefinite", item->source_loc(),
+                          item->fi->flex_basis);
+            } else {
+                // CSS Flexbox: flex-basis % resolves against container's inner main size
+                float container_size = flex_layout->main_axis_size;
+                float basis = item->fi->flex_basis * container_size / 100.0f;
+                log_info("%s FLEX_BASIS - explicit percent: %.1f%% of %.1f = %.1f", item->source_loc(),
+                         item->fi->flex_basis, container_size, basis);
+                return basis;
+            }
+        } else {
+            log_info("%s FLEX_BASIS - explicit: %.1f", item->source_loc(), item->fi->flex_basis);
+            return item->fi->flex_basis;
         }
-        log_info("%s FLEX_BASIS - explicit: %d", item->source_loc(), item->fi->flex_basis);
-        return (float)item->fi->flex_basis;
     }
 
     // Case 2: flex-basis: auto - use main axis size if explicit
@@ -2636,7 +2762,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
 
         // determine alignment type for this item
-        int align_type = (item->fi->align_self != ALIGN_AUTO) ?
+        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                          item->fi->align_self : flex_layout->align_items;
         bool is_stretch = (align_type == ALIGN_STRETCH);
 
@@ -3064,7 +3190,7 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
     // below the size that would maintain the aspect-ratio at the established cross size).
     // This only applies when the main-axis minimum is AUTO (not explicitly set by CSS).
     if (item->fi && item->fi->aspect_ratio > 0) {
-        int align_type = (item->fi->align_self != ALIGN_AUTO) ?
+        int align_type = ((int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                          item->fi->align_self : (flex_layout ? flex_layout->align_items : ALIGN_STRETCH);
         bool is_stretch = (align_type == ALIGN_STRETCH);
         if (is_stretch && flex_layout && flex_layout->cross_axis_size > 0) {
@@ -3602,7 +3728,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
             FlexLineInfo* line = &flex_layout->lines[i];
             for (int j = 0; j < line->item_count; j++) {
                 ViewElement* item = lam::view_as_element(line->items[j]);
-                if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
+                if (item && item->fi && (int)item->fi->align_self == ALIGN_BASELINE) { // INT_CAST_OK: enum comparison
                     has_baseline_alignment = true;
                     break;
                 }
@@ -3639,7 +3765,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
 
             // Check if this item uses baseline alignment
             // NOTE: fi may be NULL for items that inherit alignment from container
-            int align_self = (item->fi && item->fi->align_self != ALIGN_AUTO) ?
+            int align_self = (item->fi && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                 item->fi->align_self : ALIGN_AUTO;
             bool uses_baseline = (align_self == ALIGN_BASELINE) ||
                                 (align_self == ALIGN_AUTO && flex_layout->align_items == ALIGN_BASELINE);
@@ -3721,7 +3847,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
         for (int i = 0; i < line->item_count; i++) {
             ViewElement* item = lam::view_as_element(line->items[i]);
             if (!item) continue;
-            int align_self = (item->fi && item->fi->align_self != ALIGN_AUTO) ?
+            int align_self = (item->fi && (int)item->fi->align_self != ALIGN_AUTO) ? // INT_CAST_OK: enum comparison
                 item->fi->align_self : flex_layout->align_items;
             bool is_baseline_item = (align_self == ALIGN_BASELINE || align_self == CSS_VALUE_BASELINE);
             if (is_baseline_item) {
@@ -4674,7 +4800,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             log_debug("ALIGN_SELF_FORM - item %d: using container align_items=%d", i, align_type);
         } else {
             // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
-            align_type = item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
+            align_type = (int)item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items; // INT_CAST_OK: enum comparison
             log_debug("ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d",
                    i, item->fi->align_self, ALIGN_AUTO, flex_layout->align_items);
         }
@@ -5375,7 +5501,7 @@ static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layou
     if (!item || !item->fi) return false;
 
     // Get effective align-self (uses align-items if auto)
-    int align_type = item->fi->align_self != ALIGN_AUTO ?
+    int align_type = (int)item->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
                      item->fi->align_self : flex_layout->align_items;
 
     return align_type == ALIGN_STRETCH;
@@ -5435,7 +5561,7 @@ static void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
             // Check if this item participates in baseline alignment
             bool is_baseline = false;
             if (item->fi) {
-                int align = item->fi->align_self != ALIGN_AUTO ?
+                int align = (int)item->fi->align_self != ALIGN_AUTO ? // INT_CAST_OK: enum comparison
                     item->fi->align_self : flex_layout->align_items;
                 is_baseline = (align == ALIGN_BASELINE || align == CSS_VALUE_BASELINE);
             }
