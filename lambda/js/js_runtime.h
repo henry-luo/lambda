@@ -158,6 +158,7 @@ Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bou
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
 Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+Item js_builtin_eval_regexp_literal_fast(Item code_item);
 void js_eval_private_push_frame(void);
 void js_eval_private_pop_frame(void);
 void js_eval_private_bind(Item unscoped_key, Item scoped_key);

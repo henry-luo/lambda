@@ -1854,7 +1854,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Pre-seed module_consts from preamble (batch mode: test inherits harness definitions)
     if (mt->preamble_entries && mt->preamble_entry_count > 0) {
         for (int i = 0; i < mt->preamble_entry_count; i++) {
-            hashmap_set(mt->module_consts, &mt->preamble_entries[i]);
+            JsModuleConstEntry entry = mt->preamble_entries[i];
+            entry.is_preamble = true;
+            hashmap_set(mt->module_consts, &entry);
         }
         log_debug("js-mir: pre-seeded %d preamble entries (var_count=%d)",
             mt->preamble_entry_count, mt->preamble_var_count);
@@ -2249,6 +2251,40 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_collect_func_assignments(s, top_assigned);
             }
             s = s->next;
+        }
+        // A nested function can write a top-level var through js_module_vars[].
+        // Keep those module vars boxed so the parent frame does not reload a
+        // boxed undefined/string/object value through a stale native mirror.
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFunctionNode* fn = mt->func_entries[fi].node;
+            if (!fn || !fn->body) continue;
+            struct hashmap* func_assigned = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_func_assignments(fn->body, func_assigned);
+            size_t iter = 0; void* item;
+            while (hashmap_iter(func_assigned, &iter, &item)) {
+                JsNameSetEntry* e = (JsNameSetEntry*)item;
+                if (!jm_name_set_has(top_declarations, e->name)) continue;
+                if (func_decl_sets[fi] && jm_name_set_has(func_decl_sets[fi], e->name)) continue;
+                bool in_function_ancestor = false;
+                int anc_idx = mt->func_entries[fi].parent_index;
+                while (anc_idx >= 0 && anc_idx < mt->func_count) {
+                    if (func_decl_sets[anc_idx] && jm_name_set_has(func_decl_sets[anc_idx], e->name)) {
+                        in_function_ancestor = true;
+                        break;
+                    }
+                    anc_idx = mt->func_entries[anc_idx].parent_index;
+                }
+                if (in_function_ancestor) continue;
+                JsModuleConstEntry lookup;
+                snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->modvar_type != 0) {
+                    log_debug("js-mir: widening cross-function-written module var '%s'", e->name);
+                    mc->modvar_type = 0;
+                }
+            }
+            hashmap_free(func_assigned);
         }
         // top assigned - top declared → top-level implicit globals
         {
@@ -3848,7 +3884,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
             MIR_label_t skip_preinit = jm_new_label(mt);
-            if (mt->is_eval_direct) {
+            if (mt->is_eval_direct && !mt->is_eval_var_env_global) {
                 MIR_reg_t bridged_reg = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -3859,7 +3895,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, undef_reg),
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
-            if (mt->is_eval_direct) {
+            if (mt->is_eval_direct && mt->is_eval_var_env_global) {
+                jm_call_void_2(mt, "js_define_global_eval_var_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+            } else if (mt->is_eval_direct) {
                 MIR_reg_t eval_script_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
                 MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
                 MIR_label_t eval_env_preinit = jm_new_label(mt);
@@ -5024,6 +5064,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
             MIR_reg_t val_reg = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
+            if (mt->is_eval_var_env_global) {
+                jm_call_void_2(mt, "js_define_global_eval_var_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                jm_call_void_2(mt, "js_set_global_property",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                jm_call_void_2(mt, "js_eval_local_export_var",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                log_debug("js-mir: eval export var '%s' to globalThis", js_name);
+                continue;
+            }
             MIR_reg_t eval_script_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
             MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
             MIR_label_t eval_env_export = jm_new_label(mt);

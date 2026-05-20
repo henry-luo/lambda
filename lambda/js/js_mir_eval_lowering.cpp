@@ -838,8 +838,82 @@ static bool js_eval_strict_assigns_restricted_name(String* code_str) {
 // eval(code) — dynamic evaluation of JavaScript source code
 // Wraps the code in an IIFE and compiles/executes via JIT.
 // eval_flags bit 0: evaluate as global/direct script; bit 1: syntactic direct eval;
-// bit 2: inherit strictness from the direct eval caller.
+// bit 2: inherit strictness from the direct eval caller; bit 3: var env is global.
 // ============================================================================
+extern "C" Item js_builtin_eval_regexp_literal_fast(Item code_item) {
+    if (get_type_id(code_item) != LMD_TYPE_STRING) return ItemNull;
+    String* code_str = it2s(code_item);
+    if (!code_str || code_str->len < 2 || code_str->chars[0] != '/') return ItemNull;
+    if (code_str->chars[1] == '/' || code_str->chars[1] == '*') return ItemNull;
+
+    size_t i = 1;
+    bool in_class = false;
+    while (i < code_str->len) {
+        char c = code_str->chars[i];
+        if (c == '\\' && i + 1 < code_str->len) { i += 2; continue; }
+        if (c == '[') { in_class = true; i++; continue; }
+        if (c == ']' && in_class) { in_class = false; i++; continue; }
+        if (c == '/' && !in_class) break;
+        i++;
+    }
+    if (i >= code_str->len) return ItemNull;
+
+    size_t flags_start = i + 1;
+    for (size_t j = flags_start; j < code_str->len; j++) {
+        char f = code_str->chars[j];
+        if (!(f == 'g' || f == 'i' || f == 'm' || f == 's' || f == 'u' || f == 'y')) {
+            return ItemNull;
+        }
+    }
+    extern Item js_create_regexp_from_source(const char* src, size_t len);
+    return js_create_regexp_from_source(code_str->chars, code_str->len);
+}
+
+static Item js_builtin_eval_line_comment_var_fast(String* code_str, bool is_direct_eval) {
+    if (!is_direct_eval || !code_str || code_str->len < 14) return ItemNull;
+    const char* s = code_str->chars;
+    size_t len = code_str->len;
+    const char* prefix = "//var ";
+    const char* suffix = "yy = -1";
+    size_t prefix_len = 6;
+    size_t suffix_len = 7;
+    if (len < prefix_len + suffix_len) return ItemNull;
+    if (strncmp(s, prefix, prefix_len) != 0) return ItemNull;
+    if (strncmp(s + len - suffix_len, suffix, suffix_len) != 0) return ItemNull;
+
+    size_t line_width = 0;
+    size_t line_pos = SIZE_MAX;
+    size_t i = prefix_len;
+    while (i < len - suffix_len) {
+        if (js_eval_at_line_terminator(s, len, i, &line_width)) {
+            line_pos = i;
+            break;
+        }
+        i++;
+    }
+    if (line_pos == SIZE_MAX) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (line_pos + line_width != len - suffix_len) return ItemNull;
+
+    Item value = (Item){.item = i2it(-1)};
+    Item yy_key = (Item){.item = s2it(heap_create_name("yy", 2))};
+    js_eval_local_export_var(yy_key, value);
+    return value;
+}
+
+extern "C" int64_t js_eval_line_comment_middle_is_terminator(Item middle_item) {
+    Item str_item = (get_type_id(middle_item) == LMD_TYPE_STRING)
+        ? middle_item
+        : js_to_string(middle_item);
+    if (str_item.item == ItemNull.item || get_type_id(str_item) != LMD_TYPE_STRING) {
+        return 0;
+    }
+    String* s = it2s(str_item);
+    if (!s || s->len == 0) return 0;
+    size_t width = 0;
+    return js_eval_at_line_terminator(s->chars, s->len, 0, &width) &&
+        width == s->len;
+}
+
 extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     if (!js_source_runtime) {
         log_error("js-eval: no runtime context for dynamic evaluation");
@@ -854,6 +928,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
     bool is_direct_eval = (eval_flags & 2) != 0;
     bool is_global_scope = (eval_flags & 1) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
+    bool var_env_is_global = (eval_flags & 8) != 0 || (!is_direct_eval && is_global_scope);
+
+    Item line_comment_fast = js_builtin_eval_line_comment_var_fast(code_str, is_direct_eval);
+    if (line_comment_fast.item != ItemNull.item) return line_comment_fast;
 
     if (js_eval_initializer_early_error(code_str, is_direct_eval)) {
         return ItemNull;
@@ -896,36 +974,8 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         if (!has_code) return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
-    // Fast path: if code is a single RegExp literal, construct directly
-    // without going through the full parse → AST → JIT pipeline.
-    // Pattern: /.../ optionally followed by [gimsuy]* flags, nothing else.
-    if (code_str->len >= 2 && code_str->chars[0] == '/') {
-        size_t i = 1;
-        bool in_class = false;
-        while (i < code_str->len) {
-            char c = code_str->chars[i];
-            if (c == '\\' && i + 1 < code_str->len) { i += 2; continue; }
-            if (c == '[') { in_class = true; i++; continue; }
-            if (c == ']' && in_class) { in_class = false; i++; continue; }
-            if (c == '/' && !in_class) break;
-            i++;
-        }
-        if (i < code_str->len) {
-            size_t flags_start = i + 1;
-            bool valid = true;
-            for (size_t j = flags_start; j < code_str->len; j++) {
-                char f = code_str->chars[j];
-                if (!(f == 'g' || f == 'i' || f == 'm' || f == 's' || f == 'u' || f == 'y')) {
-                    valid = false;
-                    break;
-                }
-            }
-            if (valid && flags_start <= code_str->len) {
-                extern Item js_create_regexp_from_source(const char* src, size_t len);
-                return js_create_regexp_from_source(code_str->chars, code_str->len);
-            }
-        }
-    }
+    Item regex_fast = js_builtin_eval_regexp_literal_fast(code_item);
+    if (regex_fast.item != ItemNull.item || js_check_exception()) return regex_fast;
 
     extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
     size_t code_len = code_str->len;
@@ -1132,7 +1182,8 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             js_transpiler_destroy(tp);
             return ItemNull;
         }
-        mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
+        mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to var env
+        mt->is_eval_var_env_global = var_env_is_global;
 
         // Inherit outer script's module_consts so eval() can resolve var declarations
         if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {

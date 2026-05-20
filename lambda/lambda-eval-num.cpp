@@ -2252,9 +2252,15 @@ extern "C" int64_t fn_sign_f(double x) {
 extern "C" double js_math_round(double x) {
     // ES spec: if x in [-0.5, -0], return -0
     if (x != x || !isfinite(x) || x == 0.0) return x;
-    if (x >= -0.5 && x < 0.0) return -0.0;
     if (fabs(x) >= 4503599627370496.0) return x;
-    return floor(x + 0.5);
+    double int_part = 0.0;
+    double frac = modf(x, &int_part);
+    if (x < 0.0) {
+        if (frac < -0.5) return int_part - 1.0;
+        if (int_part == 0.0) return -0.0;
+        return int_part;
+    }
+    return frac >= 0.5 ? int_part + 1.0 : int_part;
 }
 
 // JS-semantic Math functions that handle NaN, Infinity, -0 correctly.
@@ -2338,8 +2344,16 @@ extern "C" Item js_math_round_item(Item x) {
         double d = it2d(x);
         if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
         if (fabs(d) >= 4503599627370496.0) return push_d(d);
-        double r = floor(d + 0.5);
-        if (r == 0.0 && d < 0.0) return push_d(-0.0);
+        double int_part = 0.0;
+        double frac = modf(d, &int_part);
+        double r;
+        if (d < 0.0) {
+            if (frac < -0.5) r = int_part - 1.0;
+            else if (int_part == 0.0) r = -0.0;
+            else r = int_part;
+        } else {
+            r = frac >= 0.5 ? int_part + 1.0 : int_part;
+        }
         return push_d(r);
     }
     return push_d(NAN);

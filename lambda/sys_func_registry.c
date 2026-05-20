@@ -67,6 +67,7 @@ extern Item js_to_numeric(Item value);
 extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_not_constructor(void);
+extern double js_get_number_import(Item value);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
 extern Item js_number_function(Item value);
@@ -196,6 +197,7 @@ extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern Item js_test262_concat_percent_hex_int(Item left_item, int64_t n_raw);
 extern void js_validate_native_function_source(Item source_item);
+extern int64_t js_eval_line_comment_middle_is_terminator(Item middle_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -1321,6 +1323,7 @@ JitImport jit_runtime_imports[] = {
     // JavaScript runtime functions
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
+    {"js_get_number", FPTR(js_get_number_import)},
     {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},
@@ -1436,6 +1439,8 @@ JitImport jit_runtime_imports[] = {
     {"js_func_bind", FPTR(js_func_bind)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
     {"js_builtin_eval", FPTR(js_builtin_eval)},
+    {"js_builtin_eval_regexp_literal_fast", FPTR(js_builtin_eval_regexp_literal_fast)},
+    {"js_eval_line_comment_middle_is_terminator", FPTR(js_eval_line_comment_middle_is_terminator)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},

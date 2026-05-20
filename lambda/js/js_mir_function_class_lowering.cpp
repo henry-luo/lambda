@@ -287,6 +287,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     bool generate_native = false;
     if (fc->has_native_version &&
         !has_captures && param_count > 0 && param_count <= 16 &&
+        !fc->uses_arguments && fc->ctor_prop_count <= 0 &&
         (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
@@ -2472,17 +2473,28 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // Register parameter variables
+        MIR_reg_t param_env_reg = 0;
+        if (param_count > 0) {
+            param_env_reg = jm_new_reg(mt, "param_env", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                MIR_new_reg_op(mt->ctx, param_env_reg),
+                MIR_new_int_op(mt->ctx, param_count * (int)sizeof(uint64_t))));
+        }
         param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
             if (param_node) {
                 char vname[128];
                 jm_get_param_name(param_node, i, vname, sizeof(vname));
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
+                MIR_reg_t param_reg = jm_new_reg(mt, "param", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, param_reg),
+                    MIR_new_reg_op(mt->ctx, preg)));
                 bool is_default_param = (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN);
                 JsAstNode* param_binding = param_node;
                 if (is_default_param) param_binding = ((JsAssignmentPatternNode*)param_node)->left;
                 if (!(has_default_params && param_binding && param_binding->node_type == JS_AST_NODE_IDENTIFIER)) {
-                jm_set_var(mt, vname, preg);
+                jm_set_var(mt, vname, param_reg);
                 }
 
                 // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
@@ -2514,12 +2526,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_label_t skip_label = jm_new_label(mt);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
                             MIR_new_label_op(mt->ctx, skip_label),
-                            MIR_new_reg_op(mt->ctx, preg),
+                            MIR_new_reg_op(mt->ctx, param_reg),
                             MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
                         // emit default value and store into param reg
                         MIR_reg_t def_val = jm_transpile_default_param_value(mt, fn, ap->right);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, preg),
+                            MIR_new_reg_op(mt->ctx, param_reg),
                             MIR_new_reg_op(mt->ctx, def_val)));
                         jm_emit_label(mt, skip_label);
                     }
@@ -2530,9 +2542,19 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     if (pvar) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, pvar->reg),
-                            MIR_new_reg_op(mt->ctx, preg)));
+                            MIR_new_reg_op(mt->ctx, param_reg)));
                         pvar->tdz_active = false;
                     }
+                }
+                JsMirVarEntry* stable_pvar = jm_find_var(mt, vname);
+                if (stable_pvar && param_env_reg != 0) {
+                    stable_pvar->in_scope_env = true;
+                    stable_pvar->scope_env_slot = i;
+                    stable_pvar->scope_env_reg = param_env_reg;
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            i * (int)sizeof(uint64_t), param_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, stable_pvar->reg)));
                 }
 
                 // Unwrap assignment pattern for destructured default params: f({ x = 1 } = {})
@@ -2548,7 +2570,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                     // Throw TypeError if arg is null/undefined (RequireObjectCoercible)
                     jm_call_void_1(mt, "js_require_object_coercible",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, param_reg));
                     MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
                     MIR_label_t skip_param_destr = jm_new_label(mt);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_param_destr),
@@ -2571,7 +2593,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 key = jm_transpile_box_item(mt, p->key);
                             }
                             MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, param_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                             // determine target variable (value of property, or key for shorthand)
                             JsAstNode* target = p->value ? p->value : p->key;
@@ -2615,11 +2637,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // For array-destructured params: function f([a, b]) → extract by index
                 if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                     // v20: use recursive destructuring helper
-                    jm_emit_array_destructure(mt, destr_pat, preg);
+                    jm_emit_array_destructure(mt, destr_pat, param_reg);
                 }
                 // v20: object-destructured params: function f({a, b})
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    jm_emit_object_destructure(mt, destr_pat, preg);
+                    jm_emit_object_destructure(mt, destr_pat, param_reg);
                 }
             }
             param_node = param_node ? param_node->next : NULL;

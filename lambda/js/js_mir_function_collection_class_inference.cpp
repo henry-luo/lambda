@@ -2637,21 +2637,28 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
+    // Evaluate arguments before allocating the argument buffer. Direct-call
+    // callers may pass their own formal parameter registers as arguments; a
+    // runtime allocation before those reads can clobber incoming ABI registers
+    // before MIR has copied them into stable temporaries.
+    MIR_reg_t* arg_vals = (MIR_reg_t*)alloca((size_t)arg_count * sizeof(MIR_reg_t));
+    JsAstNode* arg = first_arg;
+    for (int i = 0; i < arg_count && arg; i++) {
+        arg_vals[i] = jm_transpile_box_item(mt, arg);
+        jm_emit_exc_propagate_check(mt);
+        arg = arg->next;
+    }
+
     // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64,
     // where MIR's top-alloca consolidation assigns wrong offsets when the top alloca
     // appears after the inline call site.
     MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 
-    // Evaluate and store each argument
-    JsAstNode* arg = first_arg;
-    for (int i = 0; i < arg_count && arg; i++) {
-        MIR_reg_t val = jm_transpile_box_item(mt, arg);
-        jm_emit_exc_propagate_check(mt);
+    for (int i = 0; i < arg_count; i++) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, i * 8, args_ptr, 0, 1),
-            MIR_new_reg_op(mt->ctx, val)));
-        arg = arg->next;
+            MIR_new_reg_op(mt->ctx, arg_vals[i])));
     }
 
     return args_ptr;

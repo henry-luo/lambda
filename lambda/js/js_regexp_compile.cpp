@@ -349,6 +349,10 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     if (!pattern || pattern_len <= 0) return NULL;
 
     JsRegExpNameRef groups[JS_REGEXP_MAX_NAMED_GROUPS];
+    for (int gi = 0; gi < JS_REGEXP_MAX_NAMED_GROUPS; gi++) {
+        groups[gi].name = NULL;
+        groups[gi].len = 0;
+    }
     int group_count = 0;
     bool in_class = false;
     bool has_named_backref = false;
@@ -410,6 +414,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
                 int name_len = j - name_start;
                 int numeric_index = 0;
                 for (int g = 0; g < group_count && g < JS_REGEXP_MAX_NAMED_GROUPS; g++) {
+                    if (!groups[g].name) continue;
                     if (js_regexp_same_name_decoded(&groups[g], pattern + name_start, name_len)) {
                         numeric_index = g + 1;
                         break;
@@ -432,7 +437,10 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
                     i = j;
                     continue;
                 }
-                if (group_count == 0) {
+                if (numeric_index == 0) {
+                    // In legacy (non-u/non-v) mode, malformed or unresolved
+                    // named backreferences are identity escapes.  This remains
+                    // true even when the same pattern has ordinary captures.
                     rewritten[out_pos++] = 'k';
                     for (int k = name_start - 1; k <= j; k++) {
                         rewritten[out_pos++] = pattern[k];

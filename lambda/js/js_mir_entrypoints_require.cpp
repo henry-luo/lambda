@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 
+extern "C" void js_capture_preamble_module_vars(int count);
 
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -658,6 +659,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Preamble mode: snapshot module_consts so tests can inherit harness definitions
     if (g_jm_preamble_out && mt->module_consts) {
         g_jm_preamble_out->module_var_count = mt->module_var_count;
+        js_capture_preamble_module_vars(mt->module_var_count);
         int count = (int)hashmap_count(mt->module_consts);
         g_jm_preamble_out->entries = (JsModuleConstEntry*)mem_alloc(count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
         g_jm_preamble_out->entry_count = 0;

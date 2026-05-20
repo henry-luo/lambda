@@ -139,6 +139,26 @@ extern "C" void js_reset_module_vars() {
     js_ensure_module_vars_gc_rooted();
     memset(js_module_vars, 0, sizeof(js_module_vars));
     js_module_var_count = 0;
+    memset(js_runtime_state.preamble_module_vars, 0,
+           sizeof(js_runtime_state.preamble_module_vars));
+    js_runtime_state.preamble_module_var_count = 0;
+    js_runtime_state.preamble_module_snapshot_valid = false;
+}
+
+extern "C" void js_capture_preamble_module_vars(int count) {
+    if (count < 0) count = 0;
+    if (count > JS_MAX_MODULE_VARS) count = JS_MAX_MODULE_VARS;
+    js_ensure_module_vars_gc_rooted();
+    if (count > 0) {
+        memcpy(js_runtime_state.preamble_module_vars, js_active_module_vars,
+               (size_t)count * sizeof(Item));
+    }
+    if (count < JS_MAX_MODULE_VARS) {
+        memset(js_runtime_state.preamble_module_vars + count, 0,
+               (size_t)(JS_MAX_MODULE_VARS - count) * sizeof(Item));
+    }
+    js_runtime_state.preamble_module_var_count = count;
+    js_runtime_state.preamble_module_snapshot_valid = true;
 }
 
 // Save/restore module vars for nested require() — prevents inner module
@@ -395,11 +415,17 @@ extern "C" int js_get_module_var_count() {
 // to avoid re-initializing the harness between tests.
 extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_ensure_module_vars_gc_rooted();
-    // If preamble ran with a pool-allocated module vars array, copy preamble vars
-    // [0..checkpoint) into the static js_module_vars so tests can access them via
-    // js_get_module_var(). Tests skip re-including preamble files (e.g.
-    // nativeFunctionMatcher.js), so those module vars would otherwise stay zero.
-    if (js_active_module_vars != js_module_vars && checkpoint_var_count > 0) {
+    // Restore harness module vars from the preamble snapshot on every reset.
+    // Tests may assign to names such as Test262Error; keeping the mutated value
+    // would poison later tests in the same hot-reload batch.
+    if (js_runtime_state.preamble_module_snapshot_valid &&
+        checkpoint_var_count > 0 &&
+        checkpoint_var_count <= js_runtime_state.preamble_module_var_count) {
+        memcpy(js_module_vars, js_runtime_state.preamble_module_vars,
+               (size_t)checkpoint_var_count * sizeof(Item));
+    } else if (js_active_module_vars != js_module_vars && checkpoint_var_count > 0) {
+        // First reset after compiling the preamble may still be using the
+        // pool-allocated per-module array.
         memcpy(js_module_vars, js_active_module_vars,
                (size_t)checkpoint_var_count * sizeof(Item));
     }
@@ -709,6 +735,11 @@ extern "C" void js_runtime_set_input(void* input) {
     heap_register_gc_root(&js_new_target.item);
     heap_register_gc_root(&js_pending_new_target.item);
     heap_register_gc_root(&js_exception_value.item);
+    heap_register_gc_root(&js_regexp_last_match.input.item);
+    heap_register_gc_root(&js_regexp_last_match.match.item);
+    for (int i = 0; i < JS_REGEXP_MAX_PAREN; i++) {
+        heap_register_gc_root(&js_regexp_last_match.groups[i].item);
+    }
 }
 
 extern "C" Item js_get_this() {

@@ -67,6 +67,7 @@ struct JsModuleConstEntry {
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
     bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
+    bool is_preamble;          // true if inherited from the test262 harness preamble
 };
 
 // Evidence counters for parameter type inference.
@@ -427,6 +428,7 @@ struct JsMirTranspiler {
     bool is_module;                  // true when compiling an ES module (not main script)
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
     bool is_eval_direct;             // true when compiling eval code as direct script (sloppy-mode var export)
+    bool is_eval_var_env_global;      // true when direct/indirect eval var environment is global
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 

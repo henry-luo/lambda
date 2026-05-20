@@ -296,6 +296,7 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
 }
 static int64_t js_parse_array_index(const char* s, int len);
 static bool js_is_arguments_exotic_array_for_proto(Item value);
+extern "C" void js_mark_own_proto_property(Item object);
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
@@ -749,6 +750,10 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     if (!nm_s || nm_s->len >= 200) return obj;
     const char* nm_chars = nm_s->chars;
     int nm_len = (int)nm_s->len;
+    if (get_type_id(obj) == LMD_TYPE_MAP && nm_len == 9 &&
+        strncmp(nm_chars, "__proto__", 9) == 0) {
+        js_mark_own_proto_property(obj);
+    }
 
     JsPropertyDescriptor pd;
     if (!js_descriptor_from_object(descriptor, &pd)) return obj;
@@ -8327,16 +8332,44 @@ extern "C" Item js_alert(Item msg) {
 // =============================================================================
 
 static bool js_is_internal_enumeration_key(const char* s, int len) {
-    if (!s || len < 5) return false;
+    if (!s) return false;
+    if (len == 4 && strncmp(s, "__rd", 4) == 0) return true;
+    if (len < 5) return false;
+    if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
+        bool all_digits = true;
+        for (int i = 6; i < len; i++) {
+            if (s[i] < '0' || s[i] > '9') { all_digits = false; break; }
+        }
+        if (all_digits) return true;
+    }
     if (len >= 6 && (strncmp(s, "__get_", 6) == 0 ||
                      strncmp(s, "__set_", 6) == 0)) return true;
     if (strncmp(s, "__nw_", 5) == 0 ||
         strncmp(s, "__ne_", 5) == 0 ||
         strncmp(s, "__nc_", 5) == 0) return true;
+    if (len == 10 && strncmp(s, "__frozen__", 10) == 0) return true;
+    if (len == 10 && strncmp(s, "__sealed__", 10) == 0) return true;
+    if (len == 17 && strncmp(s, "__non_extensible_", 17) == 0) return true;
+    if (len == 8 && strncmp(s, "__time__", 8) == 0) return true;
+    if (len == 11 && strncmp(s, "__is_math__", 11) == 0) return true;
     if (len == 14 && strncmp(s, "__class_name__", 14) == 0) return true;
+    if (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0) return true;
+    if (len == 18 && strncmp(s, "__json_own_proto__", 18) == 0) return true;
+    if (len == 18 && strncmp(s, "__internal_proto__", 18) == 0) return true;
     if (len == 23 && strncmp(s, "__class_private_index__", 23) == 0) return true;
-    if (len == 10 && strncmp(s, "__is_proto__", 10) == 0) return true;
+    if (len == 12 && strncmp(s, "__is_proto__", 12) == 0) return true;
+    if (len == 18 && strncmp(s, "__instance_proto__", 18) == 0) return true;
+    if (len == 15 && strncmp(s, "__source_text__", 15) == 0) return true;
+    if (len == 8 && strncmp(s, "__ctor__", 8) == 0) return true;
     return false;
+}
+
+static bool js_should_enumerate_proto_key(Item object, ShapeEntry* se) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return false;
+    if (se && jspd_is_accessor(se)) return true;
+    bool marker_found = false;
+    Item marker = js_map_get_fast_ext(object.map, "__json_own_proto__", 18, &marker_found);
+    return marker_found && js_is_truthy(marker);
 }
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
@@ -8506,6 +8539,10 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                             bool skip = js_is_internal_enumeration_key(s, len);
                             // skip "length" (already added) and numeric-only names
                             if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
+                            if (!skip && len == 9 && memcmp(s, "__proto__", 9) == 0 &&
+                                !js_should_enumerate_proto_key((Item){.map = m}, se)) {
+                                skip = true;
+                            }
                             if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
                                 bool all_digit = true;
                                 for (int i = 0; i < len; i++) {
@@ -8554,6 +8591,8 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         int len = (int)e->name->length;
         bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
+        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
+            !js_should_enumerate_proto_key(object, e)) skip = true;
         if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
             Item val = _map_read_field(e, m->data);
             if (val.item == ITEM_JS_UNDEFINED) skip = true;
@@ -8603,6 +8642,8 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         bool skip = js_is_internal_enumeration_key(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
+        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
+            !js_should_enumerate_proto_key(object, e)) skip = true;
         if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
             Item val = _map_read_field(e, m->data);
             if (val.item == ITEM_JS_UNDEFINED) skip = true;
@@ -8922,8 +8963,13 @@ extern "C" Item js_object_keys(Item object) {
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
-                        if (!(js_is_internal_enumeration_key(s, len) ||
-                              (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0))) {
+                        bool skip = js_is_internal_enumeration_key(s, len) ||
+                            (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0);
+                        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
+                            !js_should_enumerate_proto_key((Item){.map = m}, se)) {
+                            skip = true;
+                        }
+                        if (!skip) {
                             Item val = _map_read_field(se, m->data);
                             if (val.item != JS_DELETED_SENTINEL_VAL && js_props_query_enumerable(m, se, s, len)) {
                                 int64_t idx = js_parse_array_index(s, len);
@@ -8968,6 +9014,10 @@ extern "C" Item js_object_keys(Item object) {
             skip = true;
         }
         if (is_error_object && len == 5 && strncmp(s, "stack", 5) == 0) {
+            skip = true;
+        }
+        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
+            !js_should_enumerate_proto_key(object, e)) {
             skip = true;
         }
         if (!skip) {
@@ -14822,10 +14872,21 @@ extern "C" void js_set_global_var_property_fast(Item key, Item value) {
                 Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
                 TypeId slot_type = get_type_id(slot);
                 TypeId value_type = get_type_id(value);
+                bool scalar_value = value_type == LMD_TYPE_NULL ||
+                    value_type == LMD_TYPE_BOOL ||
+                    value_type == LMD_TYPE_INT ||
+                    value_type == LMD_TYPE_INT64 ||
+                    value_type == LMD_TYPE_FLOAT ||
+                    value_type == LMD_TYPE_STRING ||
+                    value_type == LMD_TYPE_SYMBOL ||
+                    value_type == LMD_TYPE_DECIMAL ||
+                    value_type == LMD_TYPE_DTIME ||
+                    value_type == LMD_TYPE_UNDEFINED;
                 if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
                     se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
                     js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
-                    slot_type == value_type && js_global_lexical_find_binding(key) < 0) {
+                    slot_type == value_type && scalar_value &&
+                    js_global_lexical_find_binding(key) < 0) {
                     fn_map_set(global, key, value);
                     return;
                 }
