@@ -10497,18 +10497,16 @@ extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
             return;
         }
 
-        // check: thrown instanceof expectedErrorConstructor
-        Item instanceof_result = js_instanceof(thrown, expected_ctor);
-        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
+        // Test262's JS harness checks constructor identity, not instanceof:
+        //   thrown.constructor !== expectedErrorConstructor
+        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+        Item thrown_ctor = js_property_get(thrown, ctor_key);
+        bool is_instance = (thrown_ctor.item == expected_ctor.item);
 
         if (!is_instance) {
             // type mismatch — build error message
             Item name_key = (Item){.item = s2it(heap_create_name("name"))};
             Item exp_name = js_property_get(expected_ctor, name_key);
-            // get actual constructor name via prototype chain
-            extern Item js_prototype_lookup(Item obj, Item key);
-            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-            Item thrown_ctor = js_prototype_lookup(thrown, ctor_key);
             Item act_name = (get_type_id(thrown_ctor) != LMD_TYPE_UNDEFINED && get_type_id(thrown_ctor) != LMD_TYPE_NULL)
                 ? js_property_get(thrown_ctor, name_key) : make_js_undefined();
             String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;

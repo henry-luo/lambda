@@ -128,6 +128,10 @@ static bool jm_transpile_for_var_init_as_assignments(JsMirTranspiler* mt,
             }
             if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == JS_VAR_VAR) {
                 TypeId init_type = jm_get_effective_type(mt, d->init);
+                if (init_type == LMD_TYPE_INT && jm_should_widen_to_float(mt, vname)) {
+                    init_type = LMD_TYPE_FLOAT;
+                    log_debug("P9: widening for-var '%s' from INT to FLOAT", vname);
+                }
                 MIR_reg_t local_reg = 0;
                 MIR_reg_t boxed_val = 0;
                 if (init_type == LMD_TYPE_INT) {
@@ -1889,6 +1893,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         const char* saved_assign_target = mt->assign_target_vname;
                         mt->assign_target_vname = vname;
                         TypeId init_type = jm_get_effective_type(mt, d->init);
+                        if (init_type == LMD_TYPE_INT && jm_should_widen_to_float(mt, vname)) {
+                            init_type = LMD_TYPE_FLOAT;
+                            log_debug("P9: widening module var '%s' from INT to FLOAT", vname);
+                        }
                         MIR_reg_t native_val = 0;
                         TypeId native_type = LMD_TYPE_ANY;
                         MIR_reg_t boxed_val = 0;
@@ -1899,6 +1907,13 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_INT);
                             native_type = LMD_TYPE_INT;
                             boxed_val = jm_box_native(mt, native_val, LMD_TYPE_INT);
+                        } else if (var->kind == JS_VAR_VAR && mt->in_main &&
+                            mt->with_depth <= 0 && !mt->is_eval_direct &&
+                            init_type == LMD_TYPE_FLOAT &&
+                            (modvar_decl_type == LMD_TYPE_INT || modvar_decl_type == LMD_TYPE_FLOAT)) {
+                            native_val = jm_transpile_as_native(mt, d->init, init_type, LMD_TYPE_FLOAT);
+                            native_type = LMD_TYPE_FLOAT;
+                            boxed_val = jm_box_native(mt, native_val, LMD_TYPE_FLOAT);
                         } else {
                             boxed_val = jm_transpile_box_item(mt, d->init);
                         }
@@ -1922,11 +1937,13 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         } else if (var->kind == JS_VAR_VAR && mt->in_main &&
                             mt->scope_depth <= 1 &&
                             mt->with_depth <= 0 && !mt->is_eval_direct) {
-                            MIR_reg_t local_reg = jm_new_reg(mt, vname, MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_type_t local_type = native_type == LMD_TYPE_FLOAT ? MIR_T_D : MIR_T_I64;
+                            MIR_reg_t local_reg = jm_new_reg(mt, vname, local_type);
+                            jm_emit(mt, MIR_new_insn(mt->ctx,
+                                local_type == MIR_T_D ? MIR_DMOV : MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, local_reg),
                                 MIR_new_reg_op(mt->ctx, native_val ? native_val : boxed_val)));
-                            jm_set_var(mt, vname, local_reg, MIR_T_I64,
+                            jm_set_var(mt, vname, local_reg, local_type,
                                 native_val ? native_type : LMD_TYPE_ANY);
                             existing_modvar_local = jm_find_var(mt, vname);
                             if (existing_modvar_local && d->init->node_type == JS_AST_NODE_ARRAY_EXPRESSION) {
@@ -2407,6 +2424,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 // v20: array destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_array_destructure(mt, d->id, src);
+                jm_emit_exc_propagate_check(mt);
                 // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
                 if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
                     JsFuncCollected* se_fc = mt->current_fc;
@@ -2462,6 +2480,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                 // v20: object destructuring via recursive helper
                 MIR_reg_t src = d->init ? jm_transpile_box_item(mt, d->init) : jm_emit_null(mt);
                 jm_emit_object_destructure(mt, d->id, src);
+                jm_emit_exc_propagate_check(mt);
                 // v28: Write destructured bindings to scope_env for closure capture.
                 // Unlike jm_scope_env_mark_and_writeback, we do NOT set in_scope_env=true
                 // on the variable because that would cause jm_scope_env_reload_vars to
