@@ -5,12 +5,12 @@
 
 // Include the C header first and then undefine the conflicting typedef
 extern "C" {
-#include "../lib/hashmap.h"
+#include "../../lib/hashmap.h"
 }
 #undef HashMap
 
 // Now include our C++ wrapper
-#include "../lib/hashmap.hpp"
+#include "../../lib/hashmap.hpp"
 
 // Don't use 'using' declaration - use full qualification instead
 

@@ -14,6 +14,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
 #include <mir.h>
@@ -220,43 +221,19 @@ struct PyImportCacheEntry {
     MIR_item_t proto;
     MIR_item_t import;
 };
-
-static int py_import_cache_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyImportCacheEntry*)a)->name, ((PyImportCacheEntry*)b)->name);
-}
-static uint64_t py_import_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyImportCacheEntry*)item)->name,
-        strlen(((PyImportCacheEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_import_cache, struct PyImportCacheEntry, name)
 
 struct PyVarScopeEntry {
     char name[128];
     PyMirVarEntry var;
 };
-
-static int py_var_scope_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyVarScopeEntry*)a)->name, ((PyVarScopeEntry*)b)->name);
-}
-static uint64_t py_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyVarScopeEntry*)item)->name,
-        strlen(((PyVarScopeEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_var_scope, struct PyVarScopeEntry, name)
 
 struct PyLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-
-static int py_local_func_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyLocalFuncEntry*)a)->name, ((PyLocalFuncEntry*)b)->name);
-}
-static uint64_t py_local_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyLocalFuncEntry*)item)->name,
-        strlen(((PyLocalFuncEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
 
 struct PyModuleConstEntry {
     char name[128];
@@ -264,15 +241,7 @@ struct PyModuleConstEntry {
     int64_t int_val;
     double float_val;
 };
-
-static int py_module_const_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyModuleConstEntry*)a)->name, ((PyModuleConstEntry*)b)->name);
-}
-static uint64_t py_module_const_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyModuleConstEntry*)item)->name,
-        strlen(((PyModuleConstEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_module_const, struct PyModuleConstEntry, name)
 
 // ============================================================================
 // Forward declarations

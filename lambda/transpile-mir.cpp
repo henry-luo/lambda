@@ -9,6 +9,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/gc/gc_heap.h"
 #include "validator/validator.hpp"
 #include "lambda-stack.h"
@@ -248,43 +249,19 @@ struct ImportCacheEntry {
     char name[128];
     MirImportEntry entry;
 };
-
-static int import_cache_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((ImportCacheEntry*)a)->name, ((ImportCacheEntry*)b)->name);
-}
-static uint64_t import_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const ImportCacheEntry* e = (const ImportCacheEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(import_cache, struct ImportCacheEntry, name)
 
 struct VarScopeEntry {
     char name[128];
     MirVarEntry var;
 };
-
-static int var_scope_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((VarScopeEntry*)a)->name, ((VarScopeEntry*)b)->name);
-}
-static uint64_t var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const VarScopeEntry* e = (const VarScopeEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(var_scope, struct VarScopeEntry, name)
 
 struct LocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-
-static int local_func_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((LocalFuncEntry*)a)->name, ((LocalFuncEntry*)b)->name);
-}
-static uint64_t local_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const LocalFuncEntry* e = (const LocalFuncEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(local_func, struct LocalFuncEntry, name)
 
 // Native function info: tracks parameter types and return type for functions
 // that have a dual native+boxed version (Phase 4 optimization).
@@ -297,15 +274,7 @@ struct NativeFuncInfo {
     MIR_type_t return_mir;    // MIR return type
     bool has_native;          // true if a native version was generated
 };
-
-static int native_func_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((NativeFuncInfo*)a)->name, ((NativeFuncInfo*)b)->name);
-}
-static uint64_t native_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const NativeFuncInfo* e = (const NativeFuncInfo*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(native_func, struct NativeFuncInfo, name)
 
 // Global variable entry (module-level let bindings stored in BSS)
 struct GlobalVarEntry {
@@ -314,15 +283,7 @@ struct GlobalVarEntry {
     TypeId type_id;
     MIR_type_t mir_type;
 };
-
-static int global_var_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((GlobalVarEntry*)a)->name, ((GlobalVarEntry*)b)->name);
-}
-static uint64_t global_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const GlobalVarEntry* e = (const GlobalVarEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(global_var, struct GlobalVarEntry, name)
 
 // Infer cache entry: caches inferred parameter types per function to avoid
 // redundant body walks between prepass_forward_declare and transpile_func_def.
@@ -332,17 +293,7 @@ struct InferCacheEntry {
     TypeId param_types[16];
     int param_count;
 };
-
-static int infer_cache_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    const InferCacheEntry* ea = (const InferCacheEntry*)a;
-    const InferCacheEntry* eb = (const InferCacheEntry*)b;
-    return (ea->fn == eb->fn) ? 0 : (ea->fn < eb->fn ? -1 : 1);
-}
-static uint64_t infer_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const InferCacheEntry* e = (const InferCacheEntry*)item;
-    return hashmap_xxhash3(&e->fn, sizeof(e->fn), seed0, seed1);
-}
+HASHMAP_DEFINE_PTRKEY(infer_cache, struct InferCacheEntry, fn)
 
 // ============================================================================
 // Helpers

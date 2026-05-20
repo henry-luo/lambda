@@ -7,8 +7,8 @@
 #include <sstream>
 
 extern "C" {
-#include "../lib/avl_tree.h"
-#include "../lib/mempool.h"
+#include "../../lib/avl_tree.h"
+#include "../../lib/mempool.h"
 }
 
 /**

@@ -2,8 +2,8 @@
 #include <cstring>
 
 extern "C" {
-#include "../lib/url.h"
-#include "../lib/log.h"
+#include "../../lib/url.h"
+#include "../../lib/log.h"
 }
 
 class UrlTest : public ::testing::Test {

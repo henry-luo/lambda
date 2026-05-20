@@ -5,6 +5,7 @@
 #include "transpiler.hpp"
 #include "shape_pool.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
@@ -31,23 +32,11 @@ typedef struct {
     const char* path;       // key (not owned — points to ModuleDescriptor.path)
     ModuleDescriptor* desc; // value (owned)
 } RegistryEntry;
-
-static uint64_t registry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RegistryEntry* entry = (const RegistryEntry*)item;
-    return hashmap_sip(entry->path, strlen(entry->path), seed0, seed1);
-}
-
-static int registry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RegistryEntry* ea = (const RegistryEntry*)a;
-    const RegistryEntry* eb = (const RegistryEntry*)b;
-    return strcmp(ea->path, eb->path);
-}
+HASHMAP_DEFINE_STRKEY(registry, RegistryEntry, path)
 
 void module_registry_init(void) {
     if (registry_map) return;
-    registry_map = hashmap_new(sizeof(RegistryEntry), 32, 0, 0,
-        registry_hash, registry_compare, NULL, NULL);
+    registry_map = registry_new(32);
 }
 
 void module_registry_cleanup(void) {

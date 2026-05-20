@@ -1,6 +1,7 @@
 #include "layout_counters.hpp"
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -15,18 +16,7 @@
 // Counter HashMap Helpers
 // ============================================================================
 
-// Hash function for counter names (strings)
-static uint64_t counter_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const CounterValue* val = (const CounterValue*)item;
-    return hashmap_sip(val->name, strlen(val->name), seed0, seed1);
-}
-
-// Compare function for counter names
-static int counter_compare(const void* a, const void* b, void* udata) {
-    const CounterValue* val_a = (const CounterValue*)a;
-    const CounterValue* val_b = (const CounterValue*)b;
-    return strcmp(val_a->name, val_b->name);
-}
+HASHMAP_DEFINE_STRKEY(counter, CounterValue, name)
 
 // ============================================================================
 // Counter Context Management
@@ -77,8 +67,7 @@ void counter_push_scope(CounterContext* ctx) {
     if (!scope) return;
 
     // Create hash map for counters in this scope
-    scope->counters = hashmap_new(sizeof(CounterValue), 16, 0, 0,
-                                  counter_hash, counter_compare, NULL, NULL);
+    scope->counters = counter_new(16);
     scope->parent = ctx->current_scope;
 
     // Push onto stack

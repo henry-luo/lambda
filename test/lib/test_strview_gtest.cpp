@@ -1,9 +1,11 @@
 #include <gtest/gtest.h>
 #include <cstring>
+#include <cstdint>
 
 extern "C" {
-#include "../lib/strview.h"
-#include "../lib/log.h"
+#include "../../lib/strview.h"
+#include "../../lib/log.h"
+#include "../../lib/mempool.h"
 }
 
 class StrViewTest : public ::testing::Test {
@@ -116,4 +118,103 @@ TEST_F(StrViewTest, ToInt) {
     EXPECT_EQ(strview_to_int(&s3), 0);
     EXPECT_EQ(strview_to_int(&s4), 0);
     EXPECT_EQ(strview_to_int(&s5), 123);
+}
+
+// ───────── extended API ─────────
+
+TEST_F(StrViewTest, FromCstr) {
+    StrView s = strview_from_cstr("Hello");
+    EXPECT_EQ(s.length, 5u);
+    EXPECT_EQ(strview_get(&s, 0), 'H');
+
+    StrView empty = strview_from_cstr(nullptr);
+    EXPECT_EQ(empty.length, 0u);
+    ASSERT_NE(empty.str, nullptr);  // points to "" sentinel, not NULL
+    EXPECT_EQ(empty.str[0], '\0');
+
+    StrView e2 = strview_from_cstr("");
+    EXPECT_EQ(e2.length, 0u);
+}
+
+TEST_F(StrViewTest, StartsEndsWithAliases) {
+    StrView s = strview_from_str("Hello, World!");
+    EXPECT_TRUE(strview_starts_with(&s, "Hello"));
+    EXPECT_FALSE(strview_starts_with(&s, "World"));
+    EXPECT_TRUE(strview_ends_with(&s, "World!"));
+    EXPECT_FALSE(strview_ends_with(&s, "Hello"));
+}
+
+TEST_F(StrViewTest, Contains) {
+    StrView s = strview_from_str("the quick brown fox");
+    EXPECT_TRUE(strview_contains(&s, "quick"));
+    EXPECT_TRUE(strview_contains(&s, "fox"));
+    EXPECT_TRUE(strview_contains(&s, ""));  // empty needle always matches
+    EXPECT_FALSE(strview_contains(&s, "missing"));
+    EXPECT_FALSE(strview_contains(&s, nullptr));
+}
+
+TEST_F(StrViewTest, ToInt64) {
+    int64_t v;
+    StrView s1 = strview_from_str("9223372036854775807");  // INT64_MAX
+    EXPECT_TRUE(strview_to_int64(&s1, &v));
+    EXPECT_EQ(v, INT64_MAX);
+
+    StrView s2 = strview_from_str("-123");
+    EXPECT_TRUE(strview_to_int64(&s2, &v));
+    EXPECT_EQ(v, -123);
+
+    StrView empty = strview_from_str("");
+    EXPECT_FALSE(strview_to_int64(&empty, &v));
+
+    StrView garbage = strview_from_str("abc");
+    EXPECT_FALSE(strview_to_int64(&garbage, &v));
+}
+
+TEST_F(StrViewTest, ToDouble) {
+    double v;
+    StrView s1 = strview_from_str("3.14");
+    EXPECT_TRUE(strview_to_double(&s1, &v));
+    EXPECT_DOUBLE_EQ(v, 3.14);
+
+    StrView s2 = strview_from_str("-1e3");
+    EXPECT_TRUE(strview_to_double(&s2, &v));
+    EXPECT_DOUBLE_EQ(v, -1000.0);
+
+    StrView empty = strview_from_str("");
+    EXPECT_FALSE(strview_to_double(&empty, &v));
+}
+
+TEST_F(StrViewTest, HashStableAcrossSameContents) {
+    StrView a = strview_from_str("hello");
+    StrView b = strview_from_str("hello");
+    StrView c = strview_from_str("world");
+    EXPECT_EQ(strview_hash(&a), strview_hash(&b));
+    EXPECT_NE(strview_hash(&a), strview_hash(&c));
+    StrView empty = strview_from_str("");
+    EXPECT_EQ(strview_hash(&empty), 0u);
+    EXPECT_EQ(strview_hash(nullptr), 0u);
+}
+
+TEST_F(StrViewTest, DupWithPool) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+
+    StrView s = strview_from_str("pool-allocated");
+    char* copy = strview_dup_with_pool(&s, pool);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_STREQ(copy, "pool-allocated");
+
+    // pool=NULL falls back to a heap allocation we must NOT free with pool_free
+    char* heap_copy = strview_dup_with_pool(&s, nullptr);
+    ASSERT_NE(heap_copy, nullptr);
+    EXPECT_STREQ(heap_copy, "pool-allocated");
+    free(heap_copy);
+
+    // empty view round-trips to ""
+    StrView empty = strview_from_str("");
+    char* e = strview_dup_with_pool(&empty, pool);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(e, "");
+
+    pool_destroy(pool);
 }

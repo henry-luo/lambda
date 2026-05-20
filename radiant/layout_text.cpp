@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/avl_tree.h"
+#include "../lib/binsearch.h"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lib/utf.h"
@@ -174,17 +175,19 @@ static const FullCaseMapping g_lowercase_full[] = {
 };
 static const int g_lowercase_full_count = 1;
 
+static int full_case_cmp(const void* record, const void* key, void* udata) {
+    (void)udata;
+    uint32_t rfrom = ((const FullCaseMapping*)record)->from;
+    uint32_t qfrom = *(const uint32_t*)key;
+    return (rfrom > qfrom) - (rfrom < qfrom);
+}
+
 // binary search lookup in full case mapping table (sorted by 'from')
 static const FullCaseMapping* lookup_full_case(const FullCaseMapping* table,
     int count, uint32_t codepoint) {
-    int lo = 0, hi = count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (table[mid].from == codepoint) return &table[mid];
-        if (table[mid].from < codepoint) lo = mid + 1;
-        else hi = mid - 1;
-    }
-    return nullptr;
+    int idx = binsearch_records(table, count, sizeof(FullCaseMapping),
+                                 &codepoint, full_case_cmp, nullptr);
+    return idx >= 0 ? &table[idx] : nullptr;
 }
 
 /**

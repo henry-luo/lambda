@@ -6,6 +6,7 @@
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/str.h"
 #include "../../lib/mem.h"
 #include <string.h>
@@ -18,19 +19,7 @@ typedef struct {
     CacheMetadata* meta;    // value (owned)
 } CacheEntry;
 
-// hash function for cache entries
-static uint64_t cache_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const CacheEntry* entry = (const CacheEntry*)item;
-    return hashmap_sip(entry->url, strlen(entry->url), seed0, seed1);
-}
-
-// compare function for cache entries
-static int cache_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const CacheEntry* ea = (const CacheEntry*)a;
-    const CacheEntry* eb = (const CacheEntry*)b;
-    return strcmp(ea->url, eb->url);
-}
+HASHMAP_DEFINE_STRKEY(cache_entry, CacheEntry, url)
 
 // free function for cache entries
 static void cache_entry_free(void* item) {
@@ -134,15 +123,7 @@ EnhancedFileCache* enhanced_cache_create(const char* cache_dir, size_t max_size,
     cache->skipped_write_count = 0;
 
     // create hashmap for URL→CacheMetadata lookup
-    cache->metadata_map = hashmap_new(
-        sizeof(CacheEntry),
-        0,                      // initial capacity (auto)
-        0, 0,                   // seeds (default)
-        cache_entry_hash,
-        cache_entry_compare,
-        cache_entry_free,
-        NULL                    // udata
-    );
+    cache->metadata_map = cache_entry_new_with_free(0, cache_entry_free);
 
     if (!cache->metadata_map) {
         mem_free(cache->cache_dir);

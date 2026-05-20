@@ -1,0 +1,119 @@
+// test/lib/test_sort_gtest.cpp - tests for lib/sort
+#include <gtest/gtest.h>
+#include <algorithm>
+#include <vector>
+
+extern "C" {
+#include "../../lib/sort.h"
+}
+
+namespace {
+
+int cmp_int(const void* a, const void* b, void* udata) {
+    (void)udata;
+    int va = *(const int*)a;
+    int vb = *(const int*)b;
+    return (va > vb) - (va < vb);
+}
+
+int cmp_int_desc(const void* a, const void* b, void* udata) {
+    return -cmp_int(a, b, udata);
+}
+
+struct Item { int priority; const char* tag; };
+
+long item_priority_key(const void* item, void* udata) {
+    (void)udata;
+    return (long)((const Item*)item)->priority;
+}
+
+double item_priority_key_d(const void* item, void* udata) {
+    (void)udata;
+    return (double)((const Item*)item)->priority;
+}
+
+}  // namespace
+
+TEST(SortTest, InsertionSortInt) {
+    int arr[] = {5, 3, 8, 1, 9, 2, 7, 4, 6, 0};
+    insertion_sort(arr, 10, sizeof(int), cmp_int, nullptr);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(arr[i], i);
+}
+
+TEST(SortTest, InsertionSortDescending) {
+    int arr[] = {5, 3, 8, 1, 9};
+    insertion_sort(arr, 5, sizeof(int), cmp_int_desc, nullptr);
+    EXPECT_EQ(arr[0], 9);
+    EXPECT_EQ(arr[1], 8);
+    EXPECT_EQ(arr[2], 5);
+    EXPECT_EQ(arr[3], 3);
+    EXPECT_EQ(arr[4], 1);
+}
+
+TEST(SortTest, InsertionSortAlreadySorted) {
+    int arr[] = {1, 2, 3, 4, 5};
+    int expected[] = {1, 2, 3, 4, 5};
+    insertion_sort(arr, 5, sizeof(int), cmp_int, nullptr);
+    for (int i = 0; i < 5; ++i) EXPECT_EQ(arr[i], expected[i]);
+}
+
+TEST(SortTest, InsertionSortReverse) {
+    int arr[] = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
+    insertion_sort(arr, 10, sizeof(int), cmp_int, nullptr);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(arr[i], i);
+}
+
+TEST(SortTest, InsertionSortEdgeCases) {
+    int single[] = {42};
+    insertion_sort(single, 1, sizeof(int), cmp_int, nullptr);
+    EXPECT_EQ(single[0], 42);
+
+    insertion_sort(nullptr, 0, sizeof(int), cmp_int, nullptr);   // no-op
+    insertion_sort(single, 0, sizeof(int), cmp_int, nullptr);    // no-op
+    insertion_sort(single, 1, sizeof(int), nullptr, nullptr);    // no cmp
+}
+
+TEST(SortTest, InsertionSortStability) {
+    // pairs with equal keys: insertion sort is stable, so original order of
+    // equal-keyed elements must be preserved.
+    struct Pair { int key; int orig_idx; };
+    Pair arr[] = {{1, 0}, {2, 1}, {1, 2}, {2, 3}, {1, 4}};
+    insertion_sort(arr, 5, sizeof(Pair),
+        [](const void* a, const void* b, void*) -> int {
+            int ka = ((const Pair*)a)->key;
+            int kb = ((const Pair*)b)->key;
+            return (ka > kb) - (ka < kb);
+        }, nullptr);
+    // first three should be the 1s in original order
+    EXPECT_EQ(arr[0].orig_idx, 0);
+    EXPECT_EQ(arr[1].orig_idx, 2);
+    EXPECT_EQ(arr[2].orig_idx, 4);
+    EXPECT_EQ(arr[3].orig_idx, 1);
+    EXPECT_EQ(arr[4].orig_idx, 3);
+}
+
+TEST(SortTest, SortPtrsByIntKey) {
+    Item a{3, "a"}, b{1, "b"}, c{2, "c"}, d{0, "d"};
+    void* arr[] = {&a, &b, &c, &d};
+    sort_ptrs_by_int_key(arr, 4, item_priority_key, nullptr);
+    EXPECT_EQ(((Item*)arr[0])->priority, 0);
+    EXPECT_EQ(((Item*)arr[1])->priority, 1);
+    EXPECT_EQ(((Item*)arr[2])->priority, 2);
+    EXPECT_EQ(((Item*)arr[3])->priority, 3);
+}
+
+TEST(SortTest, SortPtrsByDoubleKey) {
+    Item a{3, "a"}, b{1, "b"}, c{2, "c"};
+    void* arr[] = {&a, &b, &c};
+    sort_ptrs_by_double_key(arr, 3, item_priority_key_d, nullptr);
+    EXPECT_EQ(((Item*)arr[0])->priority, 1);
+    EXPECT_EQ(((Item*)arr[1])->priority, 2);
+    EXPECT_EQ(((Item*)arr[2])->priority, 3);
+}
+
+TEST(SortTest, SortPtrsEmptyAndSingle) {
+    void* arr[] = {nullptr};
+    sort_ptrs_by_int_key(nullptr, 0, item_priority_key, nullptr);  // no-op
+    sort_ptrs_by_int_key(arr, 0, item_priority_key, nullptr);
+    sort_ptrs_by_int_key(arr, 1, item_priority_key, nullptr);
+}

@@ -5098,22 +5098,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 #ifndef _WIN32
 #include <pthread.h>
 #include <unistd.h>
+#include "../../lib/thread_pool.h"
 
 // Hashmap entry for path->index dedup
 typedef struct {
     const char* path;
     int index;
 } JsPathIndexEntry;
-
-uint64_t js_path_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JsPathIndexEntry* e = (const JsPathIndexEntry*)item;
-    return hashmap_sip(e->path, strlen(e->path), seed0, seed1);
-}
-
-int js_path_index_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((const JsPathIndexEntry*)a)->path, ((const JsPathIndexEntry*)b)->path);
-}
+#include "../../lib/hashmap_helpers.h"
+HASHMAP_DEFINE_STRKEY(js_path_index, JsPathIndexEntry, path)
 
 // Add dependency edge from parent to dep
 void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx) {
@@ -5348,6 +5341,11 @@ void* jm_compile_js_worker(void* arg) {
     return NULL;
 }
 
+// thread_pool adaptor (discards the return value)
+static void jm_compile_js_worker_tp(void* arg) {
+    jm_compile_js_worker(arg);
+}
+
 // Pre-compile all JS import dependencies in parallel, then execute serially.
 // Called from transpile_js_to_mir() after heap/context setup.
 // Returns the number of modules successfully precompiled and executed.
@@ -5366,8 +5364,7 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
     nodes[0].source = mem_strdup(js_source, MEM_CAT_JS_RUNTIME);
     nodes[0].depth = -1;
 
-    struct hashmap* path_map = hashmap_new(sizeof(JsPathIndexEntry), 64, 0, 0,
-        js_path_index_hash, js_path_index_compare, NULL, NULL);
+    struct hashmap* path_map = js_path_index_new(64);
     JsPathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
     hashmap_set(path_map, &main_entry);
 
@@ -5423,24 +5420,17 @@ int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char
             jm_compile_js_module(runtime, &nodes[batch_indices[0]]);
         } else {
             JsCompileWorkerArg* args = (JsCompileWorkerArg*)mem_calloc(batch_count, sizeof(JsCompileWorkerArg), MEM_CAT_JS_RUNTIME);
-            pthread_t* threads = (pthread_t*)mem_alloc(sizeof(pthread_t) * batch_count, MEM_CAT_JS_RUNTIME);
-            pthread_attr_t attr;
-            pthread_attr_init(&attr);
-            pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
-
-            for (int i = 0; i < batch_count; i++) {
-                args[i].runtime = runtime;
-                args[i].node = &nodes[batch_indices[i]];
-                args[i].success = false;
-                pthread_create(&threads[i], &attr, jm_compile_js_worker, &args[i]);
+            ThreadPool* tp = tp_create_with_stack(batch_count, 8 * 1024 * 1024);
+            if (tp) {
+                for (int i = 0; i < batch_count; i++) {
+                    args[i].runtime = runtime;
+                    args[i].node = &nodes[batch_indices[i]];
+                    args[i].success = false;
+                    tp_submit(tp, jm_compile_js_worker_tp, &args[i]);
+                }
+                tp_wait_all(tp);
+                tp_destroy(tp);
             }
-
-            pthread_attr_destroy(&attr);
-            for (int i = 0; i < batch_count; i++) {
-                pthread_join(threads[i], NULL);
-            }
-
-            mem_free(threads);
             mem_free(args);
         }
 

@@ -262,7 +262,38 @@ static void arraylist_sort_internal(ArrayListValue *list_data, int list_length,
 void arraylist_sort(ArrayList *arraylist, ArrayListCompareFunc compare_func)
 {
 	/* Perform the recursive sort */
-	
+
 	arraylist_sort_internal(arraylist->data, arraylist->length, compare_func);
+}
+
+ArrayListValue arraylist_pop(ArrayList *arraylist)
+{
+	if (!arraylist || arraylist->length <= 0) return NULL;
+	ArrayListValue v = arraylist->data[arraylist->length - 1];
+	arraylist->length--;
+	return v;
+}
+
+ArrayListValue arraylist_pop_front(ArrayList *arraylist)
+{
+	if (!arraylist || arraylist->length <= 0) return NULL;
+	ArrayListValue v = arraylist->data[0];
+	memmove(&arraylist->data[0], &arraylist->data[1],
+	        (arraylist->length - 1) * sizeof(ArrayListValue));
+	arraylist->length--;
+	return v;
+}
+
+int arraylist_reserve(ArrayList *arraylist, int capacity)
+{
+	if (!arraylist) return 0;
+	if (capacity <= arraylist->_alloced) return 1;
+	int newsize = arraylist->_alloced > 0 ? arraylist->_alloced : 1;
+	while (newsize < capacity) newsize *= 2;
+	ArrayListValue *data = realloc(arraylist->data, sizeof(ArrayListValue) * newsize);
+	if (!data) return 0;
+	arraylist->data = data;
+	arraylist->_alloced = newsize;
+	return 1;
 }
 

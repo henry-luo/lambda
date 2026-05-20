@@ -57,8 +57,8 @@
 #include <cstdint>
 
 extern "C" {
-#include "../lib/strbuf.h"
-#include "../lib/log.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/log.h"
 }
 
 class StrBufTest : public ::testing::Test {

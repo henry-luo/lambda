@@ -5,6 +5,7 @@
  */
 #include "html-defs.h"
 #include "../../lib/str.h"
+#include "../../lib/binsearch.h"
 #include <string.h>
 
 // ── sorted tag/attribute tables ────────────────────────────────────
@@ -41,17 +42,10 @@ static const char* block_elements[] = {
 static const int block_elements_count = sizeof(block_elements) / sizeof(block_elements[0]);
 
 // ── binary search helper ───────────────────────────────────────────
+// thin wrapper over lib/binsearch.h; case-insensitive ASCII lookup.
 
-static bool lookup(const char* table[], int count, const char* name, size_t len) {
-    int lo = 0, hi = count - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        int cmp = str_icmp(name, len, table[mid], strlen(table[mid]));
-        if (cmp < 0)      hi = mid - 1;
-        else if (cmp > 0) lo = mid + 1;
-        else               return true;
-    }
-    return false;
+static inline bool lookup(const char* const* table, int count, const char* name, size_t len) {
+    return binsearch_strtab_n(table, count, name, len, /*case_insensitive=*/true) >= 0;
 }
 
 // ── public API ─────────────────────────────────────────────────────

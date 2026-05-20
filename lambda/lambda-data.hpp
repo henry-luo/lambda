@@ -25,6 +25,7 @@ typedef struct mpd_t mpd_t;
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
+#include "../lib/hash.h"
 #include "../lib/gc/gc_nursery.h"
 #include "../lib/datetime.h"
 #include "../lib/url.h"
@@ -259,14 +260,10 @@ typedef struct TypeMap : Type {
     uint8_t js_class;
 } TypeMap;
 
-// A1: FNV-1a hash for property name lookup
+// A1: FNV-1a 32-bit hash for property name lookup.
+// Thin alias over lib/hash.h so the algorithm choice lives in one place.
 static inline uint32_t typemap_fnv1a(const char* key, int len) {
-    uint32_t h = 2166136261u;
-    for (int i = 0; i < len; i++) {
-        h ^= (uint8_t)key[i];
-        h *= 16777619u;
-    }
-    return h;
+    return hash_fnv1a_32(key, (size_t)len);
 }
 
 // A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).

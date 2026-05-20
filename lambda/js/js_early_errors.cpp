@@ -17,6 +17,7 @@
 #include "js_transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/utf.h"
 #include <cstring>
 #include <cstdio>
@@ -394,16 +395,7 @@ struct BlockScopeEntry {
     const char* name;
     int kind; // JsVarKind
 };
-
-static uint64_t bse_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const BlockScopeEntry* e = (const BlockScopeEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
-
-static int bse_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((const BlockScopeEntry*)a)->name, ((const BlockScopeEntry*)b)->name);
-}
+HASHMAP_DEFINE_STRKEY(bse, struct BlockScopeEntry, name)
 
 static void check_block_redeclarations(EarlyErrorCtx* ctx, JsAstNode* stmts) {
     // scan a block's statement list for duplicate let/const declarations

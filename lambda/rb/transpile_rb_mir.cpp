@@ -11,6 +11,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
 #include <mir.h>
@@ -156,43 +157,19 @@ struct RbImportCacheEntry {
     MIR_item_t proto;
     MIR_item_t import;
 };
-
-static int rb_import_cache_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbImportCacheEntry*)a)->name, ((RbImportCacheEntry*)b)->name);
-}
-static uint64_t rb_import_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbImportCacheEntry*)item)->name,
-        strlen(((RbImportCacheEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_import_cache, struct RbImportCacheEntry, name)
 
 struct RbVarScopeEntry {
     char name[128];
     RbMirVarEntry var;
 };
-
-static int rb_var_scope_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbVarScopeEntry*)a)->name, ((RbVarScopeEntry*)b)->name);
-}
-static uint64_t rb_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbVarScopeEntry*)item)->name,
-        strlen(((RbVarScopeEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_var_scope, struct RbVarScopeEntry, name)
 
 struct RbLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-
-static int rb_local_func_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbLocalFuncEntry*)a)->name, ((RbLocalFuncEntry*)b)->name);
-}
-static uint64_t rb_local_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbLocalFuncEntry*)item)->name,
-        strlen(((RbLocalFuncEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_local_func, struct RbLocalFuncEntry, name)
 
 // ============================================================================
 // Forward declarations
