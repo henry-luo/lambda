@@ -42,6 +42,30 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
         !render_geometry_bounds_intersect(render_geometry_rect_to_bound(marker_rect), dirty);
 }
 
+bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
+    if (!rdcon || !block) return false;
+
+    View* view = static_cast<View*>(block);
+    if (!view->parent) return false;
+    if (block->tag_id == HTM_TAG_HTML || block->tag_id == HTM_TAG_BODY) return false;
+
+    bool has_transform = rdcon->has_transform ||
+        (block->transform && block->transform->functions);
+    if (has_transform) return false;
+
+    if (block->position && block->position->first_abs_child) {
+        return false;
+    }
+
+    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+    float visual_overflow = render_geometry_block_visual_overflow(block) * s;
+    Rect marker_rect = render_geometry_expand_rect(
+        render_geometry_block_border_rect(&rdcon->block, block, s),
+        visual_overflow);
+    Bound marker_bound = render_geometry_rect_to_bound(marker_rect);
+    return !render_geometry_bounds_intersect(marker_bound, rdcon->block.clip);
+}
+
 static bool render_view_subtree_contains_id(View* view, uint32_t id) {
     if (!view || id == 0) return false;
     if (view->id == id) return true;
@@ -288,6 +312,10 @@ typedef struct RenderBlockPaintResult {
 } RenderBlockPaintResult;
 
 static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
+    if (render_block_viewport_misses(rdcon, block)) {
+        return true;
+    }
+
     // Early exit if the block's own visual bounds are entirely outside the
     // dirty union. Transformed blocks stay conservative because their marker
     // bounds are finalized from recorded display-list item bounds.

@@ -61,6 +61,15 @@ static inline bool render_text_preserve_spaces(CssEnum ws) {
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
 }
 
+static bool render_text_rect_misses_clip(RenderContext* rdcon, float x, float y,
+                                         float width, float height) {
+    if (!rdcon || rdcon->has_transform) return false;
+    return x + width < rdcon->block.clip.left ||
+           x > rdcon->block.clip.right ||
+           y + height < rdcon->block.clip.top ||
+           y > rdcon->block.clip.bottom;
+}
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
@@ -164,6 +173,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     while (text_rect) {
         // Apply scale to convert CSS pixel positions to physical surface pixels
         float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
+
+        if (render_text_rect_misses_clip(rdcon, x, y,
+                text_rect->width * s, text_rect->height * s)) {
+            text_rect = text_rect->next;
+            continue;
+        }
 
         render_text_inline_background(rdcon, text_view, text_rect, parent_elem, x, y);
 
