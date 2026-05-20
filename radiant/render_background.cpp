@@ -1588,11 +1588,19 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  * Compute background image dimensions based on background-size property.
  * Returns the computed width and height of the background image in physical pixels.
  */
+static bool background_size_unspecified(BackgroundProp* bg);
+
 static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
                                    float box_w, float box_h, float* out_w, float* out_h) {
     float aspect = (img_h > 0) ? img_w / img_h : 1.0f;
 
-    if (bg->bg_size_type == CSS_VALUE_COVER) {
+    if (background_size_unspecified(bg)) {
+        // CSS initial value is `auto auto`: use the image's intrinsic size.
+        // BackgroundProp fields are zero-initialized, so an omitted
+        // background-size must not fall into the explicit-size branch below.
+        *out_w = img_w;
+        *out_h = img_h;
+    } else if (bg->bg_size_type == CSS_VALUE_COVER) {
         // Scale to cover the entire box, preserving aspect ratio
         float scale_x = box_w / img_w;
         float scale_y = box_h / img_h;

@@ -4047,6 +4047,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 } else {
                     log_debug("[CSS] Font size number: %.2f (non-zero unitless values invalid for font-size)", font_size);
                 }
+            } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                font_size = resolve_length_value(lycon, prop_id, value);
+                log_debug("[CSS] Font size function: %.2f px", font_size);
+                if (!isnan(font_size) && font_size >= 0.0f) {
+                    valid = true;
+                } else {
+                    log_debug("[CSS] Font size function invalid/unresolved");
+                }
             }
 
             if (valid) {

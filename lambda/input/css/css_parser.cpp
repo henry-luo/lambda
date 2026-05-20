@@ -1876,6 +1876,76 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         if (tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) {
             // Simple attribute exists selector: [attr]
             (*pos)++;
+        } else if (tokens[*pos].type == CSS_TOKEN_INCLUDE_MATCH ||
+                   tokens[*pos].type == CSS_TOKEN_DASH_MATCH ||
+                   tokens[*pos].type == CSS_TOKEN_PREFIX_MATCH ||
+                   tokens[*pos].type == CSS_TOKEN_SUFFIX_MATCH ||
+                   tokens[*pos].type == CSS_TOKEN_SUBSTRING_MATCH) {
+            switch (tokens[*pos].type) {
+                case CSS_TOKEN_INCLUDE_MATCH: attr_type = CSS_SELECTOR_ATTR_CONTAINS; break;
+                case CSS_TOKEN_DASH_MATCH: attr_type = CSS_SELECTOR_ATTR_LANG; break;
+                case CSS_TOKEN_PREFIX_MATCH: attr_type = CSS_SELECTOR_ATTR_BEGINS; break;
+                case CSS_TOKEN_SUFFIX_MATCH: attr_type = CSS_SELECTOR_ATTR_ENDS; break;
+                case CSS_TOKEN_SUBSTRING_MATCH: attr_type = CSS_SELECTOR_ATTR_SUBSTRING; break;
+                default: break;
+            }
+            (*pos)++;
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Get attribute value if present
+            if (*pos < token_count && (tokens[*pos].type == CSS_TOKEN_STRING || tokens[*pos].type == CSS_TOKEN_IDENT)) {
+                if (tokens[*pos].type == CSS_TOKEN_STRING) {
+                    const char* str_val = tokens[*pos].value;
+                    if (str_val && (str_val[0] == '"' || str_val[0] == '\'')) {
+                        size_t len = strlen(str_val);
+                        if (len >= 2) {
+                            char* val_buf = (char*)pool_calloc(pool, len - 1);
+                            if (val_buf) {
+                                memcpy(val_buf, str_val + 1, len - 2);
+                                val_buf[len - 2] = '\0';
+                                attr_value = val_buf;
+                            }
+                        }
+                    } else {
+                        attr_value = pool_strdup(pool, str_val);
+                    }
+                } else {
+                    attr_value = tokens[*pos].value;
+                    if (!attr_value && tokens[*pos].start && tokens[*pos].length > 0) {
+                        char* val_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+                        if (val_buf) {
+                            memcpy(val_buf, tokens[*pos].start, tokens[*pos].length);
+                            val_buf[tokens[*pos].length] = '\0';
+                            attr_value = val_buf;
+                        }
+                    }
+                }
+                (*pos)++;
+            }
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Check for case insensitivity flag 'i' or 's'
+            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
+                const char* flag = tokens[*pos].value;
+                if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
+                    case_insensitive = true;
+                    (*pos)++;
+                } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
+                    (*pos)++;
+                }
+            }
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Expect closing bracket
+            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) {
+                (*pos)++;
+            }
         } else if (tokens[*pos].type == CSS_TOKEN_DELIM) {
             char delim = tokens[*pos].data.delimiter;
             (*pos)++;
