@@ -593,6 +593,7 @@ static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool)
     if (decl->value) {
         CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
         if (fmt) {
+            fmt->options.quote_urls = !is_custom;
             css_format_value(fmt, decl->value);
             String* result = stringbuf_to_string(fmt->output);
             if (result && result->chars && result->chars[0] != '\0') {

@@ -975,6 +975,48 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
     }
 }
 
+static size_t css_utf16_encoded_at_charset_prelude_len(const char* data, size_t len) {
+    if (!data || len < 20) return 0;
+
+    bool be = (unsigned char)data[0] == 0x00 && data[1] == '@';
+    bool le = data[0] == '@' && (unsigned char)data[1] == 0x00;
+    if (!be && !le) return 0;
+
+    const char* prefix = "@charset \"";
+    size_t prefix_len = strlen(prefix);
+    if (len < prefix_len * 2) return 0;
+
+    char decoded_prefix[11];
+    for (size_t i = 0; i < prefix_len; i++) {
+        size_t pos = i * 2;
+        unsigned char high = (unsigned char)data[pos + (be ? 0 : 1)];
+        unsigned char low = (unsigned char)data[pos + (be ? 1 : 0)];
+        if (high != 0x00) return 0;
+        decoded_prefix[i] = (char)low;
+    }
+    decoded_prefix[prefix_len] = '\0';
+    if (strcmp(decoded_prefix, prefix) != 0) return 0;
+
+    bool saw_close_quote = false;
+    for (size_t pos = prefix_len * 2; pos + 1 < len; pos += 2) {
+        unsigned char high = (unsigned char)data[pos + (be ? 0 : 1)];
+        unsigned char low = (unsigned char)data[pos + (be ? 1 : 0)];
+        if (high != 0x00) return 0;
+        if (low == '"') {
+            saw_close_quote = true;
+            continue;
+        }
+        if (saw_close_quote && low == ';') {
+            size_t end = pos + 2;
+            if (end < len && data[end] == '\r') end++;
+            if (end < len && data[end] == '\n') end++;
+            log_debug("[CSS charset] Ignoring UTF-16-pattern @charset prelude (%zu bytes)", end);
+            return end;
+        }
+    }
+    return 0;
+}
+
 /**
  * Detect the encoding of a CSS file per CSS Syntax §3.2.
  * Resolution order: BOM → HTTP charset → link charset → @charset → document fallback → UTF-8.
@@ -1436,6 +1478,20 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             if (css_content) {
                 // Use binary size when available (handles null bytes); fallback to strlen
                 size_t css_len = css_file_size > 0 ? css_file_size : strlen(css_content);
+
+                size_t utf16_at_charset_prelude_len = css_utf16_encoded_at_charset_prelude_len(css_content, css_len);
+                if (utf16_at_charset_prelude_len > 0 && utf16_at_charset_prelude_len < css_len) {
+                    size_t stripped_len = css_len - utf16_at_charset_prelude_len;
+                    char* stripped_css = (char*)mem_alloc(stripped_len + 1, MEM_CAT_LAYOUT);
+                    if (stripped_css) {
+                        memcpy(stripped_css, css_content + utf16_at_charset_prelude_len, stripped_len);
+                        stripped_css[stripped_len] = '\0';
+                        mem_free(css_content);
+                        css_content = stripped_css;
+                        css_len = stripped_len;
+                        css_file_size = stripped_len;
+                    }
+                }
 
                 // Check for .headers companion file (WPT HTTP charset simulation)
                 const char* http_charset = nullptr;

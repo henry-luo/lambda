@@ -224,12 +224,20 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
         literal->literal_type = JS_LITERAL_NUMBER;
         // Check if source text ends with 'n' (BigInt literal)
         literal->is_bigint = (source.length > 0 && source.str[source.length - 1] == 'n');
-        // Check if source text contains '.' or 'e'/'E' (fractional/scientific hint)
+        // Check if source text contains '.' or decimal exponent marker.
+        // Radix-prefixed integer literals can contain a-f/A-F digits; the `e`
+        // in `0xe` is a hex digit, not an exponent marker.
         literal->has_decimal = false;
-        for (size_t i = 0; i < source.length; i++) {
-            if (source.str[i] == '.' || source.str[i] == 'e' || source.str[i] == 'E') {
-                literal->has_decimal = true;
-                break;
+        bool radix_prefixed = source.length > 2 && source.str[0] == '0' &&
+            (source.str[1] == 'x' || source.str[1] == 'X' ||
+             source.str[1] == 'b' || source.str[1] == 'B' ||
+             source.str[1] == 'o' || source.str[1] == 'O');
+        if (!radix_prefixed) {
+            for (size_t i = 0; i < source.length; i++) {
+                if (source.str[i] == '.' || source.str[i] == 'e' || source.str[i] == 'E') {
+                    literal->has_decimal = true;
+                    break;
+                }
             }
         }
         // Create null-terminated string, stripping numeric separators (_)
