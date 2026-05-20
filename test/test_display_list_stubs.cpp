@@ -10,6 +10,7 @@ static float g_test_path_bottom = 0.0f;
 static RdtPicture* g_test_picture = nullptr;
 static float g_test_picture_w = 0.0f;
 static float g_test_picture_h = 0.0f;
+static char g_test_new_path;
 
 void test_display_list_stub_set_path_bounds(const RdtPath* path,
                                             bool has_bounds,
@@ -31,6 +32,22 @@ void test_display_list_stub_set_picture_size(RdtPicture* picture, float w, float
 
 RdtPath* rdt_path_clone(const RdtPath* src) {
     return (RdtPath*)src;
+}
+
+RdtPath* rdt_path_new(void) {
+    return (RdtPath*)&g_test_new_path;
+}
+
+void rdt_path_move_to(RdtPath* path, float x, float y) {
+    (void)path; (void)x; (void)y;
+}
+
+void rdt_path_line_to(RdtPath* path, float x, float y) {
+    (void)path; (void)x; (void)y;
+}
+
+void rdt_path_close(RdtPath* path) {
+    (void)path;
 }
 
 void rdt_path_free(RdtPath* path) {
@@ -63,4 +80,12 @@ void rdt_picture_get_size(RdtPicture* pic, float* w, float* h) {
 
 void rdt_picture_free(RdtPicture* pic) {
     (void)pic;
+}
+
+void rdt_push_clip(RdtVector* vec, RdtPath* clip, const RdtMatrix* transform) {
+    (void)vec; (void)clip; (void)transform;
+}
+
+void rdt_pop_clip(RdtVector* vec) {
+    (void)vec;
 }

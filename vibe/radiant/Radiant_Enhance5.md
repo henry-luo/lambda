@@ -259,7 +259,8 @@ Completed:
   - Retained reuse can compare stable layout marker bounds while using cached visual bounds for dirty-region intersection, so transformed fragments are no longer rejected solely because their recorded visual bounds differ from untransformed layout bounds.
 - Added `test_retained_display_list_gtest.cpp` plus a small test-only stub file so retained fragment capture/append and dirty-source retained replay decisions can be tested without linking the full ThorVG/SVG stack.
 - Added the retained display-list gtest to `build_lambda_config.json` and regenerated the generated Premake files through `make build-test`.
-- Extended retained display-list tests to cover stale borrowed image pixels, scaled surface blits, video generations, webview surface generations, borrowed glyph buffers, marker-bounds mismatch, unknown dirty-source rejection, dirty-source-inside-subtree rejection, external dirty-source reuse, dirty misses, and transformed visual bounds with stable marker bounds.
+- Extended retained display-list tests to cover stale borrowed image pixels, scaled surface blits, video generations, webview surface generations, borrowed glyph buffers, marker-bounds mismatch, unknown dirty-source rejection, dirty-source-inside-subtree rejection, external dirty-source reuse, dirty misses, dirty-scale handling, full-repaint rejection, multiple dirty-source decisions, raster clip-shape copying, and transformed visual bounds with stable marker bounds.
+- Extended display-list bounds tests to cover stateful dirty-replay effect commands, radial gradient bounds/copying, and precise clip-command bounds while preserving `DL_POP_CLIP` state during dirty replay.
 
 Validation:
 
@@ -271,6 +272,85 @@ Remaining limits:
 - Reuse is intentionally conservative and skips full repaints, unknown dirty sources, and any dirty source inside the subtree.
 - The cache is currently keyed by view id and bounds, plus generation checks for borrowed image/surface/video/webview payloads.
 - Volatile text fragments are now generation-checked: glyph-backed fragments can be reused while the font glyph cache generation matches, but caret/selection/preedit overlay integration still needs full UI repaint fixtures before broad text-subtree reuse should be relaxed further.
+- End-to-end fixture coverage now includes screenshot-level dirty caret/selection, tiled-vs-non-tiled parity, and PDF/SVG paint-order parity. Future additions should keep broadening this around newly changed effects and native backend paths rather than treating those buckets as untested.
+- Added focused render-page fixtures for opacity/text/effect ordering, transparent drop-shadow, mixed inset clipping, transformed circle clipping, and wrapped inline background decoration:
+  - `enhance5_opacity_text_effect_01`
+  - `enhance5_filter_transparent_shadow_01`
+  - `enhance5_clip_inset_mixed_01`
+  - `enhance5_transform_clip_circle_01`
+  - `enhance5_wrapped_inline_bg_radius_01`
+- Added more focused render-page fixtures for text shadow plus underline skip-ink, high-DPI raster object-fit, inline SVG gradient/text/transform, mix-blend-mode over a parent background, and rounded overflow clipping of media plus text:
+  - `enhance5_text_shadow_skip_ink_01`
+  - `enhance5_object_fit_raster_01`
+  - `enhance5_inline_svg_gradient_text_01`
+  - `enhance5_mix_blend_parent_01`
+  - `enhance5_overflow_radius_media_text_01`
+- Added additional paint/effect parity fixtures for backdrop filtering under clipping, external SVG picture stacking, nested opacity/filter/blend effects, background/border transform bounds, and combined paint order across background, border, raster image, inline SVG, and text:
+  - `enhance5_backdrop_clip_filter_01`
+  - `enhance5_external_svg_picture_stack_01`
+  - `enhance5_nested_effect_stack_01`
+  - `enhance5_transform_border_background_01`
+  - `enhance5_paint_order_media_svg_01`
+- Added another focused fixture batch for polygon clipping with transformed raster media/text, inset shadows with text, SVG clipPath plus gradient/text, z-index opacity isolation, and rounded background-image clipping:
+  - `enhance5_clip_polygon_transform_media_01`
+  - `enhance5_inset_shadow_text_01`
+  - `enhance5_svg_clip_gradient_text_01`
+  - `enhance5_zindex_opacity_isolation_01`
+  - `enhance5_background_image_clip_round_01`
+- Added another fixture batch for chained filter overlap, multi-shadow rounded clipping, table-cell background/border plus inline SVG/text paint order, negative z-index under isolation, and multi-background padding-box clipping:
+  - `enhance5_filter_chain_overlap_01`
+  - `enhance5_multi_shadow_rounded_clip_01`
+  - `enhance5_table_cell_svg_text_order_01`
+  - `enhance5_negative_zindex_isolation_01`
+  - `enhance5_multi_background_clip_01`
+- Added another fixture batch for the remaining visual coverage gaps: transformed dirty-style repaint bounds, clipped element effects, caret/selection overlay painting, tile-boundary clipping/shadow behavior, PDF/SVG-style paint-order stacks, and backdrop-filter clipping across a tile boundary:
+  - `enhance5_dirty_repaint_transform_filter_01`
+  - `enhance5_clipped_element_nested_effects_01`
+  - `enhance5_dirty_caret_selection_overlay_01`
+  - `enhance5_tiled_boundary_clip_shadow_01`
+  - `enhance5_pdf_svg_paint_order_stack_01`
+  - `enhance5_backdrop_filter_tiled_clip_01`
+- Added a further fixture batch for nested clip/filter/shadow effects, selection/caret over rounded transformed overflow, tile-boundary inline SVG/text/shadow paint, PDF/SVG-style blend ordering, clipped dirty-style repaint bounds, and transformed offscreen shadow dirty bounds:
+  - `enhance5_nested_clip_filter_shadow_02`
+  - `enhance5_selection_rounded_overflow_transform_01`
+  - `enhance5_tiled_boundary_svg_text_shadow_01`
+  - `enhance5_pdf_svg_blend_order_01`
+  - `enhance5_dirty_repaint_clipped_fixed_area_01`
+  - `enhance5_transform_dirty_offscreen_shadow_01`
+- Added another render-page fixture batch for isolated color-matrix filtering, fractional transform/subpixel paint bounds, form-control paint stacking, scroll-style clipping with effect overflow, rounded background-blend clipping, and SVG image payload paint ordering:
+  - `enhance5_filter_color_matrix_chain_01`
+  - `enhance5_fractional_transform_hidpi_01`
+  - `enhance5_form_controls_paint_stack_01`
+  - `enhance5_scroll_clip_effect_stack_01`
+  - `enhance5_background_blend_clip_01`
+  - `enhance5_svg_image_payload_order_01`
+- Added a further render-page fixture batch for z-index/effect stacking, outline opacity, text-decoration clipping, SVG data-URI image stacking, and SVG stroke/gradient/dash paint metadata:
+  - `enhance5_abspos_effect_zorder_01`
+  - `enhance5_outline_transform_opacity_01`
+  - `enhance5_text_decoration_clip_layers_01`
+  - `enhance5_svg_data_uri_image_stack_01`
+  - `enhance5_svg_stroke_gradient_dash_01`
+- Added spec-facing expected-failure visual fixtures so rendering gaps are tracked against browser references instead of omitted from the suite:
+  - `enhance5_repeating_gradient_radius_clip_01`
+  - `enhance5_spec_outline_transform_01`
+  - `enhance5_spec_repeating_gradient_angle_01`
+  - `enhance5_spec_svg_marker_arrow_01`
+  - `enhance5_spec_css_mask_gradient_01`
+  - `enhance5_spec_background_clip_text_01`
+  - `enhance5_spec_svg_fill_rule_evenodd_01`
+- Added another spec-facing expected-failure fixture batch from CSS/SVG requirements, covering gradient border images, vertical writing modes, CSS path clipping, 3D perspective transforms, SVG pattern paint servers, SVG textPath, SVG luminance masks, and SVG filter effects:
+  - `enhance5_spec_border_image_gradient_01`
+  - `enhance5_spec_writing_mode_vertical_01`
+  - `enhance5_spec_clip_path_path_01`
+  - `enhance5_spec_3d_transform_perspective_01`
+  - `enhance5_spec_svg_pattern_units_01`
+  - `enhance5_spec_svg_text_path_01`
+  - `enhance5_spec_svg_mask_luminance_01`
+  - `enhance5_spec_svg_filter_gaussian_blur_01`
+- Added `expectedFail` support to the render visual runner. Expected failures now report as XFAIL and keep the suite green, while an unexpected pass becomes a normal failure so the marker can be removed.
+- Added display-list unit checks for effect-overflow marker bounds, dirty replay clip intersection against expanded effect bounds, and retained-fragment rejection when unknown dirty rects intersect only effect overflow.
+- Added a `--replay-parity` mode to the render visual runner so these fixtures can compare single-thread display-list replay with tiled replay directly.
+- Validation now covers 63 `enhance5_*` page fixtures: 48 passing browser-comparison fixtures plus 15 spec-facing XFAIL fixtures. `make test-render pattern=enhance5 suite=page` passes, and `node test_radiant_render.js --suite page --pattern enhance5 --replay-parity` passes with exact single-thread-vs-tiled replay matches.
 
 ## Current Structure Assessment
 
