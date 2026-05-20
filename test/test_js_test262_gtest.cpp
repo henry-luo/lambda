@@ -3087,7 +3087,58 @@ public:
     }
 };
 
+static bool test262_help_requested(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void print_test262_help(const char* program) {
+    if (!program || !program[0]) {
+        program = "./test/test_js_test262_gtest.exe";
+    }
+
+    printf("LambdaJS test262 gtest runner\n");
+    printf("\n");
+    printf("Usage:\n");
+    printf("  %s [js262 options] [gtest options]\n", program);
+    printf("\n");
+    printf("Common js262 options:\n");
+    printf("  --batch-only              Run the js262 batch runner path.\n");
+    printf("  --baseline-only           Run only tests listed in the baseline file.\n");
+    printf("  --run-partial             Include partial/non-fully-passing tests.\n");
+    printf("  --update-baseline         Update the baseline when stability gates pass.\n");
+    printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
+    printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
+    printf("  --js-timeout=<seconds>    Set per-test Lambda timeout, clamped to 1..120.\n");
+    printf("  --jobs=<n>                Set batch worker count.\n");
+    printf("  --opt-level=<0..3>        Pass the MIR optimization level to Lambda.\n");
+    printf("  --feature-summary         Print failure counts grouped by feature.\n");
+    printf("  --no-hot-reload           Disable batch hot reload behavior.\n");
+    printf("  --mir-interp              Run Lambda through MIR interpreter mode.\n");
+    printf("  --no-stripped             Use canonical test files instead of stripped files.\n");
+    printf("  --help, -h                Print this help and exit without running tests.\n");
+    printf("\n");
+    printf("Useful gtest options:\n");
+    printf("  --gtest_filter=<pattern>  Restrict gtest cases.\n");
+    printf("  --gtest_list_tests        List gtest cases without running them.\n");
+    printf("  --gtest_brief=1           Print shorter gtest output.\n");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  %s --batch-only --baseline-only\n", program);
+    printf("  %s --batch-only --batch-file=temp/js44_batch.txt --jobs=1 --write-failures=temp/out.tsv\n", program);
+    printf("  %s --batch-only --update-baseline\n", program);
+}
+
 int main(int argc, char** argv) {
+    if (test262_help_requested(argc, argv)) {
+        print_test262_help(argc > 0 ? argv[0] : nullptr);
+        return 0;
+    }
+
     testing::InitGoogleTest(&argc, argv);
 
 #ifndef _WIN32

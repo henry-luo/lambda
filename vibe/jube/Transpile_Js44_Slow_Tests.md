@@ -63,6 +63,20 @@ The URI A1 batch must be run with the batch-only path.  A plain
 collection, but the proper `--batch-only --batch-file=... --jobs=1` rerun
 reported all seven rows as passing.
 
+Latest broad regression triage also reduced the focused regression recheck from
+333 rows to 310 rows after the Annex B eval/global binding fixes.  One apparent
+new slow row appeared at the 30s timeout boundary:
+
+```text
+language_comments_S7_4_A5_js
+```
+
+That row was not a semantic regression.  An isolated `--batch-only` rerun with
+`--js-timeout=60 --jobs=1` passed in 23.1s, with a 22,822ms row timing.  It
+should stay on the slow-watch list, but the latest check confirmed it is
+timeout-threshold noise from the broad batch run rather than a new crash or
+correctness failure.
+
 ## 1. Starting Point
 
 The latest Js43 baseline refresh had already moved the suite to 34,071 fully
