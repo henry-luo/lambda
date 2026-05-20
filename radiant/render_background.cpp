@@ -1498,17 +1498,69 @@ static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* 
     render_painter_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
 }
 
+static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
+                                        ClipShape* rounded_shape,
+                                        ClipShape** out_shapes) {
+    int depth = 0;
+    if (!rdcon || !out_shapes) return 0;
+
+    for (int i = 0; i < rdcon->clip_shape_depth && depth < RDT_MAX_CLIP_SHAPES; i++) {
+        out_shapes[depth++] = rdcon->clip_shapes[i];
+    }
+
+    if (!view || !view->bound || !view->bound->border ||
+        !corner_has_radius(&view->bound->border->radius) ||
+        depth >= RDT_MAX_CLIP_SHAPES) {
+        return depth;
+    }
+
+    Bound* clip = &rdcon->block.clip;
+    float clip_w = clip->right - clip->left;
+    float clip_h = clip->bottom - clip->top;
+    if (clip_w <= 0 || clip_h <= 0) return depth;
+
+    Corner radius = view->bound->border->radius;
+    constrain_corner_radii(&radius, clip_w, clip_h);
+    rounded_shape->type = CLIP_SHAPE_ROUNDED_RECT;
+    rounded_shape->rounded_rect = {
+        clip->left, clip->top, clip_w, clip_h,
+        radius.top_left, radius.top_right, radius.bottom_right, radius.bottom_left
+    };
+    out_shapes[depth++] = rounded_shape;
+    return depth;
+}
+
+static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view) {
+    if (!rdcon) return nullptr;
+    if (!view || !view->bound || !view->bound->border ||
+        !corner_has_radius(&view->bound->border->radius)) {
+        return render_path_create_clip_path(rdcon);
+    }
+
+    Bound* clip = &rdcon->block.clip;
+    float clip_w = clip->right - clip->left;
+    float clip_h = clip->bottom - clip->top;
+    if (clip_w <= 0 || clip_h <= 0) {
+        return render_path_create_clip_path(rdcon);
+    }
+
+    Corner radius = view->bound->border->radius;
+    constrain_corner_radii(&radius, clip_w, clip_h);
+    Rect clip_rect = {clip->left, clip->top, clip_w, clip_h};
+    return render_path_create_rounded_rect(clip_rect, &radius);
+}
+
 /**
  * Render a single tile of a background image using the vector API (for SVG images).
  */
-static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* tile_rect) {
+static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurface* img, Rect* tile_rect) {
     if (!img->pic) return;
 
     RdtPicture* pic = rdt_picture_dup(img->pic);
     if (!pic) return;
 
     // Clip to block clip region (clip path is already in absolute coordinates, no transform needed)
-    RdtPath* clip_path = render_path_create_clip_path(rdcon);
+    RdtPath* clip_path = background_image_clip_path(rdcon, view);
     rc_push_clip(rdcon, clip_path, NULL);
     render_painter_draw_picture_rect(rdcon, pic, tile_rect, NULL, 255);
     rc_pop_clip(rdcon);
@@ -1633,6 +1685,9 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
     bool is_repeating = (repeat_x != CSS_VALUE_NO_REPEAT && repeat_x != CSS_VALUE_SPACE) ||
                         (repeat_y != CSS_VALUE_NO_REPEAT && repeat_y != CSS_VALUE_SPACE);
     ScaleMode tile_scale_mode = (is_repeating && !is_svg) ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
+    ClipShape rounded_clip_shape = {};
+    ClipShape* clip_shape_stack[RDT_MAX_CLIP_SHAPES];
+    int clip_shape_depth = background_image_clip_shapes(rdcon, view, &rounded_clip_shape, clip_shape_stack);
 
     for (int row = start_row; row <= end_row; row++) {
         for (int col = start_col; col <= end_col; col++) {
@@ -1657,10 +1712,10 @@ void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundPr
             }
 
             if (is_svg) {
-                render_bg_tile_tvg(rdcon, img, &tile_rect);
+                render_bg_tile_tvg(rdcon, view, img, &tile_rect);
             } else {
                 blit_bg_tile(rdcon, img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip,
-                             tile_scale_mode, rdcon->clip_shapes, rdcon->clip_shape_depth);
+                             tile_scale_mode, clip_shape_stack, clip_shape_depth);
             }
         }
     }

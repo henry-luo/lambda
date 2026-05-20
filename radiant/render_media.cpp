@@ -4,6 +4,7 @@
 #include "render.hpp"
 #include "render_raster.hpp"
 #include "render_selection.hpp"
+#include "render_state.hpp"
 #include "webview.h"
 
 #include "../lib/tagged.hpp"
@@ -12,6 +13,39 @@
 
 #include <math.h>
 #include <string.h>
+
+static Bound render_media_intersect_clip_rect(const Bound* clip, const Rect* rect) {
+    Bound out = clip ? *clip : Bound{rect->x, rect->y, rect->x + rect->width, rect->y + rect->height};
+    float rect_right = rect->x + rect->width;
+    float rect_bottom = rect->y + rect->height;
+    if (out.left < rect->x) out.left = rect->x;
+    if (out.top < rect->y) out.top = rect->y;
+    if (out.right > rect_right) out.right = rect_right;
+    if (out.bottom > rect_bottom) out.bottom = rect_bottom;
+    return out;
+}
+
+static bool render_media_rect_contains(const Rect* outer, const Rect* inner) {
+    if (!outer || !inner) return true;
+    const float eps = 0.01f;
+    return inner->x >= outer->x - eps &&
+           inner->y >= outer->y - eps &&
+           inner->x + inner->width <= outer->x + outer->width + eps &&
+           inner->y + inner->height <= outer->y + outer->height + eps;
+}
+
+static bool render_media_push_content_clip(RenderContext* rdcon, const Rect* content_rect,
+                                           const Rect* image_rect) {
+    if (!rdcon || !content_rect || render_media_rect_contains(content_rect, image_rect)) {
+        return false;
+    }
+    RdtPath* clip_path = rdt_path_new();
+    rdt_path_add_rect(clip_path, content_rect->x, content_rect->y,
+                      content_rect->width, content_rect->height, 0, 0);
+    rc_push_clip(rdcon, clip_path, render_state_current_transform(rdcon));
+    rdt_path_free(clip_path);
+    return true;
+}
 
 static bool render_media_view_has_dom_element(ViewBlock* view) {
     if (!view) return false;
@@ -122,19 +156,23 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
               rect.width, rect.height, rect.x, rect.y,
               rdcon->block.clip.left, rdcon->block.clip.top,
               rdcon->block.clip.right, rdcon->block.clip.bottom);
+    Bound image_clip = rdcon->has_transform
+        ? rdcon->block.clip
+        : render_media_intersect_clip_rect(&rdcon->block.clip, &rect);
+    bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
         log_debug("render svg image vector-first at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
         if (img->pic) {
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
-                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &rdcon->block.clip, 255);
+                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip, 255);
                 if (!rdcon->dl) {
                     rdt_picture_free(pic);
                 }
             }
         } else if (img->pixels) {
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                                            img->width, &img_rect, &rdcon->block.clip, 255, img);
+                                            img->width, &img_rect, &image_clip, 255, img);
         } else {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
@@ -142,9 +180,18 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         // ensure raster image pixels are decoded (lazy loading) at the displayed size
         image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
         log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-        render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
-            &img_rect, &rdcon->block.clip, SCALE_MODE_LINEAR,
-            rdcon->clip_shapes, rdcon->clip_shape_depth);
+        if (rdcon->has_transform) {
+            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels,
+                                            img->width, img->height, img->width,
+                                            &img_rect, &image_clip, 255, img);
+        } else {
+            render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
+                &img_rect, &image_clip, SCALE_MODE_LINEAR,
+                rdcon->clip_shapes, rdcon->clip_shape_depth);
+        }
+    }
+    if (pushed_content_clip) {
+        rc_pop_clip(rdcon);
     }
 
     // Render blue selection overlay if image is within a cross-view selection
@@ -172,6 +219,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     }
 
     RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, view);
+    BlockBlot parent_block = rdcon->block;
 
     if (render_media_view_has_dom_element(view)) {
         // render border and background, etc. under the outer image marker so the
@@ -182,7 +230,9 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     }
 
     // render the image content after any DOM-backed block decorations.
+    RenderTransformScope content_transform_scope = render_state_push_transform(rdcon, view, &parent_block);
     render_image_content(rdcon, view);
+    render_state_pop_transform(&content_transform_scope);
     render_element_marker_end(rdcon, &marker_scope);
     log_debug("end of image render");
     log_leave();
