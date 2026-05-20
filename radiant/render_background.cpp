@@ -16,12 +16,13 @@
  * Main background rendering dispatch
  */
 
+static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view);
 static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, LinearGradient* gradient,
-                                         Rect rect);
+                                         Rect position_rect, Rect paint_rect);
 static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, RadialGradient* gradient,
-                                         Rect rect);
+                                         Rect position_rect, Rect paint_rect);
 
 static Corner background_corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
@@ -157,7 +158,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         for (int i = 0; i < bg->linear_layer_count; i++) {
             if (bg->linear_layers[i]) {
                 log_debug("[GRADIENT] Rendering linear gradient layer %d/%d", i + 1, bg->linear_layer_count);
-                render_linear_gradient_layer(rdcon, view, bg, bg->linear_layers[i], paint_rect);
+                render_linear_gradient_layer(rdcon, view, bg, bg->linear_layers[i], pos_rect, paint_rect);
             }
         }
     }
@@ -167,7 +168,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         for (int i = 0; i < bg->radial_layer_count; i++) {
             if (bg->radial_layers[i]) {
                 log_debug("[GRADIENT] Rendering radial gradient layer %d/%d", i + 1, bg->radial_layer_count);
-                render_radial_gradient_layer(rdcon, view, bg, bg->radial_layers[i], paint_rect);
+                render_radial_gradient_layer(rdcon, view, bg, bg->radial_layers[i], pos_rect, paint_rect);
             }
         }
     }
@@ -177,9 +178,9 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
         if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient) {
-            render_linear_gradient_layer(rdcon, view, bg, bg->linear_gradient, paint_rect);
+            render_linear_gradient_layer(rdcon, view, bg, bg->linear_gradient, pos_rect, paint_rect);
         } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient) {
-            render_radial_gradient_layer(rdcon, view, bg, bg->radial_gradient, paint_rect);
+            render_radial_gradient_layer(rdcon, view, bg, bg->radial_gradient, pos_rect, paint_rect);
         } else {
             render_background_gradient(rdcon, view, bg, paint_rect);
         }
@@ -287,37 +288,51 @@ static void calc_linear_gradient_points(float angle, Rect rect,
 /**
  * Render linear gradient
  */
-void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+static RdtPath* background_gradient_clip_path(ViewBlock* view, Rect clip_rect) {
+    RdtPath* clip = nullptr;
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (border && corner_has_radius(&border->radius)) {
+        Corner radius = border->radius;
+        constrain_corner_radii(&radius, clip_rect.width, clip_rect.height);
+        clip = render_path_create_rounded_rect(clip_rect, &radius);
+    } else {
+        clip = rdt_path_new();
+        rdt_path_add_rect(clip, clip_rect.x, clip_rect.y, clip_rect.width, clip_rect.height, 0, 0);
+    }
+    return clip;
+}
+
+static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
+                                        LinearGradient* gradient, Rect tile_rect,
+                                        Rect clip_rect) {
     if (!gradient || gradient->stop_count < 2) {
         log_debug("[GRADIENT] Invalid gradient (need at least 2 stops)");
         return;
     }
 
     log_debug("[GRADIENT] render_linear_gradient <%s> rect=(%.0f,%.0f,%.0f,%.0f)",
-              view->node_name(), rect.x, rect.y, rect.width, rect.height);
+              view->node_name(), tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height);
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
-    // Build shape path
     RdtPath* p = rdt_path_new();
-    bool has_radius = false;
-    BorderProp* border = nullptr;
-    if (view->bound && view->bound->border) {
-        border = view->bound->border;
-        has_radius = corner_has_radius(&border->radius);
-    }
-
-    if (has_radius) {
-        constrain_border_radii(border, rect.width, rect.height);
+    bool same_rect = fabsf(tile_rect.x - clip_rect.x) < 0.001f &&
+                     fabsf(tile_rect.y - clip_rect.y) < 0.001f &&
+                     fabsf(tile_rect.width - clip_rect.width) < 0.001f &&
+                     fabsf(tile_rect.height - clip_rect.height) < 0.001f;
+    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    if (same_rect && border && corner_has_radius(&border->radius)) {
         rdt_path_free(p);
-        p = render_path_create_rounded_rect(rect, &border->radius);
+        Corner radius = border->radius;
+        constrain_corner_radii(&radius, tile_rect.width, tile_rect.height);
+        p = render_path_create_rounded_rect(tile_rect, &radius);
     } else {
-        rdt_path_add_rect(p, rect.x, rect.y, rect.width, rect.height, 0, 0);
+        rdt_path_add_rect(p, tile_rect.x, tile_rect.y, tile_rect.width, tile_rect.height, 0, 0);
     }
 
     // Calculate gradient line
     float x1, y1, x2, y2;
-    calc_linear_gradient_points(gradient->angle, rect, &x1, &y1, &x2, &y2);
+    calc_linear_gradient_points(gradient->angle, tile_rect, &x1, &y1, &x2, &y2);
 
     // Build gradient stops
     int stop_count = gradient->stop_count;
@@ -377,13 +392,18 @@ void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradien
         }
     }
 
-    RdtPath* clip = render_path_create_clip_path(rdcon);
+    RdtPath* clip = same_rect ? render_path_create_clip_path(rdcon)
+                              : background_gradient_clip_path(view, clip_rect);
     rc_push_clip(rdcon, clip, NULL);
     rc_fill_linear_gradient(rdcon, p, x1, y1, x2, y2, final_stops, final_stop_count,
                              RDT_FILL_WINDING, xform);
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
+}
+
+void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+    render_linear_gradient_tile(rdcon, view, gradient, rect, rect);
 }
 
 /**
@@ -1671,16 +1691,21 @@ typedef struct {
     CssEnum repeat_y;
 } BackgroundTilePlan;
 
-static bool compute_background_tile_plan(BackgroundProp* bg, Rect rect,
+static bool compute_background_tile_plan(BackgroundProp* bg, Rect position_rect, Rect coverage_rect,
                                          float intrinsic_w, float intrinsic_h,
                                          BackgroundTilePlan* plan) {
-    if (!bg || !plan || rect.width <= 0.0f || rect.height <= 0.0f) return false;
+    if (!bg || !plan ||
+        position_rect.width <= 0.0f || position_rect.height <= 0.0f ||
+        coverage_rect.width <= 0.0f || coverage_rect.height <= 0.0f) {
+        return false;
+    }
 
     if (background_size_unspecified(bg)) {
-        plan->tile_w = rect.width;
-        plan->tile_h = rect.height;
+        plan->tile_w = position_rect.width;
+        plan->tile_h = position_rect.height;
     } else {
-        compute_bg_image_size(bg, intrinsic_w, intrinsic_h, rect.width, rect.height,
+        compute_bg_image_size(bg, intrinsic_w, intrinsic_h,
+                              position_rect.width, position_rect.height,
                               &plan->tile_w, &plan->tile_h);
     }
     if (plan->tile_w <= 0.0f || plan->tile_h <= 0.0f) return false;
@@ -1688,53 +1713,53 @@ static bool compute_background_tile_plan(BackgroundProp* bg, Rect rect,
     float pos_x = 0.0f;
     float pos_y = 0.0f;
     compute_bg_image_position(bg, plan->tile_w, plan->tile_h,
-                              rect.width, rect.height, &pos_x, &pos_y);
+                              position_rect.width, position_rect.height, &pos_x, &pos_y);
 
     plan->repeat_x = bg->bg_repeat_x ? bg->bg_repeat_x : CSS_VALUE_REPEAT;
     plan->repeat_y = bg->bg_repeat_y ? bg->bg_repeat_y : CSS_VALUE_REPEAT;
-    plan->origin_x = rect.x + pos_x;
-    plan->origin_y = rect.y + pos_y;
+    plan->origin_x = position_rect.x + pos_x;
+    plan->origin_y = position_rect.y + pos_y;
     plan->space_gap_x = 0.0f;
     plan->space_gap_y = 0.0f;
 
     if (plan->repeat_x == CSS_VALUE_ROUND && plan->tile_w > 0.0f) {
-        int count = (int)(rect.width / plan->tile_w + 0.5f);
+        int count = (int)(position_rect.width / plan->tile_w + 0.5f);
         if (count < 1) count = 1;
-        plan->tile_w = rect.width / count;
+        plan->tile_w = position_rect.width / count;
     }
     if (plan->repeat_y == CSS_VALUE_ROUND && plan->tile_h > 0.0f) {
-        int count = (int)(rect.height / plan->tile_h + 0.5f);
+        int count = (int)(position_rect.height / plan->tile_h + 0.5f);
         if (count < 1) count = 1;
-        plan->tile_h = rect.height / count;
+        plan->tile_h = position_rect.height / count;
     }
 
     if (plan->repeat_x == CSS_VALUE_NO_REPEAT) {
         plan->start_col = 0; plan->end_col = 0;
     } else if (plan->repeat_x == CSS_VALUE_SPACE) {
         plan->start_col = 0;
-        plan->end_col = (plan->tile_w > 0.0f) ? (int)(rect.width / plan->tile_w) - 1 : 0;
+        plan->end_col = (plan->tile_w > 0.0f) ? (int)(position_rect.width / plan->tile_w) - 1 : 0;
         if (plan->end_col < 0) plan->end_col = 0;
     } else {
-        plan->start_col = (int)floorf((rect.x - plan->origin_x) / plan->tile_w);
-        plan->end_col = (int)ceilf((rect.x + rect.width - plan->origin_x) / plan->tile_w) - 1;
+        plan->start_col = (int)floorf((coverage_rect.x - plan->origin_x) / plan->tile_w);
+        plan->end_col = (int)ceilf((coverage_rect.x + coverage_rect.width - plan->origin_x) / plan->tile_w) - 1;
     }
 
     if (plan->repeat_y == CSS_VALUE_NO_REPEAT) {
         plan->start_row = 0; plan->end_row = 0;
     } else if (plan->repeat_y == CSS_VALUE_SPACE) {
         plan->start_row = 0;
-        plan->end_row = (plan->tile_h > 0.0f) ? (int)(rect.height / plan->tile_h) - 1 : 0;
+        plan->end_row = (plan->tile_h > 0.0f) ? (int)(position_rect.height / plan->tile_h) - 1 : 0;
         if (plan->end_row < 0) plan->end_row = 0;
     } else {
-        plan->start_row = (int)floorf((rect.y - plan->origin_y) / plan->tile_h);
-        plan->end_row = (int)ceilf((rect.y + rect.height - plan->origin_y) / plan->tile_h) - 1;
+        plan->start_row = (int)floorf((coverage_rect.y - plan->origin_y) / plan->tile_h);
+        plan->end_row = (int)ceilf((coverage_rect.y + coverage_rect.height - plan->origin_y) / plan->tile_h) - 1;
     }
 
     if (plan->repeat_x == CSS_VALUE_SPACE && plan->end_col > 0) {
-        plan->space_gap_x = (rect.width - plan->tile_w * (plan->end_col + 1)) / plan->end_col;
+        plan->space_gap_x = (position_rect.width - plan->tile_w * (plan->end_col + 1)) / plan->end_col;
     }
     if (plan->repeat_y == CSS_VALUE_SPACE && plan->end_row > 0) {
-        plan->space_gap_y = (rect.height - plan->tile_h * (plan->end_row + 1)) / plan->end_row;
+        plan->space_gap_y = (position_rect.height - plan->tile_h * (plan->end_row + 1)) / plan->end_row;
     }
     return true;
 }
@@ -1764,33 +1789,41 @@ static bool background_tile_outside_rect(const Rect* tile_rect, const Rect* rect
 
 static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, LinearGradient* gradient,
-                                         Rect rect) {
+                                         Rect position_rect, Rect paint_rect) {
     if (!gradient) return;
+    Rect tile_basis_rect = gradient->is_repeating ? position_rect : paint_rect;
     BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, rect, rect.width, rect.height, &plan)) return;
+    if (!compute_background_tile_plan(bg, tile_basis_rect, paint_rect,
+                                      tile_basis_rect.width, tile_basis_rect.height, &plan)) {
+        return;
+    }
 
     for (int row = plan.start_row; row <= plan.end_row; row++) {
         for (int col = plan.start_col; col <= plan.end_col; col++) {
             Rect tile_rect;
-            background_tile_rect(&plan, rect, row, col, &tile_rect);
-            if (background_tile_outside_rect(&tile_rect, &rect)) continue;
-            render_linear_gradient(rdcon, view, gradient, tile_rect);
+            background_tile_rect(&plan, tile_basis_rect, row, col, &tile_rect);
+            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
+            render_linear_gradient_tile(rdcon, view, gradient, tile_rect, paint_rect);
         }
     }
 }
 
 static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, RadialGradient* gradient,
-                                         Rect rect) {
+                                         Rect position_rect, Rect paint_rect) {
     if (!gradient) return;
+    (void)position_rect;
     BackgroundTilePlan plan = {};
-    if (!compute_background_tile_plan(bg, rect, rect.width, rect.height, &plan)) return;
+    if (!compute_background_tile_plan(bg, paint_rect, paint_rect,
+                                      paint_rect.width, paint_rect.height, &plan)) {
+        return;
+    }
 
     for (int row = plan.start_row; row <= plan.end_row; row++) {
         for (int col = plan.start_col; col <= plan.end_col; col++) {
             Rect tile_rect;
-            background_tile_rect(&plan, rect, row, col, &tile_rect);
-            if (background_tile_outside_rect(&tile_rect, &rect)) continue;
+            background_tile_rect(&plan, paint_rect, row, col, &tile_rect);
+            if (background_tile_outside_rect(&tile_rect, &paint_rect)) continue;
             render_radial_gradient(rdcon, view, gradient, tile_rect);
         }
     }
