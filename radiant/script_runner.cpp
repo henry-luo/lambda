@@ -32,6 +32,7 @@
 #include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/js/js_event_loop.h"
 
@@ -706,16 +707,7 @@ static const struct {
 #include "event_handler_registry.h"
 
 // hashmap callbacks for DomElement* keys
-static uint64_t js_handler_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const JsEventHandler* h = (const JsEventHandler*)item;
-    return hashmap_sip(&h->element, sizeof(void*), seed0, seed1);
-}
-
-static int js_handler_compare(const void *a, const void *b, void *udata) {
-    const JsEventHandler* ha = (const JsEventHandler*)a;
-    const JsEventHandler* hb = (const JsEventHandler*)b;
-    return (ha->element == hb->element) ? 0 : 1;
-}
+HASHMAP_DEFINE_PTRKEY(js_handler, JsEventHandler, element)
 
 static void collect_handlers_recursive(DomElement* elem, JsEventRegistry* registry,
                                         StrBuf* compile_buf, int* handler_id, int depth) {
@@ -787,8 +779,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     Pool* reg_pool = pool_create_mmap();
     JsEventRegistry* registry = (JsEventRegistry*)pool_calloc(reg_pool, sizeof(JsEventRegistry));
     registry->pool = reg_pool;
-    registry->element_map = hashmap_new(sizeof(JsEventHandler), 32, 0, 0,
-                                         js_handler_hash, js_handler_compare, nullptr, nullptr);
+    registry->element_map = js_handler_new(32);
     registry->count = 0;
 
     // collect all inline event handler attributes

@@ -342,8 +342,7 @@ static void rm_call_void_3(RbMirTranspiler* mt, const char* fn_name,
 static void rm_push_scope(RbMirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("rb-mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(RbVarScopeEntry), 16, 0, 0,
-        rb_var_scope_hash, rb_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = rb_var_scope_new(16);
 }
 
 static void rm_pop_scope(RbMirTranspiler* mt) {
@@ -4749,12 +4748,9 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     mt->filename = filename;
     mt->runtime = runtime;
 
-    mt->import_cache = hashmap_new(sizeof(RbImportCacheEntry), 64, 0, 0,
-        rb_import_cache_hash, rb_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(RbLocalFuncEntry), 32, 0, 0,
-        rb_local_func_hash, rb_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(RbVarScopeEntry), 16, 0, 0,
-        rb_var_scope_hash, rb_var_scope_cmp, NULL, NULL);
+    mt->import_cache = rb_import_cache_new(64);
+    mt->local_funcs  = rb_local_func_new(32);
+    mt->var_scopes[0] = rb_var_scope_new(16);
     mt->scope_depth = 0;
 
     // create module

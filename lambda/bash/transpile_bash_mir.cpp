@@ -4513,8 +4513,7 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
     int saved_loop_depth = mt->loop_depth;
 
     // new variable scope for function
-    mt->vars = hashmap_new(sizeof(BashMirVar), 16, 0, 0,
-                           bash_var_hash, bash_var_cmp, NULL, NULL);
+    mt->vars = bash_var_new(16);
     mt->var_count = 0;
     mt->loop_break_label = NULL;
     mt->loop_continue_label = NULL;
@@ -5008,12 +5007,9 @@ extern "C" Item bash_source_file(Item filename) {
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
-    mt->vars = hashmap_new(sizeof(BashMirVar), 64, 0, 0,
-                           bash_var_hash, bash_var_cmp, NULL, NULL);
-    mt->import_cache = hashmap_new(sizeof(BashMirImportEntry), 64, 0, 0,
-                                   bm_import_hash, bm_import_cmp, NULL, NULL);
-    mt->user_funcs = hashmap_new(sizeof(BashMirUserFunc), 16, 0, 0,
-                                 bm_user_func_hash, bm_user_func_cmp, NULL, NULL);
+    mt->vars         = bash_var_new(64);
+    mt->import_cache = bm_import_new(64);
+    mt->user_funcs   = bm_user_func_new(16);
     mt->var_count = 0;
     mt->label_counter = 0;
     mt->loop_depth = 0;
@@ -5277,12 +5273,9 @@ extern "C" Item bash_eval_string(Item code) {
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
-    mt->vars = hashmap_new(sizeof(BashMirVar), 32, 0, 0,
-                           bash_var_hash, bash_var_cmp, NULL, NULL);
-    mt->import_cache = hashmap_new(sizeof(BashMirImportEntry), 32, 0, 0,
-                                   bm_import_hash, bm_import_cmp, NULL, NULL);
-    mt->user_funcs = hashmap_new(sizeof(BashMirUserFunc), 8, 0, 0,
-                                 bm_user_func_hash, bm_user_func_cmp, NULL, NULL);
+    mt->vars         = bash_var_new(32);
+    mt->import_cache = bm_import_new(32);
+    mt->user_funcs   = bm_user_func_new(8);
     mt->var_count = 0;
     mt->label_counter = 0;
     mt->loop_depth = 0;
@@ -6368,12 +6361,9 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
-    mt->vars = hashmap_new(sizeof(BashMirVar), 64, 0, 0,
-                           bash_var_hash, bash_var_cmp, NULL, NULL);
-    mt->import_cache = hashmap_new(sizeof(BashMirImportEntry), 64, 0, 0,
-                                   bm_import_hash, bm_import_cmp, NULL, NULL);
-    mt->user_funcs = hashmap_new(sizeof(BashMirUserFunc), 16, 0, 0,
-                                 bm_user_func_hash, bm_user_func_cmp, NULL, NULL);
+    mt->vars         = bash_var_new(64);
+    mt->import_cache = bm_import_new(64);
+    mt->user_funcs   = bm_user_func_new(16);
     mt->var_count = 0;
     mt->label_counter = 0;
     mt->loop_depth = 0;

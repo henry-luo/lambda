@@ -8,6 +8,7 @@
 #include "render_background.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/math_utils.h"
 #include <math.h>
 #include <algorithm>
 #include <string.h>
@@ -30,12 +31,8 @@ static inline uint8_t clamp_byte(float v) {
     return (uint8_t)(v + 0.5f);  // Round to nearest
 }
 
-// Helper: Clamp value to 0-1 range
-static inline float clamp_01(float v) {
-    if (v < 0) return 0;
-    if (v > 1) return 1;
-    return v;
-}
+// Alias for lib/math_utils.h clamp_unit (same semantics).
+static inline float clamp_01(float v) { return clamp_unit(v); }
 
 /**
  * grayscale(amount)
