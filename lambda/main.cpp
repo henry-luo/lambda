@@ -169,6 +169,10 @@ extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false);
+extern int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
+                                                           const char* event_file, bool headless,
+                                                           const char** font_dirs = nullptr, int font_dir_count = 0,
+                                                           bool enable_event_log = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 
@@ -513,12 +517,12 @@ static char* lambda_string_literal_escape(const char* value) {
     return out;
 }
 
-static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
-                                            const char* opts_expr, const char* log_prefix) {
+static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* opts_expr,
+                                             const char* log_prefix) {
     char* escaped_pdf = lambda_string_literal_escape(pdf_file);
     if (!escaped_pdf) {
         log_error("[%s] PDF package: failed to escape input path", log_prefix);
-        return false;
+        return nullptr;
     }
 
     const char* opts = opts_expr ? opts_expr : "null";
@@ -530,13 +534,13 @@ static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tm
     if (needed <= 0) {
         mem_free(escaped_pdf);
         log_error("[%s] PDF package: failed to size bridge script", log_prefix);
-        return false;
+        return nullptr;
     }
     char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
     if (!script_buf) {
         mem_free(escaped_pdf);
         log_error("[%s] PDF package: failed to allocate bridge script", log_prefix);
-        return false;
+        return nullptr;
     }
     snprintf(script_buf, (size_t)needed + 1,
         "import pdf: lambda.package.pdf.pdf\n"
@@ -544,7 +548,13 @@ static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tm
         "pdf.pdf_to_html(doc, %s)\n",
         escaped_pdf, opts);
     mem_free(escaped_pdf);
+    return script_buf;
+}
 
+static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
+                                            const char* opts_expr, const char* log_prefix) {
+    char* script_buf = build_pdf_to_html_bridge_script(pdf_file, opts_expr, log_prefix);
+    if (!script_buf) return false;
     write_text_file(tmp_script_path, script_buf);
     mem_free(script_buf);
     return true;
@@ -2443,19 +2453,19 @@ int main(int argc, char *argv[]) {
                 return copy_status == 0 ? 0 : 1;
             }
             log_info("[render] PDF detected — using Lambda PDF package in-memory element pipeline");
-            const char* render_pdf_bridge = "temp/_render_pdf_bridge.ls";
+            char* render_pdf_bridge = file_temp_path("render_pdf_bridge", ".ls");
+            if (!render_pdf_bridge) {
+                printf("Error: Failed to allocate PDF render bridge path\n");
+                log_finish();
+                return 1;
+            }
             if (!write_pdf_to_html_bridge_script(html_file, render_pdf_bridge, "null", "render")) {
                 printf("Error: Failed to prepare PDF render bridge for '%s'\n", html_file);
+                mem_free(render_pdf_bridge);
                 log_finish();
                 return 1;
             }
-            render_pdf_temp_input = mem_strdup(render_pdf_bridge, MEM_CAT_TEMP);
-            if (!render_pdf_temp_input) {
-                printf("Error: Failed to allocate PDF render bridge path\n");
-                file_delete(render_pdf_bridge);
-                log_finish();
-                return 1;
-            }
+            render_pdf_temp_input = render_pdf_bridge;
             html_file = render_pdf_temp_input;
         }
 
@@ -2855,7 +2865,7 @@ int main(int argc, char *argv[]) {
             // Clean up temp file after viewing
             file_delete(temp_svg);
 
-            log_debug("view command completed with result: %d", exit_code);
+            log_info("view command completed with result: %d", exit_code);
             log_finish();
             return exit_code;
         }
@@ -2864,34 +2874,37 @@ int main(int argc, char *argv[]) {
         // PDF → Lambda element-tree view via the Lambda PDF package
         // ============================================================
         // The legacy C++ pipeline (load_pdf_doc → ViewTree) is bypassed.
-        // We hand a tiny Lambda bridge script to the normal .ls view loader;
+        // We hand a tiny Lambda bridge script to the normal in-memory .ls view loader;
         // the script returns an <html> document containing one <svg> per page.
         // Radiant then builds the DOM directly from that element tree.
-        char* pdf_temp_script = nullptr;
+        char* pdf_bridge_source = nullptr;
         if (ext && strcmp(ext, ".pdf") == 0) {
             log_info("[view] PDF detected — using Lambda PDF package in-memory element pipeline");
 
-            const char* view_pdf_bridge = "temp/_view_pdf_bridge.ls";
-            if (!write_pdf_to_html_bridge_script(filename, view_pdf_bridge, "{max_pages: 48}", "view")) {
+            pdf_bridge_source = build_pdf_to_html_bridge_script(filename, "{max_pages: 48}", "view");
+            if (!pdf_bridge_source) {
                 printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
                 if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
                 log_finish();
                 return 1;
             }
 
-            // Hand the bridge script to the normal Lambda view loader. The
-            // script returns the constructed <html>/<svg> element tree, so
-            // Radiant builds the DOM directly without XML/HTML serialization.
-            pdf_temp_script = mem_strdup(view_pdf_bridge, MEM_CAT_TEMP);
-            if (!pdf_temp_script) {
-                printf("Error: Failed to allocate PDF view bridge path\n");
-                file_delete(view_pdf_bridge);
-                if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
-                log_finish();
-                return 1;
+            // The script returns the constructed <html>/<svg> element tree, so
+            // Radiant builds the DOM directly without XML/HTML serialization or
+            // bridge-file I/O.
+            exit_code = view_lambda_script_source_in_window_with_events(
+                filename, pdf_bridge_source, event_file, headless,
+                font_dirs, font_dir_count, event_log);
+
+            mem_free(pdf_bridge_source);
+            if (temp_file_path) {
+                file_delete(temp_file_path);
+                mem_free(temp_file_path);
             }
-            filename = pdf_temp_script;
-            ext = ".ls";
+
+            log_info("view command completed with result: %d", exit_code);
+            log_finish();
+            return exit_code;
         }
 
         if (ext && (strcmp(ext, ".pdf") == 0 ||
@@ -2925,14 +2938,7 @@ int main(int argc, char *argv[]) {
             file_delete(temp_file_path);
             mem_free(temp_file_path);
         }
-        // Cleanup temp Lambda bridge script produced for PDF view.
-        if (pdf_temp_script) {
-            file_delete(pdf_temp_script);
-            mem_free(pdf_temp_script);
-        }
-
-        fprintf(stderr, "view command completed with result: %d\n", exit_code);
-        log_debug("view command completed with result: %d", exit_code);
+        log_info("view command completed with result: %d", exit_code);
 
         // Always print peak physical footprint on macOS so the parent test process
         // can read true app memory usage (excludes shared OS framework pages).
@@ -2943,8 +2949,8 @@ int main(int argc, char *argv[]) {
             mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
             if (task_info(mach_task_self(), TASK_VM_INFO,
                           (task_info_t)&vm_info, &cnt) == KERN_SUCCESS) {
-                fprintf(stderr, "[PEAK_FOOTPRINT] %llu\n",
-                        (unsigned long long)vm_info.ledger_phys_footprint_peak);
+                log_info("[PEAK_FOOTPRINT] %llu",
+                         (unsigned long long)vm_info.ledger_phys_footprint_peak);
             }
         }
 #endif

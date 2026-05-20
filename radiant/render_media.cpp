@@ -6,11 +6,18 @@
 #include "render_selection.hpp"
 #include "webview.h"
 
+#include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 
 #include <math.h>
 #include <string.h>
+
+static bool render_media_view_has_dom_element(ViewBlock* view) {
+    if (!view) return false;
+    DomNode* node = lam::view_dom_node(static_cast<View*>(view));
+    return node && node->node_type == DOM_NODE_ELEMENT;
+}
 
 void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
@@ -166,13 +173,15 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
 
     RenderElementMarkerScope marker_scope = render_element_marker_begin(rdcon, view);
 
-    // render border and background, etc. under the outer image marker so the
-    // marker bounds include the replaced content recorded below.
-    rdcon->element_marker_suppression_depth++;
-    render_block_view(rdcon, view);
-    rdcon->element_marker_suppression_depth--;
+    if (render_media_view_has_dom_element(view)) {
+        // render border and background, etc. under the outer image marker so the
+        // marker bounds include the replaced content recorded below.
+        rdcon->element_marker_suppression_depth++;
+        render_block_view(rdcon, view);
+        rdcon->element_marker_suppression_depth--;
+    }
 
-    // render the image content (using parent coordinates restored by render_block_view)
+    // render the image content after any DOM-backed block decorations.
     render_image_content(rdcon, view);
     render_element_marker_end(rdcon, &marker_scope);
     log_debug("end of image render");

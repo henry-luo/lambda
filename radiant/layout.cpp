@@ -2410,7 +2410,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     auto t_layout = high_resolution_clock::now();
     double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
-    fprintf(stderr, "[LAYOUT_PROF] layout_html_root: %.1fms\n", layout_ms);
+    log_info("[LAYOUT_PROF] layout_html_root: %.1fms", layout_ms);
 
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_STYLE, g_style_resolve_time);
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_TEXT, g_text_layout_time);

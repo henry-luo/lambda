@@ -4539,6 +4539,34 @@ extern "C" int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item f
     return get_type_id(matched) == LMD_TYPE_BOOL && it2b(matched) ? 1 : 0;
 }
 
+extern "C" int64_t js_uri_decode_equals_from_char_code_raw_ints(Item str_item, int64_t first_raw,
+                                                                int64_t second_raw, int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return 0;
+    String* s = it2s(str_val);
+    uint32_t cp = 0;
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    bool has_fast_cp = cached_cp >= 0;
+    if (has_fast_cp) cp = (uint32_t)cached_cp;
+    if (has_fast_cp || js_uri_try_decode_four_byte_cp(s, &cp)) {
+        uint32_t first = ((uint32_t)first_raw) & 0xFFFFu;
+        uint32_t second = ((uint32_t)second_raw) & 0xFFFFu;
+        if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
+            uint32_t pair_cp = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
+            return pair_cp == cp ? 1 : 0;
+        }
+        return 0;
+    }
+
+    Item first_item = (Item){.item = i2it((int32_t)first_raw)};
+    Item second_item = (Item){.item = i2it((int32_t)second_raw)};
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return 0;
+    Item expected = js_string_fromCharCode2(first_item, second_item);
+    if (js_exception_pending) return 0;
+    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
+}
+
 extern "C" int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item,
                                                             int64_t component) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
@@ -9715,29 +9743,11 @@ static inline bool js_test262_percent_escape_three_byte_prefix(String* s, uint32
     return true;
 }
 
-extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
+static Item js_test262_concat_percent_hex_u32(Item left_item, uint32_t n) {
     Item left_val = (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item);
     if (js_check_exception()) return ItemNull;
     String* left = it2s(left_val);
     if (!left) left = heap_create_name("", 0);
-
-    uint32_t n = 0;
-    TypeId n_type = get_type_id(n_item);
-    if (n_type == LMD_TYPE_INT) {
-        n = (uint32_t)it2i(n_item);
-    } else if (n_type == LMD_TYPE_INT64) {
-        n = (uint32_t)it2l(n_item);
-    } else {
-        Item num_item = js_to_number(n_item);
-        if (js_check_exception()) return ItemNull;
-        double d = js_get_number(num_item);
-        if (!isnan(d) && !isinf(d) && d != 0.0) {
-            double integral = d < 0 ? ceil(d) : floor(d);
-            double mod = fmod(integral, 4294967296.0);
-            if (mod < 0) mod += 4294967296.0;
-            n = (uint32_t)mod;
-        }
-    }
 
     static const char hex[] = "0123456789ABCDEF";
     uint32_t byte = n & 0xFF;
@@ -9769,6 +9779,31 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
         g_last_three_byte_uri_prefix_epoch = epoch;
     }
     return result_item;
+}
+
+extern "C" Item js_test262_concat_percent_hex_int(Item left_item, int64_t n_raw) {
+    return js_test262_concat_percent_hex_u32(left_item, (uint32_t)n_raw);
+}
+
+extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
+    uint32_t n = 0;
+    TypeId n_type = get_type_id(n_item);
+    if (n_type == LMD_TYPE_INT) {
+        n = (uint32_t)it2i(n_item);
+    } else if (n_type == LMD_TYPE_INT64) {
+        n = (uint32_t)it2l(n_item);
+    } else {
+        Item num_item = js_to_number(n_item);
+        if (js_check_exception()) return ItemNull;
+        double d = js_get_number(num_item);
+        if (!isnan(d) && !isinf(d) && d != 0.0) {
+            double integral = d < 0 ? ceil(d) : floor(d);
+            double mod = fmod(integral, 4294967296.0);
+            if (mod < 0) mod += 4294967296.0;
+            n = (uint32_t)mod;
+        }
+    }
+    return js_test262_concat_percent_hex_u32(left_item, n);
 }
 
 // =============================================================================
@@ -13292,6 +13327,14 @@ static bool js_uri_has_malformed_percent_triplet(String* s) {
     return false;
 }
 
+static bool js_uri_has_percent(String* s) {
+    if (!s) return false;
+    for (int64_t i = 0; i < s->len; i++) {
+        if (s->chars[i] == '%') return true;
+    }
+    return false;
+}
+
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
     if (s->chars[0] != '%' || s->chars[3] != '%' ||
@@ -13361,6 +13404,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (!js_uri_has_percent(s)) return str_val;
     if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
@@ -13396,6 +13440,7 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (!js_uri_has_percent(s)) return str_val;
     if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
@@ -14721,7 +14766,7 @@ extern "C" void js_set_global_var_property_fast(Item key, Item value) {
                 if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
                     se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
                     js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
-                    slot_type == value_type) {
+                    slot_type == value_type && js_global_lexical_find_binding(key) < 0) {
                     fn_map_set(global, key, value);
                     return;
                 }

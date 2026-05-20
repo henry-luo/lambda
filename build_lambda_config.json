@@ -3651,6 +3651,18 @@
                         "icon": "📄"
                     },
                     {
+                        "source": "test/test_radiant_view_gtest.cpp",
+                        "name": "Radiant View Tests",
+                        "dependencies": [],
+                        "binary": "test_radiant_view_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🖼️"
+                    },
+                    {
                         "source": "test/test_fuzzy_crash_gtest.cpp",
                         "name": "Fuzzy Crash Tests",
                         "dependencies": [],

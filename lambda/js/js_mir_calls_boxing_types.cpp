@@ -754,7 +754,10 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
-        if (var) return var->type_id;
+        if (var) {
+            if (var->is_js_array) return LMD_TYPE_ARRAY;
+            return var->type_id;
+        }
         // P5: Check module-level variable type for arithmetic type inference.
         // When a MODVAR was initialized with a numeric literal, modvar_type is set
         // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
