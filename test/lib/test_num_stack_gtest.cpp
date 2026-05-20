@@ -2,9 +2,9 @@
 #include <cstring>
 
 extern "C" {
-#include "../lib/num_stack.h"
-#include "../lib/datetime.h"
-#include "../lib/log.h"
+#include "../../lib/num_stack.h"
+#include "../../lib/datetime.h"
+#include "../../lib/log.h"
 }
 
 class NumStackTest : public ::testing::Test {

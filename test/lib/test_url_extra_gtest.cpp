@@ -2,9 +2,9 @@
 #include <cstring>
 
 extern "C" {
-#include "../lib/url.h"
-#include "../lib/strbuf.h"
-#include "../lib/log.h"
+#include "../../lib/url.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/log.h"
 }
 
 class UrlExtraTest : public ::testing::Test {

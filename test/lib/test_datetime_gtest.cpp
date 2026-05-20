@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../lib/datetime.h"
-#include "../lib/mempool.h"
-#include "../lib/log.h"
+#include "../../lib/datetime.h"
+#include "../../lib/mempool.h"
+#include "../../lib/log.h"
 }
 
 class DateTimeTest : public ::testing::Test {

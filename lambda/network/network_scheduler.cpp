@@ -7,6 +7,7 @@
 #include "network_resource_manager.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/url.h"
@@ -48,17 +49,7 @@ struct NetworkScheduler {
     bool stop_workers;
 };
 
-static uint64_t origin_counter_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const OriginCounter* counter = (const OriginCounter*)item;
-    return hashmap_sip(counter->origin, strlen(counter->origin), seed0, seed1);
-}
-
-static int origin_counter_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const OriginCounter* ca = (const OriginCounter*)a;
-    const OriginCounter* cb = (const OriginCounter*)b;
-    return strcmp(ca->origin, cb->origin);
-}
+HASHMAP_DEFINE_STRKEY(origin_counter, OriginCounter, origin)
 
 static void origin_counter_free(void* item) {
     OriginCounter* counter = (OriginCounter*)item;
@@ -329,15 +320,7 @@ NetworkScheduler* network_scheduler_create(NetworkThreadPool* backend_pool,
         }
     }
 
-    scheduler->origin_counters = hashmap_new(
-        sizeof(OriginCounter),
-        0,
-        0, 0,
-        origin_counter_hash,
-        origin_counter_compare,
-        origin_counter_free,
-        NULL
-    );
+    scheduler->origin_counters = origin_counter_new_with_free(0, origin_counter_free);
     if (!scheduler->origin_counters) {
         for (int i = 0; i < NETWORK_PRIORITY_COUNT; i++) arraylist_free(scheduler->queues[i]);
         pthread_cond_destroy(&scheduler->cond);

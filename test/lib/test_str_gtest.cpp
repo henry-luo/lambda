@@ -32,8 +32,8 @@
 #include <climits>
 
 extern "C" {
-#include "../lib/str.h"
-#include "../lib/utf.h"
+#include "../../lib/str.h"
+#include "../../lib/utf.h"
 }
 
 /* ================================================================== *

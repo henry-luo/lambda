@@ -19,6 +19,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
@@ -46,17 +47,7 @@ typedef struct BashMirVar {
     int index;           // module variable table index
 } BashMirVar;
 
-static uint64_t bash_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const BashMirVar* v = (const BashMirVar*)item;
-    return hashmap_sip(v->name, strlen(v->name), seed0, seed1);
-}
-
-static int bash_var_cmp(const void *a, const void *b, void *udata) {
-    const BashMirVar* va = (const BashMirVar*)a;
-    const BashMirVar* vb = (const BashMirVar*)b;
-    (void)udata;
-    return strcmp(va->name, vb->name);
-}
+HASHMAP_DEFINE_STRKEY(bash_var, BashMirVar, name)
 
 // MIR transpiler context
 typedef struct BashMirImportEntry {
@@ -65,15 +56,7 @@ typedef struct BashMirImportEntry {
     MIR_item_t import;
 } BashMirImportEntry;
 
-static uint64_t bm_import_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const BashMirImportEntry* e = (const BashMirImportEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
-
-static int bm_import_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((const BashMirImportEntry*)a)->name, ((const BashMirImportEntry*)b)->name);
-}
+HASHMAP_DEFINE_STRKEY(bm_import, BashMirImportEntry, name)
 
 typedef struct BashMirTranspiler {
     BashTranspiler* tp;
@@ -120,15 +103,7 @@ typedef struct BashMirUserFunc {
     int source_len;
 } BashMirUserFunc;
 
-static uint64_t bm_user_func_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const BashMirUserFunc* f = (const BashMirUserFunc*)item;
-    return hashmap_sip(f->name, strlen(f->name), seed0, seed1);
-}
-
-static int bm_user_func_cmp(const void *a, const void *b, void *udata) {
-    (void)udata;
-    return strcmp(((const BashMirUserFunc*)a)->name, ((const BashMirUserFunc*)b)->name);
-}
+HASHMAP_DEFINE_STRKEY(bm_user_func, BashMirUserFunc, name)
 
 // ============================================================================
 // Special variable registry — eliminates repetitive memcmp chains

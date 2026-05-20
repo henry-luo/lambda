@@ -213,6 +213,46 @@ void arraylist_clear(ArrayList *arraylist);
 
 void arraylist_sort(ArrayList *arraylist, ArrayListCompareFunc compare_func);
 
+/* Accessors. Inline so they compile down to a direct pointer/length read. */
+
+static inline ArrayListValue arraylist_get(const ArrayList *arraylist, int index) {
+	return arraylist->data[index];
+}
+
+static inline int arraylist_size(const ArrayList *arraylist) {
+	return arraylist->length;
+}
+
+static inline int arraylist_length(const ArrayList *arraylist) {
+	return arraylist->length;
+}
+
+static inline ArrayListValue arraylist_front(const ArrayList *arraylist) {
+	return arraylist->data[0];
+}
+
+static inline ArrayListValue arraylist_back(const ArrayList *arraylist) {
+	return arraylist->data[arraylist->length - 1];
+}
+
+static inline void arraylist_set(ArrayList *arraylist, int index, ArrayListValue value) {
+	arraylist->data[index] = value;
+}
+
+/* Remove and return the last element. Returns NULL if the list is empty. */
+ArrayListValue arraylist_pop(ArrayList *arraylist);
+
+/* Remove and return the first element. Returns NULL if the list is empty. */
+ArrayListValue arraylist_pop_front(ArrayList *arraylist);
+
+/* Ensure capacity for at least `capacity` entries. Returns non-zero on success. */
+int arraylist_reserve(ArrayList *arraylist, int capacity);
+
+/* Iterate over each entry. `var` is bound to the cast-to-type value. */
+#define ARRAYLIST_FOREACH(list, type, var) \
+	for (int _al_i = 0, _al_once = 1; _al_i < (list)->length; ++_al_i, _al_once = 1) \
+		for (type var = (type)(list)->data[_al_i]; _al_once; _al_once = 0)
+
 #ifdef __cplusplus
 }
 #endif

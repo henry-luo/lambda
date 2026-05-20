@@ -11,6 +11,7 @@
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/mem.h"
 #include <string.h>
@@ -24,19 +25,7 @@ typedef struct {
 
 static uint64_t g_next_document_id = 1;
 
-// hash function for resource entries
-static uint64_t resource_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ResourceEntry* entry = (const ResourceEntry*)item;
-    return hashmap_sip(entry->url, strlen(entry->url), seed0, seed1);
-}
-
-// compare function for resource entries
-static int resource_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const ResourceEntry* ea = (const ResourceEntry*)a;
-    const ResourceEntry* eb = (const ResourceEntry*)b;
-    return strcmp(ea->url, eb->url);
-}
+HASHMAP_DEFINE_STRKEY(resource_entry, ResourceEntry, url)
 
 // free function for resource entries (only frees URL, not resource)
 static void resource_entry_free(void* item) {
@@ -342,15 +331,7 @@ NetworkResourceManager* resource_manager_create(struct DomDocument* doc,
     }
     
     // create hashmap for URL→NetworkResource* lookup (deduplication)
-    mgr->resources = hashmap_new(
-        sizeof(ResourceEntry),
-        0,                      // initial capacity (auto)
-        0, 0,                   // seeds (default)
-        resource_entry_hash,
-        resource_entry_compare,
-        resource_entry_free,
-        NULL                    // udata
-    );
+    mgr->resources = resource_entry_new_with_free(0, resource_entry_free);
     
     if (!mgr->resources) {
         network_scheduler_destroy(mgr->scheduler);

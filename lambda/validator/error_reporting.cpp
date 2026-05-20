@@ -9,6 +9,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/strview.h"
 #include <string.h>
 #include <assert.h>
 
@@ -16,7 +17,6 @@
 List* suggest_corrections(ValidationError* error, Pool* pool);
 String* format_validation_path(PathSegment* path, Pool* pool);
 String* format_type_name(void* type, Pool* pool);
-StrView strview_from_cstr(const char* str);
 
 // helper to get type name from type_info
 static const char* get_type_name_str(TypeId type_id) {

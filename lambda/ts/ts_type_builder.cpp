@@ -8,6 +8,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include <cstring>
 
 // ============================================================================
@@ -277,15 +278,7 @@ void ts_resolve_all_types(TsTranspiler* tp, JsAstNode* root) {
 // Type registry
 // ============================================================================
 
-static int ts_type_reg_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((TsTypeRegistryEntry*)a)->name, ((TsTypeRegistryEntry*)b)->name);
-}
-
-static uint64_t ts_type_reg_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((TsTypeRegistryEntry*)item)->name,
-        strlen(((TsTypeRegistryEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(ts_type_reg, TsTypeRegistryEntry, name)
 
 void ts_type_registry_init(TsTranspiler* tp) {
     tp->type_registry = hashmap_new(sizeof(TsTypeRegistryEntry), 32, 0, 0,

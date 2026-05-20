@@ -6,6 +6,8 @@
 #include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
+#include "../lib/hashmap_helpers.h"
+#include "../lib/thread_pool.h"
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
@@ -655,13 +657,7 @@ typedef struct {
     int index;
 } PathIndexEntry;
 
-static uint64_t path_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const PathIndexEntry* e = (const PathIndexEntry*)item;
-    return hashmap_xxhash3(e->path, strlen(e->path), seed0, seed1);
-}
-static int path_index_compare(const void* a, const void* b, void* udata) {
-    return strcmp(((const PathIndexEntry*)a)->path, ((const PathIndexEntry*)b)->path);
-}
+HASHMAP_DEFINE_STRKEY(path_index, PathIndexEntry, path)
 
 // Resolve a module import path to a canonical absolute path.
 // Returns malloc'd canonical path, or NULL for built-in/URI imports.
@@ -825,7 +821,7 @@ typedef struct {
     bool success;
 } CompileWorkerArg;
 
-static void* compile_module_worker(void* arg) {
+static void compile_module_worker(void* arg) {
     CompileWorkerArg* work = (CompileWorkerArg*)arg;
 
     // create thread-local parser
@@ -839,8 +835,6 @@ static void* compile_module_worker(void* arg) {
     // cleanup thread-local parser
     ts_parser_delete(tls_parser);
     tls_parser = NULL;
-
-    return NULL;
 }
 
 // Pre-compile all import dependencies in parallel before the main script starts.
@@ -876,8 +870,7 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
     nodes[0].directory = main_dir;
     nodes[0].depth = -1;
 
-    struct hashmap* path_map = hashmap_new(sizeof(PathIndexEntry), 64, 0, 0,
-        path_index_hash, path_index_compare, NULL, NULL);
+    struct hashmap* path_map = path_index_new(64);
     PathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
     hashmap_set(path_map, &main_entry);
 
@@ -954,20 +947,16 @@ static void precompile_imports(Runtime* runtime, const char* main_script_path) {
                 ts_parser_delete(tls_parser);
                 tls_parser = NULL;
             } else {
-                // parallel compilation
-                pthread_t* threads = (pthread_t*)mem_alloc(sizeof(pthread_t) * actual, MEM_CAT_SYSTEM);
-                pthread_attr_t attr;
-                pthread_attr_init(&attr);
-                pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); // 8MB stack for deep transpiler recursion
-
-                for (int i = 0; i < actual; i++) {
-                    pthread_create(&threads[i], &attr, compile_module_worker, &args[i]);
+                // parallel compilation via lib/thread_pool. 8MB worker stacks
+                // accommodate the transpiler's deep recursion.
+                ThreadPool* tp = tp_create_with_stack(actual, 8 * 1024 * 1024);
+                if (tp) {
+                    for (int i = 0; i < actual; i++) {
+                        tp_submit(tp, compile_module_worker, &args[i]);
+                    }
+                    tp_wait_all(tp);
+                    tp_destroy(tp);
                 }
-                pthread_attr_destroy(&attr);
-                for (int i = 0; i < actual; i++) {
-                    pthread_join(threads[i], NULL);
-                }
-                mem_free(threads);
             }
             mem_free(args);
         }

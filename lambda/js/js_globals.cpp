@@ -16136,6 +16136,7 @@ extern "C" Item js_get_constructor(Item name_item) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 
 // symbol registry entry for Symbol.for() / Symbol.keyFor()
 struct JsSymbolEntry {
@@ -16187,20 +16188,11 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_IS_CONCAT_SPREADABLE 12
 #define JS_SYMBOL_ID_MATCH_ALL     13
 
-static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((const JsSymbolEntry*)a)->key, ((const JsSymbolEntry*)b)->key);
-}
-
-static uint64_t js_symbol_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JsSymbolEntry* e = (const JsSymbolEntry*)item;
-    return hashmap_sip(e->key, strlen(e->key), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(js_symbol_entry, JsSymbolEntry, key)
 
 static void js_symbol_init_registry() {
     if (!js_symbol_registry) {
-        js_symbol_registry = hashmap_new(sizeof(JsSymbolEntry), 16, 0, 0,
-            js_symbol_entry_hash, js_symbol_entry_compare, NULL, NULL);
+        js_symbol_registry = js_symbol_entry_new(16);
     }
 }
 
