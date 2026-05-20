@@ -354,6 +354,7 @@ struct JsMirTranspiler {
     int loop_depth;
     int iteration_depth;
     bool allow_iteration_scope_env_capture;
+    bool suppress_module_var_writeback;
 
     // Active for-of iterator stack for return cleanup
     MIR_reg_t for_of_iterators[32];

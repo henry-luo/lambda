@@ -187,6 +187,10 @@ extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
 extern int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item, Item second_item, int64_t component);
+extern Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item, int64_t component);
+extern Item js_uri_decode_identity(Item str_item, int64_t component);
+extern int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item, int64_t component);
+extern int64_t js_uri_decode_identity_raw(Item str_item, int64_t component);
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
@@ -1490,6 +1494,10 @@ JitImport jit_runtime_imports[] = {
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
     {"js_uri_decode_equals_from_char_code_raw", FPTR(js_uri_decode_equals_from_char_code_raw)},
+    {"js_uri_decode_equals_from_char_code1", FPTR(js_uri_decode_equals_from_char_code1)},
+    {"js_uri_decode_identity", FPTR(js_uri_decode_identity)},
+    {"js_uri_decode_equals_from_char_code1_raw", FPTR(js_uri_decode_equals_from_char_code1_raw)},
+    {"js_uri_decode_identity_raw", FPTR(js_uri_decode_identity_raw)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
     {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
