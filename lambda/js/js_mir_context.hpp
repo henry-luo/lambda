@@ -140,6 +140,9 @@ struct JsMirVarEntry {
     MIR_reg_t scope_env_reg; // register holding scope env pointer
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
     bool is_js_array;        // A2: true if variable is known to hold a regular JS array
+    MIR_reg_t uri_escape_cp_reg;    // decoded UTF-8 code point accumulator for percent-escape strings
+    MIR_reg_t uri_escape_valid_reg; // 0/1 guard for the accumulator above
+    int uri_escape_byte_count;      // number of UTF-8 bytes accumulated, 0 when unavailable
     JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
     Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
     bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
