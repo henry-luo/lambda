@@ -195,7 +195,7 @@ const char* err_category_name(LambdaErrorCode code) {
     if (ERR_IS_SEMANTIC(code)) return "Semantic";
     if (ERR_IS_RUNTIME(code)) return "Runtime";
     if (ERR_IS_IO(code)) return "I/O";
-    if (ERR_IS_INTERNAL(code)) return "Internal";
+    if (ERR_IS_INTERNAL((int)code)) return "Internal";
     return "Unknown";
 }
 

@@ -410,6 +410,9 @@ void print_validation_path(PathSegment* path, StringBuf* sb) {
                 stringbuf_append_format(sb, "@%.*s", (int)segment->data.attr_name.length,
                        segment->data.attr_name.str);
                 break;
+            case PATH_UNION:
+                stringbuf_append_format(sb, "|%ld", segment->data.index);
+                break;
         }
     }
 }

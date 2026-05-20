@@ -114,9 +114,23 @@ Low-risk improvements that can be batched per subsystem.
 | `-Wsign-compare` | 121 | Most benign; a few hide bugs. Fix per file. |
 | `-Wcomment` | 139 | Stray `/*` inside block comments. Trivial. |
 
+## Progress
+
+| Phase | Status | Result |
+|-------|--------|--------|
+| Phase 1 — Silence Category A | ✅ Done | Warnings: ~82,000 → 2,837 |
+| Phase 2 — Promote Category B to errors | ✅ Done (with one caveat — see below) | Warnings: 2,837 → **2,764**, 0 errors |
+| Phase 3 — `-Wpointer-bool-conversion` audit | ⏳ Pending | 166 sites remain |
+| Phase 4 — Dead code audit | ⏳ Pending | 165 `-Wunused-function` sites remain |
+| Phase 5 — Code-health waves | ⏳ Ongoing | ~2,500 Category C warnings remain |
+
+**Caveat (Phase 2):** `-Werror=undefined-bool-conversion` was **not** added. The 7 sites (all in `lambda/lambda-data.cpp`) use the `if (!this) return null_result;` defensive null-receiver pattern; fixing them properly requires moving null checks to every caller — a wider refactor than Phase 2 scope. The 7 warnings remain; treat as a separate task.
+
+**Flag-ordering gotcha discovered during Phase 2:** clang's `-Werror=foo` is a **prefix match** that re-enables warnings — `-Werror=return-type` also promotes `-Wreturn-type-c-linkage`. The `-Wno-*` flags must appear **after** the `-Werror=*` flags in the build flags list to take effect; the config in `build_lambda_config.json` is ordered accordingly.
+
 ## Recommended Plan
 
-### Phase 1 — Silence Category A (1 PR)
+### Phase 1 — Silence Category A (1 PR) ✅ DONE
 
 Add `-Wno-*` flags to the project compile flags in `build_lambda_config.json` for the patterns we've ratified as intentional:
 
@@ -138,16 +152,15 @@ Add `-Wno-*` flags to the project compile flags in `build_lambda_config.json` fo
 -Wno-unused-parameter
 ```
 
-**Expected result:** warning count drops from ~82,000 to ~2,500.
+**Actual result:** 82,000 → 2,837 warnings.
 
-### Phase 2 — Promote real bugs to errors (1 PR)
+### Phase 2 — Promote real bugs to errors (1 PR) ✅ DONE (except `-Werror=undefined-bool-conversion`)
 
-So Category B classes cannot regress:
+The following are now `-Werror=*` and cannot regress:
 
 ```
 -Werror=return-type
 -Werror=sometimes-uninitialized
--Werror=undefined-bool-conversion
 -Werror=varargs
 -Werror=format
 -Werror=switch
@@ -156,7 +169,18 @@ So Category B classes cannot regress:
 -Werror=enum-compare
 ```
 
-Fix any sites these promote into errors before merging.
+**Fixed sites** (~55):
+- **`-Wreturn-type` (1):** `lambda/js/js_runtime_value.cpp:630` — `break` in `LMD_TYPE_MAP` case exited the switch with no return; replaced with the actual default return.
+- **`-Wvarargs` (3):** `lambda/lambda-data-runtime.cpp:711,951,1025` — `va_start` was passing `type->length` / a local var instead of the actual last named parameter (`map`/`obj`/`elmt`).
+- **`-Wformat` (5):** `lambda/lambda-eval.cpp:1865`, `lambda/main.cpp:3160,3207`, `lambda/validator/validate.cpp:237,245` — `%ld` vs `int64_t` / `int` mismatches.
+- **`-Wswitch` (5):** `lambda/validator/error_reporting.cpp` (missing `PATH_UNION`), `lambda/js/js_globals.cpp`, `lambda/js/js_runtime.cpp`, `lambda/js/js_typed_array.cpp` (missing `JS_TYPED_UINT8_CLAMPED`, `JS_TYPED_BIGINT64`, `JS_TYPED_BIGUINT64` cases).
+- **`-Wsometimes-uninitialized` (3):** `lambda/js/js_mir_expression_lowering.cpp:12943`, `lambda/js/js_mir_statement_lowering.cpp:4855` — initialized `MIR_reg_t` locals to `0`.
+- **`-Winvalid-offsetof` (3):** `lambda/transpile-mir.cpp:73,10152,11774` — wrapped each `offsetof(EvalContext, …)` in `#pragma clang diagnostic push/pop`. `EvalContext` inherits from `Context` via single, non-virtual public inheritance with POD members, so the offset is well-defined; the existing `static_assert` continues to verify the invariant.
+- **`-Wtautological-constant-out-of-range-compare` (15):** `lambda/js/js_mir_*.cpp` and `lambda/lambda-error.cpp:198` — added `(int)` casts on the LHS of `node_type ==/!= (int)TS_AST_NODE_*` comparisons (the field is typed `JsAstNodeType` but legitimately holds `TsAstNodeType` values ≥ 1000) and on `ERR_IS_INTERNAL((int)code)`.
+- **`-Wenum-compare` (13):** `radiant/layout_flex.cpp` and `radiant/layout_flex_multipass.cpp` — `(int)item->fi->align_self ==/!= ALIGN_*`. `FlexItemProp::align_self` is declared `CssEnum` but stores `AlignType` values which alias `CSS_VALUE_*` — same values, different declared enums.
+
+**Deferred — `-Werror=undefined-bool-conversion` (7 sites):**
+All 7 are in `lambda/lambda-data.cpp`: `Map::get`, `Element::get_attr`, `Element::has_attr`, `Map::has_field`, `List::get`. Each begins `if (!this || …) return null_result;` — a defensive null-receiver pattern that is UB in C++ but used as a deliberate convention in this codebase. Fixing them properly requires auditing every caller (e.g. `mark_reader.cpp:604`, `validate.cpp:408`, `html5_parser.cpp:502`, `dom_element.cpp:453`, …) and moving the null check to the call site. This is wider than Phase 2 scope and needs a design decision on the receiver-null convention before proceeding.
 
 ### Phase 3 — Audit `-Wpointer-bool-conversion` (separate task)
 
@@ -172,6 +196,6 @@ The 143 `-Wunused-function` sites are the best free signal for dead code. Cross-
 
 ## Success Criteria
 
-- Clean debug build emits **< 100 warnings** after Phase 1.
-- Category B regressions are caught at build time after Phase 2.
-- Each phase is independently shippable.
+- Clean debug build emits **< 100 warnings** after Phase 1. ⚠️ Actual: 2,837 (the remaining ~2,700 are Category C, deferred to Phase 5).
+- Category B regressions are caught at build time after Phase 2. ✅ Achieved for 8 of 9 classes (see `-Werror=undefined-bool-conversion` caveat above).
+- Each phase is independently shippable. ✅
