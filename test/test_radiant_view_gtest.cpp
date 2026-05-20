@@ -52,6 +52,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls", nullptr},
     {"RadiantViewTest.LoadsPdfAsHeadlessView", "pdf", "test/input/raw_commands_test.pdf", nullptr},
     {"RadiantViewTest.LoadsPdfIntoIframeAfterLinkClickWithNoLog", "pdf_iframe", "test/html/index.html", "test/ui/radiant_view_pdf_iframe.json"},
+    {"RadiantViewTest.LoadsMarkdownIntoIframeAfterLinkClickWithNoLog", "markdown_iframe", "test/html/index.html", "test/ui/radiant_view_markdown_iframe.json"},
+    {"RadiantViewTest.LoadsPngIntoIframeAfterLinkClickWithNoLog", "png_iframe", "test/html/index.html", "test/ui/radiant_view_png_iframe.json"},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -269,6 +271,28 @@ TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsPdfIntoIframeAfterLinkClickWithNoLog) {
     test_radiant_view_expect_case(15);
+}
+
+TEST(RadiantViewTest, LoadsMarkdownIntoIframeAfterLinkClickWithNoLog) {
+    test_radiant_view_expect_case(16);
+}
+
+TEST(RadiantViewTest, LoadsPngIntoIframeAfterLinkClickWithNoLog) {
+    test_radiant_view_expect_case(17);
+}
+
+TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
+    ASSERT_TRUE(test_radiant_view_file_readable("test/html/image_cache_promotion.html"));
+    test_radiant_view_ensure_temp_dir();
+
+    int status = system("./lambda.exe view test/html/image_cache_promotion.html --headless > ./temp/test_radiant_view_cache_promotion.log 2>&1");
+    ASSERT_EQ(0, test_radiant_view_exit_code(status));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        "log.txt",
+        "[image] Decoded local image on demand: 64x42 (intrinsic 640x427, target 60x40)"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        "log.txt",
+        "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
 }
 
 struct RadiantViewWorkQueue {

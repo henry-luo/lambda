@@ -3,6 +3,7 @@
 #include "render_output.hpp"
 #include "render_media.hpp"
 #include "render_svg_inline.hpp"
+#include "render_clip.hpp"
 #include "scroller.hpp"
 #include "layout.hpp"
 
@@ -62,6 +63,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
     // setup clip box for scrolling
     if (block->scroller) { setup_scroller(rdcon, block); }
+
+    RenderClipScope iframe_clip_scope = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
+
     // render the embedded doc
     if (block->embed && block->embed->doc) {
         DomDocument* doc = block->embed->doc;
@@ -145,6 +149,10 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 log_debug("Invalid root view");
             }
         }
+    }
+
+    if (iframe_clip_scope.active) {
+        render_clip_pop_scope(rdcon, &iframe_clip_scope);
     }
 
     // Render scrollbar for the iframe scroll container

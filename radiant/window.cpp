@@ -603,6 +603,15 @@ void repaint_window() {
         return;
     }
 
+    int framebuffer_width = 0;
+    int framebuffer_height = 0;
+    if (ui_context.window) {
+        glfwGetFramebufferSize(ui_context.window, &framebuffer_width, &framebuffer_height);
+    }
+    bool exact_framebuffer_present =
+        framebuffer_width == ui_context.surface->width &&
+        framebuffer_height == ui_context.surface->height;
+
     // generate a texture from the bitmap
     log_debug("creating rendering texture");
     GLuint texture;
@@ -612,8 +621,9 @@ void repaint_window() {
         GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, ui_context.surface->pixels);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    GLint present_filter = exact_framebuffer_present ? GL_NEAREST : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, present_filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, present_filter);
 
     // render the texture as a quad
     log_debug("rendering texture");
