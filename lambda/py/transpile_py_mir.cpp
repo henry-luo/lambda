@@ -409,8 +409,7 @@ static void pm_call_void_2(PyMirTranspiler* mt, const char* fn_name,
 static void pm_push_scope(PyMirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("py-mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = py_var_scope_new(16);
 }
 
 static void pm_pop_scope(PyMirTranspiler* mt) {
@@ -7470,12 +7469,9 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         }
     }
 
-    mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
-        py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
-        py_local_func_hash, py_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->import_cache = py_import_cache_new(64);
+    mt->local_funcs  = py_local_func_new(32);
+    mt->var_scopes[0] = py_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 
@@ -7656,12 +7652,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     mt->ctx = ctx;
     mt->filename = py_path;
     mt->runtime = runtime;
-    mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
-        py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
-        py_local_func_hash, py_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->import_cache = py_import_cache_new(64);
+    mt->local_funcs  = py_local_func_new(32);
+    mt->var_scopes[0] = py_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 

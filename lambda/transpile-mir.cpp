@@ -441,8 +441,7 @@ static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
 static void push_scope(MirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(VarScopeEntry), 16, 0, 0,
-        var_scope_hash, var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = var_scope_new(16);
 }
 
 static void pop_scope(MirTranspiler* mt) {
@@ -549,8 +548,7 @@ static NativeFuncInfo* find_native_func_info(MirTranspiler* mt, const char* name
 
 static void register_native_func_info(MirTranspiler* mt, const char* name, NativeFuncInfo* info) {
     if (!mt->native_func_info) {
-        mt->native_func_info = hashmap_new(sizeof(NativeFuncInfo), 16, 0, 0,
-            native_func_hash, native_func_cmp, NULL, NULL);
+        mt->native_func_info = native_func_new(16);
     }
     snprintf(info->name, sizeof(info->name), "%s", name);
     hashmap_set(mt->native_func_info, info);
@@ -11695,14 +11693,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
 
     // Init import cache
-    mt.import_cache = hashmap_new(sizeof(ImportCacheEntry), 128, 0, 0,
-        import_cache_hash, import_cache_cmp, NULL, NULL);
-    mt.local_funcs = hashmap_new(sizeof(LocalFuncEntry), 32, 0, 0,
-        local_func_hash, local_func_cmp, NULL, NULL);
-    mt.global_vars = hashmap_new(sizeof(GlobalVarEntry), 32, 0, 0,
-        global_var_hash, global_var_cmp, NULL, NULL);
-    mt.infer_cache = hashmap_new(sizeof(InferCacheEntry), 32, 0, 0,
-        infer_cache_hash, infer_cache_cmp, NULL, NULL);
+    mt.import_cache = import_cache_new(128);
+    mt.local_funcs  = local_func_new(32);
+    mt.global_vars  = global_var_new(32);
+    mt.infer_cache  = infer_cache_new(32);
 
     // Create module
     mt.module = MIR_new_module(ctx, "lambda_script");

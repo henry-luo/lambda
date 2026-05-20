@@ -2,11 +2,12 @@
 #include "layout.hpp"
 
 #include "../lib/log.h"
+#include "../lib/math_utils.h"
 #include "../lib/tagged.hpp"
 #include <cmath>
 
-static float clamp_non_negative(float value) {
-    return value > 0.0f ? value : 0.0f;
+static inline float clamp_non_negative(float value) {
+    return lib_math::max_val(value, 0.0f);
 }
 
 bool layout_view_is_abs_or_fixed(ViewBlock* block) {
