@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include "../../lib/mem.h"
+#include "../../lib/time_util.h"
 #include "../input/css/css_font_face.hpp"
 #include <time.h>
 
@@ -55,9 +56,7 @@ int radiant_init_network_support(DomDocument* doc,
     }
 
     // Record load start time
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    doc->load_start_time = ts.tv_sec + ts.tv_nsec / 1000000000.0;
+    doc->load_start_time = time_now_seconds();
     doc->fully_loaded = false;
 
     log_debug("network: network support initialized successfully");

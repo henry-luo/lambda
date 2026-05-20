@@ -19,6 +19,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -3579,23 +3580,11 @@ typedef struct BashRtVar {
     int attributes;     // BashVarAttrFlags
 } BashRtVar;
 
-static uint64_t bash_rt_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const BashRtVar* v = (const BashRtVar*)item;
-    return hashmap_sip(v->name, v->name_len, seed0, seed1);
-}
-
-static int bash_rt_var_cmp(const void *a, const void *b, void *udata) {
-    const BashRtVar* va = (const BashRtVar*)a;
-    const BashRtVar* vb = (const BashRtVar*)b;
-    (void)udata;
-    if (va->name_len != vb->name_len) return 1;
-    return memcmp(va->name, vb->name, va->name_len);
-}
+HASHMAP_DEFINE_LENSTRKEY(bash_rt_var, BashRtVar, name, name_len)
 
 static void bash_ensure_var_table(void) {
     if (!bash_var_table) {
-        bash_var_table = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
-                                    bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+        bash_var_table = bash_rt_var_new(64);
     }
 }
 
@@ -4878,9 +4867,7 @@ extern "C" void bash_scope_push(void) {
         log_error("bash: scope stack overflow (max %d nested calls)", BASH_FUNC_SCOPE_STACK_MAX);
         return;
     }
-    bash_func_scope_stack[bash_func_scope_depth] = hashmap_new(
-        sizeof(BashRtVar), 16, 0, 0,
-        bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    bash_func_scope_stack[bash_func_scope_depth] = bash_rt_var_new(16);
     bash_func_scope_depth++;
     bash_getopts_push_state();
     log_debug("bash: scope push → depth %d", bash_func_scope_depth);
@@ -4901,8 +4888,7 @@ extern "C" void bash_scope_pop(void) {
 extern "C" void bash_scope_push_subshell(void) {
     // save the current var table and create a copy for the subshell
     bash_ensure_var_table();
-    struct hashmap* copy = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
-                                       bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    struct hashmap* copy = bash_rt_var_new(64);
     size_t iter = 0;
     void* item;
     while (hashmap_iter(bash_var_table, &iter, &item)) {
@@ -5033,23 +5019,12 @@ typedef struct BashRtFuncEntry {
     size_t source_len;
 } BashRtFuncEntry;
 
-static uint64_t bash_rt_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const BashRtFuncEntry* e = (const BashRtFuncEntry*)item;
-    return hashmap_sip(e->name, e->name_len, seed0, seed1);
-}
-
-static int bash_rt_func_cmp(const void* a, const void* b, void* udata) {
-    const BashRtFuncEntry* ea = (const BashRtFuncEntry*)a;
-    const BashRtFuncEntry* eb = (const BashRtFuncEntry*)b;
-    (void)udata;
-    if (ea->name_len != eb->name_len) return 1;
-    return memcmp(ea->name, eb->name, ea->name_len);
-}
+// inline char[128] name + explicit length; matches LENSTRKEY shape.
+HASHMAP_DEFINE_LENSTRKEY(bash_rt_func, BashRtFuncEntry, name, name_len)
 
 static void bash_ensure_rt_func_table(void) {
     if (!bash_rt_func_table) {
-        bash_rt_func_table = hashmap_new(sizeof(BashRtFuncEntry), 16, 0, 0,
-                                         bash_rt_func_hash, bash_rt_func_cmp, NULL, NULL);
+        bash_rt_func_table = bash_rt_func_new(16);
     }
 }
 
@@ -5297,8 +5272,7 @@ extern "C" void bash_builtin_set_dump(void) {
 
     // collect all variables from global table + scope stack
     // use a temporary hashmap to merge (scoped vars override globals)
-    struct hashmap* merged = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
-                                         bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    struct hashmap* merged = bash_rt_var_new(64);
     // global vars first
     {
         size_t iter = 0;

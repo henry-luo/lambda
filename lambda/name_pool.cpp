@@ -1,5 +1,6 @@
 #include "../lib/log.h"
 #include "../lib/string.h"
+#include "../lib/hashmap_helpers.h"
 #include "lambda-data.hpp"
 
 // Entry structure for the hashmap
@@ -8,31 +9,8 @@ typedef struct NamePoolEntry {
     StrView view;               // StrView pointing to the String's chars for fast comparison
 } NamePoolEntry;
 
-// Hash function for NamePoolEntry
-static uint64_t name_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const NamePoolEntry* entry = (const NamePoolEntry*)item;
-    // Hash based on the StrView content, not the name pointer
-    // This allows lookup with a temporary StrView (name can be nullptr during lookup)
-    if (!entry->view.str || entry->view.length == 0) return 0;
-    return hashmap_sip(entry->view.str, entry->view.length, seed0, seed1);
-}
-
-// Compare function for NamePoolEntry
-static int name_entry_compare(const void *a, const void *b, void *udata) {
-    const NamePoolEntry* entry_a = (const NamePoolEntry*)a;
-    const NamePoolEntry* entry_b = (const NamePoolEntry*)b;
-
-    // Compare using StrView for efficiency
-    const StrView* view_a = &entry_a->view;
-    const StrView* view_b = &entry_b->view;
-
-    if (view_a->length != view_b->length) {
-        return (view_a->length < view_b->length) ? -1 : 1;
-    }
-
-    if (view_a->length == 0) return 0;
-    return memcmp(view_a->str, view_b->str, view_a->length);
-}
+// Hash + compare via lib/hashmap_helpers — StrView (str, length) key shape.
+HASHMAP_DEFINE_LENSTRKEY(name_entry, NamePoolEntry, view.str, view.length)
 
 // Helper function to find string by content in the name pool
 static String* find_string_by_content(NamePool* pool, const char* content, size_t len) {
@@ -65,10 +43,7 @@ NamePool* name_pool_create(Pool* memory_pool, NamePool* parent) {
     pool->ref_count = 1;
 
     // Create C hashmap with NamePoolEntry
-    pool->names = hashmap_new(sizeof(NamePoolEntry), 32,
-                              0x1234567890abcdefULL, 0xfedcba0987654321ULL,
-                              name_entry_hash, name_entry_compare,
-                              nullptr, nullptr);
+    pool->names = name_entry_new(32);
 
     if (!pool->names) {
         if (pool->parent) {

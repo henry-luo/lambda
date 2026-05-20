@@ -62,6 +62,11 @@ void strbuf_copy(StrBuf *dst, const StrBuf *src);
 bool strbuf_append_file(StrBuf *sb, FILE *file);
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n);
 
+// Prefix / suffix predicates. NULL-safe; empty `prefix`/`suffix` matches.
+// Delegate to lib/str.h's length-bounded primitives.
+bool strbuf_starts_with(const StrBuf *sb, const char *prefix);
+bool strbuf_ends_with(const StrBuf *sb, const char *suffix);
+
 #ifdef __cplusplus
 }
 #endif

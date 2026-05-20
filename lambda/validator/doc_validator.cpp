@@ -3,6 +3,7 @@
 #include <climits>
 #include <cstdint>
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
@@ -142,38 +143,8 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
 // ==================== Hash Functions for Type Registry ====================
 
-static uint64_t type_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const TypeRegistryEntry* entry = (const TypeRegistryEntry*)item;
-    return hashmap_sip(entry->name_key.str, entry->name_key.length, seed0, seed1);
-}
-
-static int type_entry_compare(const void *a, const void *b, void *udata) {
-    (void)udata;
-    const TypeRegistryEntry* entry_a = (const TypeRegistryEntry*)a;
-    const TypeRegistryEntry* entry_b = (const TypeRegistryEntry*)b;
-
-    if (entry_a->name_key.length != entry_b->name_key.length) {
-        return (int)entry_a->name_key.length - (int)entry_b->name_key.length;
-    }
-    return memcmp(entry_a->name_key.str, entry_b->name_key.str, entry_a->name_key.length);
-}
-
-// Hash functions for circular reference detection
-static uint64_t visited_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const VisitedEntry* entry = (const VisitedEntry*)item;
-    return hashmap_sip(entry->key.str, entry->key.length, seed0, seed1);
-}
-
-static int visited_entry_compare(const void *a, const void *b, void *udata) {
-    (void)udata;
-    const VisitedEntry* entry_a = (const VisitedEntry*)a;
-    const VisitedEntry* entry_b = (const VisitedEntry*)b;
-
-    if (entry_a->key.length != entry_b->key.length) {
-        return (int)entry_a->key.length - (int)entry_b->key.length;
-    }
-    return memcmp(entry_a->key.str, entry_b->key.str, entry_a->key.length);
-}
+HASHMAP_DEFINE_LENSTRKEY(type_entry, TypeRegistryEntry, name_key.str, name_key.length)
+HASHMAP_DEFINE_LENSTRKEY(visited_entry, VisitedEntry, key.str, key.length)
 
 // ==================== Core Validator Functions ====================
 
@@ -191,15 +162,13 @@ SchemaValidator* SchemaValidator::create(Pool* pool) {
     }
 
     // Initialize type definitions registry
-    validator->type_definitions = hashmap_new(sizeof(TypeRegistryEntry), 0, 0, 0,
-                                   type_entry_hash, type_entry_compare, NULL, pool);
+    validator->type_definitions = type_entry_new(0);
     if (!validator->type_definitions) {
         return nullptr;
     }
 
     // Initialize visited nodes for circular reference detection
-    validator->visited_nodes = hashmap_new(sizeof(VisitedEntry), 0, 0, 0,
-                                   visited_entry_hash, visited_entry_compare, NULL, pool);
+    validator->visited_nodes = visited_entry_new(0);
     if (!validator->visited_nodes) {
         return nullptr;
     }

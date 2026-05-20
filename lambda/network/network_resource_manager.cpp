@@ -11,6 +11,7 @@
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/time_util.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/mem.h"
@@ -37,11 +38,9 @@ static void resource_entry_free(void* item) {
 // CPP internal helpers
 namespace {
 
-// get current time in seconds
+// get current time in seconds (delegates to lib/time_util)
 double get_time_seconds() {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+    return time_now_seconds();
 }
 
 // create network resource

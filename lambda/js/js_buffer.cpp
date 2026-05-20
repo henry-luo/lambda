@@ -14,6 +14,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/hex.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -829,12 +830,7 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
 
     if (strcmp(enc_buf, "hex") == 0) {
         char* hex = (char*)mem_alloc(slice_len * 2 + 1, MEM_CAT_JS_RUNTIME);
-        for (int i = 0; i < slice_len; i++) {
-            static const char hx[] = "0123456789abcdef";
-            hex[i * 2] = hx[slice[i] >> 4];
-            hex[i * 2 + 1] = hx[slice[i] & 0xf];
-        }
-        hex[slice_len * 2] = '\0';
+        hex_encode(slice, (size_t)slice_len, hex);
         Item result = make_string_item(hex, slice_len * 2);
         mem_free(hex);
         return result;

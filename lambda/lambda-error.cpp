@@ -37,6 +37,7 @@ extern "C" {
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
+#include "../lib/binsearch.h"
 #include <tree_sitter/api.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,33 +213,27 @@ typedef struct {
 // Note: build_debug_info_table is implemented in mir.c because it needs MIR APIs
 // which are only linked into the main lambda executable.
 
+// range_cmp for binsearch_range: items are FuncDebugInfo** (pointer-to-pointer
+// because DebugInfoList stores an array of pointers); key is the addr to look
+// up.
+static int debug_info_range_cmp(const void* record, const void* key, void* udata) {
+    (void)udata;
+    const FuncDebugInfo* info = *(FuncDebugInfo* const*)record;
+    const void* addr = key;
+    if (addr < info->native_addr_start) return 1;   // record interval is after key
+    if (addr >= info->native_addr_end)  return -1;  // record interval is before key
+    return 0;                                       // addr ∈ [start, end)
+}
+
 // Look up debug info for a native address using binary search
 // Returns NULL if address is not in any Lambda function
 FuncDebugInfo* lookup_debug_info(void* debug_info_list, void* addr) {
     if (!debug_info_list || !addr) return NULL;
-    
     DebugInfoList* list = (DebugInfoList*)debug_info_list;
     if (list->length == 0) return NULL;
-    
-    // Binary search: find the function whose range contains addr
-    int lo = 0;
-    int hi = (int)list->length - 1;
-    
-    while (lo <= hi) {
-        int mid = lo + (hi - lo) / 2;
-        FuncDebugInfo* info = list->items[mid];
-        
-        if (addr < info->native_addr_start) {
-            hi = mid - 1;
-        } else if (addr >= info->native_addr_end) {
-            lo = mid + 1;
-        } else {
-            // Found: addr is within [start, end)
-            return info;
-        }
-    }
-    
-    return NULL;  // Not found: address is in runtime/external code
+    int idx = binsearch_range(list->items, (int)list->length, sizeof(FuncDebugInfo*),
+                              addr, debug_info_range_cmp, NULL);
+    return idx >= 0 ? list->items[idx] : NULL;
 }
 
 // Free debug info table

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include "../../lib/mem.h"
+#include "../../lib/time_util.h"
 #include <ctime>
 #ifndef _WIN32
 #include <unistd.h>    // for usleep
@@ -852,10 +853,7 @@ static Item py_time_time(void) {
 
 // time.monotonic() — monotonic clock as float
 static Item py_time_monotonic(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    double t = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    return mk_float(t);
+    return mk_float(time_now_seconds());
 }
 
 // time.sleep(secs)
@@ -877,10 +875,7 @@ static Item py_time_perf_counter(void) {
 
 // time.perf_counter_ns() — monotonic nanoseconds as integer
 static Item py_time_perf_counter_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    int64_t ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
-    return mk_int(ns);
+    return mk_int((int64_t)time_now_ns());
 }
 
 // time.time_ns() — Unix epoch nanoseconds as integer

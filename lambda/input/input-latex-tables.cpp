@@ -1,4 +1,5 @@
 #include "input-latex-tables.h"
+#include "../../lib/sort.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -90,10 +91,7 @@ const char* raw_text_environments[] = {
 };
 
 // ── Binary search infrastructure ───────────────────────────────────
-
-static int cmp_str_ptr(const void* a, const void* b) {
-    return strcmp(*(const char**)a, *(const char**)b);
-}
+// Uses lib/sort.h's sort_cmp_cstr_asc (pointer-to-cstr comparator).
 
 static size_t count_str_array(const char* arr[]) {
     size_t n = 0;
@@ -103,11 +101,11 @@ static size_t count_str_array(const char* arr[]) {
 
 static void sort_str_array(const char* arr[], size_t* out_n) {
     *out_n = count_str_array(arr);
-    qsort(arr, *out_n, sizeof(const char*), cmp_str_ptr);
+    qsort(arr, *out_n, sizeof(const char*), sort_cmp_cstr_asc);
 }
 
 static bool str_in_sorted_array(const char* key, const char* arr[], size_t n) {
-    return bsearch(&key, arr, n, sizeof(const char*), cmp_str_ptr) != NULL;
+    return bsearch(&key, arr, n, sizeof(const char*), sort_cmp_cstr_asc) != NULL;
 }
 
 // pre-computed array sizes (filled by init_common_tables)

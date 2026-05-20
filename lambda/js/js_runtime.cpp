@@ -7,6 +7,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
+#include "../../lib/binsearch.h"
 #include <re2/unicode_casefold.h>
 
 extern "C" Item js_to_property_key(Item key);
@@ -12058,20 +12059,19 @@ static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int c
     return false;
 }
 
+// range_cmp for binsearch_range: ranges use inclusive [first, last] intervals.
+static int js_regex_range_cmp(const void* record, const void* key, void* udata) {
+    (void)udata;
+    const JsRegexRange* r = (const JsRegexRange*)record;
+    int cp = *(const int*)key;
+    if (cp < r->first) return 1;   // record interval is after key
+    if (cp > r->last)  return -1;  // record interval is before key
+    return 0;                       // cp ∈ [first, last]
+}
+
 static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
-    int lo = 0;
-    int hi = count - 1;
-    while (lo <= hi) {
-        int mid = lo + ((hi - lo) / 2);
-        if (cp < ranges[mid].first) {
-            hi = mid - 1;
-        } else if (cp > ranges[mid].last) {
-            lo = mid + 1;
-        } else {
-            return true;
-        }
-    }
-    return false;
+    return binsearch_range(ranges, count, sizeof(JsRegexRange),
+                           &cp, js_regex_range_cmp, NULL) >= 0;
 }
 
 #include "js_regex_generated_property_tables.inc"
