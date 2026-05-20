@@ -4240,38 +4240,27 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	                text_transform = get_element_text_transform(node->parent->as_element());
 	                font_variant = get_element_font_variant(node->parent->as_element());
 	            }
-	            // Measure text width using intrinsic sizing
-	            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len,
-	                                                                       text_transform, font_variant);
-	            float text_width = widths.max_content;
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len,
+                                                                       text_transform, font_variant);
+            float text_width = widths.max_content;
 
-            // Calculate number of lines (rounded up)
-            // white-space: nowrap/pre prevents text wrapping → always 1 line
-            // Use min_content (widest word/break unit) to estimate word-boundary waste:
-            // text wraps at word boundaries, so each line's effective width is
-            // floor(available_width / word_width) * word_width, not the full available_width.
-            // Use epsilon tolerance: text intrinsic width measurement (whole-string shaping)
-            // can differ from character-by-character accumulation by tiny amounts due to
-            // floating-point rounding. Without tolerance, text that fits can appear to overflow.
-            int num_lines = 1;
-	            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width + 0.005f) {
-                float effective_width = width;
-                if (widths.min_content > 0 && widths.min_content <= width) {
-                    int units_per_line = (int)(width / widths.min_content); // INT_CAST_OK: integer count
-                    if (units_per_line > 0) {
-                        effective_width = units_per_line * widths.min_content;
-                    }
-                } else if (widths.min_content > width && widths.min_content > 0) {
-                    // Each break unit overflows the line and gets its own line
-                    effective_width = widths.min_content;
-                }
-                num_lines = (int)ceil(text_width / effective_width); // INT_CAST_OK: integer line count
+            // Calculate wrapped text height with the same greedy break-unit packing
+            // used by the intrinsic text-height helper.  The old division-based
+            // estimate used min-content width as a fixed packing unit, which
+            // over-counted normal word wrapping for varied word lengths.
+            float measured_height = line_height;
+            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE &&
+                text_width > width + 0.005f) {
+                measured_height = compute_text_height_at_width(
+                    lycon, measure_text, measure_len, width, line_height,
+                    text_transform, font_variant);
             }
 
-	            log_debug("calculate_max_content_height: text len=%zu, measure_len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
-	                      text_len, measure_len, text_width, width, num_lines);
+            int num_lines = (int)ceilf(measured_height / line_height); // INT_CAST_OK: diagnostic line count
+            log_debug("calculate_max_content_height: text len=%zu, measure_len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
+                      text_len, measure_len, text_width, width, num_lines);
 
-            return line_height * num_lines;
+            return measured_height;
         }
 
         return line_height;

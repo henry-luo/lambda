@@ -886,6 +886,8 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
 static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseudo_state) {
     if (!element) return false;
     switch (pseudo_state) {
+        case PSEUDO_STATE_LINK:
+            return dom_element_has_attribute(element, "href");
         case PSEUDO_STATE_CHECKED:
             return dom_element_has_attribute(element, "checked");
         case PSEUDO_STATE_DISABLED:
@@ -915,6 +917,9 @@ bool state_resolve_selector_pseudo_state(void* context, DomElement* element, uin
     DocState* state = (DocState*)context;
     if (!state && element->doc) {
         state = (DocState*)element->doc->state;
+    }
+    if (pseudo_state == PSEUDO_STATE_LINK) {
+        return dom_element_default_pseudo_state(element, pseudo_state);
     }
     return state_get_pseudo_state(state, static_cast<View*>(element), pseudo_state);
 }

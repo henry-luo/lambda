@@ -2444,7 +2444,7 @@ capture-layout:
 # ==============================
 
 # test-layout: Run layout tests using Lambda CSS engine
-# Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
+# Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN] [update=1]
 # Note: test parameter now accepts filename with or without .html/.htm extension
 # Example: make test-layout test=baseline_301_simple_margin
 test-layout:
@@ -2465,6 +2465,9 @@ test-layout:
 		TEST_VAR="$(or $(test),$(TEST))"; \
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
+		UPDATE_BASELINE_VAR="$(or $(update),$(UPDATE),$(update-baseline),$(UPDATE_BASELINE))"; \
+		UPDATE_BASELINE_FLAG=""; \
+		if [ -n "$$UPDATE_BASELINE_VAR" ]; then UPDATE_BASELINE_FLAG="--update-baseline"; fi; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
 				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
@@ -2505,10 +2508,10 @@ test-layout:
 			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR -j 5; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR -j 5; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR -j 5 $$UPDATE_BASELINE_FLAG; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css -j 5; \
+			node test/layout/test_radiant_layout.js --engine lambda-css -j 5 $$UPDATE_BASELINE_FLAG; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \

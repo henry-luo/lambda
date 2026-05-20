@@ -3192,6 +3192,18 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // computed font-size unless author CSS explicitly set font-size.
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
                 uintptr_t tag = dom_elem->tag();
+                if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
+                    tag == HTM_TAG_SAMP || tag == HTM_TAG_TT) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    bool has_ua_monospace_size = span->font && span->font->family &&
+                        str_ieq_const(span->font->family, strlen(span->font->family), "monospace") &&
+                        span->font->font_size > 0 && span->font->font_size_from_medium;
+                    if (has_ua_monospace_size) {
+                        log_debug("[FONT INHERIT] Code element keeps UA monospace font-size %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
                 if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     if (span->font && span->font->font_size > 0) {

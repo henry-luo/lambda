@@ -273,6 +273,11 @@ static float flex_item_content_width_for_child_percentages(LayoutContext* lycon,
 // This function recursively traverses the DOM tree to find the content-based
 // height of nested flex containers before their Views are fully initialized.
 static const int MAX_MEASURE_DEPTH = 32;
+
+static bool has_flex_item_prop(ViewElement* item) {
+    return item && item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi;
+}
+
 static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth) {
     if (!node || !node->is_element()) return 0;
     if (depth > MAX_MEASURE_DEPTH) return 0;
@@ -293,7 +298,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
                       elem->tag_name ? elem->tag_name : "(null)", elem->height);
             return (float)elem->height;
         }
-        if (elem->fi && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
+        if (has_flex_item_prop(elem) && elem->fi->has_intrinsic_height && elem->fi->intrinsic_height.max_content > 0) {
             log_debug("measure_content_height_recursive: elem %s has intrinsic_height=%.1f",
                       elem->tag_name ? elem->tag_name : "(null)", elem->fi->intrinsic_height.max_content);
             return (float)elem->fi->intrinsic_height.max_content;
@@ -1015,10 +1020,24 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             log_debug("Element %s: content_height=%d, padding+border=%.1f, total=%d",
                                       sub_child->node_name(), child_content_height, vert_extra, elem_height);
                         } else {
+                            // Form controls are replaced controls with intrinsic dimensions.
+                            // They should not fall through to the generic 20px + margin
+                            // estimate; that inflates checkbox/radio flex labels.
+                            ViewElement* sub_view = lam::view_as_element(sub_child);
+                            if (sub_view && sub_view->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                                sub_view->form && sub_view->form->intrinsic_height > 0) {
+                                elem_height = sub_view->form->intrinsic_height;
+                                has_explicit_height_css = true;
+                                log_debug("Element %s using form intrinsic height=%.1f",
+                                          sub_child->node_name(), elem_height);
+                            }
+
                             // Check for explicit CSS height property before using default
-                            log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
-                                      sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
-                            if (elem && elem->specified_style) {
+                            if (!has_explicit_height_css) {
+                                log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
+                                          sub_child->node_name(), elem, elem ? elem->specified_style : nullptr);
+                            }
+                            if (!has_explicit_height_css && elem && elem->specified_style) {
                                 CssDeclaration* height_decl = style_tree_get_declaration(
                                     elem->specified_style, CSS_PROPERTY_HEIGHT);
                                 log_debug("  height_decl=%p, value=%p, type=%d",
@@ -1542,7 +1561,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         return;
     }
 
-    if (!item->fi) {
+    if (!has_flex_item_prop(item)) {
         log_debug("calculate_item_intrinsic_sizes: no flex properties");
         return;
     }
@@ -2311,7 +2330,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                             // Explicit width is both min and max
                             child_min_width = child_max_width = explicit_w;
-                        } else if (child_view->fi) {
+                        } else if (child_view->item_prop_type == DomElement::ITEM_PROP_FORM && child_view->form) {
+                            child_min_width = child_view->form->intrinsic_width;
+                            child_max_width = child_view->form->intrinsic_width;
+                            if (child_max_width <= 0.0f && lycon) {
+                                IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
+                                    lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view));
+                                child_min_width = child_sizes.min_content;
+                                child_max_width = child_sizes.max_content;
+                            }
+                        } else if (has_flex_item_prop(child_view)) {
                             // Child has fi - use cached intrinsic or calculate
                             if (!child_view->fi->has_intrinsic_width) {
                                 calculate_item_intrinsic_sizes(child_view, flex_layout);
@@ -2434,7 +2462,12 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             child_height = calculate_max_content_height(lycon, c, child_content_w);
                             log_debug("Row flex child height at estimated share: share=%.1f, content_w=%.1f, h=%.1f",
                                       child_share, child_content_w, child_height);
-                        } else if (child_view->fi) {
+                        } else if (child_view->item_prop_type == DomElement::ITEM_PROP_FORM && child_view->form) {
+                            child_height = child_view->form->intrinsic_height;
+                            if (child_height <= 0.0f && lycon) {
+                                child_height = calculate_max_content_height(lycon, c, child_max_width);
+                            }
+                        } else if (has_flex_item_prop(child_view)) {
                             // Child has fi - use cached intrinsic or calculate recursively
                             if (!child_view->fi->has_intrinsic_height) {
                                 calculate_item_intrinsic_sizes(child_view, flex_layout);
