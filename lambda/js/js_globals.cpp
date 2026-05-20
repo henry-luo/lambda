@@ -13335,6 +13335,63 @@ static bool js_uri_has_percent(String* s) {
     return false;
 }
 
+static int js_uri_percent_byte_at(String* s, int64_t pos) {
+    if (!s || pos + 2 >= s->len || s->chars[pos] != '%') return -1;
+    int hi = js_uri_hex_digit(s->chars[pos + 1]);
+    int lo = js_uri_hex_digit(s->chars[pos + 2]);
+    if (hi < 0 || lo < 0) return -1;
+    return (hi << 4) | lo;
+}
+
+static bool js_uri_byte_is_continuation(int byte) {
+    return (byte & 0xC0) == 0x80;
+}
+
+static bool js_uri_percent_sequences_are_well_formed_utf8(String* s) {
+    if (!s) return false;
+    for (int64_t i = 0; i < s->len; i++) {
+        if (s->chars[i] != '%') continue;
+        int b0 = js_uri_percent_byte_at(s, i);
+        if (b0 < 0) return false;
+        if (b0 < 0x80) {
+            i += 2;
+            continue;
+        }
+        int needed = 0;
+        int min_b1 = 0x80;
+        int max_b1 = 0xBF;
+        if (b0 >= 0xC2 && b0 <= 0xDF) {
+            needed = 1;
+        } else if (b0 == 0xE0) {
+            needed = 2; min_b1 = 0xA0;
+        } else if (b0 >= 0xE1 && b0 <= 0xEC) {
+            needed = 2;
+        } else if (b0 == 0xED) {
+            needed = 2; max_b1 = 0x9F;
+        } else if (b0 >= 0xEE && b0 <= 0xEF) {
+            needed = 2;
+        } else if (b0 == 0xF0) {
+            needed = 3; min_b1 = 0x90;
+        } else if (b0 >= 0xF1 && b0 <= 0xF3) {
+            needed = 3;
+        } else if (b0 == 0xF4) {
+            needed = 3; max_b1 = 0x8F;
+        } else {
+            return false;
+        }
+        int64_t p = i + 3;
+        int b1 = js_uri_percent_byte_at(s, p);
+        if (b1 < min_b1 || b1 > max_b1) return false;
+        p += 3;
+        for (int k = 1; k < needed; k++, p += 3) {
+            int bx = js_uri_percent_byte_at(s, p);
+            if (!js_uri_byte_is_continuation(bx)) return false;
+        }
+        i += 3 * needed + 2;
+    }
+    return true;
+}
+
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
     if (s->chars[0] != '%' || s->chars[3] != '%' ||
@@ -13406,6 +13463,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     if (!js_uri_has_percent(s)) return str_val;
     if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
+    if (!js_uri_percent_sequences_are_well_formed_utf8(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
@@ -13442,6 +13500,7 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
     if (!js_uri_has_percent(s)) return str_val;
     if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
+    if (!js_uri_percent_sequences_are_well_formed_utf8(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {

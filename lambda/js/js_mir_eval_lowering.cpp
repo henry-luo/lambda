@@ -723,6 +723,66 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
     return false;
 }
 
+static bool js_eval_source_writes_simple_binding(String* code_str) {
+    if (!code_str || !code_str->chars) return false;
+    const char* source = code_str->chars;
+    size_t len = code_str->len;
+    size_t pos = 0;
+    while (pos < len) {
+        char ch = source[pos];
+        if (ch == '\'' || ch == '"' || ch == '`') {
+            char quote = ch;
+            pos++;
+            while (pos < len && source[pos] != quote) {
+                if (source[pos] == '\\' && pos + 1 < len) pos++;
+                pos++;
+            }
+            if (pos < len) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '/') {
+            pos += 2;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
+            continue;
+        }
+        if (ch == '/' && pos + 1 < len && source[pos + 1] == '*') {
+            pos += 2;
+            while (pos + 1 < len && !(source[pos] == '*' && source[pos + 1] == '/')) pos++;
+            if (pos + 1 < len) pos += 2;
+            continue;
+        }
+        if ((ch == '+' || ch == '-') && pos + 1 < len && source[pos + 1] == ch) {
+            size_t after_op = js_eval_skip_space_and_comments(source, len, pos + 2);
+            if (after_op < len &&
+                ((source[after_op] >= 'a' && source[after_op] <= 'z') ||
+                 (source[after_op] >= 'A' && source[after_op] <= 'Z') ||
+                 source[after_op] == '_' || source[after_op] == '$')) {
+                return true;
+            }
+            pos += 2;
+            continue;
+        }
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$')) {
+            pos++;
+            continue;
+        }
+        pos++;
+        while (pos < len && js_eval_is_ident_char(source[pos])) pos++;
+        size_t after = js_eval_skip_space_and_comments(source, len, pos);
+        if (after < len) {
+            char op = source[after];
+            char next = (after + 1 < len) ? source[after + 1] : '\0';
+            if ((op == '=' && next != '=' && next != '>') ||
+                ((op == '+' || op == '-') && next == op) ||
+                ((op == '+' || op == '-' || op == '*' || op == '/' || op == '%' ||
+                  op == '&' || op == '|' || op == '^') && next == '=')) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool js_eval_strict_assigns_restricted_name(String* code_str) {
     if (!code_str || !code_str->chars) return false;
     const char* source = code_str->chars;
@@ -967,6 +1027,10 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         }
         // v37: Also skip expression form if code contains semicolons (multi-statement)
         // or declarations that need to be compiled as a program for correct scoping.
+        if (!skip_expr_form && is_direct_eval &&
+            js_eval_source_writes_simple_binding(code_str)) {
+            skip_expr_form = true;
+        }
         if (!skip_expr_form) {
             for (size_t j = i; j < slen; j++) {
                 char c = s[j];
