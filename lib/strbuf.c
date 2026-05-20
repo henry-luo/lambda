@@ -304,3 +304,13 @@ bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n) {
     sb->str[sb->length] = '\0';
     return (read >= 0);
 }
+
+bool strbuf_starts_with(const StrBuf *sb, const char *prefix) {
+    if (!sb || !prefix) return false;
+    return str_starts_with_const(sb->str, sb->length, prefix);
+}
+
+bool strbuf_ends_with(const StrBuf *sb, const char *suffix) {
+    if (!sb || !suffix) return false;
+    return str_ends_with_const(sb->str, sb->length, suffix);
+}

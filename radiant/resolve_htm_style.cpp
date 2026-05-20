@@ -5,13 +5,12 @@
 #include "video_frame_wake.h"
 #include "retained_fields.hpp"
 #include "../lib/str.h"
+#include "../lib/strview.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
 
-// Direct declaration of the actual C symbol (compiler will add underscore)
-extern "C" int strview_to_int(StrView* s);
 
 static void media_state_changed(RdtVideo* video, RdtVideoState state, void* userdata) {
     (void)video;

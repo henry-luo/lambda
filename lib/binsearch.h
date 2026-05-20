@@ -69,6 +69,28 @@ static inline int binsearch_records(const void* base, int count, size_t stride,
     return -1;
 }
 
+// Range-containment binary search. Records form a sequence of disjoint sorted
+// intervals; this finds the record whose interval contains `key`.
+//
+// Mechanically identical to binsearch_records — the difference is purely the
+// contract of `range_cmp`, which is:
+//    -1 if the record's interval lies entirely before `key`  (search higher)
+//     0 if `key` lies within the record's interval           (hit; return index)
+//    +1 if the record's interval lies entirely after `key`   (search lower)
+//
+// Returns the record index (0..count-1) on hit, -1 if `key` falls in a gap or
+// beyond the table.
+//
+// Typical use cases:
+//   - JIT debug-info: map native address → function (each func has [start,end))
+//   - regex character classes: map codepoint → property (each entry has [first,last])
+//   - LaTeX symbol tables, Unicode tables, etc.
+static inline int binsearch_range(const void* base, int count, size_t stride,
+                                  const void* key, BinsearchCmpFn range_cmp,
+                                  void* udata) {
+    return binsearch_records(base, count, stride, key, range_cmp, udata);
+}
+
 #ifdef __cplusplus
 }
 #endif

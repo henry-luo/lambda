@@ -821,9 +821,7 @@ int exec_convert(int argc, char* argv[]) {
             is_latex_input = true;
         } else if (!from_format && strcmp(type_string->chars, "auto") == 0) {
             // For auto-detection, check if the file extension suggests LaTeX
-            const char* filename = strrchr(input_file, '/');
-            filename = filename ? filename + 1 : input_file; // Get just the filename
-            const char* ext = strrchr(filename, '.');
+            const char* ext = file_path_ext(input_file);
             if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
                 is_latex_input = true;
             }
@@ -2301,7 +2299,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Detect if input is a graph format (Mermaid, D2, DOT)
-        const char* input_ext = strrchr(html_file, '.');
+        const char* input_ext = file_path_ext(html_file);
         bool is_graph_input = false;
         if (input_ext) {
             if (strcmp(input_ext, ".mmd") == 0 ||
@@ -2386,7 +2384,7 @@ int main(int argc, char *argv[]) {
             input->root = svg_item;
 
             // Determine output format
-            const char* output_ext = strrchr(output_file, '.');
+            const char* output_ext = file_path_ext(output_file);
             if (output_ext && strcmp(output_ext, ".svg") == 0) {
                 // Direct SVG output using format_xml (SVG is XML)
                 log_info("Writing SVG output to '%s'", output_file);
@@ -2438,7 +2436,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        const char* output_ext = strrchr(output_file, '.');
+        const char* output_ext = file_path_ext(output_file);
         char* render_pdf_temp_input = nullptr;
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
             if (output_ext && strcmp(output_ext, ".pdf") == 0) {
@@ -2776,7 +2774,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Detect file type by extension
-        const char* ext = effective_ext ? effective_ext : strrchr(filename, '.');
+        const char* ext = effective_ext ? effective_ext : file_path_ext(filename);
         int exit_code;
 
         // Check if this is a graph file that needs conversion

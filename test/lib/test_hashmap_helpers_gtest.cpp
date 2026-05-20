@@ -32,6 +32,18 @@ HASHMAP_DEFINE_PTRKEY(ptr_id_entry, struct PtrIdEntry, key)
 struct OwnedEntry { char name[16]; int* counter; };
 HASHMAP_DEFINE_STRKEY(owned_entry, struct OwnedEntry, name)
 
+// int64-keyed entry
+struct I64Entry { int64_t key; int value; };
+HASHMAP_DEFINE_INTKEY(i64_entry, struct I64Entry, key)
+
+// uint32-keyed entry
+struct U32Entry { uint32_t id; const char* tag; };
+HASHMAP_DEFINE_INTKEY(u32_entry, struct U32Entry, id)
+
+// length-prefix string key (raw ptr + len fields)
+struct LenStrEntry { const char* name; size_t name_len; int value; };
+HASHMAP_DEFINE_LENSTRKEY(len_str_entry, struct LenStrEntry, name, name_len)
+
 }  // namespace
 
 TEST(HashmapHelpersTest, StrKeyInlineArray) {
@@ -147,6 +159,84 @@ TEST(HashmapHelpersTest, OffsetBasedIntAndPtr) {
     size_t poff = offsetof(PK, p);
     EXPECT_EQ(hashmap_cmp_ptr_at(&pa, &pb, poff), 0);
     EXPECT_NE(hashmap_cmp_ptr_at(&pa, &pc, poff), 0);
+}
+
+TEST(HashmapHelpersTest, IntKeyInt64) {
+    struct hashmap* m = i64_entry_new(0);
+    ASSERT_NE(m, nullptr);
+    I64Entry a{1, 10};
+    I64Entry b{42, 20};
+    I64Entry c{-7, 30};
+    hashmap_set(m, &a);
+    hashmap_set(m, &b);
+    hashmap_set(m, &c);
+    EXPECT_EQ(hashmap_count(m), 3u);
+
+    I64Entry probe{42, 0};
+    const I64Entry* found = (const I64Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 20);
+
+    probe.key = -7;
+    found = (const I64Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 30);
+
+    probe.key = 999;
+    EXPECT_EQ(hashmap_get(m, &probe), nullptr);
+    hashmap_free(m);
+}
+
+TEST(HashmapHelpersTest, IntKeyUint32) {
+    struct hashmap* m = u32_entry_new(0);
+    ASSERT_NE(m, nullptr);
+    U32Entry a{1u, "one"};
+    U32Entry b{2u, "two"};
+    hashmap_set(m, &a);
+    hashmap_set(m, &b);
+
+    U32Entry probe{1u, nullptr};
+    const U32Entry* found = (const U32Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_STREQ(found->tag, "one");
+    hashmap_free(m);
+}
+
+TEST(HashmapHelpersTest, LenStrKey) {
+    struct hashmap* m = len_str_entry_new(0);
+    ASSERT_NE(m, nullptr);
+
+    // insert three keys that are NOT NUL-terminated at their boundary
+    const char* source = "alpha|beta|gamma";  // single buffer, three slices
+    LenStrEntry a{source + 0, 5, 1};   // "alpha"
+    LenStrEntry b{source + 6, 4, 2};   // "beta"
+    LenStrEntry c{source + 11, 5, 3};  // "gamma"
+    hashmap_set(m, &a);
+    hashmap_set(m, &b);
+    hashmap_set(m, &c);
+    EXPECT_EQ(hashmap_count(m), 3u);
+
+    // lookup using a different storage but same bytes
+    char buf[8] = "beta";
+    LenStrEntry probe{buf, 4, 0};
+    const LenStrEntry* found = (const LenStrEntry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 2);
+
+    // different length but same prefix → miss
+    probe.name = "alphax";
+    probe.name_len = 6;
+    EXPECT_EQ(hashmap_get(m, &probe), nullptr);
+
+    // empty key edge case
+    LenStrEntry empty{"", 0, 99};
+    hashmap_set(m, &empty);
+    LenStrEntry empty_probe{nullptr, 0, 0};
+    found = (const LenStrEntry*)hashmap_get(m, &empty_probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 99);
+
+    hashmap_free(m);
 }
 
 TEST(HashmapHelpersTest, NewWithFreeHookInvokedOnFree) {

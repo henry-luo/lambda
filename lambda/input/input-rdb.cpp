@@ -20,6 +20,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/file.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mem.h"
 #include <string.h>
 
@@ -222,20 +223,7 @@ struct PkEntry {
     int row_index;
 };
 
-static uint64_t pk_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const PkEntry* e = (const PkEntry*)item;
-    // simple hash for int64 keys
-    uint64_t h = (uint64_t)e->pk_value;
-    h ^= seed0;
-    h *= 0x9E3779B97F4A7C15ULL;
-    h ^= seed1;
-    return h;
-}
-
-static int pk_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return ((const PkEntry*)a)->pk_value == ((const PkEntry*)b)->pk_value ? 0 : 1;
-}
+HASHMAP_DEFINE_INTKEY(pk, PkEntry, pk_value)
 
 // find the index of the primary key column in a table (first PK column, -1 if none)
 static int rdb_find_pk_column(RdbTable* tbl) {
@@ -269,19 +257,7 @@ struct RevFkEntry {
     Item* rows;  // dynamically grown array of row Items
 };
 
-static uint64_t revfk_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RevFkEntry* e = (const RevFkEntry*)item;
-    uint64_t h = (uint64_t)e->pk_value;
-    h ^= seed0;
-    h *= 0x9E3779B97F4A7C15ULL;
-    h ^= seed1;
-    return h;
-}
-
-static int revfk_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return ((const RevFkEntry*)a)->pk_value == ((const RevFkEntry*)b)->pk_value ? 0 : 1;
-}
+HASHMAP_DEFINE_INTKEY(revfk, RevFkEntry, pk_value)
 
 /**
  * Fetch table rows with FK forward navigation.
@@ -394,9 +370,7 @@ static HashMap* rdb_build_pk_index_for(Item table_array, const char* pk_col_name
     Array* arr = table_array.array;
     if (!arr || arr->length == 0) return NULL;
 
-    HashMap* idx = hashmap_new(sizeof(PkEntry), (size_t)(arr->length < 8 ? 16 : arr->length * 2),
-                               0x12345678ULL, 0x9ABCDEF0ULL,
-                               pk_hash, pk_compare, NULL, NULL);
+    HashMap* idx = pk_new((size_t)(arr->length < 8 ? 16 : arr->length * 2));
     if (!idx) return NULL;
 
     for (int64_t r = 0; r < arr->length; r++) {
@@ -441,10 +415,7 @@ static Item rdb_add_reverse_fk(MarkBuilder& builder, Item target_array,
     if (!tgt_arr || !src_arr || tgt_arr->length == 0) return target_array;
 
     // build a grouping map: target_pk_value → list of source row items
-    HashMap* groups = hashmap_new(sizeof(RevFkEntry),
-                                  (size_t)(tgt_arr->length < 8 ? 16 : tgt_arr->length * 2),
-                                  0xAAAAAAAAULL, 0xBBBBBBBBULL,
-                                  revfk_hash, revfk_compare, NULL, NULL);
+    HashMap* groups = revfk_new((size_t)(tgt_arr->length < 8 ? 16 : tgt_arr->length * 2));
     if (!groups) return target_array;
 
     // rfk fields (from target's perspective):

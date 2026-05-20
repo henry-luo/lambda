@@ -79,6 +79,76 @@ static inline void sort_ptrs_by_double_key(void** arr, size_t n,
     }
 }
 
+// ───────── Standard comparators ─────────
+//
+// Two-argument signature matches qsort(3). Use these directly with qsort to
+// avoid writing one-off comparators. For use with the 3-arg insertion_sort
+// above, wrap with SORT_CMP_AS_R(name).
+//
+// Naming: sort_cmp_<type>_<order> where <order> is `asc` or `desc`.
+
+typedef int (*SortCmp2Fn)(const void* a, const void* b);
+
+static inline int sort_cmp_int_asc(const void* a, const void* b) {
+    int va = *(const int*)a, vb = *(const int*)b;
+    return (va > vb) - (va < vb);
+}
+static inline int sort_cmp_int_desc(const void* a, const void* b) {
+    int va = *(const int*)a, vb = *(const int*)b;
+    return (vb > va) - (vb < va);
+}
+
+#include <stdint.h>
+static inline int sort_cmp_int64_asc(const void* a, const void* b) {
+    int64_t va = *(const int64_t*)a, vb = *(const int64_t*)b;
+    return (va > vb) - (va < vb);
+}
+static inline int sort_cmp_int64_desc(const void* a, const void* b) {
+    int64_t va = *(const int64_t*)a, vb = *(const int64_t*)b;
+    return (vb > va) - (vb < va);
+}
+
+static inline int sort_cmp_uint64_asc(const void* a, const void* b) {
+    uint64_t va = *(const uint64_t*)a, vb = *(const uint64_t*)b;
+    return (va > vb) - (va < vb);
+}
+
+static inline int sort_cmp_double_asc(const void* a, const void* b) {
+    double va = *(const double*)a, vb = *(const double*)b;
+    return (va > vb) - (va < vb);
+}
+static inline int sort_cmp_double_desc(const void* a, const void* b) {
+    double va = *(const double*)a, vb = *(const double*)b;
+    return (vb > va) - (vb < va);
+}
+
+static inline int sort_cmp_float_asc(const void* a, const void* b) {
+    float va = *(const float*)a, vb = *(const float*)b;
+    return (va > vb) - (va < vb);
+}
+
+// const char* — pointer-to-pointer style, matching how arrays of strings
+// are typically passed to qsort: `qsort(arr_of_cstrs, n, sizeof(char*), sort_cmp_cstr_asc)`.
+static inline int sort_cmp_cstr_asc(const void* a, const void* b) {
+    const char* sa = *(const char* const*)a;
+    const char* sb = *(const char* const*)b;
+    return strcmp(sa, sb);
+}
+
+#include <strings.h>
+static inline int sort_cmp_cstr_ci_asc(const void* a, const void* b) {
+    const char* sa = *(const char* const*)a;
+    const char* sb = *(const char* const*)b;
+    return strcasecmp(sa, sb);
+}
+
+// SORT_CMP_AS_R(name) — produce a 3-arg adapter `name##_r` that ignores its
+// udata argument, suitable for passing to insertion_sort.
+#define SORT_CMP_AS_R(name) \
+    static inline int name##_r(const void* a, const void* b, void* udata) { \
+        (void)udata; return name(a, b); \
+    }
+
 #ifdef __cplusplus
 }
 #endif

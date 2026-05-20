@@ -6,6 +6,7 @@
 #include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "event_state_log.hpp"
@@ -51,18 +52,7 @@ static int state_key_compare(const void* a, const void* b, void* udata) {
     return 0;
 }
 
-static uint64_t view_state_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ViewStateEntry* entry = (const ViewStateEntry*)item;
-    return hashmap_murmur(&entry->view_id, sizeof(uint32_t), seed0, seed1);
-}
-
-static int view_state_entry_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const ViewStateEntry* ea = (const ViewStateEntry*)a;
-    const ViewStateEntry* eb = (const ViewStateEntry*)b;
-    if (ea->view_id == eb->view_id) return 0;
-    return ea->view_id < eb->view_id ? -1 : 1;
-}
+HASHMAP_DEFINE_INTKEY(view_state_entry, ViewStateEntry, view_id)
 
 // ============================================================================
 // Interned State Names
@@ -182,15 +172,7 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
         return NULL;
     }
 
-    state->view_state_map = hashmap_new(
-        sizeof(ViewStateEntry),
-        64,
-        0x31415926, 0x27182818,
-        view_state_entry_hash,
-        view_state_entry_compare,
-        NULL,
-        NULL
-    );
+    state->view_state_map = view_state_entry_new(64);
     if (!state->view_state_map) {
         log_error("radiant_state_create: failed to create view_state_map");
         hashmap_free(state->state_map);

@@ -9,6 +9,7 @@
 
 #include "../lib/image.h"
 #include "../lib/log.h"
+#include "../lib/hashmap_helpers.h"
 #include "../lib/memtrack.h"
 #include "../lib/base64.h"
 #include "../lib/url.h"
@@ -19,18 +20,7 @@ typedef struct ImageEntry {
     ImageSurface *image;
 } ImageEntry;
 
-int image_compare(const void *a, const void *b, void *udata) {
-    (void)udata;
-    const ImageEntry *fa = (const ImageEntry*)a;
-    const ImageEntry *fb = (const ImageEntry*)b;
-    return strcmp(fa->path, fb->path);
-}
-
-uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const ImageEntry *image = (const ImageEntry*)item;
-    // xxhash3 is a fast hash function
-    return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(image, ImageEntry, path)
 
 // Detect if memory content is SVG by checking for XML/SVG signature
 static bool is_svg_content(const unsigned char* data, size_t size) {
@@ -342,8 +332,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity.
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = hashmap_new(sizeof(ImageEntry), 10, 0, 0,
-            image_hash, image_compare, NULL, NULL);
+        uicon->image_cache = image_new(10);
     }
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);

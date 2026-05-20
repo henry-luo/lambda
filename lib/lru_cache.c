@@ -11,10 +11,10 @@
 #include "lru_cache.h"
 #include "hashmap.h"
 #include "log.h"
+#include "time_util.h"
 
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 typedef struct LruNode {
     char* key;
@@ -38,11 +38,8 @@ struct LruCache {
     LruCacheConfig cfg;
 };
 
-static uint64_t lru_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
-}
+// thin alias around time_now_ms — keeps the call sites uncluttered.
+#define lru_now_ms() time_now_ms()
 
 static uint64_t lru_rec_hash(const void* item, uint64_t s0, uint64_t s1) {
     const LruRecord* r = (const LruRecord*)item;
