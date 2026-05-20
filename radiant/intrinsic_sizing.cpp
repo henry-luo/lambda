@@ -206,6 +206,65 @@ static void get_horizontal_border_widths_from_css(LayoutContext* lycon, DomEleme
     }
 }
 
+static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyId property,
+                                          const CssValue* value, float inline_base) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return inline_base > 0.0f ? (float)(value->data.percentage.value / 100.0) * inline_base : 0.0f;
+    }
+    return resolve_length_value(lycon, property, value);
+}
+
+static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElement* element,
+                                                   float inline_base,
+                                                   float* padding_left, float* padding_right) {
+    if (!element || !element->specified_style || !padding_left || !padding_right) return;
+
+    CssDeclaration* padding_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING);
+    if (padding_decl && padding_decl->value) {
+        const CssValue* value = padding_decl->value;
+        if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+            int count = value->data.list.count;
+            CssValue** values = value->data.list.values;
+            if (count == 1) {
+                float padding = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING, values[0], inline_base);
+                *padding_left = padding;
+                *padding_right = padding;
+            } else if (count == 2 || count == 3) {
+                float padding = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING, values[1], inline_base);
+                *padding_left = padding;
+                *padding_right = padding;
+            } else {
+                *padding_right = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING_RIGHT, values[1], inline_base);
+                *padding_left = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING_LEFT, values[3], inline_base);
+            }
+        } else {
+            float padding = intrinsic_resolve_box_length(
+                lycon, CSS_PROPERTY_PADDING, value, inline_base);
+            *padding_left = padding;
+            *padding_right = padding;
+        }
+    }
+
+    CssDeclaration* left_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING_LEFT);
+    if (left_decl && left_decl->value) {
+        *padding_left = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_LEFT, left_decl->value, inline_base);
+    }
+    CssDeclaration* right_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+    if (right_decl && right_decl->value) {
+        *padding_right = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_RIGHT, right_decl->value, inline_base);
+    }
+}
+
 static float measure_current_space_advance(LayoutContext* lycon, FontHandle* handle, FontProp* style) {
     if (!style) return 0.0f;
     if (!handle) handle = style->font_handle;
@@ -4999,15 +5058,27 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Pass the child's content-box width so its descendants wrap correctly.
             float child_content_w = content_w;
             if (child->is_element()) {
-                ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child->as_element()));
+                DomElement* child_elem = child->as_element();
+                ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
+                float child_padding_border = 0.0f;
                 if (child_ve->bound) {
-                    float cp = child_ve->bound->padding.left + child_ve->bound->padding.right;
-                    float cb = 0;
+                    child_padding_border += child_ve->bound->padding.left + child_ve->bound->padding.right;
                     if (child_ve->bound->border)
-                        cb = child_ve->bound->border->width.left + child_ve->bound->border->width.right;
-                    if (cp + cb > 0 && child_content_w - cp - cb > 0) {
-                        child_content_w -= cp + cb;
-                    }
+                        child_padding_border += child_ve->bound->border->width.left + child_ve->bound->border->width.right;
+                } else if (child_elem->specified_style) {
+                    float pad_left = 0.0f;
+                    float pad_right = 0.0f;
+                    float border_left = 0.0f;
+                    float border_right = 0.0f;
+                    get_horizontal_padding_widths_from_css(
+                        lycon, child_elem, content_w, &pad_left, &pad_right);
+                    get_horizontal_border_widths_from_css(
+                        lycon, child_elem, &border_left, &border_right);
+                    child_padding_border = pad_left + pad_right + border_left + border_right;
+                }
+                if (child_padding_border > 0.0f && child_content_w > 0.0f) {
+                    child_content_w -= child_padding_border;
+                    if (child_content_w < 0.0f) child_content_w = 0.0f;
                 }
             }
             float child_height = calculate_max_content_height(lycon, child, child_content_w);
