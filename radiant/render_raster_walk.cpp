@@ -14,10 +14,8 @@
 
 #include <chrono>
 
-static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, float abs_y,
-                                     FontBox* font, Color color) {
-    (void)abs_x; (void)abs_y; (void)font; (void)color;
-    RenderContext* rdcon = (RenderContext*)vctx;
+static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
+                                         bool skip_positioned_in_normal_flow) {
     if (!rdcon || !block) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
@@ -92,7 +90,7 @@ static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, 
     else {
         // Skip only absolute/fixed positioned elements - they are rendered separately.
         // Floats also have a position struct and remain in normal flow.
-        if (block->position &&
+        if (skip_positioned_in_normal_flow && block->position &&
             (block->position->position == CSS_VALUE_ABSOLUTE ||
              block->position->position == CSS_VALUE_FIXED)) {
             log_debug("absolute/fixed positioned block, skip in normal rendering");
@@ -100,6 +98,13 @@ static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, 
             render_block_view(rdcon, block);
         }
     }
+}
+
+static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+                                     FontBox* font, Color color) {
+    (void)abs_x; (void)abs_y; (void)font; (void)color;
+    RenderContext* rdcon = (RenderContext*)vctx;
+    render_raster_dispatch_block(rdcon, block, true);
 }
 
 static void render_raster_walk_inline(void* vctx, ViewSpan* span, float abs_x, float abs_y,
@@ -141,8 +146,7 @@ static void render_raster_walk_positioned_block(void* vctx, ViewBlock* block, fl
                                                 FontBox* font, Color color) {
     (void)abs_x; (void)abs_y; (void)font; (void)color;
     RenderContext* rdcon = (RenderContext*)vctx;
-    if (!rdcon || !block) return;
-    render_block_view(rdcon, block);
+    render_raster_dispatch_block(rdcon, block, false);
 }
 
 static void render_raster_backend_init(RenderBackend* backend, RenderContext* rdcon) {

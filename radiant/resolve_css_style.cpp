@@ -115,6 +115,44 @@ static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t pro
     return false;
 }
 
+static bool parse_object_position_component(LayoutContext* lycon, const CssValue* value,
+                                            float* out_value, bool* out_is_percent,
+                                            int* out_axis) {
+    if (!value || !out_value || !out_is_percent || !out_axis) return false;
+    *out_axis = 0;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *out_value = (float)value->data.percentage.value;
+        *out_is_percent = true;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        float length = resolve_length_value(lycon, CSS_PROPERTY_OBJECT_POSITION, value);
+        if (isnan(length)) return false;
+        *out_value = length;
+        *out_is_percent = false;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum kw = value->data.keyword;
+        if (kw == CSS_VALUE_LEFT) {
+            *out_value = 0.0f; *out_is_percent = true; *out_axis = 1; return true;
+        }
+        if (kw == CSS_VALUE_RIGHT) {
+            *out_value = 100.0f; *out_is_percent = true; *out_axis = 1; return true;
+        }
+        if (kw == CSS_VALUE_TOP) {
+            *out_value = 0.0f; *out_is_percent = true; *out_axis = 2; return true;
+        }
+        if (kw == CSS_VALUE_BOTTOM) {
+            *out_value = 100.0f; *out_is_percent = true; *out_axis = 2; return true;
+        }
+        if (kw == CSS_VALUE_CENTER) {
+            *out_value = 50.0f; *out_is_percent = true; *out_axis = 0; return true;
+        }
+    }
+    return false;
+}
+
 static bool css_text_has_top_level_comma(const char* text, size_t len) {
     if (!text) return false;
 
@@ -11807,7 +11845,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                     // Count color stops
                     int color_count = func->arg_count - arg_idx;
-                    lg->stop_count = color_count > 0 ? color_count : 2;
+                    int max_stop_count = color_count > 0 ? color_count * 2 : 2;
+                    lg->stop_count = max_stop_count;
                     lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
 
                     // Parse color stops
@@ -11840,7 +11879,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g, lg->stops[stop_idx].color.b);
                             stop_idx++;
                         } else if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
-                            // Color stop with position: [color, position]
+                            // Color stop with optional one or two positions:
+                            // [color, position] or [color, position, position].
                             CssValue** items = arg->data.list.values;
                             CssValue* color_val = items[0];
                             if (color_val && (color_val->type == CSS_VALUE_TYPE_COLOR ||
@@ -11849,7 +11889,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                 lg->stops[stop_idx].color = resolve_color_value(lycon, color_val);
                                 lg->stops[stop_idx].position = -1;  // default auto
 
-                                // Parse position if present
+                                // Parse first position if present
                                 if (arg->data.list.count >= 2 && items[1]) {
                                     CssValue* pos_val = items[1];
                                     if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -11866,6 +11906,29 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
                                     lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
                                 stop_idx++;
+
+                                // CSS Images allows a color stop to specify two
+                                // positions, e.g. `red 0 50%`. That is equivalent
+                                // to two adjacent stops with the same color and
+                                // creates a hard edge when the next stop starts at
+                                // the same position.
+                                if (arg->data.list.count >= 3 && items[2] && stop_idx < lg->stop_count) {
+                                    CssValue* pos_val = items[2];
+                                    lg->stops[stop_idx].color = resolve_color_value(lycon, color_val);
+                                    lg->stops[stop_idx].position = -1;
+                                    if (pos_val->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                        lg->stops[stop_idx].position = pos_val->data.percentage.value / 100.0f;
+                                    } else if (pos_val->type == CSS_VALUE_TYPE_NUMBER) {
+                                        lg->stops[stop_idx].position = pos_val->data.number.value / 100.0f;
+                                    } else if (pos_val->type == CSS_VALUE_TYPE_LENGTH) {
+                                        lg->stops[stop_idx].position = pos_val->data.length.value;
+                                        lg->stops_in_px = true;
+                                    }
+                                    log_debug("[CSS Gradient] stop %d (second pos): color #%02x%02x%02x pos=%.2f", stop_idx,
+                                        lg->stops[stop_idx].color.r, lg->stops[stop_idx].color.g,
+                                        lg->stops[stop_idx].color.b, lg->stops[stop_idx].position);
+                                    stop_idx++;
+                                }
                             }
                         }
                     }
@@ -12364,6 +12427,73 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] object-fit: %s -> 0x%04X",
                         css_enum_info(val)->name, val);
                 }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_OBJECT_POSITION: {
+            log_debug("[CSS] Processing object-position property");
+            if (!block) break;
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+
+            float x = 50.0f, y = 50.0f;
+            bool x_is_percent = true, y_is_percent = true;
+            bool parsed = false;
+
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                float values[2] = {50.0f, 50.0f};
+                bool is_percent[2] = {true, true};
+                int axes[2] = {0, 0};
+                int count = 0;
+                for (int i = 0; i < value->data.list.count && count < 2; i++) {
+                    CssValue* item = value->data.list.values ? value->data.list.values[i] : nullptr;
+                    if (parse_object_position_component(lycon, item,
+                            &values[count], &is_percent[count], &axes[count])) {
+                        count++;
+                    }
+                }
+                if (count == 1) {
+                    if (axes[0] == 2) {
+                        y = values[0]; y_is_percent = is_percent[0];
+                    } else {
+                        x = values[0]; x_is_percent = is_percent[0];
+                    }
+                    parsed = true;
+                } else if (count >= 2) {
+                    if (axes[0] == 2 && axes[1] != 2) {
+                        y = values[0]; y_is_percent = is_percent[0];
+                        x = values[1]; x_is_percent = is_percent[1];
+                    } else {
+                        x = values[0]; x_is_percent = is_percent[0];
+                        y = values[1]; y_is_percent = is_percent[1];
+                    }
+                    parsed = true;
+                }
+            } else {
+                int axis = 0;
+                float component = 50.0f;
+                bool is_percent = true;
+                if (parse_object_position_component(lycon, value, &component, &is_percent, &axis)) {
+                    if (axis == 2) {
+                        y = component; y_is_percent = is_percent;
+                    } else {
+                        x = component; x_is_percent = is_percent;
+                    }
+                    parsed = true;
+                }
+            }
+
+            if (parsed) {
+                block->embed->object_position_x = x;
+                block->embed->object_position_y = y;
+                block->embed->object_position_x_is_percent = x_is_percent;
+                block->embed->object_position_y_is_percent = y_is_percent;
+                block->embed->object_position_set = true;
+                log_debug("[CSS] object-position: %.1f%s %.1f%s",
+                          x, x_is_percent ? "%" : "px",
+                          y, y_is_percent ? "%" : "px");
             }
             break;
         }

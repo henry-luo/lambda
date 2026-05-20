@@ -177,7 +177,9 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
     }
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
-    int opacity_i = (int)(opacity * 256.0f + 0.5f);
+    int opacity_i = (int)(opacity * 255.0f + 0.5f);
+    if (opacity_i < 0) opacity_i = 0;
+    if (opacity_i > 255) opacity_i = 255;
     for (int row = 0; row < height; row++) {
         for (int col = 0; col < width; col++) {
             uint32_t src = pixels[(y0 + row) * pitch + (x0 + col)];
@@ -186,19 +188,37 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
                 pixels[(y0 + row) * pitch + (x0 + col)] = dst;
                 continue;
             }
-            uint32_t sa = ((src >> 24) & 0xFF) * opacity_i + 128;  sa >>= 8;
-            uint32_t sr = (src & 0xFF) * opacity_i + 128;          sr >>= 8;
-            uint32_t sg = ((src >> 8) & 0xFF) * opacity_i + 128;   sg >>= 8;
-            uint32_t sb = ((src >> 16) & 0xFF) * opacity_i + 128;  sb >>= 8;
+            uint32_t src_a = (src >> 24) & 0xFF;
+            uint32_t sa = (src_a * (uint32_t)opacity_i + 127u) / 255u;
+            if (sa == 0) {
+                pixels[(y0 + row) * pitch + (x0 + col)] = dst;
+                continue;
+            }
+            uint32_t src_r = src & 0xFF;
+            uint32_t src_g = (src >> 8) & 0xFF;
+            uint32_t src_b = (src >> 16) & 0xFF;
             uint32_t inv_sa = 255 - sa;
             uint32_t da = (dst >> 24) & 0xFF;
             uint32_t dr = dst & 0xFF;
             uint32_t dg = (dst >> 8) & 0xFF;
             uint32_t db = (dst >> 16) & 0xFF;
-            uint32_t ra = sa + (da * inv_sa + 128) / 255;
-            uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-            uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-            uint32_t rb = sb + (db * inv_sa + 128) / 255;
+            uint32_t src_rp = (src_r * sa + 127u) / 255u;
+            uint32_t src_gp = (src_g * sa + 127u) / 255u;
+            uint32_t src_bp = (src_b * sa + 127u) / 255u;
+            uint32_t dst_rp = (dr * da + 127u) / 255u;
+            uint32_t dst_gp = (dg * da + 127u) / 255u;
+            uint32_t dst_bp = (db * da + 127u) / 255u;
+            uint32_t ra = sa + (da * inv_sa + 127u) / 255u;
+            if (ra == 0) {
+                pixels[(y0 + row) * pitch + (x0 + col)] = 0;
+                continue;
+            }
+            uint32_t rrp = src_rp + (dst_rp * inv_sa + 127u) / 255u;
+            uint32_t rgp = src_gp + (dst_gp * inv_sa + 127u) / 255u;
+            uint32_t rbp = src_bp + (dst_bp * inv_sa + 127u) / 255u;
+            uint32_t rr = (rrp * 255u + ra / 2u) / ra;
+            uint32_t rg = (rgp * 255u + ra / 2u) / ra;
+            uint32_t rb = (rbp * 255u + ra / 2u) / ra;
             pixels[(y0 + row) * pitch + (x0 + col)] =
                 (render_composite_clamp_u8(ra) << 24) |
                 (render_composite_clamp_u8(rb) << 16) |
@@ -207,4 +227,3 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
         }
     }
 }
-

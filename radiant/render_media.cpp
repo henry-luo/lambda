@@ -53,6 +53,23 @@ static bool render_media_view_has_dom_element(ViewBlock* view) {
     return node && node->node_type == DOM_NODE_ELEMENT;
 }
 
+static uint8_t render_media_content_opacity(ViewBlock* view) {
+    if (!view || !view->in_line) return 255;
+    float opacity = view->in_line->opacity;
+    if (opacity >= 1.0f) return 255;
+    if (opacity <= 0.0f) return 0;
+    return (uint8_t)(opacity * 255.0f + 0.5f);
+}
+
+static float render_media_object_position_offset(float box_size, float rendered_size,
+                                                 float position, bool is_percent,
+                                                 float scale) {
+    if (is_percent) {
+        return (box_size - rendered_size) * position / 100.0f;
+    }
+    return position * scale;
+}
+
 void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
         log_debug("no picture to render");  return;
@@ -144,9 +161,20 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
 
         float rendered_w = img_w * scale;
         float rendered_h = img_h * scale;
-        // center in the content box (default object-position: 50% 50%)
-        img_rect.x = rect.x + (box_w - rendered_w) * 0.5f;
-        img_rect.y = rect.y + (box_h - rendered_h) * 0.5f;
+        float pos_x = 50.0f;
+        float pos_y = 50.0f;
+        bool pos_x_is_percent = true;
+        bool pos_y_is_percent = true;
+        if (view->embed->object_position_set) {
+            pos_x = view->embed->object_position_x;
+            pos_y = view->embed->object_position_y;
+            pos_x_is_percent = view->embed->object_position_x_is_percent;
+            pos_y_is_percent = view->embed->object_position_y_is_percent;
+        }
+        img_rect.x = rect.x + render_media_object_position_offset(
+            box_w, rendered_w, pos_x, pos_x_is_percent, s);
+        img_rect.y = rect.y + render_media_object_position_offset(
+            box_h, rendered_h, pos_y, pos_y_is_percent, s);
         img_rect.width = rendered_w;
         img_rect.height = rendered_h;
     }
@@ -156,6 +184,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
               rect.width, rect.height, rect.x, rect.y,
               rdcon->block.clip.left, rdcon->block.clip.top,
               rdcon->block.clip.right, rdcon->block.clip.bottom);
+    uint8_t content_opacity = render_media_content_opacity(view);
     Bound image_clip = rdcon->has_transform
         ? rdcon->block.clip
         : render_media_intersect_clip_rect(&rdcon->block.clip, &rect);
@@ -165,14 +194,16 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (img->pic) {
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
-                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip, 255);
+                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
+                                                 content_opacity);
                 if (!rdcon->dl) {
                     rdt_picture_free(pic);
                 }
             }
         } else if (img->pixels) {
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                                            img->width, &img_rect, &image_clip, 255, img);
+                                            img->width, &img_rect, &image_clip,
+                                            content_opacity, img);
         } else {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
@@ -183,11 +214,12 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (rdcon->has_transform) {
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels,
                                             img->width, img->height, img->width,
-                                            &img_rect, &image_clip, 255, img);
+                                            &img_rect, &image_clip,
+                                            content_opacity, img);
         } else {
             render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
                 &img_rect, &image_clip, SCALE_MODE_LINEAR,
-                rdcon->clip_shapes, rdcon->clip_shape_depth);
+                rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
         }
     }
     if (pushed_content_clip) {

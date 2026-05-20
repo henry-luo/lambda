@@ -1208,8 +1208,13 @@ typedef struct EmbedProp {
     FlexProp* flex;
     GridProp* grid;
     CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
+    float object_position_x; // percent when object_position_x_is_percent, otherwise CSS px
+    float object_position_y; // percent when object_position_y_is_percent, otherwise CSS px
     struct RdtVideo* video;  // video playback context (NULL for non-video elements)
     ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
+    bool object_position_set;
+    bool object_position_x_is_percent;
+    bool object_position_y_is_percent;
     bool has_controls;       // true if <video controls> attribute present
 } EmbedProp;
 
