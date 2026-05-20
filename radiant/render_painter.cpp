@@ -90,19 +90,6 @@ void rc_pop_clip(RenderContext* rdcon) {
     else rdt_pop_clip(&rdcon->vec);
 }
 
-int rc_clip_save_depth(RenderContext* rdcon) {
-    if (rdcon->dl) {
-        dl_save_clip_depth(rdcon->dl);
-        return rdcon->dl->count - 1;
-    }
-    return rdt_clip_save_depth();
-}
-
-void rc_clip_restore_depth(RenderContext* rdcon, int saved) {
-    if (rdcon->dl) dl_restore_clip_depth(rdcon->dl, saved);
-    else rdt_clip_restore_depth(saved);
-}
-
 void render_painter_begin_vector_batch(RenderContext* rdcon) {
     if (!rdcon || rdcon->dl) return;
     rdt_vector_begin_batch(&rdcon->vec);
@@ -196,13 +183,4 @@ void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,
                           ClipShape** clip_shapes, int clip_depth) {
     render_painter_fill_surface_rect(rdcon, surface, rect, color, clip, clip_shapes, clip_depth);
-}
-
-void rc_blit_surface_scaled(RenderContext* rdcon,
-                            ImageSurface* src, Rect* src_rect,
-                            ImageSurface* dst, Rect* dst_rect, Bound* clip,
-                            ScaleMode scale_mode,
-                            ClipShape** clip_shapes, int clip_depth) {
-    render_painter_blit_surface_scaled(rdcon, src, src_rect, dst, dst_rect, clip,
-                                       scale_mode, clip_shapes, clip_depth);
 }

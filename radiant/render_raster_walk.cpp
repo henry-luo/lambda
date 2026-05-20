@@ -2,6 +2,7 @@
 #include "render_profiler.hpp"
 #include "render_text.hpp"
 #include "render_backend.h"
+#include "render_form.hpp"
 #include "render_list.hpp"
 #include "render_media.hpp"
 #include "render_svg_inline.hpp"
@@ -12,8 +13,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <chrono>
-
-void render_form_control(RenderContext* rdcon, ViewBlock* block);
 
 static void render_raster_walk_block(void* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {

@@ -1,3 +1,4 @@
+#include "layout_text.hpp"
 #include "layout.hpp"
 #include "layout_positioned.hpp"
 #include "../lambda/input/css/dom_node.hpp"

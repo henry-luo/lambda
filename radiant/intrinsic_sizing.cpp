@@ -6,6 +6,7 @@
  */
 
 #include "intrinsic_sizing.hpp"
+#include "layout_text.hpp"
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "form_control.hpp" // For FormDefaults
@@ -204,11 +205,6 @@ static void get_horizontal_border_widths_from_css(LayoutContext* lycon, DomEleme
         }
     }
 }
-
-// ============================================================================
-// Forward declarations for functions defined in other files
-// ============================================================================
-CssEnum get_white_space_value(DomNode* node);
 
 static float measure_current_space_advance(LayoutContext* lycon, FontHandle* handle, FontProp* style) {
     if (!style) return 0.0f;

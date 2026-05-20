@@ -147,37 +147,6 @@ static pthread_mutex_t g_image_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 // it increments a shared non-atomic counter and may mutate the source loader's state).
 static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-RdtPicture* rdt_picture_dup(RdtPicture* pic);
-void rdt_picture_free(RdtPicture* pic);
-RdtPath* rdt_path_clone(const RdtPath* src);
-void rdt_path_free(RdtPath* p);
-
-static bool svg_doc_child_is_renderable(const char* tag) {
-    if (!tag || !*tag) return false;
-    if (tag[0] == '?' || tag[0] == '!') return false;
-    if (strcmp(tag, "svg") == 0 || strcmp(tag, "metadata") == 0) return false;
-    return true;
-}
-
-static void repair_split_svg_document(Input* input, Element* document_wrapper, Element* svg_root, int64_t svg_index) {
-    if (!input || !document_wrapper || !svg_root || svg_index < 0) return;
-    bool appended = false;
-    for (int64_t i = svg_index + 1; i < document_wrapper->length; i++) {
-        Item child = document_wrapper->items[i];
-        if (!child.item || get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        Element* ce = (Element*)child.item;
-        TypeElmt* ct = (TypeElmt*)ce->type;
-        if (!ct || !ct->name.str) continue;
-        if (!svg_doc_child_is_renderable(ct->name.str)) continue;
-        array_append((Array*)svg_root, child, input->pool, input->arena);
-        appended = true;
-    }
-    if (appended && svg_root->type) {
-        TypeElmt* svg_type = (TypeElmt*)svg_root->type;
-        svg_type->content_length = ((Array*)svg_root)->length;
-    }
-}
-
 // ============================================================================
 // Helpers
 // ============================================================================

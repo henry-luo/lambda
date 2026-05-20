@@ -28,13 +28,6 @@
  */
 // CollapsedBorder struct is now defined in view.hpp
 
-// Forward declarations for functions from other modules
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-// load_html_doc is declared in view.hpp (via layout.hpp)
-
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }

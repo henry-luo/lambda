@@ -12,8 +12,6 @@
 #include <math.h>
 #include <string.h>
 
-void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
-
 void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 

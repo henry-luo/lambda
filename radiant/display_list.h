@@ -34,13 +34,10 @@ typedef enum {
     DL_DRAW_PICTURE,
     DL_PUSH_CLIP,
     DL_POP_CLIP,
-    DL_SAVE_CLIP_DEPTH,
-    DL_RESTORE_CLIP_DEPTH,
     // direct-pixel operations (bypass ThorVG, operate on surface pixels)
     DL_FILL_SURFACE_RECT,
     DL_BLIT_SURFACE_SCALED,
     // opacity / blend / filter layers (post-processing pixel ops)
-    DL_APPLY_OPACITY,
     DL_COMPOSITE_OPACITY,    // save backdrop + composite at opacity (CSS stacking context)
     DL_SAVE_BACKDROP,        // save surface pixels before blend-mode element renders
     DL_APPLY_BLEND_MODE,
@@ -154,10 +151,6 @@ typedef struct {
 } DlPushClip;
 
 typedef struct {
-    int saved_depth;
-} DlClipDepth;
-
-typedef struct {
     int depth;
     int type[RDT_MAX_CLIP_SHAPES];
     float params[RDT_MAX_CLIP_SHAPES][8];
@@ -184,12 +177,6 @@ typedef struct {
     Bound clip;              // rectangular clip bounds at recording time
     DlClipShapeStack clip_shapes;
 } DlBlitSurfaceScaled;
-
-// Post-processing: multiply alpha of all pixels in region
-typedef struct {
-    int x0, y0, x1, y1;     // physical pixel region (already scaled + clamped)
-    float opacity;
-} DlApplyOpacity;
 
 // CSS opacity stacking context: composite element group over saved backdrop at opacity.
 // Uses DL_SAVE_BACKDROP (pushed earlier) for the backdrop pixels.
@@ -313,10 +300,8 @@ typedef struct DisplayItem {
         DlDrawGlyph          draw_glyph;
         DlDrawPicture        draw_picture;
         DlPushClip           push_clip;
-        DlClipDepth          clip_depth;
         DlFillSurfaceRect    fill_surface_rect;
         DlBlitSurfaceScaled  blit_surface_scaled;
-        DlApplyOpacity       apply_opacity;
         DlCompositeOpacity   composite_opacity;
         DlSaveBackdrop       save_backdrop;
         DlApplyBlendMode     apply_blend_mode;
@@ -403,9 +388,6 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
 void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform);
 void dl_pop_clip(DisplayList* dl);
 
-void dl_save_clip_depth(DisplayList* dl);
-void dl_restore_clip_depth(DisplayList* dl, int saved_depth);
-
 // Direct-pixel operations
 void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           uint32_t color, const Bound* clip,
@@ -419,9 +401,6 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
                             uint64_t src_generation = 0);
 
 // Post-processing operations (coordinates already in physical pixels)
-void dl_apply_opacity(DisplayList* dl, int x0, int y0, int x1, int y1,
-                      float opacity);
-
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
                           float opacity);
 

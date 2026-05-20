@@ -8,6 +8,7 @@
 
 #include "render_svg_inline.hpp"
 #include "render.hpp"
+#include "render_glyph.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
@@ -114,8 +115,6 @@ extern "C" Item pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
 extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
     return pdf_register_svg_image_resolver(svg_item, pdf_item);
 }
-
-extern void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 
 static bool svg_resource_stack_contains(const char* path) {
     if (!path || !*path) return false;
@@ -853,15 +852,6 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     }
 
     return size;
-}
-
-// ============================================================================
-// Check if element is inline SVG
-// ============================================================================
-
-bool is_inline_svg_element(DomElement* elem) {
-    if (!elem) return false;
-    return elem->tag_id == HTM_TAG_SVG;
 }
 
 // ============================================================================
@@ -2229,13 +2219,9 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                                     FontContext* font_ctx = nullptr, int weight = 400,
                                     FontSlant slant = FONT_SLANT_NORMAL,
                                     bool allow_nonunicode_fontface = false) {
-    // default font name
-    const char* used_font_name = font_family;
-
     if (!font_family || !*font_family) {
         // default to a common sans-serif font
         font_family = "Arial";
-        used_font_name = "Arial";
     }
 
     // SVG font-family is a comma-separated list of family names (with optional
@@ -2503,7 +2489,7 @@ static const char* get_direct_text_content(Element* elem) {
 
         if (type == LMD_TYPE_STRING) {
             String* str = child.get_string();
-            if (str && str->chars && str->len > 0) {
+            if (str && str->len > 0) {
                 // skip whitespace-only nodes
                 if (is_whitespace_only(str->chars, str->len)) continue;
                 return trim_whitespace(str->chars, str->len);
@@ -3101,7 +3087,7 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
         if (type == LMD_TYPE_STRING) {
             // direct text node
             String* str = child.get_string();
-            if (str && str->chars && str->len > 0) {
+            if (str && str->len > 0) {
                 if (is_whitespace_only(str->chars, str->len)) {
                     // SVG spec: whitespace between tspans collapses to a single space
                     if (has_tspan) {
@@ -3592,7 +3578,7 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
 
 // Build a composite RdtPath from the children of a <clipPath> element.
 // Returns new path (caller must free), or nullptr if no geometry found.
-static RdtPath* build_clip_path_from_def(SvgRenderContext* ctx, Element* clip_elem) {
+static RdtPath* build_clip_path_from_def(Element* clip_elem) {
     if (!clip_elem || clip_elem->length == 0) return nullptr;
 
     RdtPath* clip_path = rdt_path_new();
@@ -3689,7 +3675,7 @@ static RdtPath* resolve_svg_clip_path(SvgRenderContext* ctx, Element* elem) {
         return nullptr;
     }
 
-    RdtPath* path = build_clip_path_from_def(ctx, clip_elem);
+    RdtPath* path = build_clip_path_from_def(clip_elem);
     if (path) {
         log_debug("[SVG] resolved clip-path='%s'", cp);
     }

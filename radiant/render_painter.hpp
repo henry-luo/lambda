@@ -37,8 +37,6 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
 void rc_pop_clip(RenderContext* rdcon);
-int rc_clip_save_depth(RenderContext* rdcon);
-void rc_clip_restore_depth(RenderContext* rdcon, int saved);
 void render_painter_begin_vector_batch(RenderContext* rdcon);
 void render_painter_flush_vector_batch(RenderContext* rdcon);
 void render_painter_end_vector_batch(RenderContext* rdcon);
@@ -46,11 +44,6 @@ void render_painter_end_vector_batch(RenderContext* rdcon);
 void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,
                           ClipShape** clip_shapes, int clip_depth);
-void rc_blit_surface_scaled(RenderContext* rdcon,
-                            ImageSurface* src, Rect* src_rect,
-                            ImageSurface* dst, Rect* dst_rect, Bound* clip,
-                            ScaleMode scale_mode,
-                            ClipShape** clip_shapes, int clip_depth);
 
 // ---------------------------------------------------------------------------
 // Feature-facing painter helpers

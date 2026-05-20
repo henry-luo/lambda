@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "render_backend.h"
+#include "render_export_support.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "state_store.hpp"
@@ -20,13 +21,6 @@ extern "C" {
 #include <math.h>
 #include <cctype>
 #include <cwctype>
-
-// Forward declarations for functions from other modules
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 
 typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
 extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
@@ -52,19 +46,18 @@ typedef struct {
 } SvgRenderContext;
 
 // Forward declarations
-void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
-void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
-void calculate_content_bounds(View* view, int* max_x, int* max_y);
+static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
+static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
 static RenderBackend svg_make_backend(SvgRenderContext* ctx);
 
 // Helper functions for SVG output
-void svg_indent(SvgRenderContext* ctx) {
+static void svg_indent(SvgRenderContext* ctx) {
     for (int i = 0; i < ctx->indent_level; i++) {
         strbuf_append_str(ctx->svg_content, "  ");
     }
 }
 
-void svg_color_to_string(Color color, char* result) {
+static void svg_color_to_string(Color color, char* result) {
     if (color.a == 0) {
         str_copy(result, 32, "transparent", 11);
     } else if (color.a == 255) {
@@ -74,7 +67,7 @@ void svg_color_to_string(Color color, char* result) {
     }
 }
 
-void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
+static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     // Extract the text content
     unsigned char* str = text->text_data();
@@ -947,7 +940,7 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 }
 
 // Render multi-column rules (vertical lines between columns)
-void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
+static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     if (!block->multicol) return;
 
     MultiColumnProp* mc = block->multicol;
@@ -1876,27 +1869,3 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     ui_context_cleanup(&ui_context);
     return 1;
 }
-
-// ============================================================================
-// Math Rendering Functions for SVG
-// ============================================================================
-
-using namespace radiant;
-
-// Helper to escape XML special characters for SVG text content
-static void escape_xml_text(const char* text, StrBuf* buf) {
-    while (*text) {
-        switch (*text) {
-            case '<': strbuf_append_str(buf, "&lt;"); break;
-            case '>': strbuf_append_str(buf, "&gt;"); break;
-            case '&': strbuf_append_str(buf, "&amp;"); break;
-            default: strbuf_append_char(buf, *text); break;
-        }
-        text++;
-    }
-}
-
-// Math Rendering Functions for SVG
-// ============================================================================
-// NOTE: MathBox rendering has been removed.
-// ============================================================================

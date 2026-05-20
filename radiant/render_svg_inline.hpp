@@ -153,22 +153,12 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
 
 /**
  * Render inline SVG element in document context
- * Called from render_block_view() when element is HTM_TAG_SVG.
- * Note: This function is declared in render.cpp and render_svg_inline.cpp
- * where RenderContext is fully defined.
+ * Called by raster and vector render walkers when element is HTM_TAG_SVG.
  *
  * @param rdcon Render context with canvas, scale, clip, etc.
  * @param view ViewBlock for the SVG element
  */
-// Declared in render_svg_inline.cpp - include render.hpp first if using this
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
-
-/**
- * Check if a DomElement is an SVG element that should be rendered inline
- * @param elem The DomElement to check
- * @return true if this is an <svg> element
- */
-bool is_inline_svg_element(DomElement* elem);
 
 // ============================================================================
 // SVG Parsing Utilities

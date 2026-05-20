@@ -1,4 +1,6 @@
 #include "render.hpp"
+#include "render_form.hpp"
+#include "render_glyph.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
@@ -16,9 +18,6 @@
  * Rendering support for HTML form controls.
  * Provides native-like appearance for form elements.
  */
-
-// External declaration for glyph rendering from render.cpp
-extern void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y);
 
 // Helper to create a Color from RGBA values
 static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
@@ -679,8 +678,60 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
               x, y, w, h, has_css_background);
 }
 
-// Forward declaration for helper function
-static const char* get_option_text_at_index(ViewBlock* select, int index);
+/**
+ * Helper to get option text at index (same logic as event.cpp)
+ */
+static const char* get_option_text_at_index(ViewBlock* select, int index) {
+    if (!select || index < 0) return nullptr;
+
+    int current_idx = 0;
+    DomNode* child = select->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* child_elem = lam::dom_require_element(child);
+            if (child_elem->tag() == HTM_TAG_OPTION) {
+                if (current_idx == index) {
+                    // Find first text node child
+                    DomNode* text_child = child_elem->first_child;
+                    while (text_child) {
+                        if (text_child->is_text()) {
+                            DomText* text = lam::dom_require_text(text_child);
+                            return text->text;
+                        }
+                        text_child = text_child->next_sibling;
+                    }
+                    return nullptr;
+                }
+                current_idx++;
+            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                // Check options inside optgroup
+                DomNode* opt_child = child_elem->first_child;
+                while (opt_child) {
+                    if (opt_child->is_element()) {
+                        DomElement* opt_elem = lam::dom_require_element(opt_child);
+                        if (opt_elem->tag() == HTM_TAG_OPTION) {
+                            if (current_idx == index) {
+                                DomNode* text_child = opt_elem->first_child;
+                                while (text_child) {
+                                    if (text_child->is_text()) {
+                                        DomText* text = lam::dom_require_text(text_child);
+                                        return text->text;
+                                    }
+                                    text_child = text_child->next_sibling;
+                                }
+                                return nullptr;
+                            }
+                            current_idx++;
+                        }
+                    }
+                    opt_child = opt_child->next_sibling;
+                }
+            }
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
 
 /**
  * Render a select dropdown (closed state).
@@ -800,61 +851,6 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     }
 
     log_debug("[FORM] render_select at (%.1f, %.1f) size %.1fx%.1f selected=%d", x, y, w, h, selected_index);
-}
-
-/**
- * Helper to get option text at index (same logic as event.cpp)
- */
-static const char* get_option_text_at_index(ViewBlock* select, int index) {
-    if (!select || index < 0) return nullptr;
-
-    int current_idx = 0;
-    DomNode* child = select->first_child;
-    while (child) {
-        if (child->is_element()) {
-            DomElement* child_elem = lam::dom_require_element(child);
-            if (child_elem->tag() == HTM_TAG_OPTION) {
-                if (current_idx == index) {
-                    // Find first text node child
-                    DomNode* text_child = child_elem->first_child;
-                    while (text_child) {
-                        if (text_child->is_text()) {
-                            DomText* text = lam::dom_require_text(text_child);
-                            return text->text;
-                        }
-                        text_child = text_child->next_sibling;
-                    }
-                    return nullptr;
-                }
-                current_idx++;
-            } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
-                // Check options inside optgroup
-                DomNode* opt_child = child_elem->first_child;
-                while (opt_child) {
-                    if (opt_child->is_element()) {
-                        DomElement* opt_elem = lam::dom_require_element(opt_child);
-                        if (opt_elem->tag() == HTM_TAG_OPTION) {
-                            if (current_idx == index) {
-                                DomNode* text_child = opt_elem->first_child;
-                                while (text_child) {
-                                    if (text_child->is_text()) {
-                                        DomText* text = lam::dom_require_text(text_child);
-                                        return text->text;
-                                    }
-                                    text_child = text_child->next_sibling;
-                                }
-                                return nullptr;
-                            }
-                            current_idx++;
-                        }
-                    }
-                    opt_child = opt_child->next_sibling;
-                }
-            }
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
 }
 
 /**
@@ -1014,28 +1010,6 @@ static int textarea_line_start(const char* text, int line) {
     }
     // past last line — return end of string
     return i;
-}
-
-/**
- * Find the length (in bytes) of a given line, not including the trailing '\n'.
- */
-static int textarea_line_len(const char* text, int line_start_off) {
-    if (!text) return 0;
-    int i = 0;
-    while (text[line_start_off + i] && text[line_start_off + i] != '\n') i++;
-    return i;
-}
-
-/**
- * Count total lines in text (number of '\n' + 1).
- */
-static int textarea_line_count(const char* text) {
-    if (!text || !*text) return 1;
-    int count = 1;
-    for (const char* p = text; *p; p++) {
-        if (*p == '\n') count++;
-    }
-    return count;
 }
 
 /**

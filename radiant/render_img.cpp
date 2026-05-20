@@ -1,5 +1,7 @@
 #include "render.hpp"
+#include "render_export_support.hpp"
 #include "render_output.hpp"
+#include "render_svg.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -11,6 +13,7 @@ extern "C" {
 #include "../lib/log.h"
 }
 #include "../lambda/input/input.hpp"
+#include "../lambda/js/js_runtime.h"
 #include "../radiant/script_runner.h"
 #include <stdio.h>
 #include <string.h>
@@ -42,14 +45,6 @@ static inline int getrusage(int who, struct rusage* r) {
 #else
 #define RUSAGE_MAXRSS_TO_BYTES(v) ((size_t)(v) * 1024)
 #endif
-
-// Forward declarations for functions from other modules
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void view_pool_destroy(ViewTree* tree);
-// load_html_doc is declared in view.hpp
 
 // Save surface to PNG using libpng
 void save_surface_to_png(ImageSurface* surface, const char* filename) {
@@ -280,7 +275,6 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     bool rendered = false;  // set to true when tiled path handles rendering
 
     if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
-        extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
         int content_max_x = 0, content_max_y = 0;
         calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
         // Add padding to ensure nothing is cut off
@@ -493,15 +487,11 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     int content_max_x = uicon->viewport_width;
     int content_max_y = uicon->viewport_height;
 
-    extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
     calculate_content_bounds(uicon->document->view_tree->root, &content_max_x, &content_max_y);
     content_max_x += 50;
     content_max_y += 50;
 
     // Render to SVG (now includes caret if present)
-    extern char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, DocState* state);
-    extern bool save_svg_to_file(const char* svg_content, const char* filename);
-
     char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
                                                 uicon->document->state);
@@ -532,14 +522,6 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 // Writes results to stdout (one per line):
 //   OK\t<html_file>
 //   FAIL\t<html_file>\t<reason>
-
-// JS runtime batch reset functions
-extern "C" void js_batch_reset(void);
-extern "C" void js_dom_batch_reset(void);
-extern "C" void js_globals_batch_reset(void);
-extern "C" void script_runner_cleanup_heap(void);
-extern void script_runner_cleanup_js_state(DomDocument* doc);
-extern void image_cache_cleanup(UiContext* uicon);
 
 static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     if (doc) {
@@ -617,7 +599,6 @@ static bool render_batch_single(
     bool auto_width = (viewport_width == 0);
     bool auto_height = (viewport_height == 0);
     if ((auto_width || auto_height) && doc->view_tree && doc->view_tree->root) {
-        extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
         int content_max_x = 0, content_max_y = 0;
         calculate_content_bounds(doc->view_tree->root, &content_max_x, &content_max_y);
         content_max_x += 50;

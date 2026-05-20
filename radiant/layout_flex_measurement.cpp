@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
+#include "layout_text.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_box.hpp"
 #include "layout_measure.hpp"
@@ -13,9 +14,6 @@
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
-
-// Forward declaration for get_white_space_value from layout_text.cpp
-CssEnum get_white_space_value(DomNode* node);
 
 // Helper: Check if whitespace should be collapsed according to white-space property
 // Returns true for: normal, nowrap, pre-line

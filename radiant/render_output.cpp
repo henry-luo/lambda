@@ -6,6 +6,8 @@
 #include "render_overlay.hpp"
 #include "render_profiler.hpp"
 #include "render_raster.hpp"
+#include "render_svg.hpp"
+#include "render_video.hpp"
 #include "retained_display_list.hpp"
 #include "state_store.hpp"
 #include "tile_pool.h"
@@ -21,7 +23,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
                        float scale, float pixel_ratio);
@@ -30,9 +31,6 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
                         float scale, float pixel_ratio);
 int render_html_to_pdf(const char* html_file, const char* pdf_file,
                        int viewport_width, int viewport_height, float scale);
-int render_html_to_svg(const char* html_file, const char* svg_file,
-                       int viewport_width, int viewport_height, float scale);
-
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
 static int g_render_pool_threads = 0;

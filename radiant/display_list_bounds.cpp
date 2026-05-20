@@ -16,8 +16,6 @@ static bool dl_item_preserves_replay_state(const DisplayItem* item) {
     switch (item->op) {
         case DL_PUSH_CLIP:
         case DL_POP_CLIP:
-        case DL_SAVE_CLIP_DEPTH:
-        case DL_RESTORE_CLIP_DEPTH:
         case DL_SAVE_BACKDROP:
         case DL_APPLY_BLEND_MODE:
         case DL_COMPOSITE_OPACITY:

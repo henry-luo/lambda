@@ -137,8 +137,27 @@ static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
  * Render each border side independently using trapezoid fills.
  */
 
-// Forward declaration (defined later in file)
-static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap);
+/**
+ * Get dash pattern for dotted/dashed borders. Returns dash count (0 if none).
+ * Caller provides a float[2] array. Also sets the cap style.
+ */
+static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap) {
+    if (style == CSS_VALUE_DOTTED) {
+        // Zero-length dash with round cap produces a circle of diameter = stroke_width.
+        // Gap = 2*width so visual gap (gap - width due to caps) = width.
+        out_dash[0] = 0;
+        out_dash[1] = width * 2;
+        *out_cap = RDT_CAP_ROUND;
+        return 2;
+    } else if (style == CSS_VALUE_DASHED) {
+        out_dash[0] = width * 2;
+        out_dash[1] = width;
+        *out_cap = RDT_CAP_BUTT;
+        return 2;
+    }
+    *out_cap = RDT_CAP_BUTT;
+    return 0;
+}
 
 static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp* border) {
     float x = rect.x, y = rect.y, W = rect.width, H = rect.height;
@@ -583,28 +602,6 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         };
         render_painter_fill_surface_rect(rdcon, surface, &border_rect, border->bottom_color.c, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
     }
-}
-
-/**
- * Get dash pattern for dotted/dashed borders. Returns dash count (0 if none).
- * Caller provides a float[2] array. Also sets the cap style.
- */
-static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStrokeCap* out_cap) {
-    if (style == CSS_VALUE_DOTTED) {
-        // Zero-length dash with round cap produces a circle of diameter = stroke_width.
-        // Gap = 2*width so visual gap (gap - width due to caps) = width.
-        out_dash[0] = 0;
-        out_dash[1] = width * 2;
-        *out_cap = RDT_CAP_ROUND;
-        return 2;
-    } else if (style == CSS_VALUE_DASHED) {
-        out_dash[0] = width * 2;
-        out_dash[1] = width;
-        *out_cap = RDT_CAP_BUTT;
-        return 2;
-    }
-    *out_cap = RDT_CAP_BUTT;
-    return 0;
 }
 
 /**

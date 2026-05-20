@@ -61,19 +61,6 @@ static void dl_copy_effect_params(float* dst, int type, const float* params) {
 // Recording: post-processing operations
 // ---------------------------------------------------------------------------
 
-void dl_apply_opacity(DisplayList* dl, int x0, int y0, int x1, int y1,
-                      float opacity) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_APPLY_OPACITY;
-    item->bounds[0] = (float)x0; item->bounds[1] = (float)y0;
-    item->bounds[2] = (float)(x1 - x0); item->bounds[3] = (float)(y1 - y0);
-    item->apply_opacity.x0 = x0;
-    item->apply_opacity.y0 = y0;
-    item->apply_opacity.x1 = x1;
-    item->apply_opacity.y1 = y1;
-    item->apply_opacity.opacity = opacity;
-}
-
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
                           float opacity) {
     DisplayItem* item = dl_alloc_item(dl);

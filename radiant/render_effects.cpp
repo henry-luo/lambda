@@ -16,9 +16,9 @@ static RenderEffectBackdrop render_effect_empty_backdrop(RenderContext* rdcon) {
     return backdrop;
 }
 
-RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
-                                                  float x0, float y0,
-                                                  float x1, float y1) {
+static RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
+                                                         float x0, float y0,
+                                                         float x1, float y1) {
     RenderEffectBackdrop backdrop = render_effect_empty_backdrop(rdcon);
     if (!rdcon || !rdcon->ui_context) {
         return backdrop;
@@ -69,11 +69,11 @@ RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
     return backdrop;
 }
 
-bool render_effect_backdrop_active(const RenderEffectBackdrop* backdrop) {
+static bool render_effect_backdrop_active(const RenderEffectBackdrop* backdrop) {
     return backdrop && backdrop->active && backdrop->width > 0 && backdrop->height > 0;
 }
 
-void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* backdrop) {
+static void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* backdrop) {
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
@@ -92,8 +92,8 @@ void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* backdrop) {
     backdrop->active = false;
 }
 
-void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop,
-                                           float opacity) {
+static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop,
+                                                  float opacity) {
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
@@ -112,8 +112,8 @@ void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop,
     backdrop->active = false;
 }
 
-void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
-                                         CssEnum blend_mode) {
+static void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
+                                                CssEnum blend_mode) {
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
@@ -248,13 +248,13 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     return group;
 }
 
-bool render_effect_group_has_filter_rect(const RenderEffectGroup* group) {
+static bool render_effect_group_has_filter_rect(const RenderEffectGroup* group) {
     return group && group->has_filter;
 }
 
-bool render_effect_group_apply_filter(RenderEffectGroup* group,
-                                      ViewBlock* block,
-                                      Bound* clip) {
+static bool render_effect_group_apply_filter(RenderEffectGroup* group,
+                                             ViewBlock* block,
+                                             Bound* clip) {
     if (!group || !group->has_filter || !group->context || !block || !block->filter) {
         return false;
     }
@@ -278,8 +278,8 @@ bool render_effect_group_apply_filter(RenderEffectGroup* group,
     return true;
 }
 
-bool render_effect_group_finish_filter_backdrop(RenderEffectGroup* group,
-                                                ViewBlock* block) {
+static bool render_effect_group_finish_filter_backdrop(RenderEffectGroup* group,
+                                                       ViewBlock* block) {
     (void)block;
     if (!group || !group->has_filter_backdrop ||
         !render_effect_backdrop_active(&group->filter_backdrop)) {
@@ -296,8 +296,8 @@ bool render_effect_group_finish_filter_backdrop(RenderEffectGroup* group,
     return true;
 }
 
-bool render_effect_group_finish_opacity(RenderEffectGroup* group,
-                                        ViewBlock* block) {
+static bool render_effect_group_finish_opacity(RenderEffectGroup* group,
+                                               ViewBlock* block) {
     if (!group || !group->has_opacity_group ||
         !render_effect_backdrop_active(&group->opacity_backdrop)) {
         return false;
@@ -316,8 +316,8 @@ bool render_effect_group_finish_opacity(RenderEffectGroup* group,
     return true;
 }
 
-bool render_effect_group_finish_blend(RenderEffectGroup* group,
-                                      ViewBlock* block) {
+static bool render_effect_group_finish_blend(RenderEffectGroup* group,
+                                             ViewBlock* block) {
     if (!group || !group->mix_blend_mode ||
         !render_effect_backdrop_active(&group->mix_blend_backdrop)) {
         return false;

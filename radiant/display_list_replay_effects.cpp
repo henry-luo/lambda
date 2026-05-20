@@ -12,21 +12,6 @@ static int dl_replay_effect_min_i(int a, int b) {
     return a < b ? a : b;
 }
 
-void dl_replay_apply_opacity(ImageSurface* surface, const DlApplyOpacity* opacity) {
-    if (!surface || !surface->pixels || !opacity) return;
-    int x0 = dl_replay_effect_max_i(0, opacity->x0);
-    int y0 = dl_replay_effect_max_i(0, opacity->y0);
-    int x1 = dl_replay_effect_min_i(surface->width, opacity->x1);
-    int y1 = dl_replay_effect_min_i(surface->height, opacity->y1);
-    for (int y = y0; y < y1; y++) {
-        uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
-        for (int x = x0; x < x1; x++) {
-            uint8_t* pixel = row + x * 4;
-            pixel[3] = (uint8_t)(pixel[3] * opacity->opacity + 0.5f);
-        }
-    }
-}
-
 void dl_replay_apply_filter(ScratchArena* scratch,
                             ImageSurface* surface,
                             const RenderBackendCaps* caps,

@@ -4,14 +4,13 @@
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
 #include "form_control.hpp"
+#include "render_form.hpp"
 #include "source_pos_bridge.hpp"
 #include "state_store.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include <math.h>
-
-void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state);
 
 typedef struct SelectionPaintCtx {
     RenderContext* rdcon;

@@ -1,4 +1,5 @@
 #include "layout_table.hpp"
+#include "layout_text.hpp"
 #include "layout.hpp"
 #include "intrinsic_sizing.hpp"
 #include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
@@ -4627,9 +4628,6 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     lycon->font = saved_font;
     lycon->view = saved_view;
 }
-
-// Forward declaration from layout_text.cpp
-extern CssEnum get_white_space_value(DomNode* node);
 
 // Helper: Check if whitespace should be collapsed for this element
 // CSS white-space: normal, nowrap -> collapse whitespace
