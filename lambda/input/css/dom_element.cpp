@@ -4,6 +4,7 @@
 #include "css_style_node.hpp"
 #include "css_parser.hpp"
 #include "../../../lib/hashmap.h"
+#include "../../../lib/hashmap_helpers.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
@@ -2704,22 +2705,10 @@ typedef struct ElementDomMapEntry {
     Element* element;       // key: Lambda Element pointer
     DomElement* dom_elem;   // value: corresponding DomElement
 } ElementDomMapEntry;
-
-static uint64_t element_dom_map_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ElementDomMapEntry* entry = (const ElementDomMapEntry*)item;
-    return hashmap_sip(&entry->element, sizeof(Element*), seed0, seed1);
-}
-
-static int element_dom_map_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const ElementDomMapEntry* ea = (const ElementDomMapEntry*)a;
-    const ElementDomMapEntry* eb = (const ElementDomMapEntry*)b;
-    return ea->element == eb->element ? 0 : (ea->element < eb->element ? -1 : 1);
-}
+HASHMAP_DEFINE_PTRKEY(element_dom_map, ElementDomMapEntry, element)
 
 HashMap* element_dom_map_create(void) {
-    return hashmap_new(sizeof(ElementDomMapEntry), 64, 0, 0,
-                       element_dom_map_hash, element_dom_map_compare, NULL, NULL);
+    return element_dom_map_new(64);
 }
 
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem) {

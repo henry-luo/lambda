@@ -413,6 +413,7 @@
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
+                "lib/lru_cache.c",
                 "lib/file.c",
                 "lib/log.c",
                 "lib/memtrack.c",
@@ -1498,7 +1499,7 @@
                         "icon": "🔍"
                     },
                     {
-                        "source": "test_str_gtest.cpp",
+                        "source": "lib/test_str_gtest.cpp",
                         "name": "Str Library Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1511,7 +1512,7 @@
                         "icon": "📐"
                     },
                     {
-                        "source": "test_strbuf_gtest.cpp",
+                        "source": "lib/test_strbuf_gtest.cpp",
                         "name": "String Buffer Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1538,7 +1539,7 @@
                         "icon": "\u267b\ufe0f"
                     },
                     {
-                        "source": "test_stringbuf_gtest.cpp",
+                        "source": "lib/test_stringbuf_gtest.cpp",
                         "name": "StringBuf Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1552,7 +1553,7 @@
                         "icon": "🧵"
                     },
                     {
-                        "source": "test_strview_gtest.cpp",
+                        "source": "lib/test_strview_gtest.cpp",
                         "name": "String View Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1566,7 +1567,7 @@
                         "icon": "👀"
                     },
                     {
-                        "source": "test_num_stack_gtest.cpp",
+                        "source": "lib/test_num_stack_gtest.cpp",
                         "name": "Number Stack Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1580,7 +1581,7 @@
                         "icon": "🔢"
                     },
                     {
-                        "source": "test_datetime_gtest.cpp",
+                        "source": "lib/test_datetime_gtest.cpp",
                         "name": "DateTime Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1592,6 +1593,122 @@
                         ],
                         "binary": "test_datetime_gtest.exe",
                         "icon": "📅"
+                    },
+                    {
+                        "source": "lib/test_lru_cache_gtest.cpp",
+                        "name": "LRU Cache Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/lru_cache.c",
+                            "lib/hashmap.c",
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
+                        "binary": "test_lru_cache_gtest.exe",
+                        "icon": "🗃️"
+                    },
+                    {
+                        "source": "lib/test_binsearch_gtest.cpp",
+                        "name": "Binary Search Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_binsearch_gtest.exe",
+                        "icon": "🔍"
+                    },
+                    {
+                        "source": "lib/test_hash_gtest.cpp",
+                        "name": "Hash Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_hash_gtest.exe",
+                        "icon": "#️⃣"
+                    },
+                    {
+                        "source": "lib/test_hashmap_helpers_gtest.cpp",
+                        "name": "Hashmap Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/hashmap_helpers.c",
+                            "lib/hashmap.c"
+                        ],
+                        "binary": "test_hashmap_helpers_gtest.exe",
+                        "icon": "🗂️"
+                    },
+                    {
+                        "source": "lib/test_thread_pool_gtest.cpp",
+                        "name": "Thread Pool Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/thread_pool.c",
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
+                        "binary": "test_thread_pool_gtest.exe",
+                        "icon": "🧵"
+                    },
+                    {
+                        "source": "lib/test_math_utils_gtest.cpp",
+                        "name": "Math Utils Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_math_utils_gtest.exe",
+                        "icon": "➗"
+                    },
+                    {
+                        "source": "lib/test_sort_gtest.cpp",
+                        "name": "Sort Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_sort_gtest.exe",
+                        "icon": "📊"
+                    },
+                    {
+                        "source": "lib/test_arraylist_gtest.cpp",
+                        "name": "ArrayList Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/arraylist.c"
+                        ],
+                        "binary": "test_arraylist_gtest.exe",
+                        "icon": "📦"
                     },
                     {
                         "source": "test_font_config_gtest.cpp",
@@ -1657,7 +1774,7 @@
                         "icon": "🧱"
                     },
                     {
-                        "source": "test_url_gtest.cpp",
+                        "source": "lib/test_url_gtest.cpp",
                         "name": "URL Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1671,7 +1788,7 @@
                         "icon": "🔗"
                     },
                     {
-                        "source": "test_url_extra_gtest.cpp",
+                        "source": "lib/test_url_extra_gtest.cpp",
                         "name": "URL Extra Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -1701,7 +1818,7 @@
                         "icon": "⌨️"
                     },
                     {
-                        "source": "test_mempool_gtest.cpp",
+                        "source": "lib/test_mempool_gtest.cpp",
                         "name": "Unified Memory Pool Tests",
                         "disable_sanitizer": true,
                         "dependencies": [],
@@ -1791,7 +1908,7 @@
                         "icon": "📦"
                     },
                     {
-                        "source": "test_avl_tree.cpp",
+                        "source": "lib/test_avl_tree.cpp",
                         "name": "AVL Tree Implementation Tests",
                         "dependencies": [],
                         "libraries": [
@@ -1810,7 +1927,7 @@
                         "icon": "🌲"
                     },
                     {
-                        "source": "test_arena_gtest.cpp",
+                        "source": "lib/test_arena_gtest.cpp",
                         "name": " Arena Allocator Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1880,6 +1997,7 @@
                             "radiant/display_list_record_vector.cpp",
                             "radiant/display_list_record_effects.cpp",
                             "radiant/display_list_record_raster.cpp",
+                            "radiant/display_list_replay_glyph.cpp",
                             "radiant/display_list_replay_state.cpp",
                             "test/test_display_list_stubs.cpp"
                         ],
@@ -1915,7 +2033,7 @@
                         "icon": "🐚"
                     },
                     {
-                        "source": "test_file_module_gtest.cpp",
+                        "source": "lib/test_file_module_gtest.cpp",
                         "name": "File Module Tests",
                         "dependencies": [
                             "lambda-lib"
@@ -3532,6 +3650,18 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_radiant_view_gtest.cpp",
+                        "name": "Radiant View Tests",
+                        "dependencies": [],
+                        "binary": "test_radiant_view_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🖼️"
                     },
                     {
                         "source": "test/test_fuzzy_crash_gtest.cpp",

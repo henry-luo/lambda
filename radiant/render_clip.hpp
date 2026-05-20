@@ -6,6 +6,7 @@
 
 struct RenderContext;
 struct ViewBlock;
+typedef struct Bound Bound;
 
 typedef struct RenderClipScope {
     ClipShape* shape;
@@ -25,5 +26,6 @@ ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
 void render_clip_free_shape(ScratchArena* scratch, ClipShape* shape);
 RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale);
+RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* clip);
 RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon);
 void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);

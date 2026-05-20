@@ -634,18 +634,33 @@ void image_surface_destroy(ImageSurface* img_surface) {
     }
 }
 
+static bool image_surface_can_promote_decode(ImageSurface* img, int target_w, int target_h) {
+    if (!img || !img->pixels) return true;
+    if (img->format != IMAGE_FORMAT_PNG && img->format != IMAGE_FORMAT_JPEG) return false;
+    if (!img->source_path && !img->source_data) return false;
+    int decoded_w = img->decoded_width > 0 ? img->decoded_width : img->width;
+    int decoded_h = img->decoded_height > 0 ? img->decoded_height : img->height;
+    if (target_w <= 0) target_w = decoded_w;
+    if (target_h <= 0) target_h = decoded_h;
+    return target_w > decoded_w || target_h > decoded_h;
+}
+
 void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h) {
-    if (!img || img->pixels) return;  // already decoded or null
+    if (!img) return;
 
     // Clamp targets to a sensible minimum to avoid degenerate 0-pixel decodes.
     if (target_w < 0) target_w = 0;
     if (target_h < 0) target_h = 0;
+    if (!image_surface_can_promote_decode(img, target_w, target_h)) return;
 
     if (img->source_path) {
         // decode from local file
         int width, height, channels;
         unsigned char* data = image_load_scaled(img->source_path, target_w, target_h, &width, &height, &channels);
         if (data) {
+            if (img->pixels) {
+                mem_free(img->pixels);
+            }
             img->pixels = data;
             // record actual decoded buffer dims; intrinsic width/height stay unchanged for layout.
             img->decoded_width = width;
@@ -657,14 +672,15 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
         } else {
             log_error("[image] Failed to decode local image: %s", img->source_path);
         }
-        mem_free(img->source_path);
-        radiant_clear_image_source_path(img);
     } else if (img->source_data) {
         // decode from memory buffer
         int width, height, channels;
         unsigned char* data = image_load_from_memory_scaled(img->source_data, img->source_data_len,
                                                             target_w, target_h, &width, &height, &channels);
         if (data) {
+            if (img->pixels) {
+                mem_free(img->pixels);
+            }
             img->pixels = data;
             img->decoded_width = width;
             img->decoded_height = height;
@@ -675,7 +691,9 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
         } else {
             log_error("[image] Failed to decode HTTP image from memory");
         }
-        mem_free(img->source_data);
-        radiant_clear_image_source_data(img);
+        if (img->decoded_width >= img->width && img->decoded_height >= img->height) {
+            mem_free(img->source_data);
+            radiant_clear_image_source_data(img);
+        }
     }
 }

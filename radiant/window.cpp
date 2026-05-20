@@ -64,6 +64,8 @@ void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
+                                           int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
@@ -601,6 +603,15 @@ void repaint_window() {
         return;
     }
 
+    int framebuffer_width = 0;
+    int framebuffer_height = 0;
+    if (ui_context.window) {
+        glfwGetFramebufferSize(ui_context.window, &framebuffer_width, &framebuffer_height);
+    }
+    bool exact_framebuffer_present =
+        framebuffer_width == ui_context.surface->width &&
+        framebuffer_height == ui_context.surface->height;
+
     // generate a texture from the bitmap
     log_debug("creating rendering texture");
     GLuint texture;
@@ -610,8 +621,9 @@ void repaint_window() {
         GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, ui_context.surface->pixels);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    GLint present_filter = exact_framebuffer_present ? GL_NEAREST : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, present_filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, present_filter);
 
     // render the texture as a quad
     log_debug("rendering texture");
@@ -851,12 +863,14 @@ int run_layout(const char* html_file) {
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
 // headless: if true, run without creating a window (for CI/automated testing)
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
-                                    const char** font_dirs, int font_dir_count,
-                                    bool enable_event_log) {
+static int view_doc_in_window_with_events_internal(const char* doc_file, const char* doc_source,
+                                                   const char* event_file, bool headless,
+                                                   const char** font_dirs, int font_dir_count,
+                                                   bool enable_event_log) {
     log_init_wrapper();
-    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
-             doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
+    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
+             doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
+             event_file ? event_file : "NULL", headless);
     ui_context_init(&ui_context, headless);
     ui_context.event_log_enabled = enable_event_log;
 
@@ -966,10 +980,24 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
         script_runner_set_retain_js_state(needs_interactive_js);
         script_runner_set_execute_external_scripts(needs_interactive_js);
 
-        // Load document based on file extension
+        // Load document based on file extension, or evaluate an in-memory
+        // Lambda document script supplied by a caller such as PDF view.
         log_notice("view: loading document...");
         log_mem_stage("before-load");
-        DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
+        DomDocument* doc = nullptr;
+        if (doc_source) {
+            Url* script_url = url_parse_with_base(file_to_load, cwd);
+            if (!script_url) {
+                log_error("Failed to parse in-memory script URL: %s", file_to_load);
+                pool_destroy(pool);
+                url_destroy(cwd);
+                ui_context_cleanup(&ui_context);
+                return -1;
+            }
+            doc = load_lambda_script_source_doc(script_url, doc_source, css_width, css_height, pool);
+        } else {
+            doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
+        }
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
@@ -1294,6 +1322,21 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 
     // Return non-zero if simulation had failures
     return sim_fail_count > 0 ? 1 : 0;
+}
+
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
+                                    const char** font_dirs, int font_dir_count,
+                                    bool enable_event_log) {
+    return view_doc_in_window_with_events_internal(doc_file, nullptr, event_file, headless,
+                                                   font_dirs, font_dir_count, enable_event_log);
+}
+
+int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
+                                                    const char* event_file, bool headless,
+                                                    const char** font_dirs, int font_dir_count,
+                                                    bool enable_event_log) {
+    return view_doc_in_window_with_events_internal(script_name, script_source, event_file, headless,
+                                                   font_dirs, font_dir_count, enable_event_log);
 }
 
 // Wrapper for backward compatibility

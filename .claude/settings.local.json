@@ -8,7 +8,8 @@
       "Bash(npx tree-sitter-cli@0.24.7 generate)",
       "Bash(npx tree-sitter-cli@0.24.7 parse /tmp/test_for.ls)",
       "Bash(echo \"view {name: string, age: int} { <span; ~.name> }\")",
-      "Bash(make)"
+      "Bash(make)",
+      "Bash(make build *)"
     ]
   }
 }

@@ -9,6 +9,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "../lib/strview.h"
 #include "../lib/arraylist.h"
 #include <errno.h>
 #include <algorithm>  // for std::max
@@ -1394,7 +1395,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                     snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                         (int)module_name.length, module_name.str,
                         (int)method_name.length, method_name.str);
-                    StrView qview = {qbuf, strlen(qbuf)};
+                    StrView qview = strview_from_cstr(qbuf);
                     NameEntry* qualified = lookup_name(tp, qview);
                     if (qualified == NULL) {
                         is_builtin_module_call = true;
@@ -1415,7 +1416,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 snprintf(qbuf, sizeof(qbuf), "%.*s.%.*s",
                     (int)module_name.length, module_name.str,
                     (int)method_name.length, method_name.str);
-                StrView qview = {qbuf, strlen(qbuf)};
+                StrView qview = strview_from_cstr(qbuf);
                 NameEntry* qualified = lookup_name(tp, qview);
                 if (qualified == NULL) {
                     is_builtin_module_call = true;
@@ -1439,7 +1440,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             snprintf(qualified_buf, sizeof(qualified_buf), "%.*s.%.*s",
                 (int)module_name.length, module_name.str,
                 (int)method_name.length, method_name.str);
-            StrView qualified_view = {qualified_buf, strlen(qualified_buf)};
+            StrView qualified_view = strview_from_cstr(qualified_buf);
             NameEntry* qualified_entry = lookup_name(tp, qualified_view);
             if (qualified_entry && qualified_entry->import) {
                 // resolved as an aliased import function call
@@ -1497,7 +1498,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         snprintf(full_name, sizeof(full_name), "%s_%.*s",
             resolved_module,
             (int)method_name.length, method_name.str);
-        StrView full_name_view = {full_name, strlen(full_name)};
+        StrView full_name_view = strview_from_cstr(full_name);
         sys_func_info = get_sys_func_info(&full_name_view, arg_count);
         if (sys_func_info) {
             log_debug("builtin module call resolved to sys func: %s", sys_func_info->name);
@@ -1586,7 +1587,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 char prefixed[128];
                 snprintf(prefixed, sizeof(prefixed), "%s_%.*s",
                     modules[mi], (int)func_name.length, func_name.str);
-                StrView prefixed_view = {prefixed, strlen(prefixed)};
+                StrView prefixed_view = strview_from_cstr(prefixed);
                 sys_func_info = get_sys_func_info(&prefixed_view, lookup_arg_count);
                 if (sys_func_info) {
                     log_debug("global import resolved: %.*s -> %s",

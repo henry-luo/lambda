@@ -1,0 +1,10 @@
+{
+  "name": "Radiant view iframe markdown navigation",
+  "html": "test/html/index.html",
+  "steps": [
+    { "type": "click", "target": { "selector": "a[href=\"../input/comprehensive_test.md\"]" } },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_text", "target": { "selector": "h2" }, "contains": "Multi-Paragraph List Items", "assert_timeout": 2000 },
+    { "type": "assert_count", "target": { "selector": "li" }, "min": 4 }
+  ]
+}

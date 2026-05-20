@@ -4,7 +4,20 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/sort.h"
 #include <cmath>
+
+static int cmp_double_asc(const void* a, const void* b, void* udata) {
+    (void)udata;
+    double da = *(const double*)a, db = *(const double*)b;
+    return (da > db) - (da < db);
+}
+
+static int cmp_int64_asc(const void* a, const void* b, void* udata) {
+    (void)udata;
+    int64_t va = *(const int64_t*)a, vb = *(const int64_t*)b;
+    return (va > vb) - (va < vb);
+}
 
 extern __thread EvalContext* context;
 
@@ -990,16 +1003,7 @@ Item fn_math_median(Item item) {
         sorted->float_items[i] = val;
     }
 
-    // Simple bubble sort (can optimize later)
-    for (int64_t i = 0; i < len - 1; i++) {
-        for (int64_t j = 0; j < len - i - 1; j++) {
-            if (sorted->float_items[j] > sorted->float_items[j + 1]) {
-                double tmp = sorted->float_items[j];
-                sorted->float_items[j] = sorted->float_items[j + 1];
-                sorted->float_items[j + 1] = tmp;
-            }
-        }
-    }
+    insertion_sort(sorted->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
 
     if (len % 2 == 1) {
         return push_d(sorted->float_items[len / 2]);
@@ -1694,29 +1698,12 @@ Item fn_sort1(Item item) {
         if (arr->get_elem_type() == ELEM_FLOAT) {
             ArrayNum* result = array_float_new(len);
             for (int64_t i = 0; i < len; i++) result->float_items[i] = arr->float_items[i];
-            for (int64_t i = 0; i < len - 1; i++) {
-                for (int64_t j = 0; j < len - i - 1; j++) {
-                    if (result->float_items[j] > result->float_items[j + 1]) {
-                        double tmp = result->float_items[j];
-                        result->float_items[j] = result->float_items[j + 1];
-                        result->float_items[j + 1] = tmp;
-                    }
-                }
-            }
+            insertion_sort(result->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
             return { .array_num = result };
         } else {
             ArrayNum* result = array_int64_new(len);
             for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-            // Simple bubble sort
-            for (int64_t i = 0; i < len - 1; i++) {
-                for (int64_t j = 0; j < len - i - 1; j++) {
-                    if (result->items[j] > result->items[j + 1]) {
-                        int64_t tmp = result->items[j];
-                        result->items[j] = result->items[j + 1];
-                        result->items[j + 1] = tmp;
-                    }
-                }
-            }
+            insertion_sort(result->items, (size_t)len, sizeof(int64_t), cmp_int64_asc, NULL);
             return { .array_num = result };
         }
     }
@@ -1726,15 +1713,7 @@ Item fn_sort1(Item item) {
         for (int64_t i = 0; i < len; i++) {
             result->float_items[i] = item_to_double(vector_get(item, i));
         }
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                if (result->float_items[j] > result->float_items[j + 1]) {
-                    double tmp = result->float_items[j];
-                    result->float_items[j] = result->float_items[j + 1];
-                    result->float_items[j + 1] = tmp;
-                }
-            }
-        }
+        insertion_sort(result->float_items, (size_t)len, sizeof(double), cmp_double_asc, NULL);
         return { .array_num = result };
     }
 }

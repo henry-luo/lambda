@@ -1,9 +1,18 @@
 // strview.c — string view implementation (delegates to str.h)
 #include "strview.h"
 #include "memtrack.h"
+#include "mempool.h"
+#include "hashmap.h"
 #include "str.h"
 #include <string.h>
 #include <stdlib.h>
+
+StrView strview_from_cstr(const char* str) {
+    StrView sv;
+    if (str) { sv.str = str; sv.length = strlen(str); }
+    else     { sv.str = "";  sv.length = 0; }
+    return sv;
+}
 
 char strview_get(const StrView* s, size_t index) {
     if (!s || index >= s->length) return '\0';
@@ -64,4 +73,41 @@ char* strview_to_cstr(const StrView* s) {
         return empty;
     }
     return str_dup(s->str, s->length);
+}
+
+bool strview_contains(const StrView* s, const char* substr) {
+    if (!s || !substr) return false;
+    if (!*substr) return true;
+    size_t needle_len = strlen(substr);
+    return str_find(s->str, s->length, substr, needle_len) != STR_NPOS;
+}
+
+bool strview_to_int64(const StrView* s, int64_t* out) {
+    if (!s || !s->length || !out) return false;
+    return str_to_int64(s->str, s->length, out, NULL);
+}
+
+bool strview_to_double(const StrView* s, double* out) {
+    if (!s || !s->length || !out) return false;
+    return str_to_double(s->str, s->length, out, NULL);
+}
+
+uint64_t strview_hash(const StrView* s) {
+    if (!s || !s->length) return 0;
+    return hashmap_sip(s->str, s->length, 0, 0);
+}
+
+char* strview_dup_with_pool(const StrView* s, Pool* pool) {
+    if (!s) return NULL;
+    size_t n = s->length;
+    char* out;
+    if (pool) {
+        out = (char*)pool_alloc(pool, n + 1);
+    } else {
+        out = (char*)mem_alloc(n + 1, MEM_CAT_TEMP);
+    }
+    if (!out) return NULL;
+    if (n) memcpy(out, s->str, n);
+    out[n] = '\0';
+    return out;
 }

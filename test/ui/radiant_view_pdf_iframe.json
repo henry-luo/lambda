@@ -1,0 +1,10 @@
+{
+  "name": "Radiant view iframe PDF navigation",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "click", "target": { "selector": "a[href=\"../input/raw_commands_test.pdf\"]" } },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_count", "target": { "selector": ".pdf-text-layer span" }, "min": 1, "assert_timeout": 2000 },
+    { "type": "assert_text", "target": { "selector": ".pdf-text-layer" }, "contains": "Raw PDF Commands Test" }
+  ]
+}

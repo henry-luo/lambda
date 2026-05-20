@@ -11,6 +11,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
 #include <mir.h>
@@ -156,43 +157,19 @@ struct RbImportCacheEntry {
     MIR_item_t proto;
     MIR_item_t import;
 };
-
-static int rb_import_cache_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbImportCacheEntry*)a)->name, ((RbImportCacheEntry*)b)->name);
-}
-static uint64_t rb_import_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbImportCacheEntry*)item)->name,
-        strlen(((RbImportCacheEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_import_cache, struct RbImportCacheEntry, name)
 
 struct RbVarScopeEntry {
     char name[128];
     RbMirVarEntry var;
 };
-
-static int rb_var_scope_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbVarScopeEntry*)a)->name, ((RbVarScopeEntry*)b)->name);
-}
-static uint64_t rb_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbVarScopeEntry*)item)->name,
-        strlen(((RbVarScopeEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_var_scope, struct RbVarScopeEntry, name)
 
 struct RbLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-
-static int rb_local_func_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((RbLocalFuncEntry*)a)->name, ((RbLocalFuncEntry*)b)->name);
-}
-static uint64_t rb_local_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((RbLocalFuncEntry*)item)->name,
-        strlen(((RbLocalFuncEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(rb_local_func, struct RbLocalFuncEntry, name)
 
 // ============================================================================
 // Forward declarations
@@ -365,8 +342,7 @@ static void rm_call_void_3(RbMirTranspiler* mt, const char* fn_name,
 static void rm_push_scope(RbMirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("rb-mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(RbVarScopeEntry), 16, 0, 0,
-        rb_var_scope_hash, rb_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = rb_var_scope_new(16);
 }
 
 static void rm_pop_scope(RbMirTranspiler* mt) {
@@ -4772,12 +4748,9 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     mt->filename = filename;
     mt->runtime = runtime;
 
-    mt->import_cache = hashmap_new(sizeof(RbImportCacheEntry), 64, 0, 0,
-        rb_import_cache_hash, rb_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(RbLocalFuncEntry), 32, 0, 0,
-        rb_local_func_hash, rb_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(RbVarScopeEntry), 16, 0, 0,
-        rb_var_scope_hash, rb_var_scope_cmp, NULL, NULL);
+    mt->import_cache = rb_import_cache_new(64);
+    mt->local_funcs  = rb_local_func_new(32);
+    mt->var_scopes[0] = rb_var_scope_new(16);
     mt->scope_depth = 0;
 
     // create module

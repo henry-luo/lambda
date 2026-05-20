@@ -6,6 +6,7 @@
 #include <math.h>
 #include "../lib/log.h"
 #include "../lib/hashmap.h"    // for O(1) import resolution
+#include "../lib/hashmap_helpers.h"
 #include "mir.h"
 #include "mir-gen.h"
 #ifdef LAMBDA_C2MIR
@@ -44,16 +45,7 @@ int getc_func(void *data) {
 
 static struct hashmap* func_map = NULL;
 
-static uint64_t func_obj_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JitImport* e = (const JitImport*)item;
-    return hashmap_xxhash3(e->name, strlen(e->name), seed0, seed1);
-}
-
-static int func_obj_compare(const void* a, const void* b, void* udata) {
-    const JitImport* fa = (const JitImport*)a;
-    const JitImport* fb = (const JitImport*)b;
-    return strcmp(fa->name, fb->name);
-}
+HASHMAP_DEFINE_STRKEY(func_obj, JitImport, name)
 
 static void init_func_map(void) {
     if (func_map) return;  // already initialized
@@ -66,8 +58,7 @@ static void init_func_map(void) {
     }
     total += (size_t)jit_runtime_import_count;
 
-    func_map = hashmap_new(sizeof(JitImport), total * 2,
-        0, 0, func_obj_hash, func_obj_compare, NULL, NULL);
+    func_map = func_obj_new(total * 2);
 
     // Insert sys_func_defs entries (c_func_name → func_ptr)
     for (int i = 0; i < sys_func_def_count; i++) {
@@ -99,8 +90,7 @@ void ensure_jit_imports_initialized(void) {
 
 void register_dynamic_import(const char *name, void *addr) {
     if (!dynamic_import_map) {
-        dynamic_import_map = hashmap_new(sizeof(JitImport), 64, 0, 0,
-            func_obj_hash, func_obj_compare, NULL, NULL);
+        dynamic_import_map = func_obj_new(64);
     }
     log_debug("register dynamic import: %s -> %p", name, addr);
     JitImport entry = {(char*)name, (fn_ptr)addr};

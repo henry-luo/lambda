@@ -7,6 +7,7 @@
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/str.h"
+#include "../../lib/strview.h"
 #include "../../lib/memtrack.h"
 #include "../transpiler.hpp"
 #include "validator.hpp"
@@ -356,7 +357,7 @@ Type* extract_type_from_ast_node(AstNode* node) {
 Type* SchemaValidator::find_type(const char* type_name) {
     if (!type_name) return nullptr;
 
-    StrView name_view = {.str = type_name, .length = strlen(type_name)};
+    StrView name_view = strview_from_cstr(type_name);
     TypeRegistryEntry key = {.definition = nullptr, .name_key = name_view};
 
     const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(this->type_definitions, &key);
@@ -368,7 +369,7 @@ Type* SchemaValidator::find_type(const char* type_name) {
 Type* SchemaValidator::resolve_type_reference(const char* type_name) {
     if (!type_name) return nullptr;
 
-    StrView name_view = {.str = type_name, .length = strlen(type_name)};
+    StrView name_view = strview_from_cstr(type_name);
 
     // Check if we're already visiting this type (circular reference)
     VisitedEntry visited_key = {.key = name_view, .visited = false};

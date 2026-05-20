@@ -14,6 +14,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
 #include <mir.h>
@@ -220,43 +221,19 @@ struct PyImportCacheEntry {
     MIR_item_t proto;
     MIR_item_t import;
 };
-
-static int py_import_cache_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyImportCacheEntry*)a)->name, ((PyImportCacheEntry*)b)->name);
-}
-static uint64_t py_import_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyImportCacheEntry*)item)->name,
-        strlen(((PyImportCacheEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_import_cache, struct PyImportCacheEntry, name)
 
 struct PyVarScopeEntry {
     char name[128];
     PyMirVarEntry var;
 };
-
-static int py_var_scope_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyVarScopeEntry*)a)->name, ((PyVarScopeEntry*)b)->name);
-}
-static uint64_t py_var_scope_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyVarScopeEntry*)item)->name,
-        strlen(((PyVarScopeEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_var_scope, struct PyVarScopeEntry, name)
 
 struct PyLocalFuncEntry {
     char name[128];
     MIR_item_t func_item;
 };
-
-static int py_local_func_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyLocalFuncEntry*)a)->name, ((PyLocalFuncEntry*)b)->name);
-}
-static uint64_t py_local_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyLocalFuncEntry*)item)->name,
-        strlen(((PyLocalFuncEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
 
 struct PyModuleConstEntry {
     char name[128];
@@ -264,15 +241,7 @@ struct PyModuleConstEntry {
     int64_t int_val;
     double float_val;
 };
-
-static int py_module_const_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((PyModuleConstEntry*)a)->name, ((PyModuleConstEntry*)b)->name);
-}
-static uint64_t py_module_const_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    return hashmap_sip(((PyModuleConstEntry*)item)->name,
-        strlen(((PyModuleConstEntry*)item)->name), seed0, seed1);
-}
+HASHMAP_DEFINE_STRKEY(py_module_const, struct PyModuleConstEntry, name)
 
 // ============================================================================
 // Forward declarations
@@ -440,8 +409,7 @@ static void pm_call_void_2(PyMirTranspiler* mt, const char* fn_name,
 static void pm_push_scope(PyMirTranspiler* mt) {
     if (mt->scope_depth >= 63) { log_error("py-mir: scope overflow"); return; }
     mt->scope_depth++;
-    mt->var_scopes[mt->scope_depth] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->var_scopes[mt->scope_depth] = py_var_scope_new(16);
 }
 
 static void pm_pop_scope(PyMirTranspiler* mt) {
@@ -7501,12 +7469,9 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         }
     }
 
-    mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
-        py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
-        py_local_func_hash, py_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->import_cache = py_import_cache_new(64);
+    mt->local_funcs  = py_local_func_new(32);
+    mt->var_scopes[0] = py_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 
@@ -7687,12 +7652,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     mt->ctx = ctx;
     mt->filename = py_path;
     mt->runtime = runtime;
-    mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
-        py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
-    mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
-        py_local_func_hash, py_local_func_cmp, NULL, NULL);
-    mt->var_scopes[0] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
-        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->import_cache = py_import_cache_new(64);
+    mt->local_funcs  = py_local_func_new(32);
+    mt->var_scopes[0] = py_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 

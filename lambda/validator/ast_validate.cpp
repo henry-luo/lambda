@@ -15,6 +15,7 @@
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include "../../lib/str.h"
+#include "../../lib/strview.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -30,19 +31,7 @@ extern AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source)
 
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
-
-// Utility function
-StrView strview_from_cstr(const char* str) {
-    StrView sv;
-    if (str) {
-        sv.str = str;
-        sv.length = strlen(str);
-    } else {
-        sv.str = "";
-        sv.length = 0;
-    }
-    return sv;
-}
+// strview_from_cstr now lives in lib/strview.h
 
 // ==================== Error Reporting Implementation ====================
 // Note: Error reporting functions now implemented in error_reporting.cpp

@@ -254,6 +254,28 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
     return scope;
 }
 
+RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* clip) {
+    RenderClipScope scope = {};
+    if (!rdcon || !clip) {
+        return scope;
+    }
+    float w = clip->right - clip->left;
+    float h = clip->bottom - clip->top;
+    if (w <= 0 || h <= 0) {
+        return scope;
+    }
+
+    scope.inline_shape.type = CLIP_SHAPE_INSET;
+    scope.inline_shape.inset = {clip->left, clip->top, w, h, 0, 0};
+    if (!render_clip_push_shape_scope(rdcon, &scope, &scope.inline_shape)) {
+        scope = {};
+        return scope;
+    }
+    log_debug("[CLIP] pushed rect clip: (%.0f,%.0f) %.0fx%.0f",
+        clip->left, clip->top, w, h);
+    return scope;
+}
+
 RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
     RenderClipScope scope = {};
     if (!rdcon || !rdcon->block.has_clip_radius) {
