@@ -1,0 +1,11 @@
+{
+  "name": "Radiant view iframe PNG navigation",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "click", "target": { "selector": "a[href=\"../layout/data/res/sample1.png\"]" } },
+    { "type": "wait", "ms": 150 },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_count", "target": { "selector": "img.rdt-image-document" }, "equals": 1 },
+    { "type": "assert_attribute", "target": { "selector": "img.rdt-image-document" }, "attribute": "src", "contains": "sample1.png" }
+  ]
+}
