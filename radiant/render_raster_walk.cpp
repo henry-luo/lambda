@@ -19,6 +19,10 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     if (!rdcon || !block) return;
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_DISPATCH);
 
+    if (render_block_viewport_misses(rdcon, block)) {
+        return;
+    }
+
     if (block->view_type == RDT_VIEW_LIST_ITEM) {
         render_litem_view(rdcon, block);
         return;
