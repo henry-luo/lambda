@@ -1320,11 +1320,16 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         pthread_mutex_unlock(&g_image_paint_cache_mutex);
         if (cached) {
             tvg_picture_set_size(cached, dst_w, dst_h);
-            tvg_paint_translate(cached, dst_x, dst_y);
             if (opacity < 255) {
                 tvg_paint_set_opacity(cached, opacity);
             }
-            apply_transform(cached, transform);
+            if (transform) {
+                RdtMatrix translate = rdt_matrix_translate(dst_x, dst_y);
+                RdtMatrix composed = rdt_matrix_multiply(transform, &translate);
+                apply_transform(cached, &composed);
+            } else {
+                tvg_paint_translate(cached, dst_x, dst_y);
+            }
             tvg_push_draw_remove_clipped(impl, cached);
             return;
         }
@@ -1350,13 +1355,18 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     }
 
     tvg_picture_set_size(pic, dst_w, dst_h);
-    tvg_paint_translate(pic, dst_x, dst_y);
 
     if (opacity < 255) {
         tvg_paint_set_opacity(pic, opacity);
     }
 
-    apply_transform(pic, transform);
+    if (transform) {
+        RdtMatrix translate = rdt_matrix_translate(dst_x, dst_y);
+        RdtMatrix composed = rdt_matrix_multiply(transform, &translate);
+        apply_transform(pic, &composed);
+    } else {
+        tvg_paint_translate(pic, dst_x, dst_y);
+    }
     tvg_push_draw_remove_clipped(impl, pic);
 }
 

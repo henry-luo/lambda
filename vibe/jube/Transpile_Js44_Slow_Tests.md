@@ -9,8 +9,9 @@ correct tests take seconds or hit the per-test timeout.
 
 ## 0. Latest Progress
 
-The remaining URI A2.5 timeouts have been fixed in the focused js262 batches.
-The important current results are:
+The remaining URI A2.5 timeouts have been fixed in the focused js262 batches,
+and the follow-up pass turned the remaining problem from a timeout into a small
+semantic repro.  The important stable slow-test results are:
 
 ```text
 built_ins_decodeURI_S15_1_3_1_A2_5_T1_js: passed, 26ms row timing
@@ -25,6 +26,42 @@ metadata now feeds guarded B3/B4 continuation-byte loop fast-forwarding for the
 exact A2.5 decode/fromCharCode equality shape.  This keeps the original
 successful `continue` semantics while avoiding the million-iteration hot
 rectangle that was responsible for the timeout.
+
+Follow-up regressions found after the timeout fix:
+
+```text
+temp/js262_decode_try_no_continue_loop_min.js: fixed
+temp/js262_decimal_nested_loop_min.js: fixed
+temp/js262_optional_for_update_min.js: fixed
+temp/js262_uri_a1_15_t3_min.js: fixed
+temp/js262_inner_loop_7f_hex_min.js: fixed
+temp/js262_inner_loop_call_identity_min.js: fixed
+```
+
+The follow-up root cause was not URI decoder throughput.  It was a MIR lowering
+representation mismatch after observable calls: module-backed native locals
+were reloaded from module slots as boxed `Item`s even when earlier loop test
+code had already been emitted against the same register as a native `int64`.
+The reload paths now preserve native storage shape for typed locals by unboxing
+module values back into native registers.
+
+Focused verification after this fix:
+
+```text
+temp/js262_inner_loop_call_identity_min.js: passed
+temp/js262_inner_loop_7f_hex_min.js: passed
+temp/js262_uri_a1_15_t3_min.js: passed
+temp/js262_loop_string_call_min.js: passed
+temp/js262_loop_arg_then_literal_call_min.js: passed
+temp/js262_loop_f_return_arg_min.js: passed
+slow suspect batch: 9 / 9 passed, 1.0s batch elapsed
+URI A1 mini batch: 7 / 7 passed, 1.0s batch elapsed
+```
+
+The URI A1 batch must be run with the batch-only path.  A plain
+`--batch-file` invocation produced a transient "lost" report from result
+collection, but the proper `--batch-only --batch-file=... --jobs=1` rerun
+reported all seven rows as passing.
 
 ## 1. Starting Point
 
@@ -346,21 +383,37 @@ Fixed:
   - `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js`
   - `built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js`
 - The 14-row URI slow batch is clean.
+- Native `for` counters passed through user-function calls now stay in the
+  correct representation after call-triggered module-var reloads.
+- The focused slow suspect batch passes 9 / 9:
+  - `language_statements_for_of_iterator_next_reference_js`
+  - `language_statements_do_while_S12_6_1_A7_js`
+  - `language_statements_do_while_S12_6_1_A8_js`
+  - `language_statements_while_S12_6_2_A7_js`
+  - `language_statements_continue_S12_7_A9_T1_js`
+  - `language_statements_continue_S12_7_A9_T2_js`
+  - `built_ins_Array_from_iter_map_fn_args_js`
+  - `built_ins_RegExp_prototype_Symbol_replace_coerce_lastindex_js`
+  - `language_expressions_optional_chaining_iteration_statement_for_js`
 
 Outstanding follow-up:
 
 - No URI A2.5 timeout remains in the focused slow batches after the B3/B4
-  fast-forward.  The next full-suite baseline refresh should confirm whether
-  any unrelated slow rows remain outside these focused lists.
+  fast-forward.
+- The URI A1 focused batch is also clean when run through the batch-only path.
+- The next pass can move to a full-suite baseline refresh unless new focused
+  failures are discovered first.
 
 ## 5. Next Work
 
 Recommended next sequence:
 
-1. Run the full js262 suite and refresh the baseline/partial lists.
-2. If new slow rows appear, group them by path and feature before adding more
+1. Rerun the URI A1/A2 focused batches with batch-only options if more local
+   verification is needed.
+2. Run the full js262 suite and refresh the baseline/partial lists.
+3. If new slow rows appear, group them by path and feature before adding more
    lowering patterns.
-3. Keep these focused guards available for regression checks:
+4. Keep these focused guards available for regression checks:
 
 ```bash
 ./test/test_js_test262_gtest.exe --batch-only --batch-file=temp/js43_uri_slow_batch.txt --js-timeout=30 --jobs=1 --write-failures=temp/js44_uri_slow_after_b3_ff.tsv --gtest_brief=1

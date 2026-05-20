@@ -2,6 +2,7 @@
 
 #include "../radiant/display_list.h"
 #include "../radiant/display_list_bounds.hpp"
+#include "../radiant/display_list_replay_glyph.hpp"
 #include "../radiant/display_list_replay_state.hpp"
 #include "../radiant/display_list_storage.hpp"
 #include "../lib/mempool.h"
@@ -266,6 +267,35 @@ TEST_F(DisplayListTest, DrawGlyphIntersectsRecordedBoundsWithClip) {
     EXPECT_FLOAT_EQ(item->bounds[1], 9.0f);
     EXPECT_FLOAT_EQ(item->bounds[2], 9.0f);
     EXPECT_FLOAT_EQ(item->bounds[3], 6.0f);
+}
+
+TEST_F(DisplayListTest, ReplayedGlyphCoverageKeepsTransparentEdges) {
+    uint8_t glyph_pixels[1] = {64};
+    GlyphBitmap bitmap = {};
+    bitmap.buffer = glyph_pixels;
+    bitmap.width = 1;
+    bitmap.height = 1;
+    bitmap.pitch = 1;
+    bitmap.pixel_mode = GLYPH_PIXEL_GRAY;
+
+    uint32_t pixel = 0;
+    ImageSurface surface = {};
+    surface.width = 1;
+    surface.height = 1;
+    surface.pitch = 4;
+    surface.pixels = &pixel;
+
+    DlDrawGlyph glyph = {};
+    glyph.bitmap = bitmap;
+    glyph.color = test_color(0xffffffff);
+    glyph.clip = {0.0f, 0.0f, 1.0f, 1.0f};
+
+    dl_replay_draw_glyph(&surface, &glyph);
+
+    EXPECT_EQ(pixel & 0xFFu, 64u);
+    EXPECT_EQ((pixel >> 8) & 0xFFu, 64u);
+    EXPECT_EQ((pixel >> 16) & 0xFFu, 64u);
+    EXPECT_EQ((pixel >> 24) & 0xFFu, 64u);
 }
 
 TEST_F(DisplayListTest, DrawPictureUsesBackendSizeForBounds) {

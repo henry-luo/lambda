@@ -349,6 +349,37 @@ static uint32_t tile_glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, in
     return 0;
 }
 
+static inline void tile_blend_glyph_coverage_pixel(uint8_t* p, Color color, uint32_t coverage) {
+    uint32_t src_a = (coverage * color.a + 127) / 255;
+    if (src_a == 0) return;
+    uint32_t inv_a = 255 - src_a;
+
+    if (p[3] == 255) {
+        if (color.c == 0xFF000000) {
+            p[0] = p[0] * inv_a / 255;
+            p[1] = p[1] * inv_a / 255;
+            p[2] = p[2] * inv_a / 255;
+            p[3] = 0xFF;
+        } else {
+            p[0] = (p[0] * inv_a + color.r * src_a) / 255;
+            p[1] = (p[1] * inv_a + color.g * src_a) / 255;
+            p[2] = (p[2] * inv_a + color.b * src_a) / 255;
+            p[3] = 0xFF;
+        }
+        return;
+    }
+
+    uint32_t dst_a = p[3];
+    uint32_t out_a = src_a + (dst_a * inv_a + 127) / 255;
+    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
+    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
+    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
+    p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
+    p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
+    p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
+    p[3] = (uint8_t)(out_a > 255 ? 255 : out_a);
+}
+
 // Helper: translate a glyph to tile-local coordinates and render
 static void replay_tile_glyph(ImageSurface* tile_surface,
                                DlDrawGlyph* g, float tile_x, float tile_y) {
@@ -378,19 +409,8 @@ static void replay_tile_glyph(ImageSurface* tile_surface,
                 }
 
                 uint8_t* p = (uint8_t*)tile_surface->pixels + dst_y * tile_surface->pitch + dst_x * 4;
-                uint32_t v = 255 - intensity;
                 Color color = g->color;
-                if (color.c == 0xFF000000) {
-                    p[0] = p[0] * v / 255;
-                    p[1] = p[1] * v / 255;
-                    p[2] = p[2] * v / 255;
-                    p[3] = 0xFF;
-                } else {
-                    p[0] = (p[0] * v + color.r * intensity) / 255;
-                    p[1] = (p[1] * v + color.g * intensity) / 255;
-                    p[2] = (p[2] * v + color.b * intensity) / 255;
-                    p[3] = 0xFF;
-                }
+                tile_blend_glyph_coverage_pixel(p, color, intensity);
             }
         }
         return;
@@ -492,18 +512,7 @@ static void replay_tile_glyph(ImageSurface* tile_surface,
 
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
-                uint32_t v = 255 - intensity;
-                if (color.c == 0xFF000000) {
-                    p[0] = p[0] * v / 255;
-                    p[1] = p[1] * v / 255;
-                    p[2] = p[2] * v / 255;
-                    p[3] = 0xFF;
-                } else {
-                    p[0] = (p[0] * v + color.r * intensity) / 255;
-                    p[1] = (p[1] * v + color.g * intensity) / 255;
-                    p[2] = (p[2] * v + color.b * intensity) / 255;
-                    p[3] = 0xFF;
-                }
+                tile_blend_glyph_coverage_pixel(p, color, intensity);
             }
         }
     }
@@ -739,38 +748,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     int by = backdrop_region[backdrop_sp][1];
                     int bw = backdrop_region[backdrop_sp][2];
                     int bh = backdrop_region[backdrop_sp][3];
-                    uint32_t* px = (uint32_t*)tile_surface->pixels;
-                    int pitch = tile_surface->pitch / 4;
-                    int opacity_i = (int)(r->opacity * 256 + 0.5f);
-                    for (int row = 0; row < bh; row++) {
-                        for (int col = 0; col < bw; col++) {
-                            uint32_t src = px[(by + row) * pitch + (bx + col)];
-                            uint32_t dst = backdrop[row * bw + col];
-                            if (src == 0) {
-                                px[(by + row) * pitch + (bx + col)] = dst;
-                                continue;
-                            }
-                            uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
-                            uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
-                            uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
-                            uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
-                            uint32_t inv_sa = 255 - sa;
-                            uint32_t da = (dst >> 24) & 0xFF;
-                            uint32_t dr = dst & 0xFF;
-                            uint32_t dg = (dst >> 8) & 0xFF;
-                            uint32_t db = (dst >> 16) & 0xFF;
-                            uint32_t ra = sa + (da * inv_sa + 128) / 255;
-                            uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-                            uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-                            uint32_t rb = sb + (db * inv_sa + 128) / 255;
-                            if (ra > 255) ra = 255;
-                            if (rr > 255) rr = 255;
-                            if (rg > 255) rg = 255;
-                            if (rb > 255) rb = 255;
-                            px[(by + row) * pitch + (bx + col)] =
-                                (ra << 24) | (rb << 16) | (rg << 8) | rr;
-                        }
-                    }
+                    render_composite_opacity(tile_surface, backdrop, bx, by, bw, bh,
+                                             r->opacity);
                     scratch_free(scratch, backdrop);
                 }
             }

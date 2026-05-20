@@ -107,6 +107,37 @@ static uint32_t glyph_bitmap_sample_pixel(const GlyphBitmap* bitmap, int src_y, 
     return 0;
 }
 
+static inline void blend_glyph_coverage_pixel(uint8_t* p, Color color, uint32_t coverage) {
+    uint32_t src_a = (coverage * color.a + 127) / 255;
+    if (src_a == 0) return;
+    uint32_t inv_a = 255 - src_a;
+
+    if (p[3] == 255) {
+        if (color.c == 0xFF000000) {
+            p[0] = p[0] * inv_a / 255;
+            p[1] = p[1] * inv_a / 255;
+            p[2] = p[2] * inv_a / 255;
+            p[3] = 0xFF;
+        } else {
+            p[0] = (p[0] * inv_a + color.r * src_a) / 255;
+            p[1] = (p[1] * inv_a + color.g * src_a) / 255;
+            p[2] = (p[2] * inv_a + color.b * src_a) / 255;
+            p[3] = 0xFF;
+        }
+        return;
+    }
+
+    uint32_t dst_a = p[3];
+    uint32_t out_a = src_a + (dst_a * inv_a + 127) / 255;
+    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
+    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
+    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
+    p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
+    p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
+    p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
+    p[3] = (uint8_t)(out_a > 255 ? 255 : out_a);
+}
+
 void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
     if (rdcon->color.a == 0) return;
     if (rdcon->dl) {
@@ -164,19 +195,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y) {
             uint32_t intensity = glyph_bitmap_sample_pixel(bitmap, i, j);
             if (intensity > 0) {
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
-                intensity = (intensity * rdcon->color.a + 127) / 255;
-                uint32_t v = 255 - intensity;
-                if (rdcon->color.c == 0xFF000000) {
-                    p[0] = p[0] * v / 255;
-                    p[1] = p[1] * v / 255;
-                    p[2] = p[2] * v / 255;
-                    p[3] = 0xFF;
-                } else {
-                    p[0] = (p[0] * v + rdcon->color.r * intensity) / 255;
-                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;
-                    p[2] = (p[2] * v + rdcon->color.b * intensity) / 255;
-                    p[3] = 0xFF;
-                }
+                blend_glyph_coverage_pixel(p, rdcon->color, intensity);
             }
         }
     }

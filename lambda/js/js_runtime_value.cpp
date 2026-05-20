@@ -1079,6 +1079,10 @@ double js_get_number(Item value) {
     }
 }
 
+extern "C" double js_get_number_mir(Item value) {
+    return js_get_number(value);
+}
+
 Item js_make_number(double d) {
     // Check if it can be represented as an integer
     // Guard with isfinite to avoid UB from (int64_t)Infinity/NaN

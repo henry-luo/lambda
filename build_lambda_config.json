@@ -2035,6 +2035,7 @@
                             "radiant/display_list_record_vector.cpp",
                             "radiant/display_list_record_effects.cpp",
                             "radiant/display_list_record_raster.cpp",
+                            "radiant/display_list_replay_glyph.cpp",
                             "radiant/display_list_replay_state.cpp",
                             "test/test_display_list_stubs.cpp"
                         ],

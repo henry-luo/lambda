@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "render_raster.hpp"
+#include "render_state.hpp"
 
 void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     if (rdcon->dl) dl_fill_rect(rdcon->dl, x, y, w, h, color);
@@ -113,6 +114,10 @@ void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
     RdtMatrix m = rdt_matrix_identity();
     m.e13 = dst_rect->x;
     m.e23 = dst_rect->y;
+    const RdtMatrix* current_transform = render_state_current_transform(rdcon);
+    if (current_transform) {
+        m = rdt_matrix_multiply(current_transform, &m);
+    }
 
     if (clip) {
         RdtPath* clip_path = rdt_path_new();
@@ -143,7 +148,7 @@ void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixel
 
     rc_draw_image(rdcon, pixels, src_w, src_h, src_stride,
                   dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
-                  opacity, nullptr, resource_owner);
+                  opacity, render_state_current_transform(rdcon), resource_owner);
 
     if (clip) rc_pop_clip(rdcon);
 }

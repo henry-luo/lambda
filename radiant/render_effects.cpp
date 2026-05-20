@@ -202,9 +202,15 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     float y0 = parent_block->y + block->y * scale;
     float x1 = x0 + block->width * scale;
     float y1 = y0 + block->height * scale;
+    float visual_overflow = render_geometry_block_visual_overflow(block) * scale;
+    float effect_x0 = x0 - visual_overflow;
+    float effect_y0 = y0 - visual_overflow;
+    float effect_x1 = x1 + visual_overflow;
+    float effect_y1 = y1 + visual_overflow;
 
     if (group.mix_blend_mode) {
-        group.mix_blend_backdrop = render_effect_backdrop_begin(rdcon, x0, y0, x1, y1);
+        group.mix_blend_backdrop = render_effect_backdrop_begin(rdcon,
+            effect_x0, effect_y0, effect_x1, effect_y1);
         if (group.mix_blend_backdrop.pixels) {
             log_debug("[MIX-BLEND] Saved backdrop %dx%d for <%s>",
                       group.mix_blend_backdrop.width,
@@ -214,7 +220,8 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     }
 
     if (group.has_opacity_group) {
-        group.opacity_backdrop = render_effect_backdrop_begin(rdcon, x0, y0, x1, y1);
+        group.opacity_backdrop = render_effect_backdrop_begin(rdcon,
+            effect_x0, effect_y0, effect_x1, effect_y1);
         if (group.opacity_backdrop.pixels) {
             log_debug("[OPACITY] Saved backdrop %dx%d for <%s>",
                       group.opacity_backdrop.width,

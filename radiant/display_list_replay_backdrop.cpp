@@ -78,39 +78,8 @@ void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
     int by = stack->region[stack->sp][1];
     int bw = stack->region[stack->sp][2];
     int bh = stack->region[stack->sp][3];
-    uint32_t* px = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
-    int opacity_i = (int)(opacity->opacity * 256 + 0.5f);
-    for (int row = 0; row < bh; row++) {
-        for (int col = 0; col < bw; col++) {
-            uint32_t src = px[(by + row) * pitch + (bx + col)];
-            uint32_t dst = backdrop[row * bw + col];
-            if (src == 0) {
-                px[(by + row) * pitch + (bx + col)] = dst;
-                continue;
-            }
-
-            uint32_t sa = (((src >> 24) & 0xFF) * opacity_i + 128) >> 8;
-            uint32_t sr = ((src & 0xFF) * opacity_i + 128) >> 8;
-            uint32_t sg = (((src >> 8) & 0xFF) * opacity_i + 128) >> 8;
-            uint32_t sb = (((src >> 16) & 0xFF) * opacity_i + 128) >> 8;
-            uint32_t inv_sa = 255 - sa;
-            uint32_t da = (dst >> 24) & 0xFF;
-            uint32_t dr = dst & 0xFF;
-            uint32_t dg = (dst >> 8) & 0xFF;
-            uint32_t db = (dst >> 16) & 0xFF;
-            uint32_t ra = sa + (da * inv_sa + 128) / 255;
-            uint32_t rr = sr + (dr * inv_sa + 128) / 255;
-            uint32_t rg = sg + (dg * inv_sa + 128) / 255;
-            uint32_t rb = sb + (db * inv_sa + 128) / 255;
-            if (ra > 255) ra = 255;
-            if (rr > 255) rr = 255;
-            if (rg > 255) rg = 255;
-            if (rb > 255) rb = 255;
-            px[(by + row) * pitch + (bx + col)] =
-                (ra << 24) | (rb << 16) | (rg << 8) | rr;
-        }
-    }
+    render_composite_opacity(surface, backdrop, bx, by, bw, bh,
+                             opacity->opacity);
 }
 
 void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
