@@ -455,8 +455,6 @@ static bool jm_is_loop_update_builtin_call(JsCallNode* call) {
             jm_identifier_name_equals(id->name, "decodeURIComponent", 18) ||
             jm_identifier_name_equals(id->name, "encodeURI", 9) ||
             jm_identifier_name_equals(id->name, "encodeURIComponent", 18) ||
-            jm_identifier_name_equals(id->name, "decimalToPercentHexString", 25) ||
-            jm_identifier_name_equals(id->name, "decimalToHexString", 18) ||
             jm_identifier_name_equals(id->name, "isNaN", 5) ||
             jm_identifier_name_equals(id->name, "isFinite", 8);
     }
@@ -1326,12 +1324,29 @@ static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
             if (jm_ast_may_observe_script_var_property(call->arguments)) return true;
             break;
         }
+        case JS_AST_NODE_NEW_EXPRESSION:
+            return true;
         case JS_AST_NODE_BLOCK_STATEMENT:
             if (jm_ast_may_observe_script_var_property(((JsBlockNode*)cur)->statements)) return true;
             break;
         case JS_AST_NODE_EXPRESSION_STATEMENT:
             if (jm_ast_may_observe_script_var_property(((JsExpressionStatementNode*)cur)->expression)) return true;
             break;
+        case JS_AST_NODE_VARIABLE_DECLARATION: {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)cur;
+            for (JsAstNode* dnode = vd->declarations; dnode; dnode = dnode->next) {
+                if (dnode->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)dnode;
+                if (d->init) return true;
+            }
+            break;
+        }
+        case JS_AST_NODE_VARIABLE_DECLARATOR: {
+            JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)cur;
+            if (jm_ast_may_observe_script_var_property(d->id) ||
+                jm_ast_may_observe_script_var_property(d->init)) return true;
+            break;
+        }
         case JS_AST_NODE_BINARY_EXPRESSION: {
             JsBinaryNode* b = (JsBinaryNode*)cur;
             if (jm_ast_may_observe_script_var_property(b->left) ||
@@ -1342,16 +1357,23 @@ static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
             if (jm_ast_may_observe_script_var_property(((JsUnaryNode*)cur)->operand)) return true;
             break;
         case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-            JsAssignmentNode* a = (JsAssignmentNode*)cur;
-            if (jm_ast_may_observe_script_var_property(a->left) ||
-                jm_ast_may_observe_script_var_property(a->right)) return true;
-            break;
+            // Assignments mutate script-visible bindings/properties. Deferring
+            // module writeback across them is only safe for the separate direct
+            // increment/update cases handled by the loop fast path.
+            return true;
         }
         case JS_AST_NODE_MEMBER_EXPRESSION: {
             JsMemberNode* m = (JsMemberNode*)cur;
+            // A property read may invoke an accessor/proxy trap and mutate
+            // script-visible bindings. Known builtin calls skip their callee
+            // above, so hot URI loops still keep the safe fast path.
+            if (m->object && m->object->node_type != JS_AST_NODE_IDENTIFIER) {
+                return true;
+            }
             if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
                 if (jm_identifier_name_equals(obj->name, "globalThis", 10)) return true;
+                return true;
             }
             if (jm_ast_may_observe_script_var_property(m->object) ||
                 jm_ast_may_observe_script_var_property(m->property)) return true;
@@ -1411,13 +1433,10 @@ static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
         case JS_AST_NODE_THROW_STATEMENT:
             if (jm_ast_may_observe_script_var_property(((JsThrowNode*)cur)->argument)) return true;
             break;
-        case JS_AST_NODE_TRY_STATEMENT: {
-            JsTryNode* t = (JsTryNode*)cur;
-            if (jm_ast_may_observe_script_var_property(t->block) ||
-                jm_ast_may_observe_script_var_property(t->handler) ||
-                jm_ast_may_observe_script_var_property(t->finalizer)) return true;
-            break;
-        }
+        case JS_AST_NODE_TRY_STATEMENT:
+            // A "safe" builtin call inside try can still throw, route through
+            // catch/finally, and mutate module-backed loop state there.
+            return true;
         case JS_AST_NODE_CATCH_CLAUSE: {
             JsCatchNode* c = (JsCatchNode*)cur;
             if (jm_ast_may_observe_script_var_property(c->param) ||
@@ -1474,6 +1493,66 @@ static bool jm_ast_calls_from_char_code_with_identifier(JsAstNode* node,
             if (jm_ast_calls_from_char_code_with_identifier(i->test, name, name_len) ||
                 jm_ast_calls_from_char_code_with_identifier(i->consequent, name, name_len) ||
                 jm_ast_calls_from_char_code_with_identifier(i->alternate, name, name_len)) return true;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+static bool jm_ast_call_uses_identifier(JsAstNode* node, const char* name, int name_len) {
+    if (!node || !name || name_len <= 0) return false;
+    for (JsAstNode* cur = node; cur; cur = cur->next) {
+        switch (cur->node_type) {
+        case JS_AST_NODE_CALL_EXPRESSION: {
+            JsCallNode* call = (JsCallNode*)cur;
+            for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+                if (arg->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)arg;
+                    if (id->name && (int)id->name->len == name_len &&
+                        strncmp(id->name->chars, name, name_len) == 0) {
+                        return true;
+                    }
+                }
+                if (jm_ast_call_uses_identifier(arg, name, name_len)) return true;
+            }
+            if (jm_ast_call_uses_identifier(call->callee, name, name_len)) return true;
+            break;
+        }
+        case JS_AST_NODE_BLOCK_STATEMENT:
+            if (jm_ast_call_uses_identifier(((JsBlockNode*)cur)->statements, name, name_len)) return true;
+            break;
+        case JS_AST_NODE_EXPRESSION_STATEMENT:
+            if (jm_ast_call_uses_identifier(((JsExpressionStatementNode*)cur)->expression, name, name_len)) return true;
+            break;
+        case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+            JsAssignmentNode* a = (JsAssignmentNode*)cur;
+            if (jm_ast_call_uses_identifier(a->left, name, name_len) ||
+                jm_ast_call_uses_identifier(a->right, name, name_len)) return true;
+            break;
+        }
+        case JS_AST_NODE_BINARY_EXPRESSION: {
+            JsBinaryNode* b = (JsBinaryNode*)cur;
+            if (jm_ast_call_uses_identifier(b->left, name, name_len) ||
+                jm_ast_call_uses_identifier(b->right, name, name_len)) return true;
+            break;
+        }
+        case JS_AST_NODE_VARIABLE_DECLARATION:
+            if (jm_ast_call_uses_identifier(((JsVariableDeclarationNode*)cur)->declarations, name, name_len)) return true;
+            break;
+        case JS_AST_NODE_VARIABLE_DECLARATOR: {
+            JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)cur;
+            if (jm_ast_call_uses_identifier(d->id, name, name_len) ||
+                jm_ast_call_uses_identifier(d->init, name, name_len)) return true;
+            break;
+        }
+        case JS_AST_NODE_IF_STATEMENT: {
+            JsIfNode* i = (JsIfNode*)cur;
+            if (jm_ast_call_uses_identifier(i->test, name, name_len) ||
+                jm_ast_call_uses_identifier(i->consequent, name, name_len) ||
+                jm_ast_call_uses_identifier(i->alternate, name, name_len)) return true;
             break;
         }
         default:
@@ -2625,6 +2704,46 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
     }
 }
 
+static void jm_module_var_reload_vars(JsMirTranspiler* mt) {
+    if (!mt || !mt->module_consts) return;
+    for (int sd = 0; sd <= mt->scope_depth; sd++) {
+        if (!mt->var_scopes[sd]) continue;
+        size_t iter = 0; void* entry_ptr;
+        while (hashmap_iter(mt->var_scopes[sd], &iter, &entry_ptr)) {
+            JsVarScopeEntry* e = (JsVarScopeEntry*)entry_ptr;
+            if (!e || strncmp(e->name, "_js_", 4) != 0 || !e->var.reg) continue;
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (!mc || mc->const_type != MCONST_MODVAR) continue;
+            MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+            if (e->var.type_id == LMD_TYPE_INT && e->var.mir_type == MIR_T_I64) {
+                MIR_reg_t value = jm_call_1(mt, "it2i", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, e->var.reg),
+                    MIR_new_reg_op(mt->ctx, value)));
+            } else if (e->var.mir_type == MIR_T_D) {
+                MIR_reg_t numeric = jm_call_1(mt, "js_to_number", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                MIR_reg_t value = jm_call_1(mt, "js_get_number", MIR_T_D,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, numeric));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, e->var.reg),
+                    MIR_new_reg_op(mt->ctx, value)));
+                e->var.type_id = LMD_TYPE_FLOAT;
+            } else {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, e->var.reg),
+                    MIR_new_reg_op(mt->ctx, boxed)));
+                e->var.type_id = LMD_TYPE_ANY;
+                e->var.mir_type = MIR_T_I64;
+            }
+        }
+    }
+}
+
 // Reload captured variables from shared parent scope_env after a function call.
 // In child closures, variables captured from a parent's scope_env may be modified
 // by sibling closures called during function evaluation. Re-read those values
@@ -2735,6 +2854,8 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous loop iteration.
+    // Module-backed globals are reloaded at observable call/iterator boundaries;
+    // reloading every module var here would clobber deferred loop-body updates.
     jm_scope_env_reload_vars(mt);
 
     // v23b: unified condition handling
@@ -3012,15 +3133,10 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     jm_emit_label(mt, l_test);
 
-    // If exception pending (e.g., from init destructuring or loop body), exit loop
-    {
-        MIR_reg_t for_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
-            MIR_new_reg_op(mt->ctx, for_exc)));
-    }
-
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
+    // Module-backed globals are reloaded at observable call/iterator boundaries;
+    // reloading every module var here would clobber deferred loop-body updates.
     jm_scope_env_reload_vars(mt);
 
     // Test
@@ -3099,8 +3215,19 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         !jm_ast_may_observe_script_var_property(for_node->test) &&
         !jm_ast_may_observe_script_var_property(for_node->body) &&
         !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
+          jm_ast_call_uses_identifier(for_node->body,
+              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4))) &&
+        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
           jm_ast_calls_from_char_code_with_identifier(for_node->body,
               deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4)));
+    if (defer_update_writeback && mt->module_consts) {
+        JsModuleConstEntry lookup;
+        snprintf(lookup.name, sizeof(lookup.name), "%s", deferred_update_vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->const_type == MCONST_MODVAR) {
+            defer_update_writeback = false;
+        }
+    }
     if (for_node->update) {
         MIR_reg_t saved_update_scope_env_reg = mt->scope_env_reg;
         int saved_update_scope_env_slot_count = mt->scope_env_slot_count;
@@ -5315,6 +5442,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_label_t l_iter_err = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
         MIR_new_reg_op(mt->ctx, iter_exc)));
+    jm_scope_env_reload_vars(mt);
+    jm_module_var_reload_vars(mt);
 
     // In generators: register iterator and loop_var as env-stored variables
     if (mt->in_generator && mt->gen_env_reg) {
@@ -5425,6 +5554,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t step_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
         MIR_new_reg_op(mt->ctx, step_exc)));
+    jm_scope_env_reload_vars(mt);
+    jm_module_var_reload_vars(mt);
     // Check if done (JS_ITER_DONE_SENTINEL — unique sentinel that won't collide with null/undefined/false)
     MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
