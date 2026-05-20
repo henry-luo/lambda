@@ -241,7 +241,6 @@ RADIANT_FILE_MODULES = {
     "render":                "Radiant: rendering",
     "render_background":     "Radiant: rendering",
     "render_border":         "Radiant: rendering",
-    "render_dvi":            "Radiant: rendering",
     "render_filter":         "Radiant: rendering",
     "render_form":           "Radiant: rendering",
     "render_img":            "Radiant: rendering",
