@@ -23,7 +23,6 @@ static bool dl_replay_can_skip_item_for_dirty(DisplayOp op) {
         case DL_DRAW_PICTURE:
         case DL_FILL_SURFACE_RECT:
         case DL_BLIT_SURFACE_SCALED:
-        case DL_APPLY_OPACITY:
         case DL_APPLY_FILTER:
         case DL_BOX_BLUR_REGION:
         case DL_BOX_BLUR_INSET:
@@ -163,16 +162,6 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             rdt_pop_clip(vec);
             break;
 
-        case DL_SAVE_CLIP_DEPTH:
-            rdt_vector_flush_batch(vec);
-            item->clip_depth.saved_depth = rdt_clip_save_depth();
-            break;
-
-        case DL_RESTORE_CLIP_DEPTH:
-            rdt_vector_flush_batch(vec);
-            rdt_clip_restore_depth(item->clip_depth.saved_depth);
-            break;
-
         case DL_FILL_SURFACE_RECT: {
             rdt_vector_flush_batch(vec);
             DlFillSurfaceRect* r = &item->fill_surface_rect;
@@ -184,13 +173,6 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
             rdt_vector_flush_batch(vec);
             DlBlitSurfaceScaled* r = &item->blit_surface_scaled;
             dl_replay_blit_surface_scaled(surface, &dirty_clip, r);
-            break;
-        }
-
-        case DL_APPLY_OPACITY: {
-            rdt_vector_flush_batch(vec);
-            DlApplyOpacity* r = &item->apply_opacity;
-            dl_replay_apply_opacity(surface, r);
             break;
         }
 

@@ -292,15 +292,3 @@ void dl_pop_clip(DisplayList* dl) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_POP_CLIP;
 }
-
-void dl_save_clip_depth(DisplayList* dl) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_SAVE_CLIP_DEPTH;
-    // saved_depth filled by caller or during replay
-}
-
-void dl_restore_clip_depth(DisplayList* dl, int saved_depth) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_RESTORE_CLIP_DEPTH;
-    item->clip_depth.saved_depth = saved_depth;
-}

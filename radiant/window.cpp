@@ -21,6 +21,7 @@
 #include "video_frame_wake.h"
 #include "browsing_session.h"
 #include "event_state_log.hpp"
+#include "render_video.hpp"
 #include "script_runner.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/network_integration.h"
@@ -61,7 +62,6 @@ extern "C" void log_mem_stage(const char*) {}
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);

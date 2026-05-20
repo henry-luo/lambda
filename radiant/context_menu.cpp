@@ -2,6 +2,7 @@
 
 #include "view.hpp"
 #include "render.hpp"
+#include "render_form.hpp"
 #include "context_menu.hpp"
 #include "state_store.hpp"
 #include "form_control.hpp"
@@ -13,10 +14,6 @@
 #include "../lib/memtrack.h"
 
 #include <string.h>
-
-// External: defined in render_form.cpp (un-staticed for F8).
-void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
-                          FontProp* font, Color color);
 
 // Local copies of helpers from render_form.cpp (static there). Mirrors the
 // dropdown popup style.

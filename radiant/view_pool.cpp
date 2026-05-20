@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_text.hpp"
 #include "layout_positioned.hpp"
 #include "layout_flex.hpp"
 #include "grid.hpp"
@@ -10,7 +11,6 @@
 #include <cmath>  // for INFINITY
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
-extern CssEnum get_white_space_value(DomNode* node);
 
 // Flag to control whether consecutive text nodes are combined during JSON output
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility

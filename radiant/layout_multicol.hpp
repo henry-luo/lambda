@@ -62,11 +62,3 @@ void calculate_multicol_dimensions(
  * @param block The multi-column container block
  */
 void layout_multicol_content(LayoutContext* lycon, ViewBlock* block);
-
-/**
- * Render column rules between columns
- *
- * @param rdcon Render context
- * @param block The multi-column container
- */
-void render_column_rules(struct RenderContext* rdcon, ViewBlock* block);

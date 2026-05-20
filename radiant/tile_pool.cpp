@@ -523,11 +523,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     uint32_t* shadow_clip_saved = nullptr;
     int shadow_clip_region[4] = {};  // x0, y0, w, h (tile-local, clamped)
 
-    // Per-tile clip depth save stack (avoids writing to shared display list)
-    #define DL_MAX_CLIP_SAVE_DEPTH 32
-    int clip_saved_depths[DL_MAX_CLIP_SAVE_DEPTH];
-    int clip_save_sp = 0;
-
     // Tell ThorVG to translate all shapes from page-absolute to tile-local.
     // Both X and Y offsets are handled by the scene wrapper in tvg_push_draw_remove.
     rdt_vector_set_tile_offset_x(vec, tile_x);
@@ -552,16 +547,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     break;
                 case DL_POP_CLIP:
                     rdt_pop_clip(vec);
-                    break;
-                case DL_SAVE_CLIP_DEPTH:
-                    if (clip_save_sp < DL_MAX_CLIP_SAVE_DEPTH) {
-                        clip_saved_depths[clip_save_sp++] = rdt_clip_save_depth();
-                    }
-                    break;
-                case DL_RESTORE_CLIP_DEPTH:
-                    if (clip_save_sp > 0) {
-                        rdt_clip_restore_depth(clip_saved_depths[--clip_save_sp]);
-                    }
                     break;
                 case DL_SAVE_BACKDROP: {
                     // push a null backdrop so apply_blend_mode can pop correctly
@@ -699,22 +684,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             break;
         }
 
-        case DL_SAVE_CLIP_DEPTH: {
-            rdt_vector_flush_batch(vec);
-            if (clip_save_sp < DL_MAX_CLIP_SAVE_DEPTH) {
-                clip_saved_depths[clip_save_sp++] = rdt_clip_save_depth();
-            }
-            break;
-        }
-
-        case DL_RESTORE_CLIP_DEPTH: {
-            rdt_vector_flush_batch(vec);
-            if (clip_save_sp > 0) {
-                rdt_clip_restore_depth(clip_saved_depths[--clip_save_sp]);
-            }
-            break;
-        }
-
         case DL_FILL_SURFACE_RECT: {
             rdt_vector_flush_batch(vec);
             DlFillSurfaceRect* r = &item->fill_surface_rect;
@@ -756,31 +725,6 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                                        &dst_rect, (ScaleMode)r->scale_mode, r->opacity);
             scratch_restore(scratch, clip_mark);
             items_drawn++;
-            break;
-        }
-
-        case DL_APPLY_OPACITY: {
-            rdt_vector_flush_batch(vec);
-            DlApplyOpacity* r = &item->apply_opacity;
-            // translate to tile-local coordinates
-            int x0 = r->x0 - (int)tile_x;
-            int y0 = r->y0 - (int)tile_y;
-            int x1 = r->x1 - (int)tile_x;
-            int y1 = r->y1 - (int)tile_y;
-            // clamp to tile
-            if (x0 < 0) x0 = 0;
-            if (y0 < 0) y0 = 0;
-            if (x1 > tile_surface->width)  x1 = tile_surface->width;
-            if (y1 > tile_surface->height) y1 = tile_surface->height;
-            if (x0 < x1 && y0 < y1) {
-                for (int y = y0; y < y1; y++) {
-                    uint8_t* row = (uint8_t*)tile_surface->pixels + y * tile_surface->pitch;
-                    for (int x = x0; x < x1; x++) {
-                        uint8_t* pixel = row + x * 4;
-                        pixel[3] = (uint8_t)(pixel[3] * r->opacity + 0.5f);
-                    }
-                }
-            }
             break;
         }
 

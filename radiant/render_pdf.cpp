@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "render_backend.h"
+#include "render_export_support.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -16,13 +17,6 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-
-// Forward declarations for functions from other modules
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -41,21 +35,18 @@ typedef struct PdfRenderContext {
 } PdfRenderContext;
 
 // Forward declarations
-void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text);
+static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text);
 static RenderBackend pdf_make_backend(PdfRenderContext* ctx);
-
-// External function from render_svg.cpp
-extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
 
 
 // Error handler for libharu
-void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data) {
+static void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data) {
     log_error("PDF Error: error_no=0x%04X, detail_no=0x%04X",
               (unsigned int)error_no, (unsigned int)detail_no);
 }
 
 // Helper function to get PDF font name from system font
-const char* get_pdf_font_name(const char* font_family) {
+static const char* get_pdf_font_name(const char* font_family) {
     if (!font_family) return "Helvetica";
 
     if (strstr(font_family, "Arial") || strstr(font_family, "arial")) {
@@ -70,7 +61,7 @@ const char* get_pdf_font_name(const char* font_family) {
 }
 
 // Set PDF color from Color struct
-void pdf_set_color(PdfRenderContext* ctx, Color color) {
+static void pdf_set_color(PdfRenderContext* ctx, Color color) {
     float r = color.r / 255.0f;
     float g = color.g / 255.0f;
     float b = color.b / 255.0f;
@@ -80,7 +71,7 @@ void pdf_set_color(PdfRenderContext* ctx, Color color) {
 }
 
 // Render a rectangle (for backgrounds and borders)
-void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width, float height, Color color, bool fill) {
+static void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width, float height, Color color, bool fill) {
     if (color.a == 0) return; // Transparent, don't render
 
     pdf_set_color(ctx, color);
@@ -97,32 +88,8 @@ void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width, float
     }
 }
 
-// Render text at specific position
-void pdf_render_text(PdfRenderContext* ctx, const char* text, float x, float y, Color color) {
-    if (!text || strlen(text) == 0) return;
-
-    pdf_set_color(ctx, color);
-
-    // Get font height for proper baseline positioning
-    float font_size = 16.0f;
-    if (ctx->current_font) {
-        font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
-    }
-
-    // Convert coordinates (PDF origin is bottom-left, we use top-left)
-    // Calculate baseline position similar to SVG: y + ascender height
-    // In PDF, we need to convert from top-left to bottom-left coordinates
-    float baseline_offset = font_size * 0.8f;  // Approximate ascender height
-    float baseline_y = y + baseline_offset;    // Calculate baseline in top-left system
-    float pdf_y = ctx->page_height - baseline_y; // Convert to PDF bottom-left system
-
-    HPDF_Page_BeginText(ctx->current_page);
-    HPDF_Page_TextOut(ctx->current_page, x, pdf_y, text);
-    HPDF_Page_EndText(ctx->current_page);
-}
-
 // Render text view
-void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
+static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
 
     // Get text-transform from parent elements
@@ -365,7 +332,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
 }
 
 // Main PDF rendering function
-HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height) {
+static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height) {
     if (!root_view || !uicon) {
         return NULL;
     }
@@ -439,7 +406,7 @@ HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width,
 }
 
 // Save PDF to file
-bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
+static bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
     if (!pdf_doc || !filename) {
         return false;
     }

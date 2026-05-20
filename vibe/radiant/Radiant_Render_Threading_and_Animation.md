@@ -636,7 +636,7 @@ Draw call sites converted (all `rdt_*` → `rc_*` / `svg_*` wrappers):
 - `render.cpp` (~35 sites + `draw_glyph`, `apply_css_filters`, opacity, blend mode)
 - `render_background.cpp`, `render_border.cpp`, `render_form.cpp`, `render_svg_inline.cpp`
 
-Display list opcodes: `DL_FILL_RECT`, `DL_FILL_ROUNDED_RECT`, `DL_FILL_PATH`, `DL_STROKE_PATH`, `DL_FILL_LINEAR_GRADIENT`, `DL_FILL_RADIAL_GRADIENT`, `DL_DRAW_IMAGE`, `DL_DRAW_GLYPH`, `DL_DRAW_PICTURE`, `DL_PUSH_CLIP`, `DL_POP_CLIP`, `DL_SAVE_CLIP_DEPTH`, `DL_RESTORE_CLIP_DEPTH`, `DL_FILL_SURFACE_RECT`, `DL_BLIT_SURFACE_SCALED`, `DL_APPLY_OPACITY`, `DL_SAVE_BACKDROP`, `DL_APPLY_BLEND_MODE`, `DL_APPLY_FILTER`, `DL_BEGIN_ELEMENT`, `DL_END_ELEMENT`
+Display list opcodes: `DL_FILL_RECT`, `DL_FILL_ROUNDED_RECT`, `DL_FILL_PATH`, `DL_STROKE_PATH`, `DL_FILL_LINEAR_GRADIENT`, `DL_FILL_RADIAL_GRADIENT`, `DL_DRAW_IMAGE`, `DL_DRAW_GLYPH`, `DL_DRAW_PICTURE`, `DL_PUSH_CLIP`, `DL_POP_CLIP`, `DL_FILL_SURFACE_RECT`, `DL_BLIT_SURFACE_SCALED`, `DL_SAVE_BACKDROP`, `DL_APPLY_BLEND_MODE`, `DL_APPLY_FILTER`, `DL_BEGIN_ELEMENT`, `DL_END_ELEMENT`
 
 Key design choices:
 - Flat growable array (start 2048, double on overflow) — cache-friendly

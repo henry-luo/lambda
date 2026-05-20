@@ -74,6 +74,7 @@ void collect_and_compile_event_handlers(DomDocument* dom_doc);
  * @param dom_doc  DomDocument to clean up
  */
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
+void script_runner_cleanup_heap(void);
 
 /**
  * Returns true after JS execution has been interrupted by the watchdog while

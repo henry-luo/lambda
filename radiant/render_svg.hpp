@@ -2,10 +2,6 @@
 
 #include "view.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 // Main function to layout HTML and render to SVG
 int render_html_to_svg(const char* html_file, const char* svg_file,
                        int viewport_width, int viewport_height,
@@ -17,7 +13,3 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view,
 
 // Function to save SVG content to file
 bool save_svg_to_file(const char* svg_content, const char* filename);
-
-#ifdef __cplusplus
-}
-#endif

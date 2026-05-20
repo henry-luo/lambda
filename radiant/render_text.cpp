@@ -2,6 +2,7 @@
 #include "render_glyph.hpp"
 #include "render_background.hpp"
 #include "render_profiler.hpp"
+#include "layout_text.hpp"
 #include "layout.hpp"
 
 #include "../lib/tagged.hpp"
@@ -59,8 +60,6 @@ static inline bool render_text_is_emoji_presentation_default(uint32_t cp) {
 static inline bool render_text_preserve_spaces(CssEnum ws) {
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
 }
-
-extern CssEnum get_white_space_value(DomNode* node);
 
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
