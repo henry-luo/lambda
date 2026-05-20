@@ -3763,6 +3763,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
         std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
+    Runtime* markdown_math_runtime = nullptr;
+
     // Step 1.5: Process <math> elements using Lambda math package
     // Walk the Element tree, find <math> elements, render them to HTML via the math package,
     // and replace them in the tree with the rendered HTML elements.
@@ -3875,25 +3877,43 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
             strbuf_append_str(script, "]\n");
 
-            // Run the script in-memory (no temp file needed)
-            Runtime math_runtime;
-            runtime_init(&math_runtime);
-            math_runtime.current_dir = const_cast<char*>("./");
-            math_runtime.import_base_dir = "./";
+            // Run the script in-memory (no temp file needed). Generated math
+            // nodes are allocated directly in the markdown document arena and
+            // the runtime is retained if any of those nodes are spliced in.
+            Runtime* math_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+            if (!math_runtime) {
+                log_error("[Lambda Markdown] Failed to allocate math runtime");
+                strbuf_free(script);
+                for (int i = 0; i < math_list->length; i++) {
+                    mem_free(math_list->data[i]);
+                }
+                arraylist_free(math_list);
+                return nullptr;
+            }
+            runtime_init(math_runtime);
+            math_runtime->current_dir = const_cast<char*>("./");
+            math_runtime->import_base_dir = "./";
+            math_runtime->ui_mode = true;
+            math_runtime->result_arena = input->arena;
 
-            Input* math_result = run_script_mir(&math_runtime, script->str, (char*)"<math_render>", false);
+            Input* math_result = run_script_mir(math_runtime, script->str, (char*)"<math_render>", false);
+            context = nullptr;
+            input_context = nullptr;
 
             if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
                 Array* rendered_arr = math_result->root.array;
                 int replace_count = 0;
-                MarkBuilder markdown_builder(input);
                 for (int i = 0; i < math_list->length && i < (int)rendered_arr->length; i++) {
                     Item rendered_item = rendered_arr->items[i];
                     if (get_type_id(rendered_item) == LMD_TYPE_ELEMENT) {
                         MathInfo* mi = (MathInfo*)math_list->data[i];
-                        mi->parent->items[mi->index] = markdown_builder.deep_copy(rendered_item);
+                        mi->parent->items[mi->index] = rendered_item;
                         replace_count++;
                     }
+                }
+                if (replace_count > 0) {
+                    markdown_math_runtime = math_runtime;
+                    math_runtime = nullptr;
                 }
                 log_info("[Lambda Markdown] Replaced %d/%d math elements with rendered HTML",
                          replace_count, math_list->length);
@@ -3901,7 +3921,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 log_error("[Lambda Markdown] Math rendering script failed or returned unexpected type");
             }
 
-            runtime_cleanup(&math_runtime);
+            if (math_runtime) {
+                runtime_cleanup(math_runtime);
+                mem_free(math_runtime);
+            }
             strbuf_free(script);
         }
 
@@ -3921,6 +3944,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     DomDocument* dom_doc = dom_document_create(input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
+        if (markdown_math_runtime) {
+            runtime_cleanup(markdown_math_runtime);
+            mem_free(markdown_math_runtime);
+        }
         return nullptr;
     }
 
@@ -3928,6 +3955,10 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     if (!dom_root) {
         log_error("Failed to build DomElement tree from markdown");
         dom_document_destroy(dom_doc);
+        if (markdown_math_runtime) {
+            runtime_cleanup(markdown_math_runtime);
+            mem_free(markdown_math_runtime);
+        }
         return nullptr;
     }
 
@@ -3940,6 +3971,11 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("Failed to create CSS engine");
+        dom_document_destroy(dom_doc);
+        if (markdown_math_runtime) {
+            runtime_cleanup(markdown_math_runtime);
+            mem_free(markdown_math_runtime);
+        }
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -4049,6 +4085,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     dom_doc->url = markdown_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
+    dom_doc->lambda_runtime = markdown_math_runtime;
 
     // Store stylesheets in DomDocument for @font-face processing
     int total_stylesheets = (markdown_stylesheet ? 1 : 0) + (math_stylesheet ? 1 : 0) + (katex_stylesheet ? 1 : 0);
@@ -4261,17 +4298,42 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         "latex.render(ast, {standalone: true})\n",
         safe_path);
 
-    // Run the script in-memory (no temp file needed)
-    Runtime latex_runtime;
-    runtime_init(&latex_runtime);
-    latex_runtime.current_dir = const_cast<char*>("./");
-    latex_runtime.import_base_dir = "./";  // resolve imports from project root
-    Input* script_result = run_script_mir(&latex_runtime, script_buf, (char*)"<latex_render>", false);
+    Pool* result_pool = pool_create();
+    if (!result_pool) {
+        log_error("[Lambda LaTeX] Failed to create result pool");
+        return nullptr;
+    }
+
+    Input* result_input = Input::create(result_pool, latex_url);
+    if (!result_input) {
+        log_error("[Lambda LaTeX] Failed to create result input");
+        pool_destroy(result_pool);
+        return nullptr;
+    }
+    result_input->ui_mode = true;
+
+    // Run the script in-memory (no temp file needed). Match the normal .ls
+    // view path: allocate generated nodes in the retained document arena and
+    // keep the runtime alive for the document session.
+    Runtime* latex_runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+    if (!latex_runtime) {
+        log_error("[Lambda LaTeX] Failed to allocate runtime");
+        pool_destroy(result_pool);
+        return nullptr;
+    }
+    runtime_init(latex_runtime);
+    latex_runtime->current_dir = const_cast<char*>("./");
+    latex_runtime->import_base_dir = "./";  // resolve imports from project root
+    latex_runtime->ui_mode = true;
+    latex_runtime->result_arena = result_input->arena;
+    Input* script_result = run_script_mir(latex_runtime, script_buf, (char*)"<latex_render>", false);
 
     if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
         || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
         log_error("[Lambda LaTeX] Lambda LaTeX package - HTML rendering failed for: %s", latex_filepath);
-        runtime_cleanup(&latex_runtime);
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -4281,29 +4343,26 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     Element* html_root = nullptr;
     TypeId result_type = get_type_id(script_result->root);
     if (result_type == LMD_TYPE_ELEMENT) {
+        result_input->root = script_result->root;
         html_root = script_result->root.element;
     } else {
-        // Fallback: extract HTML via print_root_item → input_from_source
-        StrBuf* html_buf = strbuf_new_cap(8192);
-        print_root_item(html_buf, script_result->root);
-        const char* html_doc = html_buf->str;
-        size_t html_len = html_buf->length;
-        if (html_doc && html_len > 0) {
-            log_info("[Lambda LaTeX] Lambda package generated HTML (%zu bytes)", html_len);
-            String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
-            html_type_str->len = 4;
-            str_copy(html_type_str->chars, html_type_str->len + 1, "html", 4);
-            Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
-            if (html_input) {
-                html_root = get_html_root_element(html_input);
-            }
-        }
-        strbuf_free(html_buf);
+        log_error("[Lambda LaTeX] Lambda package returned non-element type: %d", result_type);
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
+        return nullptr;
     }
-    runtime_cleanup(&latex_runtime);
+
+    // run_script_mir leaves thread-local context pointing at a stack Runner.
+    // The runtime itself is retained on the document; clear the transient TLS.
+    context = nullptr;
+    input_context = nullptr;
 
     if (!html_root) {
         log_error("[Lambda LaTeX] Failed to get HTML root element from LaTeX conversion");
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -4311,9 +4370,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 3: Create DomDocument and build DomElement tree from HTML Element tree
     log_debug("[Lambda LaTeX] Building DomElement tree from HTML");
-    DomDocument* dom_doc = dom_document_create(script_result);
+    DomDocument* dom_doc = dom_document_create(result_input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -4325,6 +4387,9 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     if (!dom_root) {
         log_error("Failed to build DomElement tree from HTML");
         dom_document_destroy(dom_doc);
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -4334,6 +4399,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("Failed to create CSS engine");
+        dom_document_destroy(dom_doc);
+        runtime_cleanup(latex_runtime);
+        mem_free(latex_runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -4446,6 +4515,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     dom_doc->url = latex_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
+    dom_doc->lambda_runtime = latex_runtime;
 
     log_debug("[Lambda LaTeX] LaTeX document loaded, converted to HTML, and styled");
     return dom_doc;

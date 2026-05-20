@@ -43,7 +43,10 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsHtmlAsHeadlessView", "html", "test/layout/data/page/sample1.html", nullptr},
     {"RadiantViewTest.LoadsXmlAsHeadlessView", "xml", "test/input/test.xml", nullptr},
     {"RadiantViewTest.LoadsMarkdownAsHeadlessView", "markdown", "test/input/comprehensive_test.md", nullptr},
+    {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md", nullptr},
     {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki", nullptr},
+    {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex", nullptr},
+    {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex", nullptr},
     {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml", nullptr},
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls", nullptr},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls", nullptr},
@@ -232,28 +235,40 @@ TEST(RadiantViewTest, LoadsMarkdownAsHeadlessView) {
     test_radiant_view_expect_case(6);
 }
 
-TEST(RadiantViewTest, LoadsWikiAsHeadlessView) {
+TEST(RadiantViewTest, LoadsMarkdownMathAsHeadlessView) {
     test_radiant_view_expect_case(7);
 }
 
-TEST(RadiantViewTest, LoadsYamlAsHeadlessView) {
+TEST(RadiantViewTest, LoadsWikiAsHeadlessView) {
     test_radiant_view_expect_case(8);
 }
 
-TEST(RadiantViewTest, LoadsLambdaReportAsHeadlessView) {
+TEST(RadiantViewTest, LoadsLatexShowcaseAsHeadlessView) {
     test_radiant_view_expect_case(9);
 }
 
-TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
+TEST(RadiantViewTest, LoadsMathIntensiveLatexAsHeadlessView) {
     test_radiant_view_expect_case(10);
 }
 
-TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
+TEST(RadiantViewTest, LoadsYamlAsHeadlessView) {
     test_radiant_view_expect_case(11);
 }
 
-TEST(RadiantViewTest, LoadsPdfIntoIframeAfterLinkClickWithNoLog) {
+TEST(RadiantViewTest, LoadsLambdaReportAsHeadlessView) {
     test_radiant_view_expect_case(12);
+}
+
+TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
+    test_radiant_view_expect_case(13);
+}
+
+TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
+    test_radiant_view_expect_case(14);
+}
+
+TEST(RadiantViewTest, LoadsPdfIntoIframeAfterLinkClickWithNoLog) {
+    test_radiant_view_expect_case(15);
 }
 
 struct RadiantViewWorkQueue {
