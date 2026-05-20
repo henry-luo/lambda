@@ -266,6 +266,104 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentWhenMarkerBoundsChanged) 
     dl_destroy(&source);
 }
 
+TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentDuringFullRepaint) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 43, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 43);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, 9001);
+    DirtyTracker tracker = {};
+    tracker.full_repaint = true;
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, nullptr));
+    EXPECT_EQ(replay.count, 0);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, AppliesDirtyScaleWhenTestingFragmentVisualBounds) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 44, 10.0f, 10.0f, 20.0f, 20.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 20.0f, 20.0f, 8.0f, 8.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 44);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect dirty = retained_test_dirty(10.0f, 10.0f, 1.0f, 1.0f, 9001);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {10.0f, 10.0f, 30.0f, 30.0f};
+    uint32_t contained_id = 7777;
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 2.0f,
+        retained_test_contains_view_id, &contained_id));
+    EXPECT_EQ(replay.count, 3);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, ReusesWhenUnknownDirtyMissesAndExternalDirtyIntersects) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 45, 10.0f, 20.0f, 30.0f, 40.0f);
+    ASSERT_NE(retained_test_add_rect(&source, 12.0f, 24.0f, 8.0f, 6.0f), nullptr);
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 45);
+    ASSERT_NE(fragment, nullptr);
+
+    DirtyRect unknown_miss = retained_test_dirty(100.0f, 100.0f, 5.0f, 5.0f, 0);
+    DirtyRect external_hit = retained_test_dirty(12.0f, 24.0f, 2.0f, 2.0f, 9001);
+    unknown_miss.next = &external_hit;
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &unknown_miss;
+    Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
+    uint32_t contained_id = 7777;
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, &contained_id));
+    EXPECT_EQ(replay.count, 3);
+
+    dl_destroy(&replay);
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
 TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
@@ -296,6 +394,58 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     surface.generation++;
     EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    float vx[3] = {1.0f, 9.0f, 5.0f};
+    float vy[3] = {2.0f, 2.0f, 8.0f};
+
+    int begin = dl_begin_element(&source, 93, 0.0f, 0.0f, 20.0f, 20.0f);
+    DisplayItem* fill = dl_alloc_item(&source);
+    ASSERT_NE(fill, nullptr);
+    fill->op = DL_FILL_SURFACE_RECT;
+    fill->bounds[0] = 0.0f;
+    fill->bounds[1] = 0.0f;
+    fill->bounds[2] = 20.0f;
+    fill->bounds[3] = 20.0f;
+    fill->fill_surface_rect.clip_shapes.depth = 1;
+    fill->fill_surface_rect.clip_shapes.type[0] = CLIP_SHAPE_POLYGON;
+    fill->fill_surface_rect.clip_shapes.polygon_count[0] = 3;
+    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = vx;
+    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = vy;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 93);
+    ASSERT_NE(fragment, nullptr);
+
+    vx[0] = 100.0f;
+    vy[0] = 200.0f;
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
+    ASSERT_EQ(replay.count, 3);
+    ASSERT_EQ(replay.items[1].op, DL_FILL_SURFACE_RECT);
+    const DlClipShapeStack* copied = &replay.items[1].fill_surface_rect.clip_shapes;
+    EXPECT_EQ(copied->depth, 1);
+    EXPECT_EQ(copied->type[0], CLIP_SHAPE_POLYGON);
+    EXPECT_EQ(copied->polygon_count[0], 3);
+    ASSERT_NE(copied->polygon_vx[0], nullptr);
+    ASSERT_NE(copied->polygon_vy[0], nullptr);
+    EXPECT_NE(copied->polygon_vx[0], vx);
+    EXPECT_NE(copied->polygon_vy[0], vy);
+    EXPECT_FLOAT_EQ(copied->polygon_vx[0][0], 1.0f);
+    EXPECT_FLOAT_EQ(copied->polygon_vy[0][0], 2.0f);
+
+    dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
 }
@@ -462,6 +612,49 @@ TEST_F(RetainedDisplayListTest, PreservesOriginalMarkerBoundsForTransformedVisua
     EXPECT_FLOAT_EQ(visual_bounds.right, 130.0f);
     EXPECT_FLOAT_EQ(visual_bounds.bottom, 240.0f);
 
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, RejectsUnknownDirtyIntersectingOnlyEffectOverflow) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int begin = dl_begin_element(&source, 94, 50.0f, 50.0f, 20.0f, 20.0f);
+    DisplayItem* shadow = dl_alloc_item(&source);
+    ASSERT_NE(shadow, nullptr);
+    shadow->op = DL_OUTER_SHADOW;
+    shadow->bounds[0] = 40.0f;
+    shadow->bounds[1] = 40.0f;
+    shadow->bounds[2] = 48.0f;
+    shadow->bounds[3] = 42.0f;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 94);
+    ASSERT_NE(fragment, nullptr);
+    Bound visual_bounds = retained_dl_fragment_bounds(fragment);
+    EXPECT_FLOAT_EQ(visual_bounds.left, 40.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.top, 40.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.right, 88.0f);
+    EXPECT_FLOAT_EQ(visual_bounds.bottom, 82.0f);
+
+    DirtyRect dirty = retained_test_dirty(42.0f, 42.0f, 3.0f, 3.0f, 0);
+    DirtyTracker tracker = {};
+    tracker.dirty_list = &dirty;
+    Bound current_marker = {50.0f, 50.0f, 70.0f, 70.0f};
+
+    DisplayList replay = {};
+    dl_init(&replay, arena);
+    EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
+        &replay, fragment, current_marker, &tracker, 1.0f,
+        retained_test_contains_view_id, nullptr));
+    EXPECT_EQ(replay.count, 0);
+
+    dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
 }
