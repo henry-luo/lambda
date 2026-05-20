@@ -17560,7 +17560,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 case JS_TYPED_INT8: case JS_TYPED_UINT8: case JS_TYPED_UINT8_CLAMPED: elem_size = 1; break;
                 case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
-                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
                 }
                 memcpy(dst->data, ta->data, len * elem_size);
                 if (len > 1) {

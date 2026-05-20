@@ -6047,7 +6047,7 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
         JsAstNode* default_expr = NULL;  // default value expression if present
         if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
             pid_node = param_node;
-        } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+        } else if ((int)param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
             TsParameterNode* tsp = (TsParameterNode*)param_node;
             if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER)
                 pid_node = tsp->pattern;
@@ -12940,7 +12940,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                    MIR_reg_t mk;
+                    MIR_reg_t mk = 0;
                     if (me->computed && me->key_expr) {
                         // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
                         int proto_spill = -1, cls_spill2 = -1, fn_spill = -1;

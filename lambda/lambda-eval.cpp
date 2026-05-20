@@ -1862,7 +1862,7 @@ String* fn_string(Item itm) {
     case LMD_TYPE_INT64: {
         char buf[32];
         int64_t long_val = itm.get_int64();
-        snprintf(buf, sizeof(buf), "%ld", long_val);
+        snprintf(buf, sizeof(buf), "%lld", (long long)long_val);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }

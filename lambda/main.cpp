@@ -3157,7 +3157,7 @@ int main(int argc, char *argv[]) {
         if (success) {
             if (verbose) {
                 printf("✅ Download successful\n");
-                printf("   HTTP Status: %ld\n", res.http_status_code);
+                printf("   HTTP Status: %d\n", res.http_status_code);
                 printf("   Time: %.2f ms\n", elapsed_ms);
                 if (res.local_path) {
                     printf("   Cached: %s\n", res.local_path);
@@ -3204,7 +3204,7 @@ int main(int argc, char *argv[]) {
         } else {
             printf("❌ Download failed\n");
             printf("   URL: %s\n", url);
-            printf("   HTTP Status: %ld\n", res.http_status_code);
+            printf("   HTTP Status: %d\n", res.http_status_code);
             if (res.error_message) {
                 printf("   Error: %s\n", res.error_message);
             }

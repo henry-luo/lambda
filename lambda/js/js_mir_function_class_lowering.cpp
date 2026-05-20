@@ -2487,10 +2487,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
                 // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
                 // access on this param can resolve field types via jm_get_effective_type.
-                if (param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
+                if ((int)param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
                     TsParameterNode* tsp = (TsParameterNode*)param_node;
                     if (tsp->ts_type && tsp->ts_type->type_expr &&
-                        tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        (int)tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
                         Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, tsp->ts_type->type_expr);
                         if (resolved && resolved->type_id == LMD_TYPE_MAP) {
                             JsMirVarEntry* pvar = jm_find_var(mt, vname);
