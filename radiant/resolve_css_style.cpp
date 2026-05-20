@@ -174,6 +174,18 @@ static bool css_value_is_background_color_candidate(const CssValue* value) {
     return info && info->group == CSS_VALUE_GROUP_COLOR;
 }
 
+static bool css_background_layer_has_plain_color(const CssValue* value) {
+    if (!value) return false;
+    if (css_value_is_background_color_candidate(value)) return true;
+    if (value->type != CSS_VALUE_TYPE_LIST) return false;
+
+    for (int i = 0; i < value->data.list.count; i++) {
+        CssValue* item = value->data.list.values[i];
+        if (css_background_layer_has_plain_color(item)) return true;
+    }
+    return false;
+}
+
 static bool css_value_is_background_position_candidate(const CssValue* value) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
@@ -11425,6 +11437,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[Lambda CSS Background] Multiple background layers: %d", value->data.list.count);
                 CssValue** layers = value->data.list.values;
                 int count = value->data.list.count;
+
+                // Per CSS Backgrounds, background-color is allowed only in the
+                // final background layer. A comma-separated list of plain colors
+                // such as "background: red, white" is invalid as a whole and
+                // must not paint the last color over children.
+                for (int i = 0; i < count - 1; i++) {
+                    if (css_background_layer_has_plain_color(layers[i])) {
+                        log_debug("[Lambda CSS Background] Ignoring invalid background shorthand: non-final layer has color");
+                        return;
+                    }
+                }
 
                 // Ensure background prop exists
                 if (!span->bound) {

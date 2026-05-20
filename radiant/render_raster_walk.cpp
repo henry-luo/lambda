@@ -199,12 +199,6 @@ void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
         render_children(rdcon, root_view);
-
-        ViewBlock* root_block = lam::view_require_block(root_view);
-        if (root_block->position) {
-            log_debug("render absolute/fixed positioned children of root view");
-            render_raster_positioned_children(rdcon, root_block);
-        }
     } else {
         log_error("Invalid root view");
     }
