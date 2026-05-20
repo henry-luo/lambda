@@ -2430,10 +2430,10 @@ capture-layout:
 	            ;; \
 	        esac; \
 	        echo "📄 Capturing single test: $$TEST_FILE"; \
-	        node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG $$TEST_FILE; \
+	        LAMBDA_ROOT=$(CURDIR) node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG $$TEST_FILE; \
 	    else \
 	        echo "📂 Capturing suite: $$SUITE_VAR"; \
-	        node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG --category $$SUITE_VAR; \
+	        LAMBDA_ROOT=$(CURDIR) node extract_browser_references.js $$FORCE_FLAG $$PLATFORM_FLAG --category $$SUITE_VAR; \
 	    fi; \
 	else \
 	    echo "❌ Error: Layout directory not found at test/layout"; \
