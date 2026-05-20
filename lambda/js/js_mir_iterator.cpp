@@ -4,20 +4,32 @@
 // IteratorRecord-style MIR helpers
 // ============================================================================
 
+static void jm_reload_after_iterator_user_call(JsMirTranspiler* mt) {
+    jm_scope_env_reload_vars(mt);
+    jm_reload_module_var_locals_after_eval(mt, false);
+    jm_env_reload_shared_captures(mt);
+}
+
 MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable) {
-    return jm_call_1(mt, "js_get_iterator", MIR_T_I64,
+    MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    jm_reload_after_iterator_user_call(mt);
+    return iterator;
 }
 
 MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable) {
-    return jm_call_1(mt, "js_get_iterator_lazy", MIR_T_I64,
+    MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator_lazy", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    jm_reload_after_iterator_user_call(mt);
+    return iterator;
 }
 
 
 MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    return jm_call_1(mt, "js_iterator_step", MIR_T_I64,
+    MIR_reg_t step = jm_call_1(mt, "js_iterator_step", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_reload_after_iterator_user_call(mt);
+    return step;
 }
 
 MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result, const char* prefix) {
@@ -30,13 +42,16 @@ MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result,
 }
 
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    return jm_call_1(mt, "js_iterator_collect_rest", MIR_T_I64,
+    MIR_reg_t rest = jm_call_1(mt, "js_iterator_collect_rest", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_reload_after_iterator_user_call(mt);
+    return rest;
 }
 
 void jm_emit_iterator_close(JsMirTranspiler* mt, MIR_reg_t iterator) {
     jm_call_1(mt, "js_iterator_close", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    jm_reload_after_iterator_user_call(mt);
 }
 
 void jm_emit_iterator_close_on_exception(JsMirTranspiler* mt, MIR_reg_t iterator, MIR_label_t target) {

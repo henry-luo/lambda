@@ -2470,6 +2470,9 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
     }
     case JS_AST_NODE_FOR_STATEMENT: {
         JsForNode* n = (JsForNode*)node;
+        jm_prescan_widen_walk(n->init, float_arrays, widen_vars);
+        jm_prescan_widen_walk(n->test, float_arrays, widen_vars);
+        jm_prescan_widen_walk(n->update, float_arrays, widen_vars);
         jm_prescan_widen_walk(n->body, float_arrays, widen_vars);
         break;
     }
