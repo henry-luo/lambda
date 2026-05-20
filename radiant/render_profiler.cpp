@@ -98,7 +98,11 @@ static void render_profiler_stderr_line(const char* format, ...) {
     va_start(args, format);
     vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
-    fputs(buf, stderr);
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+    log_info("%s", buf);
 }
 
 void render_profiler_write_record_stderr(double render_ms, int surface_width,

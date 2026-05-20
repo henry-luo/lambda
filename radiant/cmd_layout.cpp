@@ -191,6 +191,8 @@ void log_root_item(Item item, char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
+                                           int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
@@ -3187,6 +3189,99 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return dom_doc;
 }
 
+static char* escape_pdf_bridge_lambda_string(const char* value) {
+    if (!value) return nullptr;
+    size_t out_len = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\' || ch == '"' || ch == '\n' || ch == '\r' || ch == '\t') {
+            out_len += 2;
+        } else {
+            out_len++;
+        }
+    }
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_LAYOUT);
+    if (!out) return nullptr;
+    size_t pos = 0;
+    for (const char* cursor = value; *cursor; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        if (ch == '\\') {
+            out[pos++] = '\\'; out[pos++] = '\\';
+        } else if (ch == '"') {
+            out[pos++] = '\\'; out[pos++] = '"';
+        } else if (ch == '\n') {
+            out[pos++] = '\\'; out[pos++] = 'n';
+        } else if (ch == '\r') {
+            out[pos++] = '\\'; out[pos++] = 'r';
+        } else if (ch == '\t') {
+            out[pos++] = '\\'; out[pos++] = 't';
+        } else {
+            out[pos++] = (char)ch;
+        }
+    }
+    out[pos] = '\0';
+    return out;
+}
+
+static char* build_pdf_view_bridge_script(const char* pdf_file, const char* opts_expr) {
+    char* escaped_pdf = escape_pdf_bridge_lambda_string(pdf_file);
+    if (!escaped_pdf) {
+        log_error("[load_html_doc] PDF package: failed to escape input path");
+        return nullptr;
+    }
+
+    const char* opts = opts_expr ? opts_expr : "null";
+    int needed = snprintf(nullptr, 0,
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
+        escaped_pdf, opts);
+    if (needed <= 0) {
+        mem_free(escaped_pdf);
+        log_error("[load_html_doc] PDF package: failed to size bridge script");
+        return nullptr;
+    }
+
+    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_LAYOUT);
+    if (!script_buf) {
+        mem_free(escaped_pdf);
+        log_error("[load_html_doc] PDF package: failed to allocate bridge script");
+        return nullptr;
+    }
+
+    snprintf(script_buf, (size_t)needed + 1,
+        "import pdf: lambda.package.pdf.pdf\n"
+        "let doc^err = input(\"%s\", 'pdf')\n"
+        "pdf.pdf_to_html(doc, %s)\n",
+        escaped_pdf, opts);
+    mem_free(escaped_pdf);
+    return script_buf;
+}
+
+static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
+                                        int viewport_height, Pool* pool) {
+    if (!pdf_url) return nullptr;
+    char* pdf_path = url_to_local_path(pdf_url);
+    const char* pdf_source = pdf_path ? pdf_path : url_get_href(pdf_url);
+    if (!pdf_source || !pdf_source[0]) {
+        log_error("[load_html_doc] PDF package: failed to resolve input path");
+        if (pdf_path) mem_free(pdf_path);
+        return nullptr;
+    }
+
+    char* bridge_source = build_pdf_view_bridge_script(pdf_source, "{max_pages: 48}");
+    if (!bridge_source) {
+        if (pdf_path) mem_free(pdf_path);
+        return nullptr;
+    }
+
+    DomDocument* doc = load_lambda_script_source_doc(pdf_url, bridge_source,
+                                                     viewport_width, viewport_height, pool);
+    mem_free(bridge_source);
+    if (pdf_path) mem_free(pdf_path);
+    return doc;
+}
+
 DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
@@ -3229,16 +3324,16 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
         log_info("[load_html_doc] Detected XML file, using XML→DOM pipeline");
         doc = load_xml_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && strcmp(ext, ".pdf") == 0) {
-        log_error("[load_html_doc] Direct PDF ViewTree loading was retired; use lambda view PDF conversion");
-        doc = nullptr;
+        log_info("[load_html_doc] Detected PDF file, using Lambda PDF package in-memory element pipeline");
+        doc = load_pdf_bridge_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && strcmp(ext, ".svg") == 0) {
-        // Load SVG document: render SVG → convert to ViewTree directly (no CSS layout needed)
-        log_info("[load_html_doc] Detected SVG file, using SVG→ViewTree pipeline");
+        // Load SVG document as a normal DOM-backed image document.
+        log_info("[load_html_doc] Detected SVG file, using SVG image document pipeline");
         doc = load_svg_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
     } else if (ext && (strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
                        strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".gif") == 0)) {
-        // Load image document: load image → convert to ViewTree directly (no CSS layout needed)
-        log_info("[load_html_doc] Detected image file, using Image→ViewTree pipeline");
+        // Load image document as html/body/img so view interactions use normal DOM paths.
+        log_info("[load_html_doc] Detected image file, using DOM image document pipeline");
         doc = load_image_doc(full_url, viewport_width, viewport_height, pool, pixel_ratio);
     } else if (ext && (strcmp(ext, ".json") == 0 || strcmp(ext, ".yaml") == 0 ||
                        strcmp(ext, ".yml") == 0 || strcmp(ext, ".toml") == 0 ||
@@ -3256,279 +3351,127 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     return doc;
 }
 
-/**
- * Load SVG document with direct ViewTree conversion
- * Loads SVG with ThorVG, creates ViewTree with SVG as embedded image
- *
- * @param svg_url URL to SVG file
- * @param viewport_width Viewport width (used for scaling if SVG has no intrinsic size)
- * @param viewport_height Viewport height
- * @param pool Memory pool for allocations
- * @param pixel_ratio Display pixel ratio for high-DPI scaling
- * @return DomDocument structure with view_tree pre-set, ready for rendering
- */
-DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
-    auto total_start = std::chrono::high_resolution_clock::now();
+static char* escape_image_document_html_attr(const char* value) {
+    if (!value) return mem_strdup("", MEM_CAT_LAYOUT);
 
-    if (!svg_url || !pool) {
-        log_error("load_svg_doc: invalid parameters");
-        return nullptr;
+    size_t escaped_len = 0;
+    for (size_t i = 0; value[i]; i++) {
+        char c = value[i];
+        if (c == '&') escaped_len += 5;
+        else if (c == '<' || c == '>') escaped_len += 4;
+        else if (c == '"') escaped_len += 6;
+        else if (c == '\'') escaped_len += 5;
+        else escaped_len++;
     }
 
-    char* svg_filepath = url_to_local_path(svg_url);
-    log_info("[TIMING] Loading SVG document: %s", svg_filepath);
+    char* escaped = (char*)mem_alloc(escaped_len + 1, MEM_CAT_LAYOUT);
+    if (!escaped) return nullptr;
 
-    // Create Input structure (minimal, for DomDocument creation)
-    Input* input = InputManager::create_input(svg_url);
-    if (!input) {
-        log_error("Failed to create Input structure for SVG");
-        return nullptr;
-    }
-
-    // Create a dedicated pool for the view tree
-    Pool* view_pool = pool_create();
-    if (!view_pool) {
-        log_error("Failed to create view pool for SVG");
-        return nullptr;
-    }
-
-    // Load SVG through rdt_ vector API
-    RdtPicture* pic = rdt_picture_load(svg_filepath);
-    if (!pic) {
-        log_error("Failed to load SVG: %s", svg_filepath);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-
-    // Get SVG intrinsic size from viewBox
-    float svg_width, svg_height;
-    rdt_picture_get_size(pic, &svg_width, &svg_height);
-    log_info("SVG intrinsic size: %.1f x %.1f", svg_width, svg_height);
-
-    // If SVG has no intrinsic size, use viewport
-    if (svg_width <= 0) svg_width = (float)viewport_width;
-    if (svg_height <= 0) svg_height = (float)viewport_height;
-
-    // Apply pixel_ratio for high-DPI displays
-    float scaled_width = svg_width * pixel_ratio;
-    float scaled_height = svg_height * pixel_ratio;
-
-    // Create ViewTree
-    ViewTree* view_tree = lam::pool_alloc_view_tree(view_pool);
-    if (!view_tree) {
-        log_error("Failed to allocate view tree for SVG");
-        rdt_picture_free(pic);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-    view_tree->pool = view_pool;
-    view_tree->html_version = HTML5;
-
-    // Create root ViewBlock to hold the SVG
-    ViewBlock* root_view = lam::pool_alloc_view_block(view_pool);
-    if (!root_view) {
-        log_error("Failed to allocate root view for SVG");
-        rdt_picture_free(pic);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-
-    root_view->view_type = RDT_VIEW_BLOCK;
-    root_view->x = 0;
-    root_view->y = 0;
-    root_view->width = scaled_width;
-    root_view->height = scaled_height;
-    root_view->content_width = scaled_width;
-    root_view->content_height = scaled_height;
-
-    // Create ImageSurface to hold the SVG
-    ImageSurface* svg_surface = (ImageSurface*)pool_calloc(view_pool, sizeof(ImageSurface));
-    if (svg_surface) {
-        svg_surface->format = IMAGE_FORMAT_SVG;
-        svg_surface->pic = pic;
-        svg_surface->width = (int)svg_width;
-        svg_surface->height = (int)svg_height;
-        svg_surface->url = svg_url;
-        // Set max_render_width so render_svg knows the target size for rasterization
-        svg_surface->max_render_width = (int)scaled_width;
-
-        // Create EmbedProp to hold the image
-        EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
-        if (embed) {
-            embed->img = svg_surface;
-            root_view->embed = embed;
+    size_t out = 0;
+    for (size_t i = 0; value[i]; i++) {
+        char c = value[i];
+        if (c == '&') {
+            memcpy(escaped + out, "&amp;", 5); out += 5;
+        } else if (c == '<') {
+            memcpy(escaped + out, "&lt;", 4); out += 4;
+        } else if (c == '>') {
+            memcpy(escaped + out, "&gt;", 4); out += 4;
+        } else if (c == '"') {
+            memcpy(escaped + out, "&quot;", 6); out += 6;
+        } else if (c == '\'') {
+            memcpy(escaped + out, "&#39;", 5); out += 5;
+        } else {
+            escaped[out++] = c;
         }
     }
+    escaped[out] = '\0';
+    return escaped;
+}
 
-    view_tree->root = static_cast<View*>(root_view);
+static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_width,
+                                                   int viewport_height, Pool* pool,
+                                                   const char* log_prefix) {
+    auto total_start = std::chrono::high_resolution_clock::now();
 
-    // Create DomDocument
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument for SVG");
-        pool_destroy(view_pool);
+    if (!image_url || !pool) {
+        log_error("%s: invalid parameters", log_prefix ? log_prefix : "load_image_doc");
         return nullptr;
     }
 
-    dom_doc->root = nullptr;           // No DomElement tree for SVG
-    dom_doc->html_root = nullptr;      // No HTML tree for SVG (skips layout_html_doc)
-    dom_doc->html_version = HTML5;
-    dom_doc->url = svg_url;
-    dom_doc->view_tree = view_tree;
-    dom_doc->state = nullptr;
+    char* image_filepath = url_to_local_path(image_url);
+    const char* image_href = url_get_href(image_url);
+    const char* src_value = image_href && image_href[0] ? image_href : image_filepath;
+    const char* filename = image_filepath ? strrchr(image_filepath, '/') : nullptr;
+    filename = filename ? filename + 1 : (src_value ? src_value : "image");
 
-    // Set scale fields for rendering
-    // SVG view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
-    dom_doc->given_scale = 1.0f;
-    dom_doc->scale = pixel_ratio;
+    char* src_attr = escape_image_document_html_attr(src_value);
+    char* title_attr = escape_image_document_html_attr(filename);
+    if (!src_attr || !title_attr) {
+        log_error("%s: failed to escape image URL", log_prefix ? log_prefix : "load_image_doc");
+        if (src_attr) mem_free(src_attr);
+        if (title_attr) mem_free(title_attr);
+        if (image_filepath) mem_free(image_filepath);
+        return nullptr;
+    }
+
+    const char* html_template =
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head>\n"
+        "  <meta charset=\"UTF-8\">\n"
+        "  <title>%s</title>\n"
+        "  <style>\n"
+        "    html, body { margin: 0; padding: 0; min-width: 100%%; min-height: 100%%; background: #fff; }\n"
+        "    body { overflow: auto; }\n"
+        "    img.rdt-image-document { display: block; max-width: none; height: auto; user-select: auto; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body data-rdt-document=\"image\">\n"
+        "<img class=\"rdt-image-document\" src=\"%s\" alt=\"%s\">\n"
+        "</body>\n"
+        "</html>\n";
+
+    size_t html_len = strlen(html_template) + strlen(title_attr) + strlen(src_attr) + strlen(title_attr) + 1;
+    char* html_content = (char*)mem_alloc(html_len, MEM_CAT_LAYOUT);
+    if (!html_content) {
+        log_error("%s: failed to allocate wrapper HTML", log_prefix ? log_prefix : "load_image_doc");
+        mem_free(src_attr);
+        mem_free(title_attr);
+        if (image_filepath) mem_free(image_filepath);
+        return nullptr;
+    }
+    snprintf(html_content, html_len, html_template, title_attr, src_attr, title_attr);
+
+    log_info("[TIMING] Loading DOM-backed image document: %s", src_value ? src_value : "(null)");
+    DomDocument* doc = load_lambda_html_doc(image_url, nullptr, viewport_width, viewport_height,
+                                            pool, html_content);
+
+    mem_free(html_content);
+    mem_free(src_attr);
+    mem_free(title_attr);
+    if (image_filepath) mem_free(image_filepath);
 
     auto total_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] load_svg_doc total: %.1fms, size: %.0fx%.0f (scaled: %.0fx%.0f)",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
-        svg_width, svg_height, scaled_width, scaled_height);
-
-    return dom_doc;
+    log_info("[TIMING] %s total: %.1fms",
+             log_prefix ? log_prefix : "load_image_doc",
+             std::chrono::duration<double, std::milli>(total_end - total_start).count());
+    return doc;
 }
 
 /**
- * Load raster image document (PNG, JPG, JPEG, GIF)
- * Loads image, creates ViewTree directly (no CSS layout needed)
- *
- * @param img_url URL to image file
- * @param viewport_width Viewport width for display
- * @param viewport_height Viewport height for display
- * @param pool Memory pool for allocations
- * @param pixel_ratio Display pixel ratio for high-DPI scaling (e.g., 2.0 for Retina)
- * @return DomDocument structure with view_tree pre-set, ready for rendering
+ * Load SVG document as a DOM-backed html/body/img document.
+ */
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
+    (void)pixel_ratio;
+    return load_dom_backed_image_document(svg_url, viewport_width, viewport_height, pool, "load_svg_doc");
+}
+
+/**
+ * Load raster image document (PNG, JPG, JPEG, GIF) as a DOM-backed html/body/img document.
  */
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
-    auto total_start = std::chrono::high_resolution_clock::now();
-
-    if (!img_url || !pool) {
-        log_error("load_image_doc: invalid parameters");
-        return nullptr;
-    }
-
-    char* img_filepath = url_to_local_path(img_url);
-    log_info("[TIMING] Loading image document: %s", img_filepath);
-
-    // Create Input structure (minimal, for DomDocument creation)
-    Input* input = InputManager::create_input(img_url);
-    if (!input) {
-        log_error("Failed to create Input structure for image");
-        return nullptr;
-    }
-
-    // Create a dedicated pool for the view tree
-    Pool* view_pool = pool_create();
-    if (!view_pool) {
-        log_error("Failed to create view pool for image");
-        return nullptr;
-    }
-
-    // Determine image format from extension
-    const char* ext = strrchr(img_filepath, '.');
-    ImageFormat format = IMAGE_FORMAT_PNG;  // default
-    if (ext) {
-        if (str_ieq_const(ext, strlen(ext), ".jpg") || str_ieq_const(ext, strlen(ext), ".jpeg")) {
-            format = IMAGE_FORMAT_JPEG;
-        } else if (str_ieq_const(ext, strlen(ext), ".gif")) {
-            format = IMAGE_FORMAT_GIF;
-        } else if (str_ieq_const(ext, strlen(ext), ".png")) {
-            format = IMAGE_FORMAT_PNG;
-        }
-    }
-
-    // Load image using stb_image
-    int img_width, img_height, channels;
-    unsigned char* data = image_load(img_filepath, &img_width, &img_height, &channels, 4);
-    if (!data) {
-        log_error("Failed to load image: %s", img_filepath);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-
-    log_info("Image loaded: %dx%d, channels=%d", img_width, img_height, channels);
-
-    // Create ImageSurface from loaded data
-    ImageSurface* img_surface = image_surface_create_from(img_width, img_height, data);
-    if (!img_surface) {
-        log_error("Failed to create image surface");
-        image_free(data);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-    img_surface->format = format;
-    img_surface->url = img_url;
-
-    // Apply pixel_ratio for high-DPI displays
-    float scaled_width = (float)img_width * pixel_ratio;
-    float scaled_height = (float)img_height * pixel_ratio;
-
-    // Create ViewTree
-    ViewTree* view_tree = lam::pool_alloc_view_tree(view_pool);
-    if (!view_tree) {
-        log_error("Failed to allocate view tree for image");
-        image_surface_destroy(img_surface);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-    view_tree->pool = view_pool;
-    view_tree->html_version = HTML5;
-
-    // Create root ViewBlock to hold the image
-    ViewBlock* root_view = lam::pool_alloc_view_block(view_pool);
-    if (!root_view) {
-        log_error("Failed to allocate root view for image");
-        image_surface_destroy(img_surface);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-
-    root_view->view_type = RDT_VIEW_BLOCK;
-    root_view->x = 0;
-    root_view->y = 0;
-    root_view->width = scaled_width;
-    root_view->height = scaled_height;
-    root_view->content_width = scaled_width;
-    root_view->content_height = scaled_height;
-
-    // Create EmbedProp to hold the image
-    EmbedProp* embed = (EmbedProp*)pool_calloc(view_pool, sizeof(EmbedProp));
-    if (embed) {
-        embed->img = img_surface;
-        root_view->embed = embed;
-    }
-
-    view_tree->root = static_cast<View*>(root_view);
-
-    // Create DomDocument
-    DomDocument* dom_doc = dom_document_create(input);
-    if (!dom_doc) {
-        log_error("Failed to create DomDocument for image");
-        image_surface_destroy(img_surface);
-        pool_destroy(view_pool);
-        return nullptr;
-    }
-
-    dom_doc->root = nullptr;           // No DomElement tree for images
-    dom_doc->html_root = nullptr;      // No HTML tree for images (skips layout_html_doc)
-    dom_doc->html_version = HTML5;
-    dom_doc->url = img_url;
-    dom_doc->view_tree = view_tree;
-    dom_doc->state = nullptr;
-
-    // Set scale fields for rendering
-    // Image view tree is pre-scaled by pixel_ratio, so given_scale = 1.0 and scale = pixel_ratio
-    dom_doc->given_scale = 1.0f;
-    dom_doc->scale = pixel_ratio;
-
-    auto total_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] load_image_doc total: %.1fms, size: %dx%d (scaled: %.0fx%.0f)",
-        std::chrono::duration<double, std::milli>(total_end - total_start).count(),
-        img_width, img_height, scaled_width, scaled_height);
-
-    return dom_doc;
+    (void)pixel_ratio;
+    return load_dom_backed_image_document(img_url, viewport_width, viewport_height, pool, "load_image_doc");
 }
 
 /**
@@ -3943,11 +3886,12 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
             if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
                 Array* rendered_arr = math_result->root.array;
                 int replace_count = 0;
+                MarkBuilder markdown_builder(input);
                 for (int i = 0; i < math_list->length && i < (int)rendered_arr->length; i++) {
                     Item rendered_item = rendered_arr->items[i];
                     if (get_type_id(rendered_item) == LMD_TYPE_ELEMENT) {
                         MathInfo* mi = (MathInfo*)math_list->data[i];
-                        mi->parent->items[mi->index] = rendered_item;
+                        mi->parent->items[mi->index] = markdown_builder.deep_copy(rendered_item);
                         replace_count++;
                     }
                 }
@@ -4764,7 +4708,8 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
  * @param pool Memory pool for allocations
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
-DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
+DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
+                                           int viewport_width, int viewport_height, Pool* pool) {
     auto total_start = std::chrono::high_resolution_clock::now();
 
     if (!script_url || !pool) {
@@ -4795,7 +4740,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     log_debug("[Lambda Script] Evaluating script (ui_mode=true, arena allocation)...");
     // Use MIR Direct JIT to evaluate the Lambda script as a functional document result.
-    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
+    Input* script_output = run_script_mir(runtime, script_source, script_filepath, false);
 
     // After run_script_mir returns, the thread-local context points to a
     // stack-local Runner that has been destroyed. Restore it from the retained
@@ -5139,6 +5084,10 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     log_notice("[Lambda Script] Script document loaded and styled");
     return dom_doc;
+}
+
+DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool) {
+    return load_lambda_script_source_doc(script_url, nullptr, viewport_width, viewport_height, pool);
 }
 
 // ============================================================================

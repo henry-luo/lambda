@@ -156,6 +156,16 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
     return 1;
 }
 
+int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
+                                                    const char* event_file, bool headless,
+                                                    const char** font_dirs, int font_dir_count,
+                                                    bool enable_event_log) {
+    (void)script_name; (void)script_source; (void)event_file; (void)headless;
+    (void)font_dirs; (void)font_dir_count; (void)enable_event_log;
+    fprintf(stderr, "Error: view command not available in headless CLI build\n");
+    return 1;
+}
+
 extern "C" Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item) {
     (void)pdf_item;
     return svg_item;

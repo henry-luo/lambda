@@ -1101,6 +1101,7 @@ test-radiant-baseline: build-test
 # Run radiant tests without rebuilding (use when test executables are already built)
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
+	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
 	render_passed=0; render_failed=0; render_status="⏭️  SKIP"; \
@@ -1167,6 +1168,19 @@ run-radiant-baseline:
 	fi; \
 	\
 	echo ""; \
+	echo "📦 Radiant View Command Tests:"; \
+	if [ -f "test/test_radiant_view_gtest.exe" ]; then \
+		output=$$(./test/test_radiant_view_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
+		radiant_view_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		radiant_view_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		radiant_view_passed=$${radiant_view_passed:-0}; radiant_view_failed=$${radiant_view_failed:-0}; \
+		if [ "$$radiant_view_failed" = "0" ] || [ -z "$$radiant_view_failed" ]; then radiant_view_status="✅ PASS"; radiant_view_failed=0; else radiant_view_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_radiant_view_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
 	echo "📦 View Page and Markdown (Headless) Tests:"; \
 	if [ -f "test/test_page_load_gtest.exe" ]; then \
 		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
@@ -1226,8 +1240,8 @@ run-radiant-baseline:
 		echo "   ⚠️  test/test_wpt_css_syntax_gtest.exe not found"; \
 	fi; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed)); \
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + radiant_view_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + radiant_view_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + total_failed)); \
 	\
@@ -1250,6 +1264,7 @@ run-radiant-baseline:
 	done < temp/_layout_baseline_results.txt; \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
+	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
 	echo "   ├── Render Visual       $$render_status  ($$render_passed passed, $$render_failed failed) (test_radiant_render.js)"; \
