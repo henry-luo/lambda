@@ -3458,7 +3458,12 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         }
     }
 
-    bool local_shadows_module = module_var && var && !mt->destructure_assignment_mode;
+    // nested lexical destructuring can shadow a top-level module var; avoid
+    // treating that local binding as a write to the module/global slot.
+    bool local_lexical_shadow_of_module = module_var && var && var->is_let_const &&
+        mt->in_main && mt->scope_depth > 1;
+    bool local_shadows_module = module_var && var &&
+        (!mt->destructure_assignment_mode || local_lexical_shadow_of_module);
     if (module_var && var && mt->current_fc && mt->current_fc->node) {
         if (jm_func_has_param_named(mt->current_fc->node, js_name, js_name_len)) {
             local_shadows_module = true;
@@ -3600,7 +3605,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
+            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
+                !local_lexical_shadow_of_module) {
                 jm_emit_captured_module_var_writeback(mt, vname, val);
             }
             var->tdz_active = false;
@@ -3637,7 +3643,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
+            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
+                !local_lexical_shadow_of_module) {
                 jm_emit_captured_module_var_writeback(mt, vname, val);
             }
             jm_emit_label(mt, l_done);
@@ -3730,7 +3737,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
         bool at_module_scope = mt->in_main ||
             (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
-        bool local_let_const_shadow = var && var->is_let_const && !at_module_scope;
+        bool local_let_const_shadow = local_lexical_shadow_of_module ||
+            (var && var->is_let_const && !at_module_scope);
         if (mc && mc->const_type == MCONST_MODVAR) {
             if (at_module_scope && !local_let_const_shadow) {
                 jm_call_void_2(mt, "js_set_module_var",
@@ -4401,7 +4409,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     }
                     // P5: For typed INT module variables, use inline native arithmetic
                     // for compound assignments instead of calling js_add/js_subtract/etc.
-                    // This eliminates one function call per iteration in tight loops.
+                    // This stays enabled only while modvar_type proves the module slot
+                    // still has a native-compatible mirror.
                     TypeId p5_rtype = jm_get_effective_type(mt, asgn->right);
                     if (mt->with_depth <= 0 && mc->modvar_type == LMD_TYPE_INT &&
                         asgn->op != JS_OP_ASSIGN && p5_rtype == LMD_TYPE_INT &&
@@ -4581,16 +4590,20 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             jm_emit_exc_propagate_check(mt);
                         }
                         TypeId simple_rhs_type = jm_get_effective_type(mt, asgn->right);
+                        // direct eval and type-changing writes can invalidate the native
+                        // mirror, so use the fast path only when the module metadata agrees.
                         if (mc->var_kind == JS_VAR_VAR &&
                             mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct &&
-                            simple_rhs_type == LMD_TYPE_INT) {
+                            simple_rhs_type == LMD_TYPE_INT &&
+                            mc->modvar_type == LMD_TYPE_INT) {
                             simple_native_rhs = jm_transpile_as_native(mt, asgn->right,
                                 simple_rhs_type, LMD_TYPE_INT);
                             rhs = jm_box_native(mt, simple_native_rhs, LMD_TYPE_INT);
                             jm_set_var(mt, vname, simple_native_rhs, MIR_T_I64, LMD_TYPE_INT);
                         } else if (mc->var_kind == JS_VAR_VAR &&
                             mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct &&
-                            simple_rhs_type == LMD_TYPE_FLOAT) {
+                            simple_rhs_type == LMD_TYPE_FLOAT &&
+                            (mc->modvar_type == LMD_TYPE_INT || mc->modvar_type == LMD_TYPE_FLOAT)) {
                             simple_native_rhs = jm_transpile_as_native(mt, asgn->right,
                                 simple_rhs_type, LMD_TYPE_FLOAT);
                             rhs = jm_box_native(mt, simple_native_rhs, LMD_TYPE_FLOAT);
@@ -6959,6 +6972,21 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             }
             if (sync_eval_bindings && boxed &&
                 (entry->var.type_id == LMD_TYPE_INT || entry->var.mir_type == MIR_T_D)) {
+                // direct eval can replace a native numeric module mirror with an
+                // arbitrary boxed value, so widen the local before reloading it.
+                TypeId native_reload_type =
+                    entry->var.mir_type == MIR_T_D ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                MIR_reg_t local_boxed = jm_box_native(mt, entry->var.reg, native_reload_type);
+                if (entry->var.mir_type == MIR_T_I64) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, entry->var.reg),
+                        MIR_new_reg_op(mt->ctx, local_boxed)));
+                    local_boxed = entry->var.reg;
+                } else {
+                    entry->var.reg = local_boxed;
+                }
+                entry->var.type_id = LMD_TYPE_ANY;
+                entry->var.mir_type = MIR_T_I64;
                 MIR_label_t l_reload_value = jm_new_label(mt);
                 MIR_label_t l_after_reload = jm_new_label(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
@@ -6968,22 +6996,9 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                     MIR_new_label_op(mt->ctx, l_after_reload)));
                 jm_emit_label(mt, l_reload_value);
-                if (entry->var.type_id == LMD_TYPE_INT && entry->var.mir_type == MIR_T_I64) {
-                    MIR_reg_t value = jm_call_1(mt, "it2i", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, entry->var.reg),
-                        MIR_new_reg_op(mt->ctx, value)));
-                } else {
-                    MIR_reg_t numeric = jm_call_1(mt, "js_to_number", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                    MIR_reg_t value = jm_call_1(mt, "js_get_number", MIR_T_D,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, numeric));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                        MIR_new_reg_op(mt->ctx, entry->var.reg),
-                        MIR_new_reg_op(mt->ctx, value)));
-                    entry->var.type_id = LMD_TYPE_FLOAT;
-                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, local_boxed),
+                    MIR_new_reg_op(mt->ctx, boxed)));
                 jm_emit_label(mt, l_after_reload);
                 continue;
             }
@@ -12141,6 +12156,13 @@ static void jm_mark_closure_env_module_var_captures(JsMirTranspiler* mt, JsFuncC
         if (!fc->captures[ci].force_env_capture) continue;
         int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
         if (slot < 0) continue;
+        JsMirVarEntry* local_var = jm_find_var(mt, fc->captures[ci].name);
+        // a local let/const shadow is captured from the local env, not from the
+        // module var table, so do not tag the closure slot as module-backed.
+        if (local_var && local_var->is_let_const && !local_var->from_env &&
+            !local_var->from_shared_env) {
+            continue;
+        }
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -12178,9 +12200,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
         // Check if this closure should use the parent's shared scope env.
-        // Share scope env so var-scoped closures can persist mutations to outer
-        // variables.  But in loops, if any captured variable is let/const, we must
-        // NOT share — let/const need per-iteration binding semantics.
+        // Share only when every capture is present in the current env with the
+        // expected slot; mixed block/module captures need a copied dense env.
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
@@ -12189,9 +12210,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     use_scope_env = false;
                     break;
                 }
-                if (cv && cv->is_let_const &&
-                    (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
-                     cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
+                if (!cv || !cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                    cv->scope_env_slot != fc->captures[ci].scope_env_slot) {
                     use_scope_env = false;
                     break;
                 }
@@ -12211,8 +12231,11 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
             jm_mark_closure_env_module_var_captures(mt, fc, fn_reg, true);
         } else {
-            // Fallback: allocate own env and copy values (per-closure env, not shared).
-            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+            // fallback: allocate own dense env and copy live values at creation time.
+            bool has_remapped = false;
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                fc->captures[ci].scope_env_slot = -1;
+            }
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture: if the function references its own name, we must
@@ -12229,7 +12252,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
+                int slot = ci;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12246,6 +12269,14 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, val),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                    } else if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                        // block lexicals may live only in the active scope env; copy
+                        // from there instead of the stale TDZ register.
+                        val = jm_new_reg(mt, "cscope_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
                     } else {
                         val = var->reg;
                         if (jm_is_native_type(var->type_id))
@@ -12361,6 +12392,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 fc->captures[ci].is_let_const = true;
             }
         }
+        // function expressions follow the same rule as declarations: share the
+        // current scope env only when all capture slots are live in that env.
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
@@ -12369,9 +12402,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                     use_scope_env = false;
                     break;
                 }
-                if (cv && cv->is_let_const &&
-                    (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
-                     cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
+                if (!cv || !cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                    cv->scope_env_slot != fc->captures[ci].scope_env_slot) {
                     use_scope_env = false;
                     break;
                 }
@@ -12431,7 +12463,10 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         } else {
-            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
+            bool has_remapped = false;
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                fc->captures[ci].scope_env_slot = -1;
+            }
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture via assignment target hint:
@@ -12449,7 +12484,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int i = 0; i < fc->capture_count; i++) {
-                int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
+                int slot = i;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12466,6 +12501,14 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, value_to_store),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                    } else if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                        // copied closures must read captured block lexicals from
+                        // the active scope env so initialized values beat TDZ.
+                        value_to_store = jm_new_reg(mt, "fscope_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, value_to_store),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
                     } else {
                         value_to_store = var->reg;
                         if (jm_is_native_type(var->type_id)) {

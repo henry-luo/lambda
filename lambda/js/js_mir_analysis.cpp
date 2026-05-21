@@ -1379,6 +1379,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     jm_collect_let_const_names(block, let_consts);
+    int slot = 0;
     size_t iter = 0; void* item;
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
@@ -1400,13 +1401,20 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
             ve->is_let_const = true;
             ve->is_const = (e->var_kind == 2);  // JS_VAR_CONST
             ve->tdz_active = true;
+            if (mt->scope_env_reg != 0) {
+                // block scope envs use their own compact slot order; write TDZ
+                // directly so captures do not inherit an enclosing env slot map.
+                ve->in_scope_env = true;
+                ve->scope_env_slot = slot;
+                ve->scope_env_reg = mt->scope_env_reg;
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
+                        mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, tdz_reg)));
+            }
         }
-        // v29 TDZ: Also write TDZ sentinel to scope_env so closures sharing
-        // the scope env see TDZ before the variable is initialized.
-        jm_scope_env_mark_and_writeback(mt, e->name, tdz_reg);
+        slot++;
     }
-    hashmap_free(let_consts);
-
     JsBlockNode* blk = (JsBlockNode*)block;
     JsAstNode* stmt = blk->statements;
     while (stmt) {
@@ -1415,6 +1423,19 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
             if (fn->name && fn->name->chars) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item) {
+                    // a hoisted block function that captures this block's lexical
+                    // binding would snapshot TDZ before the initializer runs.
+                    bool captures_block_lexical = false;
+                    for (int ci = 0; ci < fc->capture_count; ci++) {
+                        if (jm_name_set_has(let_consts, fc->captures[ci].name)) {
+                            captures_block_lexical = true;
+                            break;
+                        }
+                    }
+                    if (captures_block_lexical) {
+                        stmt = stmt->next;
+                        continue;
+                    }
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s",
                         (int)fn->name->len, fn->name->chars);
@@ -1431,6 +1452,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
         }
         stmt = stmt->next;
     }
+    hashmap_free(let_consts);
 }
 
 void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
@@ -1651,6 +1673,15 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             continue; // handle after we know if there are other captures
         }
         bool ref_in_outer_scope = jm_name_set_has(outer_scope_names, ref->name);
+        bool ref_is_lexical_for_head = false;
+        // for-head lexical names are materialized by synthetic per-iteration envs,
+        // so include them even before they appear in the normal outer-scope set.
+        for (int li = 0; li < fn->lexical_for_head_capture_count; li++) {
+            if (strcmp(fn->lexical_for_head_capture_names[li], ref->name) == 0) {
+                ref_is_lexical_for_head = true;
+                break;
+            }
+        }
         bool ref_is_module_modvar = false;
         if (!ref_in_outer_scope && module_consts) {
             JsModuleConstEntry lookup;
@@ -1658,7 +1689,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
             ref_is_module_modvar = mc && mc->const_type == MCONST_MODVAR;
         }
-        if (!ref_in_outer_scope && !ref_is_module_modvar) continue;  // not in outer scope
+        if (!ref_in_outer_scope && !ref_is_module_modvar && !ref_is_lexical_for_head)
+            continue;  // not in outer scope
         // Skip module-level constants — they're resolved at compile time via module_consts,
         // not at runtime via closure environment. Mutable module var bindings still
         // need closure capture semantics because native callbacks cannot trigger
@@ -1694,12 +1726,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             fc->captures[fc->capture_count].is_const = false;
             fc->captures[fc->capture_count].is_nfe_binding = false;
             fc->captures[fc->capture_count].force_env_capture = force_env_capture;
-            for (int li = 0; li < fn->lexical_for_head_capture_count; li++) {
-                if (strcmp(fn->lexical_for_head_capture_names[li], ref->name) == 0) {
-                    fc->captures[fc->capture_count].is_let_const = true;
-                    fc->captures[fc->capture_count].force_env_capture = true;
-                    break;
-                }
+            if (ref_is_lexical_for_head) {
+                fc->captures[fc->capture_count].is_let_const = true;
+                fc->captures[fc->capture_count].force_env_capture = true;
             }
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);

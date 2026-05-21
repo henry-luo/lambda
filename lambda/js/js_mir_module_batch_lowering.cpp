@@ -46,6 +46,326 @@ static JsFunctionNode* jm_find_iife_function_expr(JsAstNode* expr) {
     return jm_find_iife_function_expr(call->callee);
 }
 
+static TypeId jm_static_assignment_value_type(JsAstNode* expr) {
+    if (!expr) return LMD_TYPE_ANY;
+    switch (expr->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)expr;
+        switch (lit->literal_type) {
+        case JS_LITERAL_NUMBER: {
+            double val = lit->value.number_value;
+            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
+            if (lit->has_decimal) return LMD_TYPE_FLOAT;
+            if (val == (double)(int64_t)val &&
+                val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+                return LMD_TYPE_INT;
+            }
+            return LMD_TYPE_FLOAT;
+        }
+        case JS_LITERAL_BOOLEAN: return LMD_TYPE_BOOL;
+        case JS_LITERAL_STRING: return LMD_TYPE_STRING;
+        case JS_LITERAL_NULL: return LMD_TYPE_NULL;
+        case JS_LITERAL_UNDEFINED: return LMD_TYPE_UNDEFINED;
+        default: return LMD_TYPE_ANY;
+        }
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)expr;
+        if (!un->operand) return LMD_TYPE_ANY;
+        if (un->op == JS_OP_PLUS || un->op == JS_OP_MINUS) {
+            TypeId operand_type = jm_static_assignment_value_type(un->operand);
+            if (operand_type == LMD_TYPE_INT || operand_type == LMD_TYPE_FLOAT)
+                return operand_type;
+        }
+        return LMD_TYPE_ANY;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)expr;
+        if (asgn->op == JS_OP_ASSIGN)
+            return jm_static_assignment_value_type(asgn->right);
+        return LMD_TYPE_ANY;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)expr;
+        JsAstNode* last = NULL;
+        for (JsAstNode* child = seq->expressions; child; child = child->next)
+            last = child;
+        return last ? jm_static_assignment_value_type(last) : LMD_TYPE_ANY;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)expr;
+        TypeId consequent_type = jm_static_assignment_value_type(cond->consequent);
+        TypeId alternate_type = jm_static_assignment_value_type(cond->alternate);
+        return consequent_type == alternate_type ? consequent_type : LMD_TYPE_ANY;
+    }
+    default:
+        return LMD_TYPE_ANY;
+    }
+}
+
+static bool jm_assignment_preserves_modvar_type(TypeId modvar_type, TypeId value_type) {
+    if (modvar_type == LMD_TYPE_INT)
+        return value_type == LMD_TYPE_INT;
+    if (modvar_type == LMD_TYPE_FLOAT)
+        return value_type == LMD_TYPE_INT || value_type == LMD_TYPE_FLOAT;
+    return true;
+}
+
+static bool jm_compound_assignment_preserves_modvar_type(TypeId modvar_type,
+        JsOperator op, TypeId rhs_type) {
+    if (modvar_type != LMD_TYPE_INT && modvar_type != LMD_TYPE_FLOAT)
+        return true;
+    switch (op) {
+    case JS_OP_ADD_ASSIGN:
+        return rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT;
+    case JS_OP_SUB_ASSIGN:
+    case JS_OP_MUL_ASSIGN:
+    case JS_OP_DIV_ASSIGN:
+    case JS_OP_MOD_ASSIGN:
+    case JS_OP_EXP_ASSIGN:
+    case JS_OP_BIT_AND_ASSIGN:
+    case JS_OP_BIT_OR_ASSIGN:
+    case JS_OP_BIT_XOR_ASSIGN:
+    case JS_OP_LSHIFT_ASSIGN:
+    case JS_OP_RSHIFT_ASSIGN:
+    case JS_OP_URSHIFT_ASSIGN:
+        return rhs_type != LMD_TYPE_STRING &&
+               rhs_type != LMD_TYPE_DECIMAL &&
+               rhs_type != LMD_TYPE_ANY;
+    default:
+        return false;
+    }
+}
+
+static void jm_mark_type_changing_module_writes(JsAstNode* node,
+        struct hashmap* module_consts, struct hashmap* names) {
+    if (!node || !module_consts || !names) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)asgn->left;
+            if (id->name) {
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%.*s",
+                    (int)id->name->len, id->name->chars);
+                JsModuleConstEntry lookup;
+                snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->modvar_type != 0) {
+                    TypeId rhs_type = jm_static_assignment_value_type(asgn->right);
+                    bool preserves = asgn->op == JS_OP_ASSIGN ?
+                        jm_assignment_preserves_modvar_type(mc->modvar_type, rhs_type) :
+                        jm_compound_assignment_preserves_modvar_type(mc->modvar_type,
+                            asgn->op, rhs_type);
+                    if (!preserves) {
+                        jm_name_set_add(names, vname);
+                    }
+                }
+            }
+        }
+        jm_mark_type_changing_module_writes(asgn->left, module_consts, names);
+        jm_mark_type_changing_module_writes(asgn->right, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_mark_type_changing_module_writes(un->operand, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = vd->declarations; d; d = d->next)
+            jm_mark_type_changing_module_writes(d, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
+        if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER && decl->init) {
+            JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s",
+                (int)id->name->len, id->name->chars);
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR && mc->modvar_type != 0) {
+                TypeId init_type = jm_static_assignment_value_type(decl->init);
+                if (!jm_assignment_preserves_modvar_type(mc->modvar_type, init_type)) {
+                    jm_name_set_add(names, vname);
+                }
+            }
+        }
+        jm_mark_type_changing_module_writes(decl->init, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* s = blk->statements; s; s = s->next)
+            jm_mark_type_changing_module_writes(s, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_mark_type_changing_module_writes(es->expression, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_mark_type_changing_module_writes(ifn->test, module_consts, names);
+        jm_mark_type_changing_module_writes(ifn->consequent, module_consts, names);
+        jm_mark_type_changing_module_writes(ifn->alternate, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_mark_type_changing_module_writes(f->init, module_consts, names);
+        jm_mark_type_changing_module_writes(f->test, module_consts, names);
+        jm_mark_type_changing_module_writes(f->update, module_consts, names);
+        jm_mark_type_changing_module_writes(f->body, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fi = (JsForInNode*)node;
+        jm_mark_type_changing_module_writes(fi->left, module_consts, names);
+        jm_mark_type_changing_module_writes(fi->right, module_consts, names);
+        jm_mark_type_changing_module_writes(fi->body, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_mark_type_changing_module_writes(w->test, module_consts, names);
+        jm_mark_type_changing_module_writes(w->body, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        jm_mark_type_changing_module_writes(dw->body, module_consts, names);
+        jm_mark_type_changing_module_writes(dw->test, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_mark_type_changing_module_writes(ret->argument, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_mark_type_changing_module_writes(bin->left, module_consts, names);
+        jm_mark_type_changing_module_writes(bin->right, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        jm_mark_type_changing_module_writes(call->callee, module_consts, names);
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next)
+            jm_mark_type_changing_module_writes(arg, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        jm_mark_type_changing_module_writes(mem->object, module_consts, names);
+        if (mem->computed)
+            jm_mark_type_changing_module_writes(mem->property, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_mark_type_changing_module_writes(cond->test, module_consts, names);
+        jm_mark_type_changing_module_writes(cond->consequent, module_consts, names);
+        jm_mark_type_changing_module_writes(cond->alternate, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* arr = (JsArrayNode*)node;
+        for (JsAstNode* e = arr->elements; e; e = e->next)
+            jm_mark_type_changing_module_writes(e, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* obj = (JsObjectNode*)node;
+        for (JsAstNode* p = obj->properties; p; p = p->next)
+            jm_mark_type_changing_module_writes(p, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        if (prop->computed)
+            jm_mark_type_changing_module_writes(prop->key, module_consts, names);
+        jm_mark_type_changing_module_writes(prop->value, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        for (JsAstNode* e = seq->expressions; e; e = e->next)
+            jm_mark_type_changing_module_writes(e, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        jm_mark_type_changing_module_writes(sw->discriminant, module_consts, names);
+        for (JsAstNode* c = sw->cases; c; c = c->next)
+            jm_mark_type_changing_module_writes(c, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        jm_mark_type_changing_module_writes(sc->test, module_consts, names);
+        for (JsAstNode* s = sc->consequent; s; s = s->next)
+            jm_mark_type_changing_module_writes(s, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* tr = (JsTryNode*)node;
+        jm_mark_type_changing_module_writes(tr->block, module_consts, names);
+        jm_mark_type_changing_module_writes(tr->handler, module_consts, names);
+        jm_mark_type_changing_module_writes(tr->finalizer, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        jm_mark_type_changing_module_writes(cc->body, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* th = (JsThrowNode*)node;
+        jm_mark_type_changing_module_writes(th->argument, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+        jm_mark_type_changing_module_writes(ls->body, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY: {
+        JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
+        jm_mark_type_changing_module_writes(spread->argument, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* pat = (JsAssignmentPatternNode*)node;
+        jm_mark_type_changing_module_writes(pat->left, module_consts, names);
+        jm_mark_type_changing_module_writes(pat->right, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_EXPORT_DECLARATION: {
+        JsExportNode* exp = (JsExportNode*)node;
+        jm_mark_type_changing_module_writes(exp->declaration, module_consts, names);
+        break;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        break;
+    default:
+        break;
+    }
+}
+
 static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!mt || !ce || !ce->name) return 0;
     JsIdentifierNode tmp_id;
@@ -1989,6 +2309,29 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             s = s->next;
         }
+    }
+
+    // Top-level `var` locals can keep native mirrors for numeric hot paths, but
+    // only when every same-level write preserves that numeric type. Loop bodies
+    // jump back to code emitted before later assignments, so a type-changing
+    // write like `x = null` must force the whole module var to stay boxed.
+    {
+        struct hashmap* type_changing_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        for (JsAstNode* s = program->body; s; s = s->next)
+            jm_mark_type_changing_module_writes(s, mt->module_consts, type_changing_vars);
+        size_t iter = 0; void* item;
+        while (hashmap_iter(type_changing_vars, &iter, &item)) {
+            JsNameSetEntry* e = (JsNameSetEntry*)item;
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR && mc->modvar_type != 0) {
+                log_debug("js-mir: boxing type-changing module var '%s'", e->name);
+                mc->modvar_type = 0;
+            }
+        }
+        hashmap_free(type_changing_vars);
     }
 
     // Third pass (b): hoist var declarations from nested positions (for-inits,
