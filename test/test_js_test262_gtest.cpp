@@ -828,6 +828,11 @@ static std::unordered_set<std::string> g_preamble_includes;
 static std::mutex g_preamble_includes_mutex;
 static const char* PREAMBLE_INCLUDE_FILES[] = {
     "nativeFunctionMatcher.js",
+    // typed-array rows dominate the slow list; these pure helpers are shared by
+    // hundreds of tests and should be compiled once with the batch preamble.
+    "compareArray.js",
+    "testTypedArray.js",
+    "testBigIntTypedArray.js",
     NULL
 };
 
