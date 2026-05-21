@@ -567,6 +567,7 @@ struct InlineProp {
     int visibility;  // Visibility
     CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
     bool has_svg_fill;
+    bool svg_fill_none;
 };
 
 typedef struct Spacing {

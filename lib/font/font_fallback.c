@@ -70,10 +70,10 @@ const char** font_get_generic_family(const char* family) {
     if (strcmp(family, "ui-sans-serif") == 0) return sans_serif_fonts;
     if (strcmp(family, "ui-rounded") == 0) return sans_serif_fonts;
 
-    // Browser-specific system font keywords. Chromium does not treat
-    // -apple-system as a generic family; when authors write
-    // -apple-system, "Inter", sans-serif it falls through to the next
-    // available family. BlinkMacSystemFont is the Chromium system UI alias.
+    // browser-specific system font keywords. Safari and Chromium on macOS
+    // resolve -apple-system as the platform UI font; BlinkMacSystemFont is
+    // Chromium's older system UI alias.
+    if (strcmp(family, "-apple-system") == 0) return system_ui_fonts;
     if (strcmp(family, "BlinkMacSystemFont") == 0) return system_ui_fonts;
 
     // NOTE: Concrete font names like "Arial", "Times New Roman", "Courier New"

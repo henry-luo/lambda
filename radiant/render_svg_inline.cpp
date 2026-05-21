@@ -686,6 +686,51 @@ Color parse_svg_color(const char* value) {
     return c;  // default black
 }
 
+static Color svg_resolve_color_keyword(SvgRenderContext* ctx, const char* value) {
+    if (ctx && value && strcasecmp(value, "currentColor") == 0) {
+        return ctx->current_color;
+    }
+    return parse_svg_color(value);
+}
+
+static void svg_apply_inherited_paint_attrs(SvgRenderContext* ctx, Element* elem) {
+    if (!ctx || !elem) return;
+
+    char color_buf[256];
+    const char* color_attr = get_svg_attr_or_style(ctx, elem, "color", color_buf, sizeof(color_buf));
+    if (color_attr) {
+        ctx->current_color = parse_svg_color(color_attr);
+    }
+
+    char fill_buf[256];
+    const char* fill = get_svg_attr_or_style(ctx, elem, "fill", fill_buf, sizeof(fill_buf));
+    if (fill) {
+        if (strcmp(fill, "none") == 0) {
+            ctx->fill_none = true;
+        } else if (strncmp(fill, "url(#", 5) != 0) {
+            ctx->fill_color = svg_resolve_color_keyword(ctx, fill);
+            ctx->fill_none = false;
+        }
+    }
+
+    char stroke_buf[256];
+    const char* stroke = get_svg_attr_or_style(ctx, elem, "stroke", stroke_buf, sizeof(stroke_buf));
+    if (stroke) {
+        if (strcmp(stroke, "none") == 0) {
+            ctx->stroke_none = true;
+        } else {
+            ctx->stroke_color = svg_resolve_color_keyword(ctx, stroke);
+            ctx->stroke_none = false;
+        }
+    }
+
+    char stroke_width_buf[64];
+    const char* stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
+    if (stroke_width) {
+        ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
+    }
+}
+
 // ============================================================================
 // SVG Transform Parsing
 // ============================================================================
@@ -1222,10 +1267,8 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                 log_debug("[SVG] paint server fill not resolved: %s (skip fill)", fill);
                 has_fill = false;
             }
-        } else if (strcmp(fill, "currentColor") == 0) {
-            fc = ctx->current_color;
         } else {
-            fc = parse_svg_color(fill);
+            fc = svg_resolve_color_keyword(ctx, fill);
         }
     } else if (!ctx->fill_none) {
         fc = ctx->fill_color;
@@ -1246,11 +1289,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     if (stroke) {
         if (strcmp(stroke, "none") != 0) {
             has_stroke = true;
-            if (strcmp(stroke, "currentColor") == 0) {
-                sc = ctx->current_color;
-            } else {
-                sc = parse_svg_color(stroke);
-            }
+            sc = svg_resolve_color_keyword(ctx, stroke);
         }
     } else if (!ctx->stroke_none) {
         has_stroke = true;
@@ -3776,7 +3815,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         if (strcmp(fill, "none") == 0) {
             ctx->fill_none = true;
         } else if (strncmp(fill, "url(#", 5) != 0) {
-            ctx->fill_color = parse_svg_color(fill);
+            ctx->fill_color = svg_resolve_color_keyword(ctx, fill);
             ctx->fill_none = false;
         }
     }
@@ -3787,7 +3826,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
         if (strcmp(stroke, "none") == 0) {
             ctx->stroke_none = true;
         } else {
-            ctx->stroke_color = parse_svg_color(stroke);
+            ctx->stroke_color = svg_resolve_color_keyword(ctx, stroke);
             ctx->stroke_none = false;
         }
     }
@@ -4169,7 +4208,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
-                       const char* source_path, float initial_opacity) {
+                       const char* source_path, float initial_opacity, bool initial_fill_none) {
     if (!svg_element || !vec) return;
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
@@ -4192,10 +4231,14 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
     ctx.current_color.r = 0; ctx.current_color.g = 0; ctx.current_color.b = 0; ctx.current_color.a = 255;  // default black
+    ctx.fill_none = false;
+    ctx.stroke_none = true;
     if (initial_current_color) {
         ctx.current_color = *initial_current_color;
     }
-    if (initial_fill_color) {
+    if (initial_fill_none) {
+        ctx.fill_none = true;
+    } else if (initial_fill_color) {
         ctx.fill_color = *initial_fill_color;
         ctx.fill_none = false;
     }
@@ -4203,8 +4246,6 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     if (initial_opacity < 0.0f) initial_opacity = 0.0f;
     if (initial_opacity > 1.0f) initial_opacity = 1.0f;
     ctx.opacity = initial_opacity;
-    ctx.fill_none = false;
-    ctx.stroke_none = true;
 
     // start with base transform (document position/scale)
     ctx.transform = base_transform ? *base_transform : rdt_matrix_identity();
@@ -4282,6 +4323,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     }
 
     process_svg_root_resources(&ctx, svg_element);
+    svg_apply_inherited_paint_attrs(&ctx, svg_element);
 
     // render children directly to vec
     for (int64_t i = 0; i < svg_element->length; i++) {
@@ -4350,23 +4392,28 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
 
     // render SVG directly to the framebuffer
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
-    Color initial_current_color = {};
+    Color initial_current_color = rdcon->color;
     Color initial_fill_color = {};
-    Color* current_color_ptr = nullptr;
+    Color* current_color_ptr = &initial_current_color;
     Color* fill_color_ptr = nullptr;
+    bool initial_fill_none = false;
     if (view->in_line && view->in_line->has_color) {
         initial_current_color = view->in_line->color;
-        current_color_ptr = &initial_current_color;
     }
     if (view->in_line && view->in_line->has_svg_fill) {
-        initial_fill_color = view->in_line->svg_fill_color;
-        fill_color_ptr = &initial_fill_color;
+        if (view->in_line->svg_fill_none) {
+            initial_fill_none = true;
+        } else {
+            initial_fill_color = view->in_line->svg_fill_color;
+            fill_color_ptr = &initial_fill_color;
+        }
     }
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
                       rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
-                      rdcon->dl, current_color_ptr, fill_color_ptr);
+                      rdcon->dl, current_color_ptr, fill_color_ptr, nullptr, 1.0f,
+                      initial_fill_none);
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_clip) {
