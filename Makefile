@@ -24,7 +24,7 @@ LAMBDA_JUBE_EXE = lambda-jube.exe
 NPROCS := 1
 OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
-	NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || echo 1)
+	NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
@@ -40,7 +40,12 @@ else
 	PREMAKE_CLI_FILE := premake5.cli.win.lua
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
+
 NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; then echo "$$n"; else echo 1; fi)
+
+# Render visual tests are CPU-heavy but independent; leave one core free for
+# the OS and browser/reference helpers.
+RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -1209,7 +1214,8 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 Render Visual Tests:"; \
 	if [ -f "test/render/test_radiant_render.js" ]; then \
-		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j 1 --baseline 2>&1) || true; \
+		echo "   workers: $(RADIANT_RENDER_JOBS)"; \
+		output=$$(cd test/render && LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline 2>&1) || true; \
 		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
 		render_line=$$(echo "$$output" | grep "^Results:"); \
 		render_passed=$$(echo "$$render_line" | grep -oE "^Results: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \

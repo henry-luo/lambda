@@ -275,12 +275,14 @@ struct UiTestResult {
     int exit_code = -1;
     int assertions_passed = 0;
     int assertions_failed = 0;
+    long elapsed_ms = 0;
     std::string output;    // combined stdout + stderr
 };
 
 static UiTestResult run_ui_test(const UiTestInfo& info) {
     UiTestResult result;
     result.executed = true;
+    auto t0 = std::chrono::steady_clock::now();
 
     // Build command: ./lambda.exe view <html> --event-file <json>
     // The window auto-closes when simulation completes (auto_close=true in EventSimContext).
@@ -305,6 +307,8 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     }
 
     int status = pclose(pipe);
+    auto t1 = std::chrono::steady_clock::now();
+    result.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     result.exit_code = WEXITSTATUS(status);
 
     // Parse assertion counts from the event_sim output
@@ -350,7 +354,8 @@ static void run_ui_tests_parallel(const std::vector<size_t>& indices, int jobs) 
 
             std::lock_guard<std::mutex> lock(progress_mutex);
             std::cout << "  [" << done << "/" << indices.size() << "] "
-                      << g_ui_tests[test_idx].test_name << " finished";
+                      << g_ui_tests[test_idx].test_name << " finished in "
+                      << result.elapsed_ms << "ms";
             if (total_assertions > 0) {
                 std::cout << " (" << result.assertions_passed << "/" << total_assertions
                           << " assertions passed)";
