@@ -233,19 +233,33 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         : render_media_intersect_clip_rect(&rdcon->block.clip, &rect);
     bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
+        bool drew_svg = false;
+        if (rdcon->dl && img->pic) {
+            log_debug("render svg image as display-list picture at x:%f, y:%f, wd:%f, hg:%f",
+                      img_rect.x, img_rect.y, img_rect.width, img_rect.height);
+            RdtPicture* pic = rdt_picture_dup(img->pic);
+            if (pic) {
+                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
+                                                 content_opacity);
+                drew_svg = true;
+            }
+        }
+
         int svg_target_w = (int)ceilf(img_rect.width); // INT_CAST_OK: rasterized SVG image target width in pixels.
         int svg_target_h = (int)ceilf(img_rect.height); // INT_CAST_OK: rasterized SVG image target height in pixels.
-        if (svg_target_w < 1) svg_target_w = 1;
-        if (svg_target_h < 1) svg_target_h = 1;
-        bool rasterized = render_media_rasterize_svg_image(img, svg_target_w, svg_target_h);
-        if (rasterized && img->pixels) {
+        if (!drew_svg && svg_target_w < 1) svg_target_w = 1;
+        if (!drew_svg && svg_target_h < 1) svg_target_h = 1;
+        bool rasterized = !drew_svg && render_media_rasterize_svg_image(img, svg_target_w, svg_target_h);
+        if (!drew_svg && rasterized && img->pixels) {
             log_debug("render svg image as local raster at x:%f, y:%f, wd:%f, hg:%f, src=%dx%d",
                       img_rect.x, img_rect.y, img_rect.width, img_rect.height,
                       svg_target_w, svg_target_h);
             render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, svg_target_w, svg_target_h,
                                             svg_target_w, &img_rect, &image_clip,
                                             content_opacity, img);
-        } else if (img->pic) {
+            drew_svg = true;
+        }
+        if (!drew_svg && img->pic) {
             log_debug("render svg image vector fallback at x:%f, y:%f, wd:%f, hg:%f",
                       img_rect.x, img_rect.y, img_rect.width, img_rect.height);
             RdtPicture* pic = rdt_picture_dup(img->pic);
