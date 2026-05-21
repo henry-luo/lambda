@@ -3805,8 +3805,11 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
         return;
     }
 
-    // Save context
+    // Save context. Table-internal boxes are walked out of normal block flow, so
+    // the shared layout font must be restored after each subtree; otherwise a
+    // caption/th style can leak into following row groups or sibling rows.
     DomNode* saved_elmt = lycon->elmt;
+    FontBox saved_mark_font = lycon->font;
     lycon->elmt = node;
 
     // Mark node based on display type or HTML tag
@@ -4102,6 +4105,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 
     // Restore context
     lycon->elmt = saved_elmt;
+    lycon->font = saved_mark_font;
 }
 
 // Build table structure from DOM - simplified using unified tree architecture

@@ -3170,19 +3170,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_VARIANT) != nullptr ||
                               avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
 
+    FontProp* parent_font_style = lycon->font.style;
     int font_processed = 0;
     if (has_any_font_prop) {
         font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
     }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
-
-    if (has_any_font_prop) {
-        ViewSpan* span = lam::view_require_element(lycon->view);
-        if (span && span->font && span->font->font_size > 0) {
-            lycon->font.style = span->font;
-            lycon->font.current_font_size = span->font->font_size;
-        }
-    }
 
     // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
     // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family transitions to
@@ -3202,8 +3195,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     // Apply quirk based on font_size_from_medium flag rather than
                     // checking explicit size. Relative units (em, %) that trace back
                     // to 'medium' through inheritance should still get the quirk.
-                    bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-                        str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+                    bool parent_is_mono = parent_font_style && parent_font_style->family &&
+                        str_ieq_const(parent_font_style->family, strlen(parent_font_style->family), "monospace");
                     if (!parent_is_mono && span->font->font_size > 0 && span->font->font_size_from_medium) {
                         float parent_size = span->font->font_size;
                         span->font->font_size = span->font->font_size * 13.0f / 16.0f;
@@ -3214,13 +3207,27 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+    if (has_any_font_prop) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->font->font_size > 0) {
+            lycon->font.style = span->font;
+            lycon->font.current_font_size = span->font->font_size;
+        }
+    }
+
     // Set up font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
     if (has_any_font_prop) {
         ViewSpan* span = lam::view_require_element(lycon->view);
-        // Check if font or font-family was explicitly set on this element
+        // Check if any property that affects glyph metrics was explicitly set on this element.
+        // Font-relative units such as ch/ex need the current element's resolved face/size even
+        // when only font-size changes and the family is inherited.
         bool has_font = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
-                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr;
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_WEIGHT) != nullptr ||
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_STYLE) != nullptr ||
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_VARIANT) != nullptr;
         if (has_font && span && span->font && span->font->family && lycon->ui_context) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
         }
