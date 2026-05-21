@@ -6535,6 +6535,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_reg_t sp_obj = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+                                jm_emit_exc_propagate_check(mt);
+                                jm_scope_env_reload_vars(mt);
+                                jm_reload_module_var_locals_after_eval(mt, true);
+                                jm_env_reload_shared_captures(mt);
+                                jm_readback_closure_env(mt);
                                 jm_call_void_1(mt, "js_check_class_prototype_parent",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 jm_emit_exc_propagate_check(mt);
@@ -6567,6 +6572,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_reg_t sp_obj = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
+                                jm_emit_exc_propagate_check(mt);
+                                jm_scope_env_reload_vars(mt);
+                                jm_reload_module_var_locals_after_eval(mt, true);
+                                jm_env_reload_shared_captures(mt);
+                                jm_readback_closure_env(mt);
                                 jm_call_void_1(mt, "js_check_class_prototype_parent",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_obj));
                                 jm_emit_exc_propagate_check(mt);

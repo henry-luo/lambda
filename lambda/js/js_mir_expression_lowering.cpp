@@ -1213,6 +1213,12 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     jm_emit_label(mt, use_module);
                     jm_emit_label(mt, read_done);
                 }
+                if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
+                    MIR_reg_t eval_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    mv = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mv));
+                }
                 mv = jm_call_4(mt, "js_resolve_unresolved_binding", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mv),
                     MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
@@ -4496,11 +4502,19 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         // Compound assignment: read current value, apply op, store result
                         MIR_reg_t old_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                        MIR_reg_t eval_compound_key = 0;
+                        if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
+                            eval_compound_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                            old_val = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_compound_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
+                        }
                         MIR_reg_t with_key = 0;
                         bool strict_put = mt->is_global_strict || mt->is_module ||
                             (mt->current_fc && mt->current_fc->is_strict);
                         if (mt->with_depth > 0) {
-                            with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                            with_key = eval_compound_key ? eval_compound_key :
+                                jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                             old_val = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, with_key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
@@ -4585,7 +4599,24 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             rhs = jm_transpile_box_item(mt, asgn->right);
                             if (mc->var_kind == JS_VAR_VAR &&
                                 mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct) {
-                                jm_set_var(mt, vname, rhs, MIR_T_I64, LMD_TYPE_ANY);
+                                bool updated_existing = false;
+                                JsVarScopeEntry key;
+                                memset(&key, 0, sizeof(key));
+                                snprintf(key.name, sizeof(key.name), "%s", vname);
+                                for (int sd = 0; sd <= mt->scope_depth; sd++) {
+                                    if (!mt->var_scopes[sd]) continue;
+                                    JsVarScopeEntry* existing_entry =
+                                        (JsVarScopeEntry*)hashmap_get(mt->var_scopes[sd], &key);
+                                    if (!existing_entry) continue;
+                                    existing_entry->var.reg = rhs;
+                                    existing_entry->var.mir_type = MIR_T_I64;
+                                    existing_entry->var.type_id = LMD_TYPE_ANY;
+                                    existing_entry->var.typed_array_type = -1;
+                                    updated_existing = true;
+                                }
+                                if (!updated_existing) {
+                                    jm_set_var(mt, vname, rhs, MIR_T_I64, LMD_TYPE_ANY);
+                                }
                             }
                         }
                         // function name inference for simple module-var assignment:
@@ -6855,6 +6886,12 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             if (strncmp(mc->name, "_js_", 4) != 0) continue;
             const char* js_name = mc->name + 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+            MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+            MIR_label_t l_next_module_var = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_next_module_var),
+                MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
             MIR_reg_t module_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
             MIR_reg_t value = module_val;
@@ -6864,6 +6901,7 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             jm_call_void_2(mt, "js_set_module_var",
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+            jm_emit_label(mt, l_next_module_var);
         }
     }
     if (sync_eval_bindings && !mt->is_eval_direct && !mt->is_module) {
@@ -6880,9 +6918,16 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+            MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+            MIR_label_t l_next_module_export = jm_new_label(mt);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_next_module_export),
+                MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
             jm_call_void_2(mt, "js_set_global_var_property_fast",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            jm_emit_label(mt, l_next_module_export);
         }
     }
     for (int depth = 0; depth <= mt->scope_depth; depth++) {
