@@ -3,14 +3,23 @@
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
 void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings);
+static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt);
 
 static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
+    if (!mt) return;
+    if (!mt->suppress_module_var_writeback) {
+        // Runtime callbacks can observe top-level `var` bindings through the
+        // global object and can also force local mirrors to be reloaded. Flush
+        // live mirrors first so native loop counters are not overwritten by
+        // stale module slots after a DOM/user-code callback boundary.
+        jm_writeback_module_var_locals_before_callback(mt);
+    }
     jm_scope_env_reload_vars(mt);
     if (!mt->suppress_module_var_writeback) {
         // Deferred loop bodies intentionally keep module-var slots stale until
         // the loop exit sync. Reloading from the module table during that window
         // can copy boxed stale values into native loop counters.
-        jm_reload_module_var_locals_after_eval(mt, true);
+        jm_reload_module_var_locals_after_eval(mt, false);
     }
     jm_env_reload_shared_captures(mt);
     jm_readback_closure_env(mt);
@@ -3514,6 +3523,56 @@ static void jm_sync_script_var_global_property(JsMirTranspiler* mt,
     jm_call_void_2(mt, "js_set_global_property",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+}
+
+static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt) {
+    if (!mt || !mt->module_consts || mt->suppress_module_var_writeback) return;
+
+    for (int depth = 0; depth <= mt->scope_depth; depth++) {
+        if (!mt->var_scopes[depth]) continue;
+        size_t iter = 0; void* item;
+        while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
+            JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
+            if (!entry || strncmp(entry->name, "_js_", 4) != 0) continue;
+            if (!entry->var.reg) continue;
+
+            MIR_reg_t value = entry->var.reg;
+            if (entry->var.mir_type == MIR_T_D) {
+                value = jm_box_native(mt, entry->var.reg, LMD_TYPE_FLOAT);
+            } else if (jm_is_native_type(entry->var.type_id)) {
+                value = jm_box_native(mt, entry->var.reg, entry->var.type_id);
+            }
+            if (entry->var.in_scope_env && entry->var.scope_env_reg != 0 &&
+                entry->var.scope_env_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        entry->var.scope_env_slot * (int)sizeof(uint64_t),
+                        entry->var.scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, value)));
+            }
+
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", entry->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (!mc || mc->const_type != MCONST_MODVAR) continue;
+            if (mc->is_implicit_global || mc->is_nested_func_hoist || mc->is_preamble) continue;
+            if (mt->current_func_index >= 0 && !entry->var.module_var_backed &&
+                !(mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body)) {
+                continue;
+            }
+            if (!mc->is_iife_var &&
+                ((!mt->in_main && depth > 0) || (mt->in_main && depth > 1))) {
+                continue;
+            }
+
+            jm_call_void_2(mt, "js_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+
+            const char* js_name = entry->name + 4;
+            jm_sync_script_var_global_property(mt, mc, js_name, (int)strlen(js_name), value);
+        }
+    }
 }
 
 static void jm_emit_destructure_pre_binding_probe(JsMirTranspiler* mt, JsAstNode* target) {
