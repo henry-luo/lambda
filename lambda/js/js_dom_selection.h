@@ -16,6 +16,13 @@ extern "C" {
 Item js_dom_create_range(void);
 Item js_dom_get_selection(void);
 
+// CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): StaticRange
+// constructor. Per Input Events Level 2, `StaticRange` is an immutable
+// snapshot of {startContainer, startOffset, endContainer, endOffset} that
+// does not update under DOM mutation — used by InputEvent.getTargetRanges().
+// Stub implementation: copies the dictionary fields and computes `collapsed`.
+Item js_ctor_static_range_fn(Item init);
+
 // Wrap an existing native DomRange* into a JS Range object (used by
 // selection.getRangeAt). Returns ItemNull on failure. Takes a strong
 // reference (caller can release theirs).

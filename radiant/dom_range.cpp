@@ -2548,14 +2548,9 @@ static uint32_t cp_before(DomBoundary b) {
     return ' ';
 }
 
-// Find the editing host containing `node`. Delegates to the central
-// editing_host_lookup() — see radiant/editing_host.hpp + Radiant_Design_Content_Editable.md §4.
-// Selection.modify movements are confined to the editing host so e.g. moving
-// forward by word from inside a contenteditable div won't escape into
-// surrounding body whitespace or other elements.
-static DomElement* editing_host_of(DomNode* node) {
-    return ::editing_host_of(node);
-}
+// (Editing-host lookup is provided by radiant/editing_host.hpp's global
+// editing_host_of(const DomNode*). Selection.modify movements below are
+// confined to the host returned by that lookup.)
 
 static bool node_is_descendant_of(DomNode* node, DomElement* root) {
     if (!root) return true; // no confinement

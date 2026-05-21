@@ -129,6 +129,17 @@ Item js_create_native_wheel_event(const char* type,
     int buttons,
     bool ctrl, bool shift, bool alt, bool meta);
 
+// CE-3 (Radiant_Design_Content_Editable.md §6): native InputEvent factory.
+// `type` is "beforeinput" or "input"; the former is cancelable, the latter is
+// not (Input Events Level 2 §3.2). `data_transfer` may be ItemNull.
+// `target_ranges` is a JS array of StaticRange-shaped objects (each with
+// startContainer/startOffset/endContainer/endOffset/collapsed) that the
+// returned event exposes via `getTargetRanges()`. Pass ItemNull or an empty
+// array if no ranges apply (e.g. historyUndo/Redo).
+Item js_create_native_input_event(const char* type,
+    const char* input_type, const char* data,
+    bool is_composing, Item data_transfer, Item target_ranges);
+
 /**
  * Returns true if event has been preventDefault()'d (or, for cancelable
  * legacy paths, returnValue=false). Mirrors the spec's "canceled flag".

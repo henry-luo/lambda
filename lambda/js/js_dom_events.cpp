@@ -1139,6 +1139,30 @@ extern "C" Item js_ctor_composition_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
+// CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): StaticRange
+// constructor. Per Input Events Level 2 / DOM, a StaticRange is an
+// immutable snapshot of {startContainer, startOffset, endContainer,
+// endOffset}; `collapsed` is derived. We expose the four fields and
+// `collapsed` directly on the constructed object — the snapshot semantic
+// (does not update under DOM mutation) is intrinsic since the fields are
+// plain captured Items and offsets.
+extern "C" Item js_ctor_static_range_fn(Item init) {
+    Item obj = js_new_object();
+    Item start_container = init_item(init, "startContainer");
+    Item end_container = init_item(init, "endContainer");
+    int start_offset = init_int(init, "startOffset", 0);
+    int end_offset = init_int(init, "endOffset", 0);
+    event_set_item(obj, "startContainer", start_container);
+    event_set_int (obj, "startOffset",    start_offset);
+    event_set_item(obj, "endContainer",   end_container);
+    event_set_int (obj, "endOffset",      end_offset);
+    bool collapsed = (start_container.item == end_container.item) &&
+                     (start_offset == end_offset);
+    event_set_bool(obj, "collapsed", collapsed);
+    stamp_class(obj, "StaticRange");
+    return obj;
+}
+
 extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
     Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "InputEvent");
     if (js_check_exception()) return make_js_undefined();
@@ -1253,6 +1277,57 @@ extern "C" Item js_create_native_focus_event(const char* type, Item related_targ
     Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
     Item ev = js_ctor_focus_event_fn(type_str, init);
     event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1): StaticRange[]
+// list for `event.getTargetRanges()`. The snapshot is stashed on the event
+// at construction time as the hidden property `__target_ranges`. This
+// closure reads it back via `js_get_this()` — matching the existing
+// getModifierState pattern.
+static Item js_input_event_get_target_ranges(Item* args, int argc) {
+    (void)args; (void)argc;
+    Item ev = js_get_this();
+    if (get_type_id(ev) != LMD_TYPE_MAP) return js_array_new(0);
+    Item key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
+    Item stashed = js_property_get(ev, key);
+    if (get_type_id(stashed) == LMD_TYPE_ARRAY) return stashed;
+    return js_array_new(0);
+}
+
+extern "C" Item js_create_native_input_event(const char* type,
+    const char* input_type, const char* data,
+    bool is_composing, Item data_transfer, Item target_ranges)
+{
+    Item init = js_new_object();
+    // Per Input Events Level 2 §3.2: `beforeinput` is cancelable, `input`
+    // is not. Both bubble and are composed.
+    bool is_beforeinput = (type && strcmp(type, "beforeinput") == 0);
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", is_beforeinput);
+    event_set_bool(init, "composed", true);
+    event_set_str(init, "data", data ? data : "");
+    event_set_str(init, "inputType", input_type ? input_type : "");
+    event_set_bool(init, "isComposing", is_composing);
+    if (data_transfer.item != 0) {
+        event_set_item(init, "dataTransfer", data_transfer);
+    }
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "beforeinput"))};
+    Item ev = js_ctor_input_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    // Stash the StaticRange[] snapshot so getTargetRanges() can return it.
+    // If caller passed ItemNull, store an empty array — the WPT
+    // `input-events-get-target-ranges*` tests expect the method to always
+    // return an array (possibly empty), never null.
+    Item ranges = target_ranges;
+    if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
+        ranges = js_array_new(0);
+    }
+    Item ranges_key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
+    js_property_set(ev, ranges_key, ranges);
+    Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
+    js_property_set(ev, gtr_key,
+        js_new_function((void*)js_input_event_get_target_ranges, 0));
     return ev;
 }
 

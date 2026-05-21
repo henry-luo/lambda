@@ -2723,7 +2723,8 @@
                             "radiant/symbol_resolver.cpp",
                             "radiant/layout_counters.cpp",
                             "radiant/dom_range.cpp",
-                            "radiant/dom_range_resolver.cpp"
+                            "radiant/dom_range_resolver.cpp",
+                            "radiant/editing_host.cpp"
                         ],
                         "binary": "test_dom_range_gtest.exe",
                         "icon": "🎯"
@@ -2748,7 +2749,8 @@
                             "radiant/layout_counters.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
-                            "radiant/source_pos_bridge.cpp"
+                            "radiant/source_pos_bridge.cpp",
+                            "radiant/editing_host.cpp"
                         ],
                         "binary": "test_source_pos_bridge_gtest.exe",
                         "icon": "🪢"
