@@ -21,6 +21,89 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
 bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 
+static float flex_border_box_height_constraint(ViewBlock* block, float css_height) {
+    if (!block || css_height < 0.0f) return css_height;
+    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        return layout_floor_border_box_height(block, css_height);
+    }
+    return layout_border_height_from_content_box(block, css_height);
+}
+
+static float flex_apply_border_box_height_constraints(ViewBlock* block, float border_box_height) {
+    if (!block || !block->blk) return border_box_height;
+
+    float constrained = border_box_height;
+    if (block->blk->given_max_height >= 0.0f) {
+        float max_border_height = flex_border_box_height_constraint(block, block->blk->given_max_height);
+        if (constrained > max_border_height) {
+            constrained = max_border_height;
+        }
+    }
+    if (block->blk->given_min_height >= 0.0f) {
+        float min_border_height = flex_border_box_height_constraint(block, block->blk->given_min_height);
+        if (constrained < min_border_height) {
+            constrained = min_border_height;
+        }
+    }
+    return layout_floor_border_box_height(block, constrained);
+}
+
+static float flex_in_flow_content_bottom(ViewElement* elem) {
+    if (!elem) return 0.0f;
+
+    float max_bottom = 0.0f;
+    for (View* child = elem->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_BLOCK ||
+            child->view_type == RDT_VIEW_INLINE_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM ||
+            child->view_type == RDT_VIEW_TABLE) {
+            ViewElement* child_elem = lam::view_require_element(child);
+            if (!child_elem || child_elem->display.outer == CSS_VALUE_NONE ||
+                child_elem->display.inner == CSS_VALUE_NONE) {
+                continue;
+            }
+            ViewBlock* child_block = lam::view_as_block(child_elem);
+            if (child_block && (layout_view_is_abs_or_fixed(child_block) ||
+                                element_has_float(child_block))) {
+                continue;
+            }
+
+            float child_height = child_elem->height;
+            float child_content_bottom = flex_in_flow_content_bottom(child_elem);
+            if (child_content_bottom > child_height) {
+                child_height = child_content_bottom;
+            }
+            float margin_bottom = child_elem->bound ? child_elem->bound->margin.bottom : 0.0f;
+            float bottom = child_elem->y + child_height + margin_bottom;
+            if (bottom > max_bottom) {
+                max_bottom = bottom;
+            }
+        } else if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            for (TextRect* rect = text ? text->rect : nullptr; rect; rect = rect->next) {
+                float bottom = rect->y + rect->height;
+                if (bottom > max_bottom) {
+                    max_bottom = bottom;
+                }
+            }
+        }
+    }
+    return max_bottom;
+}
+
+static float flex_item_outer_height_after_content(ViewElement* item) {
+    if (!item) return 0.0f;
+    float height = item->height;
+    float content_bottom = flex_in_flow_content_bottom(item);
+    if (content_bottom > height) {
+        height = content_bottom;
+    }
+    if (item->bound) {
+        height += item->bound->margin.top + item->bound->margin.bottom;
+    }
+    return height;
+}
+
 // External function for grid layout (from layout_grid_multipass.cpp)
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
 
@@ -1871,9 +1954,23 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 float new_height = recomputed_count > 0
                     ? recomputed_content_height + padding_height + border_height
                     : flex_container->height + y_shift;
+                new_height = flex_apply_border_box_height_constraints(flex_container, new_height);
                 log_debug("COLUMN ADJUST: container height: %.1f -> %.1f (shift=%.1f, recomputed=%.1f, items=%d)",
                           flex_container->height, new_height, y_shift, recomputed_content_height, recomputed_count);
                 flex_container->height = new_height;
+                if (flex) {
+                    flex->main_axis_size = layout_content_height_from_border_box(flex_container, new_height);
+                }
+            }
+
+            // Re-run column main-axis alignment after content layout changes
+            // item heights. This is required for auto margins and justify-content:
+            // shifting subsequent items preserves old auto-margin distribution, while
+            // browsers recalculate it from the final item sizes.
+            if (flex && flex->lines && flex->line_count > 0) {
+                for (int line_idx = 0; line_idx < flex->line_count; line_idx++) {
+                    align_items_main_axis(flex, &flex->lines[line_idx]);
+                }
             }
         }
     }
@@ -1959,10 +2056,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     for (int ii = 0; ii < line->item_count; ii++) {
                         ViewElement* line_item = lam::view_as_element(line->items[ii]);
                         if (!line_item) continue;
-                        float item_outer_cross = line_item->height;
-                        if (line_item->bound) {
-                            item_outer_cross += line_item->bound->margin.top + line_item->bound->margin.bottom;
-                        }
+                        float item_outer_cross = flex_item_outer_height_after_content(line_item);
                         if (item_outer_cross > recomputed_line_cross) {
                             recomputed_line_cross = item_outer_cross;
                         }
@@ -2119,10 +2213,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
                         item->view_type == RDT_VIEW_LIST_ITEM) {
                         ViewElement* flex_item = lam::view_require_element(item);
-                        float item_outer_height = flex_item->height;
-                        if (flex_item->bound) {
-                            item_outer_height += flex_item->bound->margin.top + flex_item->bound->margin.bottom;
-                        }
+                        float item_outer_height = flex_item_outer_height_after_content(flex_item);
                         if (item_outer_height > max_item_height) {
                             max_item_height = item_outer_height;
                             log_debug("ROW FLEX HEIGHT FIX: item %s height=%.1f (outer=%.1f), max=%.1f",

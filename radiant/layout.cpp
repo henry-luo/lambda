@@ -488,11 +488,22 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
+static bool block_has_declared_line_height(ViewBlock* block) {
+    if (!block) return false;
+    DomNode* node = lam::view_dom_node(block);
+    if (!node || !node->is_element()) return false;
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
+    if (!elem || !elem->specified_style) return false;
+    return style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
+           style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT) != nullptr;
+}
+
 void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     CssValue value;
     if (block->blk && block->blk->line_height) {
-        if (block->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
-            block->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
+        if (!block_has_declared_line_height(block) ||
+            (block->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+             block->blk->line_height->data.keyword == CSS_VALUE_INHERIT)) {
             value = inherit_line_height(lycon, block);
         } else {
             value = *block->blk->line_height;

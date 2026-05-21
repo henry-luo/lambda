@@ -4887,6 +4887,49 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             }
         }
 
+        bool is_horizontal_main = is_main_axis_horizontal(flex_layout);
+        bool cross_start_auto = is_horizontal_main ?
+            item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO :
+            item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO;
+        bool cross_end_auto = is_horizontal_main ?
+            item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO :
+            item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO;
+        bool has_cross_auto_margin = cross_start_auto || cross_end_auto;
+        bool has_explicit_cross_size_for_auto = is_horizontal_main ?
+            (item->blk && item->blk->given_height >= 0.0f) :
+            (item->blk && item->blk->given_width >= 0.0f);
+
+        // CSS Flexbox §9.5: if either cross-axis margin is auto,
+        // align-self has no effect in that dimension. Do not stretch such
+        // items; use their intrinsic cross size and distribute the free space
+        // to the auto margin(s) below.
+        if (has_cross_auto_margin && !has_explicit_cross_size_for_auto &&
+            has_flex_item_prop(item)) {
+            if (!item->fi->has_intrinsic_width || !item->fi->has_intrinsic_height) {
+                calculate_item_intrinsic_sizes(item, flex_layout);
+            }
+
+            if (!is_horizontal_main) {
+                float intrinsic_width = item->fi->intrinsic_width.max_content;
+                if (intrinsic_width > 0.0f) {
+                    float border_box_width = intrinsic_width;
+                    if (item->bound) {
+                        border_box_width += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            border_box_width += item->bound->border->width.left +
+                                                item->bound->border->width.right;
+                        }
+                    }
+                    item->width = border_box_width;
+                }
+            } else {
+                float intrinsic_height = item->fi->intrinsic_height.max_content;
+                if (intrinsic_height > 0.0f) {
+                    item->height = intrinsic_height;
+                }
+            }
+        }
+
         float item_cross_size = get_cross_axis_size(item, flex_layout);
 
         // CSS Flexbox §9.4 step 11: Ensure item's used cross size reflects min/max clamping.
@@ -4902,10 +4945,8 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         float cross_pos = 0;
 
         // Check for auto margins in cross axis
-        bool top_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO;
-        bool bottom_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO;
+        bool top_auto = cross_start_auto;
+        bool bottom_auto = cross_end_auto;
 
         if (top_auto || bottom_auto) {
             // Handle auto margins in cross axis

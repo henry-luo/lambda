@@ -28,6 +28,45 @@
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
+                                                     DomElement* owner, float target_font_size) {
+    if (!lycon || !value) return 0;
+    if (target_font_size <= 0) target_font_size = 16.0f;
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value * target_font_size;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle) {
+            return font_calc_normal_line_height(lycon->font.font_handle);
+        }
+        return 0;
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        float owner_font_size = target_font_size;
+        if (owner && owner->font && owner->font->font_size > 0) {
+            owner_font_size = owner->font->font_size;
+        }
+        return (float)(value->data.percentage.value * owner_font_size / 100.0);
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        CssUnit unit = value->data.length.unit;
+        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+            float owner_font_size = target_font_size;
+            if (owner && owner->font && owner->font->font_size > 0) {
+                owner_font_size = owner->font->font_size;
+            }
+            float multiplier = (float)value->data.length.value;
+            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+                multiplier *= 0.5f;
+            }
+            return multiplier * owner_font_size;
+        }
+        return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+    }
+    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+}
+
 // ============================================================================
 // Helper: Read border width from CSS specified style
 // ============================================================================
@@ -4250,29 +4289,18 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             ViewBlock* anc_view = lam::unsafe_view_block_element_storage(ancestor->as_element());
             if (anc_view->blk && anc_view->blk->line_height) {
                 const CssValue* lh = anc_view->blk->line_height;
-                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                    line_height = font_size * (float)lh->data.number.value;
-                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                    // use resolve_length_value to handle rem/em/etc. units
-                    float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-                    if (lh_px > 0) line_height = lh_px;
-                } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    line_height = font_size * (float)(lh->data.percentage.value / 100.0);
-                }
+                float lh_px = intrinsic_resolve_line_height_for_owner(
+                    lycon, lh, ancestor->as_element(), font_size);
+                if (lh_px > 0) line_height = lh_px;
                 break;
             }
             if (anc_view->specified_style) {
                 CssDeclaration* lh_decl = style_tree_get_declaration(
                     anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
                 if (lh_decl && lh_decl->value) {
-                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                        line_height = font_size * (float)lh_decl->value->data.number.value;
-                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
-                        if (lh_px > 0) line_height = lh_px;
-                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        line_height = font_size * (float)(lh_decl->value->data.percentage.value / 100.0);
-                    }
+                    float lh_px = intrinsic_resolve_line_height_for_owner(
+                        lycon, lh_decl->value, ancestor->as_element(), font_size);
+                    if (lh_px > 0) line_height = lh_px;
                     break;
                 }
             }

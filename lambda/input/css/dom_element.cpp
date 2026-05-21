@@ -957,6 +957,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
         target_style = &element->marker_styles;
         pseudo_name = "::marker";
+    } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
+        target_style = &element->placeholder_styles;
+        pseudo_name = "::placeholder";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -1015,6 +1018,8 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->after_styles;
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
         style = element->marker_styles;
+    } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
+        style = element->placeholder_styles;
     }
 
     if (!style) {

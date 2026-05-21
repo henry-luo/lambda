@@ -77,6 +77,92 @@ static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
     return -1;
 }
 
+static float resolve_flex_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
+                                                DomElement* owner, DomElement* target) {
+    if (!lycon || !value) return 0;
+
+    float target_font_size = lycon->font.current_font_size;
+    if (target && target->font && target->font->font_size > 0) {
+        target_font_size = target->font->font_size;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value * target_font_size;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle) {
+            return calc_normal_line_height(lycon->font.font_handle);
+        }
+        return 0;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        float owner_font_size = target_font_size;
+        if (owner && owner->font && owner->font->font_size > 0) {
+            owner_font_size = owner->font->font_size;
+        }
+        return (float)(value->data.percentage.value * owner_font_size / 100.0);
+    }
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        CssUnit unit = value->data.length.unit;
+        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+            float owner_font_size = target_font_size;
+            if (owner && owner->font && owner->font->font_size > 0) {
+                owner_font_size = owner->font->font_size;
+            }
+            float multiplier = (float)value->data.length.value;
+            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+                multiplier *= 0.5f;
+            }
+            return multiplier * owner_font_size;
+        }
+        return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+    }
+
+    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+}
+
+static bool flex_element_has_declared_line_height(DomElement* elem) {
+    if (!elem || !elem->specified_style) return false;
+    return style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT) != nullptr ||
+           style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT) != nullptr;
+}
+
+static float resolve_flex_inherited_line_height(LayoutContext* lycon, DomElement* target) {
+    if (!lycon || !target) return 0;
+
+    for (DomElement* elem = target; elem; ) {
+        bool has_declared_lh = flex_element_has_declared_line_height(elem);
+        ViewBlock* view = lam::view_as_block(elem);
+        if (has_declared_lh && view && view->blk && view->blk->line_height) {
+            const CssValue* lh = view->blk->line_height;
+            if (!(lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_INHERIT)) {
+                return resolve_flex_line_height_for_owner(lycon, lh, elem, target);
+            }
+        }
+
+        if (has_declared_lh && elem->specified_style) {
+            CssDeclaration* decl = style_tree_get_declaration(
+                elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+            if (decl && decl->value &&
+                !(decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                  decl->value->data.keyword == CSS_VALUE_INHERIT)) {
+                return resolve_flex_line_height_for_owner(lycon, decl->value, elem, target);
+            }
+        }
+
+        DomNode* parent = elem->parent;
+        while (parent && !parent->is_element()) {
+            parent = parent->parent;
+        }
+        elem = parent ? lam::dom_require<DOM_NODE_ELEMENT>(parent) : nullptr;
+    }
+
+    return 0;
+}
+
 // Helper to get explicit CSS height from DOM element's specified_style
 static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
     if (!elem || !elem->specified_style) return -1;
@@ -912,30 +998,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             //  but CSS line-height may differ, e.g. Bootstrap line-height:1.5)
                             float child_content_height = text_line_height;
                             ViewElement* sub_view = lam::view_require_element(elem);
-                            float child_fs = elem_font_size;
-                            if (sub_view && sub_view->font && sub_view->font->font_size > 0) {
-                                child_fs = sub_view->font->font_size;
-                            }
-                            if (sub_view && sub_view->blk && sub_view->blk->line_height) {
-                                const CssValue* lh = sub_view->blk->line_height;
-                                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                                    child_content_height = lh->data.number.value * child_fs;
-                                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                                    float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-                                    if (lh_px > 0) child_content_height = lh_px;
-                                }
-                                // CSS_VALUE_TYPE_KEYWORD "normal" → keep font metric fallback
-                            } else if (elem->specified_style) {
-                                CssDeclaration* lh_decl = style_tree_get_declaration(
-                                    elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
-                                if (lh_decl && lh_decl->value) {
-                                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                                        child_content_height = lh_decl->value->data.number.value * child_fs;
-                                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
-                                        if (lh_px > 0) child_content_height = lh_px;
-                                    }
-                                }
+                            float inherited_lh = resolve_flex_inherited_line_height(lycon, elem);
+                            if (inherited_lh > 0) {
+                                child_content_height = inherited_lh;
                             }
                             elem_height = child_content_height;
 
@@ -1854,76 +1919,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 }
 
                 // Calculate height using CSS line-height if available, otherwise font metrics
-                // Line-height is inherited, so walk up the parent chain to find it
-                float resolved_line_height = 0;
-                DomNode* lh_node = item;
-                while (lh_node) {
-                    if (lh_node->is_element()) {
-                        DomElement* lh_elem = lam::dom_require<DOM_NODE_ELEMENT>(lh_node);
-                        ViewBlock* lh_view = lam::view_as_block(lh_elem);
-
-                        // Check blk->line_height first (resolved CSS property)
-                        if (lh_view && lh_view->blk && lh_view->blk->line_height) {
-                            const CssValue* lh_val = lh_view->blk->line_height;
-                            // Skip 'inherit' keyword - continue to parent
-                            if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                                lh_val->data.keyword == CSS_VALUE_INHERIT) {
-                                lh_node = lh_node->parent;
-                                continue;
-                            }
-                            // Resolve the line-height value
-                            if (lh_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                // Unitless number: multiply by font-size
-                                resolved_line_height = lh_val->data.number.value * lycon->font.current_font_size;
-                            } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                                       lh_val->data.keyword == CSS_VALUE_NORMAL) {
-                                // 'normal' - use font metrics
-                                if (lycon->font.font_handle) {
-                                    resolved_line_height = calc_normal_line_height(lycon->font.font_handle);
-                                }
-                            } else {
-                                // Length or percentage
-                                resolved_line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_val);
-                            }
-                            if (resolved_line_height > 0) {
-                                log_debug("calculate_item_intrinsic_sizes: using CSS line-height=%.1f from %s",
-                                          resolved_line_height, lh_node->node_name());
-                                break;
-                            }
-                        }
-
-                        // Also check specified_style for line-height declaration
-                        if (lh_elem->specified_style) {
-                            CssDeclaration* lh_decl = style_tree_get_declaration(
-                                lh_elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
-                            if (lh_decl && lh_decl->value) {
-                                const CssValue* lh_val = lh_decl->value;
-                                // Skip 'inherit' keyword
-                                if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                                    lh_val->data.keyword == CSS_VALUE_INHERIT) {
-                                    lh_node = lh_node->parent;
-                                    continue;
-                                }
-                                if (lh_val->type == CSS_VALUE_TYPE_NUMBER) {
-                                    resolved_line_height = lh_val->data.number.value * lycon->font.current_font_size;
-                                } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
-                                           lh_val->data.keyword == CSS_VALUE_NORMAL) {
-                                    if (lycon->font.font_handle) {
-                                        resolved_line_height = calc_normal_line_height(lycon->font.font_handle);
-                                    }
-                                } else {
-                                    resolved_line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_val);
-                                }
-                                if (resolved_line_height > 0) {
-                                    log_debug("calculate_item_intrinsic_sizes: using CSS line-height=%.1f from specified_style of %s",
-                                              resolved_line_height, lh_node->node_name());
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    lh_node = lh_node->parent;
-                }
+                // Line-height is inherited; font-relative lengths/percentages are
+                // computed on the declaring ancestor, while unitless numbers use
+                // the target element's font-size.
+                float resolved_line_height = resolve_flex_inherited_line_height(lycon, item);
 
                 // Use resolved line-height, or fallback to font metrics
                 if (resolved_line_height > 0) {
@@ -2069,6 +2068,24 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     // Subtract item's own margin from container cross-axis
                     if (item->bound)
                         available_width -= item->bound->margin.left + item->bound->margin.right;
+                    // A column-flex item's auto cross size is the stretched cross
+                    // size constrained by its own min/max-width.  Height
+                    // measurement must use that constrained content width; otherwise
+                    // children such as width:100% images are measured too wide and
+                    // produce an inflated flex base size.
+                    if (item->blk) {
+                        if (item->blk->given_width >= 0.0f) {
+                            available_width = item->blk->given_width;
+                        }
+                        if (item->blk->given_max_width > 0.0f &&
+                            available_width > item->blk->given_max_width) {
+                            available_width = item->blk->given_max_width;
+                        }
+                        if (item->blk->given_min_width > 0.0f &&
+                            available_width < item->blk->given_min_width) {
+                            available_width = item->blk->given_min_width;
+                        }
+                    }
                     // Subtract item's padding+border to get content width
                     if (item->bound) {
                         available_width -= item->bound->padding.left + item->bound->padding.right;
@@ -2390,10 +2407,39 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             float row_width = flex_layout->cross_axis_size;
                             if (item->bound) {
                                 row_width -= item->bound->margin.left + item->bound->margin.right;
+                            }
+                            if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                                if (item->blk->given_width >= 0.0f) {
+                                    row_width = item->blk->given_width;
+                                }
+                                if (item->blk->given_max_width > 0.0f &&
+                                    row_width > item->blk->given_max_width) {
+                                    row_width = item->blk->given_max_width;
+                                }
+                                if (item->blk->given_min_width > 0.0f &&
+                                    row_width < item->blk->given_min_width) {
+                                    row_width = item->blk->given_min_width;
+                                }
+                            }
+                            if (item->bound) {
                                 row_width -= item->bound->padding.left + item->bound->padding.right;
                                 if (item->bound->border)
                                     row_width -= item->bound->border->width.left + item->bound->border->width.right;
                             }
+                            if (item->blk && item->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                                if (item->blk->given_width >= 0.0f) {
+                                    row_width = item->blk->given_width;
+                                }
+                                if (item->blk->given_max_width > 0.0f &&
+                                    row_width > item->blk->given_max_width) {
+                                    row_width = item->blk->given_max_width;
+                                }
+                                if (item->blk->given_min_width > 0.0f &&
+                                    row_width < item->blk->given_min_width) {
+                                    row_width = item->blk->given_min_width;
+                                }
+                            }
+                            if (row_width <= 0.0f) row_width = flex_layout->cross_axis_size;
                             // Estimate each child's share of the row (assumes flex:1 equal split)
                             float gap = 0;
                             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
