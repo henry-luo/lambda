@@ -904,6 +904,7 @@ extern void js_eval_private_pop_frame(void);
 extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 extern Item js_eval_private_resolve(Item unscoped_key);
 extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
+extern Item js_eval_global_lexical_or_local_binding_or_fallback(Item key, Item fallback);
 extern void js_eval_local_export_var(Item key, Item value);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
@@ -1781,6 +1782,7 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_private_bind", FPTR(js_eval_private_bind)},
     {"js_eval_private_resolve", FPTR(js_eval_private_resolve)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
+    {"js_eval_global_lexical_or_local_binding_or_fallback", FPTR(js_eval_global_lexical_or_local_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
     {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
     {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},

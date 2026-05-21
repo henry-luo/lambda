@@ -942,6 +942,21 @@ static MIR_reg_t jm_apply_with_identifier_fallback(JsMirTranspiler* mt, JsIdenti
     return result;
 }
 
+static JsMirVarEntry* jm_find_nearest_block_func_binding(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        if (!mt->var_scopes[depth]) continue;
+        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
+        if (!found) continue;
+        if (found->var.from_block_func_decl) return &found->var;
+        if (!found->var.from_env && !found->var.from_shared_env) return NULL;
+    }
+    return NULL;
+}
+
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     // Handle 'this' keyword: use captured _js_this if in arrow function, else js_get_this()
     if (id->name->len == 4 && strncmp(id->name->chars, "this", 4) == 0) {
@@ -956,6 +971,11 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     // v18q: Handle 'arguments' keyword: return the function's arguments array-like object
     if (id->name->len == 9 && strncmp(id->name->chars, "arguments", 9) == 0) {
+        // Annex B block functions named `arguments` are lexical block bindings.
+        // They must shadow the function's implicit arguments object inside the
+        // block, while the Annex B var-environment update is still skipped.
+        JsMirVarEntry* block_fn_var = jm_find_nearest_block_func_binding(mt, "_js_arguments");
+        if (block_fn_var) return block_fn_var->reg;
         JsMirVarEntry* var = jm_find_var(mt, "_js_arguments");
         if (var) return var->reg;
     }
@@ -1033,7 +1053,10 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         bool block_function_self_binding = jm_current_block_function_self_binding(mt, vname);
         if (var->from_env && mt->eval_local_frame_reg != 0 && !block_function_self_binding) {
             lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-            var_read_reg = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
+            const char* eval_lookup = (mt->in_main && !mt->is_module) ?
+                "js_eval_global_lexical_or_local_binding_or_fallback" :
+                "js_eval_local_get_binding_or_fallback";
+            var_read_reg = jm_call_2(mt, eval_lookup, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
@@ -1371,7 +1394,10 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         if (mt->eval_local_frame_reg != 0 &&
             (!mt->current_fc || mt->current_fc->has_direct_eval)) {
             MIR_reg_t missing = jm_emit_item_error(mt);
-            MIR_reg_t candidate = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
+            const char* eval_lookup = (mt->in_main && !mt->is_module) ?
+                "js_eval_global_lexical_or_local_binding_or_fallback" :
+                "js_eval_local_get_binding_or_fallback";
+            MIR_reg_t candidate = jm_call_2(mt, eval_lookup, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, missing));
             MIR_reg_t is_missing = jm_new_reg(mt, "eval_id_missing", MIR_T_I64);

@@ -15236,6 +15236,17 @@ extern "C" Item js_eval_local_get_binding_or_fallback(Item key, Item fallback) {
     return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
 }
 
+extern "C" Item js_eval_global_lexical_or_local_binding_or_fallback(Item key, Item fallback) {
+    // Global direct eval exports configurable var/function bindings into the
+    // caller frame for subsequent script reads. A later `evalScript("let x")`
+    // creates a global lexical binding, and ES global environment lookup must
+    // prefer that lexical record over the configurable object-record binding.
+    int lex_idx = js_global_lexical_find_binding(key);
+    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
+    int idx = js_eval_local_find_binding(key);
+    return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
+}
+
 extern "C" void js_eval_local_export_var(Item key, Item value) {
     if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
     int idx = js_eval_local_find_binding(key);

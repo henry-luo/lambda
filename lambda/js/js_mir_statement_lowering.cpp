@@ -103,6 +103,20 @@ static bool jm_statement_function_decl_is_direct_binding(JsFunctionNode* fn) {
         ts_node_end_byte(body) == ts_node_end_byte(parent);
 }
 
+static bool jm_block_has_arguments_function_decl(JsAstNode* stmt) {
+    if (!stmt || stmt->node_type != JS_AST_NODE_BLOCK_STATEMENT) return false;
+    JsBlockNode* blk = (JsBlockNode*)stmt;
+    for (JsAstNode* s = blk->statements; s; s = s->next) {
+        if (s->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* fn = (JsFunctionNode*)s;
+        if (fn->name && fn->name->len == 9 &&
+                strncmp(fn->name->chars, "arguments", 9) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
         JsVariableDeclarationNode* decl, JsIdentifierNode* id, MIR_reg_t value) {
     if (!mt || !decl || !id || !id->name || !value) return;
@@ -7298,6 +7312,22 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         break;
     }
     case JS_AST_NODE_BLOCK_STATEMENT: {
+        MIR_reg_t saved_arguments_reg = 0;
+        MIR_reg_t outer_arguments_reg = 0;
+        if (mt->current_fc && mt->current_fc->uses_arguments &&
+                jm_block_has_arguments_function_decl(stmt)) {
+            JsMirVarEntry* outer_args = jm_find_var(mt, "_js_arguments");
+            if (outer_args) {
+                // A sloppy Annex B block function named `arguments` is scoped
+                // to this block and must not disturb the function's implicit
+                // arguments object after the block exits.
+                outer_arguments_reg = outer_args->reg;
+                saved_arguments_reg = jm_new_reg(mt, "_js_arguments_saved", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, saved_arguments_reg),
+                    MIR_new_reg_op(mt->ctx, outer_arguments_reg)));
+            }
+        }
         jm_push_scope(mt);
         char block_scope_names[64][128];
         int block_scope_name_count = 0;
@@ -7342,6 +7372,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         mt->scope_env_reg = saved_block_scope_env_reg;
         mt->scope_env_slot_count = saved_block_scope_env_slot_count;
         jm_pop_scope(mt);
+        if (saved_arguments_reg && outer_arguments_reg) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, outer_arguments_reg),
+                MIR_new_reg_op(mt->ctx, saved_arguments_reg)));
+        }
         break;
     }
     case JS_AST_NODE_EXPRESSION_STATEMENT: {
