@@ -2860,6 +2860,22 @@ static void jm_module_var_reload_vars(JsMirTranspiler* mt) {
         while (hashmap_iter(mt->var_scopes[sd], &iter, &entry_ptr)) {
             JsVarScopeEntry* e = (JsVarScopeEntry*)entry_ptr;
             if (!e || strncmp(e->name, "_js_", 4) != 0 || !e->var.reg) continue;
+            if (e->var.from_block_func_decl) {
+                // a block-level function declaration's lexical binding is not
+                // the module/global var mirror. Reloading it by name can replace
+                // a block function like `arguments` with the outer arguments
+                // object after an observable call.
+                continue;
+            }
+            if (mt->current_fc && mt->current_fc->uses_arguments &&
+                    strcmp(e->name, "_js_arguments") == 0 &&
+                    !e->var.module_var_backed && !e->var.from_env &&
+                    !e->var.from_shared_env) {
+                // the implicit function `arguments` binding is local FDI state,
+                // even inside an IIFE lowered with module-var mirrors. Do not
+                // reload it from a same-named Annex B/module slot.
+                continue;
+            }
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);

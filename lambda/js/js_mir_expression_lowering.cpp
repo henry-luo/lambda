@@ -27,6 +27,37 @@ static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
     jm_readback_closure_env(mt);
 }
 
+static JsMirVarEntry* jm_find_closure_readback_var(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        if (!mt->var_scopes[depth]) continue;
+        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
+        if (!found) continue;
+        JsMirVarEntry* var = &found->var;
+        if (var->from_block_func_decl && !var->in_scope_env && !var->from_env &&
+                !var->from_shared_env && !var->module_var_backed) {
+            // a sloppy Annex B block function creates a lexical binding that can
+            // shadow an outer captured name such as `arguments`. Closure
+            // readback targets the env-backed captured binding, not this local
+            // block function object, so keep walking outward.
+            continue;
+        }
+        return var;
+    }
+    return NULL;
+}
+
+static bool jm_is_implicit_arguments_local(JsMirTranspiler* mt, const JsVarScopeEntry* entry) {
+    if (!mt || !entry || !mt->current_fc || !mt->current_fc->uses_arguments) return false;
+    if (strcmp(entry->name, "_js_arguments") != 0) return false;
+    const JsMirVarEntry* var = &entry->var;
+    return !var->from_block_func_decl && !var->module_var_backed &&
+        !var->from_env && !var->from_shared_env;
+}
+
 static MIR_reg_t jm_emit_double_const(JsMirTranspiler* mt, const char* prefix, double value) {
     MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_D);
     if (value == INFINITY || value == -INFINITY) {
@@ -3563,6 +3594,20 @@ static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt) 
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
             if (!entry || strncmp(entry->name, "_js_", 4) != 0) continue;
             if (!entry->var.reg) continue;
+            if (entry->var.from_block_func_decl) {
+                // annex B block functions have a lexical block binding separate
+                // from the optional var-environment propagation target. Module
+                // mirror writeback is name-keyed, so writing this binding would
+                // collapse that distinction for names such as `arguments`.
+                continue;
+            }
+            if (jm_is_implicit_arguments_local(mt, entry)) {
+                // the implicit function `arguments` object is created by FDI,
+                // not by a script/module var binding. A same-named Annex B
+                // block function can still create a module mirror entry in
+                // IIFE lowering, so never publish this local through that slot.
+                continue;
+            }
 
             MIR_reg_t value = entry->var.reg;
             if (entry->var.mir_type == MIR_T_D) {
@@ -6865,7 +6910,7 @@ bool jm_is_window_getComputedStyle(JsCallNode* call) {
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure_has_env) return;
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
-        JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
+        JsMirVarEntry* var = jm_find_closure_readback_var(mt, mt->last_closure_capture_names[i]);
         if (!var) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
         MIR_reg_t source_boxed = 0;
@@ -7220,6 +7265,17 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
             if (!entry || !entry->name || strncmp(entry->name, "_js_", 4) != 0) continue;
             if (!entry->var.reg) continue;
+            if (entry->var.from_block_func_decl) {
+                // keep Annex B lexical block-function bindings out of module
+                // reloads; any var-environment update is represented by a
+                // distinct binding and must not overwrite the block binding.
+                continue;
+            }
+            if (jm_is_implicit_arguments_local(mt, entry)) {
+                // keep the implicit arguments object independent from any
+                // same-named module var mirror created for Annex B handling.
+                continue;
+            }
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", entry->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
