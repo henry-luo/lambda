@@ -1615,6 +1615,10 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     if (fn->body) jm_collect_body_locals(fn->body, locals);
 
+    struct hashmap* assigned_names = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    if (fn->body) jm_collect_func_assignments(fn->body, assigned_names);
+
     // Collect all identifier references in the body
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -1646,9 +1650,19 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             has_self_ref = true;
             continue; // handle after we know if there are other captures
         }
-        if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
+        bool ref_in_outer_scope = jm_name_set_has(outer_scope_names, ref->name);
+        bool ref_is_module_modvar = false;
+        if (!ref_in_outer_scope && module_consts) {
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
+            ref_is_module_modvar = mc && mc->const_type == MCONST_MODVAR;
+        }
+        if (!ref_in_outer_scope && !ref_is_module_modvar) continue;  // not in outer scope
         // Skip module-level constants — they're resolved at compile time via module_consts,
-        // not at runtime via closure environment.
+        // not at runtime via closure environment. Mutable module var bindings still
+        // need closure capture semantics because native callbacks cannot trigger
+        // MIR-side closure-env readback at the call site.
         // BUT: if a parent function declares a local with the same name, the parent's
         // local shadows the module constant, so we must capture it.
         bool ancestor_has_local_name = ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name);
@@ -1656,13 +1670,12 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc && !(mc->const_type == MCONST_MODVAR &&
-                        (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST))) {
+            if (mc && mc->const_type != MCONST_MODVAR) {
                 continue;  // resolved via module_consts, no capture needed
             }
         }
         bool force_env_capture = false;
-        if (module_consts && ancestor_has_local_name) {
+        if (module_consts && jm_name_set_has(assigned_names, ref->name)) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
@@ -1763,5 +1776,6 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
 
     hashmap_free(params);
     hashmap_free(locals);
+    hashmap_free(assigned_names);
     hashmap_free(refs);
 }

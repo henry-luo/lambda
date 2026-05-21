@@ -14560,6 +14560,18 @@ extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     return found ? result : fallback;
 }
 
+extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference);
+
+extern "C" Item js_get_with_binding_or_global_reference(Item key, int64_t strict_reference) {
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item result = js_with_scope_lookup(key, &found, strict_reference != 0);
+        if (found) return result;
+        if (js_check_exception()) return ItemNull;
+    }
+    return js_get_global_property_reference(key, strict_reference);
+}
+
 extern "C" int64_t js_probe_with_binding(Item key) {
     if (js_with_stack_depth <= 0) return 0;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14614,6 +14626,23 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     }
     Item scope_obj = js_last_with_binding_scope;
     js_last_with_binding_valid = false;
+    if (!js_with_scope_is_object(scope_obj)) return 0;
+    if (it2b(js_in(key, scope_obj))) {
+        if (js_check_exception()) return 1;
+        js_property_set(scope_obj, key, value);
+        return 1;
+    }
+    if (js_check_exception()) return 1;
+    if (strict) {
+        js_throw_binding_reference_error(key);
+        return 1;
+    }
+    js_property_set(scope_obj, key, value);
+    return 1;
+}
+
+extern "C" int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict) {
+    if (get_type_id(scope_obj) == LMD_TYPE_UNDEFINED) return 0;
     if (!js_with_scope_is_object(scope_obj)) return 0;
     if (it2b(js_in(key, scope_obj))) {
         if (js_check_exception()) return 1;
@@ -14866,38 +14895,39 @@ extern "C" void js_set_global_property(Item key, Item value) {
 }
 
 extern "C" void js_set_global_var_property_fast(Item key, Item value) {
-    if (js_with_stack_depth == 0 && get_type_id(key) == LMD_TYPE_STRING) {
-        Item global = js_get_global_this();
-        if (get_type_id(global) == LMD_TYPE_MAP && global.map) {
-            String* str = it2s(key);
-            if (str && str->len > 0) {
-                ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
-                bool found = false;
-                Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
-                TypeId slot_type = get_type_id(slot);
-                TypeId value_type = get_type_id(value);
-                bool scalar_value = value_type == LMD_TYPE_NULL ||
-                    value_type == LMD_TYPE_BOOL ||
-                    value_type == LMD_TYPE_INT ||
-                    value_type == LMD_TYPE_INT64 ||
-                    value_type == LMD_TYPE_FLOAT ||
-                    value_type == LMD_TYPE_STRING ||
-                    value_type == LMD_TYPE_SYMBOL ||
-                    value_type == LMD_TYPE_DECIMAL ||
-                    value_type == LMD_TYPE_DTIME ||
-                    value_type == LMD_TYPE_UNDEFINED;
-                if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
-                    se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
-                    js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
-                    slot_type == value_type && scalar_value &&
-                    js_global_lexical_find_binding(key) < 0) {
-                    fn_map_set(global, key, value);
-                    return;
-                }
+    Item global = js_get_global_this();
+    if (get_type_id(key) == LMD_TYPE_STRING &&
+        get_type_id(global) == LMD_TYPE_MAP && global.map) {
+        String* str = it2s(key);
+        if (str && str->len > 0) {
+            ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
+            bool found = false;
+            Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
+            TypeId slot_type = get_type_id(slot);
+            TypeId value_type = get_type_id(value);
+            bool scalar_value = value_type == LMD_TYPE_NULL ||
+                value_type == LMD_TYPE_BOOL ||
+                value_type == LMD_TYPE_INT ||
+                value_type == LMD_TYPE_INT64 ||
+                value_type == LMD_TYPE_FLOAT ||
+                value_type == LMD_TYPE_STRING ||
+                value_type == LMD_TYPE_SYMBOL ||
+                value_type == LMD_TYPE_DECIMAL ||
+                value_type == LMD_TYPE_DTIME ||
+                value_type == LMD_TYPE_UNDEFINED;
+            if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
+                se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
+                js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
+                slot_type == value_type && scalar_value &&
+                js_global_lexical_find_binding(key) < 0) {
+                fn_map_set(global, key, value);
+                return;
             }
         }
     }
-    js_set_global_property_impl(key, value, false);
+    js_last_with_binding_valid = false;
+    if (js_global_lexical_find_binding(key) >= 0) return;
+    js_property_set(global, key, value);
 }
 
 extern "C" void js_set_global_property_strict(Item key, Item value) {

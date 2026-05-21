@@ -4238,6 +4238,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+                    if (mt->module_consts) {
+                        for (int ci = 0; ci < fc->capture_count; ci++) {
+                            if (!fc->captures[ci].force_env_capture) continue;
+                            JsModuleConstEntry mclookup;
+                            snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
+                            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                            if (!mc || mc->const_type != MCONST_MODVAR) continue;
+                            jm_call_void_3(mt, "js_set_closure_env_module_var",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ci),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                        }
+                    }
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));

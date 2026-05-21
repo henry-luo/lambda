@@ -113,6 +113,7 @@ static std::string g_harness_dir = "ref/test262/harness";
 // Slow tests (>= 3s) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
+static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -1051,7 +1052,10 @@ static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
+static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
+static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
+static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
 static std::string g_write_failures_path; // --write-failures=<path>: write failed test manifest TSV
 static bool g_feature_summary = false;    // --feature-summary: write failure summaries under temp/
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
@@ -1128,6 +1132,45 @@ static std::string join_fields(const std::vector<std::string>& values, const cha
         out += values[i];
     }
     return out;
+}
+
+static std::string trim_ascii(const std::string& value) {
+    size_t start = 0;
+    while (start < value.size() &&
+           (value[start] == ' ' || value[start] == '\t' ||
+            value[start] == '\n' || value[start] == '\r')) {
+        start++;
+    }
+    size_t end = value.size();
+    while (end > start &&
+           (value[end - 1] == ' ' || value[end - 1] == '\t' ||
+            value[end - 1] == '\n' || value[end - 1] == '\r')) {
+        end--;
+    }
+    return value.substr(start, end - start);
+}
+
+static std::vector<std::string> split_diagnose_expected_paths(const std::string& field) {
+    std::vector<std::string> paths;
+    std::string trimmed = trim_ascii(field);
+    if (trimmed.empty() || trimmed == "none-yet") return paths;
+    size_t start = 0;
+    while (start <= trimmed.size()) {
+        size_t comma = trimmed.find(',', start);
+        std::string item = trim_ascii(trimmed.substr(start,
+            comma == std::string::npos ? std::string::npos : comma - start));
+        if (!item.empty() && item != "none-yet") paths.push_back(item);
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return paths;
+}
+
+static bool diagnose_output_has_path(const std::string& output, const std::string& path) {
+    std::string hit = std::string("fast-path-hit=") + path;
+    if (output.find(hit) != std::string::npos) return true;
+    std::string note = std::string("fast-path-note=") + path;
+    return output.find(note) != std::string::npos;
 }
 
 static const char* t262_result_name(Test262Result result) {
@@ -1593,6 +1636,7 @@ static int run_t262_sub_batch(
     if (g_no_hot_reload) cmd += " --no-hot-reload";
     if (g_opt_level >= 0) cmd += std::string(" ") + g_opt_level_arg;
     if (g_mir_interp) cmd += " --mir-interp";
+    if (g_diagnose_mode) cmd += " --diagnose";
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
@@ -1720,8 +1764,8 @@ static int run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* argv[8] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL
+    char* argv[10] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -1732,6 +1776,9 @@ static int run_t262_sub_batch(
     }
     if (g_mir_interp) {
         argv[argi++] = (char*)"--mir-interp";
+    }
+    if (g_diagnose_mode) {
+        argv[argi++] = (char*)"--diagnose";
     }
     extern char** environ;
     pid_t pid;
@@ -3112,6 +3159,8 @@ static void print_test262_help(const char* program) {
     printf("  --run-partial             Include partial/non-fully-passing tests.\n");
     printf("  --update-baseline         Update the baseline when stability gates pass.\n");
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
+    printf("  --diagnose                Run diagnose list and pass --diagnose to Lambda.\n");
+    printf("  --diagnose-list=<path>    Override diagnose list path (default: test/js262/diagnose_list.txt).\n");
     printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
     printf("  --js-timeout=<seconds>    Set per-test Lambda timeout, clamped to 1..120.\n");
     printf("  --jobs=<n>                Set batch worker count.\n");
@@ -3130,6 +3179,7 @@ static void print_test262_help(const char* program) {
     printf("Examples:\n");
     printf("  %s --batch-only --baseline-only\n", program);
     printf("  %s --batch-only --batch-file=temp/js44_batch.txt --jobs=1 --write-failures=temp/out.tsv\n", program);
+    printf("  %s --diagnose --jobs=1 --js-timeout=30\n", program);
     printf("  %s --batch-only --update-baseline\n", program);
 }
 
@@ -3179,6 +3229,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--batch-only") == 0) {
             g_batch_only = true;
         }
+        if (strcmp(argv[i], "--diagnose") == 0) {
+            g_diagnose_mode = true;
+        }
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
         }
@@ -3190,6 +3243,10 @@ int main(int argc, char** argv) {
         }
         if (strncmp(argv[i], "--batch-file=", 13) == 0) {
             g_batch_file = argv[i] + 13;
+        }
+        if (strncmp(argv[i], "--diagnose-list=", 16) == 0) {
+            g_diagnose_mode = true;
+            g_diagnose_list_file = argv[i] + 16;
         }
         if (strncmp(argv[i], "--write-failures=", 17) == 0) {
             g_write_failures_path = argv[i] + 17;
@@ -3208,6 +3265,14 @@ int main(int argc, char** argv) {
             if (timeout_secs > 120) timeout_secs = 120;
             snprintf(g_js_timeout_arg, sizeof(g_js_timeout_arg), "--timeout=%d", timeout_secs);
         }
+    }
+
+    if (g_diagnose_mode) {
+        g_batch_only = true;
+        if (g_batch_file.empty()) {
+            g_batch_file = g_diagnose_list_file;
+        }
+        fprintf(stderr, "[test262] Diagnose mode enabled: list=%s\n", g_batch_file.c_str());
     }
 
     // Auto-detect stripped test files directory (test/js262 -> ../lambda-test/js262)
@@ -3287,10 +3352,57 @@ int main(int argc, char** argv) {
         }
         char line[512];
         while (fgets(line, sizeof(line), bf)) {
-            if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
-            size_t len = strlen(line);
-            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
-            if (len > 0) batch_names.push_back(std::string(line, len));
+            char* start = line;
+            while (*start == ' ' || *start == '\t') start++;
+            if (*start == '#' || *start == '\n' || *start == '\r' || *start == '\0') continue;
+
+            if (g_diagnose_mode) {
+                std::string row = trim_ascii(start);
+                size_t tab1 = row.find('\t');
+                std::string name = trim_ascii(tab1 == std::string::npos ? row : row.substr(0, tab1));
+                if (name.empty()) continue;
+                batch_names.push_back(name);
+
+                if (tab1 != std::string::npos) {
+                    size_t tab2 = row.find('\t', tab1 + 1);
+                    if (tab2 != std::string::npos) {
+                        size_t tab3 = row.find('\t', tab2 + 1);
+                        std::string expected = row.substr(tab2 + 1,
+                            tab3 == std::string::npos ? std::string::npos : tab3 - tab2 - 1);
+                        std::vector<std::string> paths = split_diagnose_expected_paths(expected);
+                        if (!paths.empty()) {
+                            g_diagnose_expected_paths[name] = paths;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            char* first = start;
+            char* first_end = first;
+            while (*first_end && *first_end != ' ' && *first_end != '\t' &&
+                   *first_end != '\n' && *first_end != '\r') {
+                first_end++;
+            }
+            char* second = first_end;
+            while (*second == ' ' || *second == '\t') second++;
+            char* second_end = second;
+            while (*second_end && *second_end != ' ' && *second_end != '\t' &&
+                   *second_end != '\n' && *second_end != '\r') {
+                second_end++;
+            }
+
+            char* name = first;
+            char* name_end = first_end;
+            if ((strncmp(first, "SLOW_", 5) == 0 ||
+                 strncmp(first, "CRASH_", 6) == 0 ||
+                 strncmp(first, "BATCH_", 6) == 0) &&
+                second_end > second) {
+                name = second;
+                name_end = second_end;
+            }
+            size_t len = (size_t)(name_end - name);
+            if (len > 0) batch_names.push_back(std::string(name, len));
         }
         fclose(bf);
         fprintf(stderr, "[test262] Batch file: %zu tests from %s\n", batch_names.size(), g_batch_file.c_str());
@@ -3361,6 +3473,28 @@ int main(int argc, char** argv) {
         g_cached_batch_results = results;
         for (size_t i = 0; i < prepared.size(); i++) {
             auto result = evaluate_batch_result(prepared[i], results);
+            if (g_diagnose_mode && result.result != T262_SKIP) {
+                auto exp_it = g_diagnose_expected_paths.find(prepared[i].test_name);
+                if (exp_it != g_diagnose_expected_paths.end()) {
+                    auto br_it = results.find(prepared[i].test_name);
+                    const std::string output = br_it != results.end() ? br_it->second.output : "";
+                    std::vector<std::string> missing;
+                    for (const std::string& path : exp_it->second) {
+                        if (!diagnose_output_has_path(output, path)) missing.push_back(path);
+                    }
+                    if (!missing.empty()) {
+                        std::string diag_msg = std::string("diagnose expected path(s) not hit: ") +
+                            join_fields(missing, ",");
+                        if (result.result == T262_PASS) {
+                            result.result = T262_FAIL;
+                            result.message = diag_msg;
+                        } else if (result.message.find(diag_msg) == std::string::npos) {
+                            if (!result.message.empty()) result.message += "\n";
+                            result.message += diag_msg;
+                        }
+                    }
+                }
+            }
             g_failure_info[prepared[i].test_name] = {prepared[i].test_path, prepared[i].category,
                                                      prepared[i].subcategory, prepared[i].features,
                                                      prepared[i].includes, prepared[i].native_harness};

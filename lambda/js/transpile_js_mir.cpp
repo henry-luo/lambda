@@ -34,6 +34,16 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+static int g_js_diagnose_enabled = 0;
+
+extern "C" void js_set_diagnose_enabled(int enabled) {
+    g_js_diagnose_enabled = enabled ? 1 : 0;
+}
+
+extern "C" int js_is_diagnose_enabled(void) {
+    return g_js_diagnose_enabled;
+}
+
 // Adaptive gen interface: large functions (>N insns) compile at opt=1 to avoid
 // O(n²) SSA/GVN cost, while small functions get full optimization.
 // Threshold: 10K MIR insns → functions above this use opt=1.

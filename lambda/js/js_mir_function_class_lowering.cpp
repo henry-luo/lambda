@@ -2474,12 +2474,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Register parameter variables
         MIR_reg_t param_env_reg = 0;
-        if (param_count > 0) {
-            param_env_reg = jm_new_reg(mt, "param_env", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
-                MIR_new_reg_op(mt->ctx, param_env_reg),
-                MIR_new_int_op(mt->ctx, param_count * (int)sizeof(uint64_t))));
-        }
         param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
             if (param_node) {
@@ -2545,16 +2539,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             MIR_new_reg_op(mt->ctx, param_reg)));
                         pvar->tdz_active = false;
                     }
-                }
-                JsMirVarEntry* stable_pvar = jm_find_var(mt, vname);
-                if (stable_pvar && param_env_reg != 0) {
-                    stable_pvar->in_scope_env = true;
-                    stable_pvar->scope_env_slot = i;
-                    stable_pvar->scope_env_reg = param_env_reg;
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                            i * (int)sizeof(uint64_t), param_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, stable_pvar->reg)));
                 }
 
                 // Unwrap assignment pattern for destructured default params: f({ x = 1 } = {})
@@ -2645,6 +2629,28 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
             param_node = param_node ? param_node->next : NULL;
+        }
+        if (param_count > 0) {
+            param_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
+            param_node = fn->params;
+            for (int i = 0; i < param_count; i++) {
+                if (param_node) {
+                    char vname[128];
+                    jm_get_param_name(param_node, i, vname, sizeof(vname));
+                    JsMirVarEntry* stable_pvar = jm_find_var(mt, vname);
+                    if (stable_pvar && stable_pvar->reg) {
+                        stable_pvar->in_scope_env = true;
+                        stable_pvar->scope_env_slot = i;
+                        stable_pvar->scope_env_reg = param_env_reg;
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                i * (int)sizeof(uint64_t), param_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, stable_pvar->reg)));
+                    }
+                }
+                param_node = param_node ? param_node->next : NULL;
+            }
         }
 
         // P9: Pre-scan variable types before transpiling body

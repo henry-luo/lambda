@@ -2270,18 +2270,29 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         with_stmt->base.type = &TYPE_NULL;
         with_stmt->object = NULL;
         with_stmt->body = NULL;
-        // extract object expression (inside parenthesized_expression)
+        // extract object expression. Some tree-sitter builds return the
+        // parenthesized_expression here; others expose the inner expression.
         TSNode obj_node = ts_node_child_by_field_name(stmt_node, "object", strlen("object"));
+        if (ts_node_is_null(obj_node) && ts_node_named_child_count(stmt_node) > 0) {
+            obj_node = ts_node_named_child(stmt_node, 0);
+        }
         if (!ts_node_is_null(obj_node)) {
-            // parenthesized_expression wraps the actual expression
-            uint32_t obj_child_count = ts_node_named_child_count(obj_node);
-            if (obj_child_count > 0) {
-                TSNode inner = ts_node_named_child(obj_node, 0);
-                with_stmt->object = build_js_expression(tp, inner);
+            const char* obj_type = ts_node_type(obj_node);
+            if (obj_type && strcmp(obj_type, "parenthesized_expression") == 0) {
+                uint32_t obj_child_count = ts_node_named_child_count(obj_node);
+                if (obj_child_count > 0) {
+                    TSNode inner = ts_node_named_child(obj_node, 0);
+                    with_stmt->object = build_js_expression(tp, inner);
+                }
+            } else {
+                with_stmt->object = build_js_expression(tp, obj_node);
             }
         }
         // extract body statement
         TSNode body_node = ts_node_child_by_field_name(stmt_node, "body", strlen("body"));
+        if (ts_node_is_null(body_node) && ts_node_named_child_count(stmt_node) > 1) {
+            body_node = ts_node_named_child(stmt_node, 1);
+        }
         if (!ts_node_is_null(body_node)) {
             with_stmt->body = build_js_statement(tp, body_node);
         }

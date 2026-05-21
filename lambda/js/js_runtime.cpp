@@ -11026,6 +11026,24 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
     return js_super_call_native(callee, this_val, args, argc);
 }
 
+static void js_sync_closure_env_module_vars(JsFunction* fn) {
+    if (!fn || !fn->env || !fn->env_module_var_indices || !fn->module_vars) return;
+    for (int i = 0; i < fn->env_size; i++) {
+        int module_index = fn->env_module_var_indices[i];
+        if (module_index < 0 || module_index >= JS_MAX_MODULE_VARS) continue;
+        fn->module_vars[module_index] = fn->env[i];
+    }
+}
+
+static void js_refresh_closure_env_module_vars(JsFunction* fn) {
+    if (!fn || !fn->env || !fn->env_module_var_indices || !fn->module_vars) return;
+    for (int i = 0; i < fn->env_size; i++) {
+        int module_index = fn->env_module_var_indices[i];
+        if (module_index < 0 || module_index >= JS_MAX_MODULE_VARS) continue;
+        fn->env[i] = fn->module_vars[module_index];
+    }
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
@@ -11308,7 +11326,9 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_current_private_home_class = method_home_class;
             js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
+        js_refresh_closure_env_module_vars(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc);
+        js_sync_closure_env_module_vars(fn);
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
@@ -11382,7 +11402,9 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
+    js_refresh_closure_env_module_vars(fn);
     Item result = js_invoke_fn(fn, args, arg_count);
+    js_sync_closure_env_module_vars(fn);
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);

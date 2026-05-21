@@ -9,6 +9,91 @@ correct tests take seconds or hit the per-test timeout.
 
 ## 0. Latest Progress
 
+2026-05-21 update: the latest release recheck showed the two URI A2.5 rows are
+still timing out, so the earlier "26ms row timing" result should be treated as
+a focused-run success that did not survive the current tree.  They are now in
+`test/js262/diagnose_list.txt` with release timings and the fast paths they
+should hit after tuning:
+
+```text
+built_ins_decodeURI_S15_1_3_1_A2_5_T1_js: timeout@30s
+built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js: timeout@30s
+expected fast paths: uri.escape.b3-b4-loop-fast-forward,
+                     uri.escape.inner-loop-fast-forward,
+                     uri.escape.b4-fast-continue
+```
+
+The js262 runner now has a diagnose mode for this watch list:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 ./test/test_js_test262_gtest.exe \
+  --diagnose \
+  --jobs=1 \
+  --js-timeout=30 \
+  --write-failures=temp/js262_diagnose_failures.tsv
+```
+
+`--diagnose` defaults to `test/js262/diagnose_list.txt`, passes `--diagnose` to
+`lambda.exe js-test-batch`, and enables `js-diagnose: fast-path-hit=...` log
+messages in `log.txt`.  `--diagnose-list=<path>` can point at a smaller or
+temporary list.  The list format is:
+
+```text
+test_name<TAB>last_timing<TAB>expected_fast_paths<TAB>notes
+```
+
+This gives slow-test triage a durable place to record both the observed timing
+and the fast path the compiler/runtime is expected to take after tuning.
+
+2026-05-21 diagnose-list enhancement: `expected_fast_paths` is now enforced by
+the gtest runner.  In `--diagnose` mode, missing paths are reported from the
+child output as `fast-path-hit=<name>` or `fast-path-note=<name>` misses; a test
+that otherwise passes is marked failed.  The current `with`/object environment
+regression has been moved onto the list with expected path `with.read.dynamic`
+and a latest focused timing of 7ms, so it can be tracked as a missing dynamic
+lookup path rather than only as a broad js262 regression.
+
+2026-05-21 diagnose follow-up: the `with.read.dynamic` row now passes.  The
+miss was a native identifier boxing shortcut in `jm_transpile_box_item`: literal
+initialized globals such as `var x = 0` could be boxed directly from the local
+native mirror while executing inside `with`, bypassing the object-environment
+lookup.  The shortcut now boxes the native mirror only as the fallback value,
+then calls the shared `with` dynamic lookup helper.  Release diagnose result:
+
+```text
+language_statements_with_binding_not_blocked_by_unscopables_falsey_prop_js:
+  passed, 8ms, hit with.read.dynamic
+diagnose list: 5 / 5 passed, 4.0s batch elapsed
+```
+
+2026-05-21 follow-up: diagnose mode identified the current A2.5 miss as missing
+URI prefix metadata, not a runtime decode bottleneck.  The root cause was the
+module-var lowering for function-scoped `var` declarations inside nested blocks:
+the declarations were correctly treated as hoisted module vars, but no local
+mirror was created unless the textual declaration appeared at top-level.  URI
+metadata attaches to the local `JsMirVarEntry`, so `hexB1_B2` and
+`hexB1_B2_B3` had no metadata by the time the B3/B4 fast-forward matchers ran.
+
+The fix creates the same local mirror for hoisted `var` module vars when
+`var_hoist_depth <= 1`, even if the declaration appears inside nested loops.
+Release diagnose verification:
+
+```text
+built_ins_decodeURI_S15_1_3_1_A2_5_T1_js: passed, 40ms
+built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js: passed, 40ms
+built_ins_decodeURI_S15_1_3_1_A2_4_T1_js: passed, 1390ms
+built_ins_decodeURIComponent_S15_1_3_2_A2_4_T1_js: passed, 1389ms
+diagnose list: 4 / 4 passed, 4.0s batch elapsed
+```
+
+`log.txt` confirmed the expected A2.5 fast-path hits:
+
+```text
+uri.escape.b3-b4-loop-fast-forward
+uri.escape.inner-loop-fast-forward
+uri.escape.b4-fast-continue
+```
+
 The remaining URI A2.5 timeouts have been fixed in the focused js262 batches,
 and the follow-up pass turned the remaining problem from a timeout into a small
 semantic repro.  The important stable slow-test results are:

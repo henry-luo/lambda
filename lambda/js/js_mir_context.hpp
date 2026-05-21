@@ -411,6 +411,7 @@ struct JsMirTranspiler {
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
     char last_closure_capture_names[512][128];
+    int last_closure_capture_slots[512];
     bool last_closure_has_env;
 
     // Assignment target hint for closure self-capture detection in copy-env path
