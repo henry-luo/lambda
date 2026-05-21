@@ -4,6 +4,7 @@ extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
 void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings);
 static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt);
+static void jm_sync_module_var_global_properties_after_callback(JsMirTranspiler* mt);
 
 static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
     if (!mt) return;
@@ -20,6 +21,7 @@ static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
         // the loop exit sync. Reloading from the module table during that window
         // can copy boxed stale values into native loop counters.
         jm_reload_module_var_locals_after_eval(mt, false);
+        jm_sync_module_var_global_properties_after_callback(mt);
     }
     jm_env_reload_shared_captures(mt);
     jm_readback_closure_env(mt);
@@ -3572,6 +3574,39 @@ static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt) 
             const char* js_name = entry->name + 4;
             jm_sync_script_var_global_property(mt, mc, js_name, (int)strlen(js_name), value);
         }
+    }
+}
+
+static void jm_sync_module_var_global_properties_after_callback(JsMirTranspiler* mt) {
+    if (!mt || !mt->module_consts || mt->suppress_module_var_writeback) return;
+    if (mt->is_eval_direct || mt->is_module) return;
+
+    // after a callback, the canonical top-level `var` value lives in the module
+    // table. Re-export it to the global object so later user callbacks observe
+    // the same binding value as MIR locals.
+    size_t miter = 0; void* mitem;
+    while (hashmap_iter(mt->module_consts, &miter, &mitem)) {
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)mitem;
+        if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) continue;
+        if (mc->is_iife_var || mc->is_implicit_global || mc->is_nested_func_hoist ||
+            mc->is_preamble) {
+            continue;
+        }
+        if (strncmp(mc->name, "_js_", 4) != 0) continue;
+        const char* js_name = mc->name + 4;
+        MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+        MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+        MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+        MIR_label_t l_next_module_export = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, l_next_module_export),
+            MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
+        jm_call_void_2(mt, "js_set_global_var_property_fast",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        jm_emit_label(mt, l_next_module_export);
     }
 }
 
@@ -7147,30 +7182,10 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
         }
     }
     if (sync_eval_bindings && !mt->is_eval_direct && !mt->is_module) {
-        size_t miter = 0; void* mitem;
-        while (hashmap_iter(mt->module_consts, &miter, &mitem)) {
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)mitem;
-            if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) continue;
-            if (mc->is_iife_var || mc->is_implicit_global || mc->is_nested_func_hoist ||
-                mc->is_preamble) {
-                continue;
-            }
-            if (strncmp(mc->name, "_js_", 4) != 0) continue;
-            const char* js_name = mc->name + 4;
-            MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-            MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-            MIR_label_t l_next_module_export = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_next_module_export),
-                MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
-            jm_call_void_2(mt, "js_set_global_var_property_fast",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-            jm_emit_label(mt, l_next_module_export);
-        }
+        // direct eval and callback reloads share the same "module table back to
+        // global property" repair step; keep it centralized so the shadowing
+        // rules stay identical.
+        jm_sync_module_var_global_properties_after_callback(mt);
     }
     for (int depth = 0; depth <= mt->scope_depth; depth++) {
         if (!mt->var_scopes[depth]) continue;
@@ -7259,7 +7274,13 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
                 jm_emit_label(mt, l_after_reload);
                 continue;
             }
-            if (!sync_eval_bindings && jm_is_native_type(entry->var.type_id)) continue;
+            if (!sync_eval_bindings && jm_is_native_type(entry->var.type_id) &&
+                entry->var.type_id != LMD_TYPE_INT && entry->var.mir_type != MIR_T_D) {
+                // callback reloads must refresh native numeric loop mirrors, but
+                // other native locals are not module-var mirrors and should not be
+                // widened or overwritten from boxed module slots.
+                continue;
+            }
             if (entry->var.type_id == LMD_TYPE_INT && entry->var.mir_type == MIR_T_I64) {
                 MIR_reg_t value = jm_call_1(mt, "it2i", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
@@ -10476,6 +10497,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // save with-scope depth before direct call (function may return from inside 'with')
                 MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
+                // direct MIR calls bypass js_call_function, so flush top-level
+                // module mirrors here before any callee-side callback can read
+                // them through the global object.
+                jm_writeback_module_var_locals_before_callback(mt);
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
                 // restore with-scope depth after direct call
@@ -10581,6 +10606,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            // optional-chain fallback calls can invoke user code; preserve live
+            // MIR locals in module slots before crossing that boundary.
+            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
@@ -10588,6 +10616,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            // optional-chain fallback calls can invoke user code; preserve live
+            // MIR locals in module slots before crossing that boundary.
+            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
@@ -10631,6 +10662,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            // optional-call fallback can invoke user code; preserve live MIR
+            // locals in module slots before crossing that boundary.
+            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
@@ -10638,6 +10672,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+            // optional-call fallback can invoke user code; preserve live MIR
+            // locals in module slots before crossing that boundary.
+            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
@@ -10658,30 +10695,30 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+        // js_apply_function may run user callbacks that read globals or mutate
+        // module vars, so synchronize mirrors before and after the call.
+        jm_writeback_module_var_locals_before_callback(mt);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_exc_propagate_check(mt);
-        jm_scope_env_reload_vars(mt);
-        jm_reload_module_var_locals_after_eval(mt, true);
-        jm_env_reload_shared_captures(mt);
-        jm_readback_closure_env(mt);
+        jm_reload_after_possible_runtime_callback(mt);
         return call_result;
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
     if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
+    // js_call_function may run user callbacks that read globals or mutate module
+    // vars, so synchronize mirrors before and after the call.
+    jm_writeback_module_var_locals_before_callback(mt);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     jm_emit_exc_propagate_check(mt);
-    jm_scope_env_reload_vars(mt);
-    jm_reload_module_var_locals_after_eval(mt, true);
-    jm_env_reload_shared_captures(mt);
-    jm_readback_closure_env(mt);
+    jm_reload_after_possible_runtime_callback(mt);
     return call_result;
 }
 
