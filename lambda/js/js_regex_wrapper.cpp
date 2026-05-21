@@ -1067,7 +1067,10 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out,
                 bool leading_like = !info.is_trailing ||
                     (info.start_pos >= 3 && original[info.start_pos - 3] == '(' &&
                      original[info.start_pos - 2] == '?' && original[info.start_pos - 1] == ':');
-                bool absorb_leading_atom = leading_like &&
+                // Do not fold the following consuming atom into a leading lookahead when a
+                // backreference is present: the backref observes the assertion capture, and
+                // moving a quantified atom like `a*` onto that capture changes JS backtracking.
+                bool absorb_leading_atom = leading_like && !pattern_has_backref &&
                     find_required_leading_lookahead_atom(original, info.end_pos,
                         &following_atom_pos, &following_atom_len, &leading_trim_len);
                 bool move_following_lookbehind_marker = leading_like &&

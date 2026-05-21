@@ -51,6 +51,21 @@ static JsMirVarEntry* jm_find_enclosing_var_env_binding(JsMirTranspiler* mt, con
     return NULL;
 }
 
+static JsMirVarEntry* jm_find_enclosing_catch_param_binding(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
+    int start_depth = mt->scope_depth;
+    if (start_depth >= 64) start_depth = 63;
+    int stop_depth = mt->var_hoist_depth;
+    if (stop_depth < 0) stop_depth = 0;
+    for (int depth = start_depth; depth > stop_depth; depth--) {
+        JsMirVarEntry* var = jm_find_var_in_scope_depth(mt, name, depth);
+        if (!var) continue;
+        if (var->from_catch_param) return var;
+        if (var->is_let_const || var->from_block_func_decl) return NULL;
+    }
+    return NULL;
+}
+
 static bool jm_has_enclosing_non_block_func_lexical_binding(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return false;
     int start_depth = mt->scope_depth - 1;
@@ -1792,7 +1807,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                 JsMirVarEntry* catch_param_var = NULL;
                 if (var->kind == JS_VAR_VAR && d->init && mt->scope_depth >= 0) {
-                    catch_param_var = jm_find_var_in_scope_depth(mt, vname, mt->scope_depth);
+                    // Annex B B.3.5 keeps `var e = ...` inside a catch body bound
+                    // to the catch parameter when the names collide. The body itself
+                    // has a block scope, so the parameter may be one scope outward.
+                    catch_param_var = jm_find_enclosing_catch_param_binding(mt, vname);
                     if (catch_param_var && catch_param_var->from_catch_param && catch_param_var->reg) {
                         MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -3064,8 +3082,18 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     if (for_node->init && !init_is_lexical_decl) {
         bool handled_var_init = false;
         if (init_is_var && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            int saved_for_init_hoist = mt->var_hoist_depth;
+            if (mt->scope_depth > 1 && mt->var_hoist_depth < 0) {
+                // `for (var ... )` is still a `var` declaration: the custom
+                // assignment-style initializer must hoist to the function/script
+                // var environment just like jm_transpile_var_decl(), otherwise
+                // nested loop counters land in block scopes and miss later
+                // module-var refresh/writeback.
+                mt->var_hoist_depth = 1;
+            }
             handled_var_init = jm_transpile_for_var_init_as_assignments(
                 mt, (JsVariableDeclarationNode*)for_node->init);
+            mt->var_hoist_depth = saved_for_init_hoist;
         }
         if (!handled_var_init) jm_transpile_statement(mt, for_node->init);
         if (init_is_var) {
@@ -3183,6 +3211,21 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     can_semi = true;
                 }
 
+                if (can_semi && bound_expr &&
+                    bound_expr->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* bid = (JsIdentifierNode*)bound_expr;
+                    char bound_vname[128];
+                    snprintf(bound_vname, sizeof(bound_vname), "_js_%.*s",
+                        (int)bid->name->len, bid->name->chars);
+                    if (!jm_find_var(mt, bound_vname)) {
+                        // Unresolved identifiers are implicit/global property
+                        // reads. Do not cache them as native loop bounds because
+                        // preceding assignments update the global object, not a
+                        // stable local mirror.
+                        can_semi = false;
+                    }
+                }
+
                 if (can_semi) {
                     cached_cmp_target = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
 
@@ -3198,6 +3241,14 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     default: break;
                     }
 
+                    if (!mt->suppress_module_var_writeback) {
+                        // Semi-native bounds often read an outer top-level `var`
+                        // counter. Refresh it before caching so runtime calls in
+                        // the previous loop body do not leave a stale native
+                        // mirror behind; deferred-writeback loops skip this
+                        // because their module slots are intentionally stale.
+                        jm_reload_module_var_locals_after_eval(mt, true);
+                    }
                     // Cache the bound ONCE before the loop.
                     cached_bound = jm_transpile_as_native(mt, bound_expr, bound_type, cached_cmp_target);
                     semi_native_test = true;
@@ -3249,6 +3300,44 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         }
     }
 
+    bool defer_loop_body_writeback =
+        mt->in_main && mt->module_consts &&
+        !jm_ast_may_observe_script_var_property(for_node->test) &&
+        !jm_ast_may_observe_script_var_property(for_node->update) &&
+        !jm_ast_may_observe_script_var_property(for_node->body);
+    char deferred_body_vnames[32][128];
+    int deferred_body_vname_count = 0;
+    if (defer_loop_body_writeback) {
+        jm_collect_direct_deferred_writeback_names(for_node->body,
+            deferred_body_vnames, &deferred_body_vname_count, 32);
+    }
+
+    char deferred_update_vname[128];
+    deferred_update_vname[0] = '\0';
+    bool defer_update_writeback =
+        jm_for_update_identifier_vname(for_node->update, deferred_update_vname, sizeof(deferred_update_vname)) &&
+        mt->in_main && mt->module_consts &&
+        !jm_ast_may_observe_script_var_property(for_node->test) &&
+        !jm_ast_may_observe_script_var_property(for_node->body) &&
+        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
+          jm_ast_call_uses_identifier(for_node->body,
+              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4))) &&
+        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
+          jm_ast_calls_from_char_code_with_identifier(for_node->body,
+              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4)));
+    if (defer_update_writeback && mt->module_consts) {
+        JsModuleConstEntry lookup;
+        snprintf(lookup.name, sizeof(lookup.name), "%s", deferred_update_vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (mc && mc->const_type == MCONST_MODVAR &&
+            !mt->suppress_module_var_writeback) {
+            // module `var` updates normally write through immediately, but an
+            // outer loop body may suppress that path while batching writes. In
+            // that nested case, keep the deferred sync for this loop's exit.
+            defer_update_writeback = false;
+        }
+    }
+
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_update = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
@@ -3261,9 +3350,14 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
-    // Module-backed globals are reloaded at observable call/iterator boundaries;
-    // reloading every module var here would clobber deferred loop-body updates.
     jm_scope_env_reload_vars(mt);
+    if (!defer_loop_body_writeback && !defer_update_writeback) {
+        // Native top-level `var` counters are mirrored in module slots. Observable
+        // update writebacks call runtime helpers, so refresh the local mirror at
+        // the loop boundary; skip loops using deferred writeback because their
+        // module slots are intentionally stale until the loop exits.
+        jm_reload_module_var_locals_after_eval(mt, true);
+    }
 
     // Test
     if (for_node->test) {
@@ -3288,18 +3382,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
                 MIR_new_reg_op(mt->ctx, test_cond)));
         }
-    }
-
-    bool defer_loop_body_writeback =
-        mt->in_main && mt->module_consts &&
-        !jm_ast_may_observe_script_var_property(for_node->test) &&
-        !jm_ast_may_observe_script_var_property(for_node->update) &&
-        !jm_ast_may_observe_script_var_property(for_node->body);
-    char deferred_body_vnames[32][128];
-    int deferred_body_vname_count = 0;
-    if (defer_loop_body_writeback) {
-        jm_collect_direct_deferred_writeback_names(for_node->body,
-            deferred_body_vnames, &deferred_body_vname_count, 32);
     }
 
     // Body
@@ -3333,31 +3415,6 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
-    char deferred_update_vname[128];
-    deferred_update_vname[0] = '\0';
-    bool defer_update_writeback =
-        jm_for_update_identifier_vname(for_node->update, deferred_update_vname, sizeof(deferred_update_vname)) &&
-        mt->in_main && mt->module_consts &&
-        !jm_ast_may_observe_script_var_property(for_node->test) &&
-        !jm_ast_may_observe_script_var_property(for_node->body) &&
-        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
-          jm_ast_call_uses_identifier(for_node->body,
-              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4))) &&
-        !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
-          jm_ast_calls_from_char_code_with_identifier(for_node->body,
-              deferred_update_vname + 4, (int)strlen(deferred_update_vname + 4)));
-    if (defer_update_writeback && mt->module_consts) {
-        JsModuleConstEntry lookup;
-        snprintf(lookup.name, sizeof(lookup.name), "%s", deferred_update_vname);
-        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-        if (mc && mc->const_type == MCONST_MODVAR &&
-            !mt->suppress_module_var_writeback) {
-            // module `var` updates normally write through immediately, but an
-            // outer loop body may suppress that path while batching writes. In
-            // that nested case, keep the deferred sync for this loop's exit.
-            defer_update_writeback = false;
-        }
-    }
     if (for_node->update) {
         MIR_reg_t saved_update_scope_env_reg = mt->scope_env_reg;
         int saved_update_scope_env_slot_count = mt->scope_env_slot_count;

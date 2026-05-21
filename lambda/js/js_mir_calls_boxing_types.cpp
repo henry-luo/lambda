@@ -293,14 +293,14 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     MIR_label_t l_end = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
         MIR_new_reg_op(mt->ctx, in_range2)));
-    // out of int56 range or in symbol range: promote to float instead of returning error
-    MIR_reg_t d_ovf = jm_new_reg(mt, "i2d_ovf", MIR_T_D);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-        MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
-    MIR_reg_t float_boxed = jm_call_1(mt, "push_d", MIR_T_I64,
-        MIR_T_D, MIR_new_reg_op(mt->ctx, d_ovf));
+    // Hot loop counters should not call out just to box small int56 values.
+    // Deep nested for-loops keep many native counters live across each string
+    // concat; avoiding a helper call here keeps the native mirrors intact while
+    // preserving the shared slow path for overflow and Symbol-collision values.
+    MIR_reg_t slow_boxed = jm_call_1(mt, "js_box_native_int64", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, float_boxed)));
+        MIR_new_reg_op(mt->ctx, slow_boxed)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     jm_emit_label(mt, l_ok);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),

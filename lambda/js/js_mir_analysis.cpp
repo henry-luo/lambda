@@ -1376,6 +1376,11 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
 // Call at block entry (after jm_push_scope) before transpiling block statements.
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     if (!block || block->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+    // Block lexical declarations and Annex B block function bindings must be
+    // installed in the block scope, even while `var` declarations in the same
+    // function are being hoisted to the var environment.
+    int saved_hoist_depth = mt->var_hoist_depth;
+    mt->var_hoist_depth = -1;
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     jm_collect_let_const_names(block, let_consts);
@@ -1453,6 +1458,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
         stmt = stmt->next;
     }
     hashmap_free(let_consts);
+    mt->var_hoist_depth = saved_hoist_depth;
 }
 
 void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {

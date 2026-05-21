@@ -7168,7 +7168,7 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
                         entry->var.scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, boxed)));
             }
-            if (sync_eval_bindings && boxed &&
+            if (sync_eval_bindings && mt->eval_local_frame_reg != 0 && boxed &&
                 (entry->var.type_id == LMD_TYPE_INT || entry->var.mir_type == MIR_T_D)) {
                 // direct eval can replace a native numeric module mirror with an
                 // arbitrary boxed value, so widen the local before reloading it.
@@ -7499,7 +7499,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 jm_build_spread_args_array(mt, call->arguments) :
                                 jm_build_args_array(mt, call->arguments, arg_count);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
-                            MIR_reg_t parent_fn = jm_emit_undefined(mt);
+                            // Reflect.construct may allocate `this` from an arbitrary newTarget,
+                            // so receiver.prototype.constructor cannot always lead back to the
+                            // derived class; keep the lexical heritage value as the spec fallback.
+                            MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));

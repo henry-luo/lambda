@@ -1103,6 +1103,17 @@ Item js_make_number(double d) {
     return (Item){.item = d2it(ptr)};
 }
 
+extern "C" Item js_box_native_int64(int64_t value) {
+    // Native MIR counters are untagged int64 values. Box them with the same
+    // symbol-collision and int56 bounds used by js_make_number(), otherwise
+    // loop counters can become values that look like internal Symbol encodings.
+    if (value >= INT56_MIN && value <= INT56_MAX &&
+        value > -(int64_t)JS_SYMBOL_BASE) {
+        return (Item){.item = i2it(value)};
+    }
+    return js_make_number((double)value);
+}
+
 // =============================================================================
 // Arithmetic Operators
 // =============================================================================
