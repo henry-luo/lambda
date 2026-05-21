@@ -194,7 +194,14 @@ When compiling a class constructor, the transpiler:
 
 ## 2. Closure Implementation
 
-Closures use a **shared scope environment** model where all child closures of the same parent share a single `uint64_t[]` array, enabling mutable capture semantics.
+Closures use two environment shapes:
+
+- **Shared scope env**: a parent-owned `uint64_t[]` used when every captured
+  binding is live in the current scope env with the expected slot. This enables
+  mutable capture semantics for normal outer bindings.
+- **Copied dense env**: a per-closure `uint64_t[]` used when the capture set is
+  mixed or cannot be represented by the current compact scope env, for example
+  block lexicals plus module-backed names. Values are copied at closure creation.
 
 Module-level bindings are stored separately in the module-variable table, so
 capture analysis normally skips true module variables and emits reads through
@@ -232,7 +239,15 @@ At runtime, the parent function allocates the shared environment:
 scope_env = js_alloc_env(slot_count);    // uint64_t[slot_count], GC-rooted
 ```
 
-All captured local variables are **backed by env slots** rather than MIR registers. The transpiler emits reads/writes to `scope_env[N]` instead of register operations for these variables.
+Captured local variables that participate in a shared env are backed by env
+slots rather than MIR registers. The transpiler emits reads/writes to
+`scope_env[N]` instead of plain register operations for these variables.
+
+Block lexical scopes have their own compact slot order. `jm_init_block_tdz()`
+initializes each `let`/`const` binding to `ITEM_JS_TDZ` in that compact env and
+records the exact slot on the var entry. Later block lowering preserves that
+slot instead of reassigning by hash iteration order, so closure capture slots
+stay aligned with the TDZ storage.
 
 ### 2.3 Closure Creation
 
@@ -242,7 +257,7 @@ Item js_new_closure(void* func_ptr, int param_count, uint64_t* env, int env_size
 
 Creates a `JsFunction` struct with:
 - `func_ptr` — JIT-compiled function pointer
-- `env` — pointer to parent's scope env (shared, not copied)
+- `env` — pointer to either the shared parent scope env or a copied dense env
 - `env_size` — number of captured slots
 
 Child functions receive `env` as a hidden first parameter. The MIR signature becomes:
@@ -250,9 +265,22 @@ Child functions receive `env` as a hidden first parameter. The MIR signature bec
 func_name(env: i64, arg0: i64, arg1: i64, ...) → i64
 ```
 
+Closure creation first remaps capture entries to current `JsMirVarEntry`
+`scope_env_slot` values. It shares the active scope env only if every capture is
+found there with the same slot. Otherwise it allocates a dense env, resets
+capture slots to dense indices, and copies live values. If a binding currently
+lives only in a block scope env, the copied env reads from that env slot rather
+than from a stale TDZ register.
+
+Block function declarations are hoisted eagerly only when doing so is safe. If a
+hoisted block function captures a `let`/`const` from the same block, closure
+creation is deferred to the declaration statement so the closure does not
+snapshot the TDZ sentinel before the initializer runs.
+
 ### 2.4 Mutable Capture Semantics
 
-Because all closures share the same `scope_env` array, mutations are immediately visible:
+When closures share the same `scope_env` array, mutations are immediately
+visible:
 
 ```javascript
 function counter() {
@@ -272,6 +300,10 @@ reg_tmp = MIR_ADD(env[0], 1)
 env[0] = reg_tmp               // immediate writeback
 ```
 
+Copied dense envs are used for cases where sharing would be incorrect. They
+capture the value at closure creation, while shared envs preserve live mutation
+semantics for bindings that are intentionally shared.
+
 ### 2.5 Multi-Level Nesting
 
 For deeply nested closures (grandchild captures from grandparent), each intermediate function must include the variable in its own env:
@@ -290,7 +322,9 @@ function outer() {
 }
 ```
 
-The transpiler copies the slot from parent env to child env at child function entry.
+The transpiler either threads the shared slot through an intermediate scope env
+or copies the live value into the intermediate dense env, depending on the
+closure creation rule described above.
 
 ### 2.6 Interaction with Generators
 
@@ -570,6 +604,23 @@ are pre-created as TDZ bindings before RHS evaluation; declaration destructuring
 then writes and clears TDZ without performing a read/check. Assignment-form heads
 such as `for ([x] of y)` or `for ({x} of y)` do not create bindings and remain in
 assignment mode.
+
+Lowering now materializes synthetic iteration scope envs for lexical
+`for-in`/`for-of` heads:
+
+- A short-lived **head env** is active while evaluating the RHS iterable. It
+  exposes the loop-head names as TDZ so closures created by the RHS cannot fall
+  through to an outer binding with the same name.
+- A fresh **iteration env** is active for each body iteration. After the loop
+  variable or destructuring pattern is initialized, the current binding values
+  are written into that env before body lowering creates closures.
+- The previous binding locations are restored after the RHS/body window, so the
+  synthetic env does not leak into surrounding code.
+
+The AST builder also filters `break`/`continue` labels using ECMAScript's
+`[no LineTerminator here]` rule. Tree-sitter can surface a label node across a
+newline, but the JS AST drops it so control-flow lowering sees the same
+unlabeled statement that the spec requires.
 
 ---
 
@@ -955,19 +1006,55 @@ Each `js_proxy_trap_*()` function:
 
 ## 14. eval() Implementation
 
-### 14.1 Three-Phase Execution
+### 14.1 Execution Strategy
 
-`js_builtin_eval(code_item, is_global_scope)` in `transpile_js_mir.cpp`:
+`js_builtin_eval(code_item, eval_flags)` is implemented in
+`js_mir_eval_lowering.cpp`. Non-string arguments return unchanged, per spec.
+String eval uses a tiered path:
 
-1. **Expression form**: wraps code as `return (code\n)` inside anonymous function → compile + call
-2. **Statement form with return insertion**: `eval_try_insert_return()` prepends `return` before last expression statement
-3. **Direct script fallback**: parses + compiles as top-level script using `eval_completion_reg`
+1. **Small runtime fast paths**: whitespace/comment-only input returns
+   `undefined`; selected RegExp literals and simple line-comment var forms bypass
+   full JIT setup.
+2. **Expression form**: single-expression input is wrapped as `return (code\n)`
+   in a dynamically compiled function. This preserves caller function context
+   for expression-only eval, including `new.target`, `arguments`, and `super`.
+3. **Direct script fallback**: statement and multi-statement input is parsed and
+   compiled as a small script, not as a function wrapper. The script uses
+   `eval_completion_reg` to return the completion value of the last evaluated
+   expression.
 
-**Fast path**: RegExp literals (`/pattern/flags`) bypass JIT entirely.
+The older return-insertion wrapper is no longer the main statement path because
+it gives the wrong scoping for `var`, `let`, `const`, function declarations, and
+Annex B interactions.
 
-### 14.2 Known Limitation
+### 14.2 Direct Eval Environments
 
-The expression wrapping `return (code)` causes parse errors for code that isn't a valid expression (e.g., `var` declarations, multiple statements, certain control flow). This is a major source of test262 failures in the `eval-code/direct` category (~268 tests).
+Direct eval compiles against a snapshot of the outer script's module constants
+so dynamic code can resolve top-level bindings. For function-scope direct eval,
+the runtime creates temporary bridge frames in `js_globals.cpp`:
+
+- `js_eval_env_*` temporarily exposes caller var/parameter bindings through
+  global lookup while the eval script runs.
+- `js_eval_local_*` stores var/function declarations exported by sloppy direct
+  eval back to the caller-local frame.
+- `js_eval_lexical_*` and `js_eval_immutable_*` track eval-local lexical and
+  const bindings for conflict and assignment checks.
+- `js_eval_private_*` maps private names during class-field initializer eval.
+
+After eval returns, MIR lowering reloads affected module/local mirrors. Native
+numeric mirrors are widened to boxed `Item` locals before reload because direct
+eval can replace an `int` or `float` binding with any JavaScript value.
+
+### 14.3 Current Limits
+
+- Dynamic eval code is compiled with optimize level 0 to avoid expensive passes
+  on small snippets.
+- The eval MIR context and AST/transpiler storage are deferred rather than
+  destroyed immediately, because eval can return closures whose function
+  pointers and literal storage must remain valid.
+- Direct eval support is broad enough for statement code, declarations, and
+  completion values, but it still uses fixed-size bridge tables rather than a
+  general declarative environment object.
 
 ---
 
@@ -1061,6 +1148,10 @@ Try context stack (max 16 depth):
 - Fixed `JS_MAX_MODULE_VARS = 2048` static array, registered as GC root
 - Transpiler assigns indices at compile time for function/class/var declarations
 - `js_active_module_vars` pointer switches between static fallback and per-module allocated arrays
+- `JsModuleConstEntry::var_kind` records `var`/`let`/`const` for TDZ and
+  const-assignment behavior
+- `JsModuleConstEntry::modvar_type` records a native numeric mirror type when a
+  top-level `var` can safely use an int/float local fast path
 
 ### 18.2 Preamble Interaction (test262 Batch)
 
@@ -1082,7 +1173,34 @@ called later, so its locals must stay per-call locals. Promoting those locals to
 module vars can preserve a TDZ sentinel from the first invocation and make a
 later self-call fail with a false `Cannot access '<name>' before initialization`.
 
-### 18.3 Nested Require
+### 18.3 Native Mirrors and Type Changes
+
+Top-level `var` module bindings can keep a native MIR local mirror for hot
+numeric loops. This is guarded by `modvar_type`:
+
+- `LMD_TYPE_INT` enables integer native assignment and compound-assignment fast
+  paths.
+- `LMD_TYPE_FLOAT` enables float native initialization/reload paths.
+- `0` means the binding must stay boxed as an `Item`.
+
+Before codegen, `jm_mark_type_changing_module_writes()` scans the program for
+writes that can change a tracked module var away from its native type. If a
+later write such as `x = null` or an incompatible compound assignment is found,
+`modvar_type` is cleared. This matters for loops because code emitted before a
+later assignment can jump back and reuse a stale native mirror.
+
+Lowering also checks the existing MIR register shape before reusing a local
+mirror. An integer native value is written only into an `MIR_T_I64` mirror, and
+a float native value only into an `MIR_T_D` mirror. Otherwise the binding is
+boxed into an `MIR_T_I64` local to avoid storing double bits in an integer slot
+or treating arbitrary boxed values as native numbers.
+
+Destructuring and assignment writeback distinguish true module bindings from
+nested lexical shadows. A `let`/`const` destructuring binding in a nested block
+with the same mangled name as a module var writes the local binding only and
+does not clobber the module table or global property mirror.
+
+### 18.4 Nested Require
 
 `js_save_module_vars()` / `js_restore_module_vars()` for nested `require()` calls.
 
@@ -1093,9 +1211,14 @@ later self-call fail with a false `Cannot access '<name>' before initialization`
 ### 19.1 Architecture
 
 GTest harness spawns `lambda.exe js-test-batch` workers via `posix_spawn`:
-- **50 tests/batch**, **12 parallel workers**
-- 10s per-test timeout, 4GB RSS limit, max 10 crashes per worker
+- **50 tests/batch**, split into native-harness and JS-harness groups
+- **4 parallel workers** by default (`T262_MAX_PARALLEL_BATCHES`)
+- 10s default per-test Lambda timeout, with parent hard timeout of at least 30s
+  and at least 15s per test in the worker batch
+- 4GB RSS limit, max 10 crashes per worker
 - Communication over stdin/stdout pipes with `\x01`-prefixed binary protocol
+- Worker manifests are written under `temp/` as reusable
+  `temp/_t262_worker_<n>.manifest` files
 
 ### 19.2 Protocol
 
@@ -1117,7 +1240,7 @@ Worker responses:
 |-------|---------|
 | **Phase 1** | Parse YAML metadata, partition into CLEAN and PARTIAL |
 | **Phase 2** | Execute CLEAN tests in batched workers |
-| **Phase 2a** | Execute PARTIAL tests individually (batch=1) |
+| **Phase 2a** | Removed from the default path; partial tests are skipped unless `--run-partial` is used |
 | **Phase 2b** | Retry batch-lost tests individually |
 | **Phase 3** | Evaluate results, classify non-fully-passing |
 | **Phase 4** | Retry regressions individually; recovered → batch-unstable |
@@ -1155,8 +1278,35 @@ Worker responses:
 - **File**: `test/js262/test262_baseline.txt`
 - **Update gate**: 0 regressions, 0 batch-lost, 0 crash-exits, count ≥ `STABLE_BASELINE_MIN` (21824)
 - **Partial list**: `test/js262/t262_partial.txt` with tags: `CRASH_N`, `SLOW_N`, `BATCH_KILL`, `TIMEOUT_N`
+- **Timing history**: `temp/_t262_timing_o<N>.tsv` is used to dispatch
+  estimated-slowest batches first and reduce end-of-run stragglers
 
-### 19.7 Focused J42-9 Gates
+### 19.7 Diagnose Mode and Slow-Test Guards
+
+`--diagnose` switches the GTest runner to `test/js262/diagnose_list.txt` and
+passes `--diagnose` through to `lambda.exe js-test-batch`. Each diagnose-list
+row records:
+
+```
+test_name<TAB>timing<TAB>expected_fast_paths<TAB>notes
+```
+
+Expected fast paths are comma-separated names such as
+`uri.escape.b3-b4-loop-fast-forward` or `uri.escape.metadata`. During diagnose
+mode, the runner checks the child output and `log.txt` for
+`js-diagnose: fast-path-hit=<name>` or `js-diagnose: fast-path-note=<name>`.
+Missing expected paths turn an otherwise passing diagnose test into a failure,
+which makes slow-test regressions visible before they become timeout failures.
+
+Current URI slow-test tuning uses loop-shape recognizers in
+`js_mir_statement_lowering.cpp` and logs:
+
+- `uri.escape.metadata`
+- `uri.escape.b4-fast-continue`
+- `uri.escape.inner-loop-fast-forward`
+- `uri.escape.b3-b4-loop-fast-forward`
+
+### 19.8 Focused J42-9 Gates
 
 Recent Shared Memory / Atomics / BigInt typed-array work was validated with
 small focused manifests under `temp/` before running broader gates:
@@ -1208,24 +1358,25 @@ The engine includes partial Node.js API compatibility across multiple files:
 
 | Module | File | Features |
 |--------|------|----------|
-| `fs` | `js_fs.cpp` (1794 LOC) | readFileSync, writeFileSync, existsSync, stat, mkdir, readdir, unlink, rename |
-| `path` | `js_path.cpp` (1084 LOC) | join, resolve, dirname, basename, extname, parse, format, normalize, relative |
-| `buffer` | `js_buffer.cpp` (2473 LOC) | Buffer.from, Buffer.alloc, toString, slice, concat, copy, compare, indexOf |
-| `crypto` | `js_crypto.cpp` (1753 LOC) | createHash (md5, sha1, sha256, sha512), randomBytes, randomUUID |
-| `http`/`https` | `js_http.cpp` (1322), `js_https.cpp` (123) | createServer, request, get |
-| `net` | `js_net.cpp` (652 LOC) | Socket, Server, createServer, connect |
-| `child_process` | `js_child_process.cpp` (654 LOC) | execSync, spawnSync |
-| `events` | `js_events.cpp` (564 LOC) | EventEmitter: on, emit, once, removeListener |
-| `stream` | `js_stream.cpp` (848 LOC) | Readable, Writable, Transform, PassThrough |
-| `url` | `js_url_module.cpp` (763 LOC) | URL, URLSearchParams |
-| `querystring` | `js_querystring.cpp` (458 LOC) | parse, stringify |
-| `zlib` | `js_zlib.cpp` (460 LOC) | gzipSync, gunzipSync, deflateSync, inflateSync |
-| `os` | `js_os.cpp` (723 LOC) | platform, arch, hostname, tmpdir, cpus, totalmem, freemem |
-| `dns` | `js_dns.cpp` (220 LOC) | lookup, resolve4 |
-| `readline` | `js_readline.cpp` (127 LOC) | createInterface |
-| `string_decoder` | `js_string_decoder.cpp` (154 LOC) | StringDecoder |
-| `assert` | `js_assert.cpp` (1181 LOC) | ok, equal, strictEqual, deepStrictEqual, throws, doesNotThrow |
-| `util` | `js_util.cpp` (1215 LOC) | inspect, format, types, promisify |
+| `fs` | `js_fs.cpp` | readFileSync, writeFileSync, existsSync, stat, mkdir, readdir, unlink, rename |
+| `path` | `js_path.cpp` | join, resolve, dirname, basename, extname, parse, format, normalize, relative |
+| `buffer` | `js_buffer.cpp` | Buffer.from, Buffer.alloc, toString, slice, concat, copy, compare, indexOf |
+| `crypto` | `js_crypto.cpp` | createHash (md5, sha1, sha256, sha512), randomBytes, randomUUID |
+| `http`/`https` | `js_http.cpp`, `js_https.cpp` | createServer, request, get |
+| `net` | `js_net.cpp` | Socket, Server, createServer, connect |
+| `child_process` | `js_child_process.cpp` | execSync, spawnSync |
+| `events` | `js_events.cpp` | EventEmitter: on, emit, once, removeListener |
+| `stream` | `js_stream.cpp` | Readable, Writable, Transform, PassThrough |
+| `url` | `js_url_module.cpp` | URL, URLSearchParams |
+| `querystring` | `js_querystring.cpp` | parse, stringify |
+| `zlib` | `js_zlib.cpp` | gzipSync, gunzipSync, deflateSync, inflateSync |
+| `os` | `js_os.cpp` | platform, arch, hostname, tmpdir, cpus, totalmem, freemem |
+| `dns` | `js_dns.cpp` | lookup, resolve4 |
+| `readline` | `js_readline.cpp` | createInterface |
+| `string_decoder` | `js_string_decoder.cpp` | StringDecoder |
+| `assert` | `js_assert.cpp` | ok, equal, strictEqual, deepStrictEqual, throws, doesNotThrow |
+| `util` | `js_util.cpp` | inspect, format, types, promisify |
+| `fetch` / XHR / FormData | `js_fetch.cpp`, `js_xhr.cpp`, `js_formdata.cpp` | partial browser-compatible networking and form-data APIs |
 
 Module resolution via `require()` / CommonJS pattern in `module_registry.cpp`.
 
@@ -1233,34 +1384,36 @@ Module resolution via `require()` / CommonJS pattern in `module_registry.cpp`.
 
 ## 22. File Layout (Current)
 
-| File | Size | Purpose |
-|------|-----:|---------|
-| `transpile_js_mir.cpp` | large | Core MIR transpiler entry and older monolithic lowering paths: AST -> MIR IR, modules, eval, batch/preamble |
-| `js_mir_analysis.cpp` | split | Function/reference/capture analysis, including transitive capture propagation and loop-head capture metadata |
-| `js_mir_statement_lowering.cpp` | split | Statement lowering: loops, `for-in`/`for-of`, lexical head TDZ, IteratorClose control flow |
-| `js_mir_expression_lowering.cpp` | split | Expression lowering, destructuring, calls, property/key lowering, assignment-mode handling |
-| `js_mir_function_class_lowering.cpp` | split | Function, closure, generator/async, and class lowering; closure-env capture loads |
-| `js_mir_iterator.cpp` | split | Shared iterator lowering helpers for for-of/destructuring/iterable consumers |
-| `js_mir_completion.cpp` | split | Shared abrupt-completion lowering for break/continue/return/throw paths |
-| `js_runtime.cpp` | large | Runtime: coercion, operators, property access, prototypes, functions, generators, collections, typed arrays, batch reset |
-| `js_globals.cpp` | large | Built-ins and host globals: Object.*, JSON, Date, Symbol, Math, Reflect, constructors, `$262`, process/console pieces |
-| `build_js_ast.cpp` | medium | AST builder: Tree-sitter JS CST -> typed JsAstNode tree |
-| `js_ast.hpp` | split | JS AST node definitions, including function metadata used by MIR analysis |
-| `js_dom.cpp` | 333,639 bytes | DOM bridge: wraps Radiant DomElement as JS Maps |
-| `js_buffer.cpp` | 113,132 bytes | Node.js Buffer implementation |
-| `js_fs.cpp` | 72,367 bytes | Node.js fs module |
-| `js_crypto.cpp` | 72,635 bytes | Node.js crypto module |
-| `js_typed_array.cpp` | 65,591 bytes | TypedArray + ArrayBuffer + DataView helpers |
-| `js_cssom.cpp` | 58,973 bytes | CSSOM bridge |
-| `js_dom_selection.cpp` | 55,976 bytes | DOM selection bridge |
-| `js_util.cpp` | 51,969 bytes | Node.js util module |
-| `js_http.cpp` | 51,485 bytes | Node.js http module |
-| `js_regex_wrapper.cpp` | 49,479 bytes | JS regex -> RE2 transpilation + post-filters |
-| `js_early_errors.cpp` | 43,489 bytes | Early error detection, strict mode validation |
-| `js_path.cpp` | 38,730 bytes | Node.js path module |
-| `js_stream.cpp` | 35,728 bytes | Node.js stream module |
-| `js_props.cpp` | 765 | Ordinary property-operation kernels |
-| `js_property_attrs.cpp` | 673 | Shape-flag descriptor and accessor helpers |
-| `js_coerce.cpp` | 135 | Focused coercion helper tests/runtime slice |
-| `js_print.cpp` | 178 | Debug AST printer |
-| **Total** | **100K+** | JS engine, DOM bridge, Node-compatible modules, test harness support |
+The JS implementation is split across focused MIR lowering modules plus runtime
+and host-compatibility modules. Avoid relying on byte-size numbers here; these
+files move quickly during test262 work.
+
+| File | Area | Purpose |
+|------|------|---------|
+| `transpile_js_mir.cpp` | entry | Shared MIR entry glue, diagnose flag state, and legacy top-level hooks |
+| `js_mir_context.hpp` / `js_mir_internal.hpp` | MIR | Transpiler state, module-var metadata, shared lowering declarations |
+| `js_mir_module_batch_lowering.cpp` | MIR | Program/module lowering, module var collection, TDZ setup, batch preamble/reset integration |
+| `js_mir_analysis.cpp` | MIR | Reference/capture analysis, transitive capture propagation, block TDZ discovery, lexical loop-head capture metadata |
+| `js_mir_function_collection_class_inference.cpp` | MIR | Function/class collection, direct-eval detection, class/type inference helpers |
+| `js_mir_function_class_lowering.cpp` | MIR | Function bodies, closures, generators/async, classes, direct-eval local-frame setup |
+| `js_mir_statement_lowering.cpp` | MIR | Statements, loops, `for-in`/`for-of`, IteratorClose, lexical head envs, URI diagnose fast paths |
+| `js_mir_expression_lowering.cpp` | MIR | Expressions, destructuring, calls, property/key lowering, module-var assignment, closure creation |
+| `js_mir_calls_boxing_types.cpp` | MIR | Call helpers, boxing/unboxing, type conversions, with-scope dynamic reads |
+| `js_mir_hashmap_scope_utils.cpp` | MIR | Var-scope maps, TDZ/env metadata preservation, eval completion helpers |
+| `js_mir_iterator.cpp` | MIR | Shared iterator lowering helpers for for-of/destructuring/iterable consumers |
+| `js_mir_completion.cpp` | MIR | Shared abrupt-completion lowering for break/continue/return/throw paths |
+| `js_mir_eval_lowering.cpp` | dynamic code | `eval`, `new Function`, GeneratorFunction/AsyncFunction dynamic compilation |
+| `js_mir_entrypoints_require.cpp` | entry | File/REPL/module entrypoints, require integration, eval preamble snapshot |
+| `build_js_ast.cpp` | parser | Tree-sitter JS CST -> typed JsAstNode tree, including ASI-sensitive labels |
+| `js_ast.hpp` | parser | JS AST node definitions and metadata used by MIR analysis |
+| `js_runtime.cpp` | runtime | Core runtime values, operators, property access, prototypes, functions, batch reset |
+| `js_runtime_function.cpp` | runtime | Function object helpers and callable metadata |
+| `js_runtime_state.cpp` / `js_runtime_value.cpp` | runtime | Runtime global state, reset helpers, value classification/conversion helpers |
+| `js_globals.cpp` | built-ins | Object.*, JSON, Date, Symbol, Math, Reflect, constructors, `$262`, eval bridge frames |
+| `js_props.cpp` / `js_property_attrs.cpp` | properties | Ordinary property-operation kernels and shape-flag descriptor/accessor helpers |
+| `js_typed_array.cpp` | typed arrays | TypedArray, ArrayBuffer, SharedArrayBuffer, DataView, Atomics |
+| `js_regex_wrapper.cpp` / `js_regexp_compile.cpp` | RegExp | JS regex translation, RE2 wrapper, generated property-table support |
+| `js_early_errors.cpp` | validation | Early errors, strict mode validation, eval/private-name checks |
+| `js_dom*.cpp`, `js_cssom.cpp`, `js_clipboard.cpp`, `js_canvas.cpp` | Web APIs | Radiant DOM/CSSOM bridge and browser-like host APIs |
+| `js_fs.cpp`, `js_path.cpp`, `js_buffer.cpp`, `js_crypto.cpp`, `js_http.cpp`, ... | Node APIs | Partial Node-compatible modules used by JS workloads and test shims |
+| `js_print.cpp` | debug | AST/debug printing helpers |
