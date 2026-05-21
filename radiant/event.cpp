@@ -12,6 +12,7 @@
 #include "rdt_video.h"
 #include "webview.h"
 #include "dom_range_resolver.hpp"
+#include "editing_host.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 
@@ -306,31 +307,46 @@ typedef struct EditableMarginTextHit {
     float score;
 } EditableMarginTextHit;
 
-static bool is_in_rich_editable_subtree(View* view) {
+// data-editable is a Radiant-specific opt-in (Lambda `edit <…>` templates);
+// contenteditable is the W3C path resolved by editing_host_lookup (§4).
+static bool has_data_editable_ancestor(View* view) {
     DomNode* node = static_cast<DomNode*>(view);
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
             if (elem->has_attribute("data-editable")) return true;
-            const char* ce = elem->get_attribute("contenteditable");
-            if (ce && strcmp(ce, "false") != 0) return true;
         }
         node = node->parent;
     }
     return false;
 }
 
+static bool is_in_rich_editable_subtree(View* view) {
+    if (has_data_editable_ancestor(view)) return true;
+    // editing_host_lookup returns true even inside ="false" islands; the
+    // caller uses this to allow caret placement (selection across boundary
+    // is allowed per spec). target_in_false_island is the consumer's
+    // signal for "don't insert here".
+    return editing_host_lookup(static_cast<DomNode*>(view), nullptr);
+}
+
 static bool is_rich_editable_host(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
     if (elem->has_attribute("data-editable")) return true;
-    const char* ce = elem->get_attribute("contenteditable");
-    return ce && strcmp(ce, "false") != 0;
+    // §4.1: only true|""|plaintext-only mark an element as a host. We ask
+    // the lookup whether THIS element is the (nearest) host of itself —
+    // when ce is set on `elem`, that's exactly this element.
+    EditingHost h;
+    return editing_host_lookup(elem, &h) && h.host == elem;
 }
 
 static bool text_target_allows_caret(View* target) {
     if (!target) return false;
     DomNode* node = static_cast<DomNode*>(target);
+    // Bottom-up: a disabled form control found *before* an editable host
+    // forbids caret; an editable host found first allows it. Preserves the
+    // legacy walk semantics — see commit history before CE-1.
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
@@ -339,8 +355,8 @@ static bool text_target_allows_caret(View* target) {
                 return false;
             }
             if (elem->has_attribute("data-editable")) return true;
-            const char* ce = elem->get_attribute("contenteditable");
-            if (ce && strcmp(ce, "false") != 0) return true;
+            EditingHost h;
+            if (editing_host_lookup(elem, &h) && h.host == elem) return true;
         }
         node = node->parent;
     }
@@ -1001,16 +1017,18 @@ static DomElement* rich_editable_from_target(View* target) {
         DomElement* first = lam::dom_require_element(node);
         if (tc_is_text_control(first)) return nullptr;
     }
+    // Walk: data-editable is Radiant-specific and matched per-element;
+    // contenteditable is resolved through the central editing-host lookup
+    // and returns the nearest host element.
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
             if (elem->has_attribute("data-editable")) return elem;
-            const char* ce = elem->get_attribute("contenteditable");
-            if (ce && strcmp(ce, "false") != 0) return elem;
         }
         node = node->parent;
     }
-    return nullptr;
+    // No data-editable found; fall back to ce host.
+    return editing_host_of(static_cast<DomNode*>(target));
 }
 
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
@@ -3069,6 +3087,11 @@ bool is_view_focusable(View* view) {
                 int ti = (int)str_to_int64_default(tabindex, strlen(tabindex), 0);
                 return ti >= 0;
             }
+            // CE-2 (Radiant_Design_Content_Editable.md §5): a contenteditable
+            // editing host is implicitly focusable (treated as tabindex=0)
+            // when no explicit tabindex is set.
+            EditingHost h;
+            if (editing_host_lookup(elem, &h) && h.host == elem) return true;
             break;
         }
     }

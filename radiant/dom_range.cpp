@@ -18,6 +18,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "view.hpp"  // For HTM_TAG_* constants
 #include "form_control.hpp"
+#include "editing_host.hpp"
 #include "text_control.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
@@ -2547,32 +2548,13 @@ static uint32_t cp_before(DomBoundary b) {
     return ' ';
 }
 
-// Find the editing host containing `node`: nearest ancestor element with
-// contenteditable="true" (or "" / "plaintext-only"). Returns nullptr if `node`
-// is not inside an editing host. Selection.modify movements are confined to
-// the editing host (so e.g. moving forward by word from inside a contenteditable
-// div won't escape into surrounding body whitespace or other elements).
+// Find the editing host containing `node`. Delegates to the central
+// editing_host_lookup() — see radiant/editing_host.hpp + Radiant_Design_Content_Editable.md §4.
+// Selection.modify movements are confined to the editing host so e.g. moving
+// forward by word from inside a contenteditable div won't escape into
+// surrounding body whitespace or other elements.
 static DomElement* editing_host_of(DomNode* node) {
-    if (!node) return nullptr;
-    DomNode* p = node->is_text() ? node->parent : node;
-    while (p) {
-        if (p->is_element()) {
-            DomElement* e = p->as_element();
-            const char* v = dom_element_get_attribute(e, "contenteditable");
-            if (v) {
-                if (*v == '\0' ||
-                    strcasecmp(v, "true") == 0 ||
-                    strcasecmp(v, "plaintext-only") == 0) {
-                    return e;
-                }
-            } else if (dom_element_has_attribute(e, "contenteditable")) {
-                // boolean-style: <div contenteditable> with no value
-                return e;
-            }
-        }
-        p = p->parent;
-    }
-    return nullptr;
+    return ::editing_host_of(node);
 }
 
 static bool node_is_descendant_of(DomNode* node, DomElement* root) {
