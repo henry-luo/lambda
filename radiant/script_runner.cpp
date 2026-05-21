@@ -591,12 +591,19 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     {
         int jmp_val = 0; (void)jmp_val;
 #endif
-        // Use preamble mode to retain MIR context for event handler invocation.
-        // This keeps compiled JS functions alive so onclick/onmouseover etc.
-        // can call them after page load without re-compilation.
-        preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
+        // interactive documents need preamble mode so event handlers can call
+        // compiled functions later. Static headless smoke loads only need
+        // load-time DOM mutations, so use transient mode and avoid retaining
+        // large MIR/transpiler pools for pages with big inline scripts.
+        if (s_retain_js_state) {
+            preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
+        }
         log_mem_stage("js: before transpile/exec");
-        result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
+        if (s_retain_js_state) {
+            result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
+        } else {
+            result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
+        }
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
         js_exec_guarded = 0;
@@ -657,7 +664,11 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
             runtime.heap->gc->pool = NULL;
             gc_heap_destroy(runtime.heap->gc);
             mem_free(runtime.heap);
-            s_js_reuse_pool = reuse_pool;
+            if (s_retain_js_state) {
+                s_js_reuse_pool = reuse_pool;
+            } else if (reuse_pool) {
+                pool_destroy(reuse_pool);
+            }
         } else if (runtime.heap) {
             mem_free(runtime.heap);
         }
@@ -915,7 +926,6 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (dom_doc->js_runtime_heap) {
         Heap* heap = (Heap*)dom_doc->js_runtime_heap;
         if (heap->gc) {
-            Pool* js_pool = heap->gc->pool;
             heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
             gc_heap_destroy(heap->gc);
             // pool is destroyed separately below
