@@ -1483,6 +1483,7 @@ int main(int argc, char *argv[]) {
             printf("\nOptions:\n");
             printf("  -h, --help              Show this help message\n");
             printf("  --document <file.html>  Load HTML document for DOM API access\n");
+            printf("  --diagnose              Enable extra JS fast-path diagnostic logging\n");
             printf("\nExamples:\n");
             printf("  %s js                             # Run built-in tests\n", argv[0]);
             printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
@@ -1508,6 +1509,9 @@ int main(int argc, char *argv[]) {
                     html_file = argv[++i];
                 } else if (strcmp(argv[i], "--mir-interp") == 0) {
                     g_mir_interp_mode = 1;
+                } else if (strcmp(argv[i], "--diagnose") == 0) {
+                    js_set_diagnose_enabled(1);
+                    log_warn("js-diagnose: single JS diagnose mode enabled");
                 } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                     int level = atoi(argv[i] + 12);
                     if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
@@ -1613,6 +1617,7 @@ int main(int argc, char *argv[]) {
                 for (int i = 2; i < argc && js_argc_store < 64; i++) {
                     if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) { i++; continue; }
                     if (strcmp(argv[i], "--mir-interp") == 0) continue;
+                    if (strcmp(argv[i], "--diagnose") == 0) continue;
                     if (argv[i] == js_file) continue; // already added
                     if (argv[i][0] == '-') continue;
                     js_argv_store[js_argc_store++] = argv[i];
@@ -3333,8 +3338,17 @@ int main(int argc, char *argv[]) {
 
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
-        // batch mode always disables logging for maximum throughput
-        log_disable_all();
+        bool diagnose_requested = false;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--diagnose") == 0) {
+                diagnose_requested = true;
+                break;
+            }
+        }
+        // batch mode disables logging for throughput unless diagnostics are requested
+        if (!diagnose_requested) {
+            log_disable_all();
+        }
 
         int batch_timeout = 10; // default per-script timeout in seconds
         bool hot_reload = true; // persistent heap between tests (default: on)
@@ -3349,6 +3363,9 @@ int main(int argc, char *argv[]) {
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
             } else if (strcmp(argv[i], "--mir-interp") == 0) {
                 g_mir_interp_mode = 1;
+            } else if (strcmp(argv[i], "--diagnose") == 0) {
+                js_set_diagnose_enabled(1);
+                log_warn("js-diagnose: js-test-batch diagnose mode enabled");
             }
         }
 

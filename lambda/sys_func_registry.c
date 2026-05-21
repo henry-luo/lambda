@@ -869,6 +869,7 @@ extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
 extern int64_t js_probe_with_binding(Item key);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict);
 extern Item js_last_with_binding_base_or_undefined(Item key);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
@@ -913,6 +914,7 @@ extern Item js_map_group_by(Item items, Item callback);
 
 // Function formal length (ES spec .length)
 extern void js_set_formal_length(Item fn_item, int length);
+extern void js_set_closure_env_module_var(Item fn_item, int64_t env_slot, int64_t module_index);
 
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
@@ -1713,6 +1715,7 @@ JitImport jit_runtime_imports[] = {
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
+    {"js_set_closure_env_module_var", FPTR(js_set_closure_env_module_var)},
     // v12: Language features
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
@@ -1739,9 +1742,11 @@ JitImport jit_runtime_imports[] = {
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_with_depth_active", FPTR(js_with_depth_active)},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_get_with_binding_or_global_reference", FPTR(js_get_with_binding_or_global_reference)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
+    {"js_set_with_binding_base_if_valid", FPTR(js_set_with_binding_base_if_valid)},
     {"js_last_with_binding_base_or_undefined", FPTR(js_last_with_binding_base_or_undefined)},
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},

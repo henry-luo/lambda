@@ -233,6 +233,8 @@ void js_store_process_argv(int argc, const char** argv);
 void js_set_process_argv(int argc, const char** argv);
 Item js_get_process_argv(void);
 Item js_get_process_object_value(void);
+void js_set_diagnose_enabled(int enabled);
+int js_is_diagnose_enabled(void);
 
 // =============================================================================
 // v5: Global Functions
@@ -617,9 +619,11 @@ void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
+Item js_get_with_binding_or_global_reference(Item key, int64_t strict_reference);
 int64_t js_probe_with_binding(Item key);
 int64_t js_capture_with_binding(Item key);
 int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict);
 Item js_last_with_binding_base_or_undefined(Item key);
 void js_eval_env_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);

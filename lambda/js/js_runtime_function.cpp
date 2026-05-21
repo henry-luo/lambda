@@ -82,7 +82,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
     bool has_with_env = js_with_depth_active() != 0;
     JsFunction* cached = has_with_env ? NULL : js_func_cache_lookup(func_ptr);
-    if (cached) return (Item){.function = (Function*)cached};
+    if (cached && cached->module_vars == js_active_module_vars) return (Item){.function = (Function*)cached};
 
     // Pool-allocate: JS functions are module-lifetime objects that must not be
     // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
@@ -133,6 +133,19 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
+}
+
+extern "C" void js_set_closure_env_module_var(Item fn_item, int64_t env_slot, int64_t module_index) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (!fn || !fn->env || env_slot < 0 || env_slot >= fn->env_size) return;
+    if (!fn->env_module_var_indices) {
+        fn->env_module_var_indices = (int*)pool_calloc(js_input->pool, fn->env_size * sizeof(int));
+        for (int i = 0; i < fn->env_size; i++) {
+            fn->env_module_var_indices[i] = -1;
+        }
+    }
+    fn->env_module_var_indices[env_slot] = (int)module_index;
 }
 
 // Set the ES spec formal .length for a function (params before first default, excl rest)

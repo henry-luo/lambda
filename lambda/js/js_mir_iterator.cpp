@@ -42,9 +42,22 @@ MIR_reg_t jm_emit_iterator_done_test(JsMirTranspiler* mt, MIR_reg_t step_result,
 }
 
 MIR_reg_t jm_emit_iterator_collect_rest(JsMirTranspiler* mt, MIR_reg_t iterator) {
-    MIR_reg_t rest = jm_call_1(mt, "js_iterator_collect_rest", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
-    jm_reload_after_iterator_user_call(mt);
+    MIR_reg_t rest = jm_call_1(mt, "js_array_new", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+    MIR_label_t l_loop = jm_new_label(mt);
+    MIR_label_t l_done = jm_new_label(mt);
+    jm_emit_label(mt, l_loop);
+    MIR_reg_t step = jm_emit_iterator_step(mt, iterator);
+    MIR_reg_t done = jm_emit_iterator_done_test(mt, step, "rstdone");
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_done),
+        MIR_new_reg_op(mt->ctx, done)));
+    jm_call_2(mt, "js_array_push", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, rest),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, step));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, l_loop)));
+    jm_emit_label(mt, l_done);
     return rest;
 }
 

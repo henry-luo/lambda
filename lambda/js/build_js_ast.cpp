@@ -54,6 +54,23 @@ static size_t js_decode_unicode_escape(const char* src, size_t content_len, size
     return wtf8_encode(cp, out);
 }
 
+static bool js_has_line_terminator_between(const char* source, uint32_t start, uint32_t end) {
+    // ecmascript has a `[no LineTerminator here]` restriction after break/continue;
+    // tree-sitter may still expose a label node, so the AST builder filters it.
+    if (!source || end <= start) return false;
+    for (uint32_t i = start; i < end; i++) {
+        unsigned char c = (unsigned char)source[i];
+        if (c == '\n' || c == '\r') return true;
+        if (c == 0xE2 && i + 2 < end &&
+            (unsigned char)source[i + 1] == 0x80 &&
+            ((unsigned char)source[i + 2] == 0xA8 ||
+             (unsigned char)source[i + 2] == 0xA9)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // External Tree-sitter TypeScript parser (unified: handles both JS and TS)
 extern "C" {
     const TSLanguage *tree_sitter_typescript(void);
@@ -2211,13 +2228,19 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         break_stmt->base.type = &TYPE_NULL;
         break_stmt->label = NULL;
         break_stmt->label_len = 0;
-        // check for optional label child
+        // check for optional label child; ignore labels split from `break` by a newline.
         TSNode label_node = ts_node_child_by_field_name(stmt_node, "label", strlen("label"));
         if (!ts_node_is_null(label_node)) {
             uint32_t start = ts_node_start_byte(label_node);
             uint32_t end = ts_node_end_byte(label_node);
-            break_stmt->label = tp->source + start;
-            break_stmt->label_len = end - start;
+            uint32_t keyword_end = ts_node_start_byte(stmt_node) + 5;
+            TSPoint stmt_point = ts_node_start_point(stmt_node);
+            TSPoint label_point = ts_node_start_point(label_node);
+            if (stmt_point.row == label_point.row &&
+                !js_has_line_terminator_between(tp->source, keyword_end, start)) {
+                break_stmt->label = tp->source + start;
+                break_stmt->label_len = end - start;
+            }
         }
         return (JsAstNode*)break_stmt;
     } else if (strcmp(node_type, "continue_statement") == 0) {
@@ -2225,13 +2248,19 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         continue_stmt->base.type = &TYPE_NULL;
         continue_stmt->label = NULL;
         continue_stmt->label_len = 0;
-        // check for optional label child
+        // check for optional label child; ignore labels split from `continue` by a newline.
         TSNode label_node = ts_node_child_by_field_name(stmt_node, "label", strlen("label"));
         if (!ts_node_is_null(label_node)) {
             uint32_t start = ts_node_start_byte(label_node);
             uint32_t end = ts_node_end_byte(label_node);
-            continue_stmt->label = tp->source + start;
-            continue_stmt->label_len = end - start;
+            uint32_t keyword_end = ts_node_start_byte(stmt_node) + 8;
+            TSPoint stmt_point = ts_node_start_point(stmt_node);
+            TSPoint label_point = ts_node_start_point(label_node);
+            if (stmt_point.row == label_point.row &&
+                !js_has_line_terminator_between(tp->source, keyword_end, start)) {
+                continue_stmt->label = tp->source + start;
+                continue_stmt->label_len = end - start;
+            }
         }
         return (JsAstNode*)continue_stmt;
     } else if (strcmp(node_type, "switch_statement") == 0) {
@@ -2270,18 +2299,29 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         with_stmt->base.type = &TYPE_NULL;
         with_stmt->object = NULL;
         with_stmt->body = NULL;
-        // extract object expression (inside parenthesized_expression)
+        // extract object expression. Some tree-sitter builds return the
+        // parenthesized_expression here; others expose the inner expression.
         TSNode obj_node = ts_node_child_by_field_name(stmt_node, "object", strlen("object"));
+        if (ts_node_is_null(obj_node) && ts_node_named_child_count(stmt_node) > 0) {
+            obj_node = ts_node_named_child(stmt_node, 0);
+        }
         if (!ts_node_is_null(obj_node)) {
-            // parenthesized_expression wraps the actual expression
-            uint32_t obj_child_count = ts_node_named_child_count(obj_node);
-            if (obj_child_count > 0) {
-                TSNode inner = ts_node_named_child(obj_node, 0);
-                with_stmt->object = build_js_expression(tp, inner);
+            const char* obj_type = ts_node_type(obj_node);
+            if (obj_type && strcmp(obj_type, "parenthesized_expression") == 0) {
+                uint32_t obj_child_count = ts_node_named_child_count(obj_node);
+                if (obj_child_count > 0) {
+                    TSNode inner = ts_node_named_child(obj_node, 0);
+                    with_stmt->object = build_js_expression(tp, inner);
+                }
+            } else {
+                with_stmt->object = build_js_expression(tp, obj_node);
             }
         }
         // extract body statement
         TSNode body_node = ts_node_child_by_field_name(stmt_node, "body", strlen("body"));
+        if (ts_node_is_null(body_node) && ts_node_named_child_count(stmt_node) > 1) {
+            body_node = ts_node_named_child(stmt_node, 1);
+        }
         if (!ts_node_is_null(body_node)) {
             with_stmt->body = build_js_statement(tp, body_node);
         }

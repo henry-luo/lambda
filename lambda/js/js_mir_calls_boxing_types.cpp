@@ -363,6 +363,11 @@ void jm_emit_install_method_or_accessor(JsMirTranspiler* mt,
     bool is_getter, bool is_setter) {
     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_emit_exc_propagate_check(mt);
+    jm_scope_env_reload_vars(mt);
+    jm_reload_module_var_locals_after_eval(mt, true);
+    jm_env_reload_shared_captures(mt);
+    jm_readback_closure_env(mt);
     int64_t prefix_kind = is_getter ? 1 : (is_setter ? 2 : 0);
     jm_call_void_3(mt, "js_set_function_name_from_property_key_if_anonymous",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
@@ -750,6 +755,9 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     }
 
     case JS_AST_NODE_IDENTIFIER: {
+        if (mt && mt->with_depth > 0) {
+            return LMD_TYPE_ANY;
+        }
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
@@ -1169,6 +1177,24 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (mt && mt->with_depth > 0 && var) {
+            if (js_is_diagnose_enabled()) {
+                log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
+                    mt->filename ? mt->filename : "(unknown)");
+            }
+            MIR_reg_t fallback = jm_is_native_type(var->type_id)
+                ? jm_box_native(mt, var->reg, var->type_id)
+                : var->reg;
+            MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+            MIR_reg_t boxed = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
+            jm_emit_exc_propagate_check(mt);
+            if (target_type == LMD_TYPE_FLOAT)
+                return jm_emit_unbox_float(mt, boxed);
+            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
+            return jm_emit_double_to_int(mt, as_dbl);
+        }
         if (var && jm_is_native_type(var->type_id)) {
             if (var->tdz_active) {
                 MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
@@ -1202,12 +1228,39 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
                     jm_emit_exc_propagate_check(mt);
                 }
+                if (mt && mt->with_depth > 0) {
+                    if (js_is_diagnose_enabled()) {
+                        log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
+                            mt->filename ? mt->filename : "(unknown)");
+                    }
+                    MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    boxed = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                    jm_emit_exc_propagate_check(mt);
+                }
             } else if (mc && mc->const_type == MCONST_INT) {
                 // constant int: emit directly as native
                 MIR_reg_t r = jm_new_reg(mt, "mcint", MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, mc->int_val)));
+                if (mt && mt->with_depth > 0) {
+                    if (js_is_diagnose_enabled()) {
+                        log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
+                            mt->filename ? mt->filename : "(unknown)");
+                    }
+                    MIR_reg_t fallback = jm_box_native(mt, r, LMD_TYPE_INT);
+                    MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    MIR_reg_t with_val = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
+                    jm_emit_exc_propagate_check(mt);
+                    if (target_type == LMD_TYPE_FLOAT)
+                        return jm_emit_unbox_float(mt, with_val);
+                    MIR_reg_t as_dbl = jm_emit_unbox_float(mt, with_val);
+                    return jm_emit_double_to_int(mt, as_dbl);
+                }
                 if (target_type == LMD_TYPE_FLOAT)
                     return jm_ensure_native_float(mt, r, LMD_TYPE_INT);
                 return r;
@@ -1216,6 +1269,22 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                     MIR_new_reg_op(mt->ctx, r),
                     MIR_new_double_op(mt->ctx, mc->float_val)));
+                if (mt && mt->with_depth > 0) {
+                    if (js_is_diagnose_enabled()) {
+                        log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
+                            mt->filename ? mt->filename : "(unknown)");
+                    }
+                    MIR_reg_t fallback = jm_box_native(mt, r, LMD_TYPE_FLOAT);
+                    MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                    MIR_reg_t with_val = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
+                    jm_emit_exc_propagate_check(mt);
+                    if (target_type == LMD_TYPE_FLOAT)
+                        return jm_emit_unbox_float(mt, with_val);
+                    MIR_reg_t as_dbl = jm_emit_unbox_float(mt, with_val);
+                    return jm_emit_double_to_int(mt, as_dbl);
+                }
                 if (target_type == LMD_TYPE_INT)
                     return jm_ensure_native_int(mt, r, LMD_TYPE_FLOAT);
                 return r;
