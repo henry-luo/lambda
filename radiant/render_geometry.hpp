@@ -20,6 +20,9 @@ bool render_geometry_pixel_bounds_empty(RenderPixelBounds bounds);
 Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
                                        const ViewBlock* block,
                                        float scale);
+Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
+                                        const ViewBlock* block,
+                                        float scale);
 Rect render_geometry_expand_rect(Rect rect, float expand);
 Bound render_geometry_rect_to_bound(Rect rect);
 bool render_geometry_bounds_intersect(Bound a, Bound b);

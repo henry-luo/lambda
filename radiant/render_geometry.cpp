@@ -75,6 +75,16 @@ Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
     return rect;
 }
 
+Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
+                                        const ViewBlock* block,
+                                        float scale) {
+    Rect rect = render_geometry_block_border_rect(parent_block, block, scale);
+    if (!block || !block->bound) return rect;
+    return render_geometry_adjust_box_rect(rect, CSS_VALUE_CONTENT_BOX, scale,
+                                           block->bound->border,
+                                           &block->bound->padding);
+}
+
 Rect render_geometry_expand_rect(Rect rect, float expand) {
     if (expand <= 0.0f) return rect;
     rect.x -= expand;
