@@ -4365,6 +4365,7 @@ extern "C" Item js_decodeURI(Item str_item);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 extern "C" uint64_t js_get_heap_epoch();
+extern __thread EvalContext* context;
 
 static Item g_uri_last_four_byte_string = {0};
 static uint32_t g_uri_last_four_byte_cp = 0;
@@ -4372,6 +4373,18 @@ static uint64_t g_uri_last_four_byte_epoch = 0;
 static Item g_last_from_char_code_string = {0};
 static int g_last_from_char_code_cp = -1;
 static uint64_t g_last_from_char_code_epoch = 0;
+
+static void js_uri_global_cache_ensure_gc_roots() {
+    static void* rooted_gc = NULL;
+    if (!context || !context->heap || !context->heap->gc) return;
+    if (rooted_gc == context->heap->gc) return;
+    // The URI/fromCharCode fast paths reuse recent heap strings across many
+    // loop iterations. A decodeURI stress test can collect in the middle of
+    // that loop, so these static cache slots have to participate in GC.
+    heap_register_gc_root(&g_uri_last_four_byte_string.item);
+    heap_register_gc_root(&g_last_from_char_code_string.item);
+    rooted_gc = context->heap->gc;
+}
 
 static inline Item js_uri_make_four_byte_string(char* decoded) {
     String* result = (String*)heap_alloc(sizeof(String) + 5, LMD_TYPE_STRING);
@@ -4454,6 +4467,7 @@ static int js_from_char_code_to_uint16(Item code_item) {
 }
 
 extern "C" Item js_string_fromCharCode(Item code_item) {
+    js_uri_global_cache_ensure_gc_roots();
     int code = js_from_char_code_to_uint16(code_item);
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
@@ -4480,6 +4494,7 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
 }
 
 extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
+    js_uri_global_cache_ensure_gc_roots();
     if (str_item.item == g_last_from_char_code_string.item &&
         g_last_from_char_code_epoch == js_get_heap_epoch()) {
         return (int64_t)g_last_from_char_code_cp;
@@ -4488,6 +4503,7 @@ extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
 }
 
 extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
+    js_uri_global_cache_ensure_gc_roots();
     int first = js_from_char_code_to_uint16(first_item);
     int second = js_from_char_code_to_uint16(second_item);
 
@@ -13492,6 +13508,7 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
 }
 
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
+    js_uri_global_cache_ensure_gc_roots();
     int b0 = 0xF0 | (int)(cp >> 18);
     int b1 = 0x80 | (int)((cp >> 12) & 0x3F);
     int b2 = 0x80 | (int)((cp >> 6) & 0x3F);

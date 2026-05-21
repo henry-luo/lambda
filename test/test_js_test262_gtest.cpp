@@ -833,6 +833,12 @@ static const char* PREAMBLE_INCLUDE_FILES[] = {
     "compareArray.js",
     "testTypedArray.js",
     "testBigIntTypedArray.js",
+    // These helpers show up in the remaining URI, detached-buffer, and Atomics
+    // slow rows. Keep the preamble set to small pure helpers so it lowers
+    // repeated harness cost without adding large mutable fixtures to every batch.
+    "decimalToHexString.js",
+    "detachArrayBuffer.js",
+    "testAtomics.js",
     NULL
 };
 
