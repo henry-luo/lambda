@@ -2361,6 +2361,22 @@ static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId pr
     return resolve_length_value(lycon, prop_id, value);
 }
 
+static CssEnum resolve_box_sizing_inherit(LayoutContext* lycon) {
+    DomElement* current = lycon && lycon->view
+        ? lam::dom_require<DOM_NODE_ELEMENT>(lycon->view) : nullptr;
+    DomElement* parent = current ? dom_parent_element(current) : nullptr;
+    while (parent) {
+        ViewBlock* parent_block = lam::view_as_block(parent);
+        if (parent_block && parent_block->blk &&
+            parent_block->blk->box_sizing != CSS_VALUE_INHERIT &&
+            parent_block->blk->box_sizing != CSS_VALUE__UNDEF) {
+            return parent_block->blk->box_sizing;
+        }
+        parent = dom_parent_element(parent);
+    }
+    return CSS_VALUE_CONTENT_BOX;
+}
+
 // resolve property 'margin', 'padding', etc.
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     const CssValue *src_space, int64_t specificity, Spacing* trg_spacing) {
@@ -2940,6 +2956,192 @@ static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
     return true;
 }
 
+static float resolve_placeholder_font_size(LayoutContext* lycon,
+                                           FontProp* base_font,
+                                           const CssValue* raw_value) {
+    if (!lycon || !base_font || !raw_value) return -1.0f;
+    const CssValue* value = resolve_var_function(lycon, raw_value);
+    if (!value) return -1.0f;
+
+    float parent_font_size = base_font->font_size > 0.0f ? base_font->font_size : 16.0f;
+    float font_size = -1.0f;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        if (value->data.length.unit == CSS_UNIT_EM) {
+            font_size = (float)value->data.length.value * parent_font_size;
+        } else {
+            font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        font_size = parent_font_size * (float)(value->data.percentage.value / 100.0);
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum kw = value->data.keyword;
+        if (kw == CSS_VALUE_INHERIT) {
+            font_size = parent_font_size;
+        } else if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
+            float scale = (kw == CSS_VALUE_LARGER) ? 1.2f : (1.0f / 1.2f);
+            font_size = parent_font_size * scale;
+        } else {
+            font_size = map_lambda_font_size_keyword(kw);
+        }
+    } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        if (value->data.number.value == 0.0) font_size = 0.0f;
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+    }
+    return (!isnan(font_size) && font_size >= 0.0f) ? font_size : -1.0f;
+}
+
+static const char* placeholder_font_family_from_value(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        return value->data.string;
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        return value->data.custom_property.name;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
+static void apply_placeholder_font_family(FontProp* font, const CssValue* raw_value) {
+    if (!font || !raw_value) return;
+    const CssValue* value = raw_value;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            const char* family = placeholder_font_family_from_value(value->data.list.values[i]);
+            if (family && *family) {
+                radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
+                return;
+            }
+        }
+        return;
+    }
+
+    const char* family = placeholder_font_family_from_value(value);
+    if (family && *family) {
+        radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
+    }
+}
+
+static FontProp* ensure_placeholder_font(LayoutContext* lycon,
+                                         FormControlProp* form,
+                                         FontProp* base_font) {
+    if (!lycon || !form || !base_font) return nullptr;
+    if (!form->placeholder_font) {
+        form->placeholder_font = alloc_font_prop(lycon);
+    }
+    return form->placeholder_font;
+}
+
+static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext* lycon) {
+    if (!dom_elem || !lycon || dom_elem->item_prop_type != DomElement::ITEM_PROP_FORM ||
+        !dom_elem->form) {
+        return;
+    }
+
+    FormControlProp* form = dom_elem->form;
+    form->placeholder_color_r = 0;
+    form->placeholder_color_g = 0;
+    form->placeholder_color_b = 0;
+    form->placeholder_color_a = 0;
+    form->placeholder_opacity = 1.0f;
+    form->placeholder_has_color = 0;
+    form->placeholder_has_opacity = 0;
+
+    if (!dom_elem->placeholder_styles || !dom_elem->placeholder_styles->tree) {
+        form->placeholder_font = nullptr;
+        return;
+    }
+
+    FontProp* base_font = dom_elem->font ? dom_elem->font : lycon->font.style;
+    bool has_placeholder_font_prop =
+        style_tree_get_declaration(dom_elem->placeholder_styles, CSS_PROPERTY_FONT_SIZE) ||
+        style_tree_get_declaration(dom_elem->placeholder_styles, CSS_PROPERTY_FONT_WEIGHT) ||
+        style_tree_get_declaration(dom_elem->placeholder_styles, CSS_PROPERTY_FONT_STYLE) ||
+        style_tree_get_declaration(dom_elem->placeholder_styles, CSS_PROPERTY_FONT_FAMILY);
+    if (has_placeholder_font_prop && base_font) {
+        FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
+        if (placeholder_font) {
+            *placeholder_font = *base_font;
+        }
+    } else {
+        form->placeholder_font = nullptr;
+    }
+
+    CssDeclaration* color_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_COLOR);
+    if (color_decl && color_decl->value) {
+        Color color = resolve_color_value(lycon, color_decl->value);
+        form->placeholder_color_r = color.r;
+        form->placeholder_color_g = color.g;
+        form->placeholder_color_b = color.b;
+        form->placeholder_color_a = color.a;
+        form->placeholder_has_color = 1;
+    }
+
+    CssDeclaration* opacity_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_OPACITY);
+    if (opacity_decl && opacity_decl->value) {
+        const CssValue* value = resolve_var_function(lycon, opacity_decl->value);
+        float opacity = 1.0f;
+        if (value && value->type == CSS_VALUE_TYPE_NUMBER) {
+            opacity = (float)value->data.number.value;
+        } else if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            opacity = (float)(value->data.percentage.value / 100.0);
+        }
+        if (opacity < 0.0f) opacity = 0.0f;
+        if (opacity > 1.0f) opacity = 1.0f;
+        form->placeholder_opacity = opacity;
+        form->placeholder_has_opacity = 1;
+    }
+
+    CssDeclaration* font_size_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_FONT_SIZE);
+    if (font_size_decl && font_size_decl->value && base_font) {
+        float font_size = resolve_placeholder_font_size(lycon, base_font,
+                                                        font_size_decl->value);
+        if (font_size >= 0.0f) {
+            FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
+            if (placeholder_font) {
+                placeholder_font->font_size = font_size;
+                placeholder_font->font_size_from_medium = false;
+            }
+        }
+    }
+
+    CssDeclaration* font_weight_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_FONT_WEIGHT);
+    if (font_weight_decl && font_weight_decl->value && base_font) {
+        FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
+        if (placeholder_font) {
+            placeholder_font->font_weight = map_font_weight(font_weight_decl->value);
+            placeholder_font->font_weight_numeric = map_font_weight_numeric(font_weight_decl->value);
+        }
+    }
+
+    CssDeclaration* font_style_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_FONT_STYLE);
+    if (font_style_decl && font_style_decl->value &&
+        font_style_decl->value->type == CSS_VALUE_TYPE_KEYWORD && base_font) {
+        FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
+        if (placeholder_font) {
+            placeholder_font->font_style = font_style_decl->value->data.keyword;
+        }
+    }
+
+    CssDeclaration* font_family_decl = style_tree_get_declaration(
+        dom_elem->placeholder_styles, CSS_PROPERTY_FONT_FAMILY);
+    if (font_family_decl && font_family_decl->value && base_font) {
+        FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
+        if (placeholder_font) {
+            apply_placeholder_font_family(placeholder_font, font_family_decl->value);
+        }
+    }
+}
+
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
@@ -3004,6 +3206,14 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
     }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
+
+    if (has_any_font_prop) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->font->font_size > 0) {
+            lycon->font.style = span->font;
+            lycon->font.current_font_size = span->font->font_size;
+        }
+    }
 
     // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
     // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family transitions to
@@ -3192,6 +3402,18 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // computed font-size unless author CSS explicitly set font-size.
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
                 uintptr_t tag = dom_elem->tag();
+                if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
+                    tag == HTM_TAG_SAMP || tag == HTM_TAG_TT) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    bool has_ua_monospace_size = span->font && span->font->family &&
+                        str_ieq_const(span->font->family, strlen(span->font->family), "monospace") &&
+                        span->font->font_size > 0 && span->font->font_size_from_medium;
+                    if (has_ua_monospace_size) {
+                        log_debug("[FONT INHERIT] Code element keeps UA monospace font-size %.1f",
+                            span->font->font_size);
+                        continue;
+                    }
+                }
                 if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
                     if (span->font && span->font->font_size > 0) {
@@ -3565,6 +3787,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+
+    resolve_placeholder_pseudo_style(dom_elem, lycon);
 }
 
 struct MultiValue {
@@ -4248,7 +4472,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
             }
             if (!span->blk) { span->blk = alloc_block_prop(lycon); }
-            span->blk->line_height = value;  // will be resolved later
+            span->blk->line_height = value;  // Store CssValue*, resolve during layout
             break;
         }
 
@@ -8638,7 +8862,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum boxsizing_value = value->data.keyword;
-                if (boxsizing_value > 0) {
+                if (boxsizing_value == CSS_VALUE_INHERIT) {
+                    boxsizing_value = resolve_box_sizing_inherit(lycon);
+                    block->blk->box_sizing = boxsizing_value;
+                    log_debug("[CSS] Box-sizing: inherit -> %s",
+                        css_enum_info(boxsizing_value) ? css_enum_info(boxsizing_value)->name : "content-box");
+                } else if (boxsizing_value == CSS_VALUE_INITIAL ||
+                           boxsizing_value == CSS_VALUE_UNSET ||
+                           boxsizing_value == CSS_VALUE_REVERT) {
+                    block->blk->box_sizing = CSS_VALUE_CONTENT_BOX;
+                    log_debug("[CSS] Box-sizing: global initial/unset/revert -> content-box");
+                } else if (boxsizing_value == CSS_VALUE_CONTENT_BOX ||
+                           boxsizing_value == CSS_VALUE_BORDER_BOX) {
                     block->blk->box_sizing = boxsizing_value;
                     log_debug("[CSS] Box-sizing: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, boxsizing_value);
                 }

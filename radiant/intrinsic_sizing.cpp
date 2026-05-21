@@ -28,6 +28,45 @@
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const CssValue* value,
+                                                     DomElement* owner, float target_font_size) {
+    if (!lycon || !value) return 0;
+    if (target_font_size <= 0) target_font_size = 16.0f;
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value * target_font_size;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle) {
+            return font_calc_normal_line_height(lycon->font.font_handle);
+        }
+        return 0;
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        float owner_font_size = target_font_size;
+        if (owner && owner->font && owner->font->font_size > 0) {
+            owner_font_size = owner->font->font_size;
+        }
+        return (float)(value->data.percentage.value * owner_font_size / 100.0);
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        CssUnit unit = value->data.length.unit;
+        if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+            float owner_font_size = target_font_size;
+            if (owner && owner->font && owner->font->font_size > 0) {
+                owner_font_size = owner->font->font_size;
+            }
+            float multiplier = (float)value->data.length.value;
+            if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+                multiplier *= 0.5f;
+            }
+            return multiplier * owner_font_size;
+        }
+        return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+    }
+    return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+}
+
 // ============================================================================
 // Helper: Read border width from CSS specified style
 // ============================================================================
@@ -203,6 +242,65 @@ static void get_horizontal_border_widths_from_css(LayoutContext* lycon, DomEleme
             *border_left = width;
             *border_right = width;
         }
+    }
+}
+
+static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyId property,
+                                          const CssValue* value, float inline_base) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return inline_base > 0.0f ? (float)(value->data.percentage.value / 100.0) * inline_base : 0.0f;
+    }
+    return resolve_length_value(lycon, property, value);
+}
+
+static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElement* element,
+                                                   float inline_base,
+                                                   float* padding_left, float* padding_right) {
+    if (!element || !element->specified_style || !padding_left || !padding_right) return;
+
+    CssDeclaration* padding_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING);
+    if (padding_decl && padding_decl->value) {
+        const CssValue* value = padding_decl->value;
+        if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+            int count = value->data.list.count;
+            CssValue** values = value->data.list.values;
+            if (count == 1) {
+                float padding = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING, values[0], inline_base);
+                *padding_left = padding;
+                *padding_right = padding;
+            } else if (count == 2 || count == 3) {
+                float padding = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING, values[1], inline_base);
+                *padding_left = padding;
+                *padding_right = padding;
+            } else {
+                *padding_right = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING_RIGHT, values[1], inline_base);
+                *padding_left = intrinsic_resolve_box_length(
+                    lycon, CSS_PROPERTY_PADDING_LEFT, values[3], inline_base);
+            }
+        } else {
+            float padding = intrinsic_resolve_box_length(
+                lycon, CSS_PROPERTY_PADDING, value, inline_base);
+            *padding_left = padding;
+            *padding_right = padding;
+        }
+    }
+
+    CssDeclaration* left_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING_LEFT);
+    if (left_decl && left_decl->value) {
+        *padding_left = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_LEFT, left_decl->value, inline_base);
+    }
+    CssDeclaration* right_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_PADDING_RIGHT);
+    if (right_decl && right_decl->value) {
+        *padding_right = intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_RIGHT, right_decl->value, inline_base);
     }
 }
 
@@ -4191,29 +4289,18 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             ViewBlock* anc_view = lam::unsafe_view_block_element_storage(ancestor->as_element());
             if (anc_view->blk && anc_view->blk->line_height) {
                 const CssValue* lh = anc_view->blk->line_height;
-                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
-                    line_height = font_size * (float)lh->data.number.value;
-                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
-                    // use resolve_length_value to handle rem/em/etc. units
-                    float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
-                    if (lh_px > 0) line_height = lh_px;
-                } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                    line_height = font_size * (float)(lh->data.percentage.value / 100.0);
-                }
+                float lh_px = intrinsic_resolve_line_height_for_owner(
+                    lycon, lh, ancestor->as_element(), font_size);
+                if (lh_px > 0) line_height = lh_px;
                 break;
             }
             if (anc_view->specified_style) {
                 CssDeclaration* lh_decl = style_tree_get_declaration(
                     anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
                 if (lh_decl && lh_decl->value) {
-                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-                        line_height = font_size * (float)lh_decl->value->data.number.value;
-                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
-                        if (lh_px > 0) line_height = lh_px;
-                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        line_height = font_size * (float)(lh_decl->value->data.percentage.value / 100.0);
-                    }
+                    float lh_px = intrinsic_resolve_line_height_for_owner(
+                        lycon, lh_decl->value, ancestor->as_element(), font_size);
+                    if (lh_px > 0) line_height = lh_px;
                     break;
                 }
             }
@@ -4240,38 +4327,27 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	                text_transform = get_element_text_transform(node->parent->as_element());
 	                font_variant = get_element_font_variant(node->parent->as_element());
 	            }
-	            // Measure text width using intrinsic sizing
-	            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len,
-	                                                                       text_transform, font_variant);
-	            float text_width = widths.max_content;
+            TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len,
+                                                                       text_transform, font_variant);
+            float text_width = widths.max_content;
 
-            // Calculate number of lines (rounded up)
-            // white-space: nowrap/pre prevents text wrapping → always 1 line
-            // Use min_content (widest word/break unit) to estimate word-boundary waste:
-            // text wraps at word boundaries, so each line's effective width is
-            // floor(available_width / word_width) * word_width, not the full available_width.
-            // Use epsilon tolerance: text intrinsic width measurement (whole-string shaping)
-            // can differ from character-by-character accumulation by tiny amounts due to
-            // floating-point rounding. Without tolerance, text that fits can appear to overflow.
-            int num_lines = 1;
-	            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE && text_width > width + 0.005f) {
-                float effective_width = width;
-                if (widths.min_content > 0 && widths.min_content <= width) {
-                    int units_per_line = (int)(width / widths.min_content); // INT_CAST_OK: integer count
-                    if (units_per_line > 0) {
-                        effective_width = units_per_line * widths.min_content;
-                    }
-                } else if (widths.min_content > width && widths.min_content > 0) {
-                    // Each break unit overflows the line and gets its own line
-                    effective_width = widths.min_content;
-                }
-                num_lines = (int)ceil(text_width / effective_width); // INT_CAST_OK: integer line count
+            // Calculate wrapped text height with the same greedy break-unit packing
+            // used by the intrinsic text-height helper.  The old division-based
+            // estimate used min-content width as a fixed packing unit, which
+            // over-counted normal word wrapping for varied word lengths.
+            float measured_height = line_height;
+            if (ws_val != CSS_VALUE_NOWRAP && ws_val != CSS_VALUE_PRE &&
+                text_width > width + 0.005f) {
+                measured_height = compute_text_height_at_width(
+                    lycon, measure_text, measure_len, width, line_height,
+                    text_transform, font_variant);
             }
 
-	            log_debug("calculate_max_content_height: text len=%zu, measure_len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
-	                      text_len, measure_len, text_width, width, num_lines);
+            int num_lines = (int)ceilf(measured_height / line_height); // INT_CAST_OK: diagnostic line count
+            log_debug("calculate_max_content_height: text len=%zu, measure_len=%zu, text_width=%.1f, available_width=%.1f, lines=%d",
+                      text_len, measure_len, text_width, width, num_lines);
 
-            return line_height * num_lines;
+            return measured_height;
         }
 
         return line_height;
@@ -5010,15 +5086,27 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Pass the child's content-box width so its descendants wrap correctly.
             float child_content_w = content_w;
             if (child->is_element()) {
-                ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child->as_element()));
+                DomElement* child_elem = child->as_element();
+                ViewElement* child_ve = lam::view_require_element(static_cast<View*>(child_elem));
+                float child_padding_border = 0.0f;
                 if (child_ve->bound) {
-                    float cp = child_ve->bound->padding.left + child_ve->bound->padding.right;
-                    float cb = 0;
+                    child_padding_border += child_ve->bound->padding.left + child_ve->bound->padding.right;
                     if (child_ve->bound->border)
-                        cb = child_ve->bound->border->width.left + child_ve->bound->border->width.right;
-                    if (cp + cb > 0 && child_content_w - cp - cb > 0) {
-                        child_content_w -= cp + cb;
-                    }
+                        child_padding_border += child_ve->bound->border->width.left + child_ve->bound->border->width.right;
+                } else if (child_elem->specified_style) {
+                    float pad_left = 0.0f;
+                    float pad_right = 0.0f;
+                    float border_left = 0.0f;
+                    float border_right = 0.0f;
+                    get_horizontal_padding_widths_from_css(
+                        lycon, child_elem, content_w, &pad_left, &pad_right);
+                    get_horizontal_border_widths_from_css(
+                        lycon, child_elem, &border_left, &border_right);
+                    child_padding_border = pad_left + pad_right + border_left + border_right;
+                }
+                if (child_padding_border > 0.0f && child_content_w > 0.0f) {
+                    child_content_w -= child_padding_border;
+                    if (child_content_w < 0.0f) child_content_w = 0.0f;
                 }
             }
             float child_height = calculate_max_content_height(lycon, child, child_content_w);

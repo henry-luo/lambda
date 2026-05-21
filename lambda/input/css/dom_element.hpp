@@ -247,6 +247,7 @@ struct DomElement : DomNode {
     StyleTree* after_styles;     // Styles for ::after pseudo-element
     StyleTree* first_letter_styles;  // Styles for ::first-letter pseudo-element
     StyleTree* marker_styles;    // Styles for ::marker pseudo-element
+    StyleTree* placeholder_styles; // Styles for ::placeholder pseudo-element
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
@@ -321,6 +322,7 @@ struct DomElement : DomNode {
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
+        marker_styles(nullptr), placeholder_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),

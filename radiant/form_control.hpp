@@ -4,6 +4,7 @@
 #include <string.h>      // strcmp used by inline get_input_control_type
 
 struct DomElement;
+struct FontProp;
 
 // Forward decl from text_edit.hpp (avoids circular include).
 struct EditHistory;
@@ -154,6 +155,16 @@ struct FormControlProp {
     float intrinsic_width;
     float intrinsic_height;
 
+    // Computed ::placeholder pseudo-element rendering style.
+    FontProp* placeholder_font;
+    uint8_t placeholder_color_r;
+    uint8_t placeholder_color_g;
+    uint8_t placeholder_color_b;
+    uint8_t placeholder_color_a;
+    float placeholder_opacity;
+    uint8_t placeholder_has_color : 1;
+    uint8_t placeholder_has_opacity : 1;
+
     // Flex item properties (when form control is a flex item)
     // These are needed because form controls use FormControlProp instead of FlexItemProp
     float flex_grow;
@@ -244,6 +255,9 @@ struct FormControlProp {
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
         dropdown_open(0), appearance_none(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
         intrinsic_width(0), intrinsic_height(0),
+        placeholder_font(nullptr), placeholder_color_r(0), placeholder_color_g(0),
+        placeholder_color_b(0), placeholder_color_a(0),
+        placeholder_opacity(1.0f), placeholder_has_color(0), placeholder_has_opacity(0),
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
         current_value(nullptr), current_value_len(0), current_value_u16_len(0),
         selection_start(0), selection_end(0), selection_direction(0),

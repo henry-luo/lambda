@@ -26,6 +26,56 @@ static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255)
     return c;
 }
 
+static FontProp* form_render_font(ViewBlock* block, FormControlProp* form,
+                                  bool is_placeholder) {
+    if (is_placeholder && form && form->placeholder_font) {
+        return form->placeholder_font;
+    }
+    return block ? block->font : nullptr;
+}
+
+static Color form_text_color(ViewBlock* block, FormControlProp* form,
+                             bool is_placeholder) {
+    Color text_color;
+    if (is_placeholder) {
+        text_color = (form && form->placeholder_has_color)
+            ? make_color(form->placeholder_color_r,
+                         form->placeholder_color_g,
+                         form->placeholder_color_b,
+                         form->placeholder_color_a)
+            : make_color(117, 117, 117);
+        if (form && form->placeholder_has_opacity) {
+            float alpha = (float)text_color.a * form->placeholder_opacity;
+            if (alpha < 0.0f) alpha = 0.0f;
+            if (alpha > 255.0f) alpha = 255.0f;
+            text_color.a = (uint8_t)(alpha + 0.5f);
+        }
+    } else if (block && block->in_line && block->in_line->has_color) {
+        text_color.r = block->in_line->color.r;
+        text_color.g = block->in_line->color.g;
+        text_color.b = block->in_line->color.b;
+        text_color.a = block->in_line->color.a;
+    } else {
+        text_color = make_color(0, 0, 0);
+    }
+    return text_color;
+}
+
+static float form_text_align_offset(ViewBlock* block, float content_w,
+                                    float text_w) {
+    if (!block || !block->blk || text_w <= 0.0f || text_w >= content_w) {
+        return 0.0f;
+    }
+    CssEnum align = block->blk->text_align;
+    if (align == CSS_VALUE_CENTER) {
+        return (content_w - text_w) * 0.5f;
+    }
+    if (align == CSS_VALUE_RIGHT || align == CSS_VALUE_END) {
+        return content_w - text_w;
+    }
+    return 0.0f;
+}
+
 // Helper to draw a filled rectangle
 static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
@@ -76,6 +126,46 @@ static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, floa
         // Right edge
         fill_rect(rdcon, x + w - border_width, y, border_width, h, dark);
     }
+}
+
+static bool form_border_has_visible_side(BorderProp* border) {
+    if (!border) return false;
+    return ((border->width.top > 0.0f &&
+             border->top_style != CSS_VALUE_NONE &&
+             border->top_style != CSS_VALUE_HIDDEN) ||
+            (border->width.right > 0.0f &&
+             border->right_style != CSS_VALUE_NONE &&
+             border->right_style != CSS_VALUE_HIDDEN) ||
+            (border->width.bottom > 0.0f &&
+             border->bottom_style != CSS_VALUE_NONE &&
+             border->bottom_style != CSS_VALUE_HIDDEN) ||
+            (border->width.left > 0.0f &&
+             border->left_style != CSS_VALUE_NONE &&
+             border->left_style != CSS_VALUE_HIDDEN));
+}
+
+static bool form_border_has_author_override(BorderProp* border) {
+    if (!border) return false;
+    return border->width.top_specificity > 0 ||
+           border->width.right_specificity > 0 ||
+           border->width.bottom_specificity > 0 ||
+           border->width.left_specificity > 0 ||
+           border->top_style_specificity > 0 ||
+           border->right_style_specificity > 0 ||
+           border->bottom_style_specificity > 0 ||
+           border->left_style_specificity > 0 ||
+           border->top_color_specificity > 0 ||
+           border->right_color_specificity > 0 ||
+           border->bottom_color_specificity > 0 ||
+           border->left_color_specificity > 0;
+}
+
+static float form_control_border_left_width(ViewBlock* block, bool has_css_border,
+                                            bool use_default_border) {
+    if (has_css_border && block->bound && block->bound->border) {
+        return block->bound->border->width.left;
+    }
+    return use_default_border ? 1.0f : 0.0f;
 }
 
 /**
@@ -292,9 +382,9 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // Also: clip the white fill to the inside of any CSS border, otherwise the
     // fill stomps the border (which render_bound painted just before us).
     bool has_css_background = block->bound && block->bound->background;
-    bool has_css_border = block->bound && block->bound->border &&
-        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
-         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
+    bool has_css_border = form_border_has_visible_side(css_border);
+    bool use_default_border = !form_border_has_author_override(css_border);
     if (!has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = x, by = y, bw_w = w, bh_h = h;
@@ -313,7 +403,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     // didn't specify a border. If a border is set in CSS, render_block_view has
     // already drawn it (and respects border-color/border-radius); avoid stomping
     // it with the default 3D chrome.
-    if (!has_css_border) {
+    if (use_default_border) {
         draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
     }
 
@@ -352,15 +442,20 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         mask_buf = build_password_mask(src_text, (int)strlen(src_text));
         if (mask_buf) text = mask_buf;
     }
+    FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute text area position (shared by text rendering and caret)
     float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H) * s;
-    float border_w = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
+    float border_w = form_control_border_left_width(block, has_css_border, use_default_border) * s;
     float text_x = x + border_w + padding;
-    float font_size_scaled = block->font ? block->font->font_size * s : 16.0f * s;
+    float font_size_scaled = render_font ? render_font->font_size * s : 16.0f * s;
     float text_y = y + border_w + (h - 2*border_w - font_size_scaled) / 2;
     float content_right = x + w - border_w - padding;
     float content_w     = content_right - text_x;
+    float text_w = (text && *text && render_font)
+        ? measure_input_text_width(rdcon, render_font, text, (int)strlen(text)) * s
+        : 0.0f;
+    float text_origin_x = text_x + form_text_align_offset(block, content_w, text_w);
 
     // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
     // to keep the caret inside the content box. Done up-front so the same
@@ -368,7 +463,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     bool focused_here = state && focus_get(state) == static_cast<View*>(block);
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
-    if (focused_here && !is_placeholder && text && block->font &&
+    if (focused_here && !is_placeholder && text && render_font &&
         (has_preedit || caret_get_offset(state, &caret_byte))) {
         int src_len = src_text ? (int)strlen(src_text) : 0;
         if (has_preedit) caret_byte = (int)preedit_caret_byte;
@@ -376,7 +471,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         int meas_byte = is_password
             ? password_mask_byte_offset(src_text, caret_byte)
             : caret_byte;
-        caret_x_logical = measure_input_text_width(rdcon, block->font, text, meas_byte) * s;
+        caret_x_logical = measure_input_text_width(rdcon, render_font, text, meas_byte) * s;
     }
 
     // F4: keep caret_x_logical within [margin, content_w - margin]. A small
@@ -412,9 +507,9 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
                                                   selection_end);
         int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
         int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
-        float ax = text_x + measure_input_text_width(rdcon, block->font, text, a8) * s
+        float ax = text_origin_x + measure_input_text_width(rdcon, render_font, text, a8) * s
                    - scroll_px;
-        float bx = text_x + measure_input_text_width(rdcon, block->font, text, b8) * s
+        float bx = text_origin_x + measure_input_text_width(rdcon, render_font, text, b8) * s
                    - scroll_px;
         if (bx > ax) {
             Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
@@ -422,29 +517,18 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         }
     }
 
-    if (text && *text && block->font) {
-        // Set text color
-        Color text_color;
-        if (is_placeholder) {
-            text_color = make_color(117, 117, 117);
-        } else if (block->in_line && block->in_line->has_color) {
-            text_color.r = block->in_line->color.r;
-            text_color.g = block->in_line->color.g;
-            text_color.b = block->in_line->color.b;
-            text_color.a = block->in_line->color.a;
-        } else {
-            text_color = make_color(0, 0, 0);
-        }
+    if (text && *text && render_font) {
+        Color text_color = form_text_color(block, form, is_placeholder);
         // F4: glyph-based render works for both regular and password text
         // (mask_buf substitutes glyphs), with scroll_x applied uniformly.
-        render_simple_string(rdcon, text, text_x - scroll_px, text_y,
-                             block->font, text_color);
+        render_simple_string(rdcon, text, text_origin_x - scroll_px, text_y,
+                             render_font, text_color);
     }
 
-    if (has_preedit && preedit_display && block->font && preedit_end > preedit_start) {
-        float ux0 = text_x + measure_input_text_width(rdcon, block->font, text,
+    if (has_preedit && preedit_display && render_font && preedit_end > preedit_start) {
+        float ux0 = text_origin_x + measure_input_text_width(rdcon, render_font, text,
                                                       (int)preedit_start) * s - scroll_px;
-        float ux1 = text_x + measure_input_text_width(rdcon, block->font, text,
+        float ux1 = text_origin_x + measure_input_text_width(rdcon, render_font, text,
                                                       (int)preedit_end) * s - scroll_px;
         if (ux1 > ux0) {
             Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
@@ -459,7 +543,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         // Headless / first-frame rendering keeps it true so screenshot tests
         // see the caret.
         if (caret_is_visible(state)) {
-            float caret_x = text_x + caret_x_logical - scroll_px;
+            float caret_x = text_origin_x + caret_x_logical - scroll_px;
             float caret_y_pos = text_y;
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
@@ -599,9 +683,8 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     // The background prop is only allocated when author CSS sets it, so its
     // existence alone means the author specified a background (including transparent).
     bool has_css_background = block->bound && block->bound->background;
-    bool has_css_border = block->bound && block->bound->border &&
-        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
-         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
+    bool use_default_border = !form_border_has_author_override(css_border);
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
@@ -612,7 +695,7 @@ void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         Color bg = disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
         fill_rect(rdcon, x, y, w, h, bg);
     }
-    if (!has_css_background && !has_css_border) {
+    if (!has_css_background && use_default_border) {
         // 3D outset border (raised button appearance) - skip when author CSS
         // already specifies a border (rendered by render_block_view).
         draw_3d_border(rdcon, x, y, w, h, false, 1 * s);
@@ -748,9 +831,9 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
     // white/disabled-grey bg). Only fall back to manual drawing if those
     // weren't set for some reason (e.g., author CSS removed them).
     bool has_css_background = block->bound && block->bound->background;
-    bool has_css_border = block->bound && block->bound->border &&
-        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
-         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
+    bool has_css_border = form_border_has_visible_side(css_border);
+    bool use_default_border = !form_border_has_author_override(css_border);
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
     bool disabled = form_control_is_disabled(state, static_cast<View*>(block));
@@ -761,15 +844,17 @@ void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form
         Color bg = disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
         fill_rect(rdcon, x, y, w, h, bg);
     }
-    if (!has_css_border) {
+    if (use_default_border) {
         Color border_color = make_color(118, 118, 118);
         fill_rect(rdcon, x, y, w, bw, border_color);
         fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
         fill_rect(rdcon, x, y, bw, h, border_color);
         fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
-    } else {
+    } else if (has_css_border) {
         // Use actual CSS border width for arrow area inset below
         bw = block->bound->border->width.right * s;
+    } else {
+        bw = 0.0f;
     }
 
     // Dropdown arrow area
@@ -1046,9 +1131,9 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // (respecting border-radius / border-color). Only fall back to the default
     // white background + 3D inset border when the author didn't.
     bool has_css_background = block->bound && block->bound->background;
-    bool has_css_border = block->bound && block->bound->border &&
-        (block->bound->border->width.top > 0 || block->bound->border->width.right > 0 ||
-         block->bound->border->width.bottom > 0 || block->bound->border->width.left > 0);
+    BorderProp* css_border = block->bound ? block->bound->border : nullptr;
+    bool has_css_border = form_border_has_visible_side(css_border);
+    bool use_default_border = !form_border_has_author_override(css_border);
     if (!has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = x, by = y, bw_w = w, bh_h = h;
@@ -1062,7 +1147,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
         fill_rect(rdcon, bx, by, bw_w, bh_h, bg);
     }
-    if (!has_css_border) {
+    if (use_default_border) {
         draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
     }
 
@@ -1093,33 +1178,24 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         text = form->placeholder;
         is_placeholder = true;
     }
+    FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute internal metrics
     float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING) * s;
-    float border_w_px = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
+    float border_w_px = form_control_border_left_width(block, has_css_border, use_default_border) * s;
     float content_x = x + border_w_px + padding;
     float content_y = y + border_w_px + padding;
     float content_w = w - 2 * (border_w_px + padding);
-    float font_size_scaled = block->font ? block->font->font_size * s : 13.333f * s;
+    float font_size_scaled = render_font ? render_font->font_size * s : 13.333f * s;
     float line_height = font_size_scaled * 1.4f;
 
     // Render text lines
-    if (text && *text && block->font) {
-        Color text_color;
-        if (is_placeholder) {
-            text_color = make_color(117, 117, 117);
-        } else if (block->in_line && block->in_line->has_color) {
-            text_color.r = block->in_line->color.r;
-            text_color.g = block->in_line->color.g;
-            text_color.b = block->in_line->color.b;
-            text_color.a = block->in_line->color.a;
-        } else {
-            text_color = make_color(0, 0, 0);
-        }
+    if (text && *text && render_font) {
+        Color text_color = form_text_color(block, form, is_placeholder);
 
         // Setup font
         FontBox fbox = {0};
-        setup_font(rdcon->ui_context, &fbox, block->font);
+        setup_font(rdcon->ui_context, &fbox, render_font);
         if (fbox.font_handle) {
             const FontMetrics* fm = font_get_metrics(fbox.font_handle);
             float ascender = fm ? (fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
@@ -1146,7 +1222,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
                     if (bytes <= 0) { p++; continue; }
                     p += bytes;
 
-                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                    FontStyleDesc sd = font_style_desc_from_prop(render_font);
                     LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, true);
                     if (!glyph) {
                         pen_x += font_size_scaled * 0.5f;

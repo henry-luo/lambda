@@ -1575,7 +1575,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION;
                     } else if (strcmp(elem_name, "backdrop") == 0) {
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP;
-                    } else if (strcmp(elem_name, "placeholder") == 0) {
+                    } else if (strcmp(elem_name, "placeholder") == 0 ||
+                               strcmp(elem_name, "-webkit-input-placeholder") == 0 ||
+                               strcmp(elem_name, "-moz-placeholder") == 0 ||
+                               strcmp(elem_name, "-ms-input-placeholder") == 0) {
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER;
                     } else if (strcmp(elem_name, "marker") == 0) {
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_MARKER;
@@ -1636,6 +1639,13 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->value = pseudo_name;
                     selector->argument = NULL;
                     log_debug(" Legacy pseudo-element: ':%s' (treated as ::%s)", pseudo_name, pseudo_name);
+                    matched = true;
+                } else if (strcmp(pseudo_name, "-ms-input-placeholder") == 0 ||
+                           strcmp(pseudo_name, "-moz-placeholder") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER;
+                    selector->value = pseudo_name;
+                    selector->argument = NULL;
+                    log_debug(" Legacy placeholder pseudo-element: ':%s'", pseudo_name);
                     matched = true;
                 }
 

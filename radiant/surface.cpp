@@ -56,33 +56,242 @@ static const char* find_bytes(const char* data, size_t size, const char* needle,
     return NULL;
 }
 
-static bool svg_has_intrinsic_size_in_memory(const char* data, size_t size) {
-    if (!data || size == 0) return false;
+typedef struct SvgImageIntrinsicMetadata {
+    float width;
+    float height;
+    bool has_width;
+    bool has_height;
+    bool has_ratio;
+} SvgImageIntrinsicMetadata;
+
+static const char* svg_root_tag_end(const char* svg, const char* end) {
+    if (!svg || !end) return NULL;
+
+    const char* tag_end = svg;
+    char quote = 0;
+    while (tag_end < end) {
+        char c = *tag_end;
+        if (quote) {
+            if (c == quote) quote = 0;
+        } else if (c == '"' || c == '\'') {
+            quote = c;
+        } else if (c == '>') {
+            return tag_end;
+        }
+        tag_end++;
+    }
+    return NULL;
+}
+
+static bool svg_find_root_attr(const char* svg, const char* tag_end, const char* name,
+                               char* out, size_t out_cap) {
+    if (!svg || !tag_end || !name || !out || out_cap == 0) return false;
+
+    const char* p = svg + 4;
+    size_t name_len = strlen(name);
+    while (p < tag_end) {
+        while (p < tag_end && isspace((unsigned char)*p)) p++;
+        if (p >= tag_end || *p == '/' || *p == '>') break;
+
+        const char* attr_start = p;
+        while (p < tag_end &&
+               (isalnum((unsigned char)*p) || *p == ':' || *p == '_' || *p == '-')) {
+            p++;
+        }
+        size_t attr_len = (size_t)(p - attr_start);
+        while (p < tag_end && isspace((unsigned char)*p)) p++;
+        if (p >= tag_end || *p != '=') {
+            while (p < tag_end && !isspace((unsigned char)*p)) p++;
+            continue;
+        }
+        p++;
+        while (p < tag_end && isspace((unsigned char)*p)) p++;
+        if (p >= tag_end) break;
+
+        char quote = 0;
+        if (*p == '"' || *p == '\'') {
+            quote = *p;
+            p++;
+        }
+        const char* value_start = p;
+        if (quote) {
+            while (p < tag_end && *p != quote) p++;
+        } else {
+            while (p < tag_end && !isspace((unsigned char)*p) && *p != '>') p++;
+        }
+        const char* value_end = p;
+        if (quote && p < tag_end) p++;
+
+        if (attr_len == name_len && strncmp(attr_start, name, name_len) == 0) {
+            size_t value_len = (size_t)(value_end - value_start);
+            if (value_len >= out_cap) value_len = out_cap - 1;
+            memcpy(out, value_start, value_len);
+            out[value_len] = '\0';
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool svg_parse_number_token(const char** cursor, float* out_value) {
+    if (!cursor || !*cursor || !out_value) return false;
+
+    const char* p = *cursor;
+    while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
+    char* end_ptr = NULL;
+    float value = strtof(p, &end_ptr);
+    if (end_ptr == p) return false;
+    *out_value = value;
+    *cursor = end_ptr;
+    return true;
+}
+
+static bool svg_parse_viewbox_attr(const char* value, float* width, float* height) {
+    if (!value || !width || !height) return false;
+
+    const char* p = value;
+    float min_x = 0.0f;
+    float min_y = 0.0f;
+    float vb_width = 0.0f;
+    float vb_height = 0.0f;
+    if (!svg_parse_number_token(&p, &min_x)) return false;
+    if (!svg_parse_number_token(&p, &min_y)) return false;
+    if (!svg_parse_number_token(&p, &vb_width)) return false;
+    if (!svg_parse_number_token(&p, &vb_height)) return false;
+    if (vb_width <= 0.0f || vb_height <= 0.0f) return false;
+
+    *width = vb_width;
+    *height = vb_height;
+    return true;
+}
+
+static bool svg_parse_definite_length_attr(const char* value, float* out_value) {
+    if (!value || !out_value) return false;
+
+    const char* p = value;
+    while (*p && isspace((unsigned char)*p)) p++;
+    char* end_ptr = NULL;
+    float length = strtof(p, &end_ptr);
+    if (end_ptr == p || length <= 0.0f) return false;
+
+    while (*end_ptr && isspace((unsigned char)*end_ptr)) end_ptr++;
+    if (*end_ptr == '%') return false;
+    if (strncmp(end_ptr, "px", 2) == 0 || *end_ptr == '\0') {
+        *out_value = length;
+        return true;
+    }
+    if (strncmp(end_ptr, "in", 2) == 0) {
+        *out_value = length * 96.0f;
+        return true;
+    }
+    if (strncmp(end_ptr, "cm", 2) == 0) {
+        *out_value = length * (96.0f / 2.54f);
+        return true;
+    }
+    if (strncmp(end_ptr, "mm", 2) == 0) {
+        *out_value = length * (96.0f / 25.4f);
+        return true;
+    }
+    if (strncmp(end_ptr, "pt", 2) == 0) {
+        *out_value = length * (96.0f / 72.0f);
+        return true;
+    }
+    if (strncmp(end_ptr, "pc", 2) == 0) {
+        *out_value = length * 16.0f;
+        return true;
+    }
+
+    return false;
+}
+
+static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata_in_memory(const char* data, size_t size) {
+    SvgImageIntrinsicMetadata meta = {0.0f, 0.0f, false, false, false};
+    if (!data || size == 0) return meta;
 
     const char* end = data + size;
     const char* svg = find_bytes(data, size, "<svg", 4);
-    if (!svg) return false;
+    if (!svg) return meta;
 
-    const char* tag_end = svg;
-    while (tag_end < end && *tag_end != '>') tag_end++;
-    if (tag_end >= end) return false;
+    const char* tag_end = svg_root_tag_end(svg, end);
+    if (!tag_end) return meta;
 
-    size_t tag_len = (size_t)(tag_end - svg);
-    bool has_width = find_bytes(svg, tag_len, "width", 5) != NULL;
-    bool has_height = find_bytes(svg, tag_len, "height", 6) != NULL;
-    return has_width && has_height;
+    char width_attr[128];
+    char height_attr[128];
+    char viewbox_attr[160];
+    bool has_width_attr = svg_find_root_attr(svg, tag_end, "width", width_attr, sizeof(width_attr));
+    bool has_height_attr = svg_find_root_attr(svg, tag_end, "height", height_attr, sizeof(height_attr));
+    bool has_viewbox_attr = svg_find_root_attr(svg, tag_end, "viewBox", viewbox_attr, sizeof(viewbox_attr));
+    if (!has_viewbox_attr) {
+        has_viewbox_attr = svg_find_root_attr(svg, tag_end, "viewbox", viewbox_attr, sizeof(viewbox_attr));
+    }
+
+    float viewbox_width = 0.0f;
+    float viewbox_height = 0.0f;
+    if (has_viewbox_attr && svg_parse_viewbox_attr(viewbox_attr, &viewbox_width, &viewbox_height)) {
+        meta.has_ratio = true;
+    }
+
+    if (has_width_attr && svg_parse_definite_length_attr(width_attr, &meta.width)) {
+        meta.has_width = true;
+    }
+    if (has_height_attr && svg_parse_definite_length_attr(height_attr, &meta.height)) {
+        meta.has_height = true;
+    }
+
+    if (meta.has_width && !meta.has_height && meta.has_ratio) {
+        meta.height = meta.width * viewbox_height / viewbox_width;
+        meta.has_height = true;
+    } else if (!meta.has_width && meta.has_height && meta.has_ratio) {
+        meta.width = meta.height * viewbox_width / viewbox_height;
+        meta.has_width = true;
+    } else if (!meta.has_width && !meta.has_height && meta.has_ratio) {
+        meta.width = viewbox_width;
+        meta.height = viewbox_height;
+    }
+
+    return meta;
 }
 
-static bool svg_has_intrinsic_size_in_file(const char* file_path) {
-    if (!file_path) return false;
+static SvgImageIntrinsicMetadata svg_read_intrinsic_metadata_in_file(const char* file_path) {
+    SvgImageIntrinsicMetadata meta = {0.0f, 0.0f, false, false, false};
+    if (!file_path) return meta;
 
     FILE* fp = fopen(file_path, "rb");
-    if (!fp) return false;
+    if (!fp) return meta;
 
     char buffer[4096];
     size_t read_count = fread(buffer, 1, sizeof(buffer), fp);
     fclose(fp);
-    return svg_has_intrinsic_size_in_memory(buffer, read_count);
+    return svg_read_intrinsic_metadata_in_memory(buffer, read_count);
+}
+
+static int svg_dimension_to_image_px(float value) {
+    if (value <= 0.0f) return 0;
+    // INT_CAST_OK: ImageSurface dimensions are integer CSS pixels.
+    return value < 1.0f ? 1 : (int)(value + 0.5f);
+}
+
+static void image_surface_apply_svg_metadata(ImageSurface* surface,
+                                             SvgImageIntrinsicMetadata meta,
+                                             float fallback_width,
+                                             float fallback_height) {
+    if (!surface) return;
+
+    if (meta.width <= 0.0f && fallback_width > 0.0f) meta.width = fallback_width;
+    if (meta.height <= 0.0f && fallback_height > 0.0f) meta.height = fallback_height;
+    if (meta.width <= 0.0f) meta.width = 300.0f;
+    if (meta.height <= 0.0f) {
+        meta.height = meta.has_ratio && meta.width > 0.0f ? meta.width * 0.5f : 150.0f;
+    }
+
+    surface->width = svg_dimension_to_image_px(meta.width);
+    surface->height = svg_dimension_to_image_px(meta.height);
+    surface->encoded_width = surface->width;
+    surface->encoded_height = surface->height;
+    surface->orientation = 1;
+    surface->has_intrinsic_size = meta.has_width && meta.has_height;
+    surface->generation = 1;
 }
 
 static uint16_t read_exif_u16(const unsigned char* p, bool little_endian) {
@@ -248,20 +457,20 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         bool is_svg = is_svg_content(decoded, decoded_len);
         ImageSurface* surface;
         if (is_svg) {
+            SvgImageIntrinsicMetadata svg_meta =
+                svg_read_intrinsic_metadata_in_memory((const char*)decoded, decoded_len);
             surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
             surface->format = IMAGE_FORMAT_SVG;
             surface->pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
-            mem_free(decoded);
             if (!surface->pic) {
+                mem_free(decoded);
                 mem_free(surface);
                 return NULL;
             }
             float svg_w, svg_h;
             rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
-            surface->width = svg_w;
-            surface->height = svg_h;
-            image_surface_apply_orientation_metadata(surface, 1);
-            surface->has_intrinsic_size = svg_has_intrinsic_size_in_memory((const char*)decoded, decoded_len);
+            image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
+            mem_free(decoded);
         } else {
             int width, height, channels;
             int orientation = jpeg_exif_orientation_from_memory(decoded, decoded_len);
@@ -361,6 +570,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     if (is_svg) {
+        SvgImageIntrinsicMetadata svg_meta = is_http && downloaded_data
+            ? svg_read_intrinsic_metadata_in_memory((const char*)downloaded_data, downloaded_size)
+            : svg_read_intrinsic_metadata_in_file(file_path);
         surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
         surface->format = IMAGE_FORMAT_SVG;
         if (is_http && downloaded_data) {
@@ -376,13 +588,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         float svg_w, svg_h;
         rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
-        surface->width = svg_w;
-        surface->height = svg_h;
-        image_surface_apply_orientation_metadata(surface, 1);
-        surface->has_intrinsic_size = is_http && downloaded_data
-            ? svg_has_intrinsic_size_in_memory((const char*)downloaded_data, downloaded_size)
-            : svg_has_intrinsic_size_in_file(file_path);
-        log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
+        image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
+        log_debug("SVG image size: %d x %d (picture %.1f x %.1f, intrinsic=%d)",
+                  surface->width, surface->height, svg_w, svg_h, surface->has_intrinsic_size);
         if (downloaded_data) mem_free(downloaded_data);
     }
     // Detect Lottie JSON animation (by extension for local, by content for HTTP)

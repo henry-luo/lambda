@@ -6,6 +6,7 @@
 #include "render_list.hpp"
 #include "render_media.hpp"
 #include "render_svg_inline.hpp"
+#include "render_state.hpp"
 #include "form_control.hpp"
 
 #include "../lib/tagged.hpp"
@@ -13,6 +14,15 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <chrono>
+
+static void render_form_control_in_block_state(RenderContext* rdcon, ViewBlock* block) {
+    if (!rdcon || !block) return;
+    BlockBlot parent_block = rdcon->block;
+    RenderTransformScope transform_scope =
+        render_state_push_transform(rdcon, block, &parent_block);
+    render_form_control(rdcon, block);
+    render_state_pop_transform(&transform_scope);
+}
 
 static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
                                          bool skip_positioned_in_normal_flow) {
@@ -33,13 +43,13 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
               block->embed ? block->embed->img : NULL, block->width, block->height);
     if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
         if (block->form->control_type == FORM_CONTROL_BUTTON && block->first_child) {
-            render_form_control(rdcon, block);
+            render_form_control_in_block_state(rdcon, block);
             render_block_view(rdcon, block);
         } else {
             log_debug("[RENDER DISPATCH] calling render_block_view for form control");
             render_block_view(rdcon, block);
             log_debug("[RENDER DISPATCH] calling render_form_control");
-            render_form_control(rdcon, block);
+            render_form_control_in_block_state(rdcon, block);
         }
     }
     else if (block->tag_id == HTM_TAG_SVG) {

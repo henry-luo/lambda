@@ -1034,10 +1034,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->margin.left_specificity = -1;
         break;
     case HTM_TAG_DT:
-        // definition term: bold (common style, not strictly default)
-        if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->font_weight = CSS_VALUE_BOLD;
-        block->font->font_weight_numeric = 700;
+        // definition term: browser UA default is normal-weight block text.
         break;
     case HTM_TAG_LI:
         // list item: display list-item handled elsewhere
