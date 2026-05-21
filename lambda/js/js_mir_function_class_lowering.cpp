@@ -442,8 +442,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0 &&
-                    jm_function_has_formal_arguments_binding(fn)) {
+                    strcmp(e->name, "_js_arguments") == 0) {
+                    // Annex B FDI appends the implicit arguments object name to
+                    // parameterNames. A sloppy block function named `arguments`
+                    // still gets its block lexical binding, but must not create
+                    // the var-scope hoist that would replace the arguments object.
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -478,6 +481,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
+                if (fc && fc->uses_arguments && strcmp(lce->name, "_js_arguments") == 0) {
+                    // Block functions named `arguments` get initialized when
+                    // entering their block. Initializing that name in the
+                    // function body scope would shadow the implicit arguments
+                    // object before the block is reached.
+                    continue;
+                }
                 JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     // Create register for let/const (no longer hoisted by jm_collect_body_locals)
@@ -2701,8 +2711,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0 &&
-                    jm_function_has_formal_arguments_binding(fn)) {
+                    strcmp(e->name, "_js_arguments") == 0) {
+                    // Annex B FDI appends the implicit arguments object name to
+                    // parameterNames. A sloppy block function named `arguments`
+                    // still gets its block lexical binding, but must not create
+                    // the var-scope hoist that would replace the arguments object.
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -2736,6 +2749,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
+                if (fc && fc->uses_arguments && strcmp(lce->name, "_js_arguments") == 0) {
+                    // Block functions named `arguments` get initialized when
+                    // entering their block. Initializing that name in the
+                    // function body scope would shadow the implicit arguments
+                    // object before the block is reached.
+                    continue;
+                }
                 JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
