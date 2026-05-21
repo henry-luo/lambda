@@ -3876,8 +3876,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->in_line) {
                 span->in_line = alloc_inline_prop(lycon);
             }
-            span->in_line->svg_fill_color = resolve_color_value(lycon, value);
             span->in_line->has_svg_fill = true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->in_line->svg_fill_none = true;
+            } else {
+                span->in_line->svg_fill_color = resolve_color_value(lycon, value);
+                span->in_line->svg_fill_none = false;
+            }
             break;
         }
 
@@ -4343,6 +4348,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     str_ieq(family, flen, "ui-sans-serif", 13) ||
                     str_ieq(family, flen, "ui-monospace", 12) ||
                     str_ieq(family, flen, "ui-rounded", 10) ||
+                    str_ieq(family, flen, "-apple-system", 13) ||
                     str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
                     return true;
                 }
