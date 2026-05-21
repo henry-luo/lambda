@@ -2816,6 +2816,12 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
 
 static void jm_module_var_reload_vars(JsMirTranspiler* mt) {
     if (!mt || !mt->module_consts) return;
+    if (mt->suppress_module_var_writeback) {
+        // This reload is paired with runtime calls that may mutate global vars.
+        // Deferred loop lowering deliberately leaves the module table stale, so
+        // reloading here would overwrite live native counters with boxed values.
+        return;
+    }
     for (int sd = 0; sd <= mt->scope_depth; sd++) {
         if (!mt->var_scopes[sd]) continue;
         size_t iter = 0; void* entry_ptr;
@@ -2826,6 +2832,12 @@ static void jm_module_var_reload_vars(JsMirTranspiler* mt) {
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             if (!mc || mc->const_type != MCONST_MODVAR) continue;
+            if (mt->current_func_index >= 0 && !e->var.module_var_backed &&
+                !(mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body)) {
+                // Iterator-step reloads use module names as a cheap filter. Do
+                // not let that refresh clobber a same-named function-local var.
+                continue;
+            }
             if (!mc->is_iife_var &&
                 ((!mt->in_main && sd > 0) || (mt->in_main && sd > 1))) {
                 continue;
@@ -3338,7 +3350,11 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", deferred_update_vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-        if (mc && mc->const_type == MCONST_MODVAR) {
+        if (mc && mc->const_type == MCONST_MODVAR &&
+            !mt->suppress_module_var_writeback) {
+            // module `var` updates normally write through immediately, but an
+            // outer loop body may suppress that path while batching writes. In
+            // that nested case, keep the deferred sync for this loop's exit.
             defer_update_writeback = false;
         }
     }
@@ -7282,7 +7298,13 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             if (may_update_outer_binding) {
                 jm_scope_env_reload_vars(mt);
-                jm_module_var_reload_vars(mt);
+                if (!mt->suppress_module_var_writeback) {
+                    // When a loop body defers module-var writeback, the module
+                    // table is intentionally stale until loop exit. Reloading it
+                    // after an expression statement would corrupt native counters
+                    // that still hold newer in-loop values.
+                    jm_module_var_reload_vars(mt);
+                }
             }
             // Eval completion value: update the completion register so that
             // expression statements inside control flow (for/while/if/switch)

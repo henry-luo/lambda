@@ -135,6 +135,7 @@ struct JsMirVarEntry {
     bool from_env;           // true if loaded from closure env
     int env_slot;            // slot index in env array
     MIR_reg_t env_reg;       // register holding env pointer (for write-back)
+    bool module_var_backed;  // true when this env slot mirrors a top-level module var
     bool from_shared_env;    // true if captured from a shared scope_env (reload after calls)
     bool in_scope_env;       // true if this var is in parent func's scope env (write-back on assign)
     int scope_env_slot;      // slot in scope env
@@ -185,7 +186,8 @@ struct JsCaptureEntry {
     bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
     bool is_const;       // true if captured variable is const (assignment throws)
     bool is_nfe_binding; // named function expression self-binding
-    bool force_env_capture; // true when a lexical loop head shadows a module var
+    bool force_env_capture; // true when a module-var-named binding must stay env-backed
+    bool module_var_backed; // true when this capture is the module binding, not a local shadow
 };
 
 // Function entry for pre-pass collection

@@ -3432,6 +3432,23 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     }
                                     if (shadowed_by_ancestor) break;
                                 }
+                                bool capture_assigned_in_child = child->captures[ci].force_env_capture;
+                                if (!capture_assigned_in_child && child->node && child->node->body) {
+                                    struct hashmap* assigned_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                                        jm_name_hash, jm_name_cmp, NULL, NULL);
+                                    jm_collect_func_assignments(child->node->body, assigned_names);
+                                    capture_assigned_in_child = jm_name_set_has(assigned_names, cap_name);
+                                    hashmap_free(assigned_names);
+                                }
+                                if (!shadowed_by_ancestor && capture_assigned_in_child) {
+                                    // assigned module vars must remain real captures so
+                                    // runtime-invoked closures (for example custom
+                                    // RegExp.exec callbacks) get an env slot tagged with
+                                    // its module-var index and can publish writes on exit.
+                                    child->captures[ci].force_env_capture = true;
+                                    child->captures[ci].module_var_backed = true;
+                                    shadowed_by_ancestor = true;
+                                }
                                 if (!shadowed_by_ancestor) {
                                     // No ancestor shadows this module_const — safe to remove
                                     // the capture. The identifier will be resolved at the use
@@ -3444,6 +3461,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     child->capture_count--;
                                     ci--;
                                     continue;
+                                }
+                                if (shadowed_by_ancestor) {
+                                    // A same-named ancestor binding outranks the module
+                                    // table. Preserve the capture, but keep its env slot
+                                    // local so assignments do not publish globally.
+                                    child->captures[ci].module_var_backed = false;
                                 }
                                 // Shadowed — keep the capture and propagate to parent
                             }
@@ -3458,6 +3481,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
                         parent->captures[parent->capture_count].is_nfe_binding = child->captures[ci].is_nfe_binding;
                         parent->captures[parent->capture_count].force_env_capture = child->captures[ci].force_env_capture;
+                        parent->captures[parent->capture_count].module_var_backed = child->captures[ci].module_var_backed;
                         parent->capture_count++;
                         changed = true;
                         log_debug("js-mir: propagated capture '%s' from '%s' to parent '%s'",
@@ -4584,6 +4608,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (mt->module_consts) {
                         for (int ci = 0; ci < fc->capture_count; ci++) {
                             if (!fc->captures[ci].force_env_capture) continue;
+                            if (!fc->captures[ci].module_var_backed) continue;
                             JsModuleConstEntry mclookup;
                             snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
                             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);

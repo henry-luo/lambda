@@ -1707,15 +1707,27 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             }
         }
         bool force_env_capture = false;
+        bool module_var_backed = ref_is_module_modvar && !ancestor_has_local_name;
+        if (module_consts) {
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR && !ancestor_has_local_name) {
+                // A same-named function-local binding shadows the module var.
+                // Capture metadata feeds the callee prologue, so it must carry
+                // the shadow decision before closure creation gets a chance to
+                // inspect the nearest live var entry.
+                module_var_backed = true;
+            }
+        }
         if (module_consts && jm_name_set_has(assigned_names, ref->name)) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc && mc->const_type == MCONST_MODVAR) {
+            if (mc && mc->const_type == MCONST_MODVAR && !ancestor_has_local_name) {
                 force_env_capture = true;
             }
         }
-
         // This is a capture
         {
             jm_ensure_captures_capacity(fc);
@@ -1726,9 +1738,11 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             fc->captures[fc->capture_count].is_const = false;
             fc->captures[fc->capture_count].is_nfe_binding = false;
             fc->captures[fc->capture_count].force_env_capture = force_env_capture;
+            fc->captures[fc->capture_count].module_var_backed = module_var_backed;
             if (ref_is_lexical_for_head) {
                 fc->captures[fc->capture_count].is_let_const = true;
                 fc->captures[fc->capture_count].force_env_capture = true;
+                fc->captures[fc->capture_count].module_var_backed = false;
             }
             fc->capture_count++;
             log_debug("js-mir: capture '%s' in function '%s'", ref->name, fc->name);
@@ -1757,6 +1771,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].is_const = false;
         fc->captures[fc->capture_count].is_nfe_binding = is_func_expr;
         fc->captures[fc->capture_count].force_env_capture = false;
+        fc->captures[fc->capture_count].module_var_backed = false;
         fc->capture_count++;
         log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
     }
@@ -1770,6 +1785,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].is_nfe_binding = false;
         fc->captures[fc->capture_count].force_env_capture = false;
+        fc->captures[fc->capture_count].module_var_backed = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
@@ -1783,6 +1799,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].is_const = false;
         fc->captures[fc->capture_count].is_nfe_binding = false;
         fc->captures[fc->capture_count].force_env_capture = false;
+        fc->captures[fc->capture_count].module_var_backed = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
     }
@@ -1796,6 +1813,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].is_const = false;
         fc->captures[fc->capture_count].is_nfe_binding = false;
         fc->captures[fc->capture_count].force_env_capture = false;
+        fc->captures[fc->capture_count].module_var_backed = false;
         fc->capture_count++;
         log_debug("js-mir: arrow capture '_js_new.target' in function '%s'", fc->name);
     }

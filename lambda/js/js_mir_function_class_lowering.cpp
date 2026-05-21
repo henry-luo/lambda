@@ -988,6 +988,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
             entry.var.reg = cap_reg;
             entry.var.from_env = true;
+            entry.var.module_var_backed = fc->captures[ci].module_var_backed;
             entry.var.from_shared_env = has_scope_slot;
             entry.var.env_slot = cap_env_slot;
             entry.var.env_reg = cap_env_reg;
@@ -1443,6 +1444,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
+                entry.var.module_var_backed = fc->captures[ci].module_var_backed;
                 entry.var.env_slot = cap_offset + ci;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
@@ -1759,6 +1761,15 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int saved_func_index = mt->current_func_index;
     MIR_reg_t saved_eval_completion_reg = mt->eval_completion_reg;
     MIR_reg_t saved_eval_local_frame_reg = mt->eval_local_frame_reg;
+    MIR_reg_t saved_last_closure_env_reg = mt->last_closure_env_reg;
+    int saved_last_closure_capture_count = mt->last_closure_capture_count;
+    int saved_last_closure_capture_slots[512];
+    char saved_last_closure_capture_names[512][128];
+    bool saved_last_closure_has_env = mt->last_closure_has_env;
+    memcpy(saved_last_closure_capture_slots, mt->last_closure_capture_slots,
+        sizeof(saved_last_closure_capture_slots));
+    memcpy(saved_last_closure_capture_names, mt->last_closure_capture_names,
+        sizeof(saved_last_closure_capture_names));
 
     // Set current function index for scope env lookups
     mt->current_func_index = (int)(fc - mt->func_entries);
@@ -1766,7 +1777,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->scope_env_slot_count = 0;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
     mt->eval_local_frame_reg = 0;
-    mt->last_closure_has_env = false;  // clear stale closure env from previous function
+    // function bodies maintain their own synchronous callback readback state.
+    // Leaving a nested function's last closure env in the parent codegen can
+    // make same-named outer bindings read back from the wrong closure env.
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
 
     // Determine if this function is a class method and set current_class
     mt->current_class = NULL;
@@ -1948,6 +1964,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
+                entry.var.module_var_backed = fc->captures[ci].module_var_backed;
                 entry.var.from_shared_env = has_scope_slot;
                 entry.var.env_slot = slot;
                 entry.var.env_reg = wrapper_env;
@@ -2384,6 +2401,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[i].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
+                entry.var.module_var_backed = fc->captures[i].module_var_backed;
                 entry.var.from_shared_env = (has_scope_slot && gp_slot < 0);
                 // v29: For grandparent reads, store the grandparent env info
                 // so scope_env_reload_vars and write-back use the correct env
@@ -3186,6 +3204,13 @@ finish_boxed:
     mt->current_func_index = saved_func_index;
     mt->eval_completion_reg = saved_eval_completion_reg;
     mt->eval_local_frame_reg = saved_eval_local_frame_reg;
+    mt->last_closure_env_reg = saved_last_closure_env_reg;
+    mt->last_closure_capture_count = saved_last_closure_capture_count;
+    mt->last_closure_has_env = saved_last_closure_has_env;
+    memcpy(mt->last_closure_capture_slots, saved_last_closure_capture_slots,
+        sizeof(saved_last_closure_capture_slots));
+    memcpy(mt->last_closure_capture_names, saved_last_closure_capture_names,
+        sizeof(saved_last_closure_capture_names));
 }
 
 // ============================================================================

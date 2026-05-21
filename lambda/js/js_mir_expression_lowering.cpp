@@ -6,7 +6,12 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
 
 static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
     jm_scope_env_reload_vars(mt);
-    jm_reload_module_var_locals_after_eval(mt, true);
+    if (!mt->suppress_module_var_writeback) {
+        // Deferred loop bodies intentionally keep module-var slots stale until
+        // the loop exit sync. Reloading from the module table during that window
+        // can copy boxed stale values into native loop counters.
+        jm_reload_module_var_locals_after_eval(mt, true);
+    }
     jm_env_reload_shared_captures(mt);
     jm_readback_closure_env(mt);
 }
@@ -1990,6 +1995,73 @@ static bool jm_function_refs_module_modvar(JsMirTranspiler* mt, JsFuncCollected*
     return found;
 }
 
+static bool jm_node_contains_nested_function_value(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        return true;
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+        return false;
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* s = blk->statements; s; s = s->next) {
+            if (jm_node_contains_nested_function_value(s)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT:
+        return jm_node_contains_nested_function_value(((JsExpressionStatementNode*)node)->expression);
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        return jm_node_contains_nested_function_value(asgn->left) ||
+               jm_node_contains_nested_function_value(asgn->right);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = vd->declarations; d; d = d->next) {
+            if (jm_node_contains_nested_function_value(d)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
+        return jm_node_contains_nested_function_value(decl->init);
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (jm_node_contains_nested_function_value(call->callee)) return true;
+        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
+            if (jm_node_contains_nested_function_value(arg)) return true;
+        }
+        return false;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        return jm_node_contains_nested_function_value(mem->object) ||
+               (mem->computed && jm_node_contains_nested_function_value(mem->property));
+    }
+    case JS_AST_NODE_RETURN_STATEMENT:
+        return jm_node_contains_nested_function_value(((JsReturnNode*)node)->argument);
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_node_contains_nested_function_value(ifn->test) ||
+               jm_node_contains_nested_function_value(ifn->consequent) ||
+               jm_node_contains_nested_function_value(ifn->alternate);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION:
+        return jm_node_contains_nested_function_value(((JsUnaryNode*)node)->operand);
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_node_contains_nested_function_value(bin->left) ||
+               jm_node_contains_nested_function_value(bin->right);
+    }
+    default:
+        return false;
+    }
+}
+
 // Binary expression: native arithmetic fast path + boxed fallback
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (bin->op == JS_OP_ADD) {
@@ -2932,20 +3004,29 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, result)));
-                    jm_emit_captured_module_var_writeback(mt, vname, result);
+                    if (var->module_var_backed) {
+                        // Local-shadow captures may share the module var name;
+                        // only module-backed env slots write through globally.
+                        jm_emit_captured_module_var_writeback(mt, vname, result);
+                    }
                 }
                 if (var->from_shared_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, result)));
-                    jm_emit_captured_module_var_writeback(mt, vname, result);
+                    if (var->module_var_backed) {
+                        // Shared env captures follow the same shadowing rule as
+                        // per-closure captures.
+                        jm_emit_captured_module_var_writeback(mt, vname, result);
+                    }
                 }
                 if (var->in_scope_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, result)));
                 }
-                if (mt->module_consts && !mt->suppress_module_var_writeback) {
+                if (mt->module_consts && !mt->suppress_module_var_writeback &&
+                    (!var->from_env || var->module_var_backed)) {
                     jm_emit_captured_module_var_writeback(mt, vname, result);
                 }
             } else if (mt->module_consts) {
@@ -3213,14 +3294,19 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, result)));
-                    jm_emit_captured_module_var_writeback(mt, vname, result);
+                    if (var->module_var_backed) {
+                        // A captured function-local shadow must not write the
+                        // same-named module var during decrement.
+                        jm_emit_captured_module_var_writeback(mt, vname, result);
+                    }
                 }
                 if (var->in_scope_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                         MIR_new_reg_op(mt->ctx, result)));
                 }
-                if (mt->module_consts && !mt->suppress_module_var_writeback) {
+                if (mt->module_consts && !mt->suppress_module_var_writeback &&
+                    (!var->from_env || var->module_var_backed)) {
                     jm_emit_captured_module_var_writeback(mt, vname, result);
                 }
             } else if (mt->module_consts) {
@@ -3678,7 +3764,10 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->module_consts) {
+            if (mt->module_consts && var->module_var_backed) {
+                // A from-env capture can be either the actual module binding or
+                // a function-local `var` that shadows a module name. Only the
+                // former may write through to the module/global slot.
                 JsModuleConstEntry lookup;
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -3709,7 +3798,10 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
     }
-    if (var && var->from_env && mt->current_func_index >= 0 && mt->module_consts) {
+    if (var && var->from_env && var->module_var_backed &&
+        mt->current_func_index >= 0 && mt->module_consts) {
+        // Env captures of local shadows share the same name as a module var,
+        // but they must not clobber the module binding on assignment.
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -5025,7 +5117,12 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
                 if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == JS_VAR_VAR &&
-                    rhs_type == LMD_TYPE_INT) {
+                    rhs_type == LMD_TYPE_INT && var->type_id == LMD_TYPE_INT &&
+                    var->mir_type == MIR_T_I64) {
+                    // this path mutates the cached var shape to native int. It is
+                    // only valid when the binding is already native; otherwise a
+                    // skipped branch like `var x; if (false) x = 1` would leave
+                    // the old undefined Item bits read back as an integer.
                     MIR_reg_t native_rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
                     MIR_reg_t boxed_rhs = jm_box_native(mt, native_rhs, LMD_TYPE_INT);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5087,7 +5184,11 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
                 }
                 if (mt->module_consts && !mt->suppress_module_var_writeback) {
-                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                    if (!var->from_env || var->module_var_backed) {
+                        // A local captured through env can shadow a module var
+                        // with the same name; only module-backed captures sync.
+                        jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                    }
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, local_result),
@@ -5143,13 +5244,19 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, rhs)));
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                if (var->module_var_backed) {
+                    // Assignment to a captured local shadow must stay local.
+                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                }
             }
             if (var->from_shared_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, rhs)));
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                if (var->module_var_backed) {
+                    // Shared-env captures follow the same module-shadow boundary.
+                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                }
             }
             if (var->in_scope_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5160,7 +5267,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 int api = jm_arguments_param_index(mt, vname);
                 if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
             }
-            if (mt->module_consts && !mt->suppress_module_var_writeback) {
+            if (mt->module_consts && !mt->suppress_module_var_writeback &&
+                (!var->from_env || var->module_var_backed)) {
                 jm_emit_captured_module_var_writeback(mt, vname, rhs);
                 JsModuleConstEntry wb_lookup;
                 snprintf(wb_lookup.name, sizeof(wb_lookup.name), "%s", vname);
@@ -5238,13 +5346,19 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, rhs)));
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                if (var->module_var_backed) {
+                    // With-fallback local writes must not escape through a
+                    // same-named module var unless this capture is module-backed.
+                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                }
             }
             if (var->from_shared_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, rhs)));
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                if (var->module_var_backed) {
+                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                }
             }
             if (var->in_scope_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5255,7 +5369,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 int api = jm_arguments_param_index(mt, vname);
                 if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
             }
-            if (mt->module_consts && !mt->suppress_module_var_writeback) {
+            if (mt->module_consts && !mt->suppress_module_var_writeback &&
+                (!var->from_env || var->module_var_backed)) {
                 jm_emit_captured_module_var_writeback(mt, vname, rhs);
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -5274,13 +5389,19 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, var->reg)));
-            jm_emit_captured_module_var_writeback(mt, vname, var->reg);
+            if (var->module_var_backed) {
+                // The captured binding may be a function-local shadow. Avoid
+                // writing it through to the global/module var by name alone.
+                jm_emit_captured_module_var_writeback(mt, vname, var->reg);
+            }
         }
         if (var->from_shared_env) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, var->reg)));
-            jm_emit_captured_module_var_writeback(mt, vname, var->reg);
+            if (var->module_var_backed) {
+                jm_emit_captured_module_var_writeback(mt, vname, var->reg);
+            }
         }
         // Write-back to scope env if this is a parent-scope variable captured by children
         if (var->in_scope_env) {
@@ -5293,7 +5414,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             int api = jm_arguments_param_index(mt, vname);
             if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
         }
-        if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
+        if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
+            (!var->from_env || var->module_var_backed)) {
             jm_emit_captured_module_var_writeback(mt, vname, var->reg);
         }
         return var->reg;
@@ -6626,12 +6748,30 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
+        MIR_reg_t source_boxed = 0;
+        if (mt->module_consts && var->module_var_backed) {
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", mt->last_closure_capture_names[i]);
+            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mc && mc->const_type == MCONST_MODVAR) {
+                // Runtime callback entry/exit sync makes the module var table the
+                // canonical value for module-backed captures. Reading an older
+                // closure env slot here can overwrite that fresh value in callers.
+                // For local shadows, the env slot is the authority and the module
+                // table merely has a same-named top-level binding.
+                source_boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+            }
+        }
         if (jm_is_native_type(var->type_id)) {
             // Read boxed value from env slot, unbox to native type
-            MIR_reg_t boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, boxed),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+            MIR_reg_t boxed = source_boxed;
+            if (!boxed) {
+                boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, boxed),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+            }
             if (var->type_id == LMD_TYPE_FLOAT) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -6642,10 +6782,33 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
                     MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, unboxed)));
             }
         } else {
-            // Boxed variable — direct read from env
+            if (source_boxed) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, source_boxed)));
+            } else {
+                // Boxed variable — direct read from env
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+            }
+        }
+        if (source_boxed && (var->from_env || var->from_shared_env) &&
+            var->env_reg != 0 && var->env_slot >= 0) {
+            // Keep the current function's env mirror aligned with the module
+            // value so a later closure sync cannot reintroduce the old slot.
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, source_boxed)));
+        }
+        if (source_boxed && var->in_scope_env && var->scope_env_reg != 0 &&
+            var->scope_env_slot >= 0) {
+            // Shared scope envs are another mutable mirror of the same binding.
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, source_boxed)));
         }
     }
     mt->last_closure_has_env = false;
@@ -6890,6 +7053,13 @@ static void jm_eval_env_writeback_bindings(JsMirTranspiler* mt, struct hashmap* 
 
 void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings) {
     if (!mt || !mt->module_consts) return;
+    if (mt->suppress_module_var_writeback) {
+        // Loop lowering can batch module-var writeback while the native loop
+        // counters hold the current values. During that window the module table
+        // is intentionally stale, so any reload would copy boxed old values back
+        // into native locals.
+        return;
+    }
     if (sync_eval_bindings && mt->eval_local_frame_reg != 0 && !mt->is_module) {
         size_t miter = 0; void* mitem;
         while (hashmap_iter(mt->module_consts, &miter, &mitem)) {
@@ -6954,6 +7124,13 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
             snprintf(lookup.name, sizeof(lookup.name), "%s", entry->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
             if (!mc || mc->const_type != MCONST_MODVAR) continue;
+            if (mt->current_func_index >= 0 && !entry->var.module_var_backed &&
+                !(mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body)) {
+                // Runtime-callback reloads are keyed by module var name, but a
+                // function-local shadow can share that name. Only true
+                // module-backed captures should be refreshed from the module table.
+                continue;
+            }
             if (!mc->is_iife_var &&
                 ((!mt->in_main && depth > 0) || (mt->in_main && depth > 1))) {
                 continue;
@@ -6969,6 +7146,27 @@ void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            }
+            if ((entry->var.from_env || entry->var.from_shared_env) &&
+                entry->var.env_reg != 0 && entry->var.env_slot >= 0) {
+                // Runtime callbacks can update a captured top-level `var`
+                // through a nested closure. Refresh the current closure env too,
+                // otherwise js_call_function's exit sync can write the stale
+                // outer env value back over the callback's module-var update.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        entry->var.env_slot * (int)sizeof(uint64_t), entry->var.env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, boxed)));
+            }
+            if (entry->var.in_scope_env && entry->var.scope_env_reg != 0 &&
+                entry->var.scope_env_slot >= 0) {
+                // Shared scope env captures need the same refresh so child
+                // closures created after the callback inherit the updated value.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        entry->var.scope_env_slot * (int)sizeof(uint64_t),
+                        entry->var.scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, boxed)));
             }
             if (sync_eval_bindings && boxed &&
                 (entry->var.type_id == LMD_TYPE_INT || entry->var.mir_type == MIR_T_D)) {
@@ -9059,7 +9257,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
-                jm_readback_closure_env(mt);
+                // Method dispatch can run user callbacks in the runtime (for
+                // example RegExp string iterators calling a custom exec). Bring
+                // module mirrors and env-backed captures back into the caller.
+                jm_reload_after_possible_runtime_callback(mt);
                 return r;
             }
 
@@ -9266,7 +9467,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_exc_propagate_check(mt);
-                jm_readback_closure_env(mt);
+                // Map-backed builtins include iterator methods that can call
+                // user code from C++ (RegExpStringIterator.next -> custom exec).
+                // Refresh module mirrors and env-backed captures before returning.
+                jm_reload_after_possible_runtime_callback(mt);
                 return r;
             }
 
@@ -9422,8 +9626,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
             }
             jm_emit_label(mt, l_end);
-            // Read back mutable captures from closure env after any callback-invoking method
-            jm_readback_closure_env(mt);
+            // Method dispatch can run user callbacks in the runtime (for
+            // example RegExp string iterators calling a custom exec). Bring
+            // module mirrors and env-backed captures back into the caller.
+            jm_reload_after_possible_runtime_callback(mt);
             return result;
         }
     }
@@ -9976,6 +10182,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (fc && fc->node && fc->node->is_generator && jm_count_params(fc->node) == 0) fc = NULL;
             if (fc && jm_call_args_have_local_module_shadow(mt, call->arguments)) fc = NULL;
             if (fc && jm_function_refs_module_modvar(mt, fc)) fc = NULL;
+            if (fc && fc->node && jm_node_contains_nested_function_value(fc->node->body)) {
+                // A direct MIR call has no JsFunction wrapper around it, so nested
+                // callback closures can update module vars without the runtime
+                // closure/module synchronization that js_call_function provides.
+                fc = NULL;
+            }
             if (fc && (mt->with_depth > 0 ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)resolved_fn) ||
@@ -10217,6 +10429,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_set_direct_new_target",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_nt_dc));
 
+                // Direct MIR calls bypass js_call_function, but the callee can
+                // still run runtime callbacks (for example RegExp matchAll
+                // invoking a custom exec). Refresh module mirrors before the
+                // caller observes top-level vars again.
+                jm_reload_after_possible_runtime_callback(mt);
                 return result;
                 } // end if (fc->func_item)
             }
@@ -12152,26 +12369,44 @@ static int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, b
 static void jm_mark_closure_env_module_var_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
                                                      MIR_reg_t fn_reg, bool has_remapped) {
     if (!mt || !fc || !fn_reg || !mt->module_consts) return;
+    struct hashmap* assigned_names = NULL;
     for (int ci = 0; ci < fc->capture_count; ci++) {
-        if (!fc->captures[ci].force_env_capture) continue;
+        bool assigned_module_capture = fc->captures[ci].force_env_capture;
+        if (!assigned_module_capture && fc->node && fc->node->body) {
+            if (!assigned_names) {
+                assigned_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                jm_collect_func_assignments(fc->node->body, assigned_names);
+            }
+            assigned_module_capture = jm_name_set_has(assigned_names, fc->captures[ci].name);
+        }
+        if (!assigned_module_capture) continue;
         int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
         if (slot < 0) continue;
         JsMirVarEntry* local_var = jm_find_var(mt, fc->captures[ci].name);
-        // a local let/const shadow is captured from the local env, not from the
-        // module var table, so do not tag the closure slot as module-backed.
-        if (local_var && local_var->is_let_const && !local_var->from_env &&
-            !local_var->from_shared_env) {
+        // A function-local shadow is captured from the local env, not from the
+        // module var table. This includes `var`, not just lexical bindings:
+        // otherwise an inner IIFE assignment to a shadowed name can clobber the
+        // top-level module var with the same identifier.
+        if (local_var && !local_var->module_var_backed) {
             continue;
         }
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
         if (!mc || mc->const_type != MCONST_MODVAR) continue;
+        // Some module-var captures are introduced late during batch propagation.
+        // Rechecking the module table here keeps runtime-called closures from
+        // trapping writes in their private env when the capture metadata was
+        // originally pruned as a read-only module lookup.
+        fc->captures[ci].module_var_backed = true;
+        fc->captures[ci].force_env_capture = true;
         jm_call_void_3(mt, "js_set_closure_env_module_var",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
     }
+    if (assigned_names) hashmap_free(assigned_names);
 }
 
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
@@ -12186,6 +12421,17 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
+            }
+            if (cv && !cv->module_var_backed) {
+                // The nearest binding wins even when it is stored in scope_env:
+                // a function-local `var` can shadow a top-level var with the
+                // same name and nested closures must update that local cell.
+                fc->captures[ci].module_var_backed = false;
+            } else if (cv && cv->module_var_backed &&
+                (cv->from_env || cv->from_shared_env || cv->in_scope_env)) {
+                // When a child captures through a parent env, inherit whether
+                // that parent slot is truly module-backed.
+                fc->captures[ci].module_var_backed = cv->module_var_backed;
             }
             if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
                 cv->scope_env_slot >= 0) {
@@ -12377,6 +12623,11 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     if (fc->capture_count > 0) {
         for (int ci = 0; ci < fc->capture_count; ci++) {
             JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+            if (cv && !cv->module_var_backed) {
+                // Function expressions follow function declarations: the nearest
+                // local/env binding shadows a top-level homonym for capture sync.
+                fc->captures[ci].module_var_backed = false;
+            }
             if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
                 cv->scope_env_slot >= 0) {
                 fc->captures[ci].scope_env_slot = cv->scope_env_slot;

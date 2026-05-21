@@ -11031,7 +11031,11 @@ static void js_sync_closure_env_module_vars(JsFunction* fn) {
     for (int i = 0; i < fn->env_size; i++) {
         int module_index = fn->env_module_var_indices[i];
         if (module_index < 0 || module_index >= JS_MAX_MODULE_VARS) continue;
-        fn->module_vars[module_index] = fn->env[i];
+        // Module-var-backed env slots are mirrors, not authorities. MIR writes
+        // to these captures already publish through js_set_module_var at the
+        // mutation site; copying env -> module here lets an outer stale closure
+        // overwrite a nested callback's fresher write on function exit.
+        fn->env[i] = fn->module_vars[module_index];
     }
 }
 
