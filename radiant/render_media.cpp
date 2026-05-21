@@ -2,6 +2,7 @@
 
 #include "display_list.h"
 #include "render.hpp"
+#include "render_geometry.hpp"
 #include "render_raster.hpp"
 #include "render_selection.hpp"
 #include "render_state.hpp"
@@ -70,6 +71,49 @@ static float render_media_object_position_offset(float box_size, float rendered_
     return position * scale;
 }
 
+static bool render_media_rasterize_svg_image(ImageSurface* surface, int target_width,
+                                             int target_height) {
+    if (!surface || !surface->pic || target_width <= 0 || target_height <= 0) {
+        return false;
+    }
+    if (surface->pixels &&
+        surface->decoded_width == target_width &&
+        surface->decoded_height == target_height) {
+        return true;
+    }
+
+    uint32_t* pixels = (uint32_t*)mem_alloc(
+        (size_t)target_width * (size_t)target_height * sizeof(uint32_t),
+        MEM_CAT_RENDER);
+    if (!pixels) return false;
+    memset(pixels, 0, (size_t)target_width * (size_t)target_height * sizeof(uint32_t));
+
+    RdtVector tmp_vec = {};
+    rdt_vector_init(&tmp_vec, pixels, (uint32_t)target_width, (uint32_t)target_height,
+                    (uint32_t)target_width); // INT_CAST_OK: target dimensions are validated positive raster pixels.
+    int saved_clip_depth = rdt_clip_save_depth();
+
+    RdtPicture* pic = rdt_picture_dup(surface->pic);
+    if (pic) {
+        rdt_picture_set_size(pic, (float)target_width, (float)target_height);
+        rdt_picture_draw(&tmp_vec, pic, 255, nullptr);
+        rdt_picture_free(pic);
+    }
+
+    rdt_clip_restore_depth(saved_clip_depth);
+    rdt_vector_destroy(&tmp_vec);
+
+    if (surface->pixels) {
+        mem_free(surface->pixels);
+    }
+    surface->pixels = pixels;
+    surface->decoded_width = target_width;
+    surface->decoded_height = target_height;
+    surface->pitch = target_width * 4;
+    image_surface_bump_generation(surface);
+    return true;
+}
+
 void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
         log_debug("no picture to render");  return;
@@ -123,11 +167,10 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->img) return;
 
     log_debug("render image content");
-    float s = rdcon->scale;
     ImageSurface* img = view->embed->img;
-    Rect rect;
-    rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
-    rect.width = view->width * s;  rect.height = view->height * s;
+    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->scale);
+    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->scale);
+    float s = rdcon->scale;
 
     // Apply object-fit: compute actual image render rect
     CssEnum object_fit = view->embed->object_fit;
@@ -190,8 +233,21 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         : render_media_intersect_clip_rect(&rdcon->block.clip, &rect);
     bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
-        log_debug("render svg image vector-first at x:%f, y:%f, wd:%f, hg:%f", img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-        if (img->pic) {
+        int svg_target_w = (int)ceilf(img_rect.width); // INT_CAST_OK: rasterized SVG image target width in pixels.
+        int svg_target_h = (int)ceilf(img_rect.height); // INT_CAST_OK: rasterized SVG image target height in pixels.
+        if (svg_target_w < 1) svg_target_w = 1;
+        if (svg_target_h < 1) svg_target_h = 1;
+        bool rasterized = render_media_rasterize_svg_image(img, svg_target_w, svg_target_h);
+        if (rasterized && img->pixels) {
+            log_debug("render svg image as local raster at x:%f, y:%f, wd:%f, hg:%f, src=%dx%d",
+                      img_rect.x, img_rect.y, img_rect.width, img_rect.height,
+                      svg_target_w, svg_target_h);
+            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, svg_target_w, svg_target_h,
+                                            svg_target_w, &img_rect, &image_clip,
+                                            content_opacity, img);
+        } else if (img->pic) {
+            log_debug("render svg image vector fallback at x:%f, y:%f, wd:%f, hg:%f",
+                      img_rect.x, img_rect.y, img_rect.width, img_rect.height);
             RdtPicture* pic = rdt_picture_dup(img->pic);
             if (pic) {
                 render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
@@ -200,10 +256,6 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
                     rdt_picture_free(pic);
                 }
             }
-        } else if (img->pixels) {
-            render_painter_draw_pixels_rect(rdcon, (uint32_t*)img->pixels, img->width, img->height,
-                                            img->width, &img_rect, &image_clip,
-                                            content_opacity, img);
         } else {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
@@ -232,9 +284,9 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (render_selection_contains_view(state, static_cast<View*>(view))) {
         // Semi-transparent blue overlay (same color as text selection)
         uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &border_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
         log_debug("[IMAGE SELECTION] Rendered blue overlay on image at (%.0f,%.0f) size %.0fx%.0f",
-                  rect.x, rect.y, rect.width, rect.height);
+                  border_rect.x, border_rect.y, border_rect.width, border_rect.height);
     }
 }
 

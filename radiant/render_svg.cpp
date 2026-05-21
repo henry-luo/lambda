@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "render_backend.h"
 #include "render_export_support.hpp"
+#include "render_geometry.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "state_store.hpp"
@@ -1356,13 +1357,17 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     if (!block->embed || !block->embed->img) return;
     ImageSurface* img = block->embed->img;
 
-    float img_width = block->width;
-    float img_height = block->height;
+    BlockBlot image_block = {};
+    image_block.x = abs_x - block->x;
+    image_block.y = abs_y - block->y;
+    Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
+    float img_width = content_rect.width;
+    float img_height = content_rect.height;
 
     log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
               img->url && img->url->href ? img->url->href->chars : "unknown",
               img->format, img->width, img->height,
-              img_width, img_height, abs_x, abs_y);
+              img_width, img_height, content_rect.x, content_rect.y);
 
     if (img->url && img->url->href) {
         const char* href = img->url->href->chars;
@@ -1370,7 +1375,7 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
         strbuf_append_format(ctx->svg_content,
             "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
             "preserveAspectRatio=\"none\" />\n",
-            abs_x, abs_y, img_width, img_height, href);
+            content_rect.x, content_rect.y, img_width, img_height, href);
     }
 }
 

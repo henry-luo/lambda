@@ -44,6 +44,42 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+static void reset_non_inherited_style_cache(ViewSpan* view) {
+    if (!view || !view->bound) return;
+
+    if (view->bound->outline) {
+        // clear stale outline data from previous pseudo-class matches before
+        // replaying the current cascaded declarations
+        view->bound->outline->width = 0.0f;
+        view->bound->outline->offset = 0.0f;
+        view->bound->outline->style = CSS_VALUE_NONE;
+        view->bound->outline->color.r = 0;
+        view->bound->outline->color.g = 0;
+        view->bound->outline->color.b = 0;
+        view->bound->outline->color.a = 0;
+    }
+
+    if (view->bound->background) {
+        // background is not inherited; reset before applying HTML presentational
+        // hints and CSS so stale pseudo-class fills are cleared without wiping
+        // attributes such as table/td bgcolor.
+        BackgroundProp* bg = view->bound->background;
+        bg->color.r = 0;
+        bg->color.g = 0;
+        bg->color.b = 0;
+        bg->color.a = 0;
+        radiant_clear_background_image(bg);
+        bg->gradient_type = GRADIENT_NONE;
+        bg->linear_gradient = NULL;
+        bg->radial_gradient = NULL;
+        bg->conic_gradient = NULL;
+        bg->linear_layers = NULL;
+        bg->linear_layer_count = 0;
+        bg->radial_layers = NULL;
+        bg->radial_layer_count = 0;
+    }
+}
+
 // ============================================================================
 // Layout cache statistics (Taffy-inspired)
 // ============================================================================
@@ -600,6 +636,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Apply element default styles ONLY if not already resolved
             // This must happen BEFORE CSS resolution so CSS can override defaults
             // (e.g., anchor default blue color overridden by .btn-primary { color: white })
+            reset_non_inherited_style_cache(lam::view_require_element(lycon->view));
             apply_element_default_style(lycon, dom_elem);
 
             // Track measurement vs full resolution
