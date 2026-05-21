@@ -11,6 +11,7 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_dom_events.h"
+#include "js_dom_selection.h"  // CE-7: js_ctor_static_range_fn
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_class.h"
@@ -14180,6 +14181,7 @@ extern "C" Item js_get_global_this() {
             {"UIEvent", 7}, {"FocusEvent", 10}, {"MouseEvent", 10},
             {"WheelEvent", 10}, {"KeyboardEvent", 13},
             {"CompositionEvent", 16}, {"InputEvent", 10}, {"PointerEvent", 12},
+            {"StaticRange", 11},  // CE-7 (Radiant_Design_Content_Editable.md §10)
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -15481,6 +15483,7 @@ enum JsConstructorId {
     JS_CTOR_COMPOSITION_EVENT,
     JS_CTOR_INPUT_EVENT,
     JS_CTOR_POINTER_EVENT,
+    JS_CTOR_STATIC_RANGE,  // CE-7 (Radiant_Design_Content_Editable.md §6.1, §10)
     JS_CTOR_MAX
 };
 
@@ -16143,6 +16146,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_COMPOSITION_EVENT) fn->func_ptr = (void*)js_ctor_composition_event_fn;
     else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
+    else if (ctor_id == JS_CTOR_STATIC_RANGE) fn->func_ptr = (void*)js_ctor_static_range_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_SHARED_ARRAY_BUFFER ||
@@ -16274,6 +16278,9 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"CompositionEvent", 16, JS_CTOR_COMPOSITION_EVENT, 2},
         {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
         {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
+        // CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): immutable
+        // range snapshot used by InputEvent.getTargetRanges().
+        {"StaticRange", 11, JS_CTOR_STATIC_RANGE, 1},
         {NULL, 0, 0, 0}
     };
 

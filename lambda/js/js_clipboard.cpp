@@ -862,6 +862,35 @@ extern "C" Item js_data_transfer_new(void) {
     return js_make_data_transfer_object();
 }
 
+// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1 / §8): build a
+// DataTransfer pre-populated with text/plain and/or text/html records, for
+// the InputEvent {insertFromPaste|insertFromDrop|deleteByDrag} dispatch path.
+// Either string may be null/empty — only non-empty records are added. The
+// items/files/types views are recomputed once at the end.
+extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
+                                                  const char* text_html)
+{
+    Item dt = js_make_data_transfer_object();
+    Item rec_arr = js_property_get(dt, make_str("_items"));
+    if (get_type_id(rec_arr) != LMD_TYPE_ARRAY) return dt;
+    if (text_plain && *text_plain) {
+        Item record = js_new_object();
+        js_property_set(record, make_str("kind"),  make_str("string"));
+        js_property_set(record, make_str("type"),  make_str("text/plain"));
+        js_property_set(record, make_str("value"), make_str(text_plain));
+        js_array_push(rec_arr, record);
+    }
+    if (text_html && *text_html) {
+        Item record = js_new_object();
+        js_property_set(record, make_str("kind"),  make_str("string"));
+        js_property_set(record, make_str("type"),  make_str("text/html"));
+        js_property_set(record, make_str("value"), make_str(text_html));
+        js_array_push(rec_arr, record);
+    }
+    dt_recompute_views(dt);
+    return dt;
+}
+
 // =============================================================================
 // navigator.clipboard — backed by radiant/clipboard.{hpp,cpp}
 // =============================================================================

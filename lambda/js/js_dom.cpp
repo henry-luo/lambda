@@ -2584,9 +2584,31 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         Item helper = js_get_global_property(helper_key);
         TypeId htype = get_type_id(helper);
         if (htype == LMD_TYPE_FUNC) {
+            // The WPT clipboard shim installs this helper to fire
+            // copy/cut/paste event listeners during synthetic gestures —
+            // see Radiant_Clipboard_WPT_Status.md. For all other commands,
+            // the helper itself returns false, matching §9: Radiant never
+            // mutates the document via execCommand.
             return js_call_function(helper, js_get_document_object_value(), args, argc);
         }
+        // CE-6 (Radiant_Design_Content_Editable.md §9): with no shim
+        // installed, execCommand returns false and does NOT mutate, does
+        // NOT dispatch beforeinput, ever. Feature detection still sees
+        // `typeof document.execCommand === 'function'`.
         return (Item){.item = ITEM_FALSE};
+    }
+    // CE-6 (Radiant_Design_Content_Editable.md §9): the legacy
+    // queryCommand* surface. We return spec-conformant "command does not
+    // exist" answers for every command, so a page that probes them sees a
+    // consistent "not supported" picture rather than mixed results.
+    if (strcmp(method, "queryCommandSupported") == 0 ||
+        strcmp(method, "queryCommandEnabled") == 0 ||
+        strcmp(method, "queryCommandIndeterm") == 0 ||
+        strcmp(method, "queryCommandState") == 0) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    if (strcmp(method, "queryCommandValue") == 0) {
+        return (Item){.item = s2it(heap_create_name(""))};
     }
     // document.contains(node) — true iff node is document or a descendant.
     if (strcmp(method, "contains") == 0) {
@@ -2975,13 +2997,27 @@ extern "C" Item js_document_get_property(Item prop_name) {
         "addEventListener", "removeEventListener",
         "createRange", "getSelection",
         "createEvent",
+        // CE-6 (§9): legacy editing APIs we deliberately retain for feature
+        // detection only. execCommand returns false; queryCommand* return
+        // false/"" per §9 — they never mutate and never dispatch.
         "execCommand",
+        "queryCommandSupported", "queryCommandEnabled",
+        "queryCommandIndeterm", "queryCommandState", "queryCommandValue",
         NULL
     };
     for (int i = 0; doc_methods[i]; i++) {
         if (strcmp(prop, doc_methods[i]) == 0) {
             return (Item){.item = ITEM_TRUE};
         }
+    }
+
+    // CE-6 (Radiant_Design_Content_Editable.md §9): designMode is the legacy
+    // whole-document edit toggle. We don't implement it; the getter always
+    // returns the literal string "off" so JS feature detection works without
+    // enabling anything, and the setter (handled below as a no-op expando
+    // write) cannot change this getter's answer.
+    if (strcmp(prop, "designMode") == 0) {
+        return (Item){.item = s2it(heap_create_name("off"))};
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
@@ -4137,6 +4173,18 @@ static const char* _idl_to_attr_name(const char* prop) {
         case 't':
             if (strcmp(prop, "tabIndex") == 0) return "tabindex";
             break;
+        case 'i':
+            // CE-4 (Radiant_Design_Content_Editable.md §7).
+            if (strcmp(prop, "inputMode") == 0) return "inputmode";
+            break;
+        case 'e':
+            // CE-4 (Radiant_Design_Content_Editable.md §7).
+            if (strcmp(prop, "enterKeyHint") == 0) return "enterkeyhint";
+            break;
+        case 'c':
+            // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10).
+            if (strcmp(prop, "contentEditable") == 0) return "contenteditable";
+            break;
         case 'f':
             if (strcmp(prop, "formAction") == 0) return "formaction";
             if (strcmp(prop, "formMethod") == 0) return "formmethod";
@@ -5272,6 +5320,86 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         char* end = nullptr; long n = strtol(v, &end, 10);
         return (Item){.item = i2it((end != v) ? n : 0)};
     }
+    // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
+    // are enumerated reflected attributes. The IDL getter canonicalises the
+    // value (lowercase, one of the listed keywords) and returns "" for
+    // missing/unknown — matches HTML spec "reflect ... limited to known
+    // values" semantics. These are hints to the IME / on-screen keyboard;
+    // the focus-time forwarding stub in update_focus_state() reads them.
+    if (strcmp(prop, "inputMode") == 0) {
+        const char* v = dom_element_get_attribute(elem, "inputmode");
+        if (!v) return (Item){.item = s2it(heap_create_name(""))};
+        // Canonicalise to lowercase and validate against the spec keyword set.
+        char buf[16]; size_t i = 0;
+        for (; v[i] && i < sizeof(buf) - 1; i++)
+            buf[i] = (char)tolower((unsigned char)v[i]);
+        buf[i] = '\0';
+        const char* keywords[] = {
+            "none", "text", "decimal", "numeric",
+            "tel", "search", "email", "url", nullptr
+        };
+        const char* out = "";
+        for (int k = 0; keywords[k]; k++) {
+            if (strcmp(buf, keywords[k]) == 0) { out = keywords[k]; break; }
+        }
+        return (Item){.item = s2it(heap_create_name(out))};
+    }
+    if (strcmp(prop, "enterKeyHint") == 0) {
+        const char* v = dom_element_get_attribute(elem, "enterkeyhint");
+        if (!v) return (Item){.item = s2it(heap_create_name(""))};
+        char buf[16]; size_t i = 0;
+        for (; v[i] && i < sizeof(buf) - 1; i++)
+            buf[i] = (char)tolower((unsigned char)v[i]);
+        buf[i] = '\0';
+        const char* keywords[] = {
+            "enter", "done", "go", "next", "previous", "search", "send", nullptr
+        };
+        const char* out = "";
+        for (int k = 0; keywords[k]; k++) {
+            if (strcmp(buf, keywords[k]) == 0) { out = keywords[k]; break; }
+        }
+        return (Item){.item = s2it(heap_create_name(out))};
+    }
+    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2 + §10):
+    // contentEditable returns "true"/"false"/"plaintext-only"/"inherit".
+    // isContentEditable is the computed property — walks ancestors honouring
+    // inheritance and ="false" islands.
+    if (strcmp(prop, "contentEditable") == 0) {
+        if (!dom_element_has_attribute(elem, "contenteditable")) {
+            return (Item){.item = s2it(heap_create_name("inherit"))};
+        }
+        const char* v = dom_element_get_attribute(elem, "contenteditable");
+        const char* out;
+        if (!v || *v == '\0' || strcasecmp(v, "true") == 0) out = "true";
+        else if (strcasecmp(v, "false") == 0) out = "false";
+        else if (strcasecmp(v, "plaintext-only") == 0) out = "plaintext-only";
+        else out = "inherit";
+        return (Item){.item = s2it(heap_create_name(out))};
+    }
+    if (strcmp(prop, "isContentEditable") == 0) {
+        // Walk ancestors. Editable iff the nearest ce-bearing ancestor has
+        // value true|""|plaintext-only AND we are not inside a ce="false"
+        // subtree below that host.
+        bool saw_false = false;
+        DomNode* p = (DomNode*)elem;
+        while (p) {
+            if (p->node_type == DOM_NODE_ELEMENT) {
+                DomElement* e = (DomElement*)p;
+                if (dom_element_has_attribute(e, "contenteditable")) {
+                    const char* v = dom_element_get_attribute(e, "contenteditable");
+                    if (!v || *v == '\0' || strcasecmp(v, "true") == 0 ||
+                        strcasecmp(v, "plaintext-only") == 0) {
+                        return (Item){.item = b2it(!saw_false)};
+                    }
+                    if (strcasecmp(v, "false") == 0) {
+                        saw_false = true;
+                    }
+                }
+            }
+            p = p->parent;
+        }
+        return (Item){.item = ITEM_FALSE};
+    }
     // autofocus boolean reflection (input/button/select/textarea)
     if (strcmp(prop, "autofocus") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "button") ||
@@ -5608,6 +5736,33 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             log_debug("js_dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
+        return value;
+    }
+
+    // CE-1 / CE-4 (Radiant_Design_Content_Editable.md §4.2):
+    // contentEditable setter validates per HTML spec. Empty string maps to
+    // "inherit" (attribute removed). Invalid values are a SyntaxError — we
+    // log and ignore; the proper raise will be wired through the JS
+    // DOMException machinery in a follow-up.
+    if (strcmp(prop, "contentEditable") == 0) {
+        const char* s = fn_to_cstr(value);
+        if (!s) s = "";
+        if (*s == '\0' || strcasecmp(s, "inherit") == 0) {
+            dom_element_remove_attribute(elem, "contenteditable");
+            js_dom_mutation_notify();
+            return value;
+        }
+        if (strcasecmp(s, "true") == 0) {
+            dom_element_set_attribute(elem, "contenteditable", "true");
+        } else if (strcasecmp(s, "false") == 0) {
+            dom_element_set_attribute(elem, "contenteditable", "false");
+        } else if (strcasecmp(s, "plaintext-only") == 0) {
+            dom_element_set_attribute(elem, "contenteditable", "plaintext-only");
+        } else {
+            log_debug("contentEditable setter: SyntaxError on '%s'", s);
+            return value;
+        }
+        js_dom_mutation_notify();
         return value;
     }
 
