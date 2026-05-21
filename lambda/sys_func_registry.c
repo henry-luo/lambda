@@ -42,6 +42,7 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
+extern Item js_box_native_int64(int64_t value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1062,6 +1063,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"is_truthy", FPTR(is_truthy)},
     {"v2it", FPTR(v2it)},
+    {"js_box_native_int64", FPTR(js_box_native_int64)},
     {"push_d", FPTR(push_d)},
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
