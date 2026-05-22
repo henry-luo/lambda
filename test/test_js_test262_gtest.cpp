@@ -114,6 +114,7 @@ static std::string g_harness_dir = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
+static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -821,24 +822,10 @@ static std::string g_harness_assert;
 static std::mutex  g_harness_mutex;
 static std::unordered_map<std::string, std::string> g_harness_cache;
 
-// Harness files included in preamble (compiled once, not per-test).
-// These are expensive to MIR-compile due to large regex/code; adding them to the
-// preamble avoids recompilation for every test that uses them.
-static std::unordered_set<std::string> g_preamble_includes;
-static std::mutex g_preamble_includes_mutex;
+// Minimal harness files included in every JS preamble.  Expensive family helpers
+// are added per batch from special_premble.txt instead of taxing ordinary tests.
 static const char* PREAMBLE_INCLUDE_FILES[] = {
     "nativeFunctionMatcher.js",
-    // typed-array rows dominate the slow list; these pure helpers are shared by
-    // hundreds of tests and should be compiled once with the batch preamble.
-    "compareArray.js",
-    "testTypedArray.js",
-    "testBigIntTypedArray.js",
-    // These helpers show up in the remaining URI, detached-buffer, and Atomics
-    // slow rows. Keep the preamble set to small pure helpers so it lowers
-    // repeated harness cost without adding large mutable fixtures to every batch.
-    "decimalToHexString.js",
-    "detachArrayBuffer.js",
-    "testAtomics.js",
     NULL
 };
 
@@ -860,6 +847,7 @@ struct Test262Prepared {
     std::string subcategory;     // expressions, Array, eval-code, etc.
     std::vector<std::string> includes; // harness includes (e.g. "propertyHelper.js")
     std::vector<std::string> features; // metadata feature tags
+    std::vector<std::string> special_preamble_includes; // batch-local heavy harness helpers
     bool is_strict;              // add "use strict" prefix
     bool is_async = false;       // define $DONE for asyncHelpers.js when explicitly run
     Test262Result skip_result;   // T262_SKIP if test should be skipped
@@ -869,10 +857,16 @@ struct Test262Prepared {
     bool native_harness;         // true = run without JS harness preamble (native interception only)
 };
 
+struct JsBatchGroup {
+    std::vector<size_t> indices;
+    std::vector<std::string> special_includes;
+    std::string key;
+};
+
 // Assemble combined source on-the-fly from metadata.
 // Reads test file from disk (OS-cached) and prepends harness files.
 // Assemble the harness source (sta.js + assert.js + preamble includes) — sent once per batch via harness: protocol
-static std::string assemble_harness_source() {
+static std::string assemble_harness_source(const std::vector<std::string>& special_includes = {}) {
     std::string harness;
     harness.reserve(g_harness_sta.size() + g_harness_assert.size() + 65536);
     harness += g_harness_sta;
@@ -885,11 +879,28 @@ static std::string assemble_harness_source() {
         if (!src.empty()) {
             harness += src;
             harness += '\n';
-            std::lock_guard<std::mutex> lock(g_preamble_includes_mutex);
-            g_preamble_includes.insert(*f);
+        }
+    }
+    // Special helpers are intentionally batch-local.  A global preamble set
+    // caused ordinary tests to pay TypedArray/Atomics helper compile cost; a
+    // per-batch set keeps those helpers compiled once only where requested.
+    for (const std::string& include : special_includes) {
+        const std::string& src = get_harness_file(include);
+        if (!src.empty()) {
+            harness += src;
+            harness += '\n';
         }
     }
     return harness;
+}
+
+static std::unordered_set<std::string> make_preamble_include_set(
+    const std::vector<std::string>& special_includes)
+{
+    std::unordered_set<std::string> includes;
+    for (const char** f = PREAMBLE_INCLUDE_FILES; *f; f++) includes.insert(*f);
+    for (const std::string& include : special_includes) includes.insert(include);
+    return includes;
 }
 
 // Map original test path to stripped version if available
@@ -930,7 +941,10 @@ static void append_host_flags(std::string& combined, const Test262Prepared& p) {
 }
 
 // Assemble test source WITHOUT harness (for two-module split: harness sent separately)
-static std::string assemble_test_source(const Test262Prepared& p) {
+static std::string assemble_test_source(
+    const Test262Prepared& p,
+    const std::unordered_set<std::string>* preamble_includes = nullptr)
+{
     std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
 
@@ -949,11 +963,9 @@ static std::string assemble_test_source(const Test262Prepared& p) {
     append_host_flags(combined, p);
 
     for (auto& inc : p.includes) {
-        // Skip includes already compiled into the preamble
-        {
-            std::lock_guard<std::mutex> lock(g_preamble_includes_mutex);
-            if (g_preamble_includes.count(inc)) continue;
-        }
+        // Skip only includes compiled into this batch's preamble.  This must
+        // be per-batch because special helper preambles differ by test family.
+        if (preamble_includes && preamble_includes->count(inc)) continue;
         const std::string& harness_src = get_harness_file(inc);
         if (!harness_src.empty()) {
             combined += harness_src;
@@ -983,6 +995,49 @@ static std::string assemble_native_test_source(const Test262Prepared& p) {
     append_host_flags(combined, p);
     combined += source;
     return combined;
+}
+
+static std::string special_preamble_key(const std::vector<std::string>& includes) {
+    if (includes.empty()) return "";
+    std::string key;
+    for (size_t i = 0; i < includes.size(); i++) {
+        if (i) key += ",";
+        key += includes[i];
+    }
+    return key;
+}
+
+static void partition_batch_indices(
+    const std::vector<Test262Prepared>& prepared,
+    const std::vector<size_t>& indices,
+    std::vector<size_t>& native_indices,
+    std::vector<JsBatchGroup>& js_groups)
+{
+    native_indices.clear();
+    js_groups.clear();
+    std::unordered_map<std::string, size_t> group_by_key;
+
+    for (size_t idx : indices) {
+        if (prepared[idx].native_harness) {
+            native_indices.push_back(idx);
+            continue;
+        }
+
+        std::string key = special_preamble_key(prepared[idx].special_preamble_includes);
+        auto it = group_by_key.find(key);
+        size_t group_index;
+        if (it == group_by_key.end()) {
+            group_index = js_groups.size();
+            group_by_key[key] = group_index;
+            JsBatchGroup group;
+            group.special_includes = prepared[idx].special_preamble_includes;
+            group.key = key;
+            js_groups.push_back(std::move(group));
+        } else {
+            group_index = it->second;
+        }
+        js_groups[group_index].indices.push_back(idx);
+    }
 }
 
 // Legacy: assemble combined source with harness included (for backward compatibility)
@@ -1028,7 +1083,7 @@ static const size_t T262_BATCH_CHUNK_SIZE = 50;
 static const size_t T262_MAX_PARALLEL_BATCHES = 4;
 static const size_t RETRY_BATCH_SIZE = 5;
 
-struct SubBatch { size_t start; size_t end; bool native; };
+struct SubBatch { size_t start; size_t end; bool native; size_t group; };
 
 struct BatchTiming {
     size_t batch_idx;
@@ -1067,6 +1122,8 @@ static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass -
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
+static std::unordered_map<std::string, std::vector<std::string>> g_special_preamble_exact;
+static std::vector<std::pair<std::string, std::vector<std::string>>> g_special_preamble_prefix;
 static std::string g_write_failures_path; // --write-failures=<path>: write failed test manifest TSV
 static bool g_feature_summary = false;    // --feature-summary: write failure summaries under temp/
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
@@ -1175,6 +1232,101 @@ static std::vector<std::string> split_diagnose_expected_paths(const std::string&
         start = comma + 1;
     }
     return paths;
+}
+
+static std::vector<std::string> split_special_preamble_field(const std::string& field) {
+    std::vector<std::string> includes;
+    std::string current;
+    for (char ch : field) {
+        if (ch == ',' || ch == ';' || ch == ' ' || ch == '\t') {
+            std::string item = trim_ascii(current);
+            if (!item.empty()) includes.push_back(item);
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    std::string item = trim_ascii(current);
+    if (!item.empty()) includes.push_back(item);
+    std::sort(includes.begin(), includes.end());
+    includes.erase(std::unique(includes.begin(), includes.end()), includes.end());
+    return includes;
+}
+
+static std::string test262_relative_path(const std::string& test_path) {
+    static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
+    if (test_path.compare(0, prefix.size(), prefix) == 0) {
+        return test_path.substr(prefix.size());
+    }
+    return test_path;
+}
+
+static bool load_special_preamble_list(const char* path) {
+    g_special_preamble_exact.clear();
+    g_special_preamble_prefix.clear();
+
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        std::string row = trim_ascii(line);
+        if (row.empty() || row[0] == '#') continue;
+        size_t comment = row.find('#');
+        if (comment != std::string::npos) row = trim_ascii(row.substr(0, comment));
+        if (row.empty()) continue;
+
+        size_t sep = row.find_first_of(" \t");
+        if (sep == std::string::npos) continue;
+        std::string selector = trim_ascii(row.substr(0, sep));
+        std::string include_field = trim_ascii(row.substr(sep + 1));
+        std::vector<std::string> includes = split_special_preamble_field(include_field);
+        if (selector.empty() || includes.empty()) continue;
+
+        if (selector.size() >= 1 && selector.back() == '*') {
+            g_special_preamble_prefix.push_back({selector.substr(0, selector.size() - 1), includes});
+        } else {
+            g_special_preamble_exact[selector] = includes;
+        }
+    }
+    fclose(f);
+    return !g_special_preamble_exact.empty() || !g_special_preamble_prefix.empty();
+}
+
+static void merge_special_includes(std::vector<std::string>& dst, const std::vector<std::string>& src) {
+    dst.insert(dst.end(), src.begin(), src.end());
+    std::sort(dst.begin(), dst.end());
+    dst.erase(std::unique(dst.begin(), dst.end()), dst.end());
+}
+
+static std::vector<std::string> special_preamble_for_test(
+    const std::string& test_name,
+    const std::string& test_path)
+{
+    std::vector<std::string> includes;
+    std::string rel_path = test262_relative_path(test_path);
+
+    auto add_exact = [&](const std::string& key) {
+        auto it = g_special_preamble_exact.find(key);
+        if (it != g_special_preamble_exact.end()) merge_special_includes(includes, it->second);
+    };
+    add_exact(test_name);
+    add_exact(test_path);
+    add_exact(rel_path);
+
+    auto add_prefix = [&](const std::string& value) {
+        for (const auto& entry : g_special_preamble_prefix) {
+            const std::string& prefix = entry.first;
+            if (value.compare(0, prefix.size(), prefix) == 0) {
+                merge_special_includes(includes, entry.second);
+            }
+        }
+    };
+    add_prefix(test_name);
+    add_prefix(test_path);
+    add_prefix(rel_path);
+
+    return includes;
 }
 
 static bool diagnose_output_has_path(const std::string& output, const std::string& path) {
@@ -1569,6 +1721,7 @@ static void prepare_all_tests(
             p.is_strict = meta.is_strict;
             p.includes = std::move(meta.includes);
             p.features = std::move(meta.features);
+            p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
 
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
@@ -1900,29 +2053,34 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     std::unordered_map<std::string, BatchResult> results;
     if (indices.empty()) return results;
 
-    // Split indices into native-harness and JS-harness groups.
-    // Native tests run without harness preamble (transpiler intercepts all harness calls).
-    // JS tests run with sta.js+assert.js preamble as before.
-    std::vector<size_t> native_indices, js_indices;
-    for (size_t idx : indices) {
-        if (prepared[idx].native_harness)
-            native_indices.push_back(idx);
-        else
-            js_indices.push_back(idx);
+    // Split indices into native-harness and JS-harness groups.  JS groups are
+    // keyed by special preamble needs so heavy helpers are compiled once only
+    // for the batches that require them.
+    std::vector<size_t> native_indices;
+    std::vector<JsBatchGroup> js_groups;
+    partition_batch_indices(prepared, indices, native_indices, js_groups);
+    size_t js_count = 0;
+    size_t special_group_count = 0;
+    for (const auto& group : js_groups) {
+        js_count += group.indices.size();
+        if (!group.special_includes.empty()) special_group_count++;
     }
-    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness = %zu total\n",
-            native_indices.size(), js_indices.size(), indices.size());
+    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness = %zu total (%zu special-preamble groups)\n",
+            native_indices.size(), js_count, indices.size(), special_group_count);
 
     // Create sub-batches from both groups
     std::vector<SubBatch> batches;
     for (size_t s = 0; s < native_indices.size(); s += chunk_size) {
         size_t e = std::min(s + chunk_size, native_indices.size());
-        batches.push_back({s, e, true});
+        batches.push_back({s, e, true, 0});
     }
     size_t native_batch_count = batches.size();
-    for (size_t s = 0; s < js_indices.size(); s += chunk_size) {
-        size_t e = std::min(s + chunk_size, js_indices.size());
-        batches.push_back({s, e, false});
+    for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
+        const auto& group_indices = js_groups[group_index].indices;
+        for (size_t s = 0; s < group_indices.size(); s += chunk_size) {
+            size_t e = std::min(s + chunk_size, group_indices.size());
+            batches.push_back({s, e, false, group_index});
+        }
     }
 
     // Sort dispatch order: run estimated-slowest batches first to avoid stragglers.
@@ -1953,7 +2111,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             // Compute estimated cost per batch (sum of per-test times)
             std::vector<long> batch_cost(batches.size(), 0);
             for (size_t bi = 0; bi < batches.size(); bi++) {
-                const auto& idx_vec = batches[bi].native ? native_indices : js_indices;
+                const auto& idx_vec = batches[bi].native ? native_indices : js_groups[batches[bi].group].indices;
                 for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
                     size_t pi = idx_vec[idx];
                     auto it = prev_timing.find(prepared[pi].test_name);
@@ -2000,11 +2158,14 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 FILE* mf = fopen(manifest_path, "wb");
                 if (!mf) continue;
 
-                const auto& idx_vec = batches[i].native ? native_indices : js_indices;
+                const auto& idx_vec = batches[i].native ? native_indices : js_groups[batches[i].group].indices;
+                std::unordered_set<std::string> preamble_include_set;
 
                 if (!batches[i].native) {
                     // JS-harness batch: send harness preamble via harness: protocol
-                    std::string harness = assemble_harness_source();
+                    const auto& special_includes = js_groups[batches[i].group].special_includes;
+                    preamble_include_set = make_preamble_include_set(special_includes);
+                    std::string harness = assemble_harness_source(special_includes);
                     fprintf(mf, "harness:%zu\n", harness.size());
                     fwrite(harness.data(), 1, harness.size(), mf);
                     fputc('\n', mf);
@@ -2017,7 +2178,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                     const auto& p = prepared[pi];
                     std::string test_src = batches[i].native
                         ? assemble_native_test_source(p)
-                        : assemble_test_source(p);
+                        : assemble_test_source(p, &preamble_include_set);
                     fprintf(mf, "source:%s:%zu\n",
                             p.test_name.c_str(), test_src.size());
                     fwrite(test_src.data(), 1, test_src.size(), mf);
@@ -2031,7 +2192,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 {
                     std::lock_guard<std::mutex> lock(g_progress_mutex);
                     fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
-                            i + 1, batches.size(), w, batches[i].native ? "native" : "js",
+                            i + 1, batches.size(), w,
+                            batches[i].native ? "native" :
+                                (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special"),
                             batch_num_tests, batches[i].start, batches[i].end - 1);
                 }
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
@@ -2067,7 +2230,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             size_t bi = order[k];
             fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests) %s  tests[%zu..%zu]\n",
                     bi, batch_timings[bi].elapsed_secs, batch_timings[bi].num_tests,
-                    batches[bi].native ? "[native]" : "[js]    ",
+                    batches[bi].native ? "[native]" :
+                        (js_groups[batches[bi].group].special_includes.empty() ? "[js]    " : "[js+pre]"),
                     batches[bi].start, batches[bi].end - 1);
         }
         // For the top 5 slowest batches, list all test names
@@ -2075,9 +2239,10 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         size_t detail = std::min((size_t)5, batches.size());
         for (size_t k = 0; k < detail; k++) {
             size_t bi = order[k];
-            const auto& idx_vec = batches[bi].native ? native_indices : js_indices;
+            const auto& idx_vec = batches[bi].native ? native_indices : js_groups[batches[bi].group].indices;
             fprintf(stderr, "  --- batch[%zu] (%.1fs, %s) ---\n", bi, batch_timings[bi].elapsed_secs,
-                    batches[bi].native ? "native" : "js");
+                    batches[bi].native ? "native" :
+                        (js_groups[batches[bi].group].special_includes.empty() ? "js" : "js-special"));
             for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
                 size_t pi = idx_vec[idx];
                 const auto& p = prepared[pi];
@@ -2199,21 +2364,18 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     auto batch_exec_done = std::chrono::steady_clock::now();
     double batch_exec_secs = std::chrono::duration<double>(batch_exec_done - batch_exec_start).count();
 
-    // Build batch assignment map for Phase 4 diagnostics.
-    // Must mirror the actual sub-batch composition used by execute_t262_batch:
-    // clean_indices is split into native-harness and js-harness groups, then each
-    // group is chunked separately into batches of T262_BATCH_CHUNK_SIZE.
-    // Numbering: native batches first (0..N-1), then js batches (N..N+M-1) — same
-    // ordering used by analyze_group's sequential native_clean/js_clean traversal,
-    // so crash-point batch indices align with collateral batch indices.
+    // Build batch assignment map for Phase 4 diagnostics.  This mirrors
+    // execute_t262_batch: native batches first, then JS batches grouped by
+    // their special preamble helper set.
     {
-        std::vector<size_t> native_clean_idx, js_clean_idx;
-        for (size_t idx : clean_indices) {
-            if (prepared[idx].native_harness) native_clean_idx.push_back(idx);
-            else                              js_clean_idx.push_back(idx);
-        }
+        std::vector<size_t> native_clean_idx;
+        std::vector<JsBatchGroup> js_clean_groups;
+        partition_batch_indices(prepared, clean_indices, native_clean_idx, js_clean_groups);
         size_t native_batches = (native_clean_idx.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
-        size_t js_batches     = (js_clean_idx.size()     + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+        size_t js_batches = 0;
+        for (const auto& group : js_clean_groups) {
+            js_batches += (group.indices.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+        }
         size_t num_batches    = native_batches + js_batches;
         g_batch_contents.resize(num_batches);
         for (size_t i = 0; i < native_clean_idx.size(); i++) {
@@ -2222,11 +2384,15 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             g_batch_assignment[name] = bi;
             g_batch_contents[bi].push_back(name);
         }
-        for (size_t i = 0; i < js_clean_idx.size(); i++) {
-            size_t bi = native_batches + (i / T262_BATCH_CHUNK_SIZE);
-            const auto& name = prepared[js_clean_idx[i]].test_name;
-            g_batch_assignment[name] = bi;
-            g_batch_contents[bi].push_back(name);
+        size_t js_batch_base = native_batches;
+        for (const auto& group : js_clean_groups) {
+            for (size_t i = 0; i < group.indices.size(); i++) {
+                size_t bi = js_batch_base + (i / T262_BATCH_CHUNK_SIZE);
+                const auto& name = prepared[group.indices[i]].test_name;
+                g_batch_assignment[name] = bi;
+                g_batch_contents[bi].push_back(name);
+            }
+            js_batch_base += (group.indices.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
         }
         fprintf(stderr, "[test262] Batch assignment map: %zu entries across %zu batches (%zu native + %zu js)\n",
                 g_batch_assignment.size(), num_batches, native_batches, js_batches);
@@ -2244,13 +2410,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     std::unordered_set<std::string> batch_kill_tests;
     {
         // Reconstruct native/js split to match actual sub-batch composition
-        std::vector<size_t> native_clean, js_clean;
-        for (size_t idx : clean_indices) {
-            if (prepared[idx].native_harness)
-                native_clean.push_back(idx);
-            else
-                js_clean.push_back(idx);
-        }
+        std::vector<size_t> native_clean;
+        std::vector<JsBatchGroup> js_clean_groups;
+        partition_batch_indices(prepared, clean_indices, native_clean, js_clean_groups);
 
         auto analyze_group = [&](const std::vector<size_t>& group_indices, const char* label) {
             size_t total_lost = 0;
@@ -2293,7 +2455,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         };
 
         analyze_group(native_clean, "native");
-        analyze_group(js_clean, "js");
+        for (const auto& group : js_clean_groups) {
+            std::string label = group.special_includes.empty()
+                ? "js"
+                : std::string("js-special(") + group.key + ")";
+            analyze_group(group.indices, label.c_str());
+        }
         if (!batch_kill_tests.empty())
             fprintf(stderr, "[test262] Detected %zu batch-kill crash-point tests (will add to non-fully-passing list for next run)\n",
                     batch_kill_tests.size());
@@ -3341,6 +3508,11 @@ int main(int argc, char** argv) {
                 g_metadata_cache.size(), METADATA_CACHE_FILE);
     }
 
+    if (load_special_preamble_list(SPECIAL_PREAMBLE_FILE)) {
+        fprintf(stderr, "[test262] Loaded special preamble map: %zu exact + %zu prefix entries from %s\n",
+                g_special_preamble_exact.size(), g_special_preamble_prefix.size(), SPECIAL_PREAMBLE_FILE);
+    }
+
     // Load non-fully-passing list from previous run
     load_partial_list("test/js262/t262_partial.txt");
     if (!g_known_partial.empty()) {
@@ -3470,6 +3642,7 @@ int main(int argc, char** argv) {
                 p.features = cm.features;
                 p.native_harness = cm.native_harness;
             }
+            p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
             if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }
@@ -3606,6 +3779,11 @@ int main(int argc, char** argv) {
                     p.includes = cm.includes;
                     p.native_harness = cm.native_harness;
                 }
+                // Phase 4 rebuilds prepared records from all_tests, so carry the
+                // batch-local helper policy too.  Without this, helper-dependent
+                // regressions retry without their special preamble and thousands
+                // of retry results become infrastructure noise instead of signal.
+                p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }

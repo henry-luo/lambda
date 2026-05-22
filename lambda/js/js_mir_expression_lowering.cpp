@@ -13397,11 +13397,25 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
                     jm_uri_compare_arg_is_simple(uri_arg) &&
                     jm_uri_compare_arg_is_simple(code_arg)) {
                     MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-                    MIR_reg_t code_reg = jm_transpile_box_item(mt, code_arg);
-                    MIR_reg_t raw = jm_call_3(mt, "js_uri_decode_equals_from_char_code1_raw", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, component));
+                    TypeId code_type = jm_get_effective_type(mt, code_arg);
+                    MIR_reg_t raw = 0;
+                    if (code_type == LMD_TYPE_INT) {
+                        // The three-byte URI js262 loops compute the expected
+                        // code point as a native int. Avoid boxing it thousands
+                        // of times before the runtime helper immediately
+                        // converts it back to a uint16 code unit.
+                        MIR_reg_t code_reg = jm_transpile_as_native(mt, code_arg, code_type, LMD_TYPE_INT);
+                        raw = jm_call_3(mt, "js_uri_decode_equals_from_char_code1_raw_int", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, component));
+                    } else {
+                        MIR_reg_t code_reg = jm_transpile_box_item(mt, code_arg);
+                        raw = jm_call_3(mt, "js_uri_decode_equals_from_char_code1_raw", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, component));
+                    }
                     if (bin->op == JS_OP_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,

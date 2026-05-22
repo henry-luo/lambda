@@ -9,6 +9,31 @@ correct tests take seconds or hit the per-test timeout.
 
 ## 0. Latest Progress
 
+2026-05-22 HEAD regression check: after returning from the stable
+`d6092bc8a` reference build to HEAD, the URI diagnose rows reproduced as real
+release-build runtime regressions.  The four URI rows no longer time out after
+the current fixes, but they are still slow and need another pass:
+
+```text
+built_ins_decodeURI_S15_1_3_1_A2_5_T1_js: 30004ms timeout -> 14053ms pass
+built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js: 30007ms timeout -> 13190ms pass
+built_ins_decodeURI_S15_1_3_1_A2_4_T1_js: 30005ms timeout -> 5101ms pass
+built_ins_decodeURIComponent_S15_1_3_2_A2_4_T1_js: 30006ms timeout -> 5133ms pass
+```
+
+Root cause found so far: loop observability analysis treated every
+`var x = initializer` in a loop as observable, even when the initializer was a
+pure URI/test262 helper expression.  That disabled deferred module-var
+writeback and forced per-iteration module/global synchronization in the hot URI
+loops.  The predicate now recursively inspects the initializer.  The URI prefix
+metadata also now tracks both three-byte and four-byte leading-byte ranges, and
+the three-byte decode/fromCharCode loop has a dedicated fast-forward path.
+
+Remaining issue: the fast paths are hit, but the rows are still above the 3s
+slow threshold.  The next likely fix is to fast-forward at the B2 prefix loop
+level and/or remove remaining per-prefix global sync for unobserved temporary
+`var` bindings.
+
 2026-05-22 update: the interrupted full-suite rerun left
 `temp/_t262_timing_o0.tsv` with 411 rows at or above 3s: 274 TypedArray, 68 URI,
 34 Atomics, 6 Set, 12 language, and 17 other rows.  The older optimized timing
