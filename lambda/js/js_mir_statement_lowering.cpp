@@ -4506,7 +4506,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 if (static_field_index >= ce->static_field_count) continue;
                                 JsStaticFieldEntry* sf = &ce->static_fields[static_field_index++];
                                 if (sf->computed && sf->key_expr && sf->key_module_var_index >= 0) {
+                                    // computed class field keys run while defining the class.
+                                    // A `yield` in the key suspends the generator before static
+                                    // field installation, so spill the class object register.
+                                    int cls_key_spill = -1;
+                                    if (mt->in_generator && jm_has_yield(sf->key_expr)) {
+                                        cls_key_spill = jm_gen_spill_save(mt, cls_obj);
+                                    }
                                     MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
+                                    if (cls_key_spill >= 0) {
+                                        jm_gen_spill_load(mt, cls_obj, cls_key_spill);
+                                    }
                                     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
                                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                                     jm_call_void_1(mt, "js_check_class_static_field_key",
@@ -4519,7 +4529,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 if (instance_field_index >= ce->instance_field_count) continue;
                                 JsInstanceFieldEntry* inf = &ce->instance_fields[instance_field_index++];
                                 if (inf->computed && inf->key_expr && inf->key_module_var_index >= 0) {
+                                    // keep the class object live across generator suspension from
+                                    // instance computed keys; later metadata/static setup still
+                                    // uses this register in the same class-definition sequence.
+                                    int cls_key_spill = -1;
+                                    if (mt->in_generator && jm_has_yield(inf->key_expr)) {
+                                        cls_key_spill = jm_gen_spill_save(mt, cls_obj);
+                                    }
                                     MIR_reg_t key = jm_transpile_box_item(mt, inf->key_expr);
+                                    if (cls_key_spill >= 0) {
+                                        jm_gen_spill_load(mt, cls_obj, cls_key_spill);
+                                    }
                                     key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
                                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                                     jm_call_void_2(mt, "js_set_module_var",
