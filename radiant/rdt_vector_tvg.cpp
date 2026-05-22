@@ -762,6 +762,17 @@ const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
     return &g_tvg_caps;
 }
 
+bool rdt_vector_get_target(const RdtVector* vec, RdtVectorTarget* out) {
+    if (!vec || !vec->impl || !out) return false;
+    out->pixels = vec->impl->pixels;
+    out->width = vec->impl->width;
+    out->height = vec->impl->height;
+    out->stride = vec->impl->stride;
+    out->tile_offset_x = vec->impl->tile_offset_x;
+    out->tile_offset_y = vec->impl->tile_offset_y;
+    return out->pixels && out->width > 0 && out->height > 0 && out->stride > 0;
+}
+
 void rdt_vector_begin_batch(RdtVector* vec) {
     if (!vec || !vec->impl) return;
     vec->impl->batch_depth++;
@@ -1652,8 +1663,8 @@ static void svg_dom_picture_draw(RdtVector* vec, RdtPicture* pic,
     RdtMatrix base = rdt_matrix_identity();
     if (pic->has_transform) base = pic->transform;
     if (transform) base = rdt_matrix_multiply(transform, &base);
-    render_svg_to_vec(vec, pic->svg_root, pic->width, pic->height,
-                      pic->pool, 1.0f, g_picture_font_ctx, &base, nullptr,
+    render_svg_to_vec_via_display_list(vec, pic->svg_root, pic->width, pic->height,
+                      pic->pool, 1.0f, g_picture_font_ctx, &base,
                       nullptr, nullptr, pic->source_path,
                       (float)opacity / 255.0f);
 }

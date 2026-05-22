@@ -581,14 +581,9 @@ bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
         int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
         int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
         int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
-        if (rdcon->dl) {
-            rc_box_blur_region(rdcon, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
-        } else {
-            render_painter_flush_vector_batch(rdcon);
-            box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
-        }
-        log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d) dl=%d",
-            max_shadow_blur, bx, by, bw, bh, rdcon->dl != nullptr);
+        rc_box_blur_region(rdcon, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
+        log_debug("[TEXT-SHADOW] Recorded blur radius=%.1f for region (%d,%d,%d,%d)",
+            max_shadow_blur, bx, by, bw, bh);
     }
 
     return true;

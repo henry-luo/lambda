@@ -160,6 +160,25 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       PaintList* paint_list = nullptr);
 
 /**
+ * Render an SVG element tree through DisplayList record/replay into an existing
+ * RdtVector target. This is used for offscreen SVG pictures so they follow the
+ * same replay path as raster output instead of immediate rdt_* emission.
+ */
+void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
+                      float viewport_width, float viewport_height,
+                      Pool* pool, float pixel_ratio = 1.0f,
+                      FontContext* font_ctx = nullptr,
+                      const RdtMatrix* base_transform = nullptr,
+                      const Color* initial_current_color = nullptr,
+                      const Color* initial_fill_color = nullptr,
+                      const char* source_path = nullptr,
+                      float initial_opacity = 1.0f,
+                      bool initial_fill_none = false,
+                      const Color* initial_stroke_color = nullptr,
+                      bool initial_stroke_none = true,
+                      float initial_stroke_width = -1.0f);
+
+/**
  * Render inline SVG element in document context
  * Called by raster and vector render walkers when element is HTM_TAG_SVG.
  *

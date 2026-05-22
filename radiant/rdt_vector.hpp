@@ -69,6 +69,15 @@ typedef struct RdtVector {
     RdtVectorImpl* impl;
 } RdtVector;
 
+typedef struct RdtVectorTarget {
+    uint32_t* pixels;
+    int width;
+    int height;
+    int stride;
+    float tile_offset_x;
+    float tile_offset_y;
+} RdtVectorTarget;
+
 typedef enum {
     RDT_VECTOR_BACKEND_UNKNOWN = 0,
     RDT_VECTOR_BACKEND_THORVG,
@@ -116,6 +125,10 @@ void rdt_vector_set_tile_offset_x(RdtVector* vec, float offset_x);
 
 // Return immutable capability metadata for the active vector backend.
 const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec);
+
+// Return the currently bound pixel target. Used by record/replay bridges that
+// need an ImageSurface wrapper around the backend-owned target.
+bool rdt_vector_get_target(const RdtVector* vec, RdtVectorTarget* out);
 
 // Batch consecutive vector paints into one backend submission when supported.
 // Software/raster callers should flush before reading or directly mutating the

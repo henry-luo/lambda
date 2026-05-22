@@ -241,11 +241,7 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
         return;
     }
 
-    render_painter_begin_vector_batch(rdcon);
-
     render_raster_view_tree(rdcon, view_tree);
-
-    render_painter_end_vector_batch(rdcon);
 }
 
 RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
