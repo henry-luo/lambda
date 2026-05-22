@@ -9,7 +9,29 @@
       "Bash(npx tree-sitter-cli@0.24.7 parse /tmp/test_for.ls)",
       "Bash(echo \"view {name: string, age: int} { <span; ~.name> }\")",
       "Bash(make)",
-      "Bash(make build *)"
+      "Bash(make build *)",
+      "Bash(ls /Users/henryluo/Projects/lambda/test/ | grep -i \"render\\\\|tile\\\\|svg\\\\|pdf\\\\|raster\\\\|display\" ; echo \"=== layout test dir ===\"; ls /Users/henryluo/Projects/lambda/test/layout/ 2>/dev/null | head; echo \"=== render test dir ===\"; ls /Users/henryluo/Projects/lambda/test/ | grep -i radiant)",
+      "Bash(cat /Users/henryluo/Projects/lambda/test/layout/render/*.* 2>/dev/null | head -5; echo \"=== render test contents ===\"; ls -la /Users/henryluo/Projects/lambda/test/layout/render/ 2>/dev/null | head -30)",
+      "Bash(ls /Users/henryluo/Projects/lambda/test/render/ 2>/dev/null | head -30; echo \"=== count fixtures ===\"; ls /Users/henryluo/Projects/lambda/test/render/*.html 2>/dev/null | wc -l)",
+      "Bash(python3 -c \"import PIL; print\\('PIL available'\\)\")",
+      "Bash(python3 -)",
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 600 node test_radiant_render.js --baseline)",
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda node test_radiant_render.js --help)",
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda node test_radiant_render.js --suite puppertino --baseline)",
+      "Bash(git stash *)",
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 600 node test_radiant_render.js --strip-parity)",
+      "Bash(RADIANT_TILE_THRESHOLD=1 ./lambda.exe render temp/tall_page.html -o temp/tall_strip.png)",
+      "Bash(RADIANT_RENDER_THREADS=1 ./lambda.exe render temp/tall_page.html -o temp/tall_normal.png)",
+      "Bash(python3 temp/cmp_png.py temp/tall_normal.png temp/tall_strip.png)",
+      "Bash(git check-ignore *)",
+      "Bash(sed -n '40,60p' build_lambda_config.json)",
+      "Bash(sed -n '2044,2090p' build_lambda_config.json)",
+      "Bash(make generate-premake *)",
+      "Bash(PATH=/clang64/bin:__TRACKED_VAR__ make -C build/premake config=debug_native -j8 test_display_list_gtest)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(PATH=/clang64/bin:__TRACKED_VAR__ premake5 gmake --file=../../premake5.mac.lua)",
+      "Bash(./test/test_display_list_gtest.exe --gtest_filter='PaintIrParityTest.*')",
+      "Bash(./test/test_display_list_gtest.exe)"
     ]
   }
 }

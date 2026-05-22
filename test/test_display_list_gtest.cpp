@@ -5,8 +5,10 @@
 #include "../radiant/display_list_replay_glyph.hpp"
 #include "../radiant/display_list_replay_state.hpp"
 #include "../radiant/display_list_storage.hpp"
+#include "../radiant/paint_ir.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
+#include <string.h>
 
 void test_display_list_stub_set_path_bounds(const RdtPath* path,
                                             bool has_bounds,
@@ -496,4 +498,271 @@ TEST_F(DisplayListTest, ClearRewindsScratchCopiesButKeepsCapacityForReuse) {
     ASSERT_EQ(dl.count, 1);
     EXPECT_EQ(dl.capacity, capacity);
     EXPECT_EQ(dl.items[0].op, DL_FILL_RECT);
+}
+
+// ─── PaintIR -> DisplayList parity ──────────────────────────────────────────
+//
+// Phase C gate (see vibe/radiant/Radiant_Design_Render_Paths.md): raster must
+// emit AND re-consume the semantic paint IR at parity before any backend is
+// rewired. Each test records a primitive both through the PaintBuilder (then
+// paint_ir_lower_raster) and through the matching dl_* call directly, then
+// asserts the two DisplayLists are item-by-item identical.
+
+class PaintIrParityTest : public ::testing::Test {
+protected:
+    Pool* pool = nullptr;
+    Arena* arena = nullptr;
+    PaintList pl = {};
+    DisplayList lowered = {};   // PaintBuilder -> paint_ir_lower_raster
+    DisplayList direct = {};    // direct dl_* calls
+
+    void SetUp() override {
+        pool = pool_create();
+        arena = arena_create_default(pool);
+        paint_list_init(&pl, arena);
+        dl_init(&lowered, arena);
+        dl_init(&direct, arena);
+    }
+
+    void TearDown() override {
+        dl_destroy(&lowered);
+        dl_destroy(&direct);
+        paint_list_destroy(&pl);
+        if (arena) { arena_destroy(arena); arena = nullptr; }
+        if (pool) { pool_destroy(pool); pool = nullptr; }
+    }
+
+    void lower() { paint_ir_lower_raster(&pl, &lowered); }
+};
+
+static void expect_matrix_eq(const RdtMatrix& a, const RdtMatrix& b) {
+    EXPECT_FLOAT_EQ(a.e11, b.e11); EXPECT_FLOAT_EQ(a.e12, b.e12); EXPECT_FLOAT_EQ(a.e13, b.e13);
+    EXPECT_FLOAT_EQ(a.e21, b.e21); EXPECT_FLOAT_EQ(a.e22, b.e22); EXPECT_FLOAT_EQ(a.e23, b.e23);
+}
+
+// Op-aware comparison: variable-length payloads (gradient stops, dash arrays)
+// are copied into each DisplayList's own arena, so compare values not pointers.
+static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
+    ASSERT_EQ(a.op, b.op);
+    for (int i = 0; i < 4; i++) EXPECT_FLOAT_EQ(a.bounds[i], b.bounds[i]);
+    switch (a.op) {
+    case DL_FILL_RECT:
+        EXPECT_EQ(memcmp(&a.fill_rect, &b.fill_rect, sizeof(DlFillRect)), 0);
+        break;
+    case DL_FILL_ROUNDED_RECT:
+        EXPECT_EQ(memcmp(&a.fill_rounded_rect, &b.fill_rounded_rect, sizeof(DlFillRoundedRect)), 0);
+        break;
+    case DL_FILL_PATH:
+        EXPECT_EQ(a.fill_path.path, b.fill_path.path);
+        EXPECT_EQ(a.fill_path.color.c, b.fill_path.color.c);
+        EXPECT_EQ(a.fill_path.rule, b.fill_path.rule);
+        EXPECT_EQ(a.fill_path.has_transform, b.fill_path.has_transform);
+        if (a.fill_path.has_transform) expect_matrix_eq(a.fill_path.transform, b.fill_path.transform);
+        break;
+    case DL_STROKE_PATH:
+        EXPECT_EQ(a.stroke_path.path, b.stroke_path.path);
+        EXPECT_EQ(a.stroke_path.color.c, b.stroke_path.color.c);
+        EXPECT_FLOAT_EQ(a.stroke_path.width, b.stroke_path.width);
+        EXPECT_EQ(a.stroke_path.cap, b.stroke_path.cap);
+        EXPECT_EQ(a.stroke_path.join, b.stroke_path.join);
+        EXPECT_EQ(a.stroke_path.dash_count, b.stroke_path.dash_count);
+        EXPECT_FLOAT_EQ(a.stroke_path.dash_phase, b.stroke_path.dash_phase);
+        for (int i = 0; i < a.stroke_path.dash_count; i++)
+            EXPECT_FLOAT_EQ(a.stroke_path.dash_array[i], b.stroke_path.dash_array[i]);
+        EXPECT_EQ(a.stroke_path.has_transform, b.stroke_path.has_transform);
+        if (a.stroke_path.has_transform) expect_matrix_eq(a.stroke_path.transform, b.stroke_path.transform);
+        break;
+    case DL_FILL_LINEAR_GRADIENT: {
+        const DlFillLinearGradient& x = a.fill_linear_gradient;
+        const DlFillLinearGradient& y = b.fill_linear_gradient;
+        EXPECT_EQ(x.path, y.path);
+        EXPECT_FLOAT_EQ(x.x1, y.x1); EXPECT_FLOAT_EQ(x.y1, y.y1);
+        EXPECT_FLOAT_EQ(x.x2, y.x2); EXPECT_FLOAT_EQ(x.y2, y.y2);
+        EXPECT_EQ(x.rule, y.rule);
+        ASSERT_EQ(x.stop_count, y.stop_count);
+        for (int i = 0; i < x.stop_count; i++)
+            EXPECT_EQ(memcmp(&x.stops[i], &y.stops[i], sizeof(RdtGradientStop)), 0);
+        EXPECT_EQ(x.has_transform, y.has_transform);
+        if (x.has_transform) expect_matrix_eq(x.transform, y.transform);
+        break;
+    }
+    case DL_FILL_RADIAL_GRADIENT: {
+        const DlFillRadialGradient& x = a.fill_radial_gradient;
+        const DlFillRadialGradient& y = b.fill_radial_gradient;
+        EXPECT_EQ(x.path, y.path);
+        EXPECT_FLOAT_EQ(x.cx, y.cx); EXPECT_FLOAT_EQ(x.cy, y.cy); EXPECT_FLOAT_EQ(x.r, y.r);
+        EXPECT_EQ(x.rule, y.rule);
+        ASSERT_EQ(x.stop_count, y.stop_count);
+        for (int i = 0; i < x.stop_count; i++)
+            EXPECT_EQ(memcmp(&x.stops[i], &y.stops[i], sizeof(RdtGradientStop)), 0);
+        EXPECT_EQ(x.has_transform, y.has_transform);
+        if (x.has_transform) expect_matrix_eq(x.transform, y.transform);
+        break;
+    }
+    case DL_DRAW_IMAGE: {
+        const DlDrawImage& x = a.draw_image;
+        const DlDrawImage& y = b.draw_image;
+        EXPECT_EQ(x.pixels, y.pixels);
+        EXPECT_EQ(x.src_w, y.src_w); EXPECT_EQ(x.src_h, y.src_h);
+        EXPECT_EQ(x.src_stride, y.src_stride);
+        EXPECT_FLOAT_EQ(x.dst_x, y.dst_x); EXPECT_FLOAT_EQ(x.dst_y, y.dst_y);
+        EXPECT_FLOAT_EQ(x.dst_w, y.dst_w); EXPECT_FLOAT_EQ(x.dst_h, y.dst_h);
+        EXPECT_EQ(x.opacity, y.opacity);
+        EXPECT_EQ(x.resource_owner, y.resource_owner);
+        EXPECT_EQ(x.resource_generation, y.resource_generation);
+        EXPECT_EQ(x.has_transform, y.has_transform);
+        if (x.has_transform) expect_matrix_eq(x.transform, y.transform);
+        break;
+    }
+    case DL_DRAW_PICTURE:
+        EXPECT_EQ(a.draw_picture.picture, b.draw_picture.picture);
+        EXPECT_EQ(a.draw_picture.opacity, b.draw_picture.opacity);
+        EXPECT_EQ(a.draw_picture.has_transform, b.draw_picture.has_transform);
+        if (a.draw_picture.has_transform) expect_matrix_eq(a.draw_picture.transform, b.draw_picture.transform);
+        break;
+    case DL_PUSH_CLIP:
+        EXPECT_EQ(a.push_clip.path, b.push_clip.path);
+        EXPECT_EQ(a.push_clip.has_transform, b.push_clip.has_transform);
+        if (a.push_clip.has_transform) expect_matrix_eq(a.push_clip.transform, b.push_clip.transform);
+        break;
+    case DL_POP_CLIP:
+        break;
+    default:
+        ADD_FAILURE() << "unexpected op in parity comparison: " << a.op;
+        break;
+    }
+}
+
+static void expect_lists_equal(const DisplayList& a, const DisplayList& b) {
+    ASSERT_EQ(a.count, b.count);
+    for (int i = 0; i < a.count; i++) expect_item_eq(a.items[i], b.items[i]);
+}
+
+TEST_F(PaintIrParityTest, FillRectMatchesDirect) {
+    paint_fill_rect(&pl, 1.0f, 2.0f, 30.0f, 40.0f, test_color(0xff112233));
+    lower();
+    dl_fill_rect(&direct, 1.0f, 2.0f, 30.0f, 40.0f, test_color(0xff112233));
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, FillRoundedRectMatchesDirect) {
+    paint_fill_rounded_rect(&pl, 5.0f, 6.0f, 20.0f, 10.0f, 3.0f, 4.0f, test_color(0xffaabbcc));
+    lower();
+    dl_fill_rounded_rect(&direct, 5.0f, 6.0f, 20.0f, 10.0f, 3.0f, 4.0f, test_color(0xffaabbcc));
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, FillPathWithTransformMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = 7.0f; m.e23 = 9.0f;
+    paint_fill_path(&pl, path, test_color(0xff445566), RDT_FILL_EVEN_ODD, &m);
+    lower();
+    dl_fill_path(&direct, path, test_color(0xff445566), RDT_FILL_EVEN_ODD, &m);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, StrokePathWithDashesMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    float dashes[3] = {2.0f, 4.0f, 1.5f};
+    paint_stroke_path(&pl, path, test_color(0xffddeeff), 2.5f,
+                      RDT_CAP_ROUND, RDT_JOIN_BEVEL, dashes, 3, 0.75f, nullptr);
+    lower();
+    dl_stroke_path(&direct, path, test_color(0xffddeeff), 2.5f,
+                   RDT_CAP_ROUND, RDT_JOIN_BEVEL, dashes, 3, 0.75f, nullptr);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, LinearGradientMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    RdtGradientStop stops[2] = { {0.0f, 255, 0, 0, 255}, {1.0f, 0, 0, 255, 255} };
+    paint_fill_linear_gradient(&pl, path, 0.0f, 0.0f, 10.0f, 10.0f, stops, 2,
+                               RDT_FILL_WINDING, nullptr);
+    lower();
+    dl_fill_linear_gradient(&direct, path, 0.0f, 0.0f, 10.0f, 10.0f, stops, 2,
+                            RDT_FILL_WINDING, nullptr);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, RadialGradientWithTransformMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    RdtGradientStop stops[3] = {
+        {0.0f, 10, 20, 30, 255}, {0.5f, 40, 50, 60, 128}, {1.0f, 70, 80, 90, 0}
+    };
+    RdtMatrix m = rdt_matrix_identity();
+    m.e11 = 2.0f; m.e22 = 2.0f; m.e13 = 5.0f;
+    paint_fill_radial_gradient(&pl, path, 5.0f, 5.0f, 5.0f, stops, 3,
+                               RDT_FILL_WINDING, &m);
+    lower();
+    dl_fill_radial_gradient(&direct, path, 5.0f, 5.0f, 5.0f, stops, 3,
+                            RDT_FILL_WINDING, &m);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, DrawImageWithGenerationMatchesDirect) {
+    static const uint32_t pixels[4] = {0, 0, 0, 0};
+    ImageSurface owner = {};
+    owner.generation = 42;
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = 3.0f;
+    paint_draw_image(&pl, pixels, 2, 2, 2, 1.0f, 1.0f, 8.0f, 8.0f, 200, &m, &owner);
+    lower();
+    dl_draw_image(&direct, pixels, 2, 2, 2, 1.0f, 1.0f, 8.0f, 8.0f, 200, &m,
+                  &owner, owner.generation);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, ClipPushPopMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    RdtMatrix m = rdt_matrix_identity();
+    paint_push_clip(&pl, path, &m);
+    paint_pop_clip(&pl);
+    lower();
+    dl_push_clip(&direct, path, &m);
+    dl_pop_clip(&direct);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+    RdtMatrix m = rdt_matrix_identity();
+
+    paint_push_clip(&pl, path, &m);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 10.0f, 10.0f, test_color(0xff010203));
+    paint_fill_rounded_rect(&pl, 1.0f, 1.0f, 8.0f, 8.0f, 2.0f, 2.0f, test_color(0xff040506));
+    paint_fill_path(&pl, path, test_color(0xff070809), RDT_FILL_WINDING, nullptr);
+    paint_pop_clip(&pl);
+    lower();
+
+    dl_push_clip(&direct, path, &m);
+    dl_fill_rect(&direct, 0.0f, 0.0f, 10.0f, 10.0f, test_color(0xff010203));
+    dl_fill_rounded_rect(&direct, 1.0f, 1.0f, 8.0f, 8.0f, 2.0f, 2.0f, test_color(0xff040506));
+    dl_fill_path(&direct, path, test_color(0xff070809), RDT_FILL_WINDING, nullptr);
+    dl_pop_clip(&direct);
+
+    EXPECT_EQ(paint_list_count(&pl), 5);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, ClearRewindsCountForReuse) {
+    paint_fill_rect(&pl, 0.0f, 0.0f, 1.0f, 1.0f, test_color(0xff000000));
+    EXPECT_EQ(paint_list_count(&pl), 1);
+    int cap = pl.capacity;
+    paint_list_clear(&pl);
+    EXPECT_EQ(paint_list_count(&pl), 0);
+    EXPECT_EQ(pl.capacity, cap);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 2.0f, 2.0f, test_color(0xffffffff));
+    EXPECT_EQ(paint_list_count(&pl), 1);
 }

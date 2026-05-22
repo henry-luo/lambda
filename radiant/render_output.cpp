@@ -482,9 +482,14 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
 /**
  * Render a large output image in horizontal PNG strips.
  *
- * The caller passes the full physical output size. This function creates one
- * tile surface at a time, renders into page-absolute clipped coordinates, and
- * streams rows into libpng so peak pixel memory stays bounded by the tile
+ * The caller passes the full physical output size. The view tree is walked
+ * once to record a single full-page display list; each horizontal strip is then
+ * produced by replaying that list through dl_replay_tile() with the strip as the
+ * tile region. This is the same record-once / replay-many pipeline used by
+ * normal raster output and threaded tiled replay, so strip output matches
+ * screen/PNG output instead of diverging through a separate per-strip walk.
+ *
+ * Streaming rows into libpng keeps peak pixel memory bounded by the strip
  * height rather than the full page height.
  */
 void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
@@ -493,7 +498,12 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
-    static const int TILE_H = 4096;  // physical pixels per strip
+    // physical pixels per strip; overridable for parity testing against normal PNG.
+    int TILE_H = 4096;
+    if (const char* env = getenv("RADIANT_TILE_STRIP_H")) {
+        int v = atoi(env);
+        if (v > 0) TILE_H = v;
+    }
     log_info("render_output_render_tiled_png: %dx%d px -> %s (%d tiles of %d px)",
         total_width, total_height, output_file,
         (total_height + TILE_H - 1) / TILE_H, TILE_H);
@@ -522,10 +532,49 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     ImageSurface* saved_surface = uicon->surface;
     int saved_window_height = uicon->window_height;
 
+    int first_h = total_height < TILE_H ? total_height : TILE_H;
+
+    // Recording surface: render_output_init_context() needs a surface for vector
+    // backend setup, but recording never touches its pixels (rdcon.dl is set).
+    // Size it to the first strip; the vector backend is rebound per strip below.
+    ImageSurface* rec_surf = image_surface_create(total_width, first_h);
+    if (!rec_surf) {
+        log_error("render_output_render_tiled_png: failed to allocate recording surface %dx%d",
+            total_width, first_h);
+        png_destroy_write_struct(&png, &info);
+        fclose(fp);
+        return;
+    }
+
+    uicon->surface = rec_surf;
+    uicon->window_height = first_h;
+
+    RenderProfiler profiler;
+    render_profiler_reset(&profiler);
+    RenderContext rdcon;
+    render_output_init_context(&rdcon, uicon, view_tree, &profiler);
+
+    // Record the full page once. Use the whole page as the root clip so nothing
+    // is culled at record time; per-strip culling happens during replay.
+    rdcon.block.clip = {0, 0, (float)total_width, (float)total_height};
+
+    DisplayList display_list = {};
+    dl_init(&display_list, view_tree->arena);
+    rdcon.dl = &display_list;
+
+    auto t_record_start = high_resolution_clock::now();
+    render_output_render_view_tree(&rdcon, view_tree);
+    rdcon.dl = nullptr;
+    auto t_record_end = high_resolution_clock::now();
+    log_info("[TIMING] render_output_render_tiled_png record: %.1fms, %d display list items",
+        duration<double, std::milli>(t_record_end - t_record_start).count(),
+        dl_item_count(&display_list));
+
     for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
         int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
 
-        ImageSurface* tile_surf = image_surface_create(total_width, tile_h);
+        ImageSurface* tile_surf = (tile_y == 0) ? rec_surf
+                                                : image_surface_create(total_width, tile_h);
         if (!tile_surf) {
             log_error("render_output_render_tiled_png: failed to allocate tile surface %dx%d at y=%d",
                 total_width, tile_h, tile_y);
@@ -537,30 +586,32 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
             RasterPaintContext raster = {tile_surf, &tile_clip, nullptr, 0};
             raster_fill_rect(&raster, NULL, canvas_bg);
         }
-        tile_surf->tile_offset_y = tile_y;
+        // dl_replay_tile uses tile-local coordinates and translates via tile_y,
+        // so the strip surface itself starts at local origin 0.
+        tile_surf->tile_offset_y = 0;
 
-        uicon->surface = tile_surf;
-        uicon->window_height = tile_h;
+        // Rebind the vector backend to this strip's pixel buffer.
+        rdt_vector_set_target(&rdcon.vec, (uint32_t*)tile_surf->pixels,
+                              total_width, tile_h, total_width);
 
-        RenderProfiler profiler;
-        render_profiler_reset(&profiler);
-        RenderContext rdcon;
-        render_output_init_context(&rdcon, uicon, view_tree, &profiler);
-
-        rdcon.block.clip = {0, (float)tile_y, (float)total_width, (float)(tile_y + tile_h)};
-        rdt_vector_set_tile_offset_y(&rdcon.vec, (float)tile_y);
-
-        render_output_render_view_tree(&rdcon, view_tree);
-        render_output_cleanup_context(&rdcon);
+        dl_replay_tile(&display_list, &rdcon.vec, tile_surf, &rdcon.scratch,
+                       0.0f, (float)tile_y, (float)total_width, (float)tile_h,
+                       rdcon.scale);
 
         for (int y = 0; y < tile_h; y++) {
             uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;
             png_write_row(png, row);
         }
 
-        image_surface_destroy(tile_surf);
+        if (tile_surf != rec_surf) {
+            image_surface_destroy(tile_surf);
+        }
         log_info("render_output_render_tiled_png: tile y=%d..%d done", tile_y, tile_y + tile_h);
     }
+
+    dl_destroy(&display_list);
+    render_output_cleanup_context(&rdcon);
+    image_surface_destroy(rec_surf);
 
     uicon->surface = saved_surface;
     uicon->window_height = saved_window_height;

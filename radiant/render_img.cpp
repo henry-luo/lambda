@@ -270,7 +270,13 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     // pixel threshold above which tiled rendering is used to avoid OOM on huge pages
     // (32 M pixels × 4 bytes = 128 MB; e.g. 1200-px wide → ~26 000 px tall)
-    static const int64_t PNG_TILE_THRESHOLD = (int64_t)32 * 1024 * 1024;
+    // Overridable via RADIANT_TILE_THRESHOLD (pixels) so parity tests can force the
+    // tiled path on a small page.
+    int64_t PNG_TILE_THRESHOLD = (int64_t)32 * 1024 * 1024;
+    if (const char* env = getenv("RADIANT_TILE_THRESHOLD")) {
+        long long v = atoll(env);
+        if (v > 0) PNG_TILE_THRESHOLD = (int64_t)v;
+    }
 
     bool rendered = false;  // set to true when tiled path handles rendering
 
