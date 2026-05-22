@@ -50,6 +50,9 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                ScratchArena* scratch, float scale,
                DirtyTracker* dirty_tracker) {
     (void)clip;
+    if (!dl_validate_or_log(dl, "dl_replay")) {
+        return;
+    }
     log_debug("[DL_REPLAY] replaying %d items", dl->count);
 
     DisplayReplayDirtyClip dirty_clip = dl_replay_push_dirty_clip(vec, dirty_tracker, scale);

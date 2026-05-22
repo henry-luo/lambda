@@ -63,6 +63,20 @@ typedef struct RenderProfiler {
     int64_t font_metrics_count;
 } RenderProfiler;
 
+typedef struct RenderPathTrace {
+    const char* target;
+    bool display_list_recorded;
+    bool paint_ir_enabled;
+    bool selective;
+    bool tiled_replay;
+    bool large_tiled_export;
+    int display_list_items;
+    int tile_count;
+    int thread_count;
+    int surface_width;
+    int surface_height;
+} RenderPathTrace;
+
 void render_profiler_reset(RenderProfiler* profiler);
 double render_profiler_now_ms();
 void render_profiler_increment(RenderProfiler* profiler, RenderProfileZone zone);
@@ -78,3 +92,5 @@ void render_profiler_write_tiled_replay_stderr(double replay_ms, int item_count,
 void render_profiler_emit_event(RenderProfiler* profiler, struct UiContext* uicon,
     struct DocState* state, double record_ms, double replay_ms, double total_ms,
     int item_count, bool selective, bool tiled, int tile_count, int thread_count);
+void render_profiler_emit_path_trace(RenderProfiler* profiler, struct UiContext* uicon,
+    struct DocState* state, const RenderPathTrace* trace);

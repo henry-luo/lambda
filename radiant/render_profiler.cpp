@@ -224,3 +224,50 @@ void render_profiler_emit_event(RenderProfiler* profiler, UiContext* uicon,
     jw_obj_end(&w);
     event_state_log_finish_record(log, &w);
 }
+
+void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
+                                     DocState* state, const RenderPathTrace* trace) {
+    (void)profiler;
+    if (!trace) {
+        return;
+    }
+
+    log_info("[RENDER_PATH] target=%s dl=%d paint_ir=%d selective=%d tiled=%d large_tiled=%d items=%d tiles=%d threads=%d surface=%dx%d",
+             trace->target ? trace->target : "unknown",
+             trace->display_list_recorded ? 1 : 0,
+             trace->paint_ir_enabled ? 1 : 0,
+             trace->selective ? 1 : 0,
+             trace->tiled_replay ? 1 : 0,
+             trace->large_tiled_export ? 1 : 0,
+             trace->display_list_items,
+             trace->tile_count,
+             trace->thread_count,
+             trace->surface_width,
+             trace->surface_height);
+
+    EventStateLog* log = state && state->active_event_log ? state->active_event_log :
+        (uicon ? uicon->event_log : NULL);
+    if (!event_state_log_enabled(log)) {
+        return;
+    }
+
+    char buf[1024];
+    JsonWriter w;
+    uint64_t cascade_id = state ? state->active_cascade_id : 0;
+    event_state_log_begin_record(log, &w, buf, sizeof(buf), "render.path", cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "target", trace->target ? trace->target : "unknown");
+        jw_kv_bool(&w, "display_list_recorded", trace->display_list_recorded);
+        jw_kv_bool(&w, "paint_ir_enabled", trace->paint_ir_enabled);
+        jw_kv_bool(&w, "selective", trace->selective);
+        jw_kv_bool(&w, "tiled_replay", trace->tiled_replay);
+        jw_kv_bool(&w, "large_tiled_export", trace->large_tiled_export);
+        jw_kv_int(&w, "display_list_items", trace->display_list_items);
+        jw_kv_int(&w, "tile_count", trace->tile_count);
+        jw_kv_int(&w, "thread_count", trace->thread_count);
+        jw_kv_int(&w, "surface_width", trace->surface_width);
+        jw_kv_int(&w, "surface_height", trace->surface_height);
+    jw_obj_end(&w);
+    event_state_log_finish_record(log, &w);
+}

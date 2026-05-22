@@ -500,6 +500,61 @@ TEST_F(DisplayListTest, ClearRewindsScratchCopiesButKeepsCapacityForReuse) {
     EXPECT_EQ(dl.items[0].op, DL_FILL_RECT);
 }
 
+TEST_F(DisplayListTest, ValidateAcceptsBalancedReplayState) {
+    char path_token = 0;
+    RdtPath* path = (RdtPath*)&path_token;
+    test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 10.0f, 10.0f);
+
+    dl_push_clip(&dl, path, nullptr);
+    dl_pop_clip(&dl);
+    dl_save_backdrop(&dl, 0, 0, 12, 12);
+    dl_composite_opacity(&dl, 0, 0, 12, 12, 0.5f);
+    dl_shadow_clip_save(&dl, 0, 0, 12, 12);
+    dl_shadow_clip_restore(&dl, 0, nullptr, 0, 0, 12, 12, 1);
+    int begin = dl_begin_element(&dl, 41, 1.0f, 2.0f, 3.0f, 4.0f);
+    dl_fill_rect(&dl, 2.0f, 3.0f, 4.0f, 5.0f, test_color(0xff102030));
+    dl_end_element(&dl, begin);
+
+    DisplayListValidationResult result = {};
+    EXPECT_TRUE(dl_validate(&dl, &result));
+    EXPECT_TRUE(result.valid);
+    EXPECT_EQ(result.first_error_index, -1);
+}
+
+TEST_F(DisplayListTest, ValidateRejectsUnbalancedReplayState) {
+    dl_pop_clip(&dl);
+
+    DisplayListValidationResult result = {};
+    EXPECT_FALSE(dl_validate(&dl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
+}
+
+TEST_F(DisplayListTest, ValidateRejectsInvalidDrawablePayload) {
+    DisplayItem* image = dl_alloc_item(&dl);
+    ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->draw_image.src_w = 8;
+    image->draw_image.src_h = 8;
+    image->draw_image.src_stride = 8;
+    image->draw_image.dst_w = 8.0f;
+    image->draw_image.dst_h = 8.0f;
+
+    DisplayListValidationResult result = {};
+    EXPECT_FALSE(dl_validate(&dl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
+}
+
+TEST_F(DisplayListTest, ValidateRejectsUnclosedElementMarker) {
+    dl_begin_element(&dl, 99, 0.0f, 0.0f, 10.0f, 10.0f);
+
+    DisplayListValidationResult result = {};
+    EXPECT_FALSE(dl_validate(&dl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
+}
+
 // ─── PaintIR -> DisplayList parity ──────────────────────────────────────────
 //
 // Phase C gate (see vibe/radiant/Radiant_Design_Render_Paths.md): raster must

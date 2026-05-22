@@ -639,6 +639,62 @@ TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
     expect_pngs_exactly_equal(normal_png, tiled_png);
 }
 
+TEST(RenderOutputParity, ThreadedTiledReplayMatchesSingleReplay) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/threaded_replay_parity.html";
+    const char* single_png = "temp/render_output_parity/single_replay.png";
+    const char* tiled_png = "temp/render_output_parity/threaded_tiled_replay.png";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>"
+        "html,body{margin:0;padding:0;background:#fbfbf7;}"
+        ".page{position:relative;width:220px;height:640px;background:#fbfbf7;}"
+        ".a{position:absolute;left:14px;top:18px;width:72px;height:118px;background:#ef4444;}"
+        ".b{position:absolute;left:108px;top:72px;width:84px;height:190px;background:#22c55e;}"
+        ".c{position:absolute;left:32px;top:292px;width:148px;height:92px;background:#3b82f6;}"
+        ".d{position:absolute;left:56px;top:458px;width:110px;height:118px;background:#f59e0b;}"
+        "</style></head><body><div class=\"page\">"
+        "<div class=\"a\"></div><div class=\"b\"></div><div class=\"c\"></div><div class=\"d\"></div>"
+        "</div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsingle[PATH_MAX + 8];
+    char qtiled[PATH_MAX + 8];
+    char single_cmd[PATH_MAX * 4 + 256];
+    char tiled_cmd[PATH_MAX * 4 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(single_png, qsingle, sizeof(qsingle));
+    shell_quote(tiled_png, qtiled, sizeof(qtiled));
+
+    snprintf(single_cmd, sizeof(single_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=1 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/single_replay.out 2> temp/render_output_parity/single_replay.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsingle);
+    snprintf(tiled_cmd, sizeof(tiled_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=2 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/threaded_tiled_replay.out 2> temp/render_output_parity/threaded_tiled_replay.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qtiled);
+
+    int single_status = system(single_cmd);
+    int tiled_status = system(tiled_cmd);
+
+    ASSERT_TRUE(WIFEXITED(single_status));
+    ASSERT_EQ(WEXITSTATUS(single_status), 0);
+    ASSERT_TRUE(WIFEXITED(tiled_status));
+    ASSERT_EQ(WEXITSTATUS(tiled_status), 0);
+    ASSERT_TRUE(file_exists(single_png));
+    ASSERT_TRUE(file_exists(tiled_png));
+    expect_pngs_exactly_equal(single_png, tiled_png);
+}
+
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {
     for (int i = 0; i < result_count; i++) {
         BaselineEntry* baseline_entry = find_baseline_entry(baseline, results[i].test_id);
