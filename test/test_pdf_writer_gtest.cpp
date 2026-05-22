@@ -325,6 +325,64 @@ TEST_F(PdfWriterTest, MoveToLineTo) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, CurveToClosePath) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+
+    HPDF_STATUS status;
+
+    status = HPDF_Page_MoveTo(page, 50.0f, 50.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_CurveTo(page, 75.0f, 100.0f, 125.0f, 100.0f, 150.0f, 50.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_ClosePath(page);
+    EXPECT_EQ(status, HPDF_OK);
+
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, ClipPath) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+
+    HPDF_STATUS status;
+
+    status = HPDF_Page_Rectangle(page, 10.0f, 20.0f, 30.0f, 40.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_Clip(page);
+    EXPECT_EQ(status, HPDF_OK);
+
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, DrawABGRImage) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+    HPDF_Page_SetWidth(page, 100.0f);
+    HPDF_Page_SetHeight(page, 100.0f);
+
+    uint32_t pixels[4] = {
+        0xff0000ff, 0xff00ff00,
+        0xffff0000, 0xffffffff
+    };
+    HPDF_STATUS status = HPDF_Page_DrawABGRImage(page, pixels, 2, 2, 2,
+                                                 20.0f, 0.0f, 0.0f,
+                                                 20.0f, 10.0f, 10.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    const char* filename = "test_output/test_image.pdf";
+    status = HPDF_SaveToFile(doc, filename);
+    EXPECT_EQ(status, HPDF_OK);
+    EXPECT_TRUE(file_contains(filename, "BI"));
+    EXPECT_TRUE(file_contains(filename, "/F /AHx"));
+    EXPECT_TRUE(file_contains(filename, "FF000000FF00"));
+
+    HPDF_Free(doc);
+}
+
 TEST_F(PdfWriterTest, FillPath) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_Page page = HPDF_AddPage(doc);

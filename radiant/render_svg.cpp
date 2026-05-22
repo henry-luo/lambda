@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "render_backend.h"
+#include "render_backend_caps.hpp"
 #include "render_export_support.hpp"
 #include "render_geometry.hpp"
 #include "view.hpp"
@@ -46,6 +47,7 @@ typedef struct {
     Color color;
     UiContext* ui_context;
     PaintList paint_list;
+    int paint_resource_id;
     bool _transform_emitted;  // tracks begin/end_transform pairing
 } SvgRenderContext;
 
@@ -64,7 +66,10 @@ static void svg_indent(SvgRenderContext* ctx) {
 static void svg_lower_paint_list(SvgRenderContext* ctx) {
     PaintSvgLoweringOptions options = {};
     options.indent_level = ctx->indent_level;
+    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
+    options.resource_id_base = ctx->paint_resource_id;
     paint_ir_lower_svg(&ctx->paint_list, ctx->svg_content, &options, nullptr);
+    ctx->paint_resource_id += paint_list_count(&ctx->paint_list);
     paint_list_clear(&ctx->paint_list);
 }
 
@@ -685,9 +690,10 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     // Render background gradient (linear or radial)
     if (view->bound->background && view->bound->background->gradient_type != GRADIENT_NONE) {
         BackgroundProp* bg = view->bound->background;
-        uintptr_t view_id  = (uintptr_t)view;
+        Rect gradient_rect = {x, y, width, height};
+        RdtPath* gradient_path = render_path_create_rounded_rect(gradient_rect, nullptr);
 
-        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient && bg->linear_gradient->stop_count >= 2) {
+        if (gradient_path && bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient && bg->linear_gradient->stop_count >= 2) {
             LinearGradient* lg = bg->linear_gradient;
             // CSS angle: 0 = to top, 90 = to right. Convert to direction vector.
             float angle_rad = lg->angle * (float)M_PI / 180.0f;
@@ -703,69 +709,49 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             float gx1 = bcx - dx * dist, gy1 = bcy - dy * dist;
             float gx2 = bcx + dx * dist, gy2 = bcy + dy * dist;
 
-            char grad_id[64];
-            str_fmt(grad_id, sizeof(grad_id), "lingrad-%lx", (unsigned long)view_id);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<defs><linearGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
-                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\">\n",
-                grad_id, gx1, gy1, gx2, gy2);
-            ctx->indent_level++;
-            for (int i = 0; i < lg->stop_count; i++) {
-                GradientStop* stop = &lg->stops[i];
-                float pos = stop->position >= 0 ? stop->position
-                                                : (lg->stop_count > 1 ? (float)i / (lg->stop_count - 1) : 0.0f);
-                char sc[32];
-                svg_color_to_string(stop->color, sc);
-                svg_indent(ctx);
-                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
-                if (stop->color.a < 255) {
-                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+            RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
+                (size_t)lg->stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            if (stops) {
+                for (int stop_i = 0; stop_i < lg->stop_count; stop_i++) {
+                    GradientStop* stop = &lg->stops[stop_i];
+                    float pos = stop->position >= 0 ? stop->position
+                                                    : (lg->stop_count > 1 ? (float)stop_i / (lg->stop_count - 1) : 0.0f);
+                    stops[stop_i] = {pos, stop->color.r, stop->color.g,
+                                     stop->color.b, stop->color.a};
                 }
-                strbuf_append_str(ctx->svg_content, " />\n");
+                paint_fill_linear_gradient(&ctx->paint_list, gradient_path,
+                                           gx1, gy1, gx2, gy2, stops, lg->stop_count,
+                                           RDT_FILL_WINDING, nullptr);
+                svg_lower_paint_list(ctx);
+                mem_free(stops);
             }
-            ctx->indent_level--;
-            svg_indent(ctx);
-            strbuf_append_str(ctx->svg_content, "</linearGradient></defs>\n");
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
-                x, y, width, height, grad_id);
 
-        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient && bg->radial_gradient->stop_count >= 2) {
+        } else if (gradient_path && bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient && bg->radial_gradient->stop_count >= 2) {
             RadialGradient* rg = bg->radial_gradient;
             float gcx = x + (rg->cx_set ? rg->cx * width  : width  * 0.5f);
             float gcy = y + (rg->cy_set ? rg->cy * height : height * 0.5f);
             float r   = (width < height ? width : height) * 0.5f; // farthest-corner simplification
 
-            char grad_id[64];
-            str_fmt(grad_id, sizeof(grad_id), "radgrad-%lx", (unsigned long)view_id);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<defs><radialGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
-                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\">\n",
-                grad_id, gcx, gcy, r);
-            ctx->indent_level++;
-            for (int i = 0; i < rg->stop_count; i++) {
-                GradientStop* stop = &rg->stops[i];
-                float pos = stop->position >= 0 ? stop->position
-                                                : (rg->stop_count > 1 ? (float)i / (rg->stop_count - 1) : 0.0f);
-                char sc[32];
-                svg_color_to_string(stop->color, sc);
-                svg_indent(ctx);
-                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
-                if (stop->color.a < 255) {
-                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+            RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
+                (size_t)rg->stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            if (stops) {
+                for (int stop_i = 0; stop_i < rg->stop_count; stop_i++) {
+                    GradientStop* stop = &rg->stops[stop_i];
+                    float pos = stop->position >= 0 ? stop->position
+                                                    : (rg->stop_count > 1 ? (float)stop_i / (rg->stop_count - 1) : 0.0f);
+                    stops[stop_i] = {pos, stop->color.r, stop->color.g,
+                                     stop->color.b, stop->color.a};
                 }
-                strbuf_append_str(ctx->svg_content, " />\n");
+                paint_fill_radial_gradient(&ctx->paint_list, gradient_path,
+                                           gcx, gcy, r, stops, rg->stop_count,
+                                           RDT_FILL_WINDING, nullptr);
+                svg_lower_paint_list(ctx);
+                mem_free(stops);
             }
-            ctx->indent_level--;
-            svg_indent(ctx);
-            strbuf_append_str(ctx->svg_content, "</radialGradient></defs>\n");
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
-                x, y, width, height, grad_id);
+        }
+
+        if (gradient_path) {
+            rdt_path_free(gradient_path);
         }
     }
 

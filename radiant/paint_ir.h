@@ -29,6 +29,7 @@
 // ==========================================================================
 
 #include "display_list.h"   // DisplayList + all rdt_* / Color / Bound / ClipShape types
+#include "render_backend_caps.hpp"
 #include "../lib/strbuf.h"  // StrBuf for vector lowerings
 
 #ifdef __cplusplus
@@ -449,6 +450,8 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
 typedef struct {
     int indent_level;
     bool emit_unsupported_comments;
+    const RenderExportTargetCaps* caps;
+    int resource_id_base;
 } PaintSvgLoweringOptions;
 
 typedef struct {
