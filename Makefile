@@ -2569,7 +2569,7 @@ capture-render:
 	fi
 
 # test-render: Run render visual regression tests
-# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>] [suite=<suite>]
+# Usage: make test-render [test=<test-name>] [pattern=<regex>] [threshold=<percent>] [suite=<suite>] [baseline=1] [update=1]
 test-render:
 	@echo "🎨 Running Radiant Render Tests"
 	@echo "================================"
@@ -2584,6 +2584,8 @@ test-render:
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
 		THRESHOLD_VAR="$(or $(threshold),$(THRESHOLD))"; \
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
+		BASELINE_VAR="$(or $(baseline),$(BASELINE))"; \
+		UPDATE_VAR="$(or $(update),$(UPDATE),$(update-baseline),$(UPDATE_BASELINE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			ARGS="$$ARGS --test $$TEST_VAR"; \
 		fi; \
@@ -2595,6 +2597,12 @@ test-render:
 		fi; \
 		if [ -n "$$SUITE_VAR" ]; then \
 			ARGS="$$ARGS --suite $$SUITE_VAR"; \
+		fi; \
+		if [ -n "$$BASELINE_VAR" ] && [ "$$BASELINE_VAR" != "0" ]; then \
+			ARGS="$$ARGS --baseline"; \
+		fi; \
+		if [ -n "$$UPDATE_VAR" ] && [ "$$UPDATE_VAR" != "0" ]; then \
+			ARGS="$$ARGS --update-baseline"; \
 		fi; \
 		LAMBDA_ROOT=$(CURDIR) node test_radiant_render.js $$ARGS; \
 	else \
