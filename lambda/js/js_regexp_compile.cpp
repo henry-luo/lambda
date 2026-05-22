@@ -5,7 +5,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <utf8proc.h>
 
 #define JS_REGEXP_MAX_NAMED_GROUPS 96
 #define JS_REGEXP_MAX_NAMED_BACKREFS 96
@@ -15,141 +14,17 @@ typedef struct JsRegExpNameRef {
     int len;
 } JsRegExpNameRef;
 
-static int js_regexp_hex_value(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return 10 + ch - 'a';
-    if (ch >= 'A' && ch <= 'F') return 10 + ch - 'A';
-    return -1;
+static bool js_regexp_is_ascii_name_start(unsigned char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+        ch == '_' || ch == '$' || ch >= 0x80;
 }
 
-static bool js_regexp_is_name_start_cp(uint32_t cp) {
-    if (cp == '$' || cp == '_') return true;
-    if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return true;
-    utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
-    return cat == UTF8PROC_CATEGORY_LU || cat == UTF8PROC_CATEGORY_LL ||
-        cat == UTF8PROC_CATEGORY_LT || cat == UTF8PROC_CATEGORY_LM ||
-        cat == UTF8PROC_CATEGORY_LO || cat == UTF8PROC_CATEGORY_NL;
+static bool js_regexp_is_ascii_name_continue(unsigned char ch) {
+    return js_regexp_is_ascii_name_start(ch) || (ch >= '0' && ch <= '9');
 }
 
-static bool js_regexp_is_name_continue_cp(uint32_t cp) {
-    if (js_regexp_is_name_start_cp(cp)) return true;
-    if (cp >= '0' && cp <= '9') return true;
-    if (cp == 0x200C || cp == 0x200D) return true;
-    utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)cp);
-    return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_MC ||
-        cat == UTF8PROC_CATEGORY_ND || cat == UTF8PROC_CATEGORY_PC;
-}
-
-static bool js_regexp_read_hex_escape_cp(const char* pattern, int pattern_len,
-    int index, int* next_index, uint32_t* out_cp) {
-    if (!pattern || index + 1 >= pattern_len || pattern[index] != '\\' ||
-        pattern[index + 1] != 'u') return false;
-    if (index + 2 < pattern_len && pattern[index + 2] == '{') {
-        int j = index + 3;
-        uint32_t cp = 0;
-        int digits = 0;
-        while (j < pattern_len && pattern[j] != '}') {
-            int hv = js_regexp_hex_value(pattern[j]);
-            if (hv < 0 || digits >= 6) return false;
-            cp = (cp << 4) | (uint32_t)hv;
-            digits++;
-            j++;
-        }
-        if (j >= pattern_len || digits <= 0 || cp > 0x10FFFFu) return false;
-        if (next_index) *next_index = j + 1;
-        if (out_cp) *out_cp = cp;
-        return true;
-    }
-    if (index + 5 >= pattern_len) return false;
-    uint32_t value = 0;
-    for (int j = index + 2; j < index + 6; j++) {
-        int hv = js_regexp_hex_value(pattern[j]);
-        if (hv < 0) return false;
-        value = (value << 4) | (uint32_t)hv;
-    }
-    int end = index + 6;
-    if (value >= 0xD800u && value <= 0xDBFFu && end + 5 < pattern_len &&
-        pattern[end] == '\\' && pattern[end + 1] == 'u') {
-        uint32_t low = 0;
-        bool low_ok = true;
-        for (int j = end + 2; j < end + 6; j++) {
-            int hv = js_regexp_hex_value(pattern[j]);
-            if (hv < 0) { low_ok = false; break; }
-            low = (low << 4) | (uint32_t)hv;
-        }
-        if (low_ok && low >= 0xDC00u && low <= 0xDFFFu) {
-            value = 0x10000u + ((value - 0xD800u) << 10) + (low - 0xDC00u);
-            end += 6;
-        }
-    }
-    if (next_index) *next_index = end;
-    if (out_cp) *out_cp = value;
-    return true;
-}
-
-static bool js_regexp_read_name_cp(const char* pattern, int index, int limit,
-    int* next_index, uint32_t* out_cp) {
-    if (!pattern || index >= limit) return false;
-    if (pattern[index] == '\\') {
-        if (index + 1 < limit && pattern[index + 1] == 'u') {
-            int next = index;
-            uint32_t cp = 0;
-            if (!js_regexp_read_hex_escape_cp(pattern, limit, index, &next, &cp)) return false;
-            if (next <= index || next > limit) return false;
-            if (next_index) *next_index = next;
-            if (out_cp) *out_cp = cp;
-            return true;
-        }
-        return false;
-    }
-    utf8proc_int32_t cp = 0;
-    utf8proc_ssize_t width = utf8proc_iterate(
-        (const utf8proc_uint8_t*)pattern + index,
-        (utf8proc_ssize_t)(limit - index), &cp);
-    if (width <= 0 || cp < 0) return false;
-    if (next_index) *next_index = index + (int)width;
-    if (out_cp) *out_cp = (uint32_t)cp;
-    return true;
-}
-
-static bool js_regexp_is_valid_group_name(const char* pattern, int name_start, int name_end) {
-    if (!pattern || name_start >= name_end) return false;
-    int pos = name_start;
-    uint32_t cp = 0;
-    int next = pos;
-    if (!js_regexp_read_name_cp(pattern, pos, name_end, &next, &cp) ||
-        !js_regexp_is_name_start_cp(cp)) {
-        return false;
-    }
-    pos = next;
-    while (pos < name_end) {
-        if (!js_regexp_read_name_cp(pattern, pos, name_end, &next, &cp) ||
-            !js_regexp_is_name_continue_cp(cp)) {
-            return false;
-        }
-        pos = next;
-    }
-    return true;
-}
-
-static bool js_regexp_same_name_decoded(const JsRegExpNameRef* a, const char* b, int b_len) {
-    if (!a || !a->name || !b) return false;
-    int apos = 0;
-    int bpos = 0;
-    while (apos < a->len && bpos < b_len) {
-        uint32_t acp = 0;
-        uint32_t bcp = 0;
-        int anext = apos;
-        int bnext = bpos;
-        if (!js_regexp_read_name_cp(a->name, apos, a->len, &anext, &acp) ||
-            !js_regexp_read_name_cp(b, bpos, b_len, &bnext, &bcp)) {
-            return false;
-        }
-        if (acp != bcp) return false;
-        apos = anext;
-        bpos = bnext;
-    }
-    return apos == a->len && bpos == b_len;
+static bool js_regexp_same_name(const JsRegExpNameRef* a, const char* b, int b_len) {
+    return a && a->len == b_len && memcmp(a->name, b, b_len) == 0;
 }
 
 static void js_regexp_set_error(JsRegExpCompileInfo* out, const char* fmt,
@@ -189,7 +64,24 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
                     continue;
                 }
                 int name_len = j - name_start;
-                if (name_len <= 0 || !js_regexp_is_valid_group_name(pattern, name_start, j)) {
+                if (name_len <= 0 || !js_regexp_is_ascii_name_start((unsigned char)pattern[name_start])) {
+                    if (strict_names) {
+                        js_regexp_set_error(out,
+                            "Invalid regular expression: /%.*s/%.*s: invalid named backreference%s",
+                            pattern, pattern_len, flags, flags_len, "");
+                        return false;
+                    }
+                    i = j;
+                    continue;
+                }
+                bool valid_backref_name = true;
+                for (int k = name_start + 1; k < j; k++) {
+                    if (!js_regexp_is_ascii_name_continue((unsigned char)pattern[k])) {
+                        valid_backref_name = false;
+                        break;
+                    }
+                }
+                if (!valid_backref_name) {
                     if (strict_names) {
                         js_regexp_set_error(out,
                             "Invalid regular expression: /%.*s/%.*s: invalid named backreference%s",
@@ -232,14 +124,22 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
             return false;
         }
         int name_len = j - name_start;
-        if (name_len <= 0 || !js_regexp_is_valid_group_name(pattern, name_start, j)) {
+        if (name_len <= 0 || !js_regexp_is_ascii_name_start((unsigned char)pattern[name_start])) {
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: invalid named capture%s",
                 pattern, pattern_len, flags, flags_len, "");
             return false;
         }
+        for (int k = name_start + 1; k < j; k++) {
+            if (!js_regexp_is_ascii_name_continue((unsigned char)pattern[k])) {
+                js_regexp_set_error(out,
+                    "Invalid regular expression: /%.*s/%.*s: invalid named capture%s",
+                    pattern, pattern_len, flags, flags_len, "");
+                return false;
+            }
+        }
         for (int g = 0; g < group_count; g++) {
-            if (js_regexp_same_name_decoded(&groups[g], pattern + name_start, name_len)) {
+            if (js_regexp_same_name(&groups[g], pattern + name_start, name_len)) {
                 js_regexp_set_error(out,
                     "Invalid regular expression: /%.*s/%.*s: duplicate capture group name%s",
                     pattern, pattern_len, flags, flags_len, "");
@@ -258,7 +158,7 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
     for (int b = 0; b < backref_count; b++) {
         bool found = false;
         for (int g = 0; g < group_count; g++) {
-            if (js_regexp_same_name_decoded(&groups[g], backrefs[b].name, backrefs[b].len)) {
+            if (js_regexp_same_name(&groups[g], backrefs[b].name, backrefs[b].len)) {
                 found = true;
                 break;
             }
@@ -349,10 +249,6 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     if (!pattern || pattern_len <= 0) return NULL;
 
     JsRegExpNameRef groups[JS_REGEXP_MAX_NAMED_GROUPS];
-    for (int gi = 0; gi < JS_REGEXP_MAX_NAMED_GROUPS; gi++) {
-        groups[gi].name = NULL;
-        groups[gi].len = 0;
-    }
     int group_count = 0;
     bool in_class = false;
     bool has_named_backref = false;
@@ -400,9 +296,6 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
     if (!rewritten) return NULL;
     int out_pos = 0;
     in_class = false;
-    int current_group = 0;
-    int paren_stack[128];
-    int paren_depth = 0;
     for (int i = 0; i < pattern_len; i++) {
         unsigned char ch = (unsigned char)pattern[i];
         if (ch == '\\' && !in_class && i + 2 < pattern_len &&
@@ -414,33 +307,18 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
                 int name_len = j - name_start;
                 int numeric_index = 0;
                 for (int g = 0; g < group_count && g < JS_REGEXP_MAX_NAMED_GROUPS; g++) {
-                    if (!groups[g].name) continue;
-                    if (js_regexp_same_name_decoded(&groups[g], pattern + name_start, name_len)) {
+                    if (js_regexp_same_name(&groups[g], pattern + name_start, name_len)) {
                         numeric_index = g + 1;
                         break;
                     }
                 }
                 if (numeric_index > 0 && numeric_index <= 9) {
-                    bool refers_to_open_group = false;
-                    for (int d = 0; d < paren_depth; d++) {
-                        if (paren_stack[d] == numeric_index) {
-                            refers_to_open_group = true;
-                            break;
-                        }
-                    }
-                    if (refers_to_open_group) {
-                        i = j;
-                        continue;
-                    }
                     rewritten[out_pos++] = '\\';
                     rewritten[out_pos++] = (char)('0' + numeric_index);
                     i = j;
                     continue;
                 }
-                if (numeric_index == 0) {
-                    // In legacy (non-u/non-v) mode, malformed or unresolved
-                    // named backreferences are identity escapes.  This remains
-                    // true even when the same pattern has ordinary captures.
+                if (group_count == 0) {
                     rewritten[out_pos++] = 'k';
                     for (int k = name_start - 1; k <= j; k++) {
                         rewritten[out_pos++] = pattern[k];
@@ -457,20 +335,6 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
         }
         if (ch == '[') in_class = true;
         else if (ch == ']' && in_class) in_class = false;
-        else if (!in_class && ch == '(') {
-            int group_index = 0;
-            if (i + 1 < pattern_len && pattern[i + 1] == '?') {
-                if (i + 3 < pattern_len && pattern[i + 2] == '<' &&
-                    pattern[i + 3] != '=' && pattern[i + 3] != '!') {
-                    group_index = ++current_group;
-                }
-            } else {
-                group_index = ++current_group;
-            }
-            if (paren_depth < 128) paren_stack[paren_depth++] = group_index;
-        } else if (!in_class && ch == ')') {
-            if (paren_depth > 0) paren_depth--;
-        }
         rewritten[out_pos++] = pattern[i];
     }
     rewritten[out_pos] = '\0';

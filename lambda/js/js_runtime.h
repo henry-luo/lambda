@@ -158,7 +158,6 @@ Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bou
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
 Item js_builtin_eval(Item code_item, int64_t is_global_scope);
-Item js_builtin_eval_regexp_literal_fast(Item code_item);
 void js_eval_private_push_frame(void);
 void js_eval_private_pop_frame(void);
 void js_eval_private_bind(Item unscoped_key, Item scoped_key);
@@ -242,8 +241,6 @@ int js_is_diagnose_enabled(void);
 
 Item js_parseInt(Item str_item, Item radix_item);
 Item js_parseFloat(Item str_item);
-Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item, Item radix_item);
-Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item);
 Item js_isNaN(Item value);
 Item js_isFinite(Item value);
 
@@ -425,7 +422,6 @@ void js_fetch_set_base_path(const char* dir_path);
  * In a called function, throw sets the flag and returns; the caller checks.
  */
 void js_throw_value(Item value);
-void js_throw_value_with_message(Item value, const char* message);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
@@ -534,7 +530,6 @@ void js_globals_batch_reset(void);
 void js_reset_constructor_prototypes(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
-bool js_is_constructor_object(Item callee);
 
 // A5: Constructor shape pre-allocation
 // Creates a new object with pre-built shape: all property slots pre-allocated
@@ -572,12 +567,6 @@ Item js_encodeURIComponent(Item str_item);
 Item js_decodeURIComponent(Item str_item);
 Item js_encodeURI(Item str_item);
 Item js_decodeURI(Item str_item);
-Item js_decodeURI_percent_fromCharCode_1(Item code_item, int64_t component);
-Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item, int64_t component);
-Item js_uri_decode_identity(Item str_item, int64_t component);
-int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item, int64_t component);
-int64_t js_uri_decode_equals_from_char_code_raw_ints(Item str_item, int64_t first, int64_t second, int64_t component);
-int64_t js_uri_decode_identity_raw(Item str_item, int64_t component);
 Item js_unescape(Item str_item);
 Item js_escape(Item str_item);
 Item js_atob(Item str_item);
@@ -594,11 +583,7 @@ void js_set_global_property(Item key, Item value);
 void js_set_global_var_property_fast(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
 void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
-void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
-void js_define_global_function_property(Item key, Item value);
-void js_define_global_lexical_binding(Item key, Item value, int64_t immutable);
-void js_check_global_lex_decl(Item key);
 void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
@@ -621,12 +606,9 @@ void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
-Item js_get_with_binding_or_global_reference(Item key, int64_t strict_reference);
 int64_t js_probe_with_binding(Item key);
 int64_t js_capture_with_binding(Item key);
 int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
-int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict);
-Item js_last_with_binding_base_or_undefined(Item key);
 void js_eval_env_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_env_is_active(void);

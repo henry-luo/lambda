@@ -7,8 +7,6 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
-#include "../../lib/binsearch.h"
-#include <re2/unicode_casefold.h>
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
@@ -1571,8 +1569,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                Item result = js_typed_array_construct(ta_type, arg, off, tlen, argc);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_typed_array_construct(ta_type, arg, off, tlen, argc);
             }
 
             // ArrayBuffer
@@ -1581,8 +1578,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                Item result = js_arraybuffer_construct_resizable(blen_arg, options_arg);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_arraybuffer_construct_resizable(blen_arg, options_arg);
             }
 
             // SharedArrayBuffer
@@ -1591,8 +1587,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                Item result = js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_sharedarraybuffer_construct_with_options(blen_arg, options_arg);
             }
 
             // DataView
@@ -1602,40 +1597,37 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item buf = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item dvlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                Item result = js_dataview_new(buf, off, dvlen);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_dataview_new(buf, off, dvlen);
             }
 
             // Map
             if (nl == 3 && strncmp(n, "Map", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                Item result = (argc > 0 && args) ? js_map_collection_new_from(args[0]) : js_map_collection_new();
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                if (argc > 0 && args) return js_map_collection_new_from(args[0]);
+                return js_map_collection_new();
             }
 
             // Set
             if (nl == 3 && strncmp(n, "Set", 3) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                Item result = (argc > 0 && args) ? js_set_collection_new_from(args[0]) : js_set_collection_new();
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                if (argc > 0 && args) return js_set_collection_new_from(args[0]);
+                return js_set_collection_new();
             }
 
             // WeakMap
             if (nl == 7 && strncmp(n, "WeakMap", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                Item result = js_weakmap_new();
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_weakmap_new();
             }
 
             // WeakSet
             if (nl == 7 && strncmp(n, "WeakSet", 7) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                Item result = js_weakset_new();
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_weakset_new();
             }
 
             // Promise
@@ -1663,8 +1655,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item pattern = (argc > 0 && args) ? args[0] : make_js_undefined();
                 Item flags = (argc > 1 && args) ? args[1] : make_js_undefined();
-                Item result = js_regexp_construct(pattern, flags);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_regexp_construct(pattern, flags);
             }
 
             // Symbol — not constructable (ES §19.4.1 step 1)
@@ -1678,19 +1669,12 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 4 && strncmp(n, "Date", 4) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (argc == 0) {
-                    Item result = js_date_new();
-                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
-                }
-                if (argc == 1) {
-                    Item result = js_date_new_from(args[0]);
-                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
-                }
+                if (argc == 0) return js_date_new();
+                if (argc == 1) return js_date_new_from(args[0]);
                 // Multi-arg: pack into an array and call js_date_new_multi
                 Item arr = js_array_new(0);
                 for (int i = 0; i < argc; i++) js_array_push(arr, args[i]);
-                Item result = js_date_new_multi(arr);
-                return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return js_date_new_multi(arr);
             }
 
             // Error and subclasses
@@ -1726,17 +1710,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 5 && strncmp(n, "Array", 5) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (eff_argc == 0) {
-                    Item result = js_array_new(0);
-                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
-                }
-                if (eff_argc == 1) {
-                    Item result = js_array_new_from_item(eff_args[0]);
-                    return js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
-                }
+                if (eff_argc == 0) return js_array_new(0);
+                if (eff_argc == 1) return js_array_new_from_item(eff_args[0]);
                 Item arr = js_array_new(0);
                 for (int i = 0; i < eff_argc; i++) js_array_push(arr, eff_args[i]);
-                return js_apply_constructed_builtin_prototype(arr, callee, effective_new_target);
+                return arr;
             }
 
             // Object
@@ -1903,7 +1881,6 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
         bool extends_promise_builtin = false;
-        bool extends_arraybuffer_builtin = false;
         if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
             Item proto = js_get_prototype(construction_proto);
             int depth = 0;
@@ -1918,31 +1895,12 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                         extends_promise_builtin = true;
                         break;
                     }
-                    if (js_class_id(proto) == JS_CLASS_ARRAY_BUFFER) {
-                        extends_arraybuffer_builtin = true;
-                        break;
-                    }
                     proto = js_get_prototype(proto);
                 } else {
                     break;
                 }
                 depth++;
             }
-        }
-        if (extends_arraybuffer_builtin && get_type_id(ctor) != LMD_TYPE_FUNC) {
-            Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
-            Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-            Item result = js_arraybuffer_construct_resizable(blen_arg, options_arg);
-            if (js_check_exception()) return ItemNull;
-            if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
-                js_set_prototype(result, construction_proto);
-            }
-            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-            js_property_set(result, ctor_key, callee);
-            Item ne_ctor_key = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
-            js_property_set(result, ne_ctor_key, (Item){.item = b2it(true)});
-            js_init_class_instance_fields(callee, result);
-            return result;
         }
         if (extends_promise_builtin && get_type_id(ctor) != LMD_TYPE_FUNC) {
             Item executor = (argc > 0 && args) ? args[0] : ItemNull;
@@ -3814,29 +3772,28 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (str_key->len == 2 && str_key->chars[0] == '$' &&
                     str_key->chars[1] >= '1' && str_key->chars[1] <= '9') {
                     int gi = str_key->chars[1] - '1'; // $1 → index 0
-                    Item gs = js_regexp_last_match.groups[gi];
-                    return get_type_id(gs) == LMD_TYPE_STRING ? gs : (Item){.item = s2it(heap_create_name("", 0))};
+                    String* gs = js_regexp_last_match.groups[gi];
+                    return gs ? (Item){.item = s2it(gs)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 5 && strncmp(str_key->chars, "input", 5) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$_", 2) == 0)) {
-                    Item s = js_regexp_last_match.input;
-                    return get_type_id(s) == LMD_TYPE_STRING ? s : (Item){.item = s2it(heap_create_name("", 0))};
+                    String* s = js_regexp_last_match.input;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 9 && strncmp(str_key->chars, "lastMatch", 9) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$&", 2) == 0)) {
-                    Item s = js_regexp_last_match.match;
-                    return get_type_id(s) == LMD_TYPE_STRING ? s : (Item){.item = s2it(heap_create_name("", 0))};
+                    String* s = js_regexp_last_match.match;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 9 && strncmp(str_key->chars, "lastParen", 9) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$+", 2) == 0)) {
                     int gc = js_regexp_last_match.group_count;
-                    Item s = gc > 0 ? js_regexp_last_match.groups[gc - 1] : ItemNull;
-                    return get_type_id(s) == LMD_TYPE_STRING ? s : (Item){.item = s2it(heap_create_name("", 0))};
+                    String* s = gc > 0 ? js_regexp_last_match.groups[gc - 1] : NULL;
+                    return s ? (Item){.item = s2it(s)} : (Item){.item = s2it(heap_create_name("", 0))};
                 }
                 if ((str_key->len == 11 && strncmp(str_key->chars, "leftContext", 11) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$`", 2) == 0)) {
-                    String* inp = get_type_id(js_regexp_last_match.input) == LMD_TYPE_STRING
-                        ? it2s(js_regexp_last_match.input) : NULL;
+                    String* inp = js_regexp_last_match.input;
                     if (inp && js_regexp_last_match.match_start > 0) {
                         return (Item){.item = s2it(heap_strcpy(inp->chars, js_regexp_last_match.match_start))};
                     }
@@ -3844,8 +3801,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 if ((str_key->len == 12 && strncmp(str_key->chars, "rightContext", 12) == 0) ||
                     (str_key->len == 2 && strncmp(str_key->chars, "$'", 2) == 0)) {
-                    String* inp = get_type_id(js_regexp_last_match.input) == LMD_TYPE_STRING
-                        ? it2s(js_regexp_last_match.input) : NULL;
+                    String* inp = js_regexp_last_match.input;
                     if (inp && js_regexp_last_match.match_end < (int)inp->len) {
                         return (Item){.item = s2it(heap_strcpy(inp->chars + js_regexp_last_match.match_end,
                             (int)inp->len - js_regexp_last_match.match_end))};
@@ -5736,10 +5692,6 @@ static bool js_is_constructor_internal(Item callee) {
     return true;
 }
 
-extern "C" bool js_is_constructor_object(Item callee) {
-    return js_is_constructor_internal(callee);
-}
-
 static bool js_is_class_instance_prototype(Item proto) {
     if (get_type_id(proto) != LMD_TYPE_MAP || !proto.map) return false;
     bool own_constructor = false;
@@ -7018,7 +6970,6 @@ extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
 
 extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
     if (js_is_proxy(obj)) obj = js_proxy_get_target(obj);
-    if (get_type_id(obj) == LMD_TYPE_MAP && js_class_id(obj) != JS_CLASS_NONE) return;
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, class_name);
 }
@@ -10832,24 +10783,21 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (js_check_exception()) return make_js_undefined();
     Item bound_this = js_is_object_constructor_result(construct_result) ? construct_result : this_val;
-    if (js_super_this_bound_depth <= 0) {
-        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
-        js_throw_reference_error(msg);
-        return make_js_undefined();
+    if (js_super_this_bound_depth > 0) {
+        int idx = js_super_this_bound_depth - 1;
+        if (js_super_this_bound_stack[idx]) {
+            Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
+            js_throw_reference_error(msg);
+            return make_js_undefined();
+        }
+        if (!js_is_object_constructor_result(bound_this) &&
+            (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
+            js_is_object_constructor_result(js_super_this_value_stack[idx])) {
+            bound_this = js_super_this_value_stack[idx];
+        }
+        js_super_this_bound_stack[idx] = true;
+        js_super_this_value_stack[idx] = bound_this;
     }
-    int idx = js_super_this_bound_depth - 1;
-    if (js_super_this_bound_stack[idx]) {
-        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
-        js_throw_reference_error(msg);
-        return make_js_undefined();
-    }
-    if (!js_is_object_constructor_result(bound_this) &&
-        (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&
-        js_is_object_constructor_result(js_super_this_value_stack[idx])) {
-        bound_this = js_super_this_value_stack[idx];
-    }
-    js_super_this_bound_stack[idx] = true;
-    js_super_this_value_stack[idx] = bound_this;
     js_current_this = bound_this;
     return bound_this;
 }
@@ -10895,15 +10843,21 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
 
 static bool js_super_callee_is_constructor(Item callee) {
     if (js_is_proxy(callee)) {
-        Item target = js_proxy_get_target(callee);
-        return js_super_callee_is_constructor(target);
+        // class heritage and super() use ES IsConstructor, not merely callable.
+        // Proxy targets such as arrow/generator functions are callable enough to
+        // have traps, but must still be rejected before reading `.prototype`.
+        return js_is_constructor_internal(callee);
     }
     TypeId type = get_type_id(callee);
     if (type == LMD_TYPE_MAP) return js_is_class_object_item(callee);
     if (type != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)callee.function;
     if (!fn) return false;
-    if (fn->builtin_id > 0 || fn->builtin_id == -2 || fn->builtin_id == -3) return false;
+    if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
+        Item target = js_bound_function_ultimate_target(callee);
+        if (target.item != callee.item) return js_is_constructor_internal(target);
+    }
+    if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
     if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
             JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
             JS_FUNC_FLAG_TYPED_ARRAY_METHOD)) return false;
@@ -10916,16 +10870,11 @@ static bool js_builtin_super_constructs_via_construct(Item callee) {
     if (!fn || !fn->name) return false;
     const char* name = fn->name->chars;
     int len = (int)fn->name->len;
-    return (len == 5 && strncmp(name, "Array", 5) == 0) ||
-           (len == 6 && strncmp(name, "String", 6) == 0) ||
-           (len == 6 && strncmp(name, "Number", 6) == 0) ||
-           (len == 7 && strncmp(name, "Boolean", 7) == 0) ||
-           (len == 7 && strncmp(name, "Promise", 7) == 0) ||
+    return (len == 7 && strncmp(name, "Promise", 7) == 0) ||
            (len == 3 && strncmp(name, "Map", 3) == 0) ||
            (len == 3 && strncmp(name, "Set", 3) == 0) ||
            (len == 7 && strncmp(name, "WeakMap", 7) == 0) ||
            (len == 7 && strncmp(name, "WeakSet", 7) == 0) ||
-           (len == 6 && strncmp(name, "Symbol", 6) == 0) ||
            (len == 11 && strncmp(name, "ArrayBuffer", 11) == 0) ||
            (len == 17 && strncmp(name, "SharedArrayBuffer", 17) == 0) ||
            (len == 8 && strncmp(name, "DataView", 8) == 0) ||
@@ -10965,6 +10914,14 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
 extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int argc) {
+    TypeId callee_type = get_type_id(callee);
+    if (callee.item == ITEM_JS_UNDEFINED || callee_type == LMD_TYPE_UNDEFINED ||
+            callee.item == ItemNull.item || callee_type == LMD_TYPE_NULL) {
+        // `extends null` gives the derived constructor Function.prototype as its
+        // [[Prototype]], so a later super() must fail IsConstructor instead of
+        // silently acting like an empty base-class constructor.
+        return js_throw_type_error("Super constructor is not a constructor");
+    }
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         return js_call_function(callee, this_val, args, argc);
     }
@@ -10975,9 +10932,8 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
             return js_call_function(ctor, this_val, args, argc);
         }
         // Empty class with no constructor — no-op, this is already created
-        return this_val;
     }
-    return js_throw_type_error("Super constructor is not a constructor");
+    return this_val;
 }
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh
@@ -11024,28 +10980,6 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
         args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
     }
     return js_super_call_native(callee, this_val, args, argc);
-}
-
-static void js_sync_closure_env_module_vars(JsFunction* fn) {
-    if (!fn || !fn->env || !fn->env_module_var_indices || !fn->module_vars) return;
-    for (int i = 0; i < fn->env_size; i++) {
-        int module_index = fn->env_module_var_indices[i];
-        if (module_index < 0 || module_index >= JS_MAX_MODULE_VARS) continue;
-        // Module-var-backed env slots are mirrors, not authorities. MIR writes
-        // to these captures already publish through js_set_module_var at the
-        // mutation site; copying env -> module here lets an outer stale closure
-        // overwrite a nested callback's fresher write on function exit.
-        fn->env[i] = fn->module_vars[module_index];
-    }
-}
-
-static void js_refresh_closure_env_module_vars(JsFunction* fn) {
-    if (!fn || !fn->env || !fn->env_module_var_indices || !fn->module_vars) return;
-    for (int i = 0; i < fn->env_size; i++) {
-        int module_index = fn->env_module_var_indices[i];
-        if (module_index < 0 || module_index >= JS_MAX_MODULE_VARS) continue;
-        fn->env[i] = fn->module_vars[module_index];
-    }
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
@@ -11330,9 +11264,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             js_current_private_home_class = method_home_class;
             js_current_private_home_class_index = js_class_private_index(method_home_class);
         }
-        js_refresh_closure_env_module_vars(fn);
         Item result = js_invoke_fn(fn, merged_args, total_argc);
-        js_sync_closure_env_module_vars(fn);
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
         if (derived_ctor_call) result = js_super_this_binding_finish(result);
@@ -11406,9 +11338,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_current_private_home_class = method_home_class;
         js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
-    js_refresh_closure_env_module_vars(fn);
     Item result = js_invoke_fn(fn, args, arg_count);
-    js_sync_closure_env_module_vars(fn);
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) result = js_super_this_binding_finish(result);
@@ -11515,6 +11445,13 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
 static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return ItemNull;
+    Item new_target = js_get_new_target();
+    if (new_target.item == ITEM_JS_UNDEFINED || new_target.item == ItemNull.item || new_target.item == 0) {
+        // Bound class constructors keep [[Construct]], but they still lack
+        // [[Call]].  Calling the bound function normally must throw before the
+        // underlying class constructor is entered.
+        return js_throw_type_error("Class constructor cannot be invoked without 'new'");
+    }
     Item target = env[0];
     int argc = 0;
     Item* args = NULL;
@@ -11526,10 +11463,6 @@ static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
                 args[i] = js_array_get(rest_array, (Item){.item = i2it(i)});
             }
         }
-    }
-    Item new_target = js_get_new_target();
-    if (new_target.item == ITEM_JS_UNDEFINED || new_target.item == ItemNull.item || new_target.item == 0) {
-        return js_throw_type_error("Class constructor cannot be invoked without 'new'");
     }
     js_set_new_target(new_target);
     return js_new_from_class_object(target, args, argc);
@@ -11677,15 +11610,14 @@ static void js_regexp_update_last_match(String* input_s,
     re2::StringPiece* matches, int num_groups) {
     const char* input_str = input_s ? input_s->chars : "";
     int input_len = input_s ? (int)input_s->len : 0;
-    js_regexp_last_match.input = (Item){.item = s2it(input_s ? input_s : heap_create_name("", 0))};
+    js_regexp_last_match.input = input_s ? input_s : heap_create_name("", 0);
     if (matches[0].data() && input_s && matches[0].data() == input_str &&
         (int)matches[0].size() == input_len) {
-        js_regexp_last_match.match = (Item){.item = s2it(input_s)};
+        js_regexp_last_match.match = input_s;
     } else {
-        String* match = matches[0].data()
+        js_regexp_last_match.match = matches[0].data()
             ? heap_strcpy((char*)matches[0].data(), (int)matches[0].size())
             : heap_create_name("", 0);
-        js_regexp_last_match.match = (Item){.item = s2it(match)};
     }
     js_regexp_last_match.match_start = matches[0].data()
         ? (int)(matches[0].data() - input_str) : 0;
@@ -11700,25 +11632,22 @@ static void js_regexp_update_last_match(String* input_s,
         if (gi < num_groups && matches[gi].data()) {
             if (input_s && matches[gi].data() == input_str &&
                 (int)matches[gi].size() == input_len) {
-                js_regexp_last_match.groups[i] = (Item){.item = s2it(input_s)};
+                js_regexp_last_match.groups[i] = input_s;
             } else {
-                String* group = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
-                js_regexp_last_match.groups[i] = (Item){.item = s2it(group)};
+                js_regexp_last_match.groups[i] = heap_strcpy((char*)matches[gi].data(), (int)matches[gi].size());
             }
         } else {
-            js_regexp_last_match.groups[i] = (Item){.item = s2it(heap_create_name("", 0))};
+            js_regexp_last_match.groups[i] = heap_create_name("", 0);
         }
     }
     for (int i = gc; i < JS_REGEXP_MAX_PAREN; i++) {
-        js_regexp_last_match.groups[i] = (Item){.item = s2it(heap_create_name("", 0))};
+        js_regexp_last_match.groups[i] = heap_create_name("", 0);
     }
 }
 
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
-    const char* source_pattern;
-    int source_pattern_len;
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
@@ -11754,8 +11683,6 @@ static const char* g_regex_property_cache_chars = NULL;
 static int g_regex_property_cache_len = 0;
 static int g_regex_property_cache_mode = 0;
 static bool g_regex_property_cache_result = false;
-static Item g_regexp_prototype_cache = {0};
-static TypeMap* g_regexp_minimal_shape_cache = NULL;
 
 static inline uint64_t js_regex_cache_key(const char* pattern, const char* flags) {
     return (uint64_t)(uintptr_t)pattern ^ ((uint64_t)(uintptr_t)flags * 2654435761ULL);
@@ -11767,8 +11694,6 @@ void js_regex_cache_reset() {
     g_regex_property_cache_len = 0;
     g_regex_property_cache_mode = 0;
     g_regex_property_cache_result = false;
-    g_regexp_prototype_cache = ItemNull;
-    g_regexp_minimal_shape_cache = NULL;
 }
 
 static bool js_regex_unicode_is_other_category(utf8proc_category_t cat) {
@@ -12093,19 +12018,20 @@ static bool js_regex_range_contains(const JsRegexRange* ranges, int count, int c
     return false;
 }
 
-// range_cmp for binsearch_range: ranges use inclusive [first, last] intervals.
-static int js_regex_range_cmp(const void* record, const void* key, void* udata) {
-    (void)udata;
-    const JsRegexRange* r = (const JsRegexRange*)record;
-    int cp = *(const int*)key;
-    if (cp < r->first) return 1;   // record interval is after key
-    if (cp > r->last)  return -1;  // record interval is before key
-    return 0;                       // cp ∈ [first, last]
-}
-
 static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count, int cp) {
-    return binsearch_range(ranges, count, sizeof(JsRegexRange),
-                           &cp, js_regex_range_cmp, NULL) >= 0;
+    int lo = 0;
+    int hi = count - 1;
+    while (lo <= hi) {
+        int mid = lo + ((hi - lo) / 2);
+        if (cp < ranges[mid].first) {
+            hi = mid - 1;
+        } else if (cp > ranges[mid].last) {
+            lo = mid + 1;
+        } else {
+            return true;
+        }
+    }
+    return false;
 }
 
 #include "js_regex_generated_property_tables.inc"
@@ -12708,7 +12634,6 @@ struct Re2PermanentEntry {
     int source_len;             // length check for collision detection
 };
 static std::unordered_map<uint64_t, Re2PermanentEntry> g_re2_permanent_cache;
-static const int JS_REGEX_PERMANENT_CACHE_MIN_SOURCE_LEN = 64;
 
 // Content-based hash for permanent cache — valid across batch resets (uses string content, not pointers)
 static inline uint64_t js_regex_content_hash(const char* pat, int plen, const char* flg, int flen) {
@@ -12728,180 +12653,6 @@ static int js_regex_num_groups(JsRegexData* rd) {
         return rd->wrapper->original_group_count + 1; // +1 for full match
     }
     return rd->re2->NumberOfCapturingGroups() + 1;
-}
-
-static bool js_regex_hex_val(char ch, int* out) {
-    if (ch >= '0' && ch <= '9') { *out = ch - '0'; return true; }
-    if (ch >= 'a' && ch <= 'f') { *out = ch - 'a' + 10; return true; }
-    if (ch >= 'A' && ch <= 'F') { *out = ch - 'A' + 10; return true; }
-    return false;
-}
-
-static bool js_regex_decode_atom_codepoint(const char* pattern, int len, int* out_cp) {
-    if (!pattern || len <= 0 || !out_cp) return false;
-    if (pattern[0] == '\\') {
-        if (len >= 6 && pattern[1] == 'u') {
-            int cp = 0;
-            for (int i = 2; i < 6; i++) {
-                int v = 0;
-                if (!js_regex_hex_val(pattern[i], &v)) return false;
-                cp = (cp << 4) | v;
-            }
-            if (len != 6) return false;
-            *out_cp = cp;
-            return true;
-        }
-        if (len >= 5 && pattern[1] == 'u' && pattern[2] == '{') {
-            int cp = 0;
-            int i = 3;
-            if (i >= len || pattern[i] == '}') return false;
-            for (; i < len && pattern[i] != '}'; i++) {
-                int v = 0;
-                if (!js_regex_hex_val(pattern[i], &v)) return false;
-                cp = (cp << 4) | v;
-                if (cp > 0x10FFFF) return false;
-            }
-            if (i != len - 1 || pattern[i] != '}') return false;
-            *out_cp = cp;
-            return true;
-        }
-        if (len == 4 && pattern[1] == 'x') {
-            int hi = 0, lo = 0;
-            if (!js_regex_hex_val(pattern[2], &hi) || !js_regex_hex_val(pattern[3], &lo)) return false;
-            *out_cp = (hi << 4) | lo;
-            return true;
-        }
-        if (len == 2) {
-            *out_cp = (unsigned char)pattern[1];
-            return true;
-        }
-        return false;
-    }
-    utf8proc_int32_t cp = 0;
-    utf8proc_ssize_t width = utf8proc_iterate(
-        (const utf8proc_uint8_t*)pattern, (utf8proc_ssize_t)len, &cp);
-    if (width <= 0 || width != len) return false;
-    *out_cp = (int)cp;
-    return true;
-}
-
-static bool js_regex_simple_source_codepoint(JsRegexData* rd, int* out_cp) {
-    if (!rd || !rd->source_pattern || rd->source_pattern_len <= 0 || !out_cp) return false;
-    const char* pattern = rd->source_pattern;
-    int len = rd->source_pattern_len;
-    if (len >= 2 && pattern[0] == '[' && pattern[len - 1] == ']') {
-        if (len >= 3 && pattern[1] == '^') return false;
-        return js_regex_decode_atom_codepoint(pattern + 1, len - 2, out_cp);
-    }
-    return js_regex_decode_atom_codepoint(pattern, len, out_cp);
-}
-
-static int js_regex_ecma_canonicalize_cp(int cp, bool unicode) {
-    if (unicode) {
-        int canonical = cp;
-        int cur = cp;
-        for (int i = 0; i < 16; i++) {
-            const re2::CaseFold* fold = re2::LookupCaseFold(
-                re2::unicode_casefold, re2::num_unicode_casefold, (re2::Rune)cur);
-            if (!fold || cur < fold->lo || cur > fold->hi) break;
-            int next = (int)re2::ApplyFold(fold, (re2::Rune)cur);
-            if (next < canonical) canonical = next;
-            if (next == cp || next == cur) break;
-            cur = next;
-        }
-        cur = cp;
-        for (int i = 0; i < 16; i++) {
-            utf8proc_int32_t folded[8];
-            utf8proc_ssize_t folded_len = utf8proc_decompose_char(
-                (utf8proc_int32_t)cur, folded, 8,
-                (utf8proc_option_t)UTF8PROC_CASEFOLD, NULL);
-            if (folded_len != 1 || folded[0] == cur) break;
-            int next = (int)folded[0];
-            if (next < canonical) canonical = next;
-            if (next == cp) break;
-            cur = next;
-        }
-        return canonical;
-    }
-    if (cp >= 'a' && cp <= 'z') return cp - 32;
-    if (cp >= 'A' && cp <= 'Z') return cp;
-    return cp;
-}
-
-static bool js_regex_unicode_fold_sequence(int cp, utf8proc_int32_t* out,
-        int out_cap, int* out_len) {
-    if (!out || out_cap <= 0 || !out_len) return false;
-    utf8proc_ssize_t folded_len = utf8proc_decompose_char(
-        (utf8proc_int32_t)cp, out, out_cap,
-        (utf8proc_option_t)UTF8PROC_CASEFOLD, NULL);
-    if (folded_len <= 0) {
-        out[0] = (utf8proc_int32_t)cp;
-        *out_len = 1;
-        return true;
-    }
-    if (folded_len > out_cap) return false;
-    *out_len = (int)folded_len;
-    return true;
-}
-
-static bool js_regex_casefold_cp_equal(int pattern_cp, int input_cp, bool unicode) {
-    if (!unicode) {
-        int pattern_canon = js_regex_ecma_canonicalize_cp(pattern_cp, false);
-        int input_canon = js_regex_ecma_canonicalize_cp(input_cp, false);
-        return pattern_canon == input_canon;
-    }
-    utf8proc_int32_t pattern_folded[8];
-    utf8proc_int32_t input_folded[8];
-    int pattern_len = 0, input_len = 0;
-    if (!js_regex_unicode_fold_sequence(pattern_cp, pattern_folded, 8, &pattern_len) ||
-        !js_regex_unicode_fold_sequence(input_cp, input_folded, 8, &input_len)) {
-        return false;
-    }
-    if (pattern_len != input_len) return false;
-    for (int i = 0; i < pattern_len; i++) {
-        if (pattern_folded[i] != input_folded[i]) return false;
-    }
-    return true;
-}
-
-static bool js_regex_decode_input_cp_at(const char* input, int input_len, int pos,
-        int* out_cp, int* out_width) {
-    if (!input || pos < 0 || pos >= input_len || !out_cp || !out_width) return false;
-    utf8proc_int32_t cp = 0;
-    utf8proc_ssize_t width = utf8proc_iterate(
-        (const utf8proc_uint8_t*)input + pos, (utf8proc_ssize_t)(input_len - pos), &cp);
-    if (width <= 0) return false;
-    *out_cp = (int)cp;
-    *out_width = (int)width;
-    return true;
-}
-
-static bool js_regex_single_case_match(JsRegexData* rd, const char* input, int input_len,
-        int start_pos, re2::RE2::Anchor anchor, re2::StringPiece* matches, int num_groups) {
-    int pattern_cp = 0;
-    if (!rd || !rd->ignore_case || !js_regex_simple_source_codepoint(rd, &pattern_cp)) return false;
-    int pos = start_pos;
-    while (pos <= input_len) {
-        int input_cp = 0, width = 0;
-        if (!js_regex_decode_input_cp_at(input, input_len, pos, &input_cp, &width)) return false;
-        if (js_regex_casefold_cp_equal(pattern_cp, input_cp, rd->unicode)) {
-            if (num_groups > 0) matches[0] = re2::StringPiece(input + pos, width);
-            return true;
-        }
-        if (anchor == re2::RE2::ANCHOR_START) return false;
-        pos += width;
-    }
-    return false;
-}
-
-static bool js_regex_single_case_match_accepts(JsRegexData* rd, const re2::StringPiece& match) {
-    if (!rd || !rd->ignore_case) return true;
-    int pattern_cp = 0;
-    if (!js_regex_simple_source_codepoint(rd, &pattern_cp)) return true;
-    int input_cp = 0, width = 0;
-    if (!js_regex_decode_input_cp_at(match.data(), (int)match.size(), 0, &input_cp, &width)) return false;
-    if (width != (int)match.size()) return false;
-    return js_regex_casefold_cp_equal(pattern_cp, input_cp, rd->unicode);
 }
 
 // Helper: match using wrapper if available, otherwise direct RE2
@@ -12953,14 +12704,8 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         return true;
     }
     // direct RE2 match (no assertions to worry about)
-    bool matched = rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
+    return rd->re2->Match(re2::StringPiece(input, input_len), start_pos, input_len,
                            anchor, matches, num_groups);
-    if (matched && !js_regex_single_case_match_accepts(rd, matches[0])) return false;
-    if (!matched && rd->ignore_case) {
-        return js_regex_single_case_match(rd, input, input_len, start_pos, anchor,
-            matches, num_groups);
-    }
-    return matched;
 }
 
 static bool js_regex_pattern_group_is_capturing(const std::string& pattern, int pos) {
@@ -13058,71 +12803,6 @@ static void js_regex_reset_stale_repeated_captures(JsRegexData* rd,
                 matches[child] = re2::StringPiece();
             }
         }
-    }
-}
-
-static bool js_regex_parse_optional_literal_repeat_group(JsRegexData* rd,
-        char* atoms, int* atom_count) {
-    if (atom_count) *atom_count = 0;
-    if (!rd || !rd->source_pattern || rd->source_pattern_len < 5 ||
-            !atoms || !atom_count) {
-        return false;
-    }
-    const char* pat = rd->source_pattern;
-    int len = rd->source_pattern_len;
-    if (pat[0] != '(' || pat[len - 1] != '*') return false;
-    int close = len - 2;
-    if (pat[close] != ')') return false;
-    int count = 0;
-    for (int i = 1; i < close;) {
-        unsigned char ch = (unsigned char)pat[i];
-        if (ch < 0x20 || ch >= 0x80 || pat[i] == '\\') return false;
-        switch (pat[i]) {
-        case '^': case '$': case '.': case '*': case '+': case '?':
-        case '(': case ')': case '[': case ']': case '{': case '}': case '|':
-            return false;
-        default:
-            break;
-        }
-        if (i + 1 >= close || pat[i + 1] != '?') return false;
-        if (count >= 16) return false;
-        atoms[count++] = pat[i];
-        i += 2;
-        if (i < close && pat[i] == '?') i++;
-    }
-    if (count <= 0) return false;
-    *atom_count = count;
-    return true;
-}
-
-static void js_regex_adjust_nullable_literal_repeat_match(JsRegexData* rd,
-        const char* input, int input_len, re2::StringPiece* matches, int num_groups) {
-    if (!rd || rd->wrapper || !input || !matches || num_groups <= 0 ||
-            !matches[0].data()) {
-        return;
-    }
-    char atoms[16];
-    int atom_count = 0;
-    if (!js_regex_parse_optional_literal_repeat_group(rd, atoms, &atom_count)) return;
-    int start = (int)(matches[0].data() - input);
-    if (start < 0 || start > input_len) return;
-    int pos = start;
-    int last_start = start;
-    int last_end = start;
-    while (pos < input_len) {
-        int iter_start = pos;
-        for (int a = 0; a < atom_count && pos < input_len; a++) {
-            if (input[pos] == atoms[a]) pos++;
-        }
-        if (pos == iter_start) break;
-        last_start = iter_start;
-        last_end = pos;
-    }
-    int old_end = start + (int)matches[0].size();
-    if (pos <= old_end) return;
-    matches[0] = re2::StringPiece(input + start, pos - start);
-    if (num_groups > 1 && last_end >= last_start) {
-        matches[1] = re2::StringPiece(input + last_start, last_end - last_start);
     }
 }
 
@@ -13288,241 +12968,6 @@ static const char* js_regex_original_group_name(JsRegexData* rd, const char* re2
     return re2_name;
 }
 
-static void js_regex_create_data_property(Item object, const char* name, int name_len, Item value) {
-    if (get_type_id(object) == LMD_TYPE_MAP && name_len == 9 &&
-        strncmp(name, "__proto__", 9) == 0) {
-        bool raw_found = false;
-        Item raw_proto = js_map_get_fast_ext(object.map, "__proto__", 9, &raw_found);
-        ScopedSkipAccessorDispatch _skip_guard;
-        if (raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
-            js_property_set(object,
-                (Item){.item = s2it(heap_create_name("__internal_proto__", 18))},
-                raw_proto);
-            js_property_set(object,
-                (Item){.item = s2it(heap_create_name("__json_own_proto__", 18))},
-                (Item){.item = ITEM_TRUE});
-        }
-    }
-    JsPropertyDescriptor pd;
-    memset(&pd, 0, sizeof(pd));
-    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE |
-        JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE |
-        JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-    js_pd_set_configurable(&pd, true);
-    pd.value = value;
-    bool is_new = !it2b(js_has_own_property(object,
-        (Item){.item = s2it(heap_create_name(name, name_len))}));
-    js_define_own_property_from_descriptor(object, name, name_len, &pd, is_new);
-}
-
-static Item js_regex_match_piece_to_item(Item str, const char* chars, int len,
-        const char* match_chars, int match_len, bool utf16_subject, bool full_unicode,
-        const re2::StringPiece& piece) {
-    int mlen = (int)piece.size();
-    if (utf16_subject) {
-        int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
-            (int)(piece.data() - match_chars));
-        int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
-            (int)(piece.data() - match_chars) + mlen);
-        return js_str_substring_utf16(str, start_units, end_units);
-    }
-    if (full_unicode) {
-        int start_units = (int)js_utf16_index_from_byte(chars, len,
-            (int)(piece.data() - match_chars));
-        int end_units = (int)js_utf16_index_from_byte(chars, len,
-            (int)(piece.data() - match_chars) + mlen);
-        return js_str_substring_utf16(str, start_units, end_units);
-    }
-    return (Item){.item = s2it(heap_strcpy((char*)piece.data(), mlen))};
-}
-
-static Item js_regex_build_source_named_groups_object(JsRegexData* rd,
-        re2::StringPiece* matches, int num_groups, Item str,
-        const char* chars, int len, const char* match_chars, int match_len,
-        bool utf16_subject, bool full_unicode) {
-    if (!rd || !rd->source_pattern || rd->source_pattern_len <= 0) return make_js_undefined();
-    Item groups_obj = js_object_create(ItemNull);
-    bool found_named = false;
-    bool in_class = false;
-    int group_idx = 0;
-    const char* pat = rd->source_pattern;
-    int pat_len = rd->source_pattern_len;
-    for (int i = 0; i < pat_len; i++) {
-        char ch = pat[i];
-        if (ch == '\\' && i + 1 < pat_len) { i++; continue; }
-        if (ch == '[' && !in_class) { in_class = true; continue; }
-        if (ch == ']' && in_class) { in_class = false; continue; }
-        if (in_class || ch != '(' || i + 1 >= pat_len) continue;
-        if (pat[i + 1] != '?') {
-            group_idx++;
-            continue;
-        }
-        if (i + 3 < pat_len && pat[i + 2] == '<' &&
-                pat[i + 3] != '=' && pat[i + 3] != '!') {
-            int name_start = i + 3;
-            int name_end = name_start;
-            while (name_end < pat_len && pat[name_end] != '>') name_end++;
-            if (name_end >= pat_len) continue;
-            group_idx++;
-            Item val = make_js_undefined();
-            if (group_idx < num_groups && matches[group_idx].data()) {
-                val = js_regex_match_piece_to_item(str, chars, len, match_chars, match_len,
-                    utf16_subject, full_unicode, matches[group_idx]);
-            }
-            js_regex_create_data_property(groups_obj, pat + name_start,
-                name_end - name_start, val);
-            found_named = true;
-            i = name_end;
-            continue;
-        }
-        if (i + 4 < pat_len && pat[i + 2] == 'P' && pat[i + 3] == '<') {
-            int name_start = i + 4;
-            int name_end = name_start;
-            while (name_end < pat_len && pat[name_end] != '>') name_end++;
-            if (name_end >= pat_len) continue;
-            group_idx++;
-            Item val = make_js_undefined();
-            if (group_idx < num_groups && matches[group_idx].data()) {
-                val = js_regex_match_piece_to_item(str, chars, len, match_chars, match_len,
-                    utf16_subject, full_unicode, matches[group_idx]);
-            }
-            js_regex_create_data_property(groups_obj, pat + name_start,
-                name_end - name_start, val);
-            found_named = true;
-            i = name_end;
-        }
-    }
-    return found_named ? groups_obj : make_js_undefined();
-}
-
-static bool js_regex_append_utf8_cp(std::string& out, uint32_t cp) {
-    if (cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) return false;
-    char buf[5];
-    int len = 0;
-    if (cp <= 0x7Fu) {
-        buf[len++] = (char)cp;
-    } else if (cp <= 0x7FFu) {
-        buf[len++] = (char)(0xC0u | (cp >> 6));
-        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
-    } else if (cp <= 0xFFFFu) {
-        buf[len++] = (char)(0xE0u | (cp >> 12));
-        buf[len++] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
-        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
-    } else {
-        buf[len++] = (char)(0xF0u | (cp >> 18));
-        buf[len++] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
-        buf[len++] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
-        buf[len++] = (char)(0x80u | (cp & 0x3Fu));
-    }
-    out.append(buf, len);
-    return true;
-}
-
-static int js_regex_decode_group_name_escape(const char* name, int name_len,
-                                             int index, uint32_t* out_cp) {
-    if (!name || index + 1 >= name_len || name[index] != '\\') return 0;
-    char kind = name[index + 1];
-    if (kind == 'x' && index + 2 < name_len && name[index + 2] == '{') {
-        int j = index + 3;
-        uint32_t cp = 0;
-        int digits = 0;
-        while (j < name_len && name[j] != '}') {
-            int hv = js_regex_hex_value(name[j]);
-            if (hv < 0 || digits >= 6) return 0;
-            cp = (cp << 4) | (uint32_t)hv;
-            digits++;
-            j++;
-        }
-        if (j >= name_len || digits <= 0 || cp > 0x10FFFFu) return 0;
-        int end = j + 1;
-        if (cp >= 0xD800u && cp <= 0xDBFFu &&
-            end + 3 < name_len && name[end] == '\\' &&
-            name[end + 1] == 'x' && name[end + 2] == '{') {
-            int low_j = end + 3;
-            uint32_t low = 0;
-            int low_digits = 0;
-            while (low_j < name_len && name[low_j] != '}') {
-                int hv = js_regex_hex_value(name[low_j]);
-                if (hv < 0 || low_digits >= 6) return 0;
-                low = (low << 4) | (uint32_t)hv;
-                low_digits++;
-                low_j++;
-            }
-            if (low_j < name_len && low_digits > 0 &&
-                low >= 0xDC00u && low <= 0xDFFFu) {
-                cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
-                end = low_j + 1;
-            }
-        }
-        if (out_cp) *out_cp = cp;
-        return end;
-    }
-    if ((kind == 'x' || kind == 'u') && index + 3 < name_len) {
-        int digits = kind == 'x' ? 2 : 4;
-        if (index + 1 + digits >= name_len) return 0;
-        uint32_t cp = 0;
-        for (int j = index + 2; j < index + 2 + digits; j++) {
-            int hv = js_regex_hex_value(name[j]);
-            if (hv < 0) return 0;
-            cp = (cp << 4) | (uint32_t)hv;
-        }
-        int end = index + 2 + digits;
-        if (kind == 'u' && cp >= 0xD800u && cp <= 0xDBFFu &&
-            end + 5 < name_len && name[end] == '\\' && name[end + 1] == 'u') {
-            uint32_t low = 0;
-            bool low_ok = true;
-            for (int j = end + 2; j < end + 6; j++) {
-                int hv = js_regex_hex_value(name[j]);
-                if (hv < 0) { low_ok = false; break; }
-                low = (low << 4) | (uint32_t)hv;
-            }
-            if (low_ok && low >= 0xDC00u && low <= 0xDFFFu) {
-                cp = 0x10000u + ((cp - 0xD800u) << 10) + (low - 0xDC00u);
-                end += 6;
-            }
-        }
-        if (out_cp) *out_cp = cp;
-        return end;
-    }
-    return 0;
-}
-
-static char* js_regex_copy_public_group_name(const char* name, int name_len, int* out_len) {
-    if (out_len) *out_len = name_len;
-    if (!name || name_len < 0) return NULL;
-    bool has_escape = false;
-    for (int i = 0; i < name_len; i++) {
-        if (name[i] == '\\') { has_escape = true; break; }
-    }
-    if (!has_escape) {
-        char* copy = (char*)pool_calloc(js_input->pool, name_len + 1);
-        if (!copy) return NULL;
-        memcpy(copy, name, name_len);
-        copy[name_len] = '\0';
-        return copy;
-    }
-    std::string decoded;
-    decoded.reserve(name_len);
-    for (int i = 0; i < name_len; i++) {
-        if (name[i] == '\\') {
-            uint32_t cp = 0;
-            int next = js_regex_decode_group_name_escape(name, name_len, i, &cp);
-            if (next > i && js_regex_append_utf8_cp(decoded, cp)) {
-                i = next - 1;
-                continue;
-            }
-        }
-        decoded.push_back(name[i]);
-    }
-    int decoded_len = (int)decoded.size();
-    char* copy = (char*)pool_calloc(js_input->pool, decoded_len + 1);
-    if (!copy) return NULL;
-    if (decoded_len > 0) memcpy(copy, decoded.data(), decoded_len);
-    copy[decoded_len] = '\0';
-    if (out_len) *out_len = decoded_len;
-    return copy;
-}
-
 static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
     bool in_class = false;
     for (int i = 0; i < pattern_len; i++) {
@@ -13545,8 +12990,6 @@ static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
         if (!in_class && c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?') {
             char kind = pattern[i + 2];
             if (kind == '=' || kind == '!') return true;
-            if (kind == '<' && i + 3 < pattern_len &&
-                (pattern[i + 3] == '=' || pattern[i + 3] == '!')) return true;
         }
     }
     return false;
@@ -13558,16 +13001,11 @@ static String* js_regex_escape_source(const char* source, int source_len);
 
 // v90: Get RegExp.prototype for setting __proto__ on regex instances
 static Item js_get_regexp_prototype() {
-    if (g_regexp_prototype_cache.item != 0 &&
-        g_regexp_prototype_cache.item != ItemNull.item) {
-        return g_regexp_prototype_cache;
-    }
     extern Item js_get_constructor(Item name_item);
     Item ctor = js_get_constructor((Item){.item = s2it(heap_create_name("RegExp", 6))});
     if (get_type_id(ctor) == LMD_TYPE_FUNC) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        g_regexp_prototype_cache = js_property_get(ctor, proto_key);
-        return g_regexp_prototype_cache;
+        return js_property_get(ctor, proto_key);
     }
     return ItemNull;
 }
@@ -13580,8 +13018,6 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
 // Build a JS RegExp Map object from a cached regex entry, reusing compiled JsRegexData.
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
-    rd->source_pattern = ce.source;
-    rd->source_pattern_len = ce.source_len;
     rd->unicode = ce.has_unicode;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
@@ -13656,103 +13092,6 @@ static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
     *canonical_flags_len = len;
     *has_unicode = seen_u || seen_v;
     return true;
-}
-
-static TypeMap* js_regex_minimal_shape() {
-    if (g_regexp_minimal_shape_cache) return g_regexp_minimal_shape_cache;
-    if (!js_input || !js_input->pool) return NULL;
-
-    const char* names[] = {
-        JS_REGEX_DATA_KEY,
-        "source",
-        "flags",
-        "lastIndex",
-        "__class_name__",
-        "__proto__"
-    };
-    const int lens[] = {4, 6, 5, 9, 14, 9};
-    const TypeId types[] = {
-        LMD_TYPE_INT,
-        LMD_TYPE_STRING,
-        LMD_TYPE_STRING,
-        LMD_TYPE_INT,
-        LMD_TYPE_STRING,
-        LMD_TYPE_MAP
-    };
-    const int count = 6;
-
-    TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!tm) return NULL;
-    ShapeEntry* first = NULL;
-    ShapeEntry* prev = NULL;
-    for (int i = 0; i < count; i++) {
-        ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool, sizeof(ShapeEntry) + sizeof(StrView));
-        StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
-        String* key_str = heap_create_name(names[i], lens[i]);
-        nv->str = key_str->chars;
-        nv->length = key_str->len;
-        se->name = nv;
-        se->type = type_info[types[i]].type;
-        se->byte_offset = i * (int)sizeof(void*);
-        if (prev) prev->next = se;
-        else first = se;
-        prev = se;
-    }
-    tm->shape = first;
-    tm->last = prev;
-    tm->length = count;
-    tm->byte_size = count * (int)sizeof(void*);
-    ShapeEntry* se = first;
-    while (se) {
-        typemap_hash_insert(tm, se);
-        se = se->next;
-    }
-    ShapeEntry** entries = (ShapeEntry**)pool_calloc(js_input->pool, count * sizeof(ShapeEntry*));
-    se = first;
-    for (int i = 0; i < count && se; i++, se = se->next) {
-        entries[i] = se;
-    }
-    tm->slot_entries = entries;
-    tm->slot_count = count;
-    tm->js_class = (uint8_t)JS_CLASS_REGEXP;
-    g_regexp_minimal_shape_cache = tm;
-    return tm;
-}
-
-static Item js_regex_build_minimal_literal_object(JsRegexData* rd,
-        const char* source, int source_len, const char* flags) {
-    if (!rd || !source || !flags) return ItemNull;
-    rd->source_pattern = source;
-    rd->source_pattern_len = source_len;
-
-    TypeMap* tm = js_regex_minimal_shape();
-    if (!tm) return ItemNull;
-    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
-    m->type_id = LMD_TYPE_MAP;
-    m->type = tm;
-    m->data_cap = tm->byte_size < 64 ? 64 : (int)tm->byte_size;
-    m->data = pool_calloc(js_input->pool, m->data_cap);
-
-    char* data = (char*)m->data;
-    int64_t rd_bits = (int64_t)(uintptr_t)rd;
-    memcpy(data + 0 * (int)sizeof(void*), &rd_bits, sizeof(int64_t));
-    String* source_string = js_regex_escape_source(source, source_len);
-    memcpy(data + 1 * (int)sizeof(void*), &source_string, sizeof(String*));
-    String* flags_string = heap_create_name(flags);
-    memcpy(data + 2 * (int)sizeof(void*), &flags_string, sizeof(String*));
-    int64_t last_index = 0;
-    memcpy(data + 3 * (int)sizeof(void*), &last_index, sizeof(int64_t));
-    String* class_string = heap_create_name("RegExp", 6);
-    memcpy(data + 4 * (int)sizeof(void*), &class_string, sizeof(String*));
-    Item regexp_proto = js_get_regexp_prototype();
-    Map* proto_map = (get_type_id(regexp_proto) == LMD_TYPE_MAP) ? regexp_proto.map : NULL;
-    memcpy(data + 5 * (int)sizeof(void*), &proto_map, sizeof(Map*));
-
-    Item regex_obj = (Item){.map = m};
-    if (regexp_proto.item != ItemNull.item && get_type_id(regexp_proto) != LMD_TYPE_MAP) {
-        js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
-    }
-    return regex_obj;
 }
 
 static bool js_regex_is_re2_literal_meta(char ch, bool in_class) {
@@ -13866,54 +13205,6 @@ static int js_regex_count_capture_groups_before(const char* pattern, int pattern
     return count;
 }
 
-static bool js_regex_lookbehind_group_offset_at(const char* pattern, int pattern_len,
-        int target_pos, int* group_offset) {
-    if (group_offset) *group_offset = 0;
-    if (!pattern || target_pos < 0 || target_pos > pattern_len) return false;
-    bool lookbehind_stack[64];
-    int start_stack[64];
-    int depth = 0;
-    int bracket_depth = 0;
-    for (int pos = 0; pos < target_pos && pos < pattern_len; pos++) {
-        if (pattern[pos] == '\\' && pos + 1 < target_pos) {
-            pos++;
-            continue;
-        }
-        if (pattern[pos] == '[') {
-            bracket_depth++;
-            continue;
-        }
-        if (pattern[pos] == ']' && bracket_depth > 0) {
-            bracket_depth--;
-            continue;
-        }
-        if (bracket_depth > 0) continue;
-        if (pattern[pos] == '(') {
-            bool is_lookbehind = pos + 3 < pattern_len &&
-                pattern[pos + 1] == '?' && pattern[pos + 2] == '<' &&
-                (pattern[pos + 3] == '=' || pattern[pos + 3] == '!');
-            if (depth < 64) {
-                lookbehind_stack[depth] = is_lookbehind;
-                start_stack[depth] = pos;
-            }
-            depth++;
-            continue;
-        }
-        if (pattern[pos] == ')' && depth > 0) {
-            depth--;
-        }
-    }
-    for (int i = depth - 1; i >= 0 && i < 64; i--) {
-        if (!lookbehind_stack[i]) continue;
-        if (group_offset) {
-            *group_offset = js_regex_count_capture_groups_before(pattern, pattern_len,
-                start_stack[i]);
-        }
-        return true;
-    }
-    return false;
-}
-
 static bool js_regex_is_class_escape_shorthand(char ch) {
     return ch == 'd' || ch == 'D' || ch == 's' || ch == 'S' || ch == 'w' || ch == 'W';
 }
@@ -13940,54 +13231,9 @@ static int js_regex_append_legacy_octal_escape(std::string& out, const char* pat
     return last;
 }
 
-static bool js_regex_try_make_legacy_single_escape_literal(const char* pattern,
-        int pattern_len, char** literal_out, int* literal_len_out) {
-    if (literal_out) *literal_out = NULL;
-    if (literal_len_out) *literal_len_out = 0;
-    if (!pattern || pattern_len < 2 || pattern[0] != '\\' ||
-        !literal_out || !literal_len_out) {
-        return false;
-    }
-
-    unsigned char first = (unsigned char)pattern[1];
-    if (first < 0x20 || first == 0x7F) return false;
-    int len = js_regex_utf8_sequence_len(first);
-    if (1 + len != pattern_len) return false;
-
-    if (first < 0x80) {
-        switch ((char)first) {
-        case '0': case '1': case '2': case '3': case '4':
-        case '5': case '6': case '7': case '8': case '9':
-        case 'b': case 'B': case 'c': case 'd': case 'D': case 'f':
-        case 'n': case 'r': case 's': case 'S': case 't':
-        case 'v': case 'w': case 'W':
-            return false;
-        default:
-            break;
-        }
-    }
-
-    char* literal = (char*)pool_calloc(js_input->pool, len + 1);
-    memcpy(literal, pattern + 1, len);
-    literal[len] = '\0';
-    *literal_out = literal;
-    *literal_len_out = len;
-    return true;
-}
-
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
-    if (flags_len == 0 &&
-        js_regex_try_make_legacy_single_escape_literal(pattern, pattern_len,
-                                                      &literal_buf, &literal_len)) {
-        JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
-        rd->literal_fast = true;
-        rd->literal_pattern = literal_buf;
-        rd->literal_pattern_len = literal_len;
-        return js_regex_build_minimal_literal_object(rd, pattern, pattern_len, "");
-    }
-
     int special_property_kind = js_regex_detect_simple_property_repeat(pattern, pattern_len);
     if (special_property_kind == 0) {
         special_property_kind = js_regex_detect_property_repeat_loose(pattern, pattern_len);
@@ -14048,8 +13294,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
 
     // Check permanent RE2 cache — survives pool resets, avoids recompiling huge regex literals between tests
     uint64_t perm_key = js_regex_content_hash(pattern, pattern_len, flags, flags_len);
-    if (pattern_len >= JS_REGEX_PERMANENT_CACHE_MIN_SOURCE_LEN &&
-        special_property_kind == 0 && !has_re2_name_alias && !needs_utf16_subject) {
+    if (special_property_kind == 0 && !has_re2_name_alias && !needs_utf16_subject) {
         auto perm_it = g_re2_permanent_cache.find(perm_key);
         if (perm_it != g_re2_permanent_cache.end()) {
             auto& pe = perm_it->second;
@@ -14334,26 +13579,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 } else {
                     int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
                         effective_pattern_len, i);
-                    int lookbehind_group_offset = 0;
-                    bool inside_lookbehind = js_regex_lookbehind_group_offset_at(
-                        effective_pattern, effective_pattern_len, i, &lookbehind_group_offset);
-                    if (inside_lookbehind && ref_num <= lookbehind_group_offset) {
-                        processed_pattern += '\\';
-                        processed_pattern += next;
-                        i++;
-                        continue;
-                    }
                     if (ref_num > groups_before_ref) {
-                        if (inside_lookbehind) {
-                            processed_pattern += '\\';
-                            processed_pattern += next;
-                            i++;
-                            continue;
-                        }
-                        i++;
-                        continue;
-                    }
-                    if (inside_lookbehind && ref_num > lookbehind_group_offset) {
                         i++;
                         continue;
                     }
@@ -14689,6 +13915,28 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
         }
     }
+    // 3b. Strip lookbehind assertions (?<=...) and (?<!...) since RE2 doesn't support them
+    //     This prevents RE2 compile failures. Log a warning for diagnostics.
+    {
+        for (const char* lb_prefix : {"(?<=", "(?<!"}) {
+            size_t pos = 0;
+            while ((pos = processed_pattern.find(lb_prefix, pos)) != std::string::npos) {
+                if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+                int depth = 1;
+                size_t end = pos + strlen(lb_prefix);
+                while (end < processed_pattern.size() && depth > 0) {
+                    if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
+                        end += 2; continue;
+                    }
+                    if (processed_pattern[end] == '(') depth++;
+                    else if (processed_pattern[end] == ')') depth--;
+                    end++;
+                }
+                log_debug("js regex: stripping lookbehind %s from pattern (RE2 unsupported)", lb_prefix);
+                processed_pattern.erase(pos, end - pos);
+            }
+        }
+    }
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
     //    Must NOT convert lookbehind (?<=...) or (?<!...)
     {
@@ -14720,19 +13968,13 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 char* re2_copy = (char*)pool_calloc(js_input->pool, alias_len + 1);
                 memcpy(re2_copy, alias_buf, alias_len);
                 re2_copy[alias_len] = '\0';
-                int js_copy_len = name_len;
-                char* js_copy = js_regex_copy_public_group_name(
-                    processed_pattern.c_str() + after, name_len, &js_copy_len);
-                if (!js_copy) {
-                    js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
-                    memcpy(js_copy, processed_pattern.c_str() + after, name_len);
-                    js_copy[name_len] = '\0';
-                    js_copy_len = name_len;
-                }
+                char* js_copy = (char*)pool_calloc(js_input->pool, name_len + 1);
+                memcpy(js_copy, processed_pattern.c_str() + after, name_len);
+                js_copy[name_len] = '\0';
                 named_alias_re2_names[named_alias_count] = re2_copy;
                 named_alias_re2_lens[named_alias_count] = alias_len;
                 named_alias_js_names[named_alias_count] = js_copy;
-                named_alias_js_lens[named_alias_count] = js_copy_len;
+                named_alias_js_lens[named_alias_count] = name_len;
                 named_alias_count++;
                 processed_pattern.replace(after, name_len, alias_buf, alias_len);
                 processed_pattern.insert(pos + 2, "P");
@@ -14806,8 +14048,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
     rd->re2 = re2;
     rd->wrapper = wrapper;
-    rd->source_pattern = pattern;
-    rd->source_pattern_len = pattern_len;
     rd->global = global;
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
@@ -14907,8 +14147,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
-    if (pattern_len >= JS_REGEX_PERMANENT_CACHE_MIN_SOURCE_LEN &&
-        special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+    if (special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
         !needs_utf16_subject && (!wrapper || !wrapper->has_filters)) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
@@ -15271,7 +14510,7 @@ extern "C" Item js_regex_test(Item regex, Item str) {
 
     int num_groups = js_regex_num_groups(rd);
     if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS] = {};
+    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = utf16_subject ?
         js_utf16_idx_to_byte(match_chars, match_len, start_pos) : start_pos;
@@ -15418,7 +14657,7 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // perform match with captures
     int num_groups = js_regex_num_groups(rd);
     if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-    re2::StringPiece matches[JS_REGEX_MAX_GROUPS] = {};
+    re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
     // sticky: must match at exactly start_pos (ANCHOR_START from start_pos)
     re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START : re2::RE2::UNANCHORED;
     int match_start_pos = code_unit_indices ?
@@ -15431,7 +14670,6 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         }
         return ItemNull;
     }
-    js_regex_adjust_nullable_literal_repeat_match(rd, match_chars, match_len, matches, num_groups);
     js_regex_reset_stale_repeated_captures(rd, matches, num_groups);
 
     // update lastIndex for global/sticky regexes (per ES spec §22.2.5.2 step 16:
@@ -15482,11 +14720,14 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // Set named properties (index, input, groups) via companion map
     int match_index = (int)(matches[0].data() - match_chars);
     if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
-    js_regex_create_data_property(result, "index", 5, (Item){.item = i2it(match_index)});
+    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
+    js_property_set(result, index_key, (Item){.item = i2it(match_index)});
     // v46: add input property (the original string passed to exec)
-    js_regex_create_data_property(result, "input", 5, str);
+    Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
+    js_property_set(result, input_key, str);
     // groups property — populated with named captures if regex has named groups
     // ES spec: groups object must be a null-prototype object (Object.create(null))
+    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
     if (!rd->literal_fast && rd->re2) {
         const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
@@ -15527,19 +14768,14 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             int js_name_len = (int)pair.first.size();
             const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
                 (int)pair.first.size(), &js_name_len);
-            js_regex_create_data_property(groups_obj, js_name, js_name_len, val);
+            Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
+            js_property_set(groups_obj, key, val);
         }
-        js_regex_create_data_property(result, "groups", 6, groups_obj);
-            return result;
-        }
-        Item source_groups = js_regex_build_source_named_groups_object(rd, matches, num_groups,
-            str, chars, len, match_chars, match_len, utf16_subject, full_unicode);
-        if (source_groups.item != ITEM_JS_UNDEFINED) {
-            js_regex_create_data_property(result, "groups", 6, source_groups);
+        js_property_set(result, groups_key, groups_obj);
             return result;
         }
     }
-    js_regex_create_data_property(result, "groups", 6, make_js_undefined());
+    js_property_set(result, groups_key, make_js_undefined());
     return result;
 }
 
@@ -16679,16 +15915,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         return ItemNull;
     }
 
-    // Computed style wrappers are MAP_KIND_DOM host objects, but their methods
-    // are CSSStyleDeclaration methods rather than DOM element methods.
-    if (js_is_computed_style_item(obj)) {
-        String* method = it2s(method_name);
-        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
-            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-            return js_computed_style_get_property(obj, args[0]);
-        }
-    }
-
     if (get_type_id(obj) == LMD_TYPE_MAP && obj.map &&
         (obj.map->map_kind == MAP_KIND_DOM || obj.map->map_kind == MAP_KIND_FOREIGN_DOC)) {
         if (js_dom_item_is_range(obj) || js_dom_item_is_selection(obj)) {
@@ -16732,6 +15958,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     }
     if (js_is_rule_style_decl(obj)) {
         return js_cssom_rule_decl_method(obj, method_name, args, argc);
+    }
+    // Computed style getPropertyValue
+    if (js_is_computed_style_item(obj)) {
+        String* method = it2s(method_name);
+        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
+            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+            return js_computed_style_get_property(obj, args[0]);
+        }
     }
     // DataView methods
     if (js_is_dataview(obj)) {
@@ -18149,6 +17383,24 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
+    // v15: Regex instance methods (.exec, .test)
+    {
+        JsRegexData* rd = js_get_regex_data(obj);
+        if (rd) {
+            String* method = it2s(method_name);
+            if (method) {
+                if (method->len == 4 && strncmp(method->chars, "exec", 4) == 0) {
+                    Item str = argc > 0 ? args[0] : make_js_undefined();
+                    return js_regex_exec(obj, str);
+                }
+                if (method->len == 4 && strncmp(method->chars, "test", 4) == 0) {
+                    Item str = argc > 0 ? args[0] : make_js_undefined();
+                    return js_regex_test(obj, str);
+                }
+            }
+        }
+    }
+
     // TextEncoder/TextDecoder instance methods (.encode, .decode)
     // Only intercept for actual TextEncoder/TextDecoder objects
     {
@@ -18509,7 +17761,8 @@ static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, i
         int js_name_len = (int)pair.first.size();
         const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
             (int)pair.first.size(), &js_name_len);
-        js_regex_create_data_property(groups_obj, js_name, js_name_len, val);
+        Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
+        js_property_set(groups_obj, key, val);
     }
     return groups_obj;
 }
@@ -18695,7 +17948,7 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
         re2::StringPiece input(s->chars, s->len);
         int ngroups = js_regex_num_groups(rd);
         if (ngroups > JS_REGEX_MAX_GROUPS) ngroups = JS_REGEX_MAX_GROUPS;
-        re2::StringPiece matches[JS_REGEX_MAX_GROUPS] = {};
+        re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
         StrBuf* buf = strbuf_new();
         int pos = 0;
         bool found_match = false;
@@ -20192,9 +19445,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 if (!s) return ItemNull;
                 Item result = js_array_new(0);
                 int offset = 0;
-                int num_groups = js_regex_num_groups(rd);
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
                 if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
-                re2::StringPiece matches[JS_REGEX_MAX_GROUPS] = {};
+                re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
                 while (offset < (int)s->len) {
                     bool matched = js_regex_match_internal(rd, s->chars, (int)s->len, offset,
                         re2::RE2::UNANCHORED, matches, num_groups);
@@ -21212,8 +20465,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
 extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc) {
     Item saved = js_array_method_real_this;
     js_array_method_real_this = (Item){0};
-    TypeId arr_type = get_type_id(arr);
-    if (arr_type == LMD_TYPE_ARRAY && get_type_id(method_name) == LMD_TYPE_STRING) {
+    if (get_type_id(arr) == LMD_TYPE_ARRAY && get_type_id(method_name) == LMD_TYPE_STRING) {
         String* method = it2s(method_name);
         Item resolved = js_property_get(arr, method_name);
         if (js_exception_pending) {
@@ -21231,20 +20483,7 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
             return result;
         }
     }
-    Item result = ItemNull;
-    if (arr_type == LMD_TYPE_ARRAY) {
-        result = js_array_method(arr, method_name, args, argc);
-    } else if (arr_type == LMD_TYPE_MAP) {
-        result = js_map_method(arr, method_name, args, argc);
-    } else if (arr_type == LMD_TYPE_STRING) {
-        result = js_string_method(arr, method_name, args, argc);
-    } else if (arr_type == LMD_TYPE_INT || arr_type == LMD_TYPE_FLOAT ||
-               arr_type == LMD_TYPE_INT64 || arr_type == LMD_TYPE_DECIMAL) {
-        result = js_number_method(arr, method_name, args, argc);
-    } else {
-        Item fn = js_property_access(arr, method_name);
-        if (!js_exception_pending) result = js_call_function(fn, arr, args, argc);
-    }
+    Item result = js_array_method(arr, method_name, args, argc);
     js_array_method_real_this = saved;
     return result;
 }
@@ -24261,16 +23500,9 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
             double v = num.get_double();
             if (v != v || !isfinite(v) || v == 0.0) return js_make_number(v);
             if (fabs(v) >= 4503599627370496.0) return js_make_number(v);
-            double int_part = 0.0;
-            double frac = modf(v, &int_part);
-            double r;
-            if (v < 0.0) {
-                if (frac < -0.5) r = int_part - 1.0;
-                else if (int_part == 0.0) r = -0.0;
-                else r = int_part;
-            } else {
-                r = frac >= 0.5 ? int_part + 1.0 : int_part;
-            }
+            double r = floor(v + 0.5);
+            // round(-0.5) → -0 in JS (floor(-0.5 + 0.5) = floor(0.0) = 0, but should be -0)
+            if (r == 0.0 && v < 0.0) return js_make_number(-0.0);
             return push_d(r);
         }
         return js_make_number(NAN);

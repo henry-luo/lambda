@@ -11,7 +11,6 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_dom_events.h"
-#include "js_dom_selection.h"  // CE-7: js_ctor_static_range_fn
 #include "js_property_attrs.h"
 #include "js_props.h"
 #include "js_class.h"
@@ -297,7 +296,6 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
 }
 static int64_t js_parse_array_index(const char* s, int len);
 static bool js_is_arguments_exotic_array_for_proto(Item value);
-extern "C" void js_mark_own_proto_property(Item object);
 
 // ES2020 §9.1.6.3 ValidateAndApplyPropertyDescriptor
 static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descriptor) {
@@ -751,10 +749,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     if (!nm_s || nm_s->len >= 200) return obj;
     const char* nm_chars = nm_s->chars;
     int nm_len = (int)nm_s->len;
-    if (get_type_id(obj) == LMD_TYPE_MAP && nm_len == 9 &&
-        strncmp(nm_chars, "__proto__", 9) == 0) {
-        js_mark_own_proto_property(obj);
-    }
 
     JsPropertyDescriptor pd;
     if (!js_descriptor_from_object(descriptor, &pd)) return obj;
@@ -3696,80 +3690,16 @@ extern "C" Item js_parseFloat(Item str_item) {
     // null-terminate at the end of valid decimal literal and parse
     char saved = *q;
     *q = '\0';
-    char* fast_p = start;
-    bool neg = false;
-    if (*fast_p == '+' || *fast_p == '-') {
-        neg = *fast_p == '-';
-        fast_p++;
-    }
-    double fast_val = 0.0;
-    int digit_count = 0;
-    while (*fast_p >= '0' && *fast_p <= '9') {
-        if (digit_count < 16) fast_val = fast_val * 10.0 + (double)(*fast_p - '0');
-        digit_count++;
-        fast_p++;
-    }
-    int frac_digits = 0;
-    if (*fast_p == '.') {
-        fast_p++;
-        while (*fast_p >= '0' && *fast_p <= '9') {
-            if (digit_count < 16) {
-                fast_val = fast_val * 10.0 + (double)(*fast_p - '0');
-                frac_digits++;
-            }
-            digit_count++;
-            fast_p++;
-        }
-    }
-    int exp_val = 0;
-    bool exp_neg = false;
-    if (*fast_p == 'e' || *fast_p == 'E') {
-        fast_p++;
-        if (*fast_p == '+' || *fast_p == '-') {
-            exp_neg = *fast_p == '-';
-            fast_p++;
-        }
-        while (*fast_p >= '0' && *fast_p <= '9') {
-            if (exp_val < 400) exp_val = exp_val * 10 + (*fast_p - '0');
-            fast_p++;
-        }
-    }
-    int decimal_exp = (exp_neg ? -exp_val : exp_val) - frac_digits;
-    bool fast_ok = fast_p == q && digit_count > 0 && digit_count <= 15 &&
-        decimal_exp >= -308 && decimal_exp <= 308;
-    double val = 0.0;
-    if (fast_ok) {
-        // Most js262 parseFloat sweeps use short decimal prefixes. Avoid
-        // strtod's locale/errno machinery in that hot path and keep strtod as
-        // the fallback for long or delicate decimals.
-        val = fast_val;
-        if (decimal_exp != 0) val *= pow(10.0, (double)decimal_exp);
-        if (neg) val = -val;
-        *q = saved;
-    } else {
-        char* endptr;
-        val = strtod(start, &endptr);
-        *q = saved;
-        if (endptr == start) {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = NAN;
-            return (Item){.item = d2it(fp)};
-        }
-    }
+    char* endptr;
+    double val = strtod(start, &endptr);
+    *q = saved;
 
-    if (!fast_ok && q == start) {
+    if (endptr == start) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
     }
 
-    if (isfinite(val) && !(val == 0.0 && signbit(val)) &&
-            val >= (double)INT56_MIN && val <= (double)INT56_MAX &&
-            val == (double)(int64_t)val) {
-        // hot parseFloat test262 loops often produce integral numbers; returning
-        // the immediate int representation avoids one heap allocation per call.
-        return (Item){.item = i2it((int64_t)val)};
-    }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = val;
     return (Item){.item = d2it(fp)};
@@ -4421,7 +4351,6 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
 
 static int encode_charcode_utf8(char* buf, int code);
 static int encode_charcode_full_utf8(char* buf, int code);
-static inline int js_uri_hex_digit(char c);
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out);
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp);
 extern "C" Item js_decodeURIComponent(Item str_item);
@@ -4429,7 +4358,6 @@ extern "C" Item js_decodeURI(Item str_item);
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item);
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp);
 extern "C" uint64_t js_get_heap_epoch();
-extern __thread EvalContext* context;
 
 static Item g_uri_last_four_byte_string = {0};
 static uint32_t g_uri_last_four_byte_cp = 0;
@@ -4437,18 +4365,6 @@ static uint64_t g_uri_last_four_byte_epoch = 0;
 static Item g_last_from_char_code_string = {0};
 static int g_last_from_char_code_cp = -1;
 static uint64_t g_last_from_char_code_epoch = 0;
-
-static void js_uri_global_cache_ensure_gc_roots() {
-    static void* rooted_gc = NULL;
-    if (!context || !context->heap || !context->heap->gc) return;
-    if (rooted_gc == context->heap->gc) return;
-    // The URI/fromCharCode fast paths reuse recent heap strings across many
-    // loop iterations. A decodeURI stress test can collect in the middle of
-    // that loop, so these static cache slots have to participate in GC.
-    heap_register_gc_root(&g_uri_last_four_byte_string.item);
-    heap_register_gc_root(&g_last_from_char_code_string.item);
-    rooted_gc = context->heap->gc;
-}
 
 static inline Item js_uri_make_four_byte_string(char* decoded) {
     String* result = (String*)heap_alloc(sizeof(String) + 5, LMD_TYPE_STRING);
@@ -4468,58 +4384,19 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     return (Item){.item = s2it(result)};
 }
 
-static inline bool js_uri_is_reserved_cp(uint32_t cp) {
-    switch (cp) {
-    case ';': case '/': case '?': case ':': case '@': case '&':
-    case '=': case '+': case '$': case ',': case '#':
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool js_uri_try_decode_percent_utf16_cp(String* s, uint32_t* cp_out) {
-    if (!s || !cp_out) return false;
-    int bytes[3];
-    int byte_count = 0;
-    if (s->len != 3 && s->len != 6 && s->len != 9) return false;
-    for (int i = 0; i < s->len; i += 3) {
-        if (s->chars[i] != '%') return false;
-        int hi = js_uri_hex_digit(s->chars[i + 1]);
-        int lo = js_uri_hex_digit(s->chars[i + 2]);
-        if (hi < 0 || lo < 0) return false;
-        bytes[byte_count++] = (hi << 4) | lo;
-    }
-
-    uint32_t cp = 0;
-    if (byte_count == 1) {
-        if (bytes[0] >= 0x80) return false;
-        cp = (uint32_t)bytes[0];
-    } else if (byte_count == 2) {
-        if (bytes[0] < 0xC2 || bytes[0] > 0xDF) return false;
-        if ((bytes[1] & 0xC0) != 0x80) return false;
-        cp = (uint32_t)(((bytes[0] & 0x1F) << 6) | (bytes[1] & 0x3F));
-    } else {
-        if (bytes[0] < 0xE0 || bytes[0] > 0xEF) return false;
-        if ((bytes[1] & 0xC0) != 0x80 || (bytes[2] & 0xC0) != 0x80) return false;
-        if (bytes[0] == 0xE0 && bytes[1] < 0xA0) return false;
-        if (bytes[0] == 0xED && bytes[1] >= 0xA0) return false;
-        cp = (uint32_t)(((bytes[0] & 0x0F) << 12) |
-                        ((bytes[1] & 0x3F) << 6) |
-                        (bytes[2] & 0x3F));
-    }
-    if (cp > 0xFFFF) return false;
-    *cp_out = cp;
-    return true;
-}
-
 static int js_from_char_code_to_uint16(Item code_item) {
     TypeId code_type = get_type_id(code_item);
     if (code_type == LMD_TYPE_INT) {
-        return (int)((uint64_t)it2i(code_item) & 0xFFFFu);
+        int64_t value = it2i(code_item);
+        int64_t mod = value % 65536;
+        if (mod < 0) mod += 65536;
+        return (int)mod;
     }
     if (code_type == LMD_TYPE_INT64) {
-        return (int)((uint64_t)it2l(code_item) & 0xFFFFu);
+        int64_t value = it2l(code_item);
+        int64_t mod = value % 65536;
+        if (mod < 0) mod += 65536;
+        return (int)mod;
     }
     Item num_item = js_to_number(code_item);
     double d = js_get_number(num_item);
@@ -4531,7 +4408,6 @@ static int js_from_char_code_to_uint16(Item code_item) {
 }
 
 extern "C" Item js_string_fromCharCode(Item code_item) {
-    js_uri_global_cache_ensure_gc_roots();
     int code = js_from_char_code_to_uint16(code_item);
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
@@ -4558,7 +4434,6 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
 }
 
 extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
-    js_uri_global_cache_ensure_gc_roots();
     if (str_item.item == g_last_from_char_code_string.item &&
         g_last_from_char_code_epoch == js_get_heap_epoch()) {
         return (int64_t)g_last_from_char_code_cp;
@@ -4567,7 +4442,6 @@ extern "C" int64_t js_string_last_fromCharCode_cp(Item str_item) {
 }
 
 extern "C" Item js_string_fromCharCode2(Item first_item, Item second_item) {
-    js_uri_global_cache_ensure_gc_roots();
     int first = js_from_char_code_to_uint16(first_item);
     int second = js_from_char_code_to_uint16(second_item);
 
@@ -4618,114 +4492,6 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     return js_strict_equal(decoded, expected);
 }
 
-extern "C" int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item,
-                                                           Item second_item, int64_t component) {
-    Item matched = js_uri_decode_equals_from_char_code(str_item, first_item, second_item, component);
-    if (js_exception_pending) return 0;
-    return get_type_id(matched) == LMD_TYPE_BOOL && it2b(matched) ? 1 : 0;
-}
-
-extern "C" int64_t js_uri_decode_equals_from_char_code_raw_ints(Item str_item, int64_t first_raw,
-                                                                int64_t second_raw, int64_t component) {
-    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
-    if (js_exception_pending) return 0;
-    String* s = it2s(str_val);
-    uint32_t cp = 0;
-    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
-    bool has_fast_cp = cached_cp >= 0;
-    if (has_fast_cp) cp = (uint32_t)cached_cp;
-    if (has_fast_cp || js_uri_try_decode_four_byte_cp(s, &cp)) {
-        uint32_t first = ((uint32_t)first_raw) & 0xFFFFu;
-        uint32_t second = ((uint32_t)second_raw) & 0xFFFFu;
-        if (first >= 0xD800 && first <= 0xDBFF && second >= 0xDC00 && second <= 0xDFFF) {
-            uint32_t pair_cp = 0x10000 + ((first - 0xD800) << 10) + (second - 0xDC00);
-            return pair_cp == cp ? 1 : 0;
-        }
-        return 0;
-    }
-
-    Item first_item = (Item){.item = i2it((int32_t)first_raw)};
-    Item second_item = (Item){.item = i2it((int32_t)second_raw)};
-    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
-    if (js_exception_pending) return 0;
-    Item expected = js_string_fromCharCode2(first_item, second_item);
-    if (js_exception_pending) return 0;
-    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
-}
-
-extern "C" int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item,
-                                                            int64_t component) {
-    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
-    if (js_exception_pending) return 0;
-    String* s = it2s(str_val);
-    uint32_t cp = 0;
-    if (js_uri_try_decode_percent_utf16_cp(s, &cp)) {
-        if (!component && js_uri_is_reserved_cp(cp)) return 0;
-        int code = js_from_char_code_to_uint16(code_item);
-        if (js_exception_pending) return 0;
-        return cp == (uint32_t)code ? 1 : 0;
-    }
-
-    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
-    if (js_exception_pending) return 0;
-    Item expected = js_string_fromCharCode(code_item);
-    if (js_exception_pending) return 0;
-    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
-}
-
-extern "C" int64_t js_uri_decode_equals_from_char_code1_raw_int(Item str_item, int64_t code_raw,
-                                                                int64_t component) {
-    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
-    if (js_exception_pending) return 0;
-    String* s = it2s(str_val);
-    uint32_t cp = 0;
-    if (js_uri_try_decode_percent_utf16_cp(s, &cp)) {
-        if (!component && js_uri_is_reserved_cp(cp)) return 0;
-        return cp == (((uint32_t)code_raw) & 0xFFFFu) ? 1 : 0;
-    }
-
-    // Keep the uncommon fallback spec-correct for non-percent or malformed
-    // shapes; the hot js262 URI loops stay on the decoded-codepoint branch.
-    Item code_item = (Item){.item = i2it((int32_t)code_raw)};
-    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
-    if (js_exception_pending) return 0;
-    Item expected = js_string_fromCharCode(code_item);
-    if (js_exception_pending) return 0;
-    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
-}
-
-extern "C" Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item,
-                                                     int64_t component) {
-    int64_t matched = js_uri_decode_equals_from_char_code1_raw(str_item, code_item, component);
-    if (js_exception_pending) return ItemNull;
-    return (Item){.item = b2it(matched != 0)};
-}
-
-extern "C" int64_t js_uri_decode_identity_raw(Item str_item, int64_t component) {
-    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
-    if (js_exception_pending) return 0;
-    String* s = it2s(str_val);
-    if (!s || s->len == 0) return it2b(js_strict_equal(str_val, str_item)) ? 1 : 0;
-    bool has_percent = false;
-    for (int64_t i = 0; i < s->len; i++) {
-        if (s->chars[i] == '%') {
-            has_percent = true;
-            break;
-        }
-    }
-    if (!has_percent) return it2b(js_strict_equal(str_val, str_item)) ? 1 : 0;
-
-    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
-    if (js_exception_pending) return 0;
-    return it2b(js_strict_equal(decoded, str_item)) ? 1 : 0;
-}
-
-extern "C" Item js_uri_decode_identity(Item str_item, int64_t component) {
-    int64_t matched = js_uri_decode_identity_raw(str_item, component);
-    if (js_exception_pending) return ItemNull;
-    return (Item){.item = b2it(matched != 0)};
-}
-
 // Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
 static int encode_charcode_utf8(char* buf, int code) {
     code &= 0xFFFF; // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
@@ -4768,68 +4534,6 @@ static int encode_charcode_full_utf8(char* buf, int code) {
     }
 }
 
-typedef struct JsInlineStringBuf {
-    uint32_t len;
-    uint8_t is_ascii;
-    char chars[256];
-} JsInlineStringBuf;
-
-static bool js_build_prefix_from_char_code_stack(Item prefix_item, Item code_item,
-                                                 JsInlineStringBuf* out) {
-    // The parseInt/parseFloat Unicode sweeps form a short literal prefix plus
-    // one UTF-16 code unit. Building the temporary String on the stack avoids
-    // two heap strings per iteration, while longer or non-string inputs fall
-    // back to the normal allocating path below.
-    if (!out) return false;
-    Item prefix_val = (get_type_id(prefix_item) == LMD_TYPE_STRING)
-        ? prefix_item : js_to_string(prefix_item);
-    if (js_exception_pending) return false;
-    String* prefix = it2s(prefix_val);
-    if (!prefix) return false;
-    int code = js_from_char_code_to_uint16(code_item);
-    if (js_exception_pending) return false;
-
-    char suffix[4];
-    int suffix_len = encode_charcode_utf8(suffix, code);
-    if (prefix->len + (uint32_t)suffix_len >= sizeof(out->chars)) return false;
-    memcpy(out->chars, prefix->chars, prefix->len);
-    memcpy(out->chars + prefix->len, suffix, suffix_len);
-    out->len = prefix->len + (uint32_t)suffix_len;
-    out->is_ascii = prefix->is_ascii && code < 128;
-    out->chars[out->len] = '\0';
-    return true;
-}
-
-extern "C" Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item,
-                                                Item radix_item) {
-    JsInlineStringBuf buf;
-    if (js_build_prefix_from_char_code_stack(prefix_item, code_item, &buf)) {
-        // test262 Unicode sweeps build short prefixes plus one code unit; parse
-        // from a stack string to avoid allocating both fromCharCode and concat.
-        Item combined = (Item){.item = s2it((String*)&buf)};
-        return js_parseInt(combined, radix_item);
-    }
-    Item suffix = js_string_fromCharCode(code_item);
-    if (js_exception_pending) return ItemNull;
-    Item combined = js_add(prefix_item, suffix);
-    if (js_exception_pending) return ItemNull;
-    return js_parseInt(combined, radix_item);
-}
-
-extern "C" Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item) {
-    JsInlineStringBuf buf;
-    if (js_build_prefix_from_char_code_stack(prefix_item, code_item, &buf)) {
-        // same allocation-free path as parseInt for parseFloat Unicode sweeps.
-        Item combined = (Item){.item = s2it((String*)&buf)};
-        return js_parseFloat(combined);
-    }
-    Item suffix = js_string_fromCharCode(code_item);
-    if (js_exception_pending) return ItemNull;
-    Item combined = js_add(prefix_item, suffix);
-    if (js_exception_pending) return ItemNull;
-    return js_parseFloat(combined);
-}
-
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
 // Takes a Lambda Array or TypedArray of code points and returns a concatenated string
 extern "C" Item js_string_fromCharCode_array(Item arr_item) {
@@ -4845,16 +4549,16 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
         for (int i = 0; i < len; i++) {
             Item code_item = (Item){0};
             switch (ta->element_type) {
-            case JS_TYPED_UINT8:
-            case JS_TYPED_UINT8_CLAMPED: code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
+            case JS_TYPED_UINT8:   code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
             case JS_TYPED_INT8:    code_item = (Item){.item = i2it(((int8_t*)ta->data)[i])}; break;
+            case JS_TYPED_UINT8_CLAMPED: code_item = (Item){.item = i2it(((uint8_t*)ta->data)[i])}; break;
             case JS_TYPED_UINT16:  code_item = (Item){.item = i2it(((uint16_t*)ta->data)[i])}; break;
             case JS_TYPED_INT16:   code_item = (Item){.item = i2it(((int16_t*)ta->data)[i])}; break;
             case JS_TYPED_UINT32:  code_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i])}; break;
             case JS_TYPED_INT32:   code_item = (Item){.item = i2it(((int32_t*)ta->data)[i])}; break;
             case JS_TYPED_FLOAT32: code_item = push_d((double)((float*)ta->data)[i]); break;
             case JS_TYPED_FLOAT64: code_item = push_d(((double*)ta->data)[i]); break;
-            case JS_TYPED_BIGINT64:  code_item = (Item){.item = i2it((int64_t)((int64_t*)ta->data)[i])}; break;
+            case JS_TYPED_BIGINT64: code_item = (Item){.item = i2it(((int64_t*)ta->data)[i])}; break;
             case JS_TYPED_BIGUINT64: code_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i])}; break;
             }
             int code = js_from_char_code_to_uint16(code_item);
@@ -4862,16 +4566,16 @@ extern "C" Item js_string_fromCharCode_array(Item arr_item) {
             if (code >= 0xD800 && code <= 0xDBFF && i + 1 < len) {
                 Item lo_item = (Item){0};
                 switch (ta->element_type) {
-                case JS_TYPED_UINT8:
-                case JS_TYPED_UINT8_CLAMPED: lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_UINT8:   lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_INT8:    lo_item = (Item){.item = i2it(((int8_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_UINT8_CLAMPED: lo_item = (Item){.item = i2it(((uint8_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_UINT16:  lo_item = (Item){.item = i2it(((uint16_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_INT16:   lo_item = (Item){.item = i2it(((int16_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_UINT32:  lo_item = (Item){.item = i2it((int64_t)((uint32_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_INT32:   lo_item = (Item){.item = i2it(((int32_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_FLOAT32: lo_item = push_d((double)((float*)ta->data)[i+1]); break;
                 case JS_TYPED_FLOAT64: lo_item = push_d(((double*)ta->data)[i+1]); break;
-                case JS_TYPED_BIGINT64:  lo_item = (Item){.item = i2it((int64_t)((int64_t*)ta->data)[i+1])}; break;
+                case JS_TYPED_BIGINT64: lo_item = (Item){.item = i2it(((int64_t*)ta->data)[i+1])}; break;
                 case JS_TYPED_BIGUINT64: lo_item = (Item){.item = i2it((int64_t)((uint64_t*)ta->data)[i+1])}; break;
                 }
                 int lo = js_from_char_code_to_uint16(lo_item);
@@ -8501,47 +8205,6 @@ extern "C" Item js_alert(Item msg) {
 // Object.keys — return array of property names
 // =============================================================================
 
-static bool js_is_internal_enumeration_key(const char* s, int len) {
-    if (!s) return false;
-    if (len == 4 && strncmp(s, "__rd", 4) == 0) return true;
-    if (len < 5) return false;
-    if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
-        bool all_digits = true;
-        for (int i = 6; i < len; i++) {
-            if (s[i] < '0' || s[i] > '9') { all_digits = false; break; }
-        }
-        if (all_digits) return true;
-    }
-    if (len >= 6 && (strncmp(s, "__get_", 6) == 0 ||
-                     strncmp(s, "__set_", 6) == 0)) return true;
-    if (strncmp(s, "__nw_", 5) == 0 ||
-        strncmp(s, "__ne_", 5) == 0 ||
-        strncmp(s, "__nc_", 5) == 0) return true;
-    if (len == 10 && strncmp(s, "__frozen__", 10) == 0) return true;
-    if (len == 10 && strncmp(s, "__sealed__", 10) == 0) return true;
-    if (len == 17 && strncmp(s, "__non_extensible_", 17) == 0) return true;
-    if (len == 8 && strncmp(s, "__time__", 8) == 0) return true;
-    if (len == 11 && strncmp(s, "__is_math__", 11) == 0) return true;
-    if (len == 14 && strncmp(s, "__class_name__", 14) == 0) return true;
-    if (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0) return true;
-    if (len == 18 && strncmp(s, "__json_own_proto__", 18) == 0) return true;
-    if (len == 18 && strncmp(s, "__internal_proto__", 18) == 0) return true;
-    if (len == 23 && strncmp(s, "__class_private_index__", 23) == 0) return true;
-    if (len == 12 && strncmp(s, "__is_proto__", 12) == 0) return true;
-    if (len == 18 && strncmp(s, "__instance_proto__", 18) == 0) return true;
-    if (len == 15 && strncmp(s, "__source_text__", 15) == 0) return true;
-    if (len == 8 && strncmp(s, "__ctor__", 8) == 0) return true;
-    return false;
-}
-
-static bool js_should_enumerate_proto_key(Item object, ShapeEntry* se) {
-    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return false;
-    if (se && jspd_is_accessor(se)) return true;
-    bool marker_found = false;
-    Item marker = js_map_get_fast_ext(object.map, "__json_own_proto__", 18, &marker_found);
-    return marker_found && js_is_truthy(marker);
-}
-
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
     Item exotic_result = ItemNull;
@@ -8585,7 +8248,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8618,7 +8281,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8706,13 +8369,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         while (se) {
                             const char* s = se->name->str;
                             int len = (int)se->name->length;
-                            bool skip = js_is_internal_enumeration_key(s, len);
+                            bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
                             // skip "length" (already added) and numeric-only names
                             if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
-                            if (!skip && len == 9 && memcmp(s, "__proto__", 9) == 0 &&
-                                !js_should_enumerate_proto_key((Item){.map = m}, se)) {
-                                skip = true;
-                            }
                             if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
                                 bool all_digit = true;
                                 for (int i = 0; i < len; i++) {
@@ -8759,14 +8418,8 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = js_is_internal_enumeration_key(s, len);
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
-        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
-            !js_should_enumerate_proto_key(object, e)) skip = true;
-        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
-            Item val = _map_read_field(e, m->data);
-            if (val.item == ITEM_JS_UNDEFINED) skip = true;
-        }
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -8809,15 +8462,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = js_is_internal_enumeration_key(s, len);
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
-        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
-            !js_should_enumerate_proto_key(object, e)) skip = true;
-        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0) {
-            Item val = _map_read_field(e, m->data);
-            if (val.item == ITEM_JS_UNDEFINED) skip = true;
-        }
         if (!skip && is_class_ctor) {
             if ((len == 6 && strncmp(s, "length", 6) == 0) ||
                 (len == 4 && strncmp(s, "name", 4) == 0) ||
@@ -9053,7 +8700,7 @@ extern "C" Item js_object_keys(Item object) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
                 // skip internal markers (__xx_xxx), deleted sentinels, non-enumerable
-                if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 // skip non-enumerable (Stage A3: shape-flag-first)
@@ -9093,7 +8740,7 @@ extern "C" Item js_object_keys(Item object) {
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
                     // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (js_is_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -9133,13 +8780,8 @@ extern "C" Item js_object_keys(Item object) {
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
-                        bool skip = js_is_internal_enumeration_key(s, len) ||
-                            (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0);
-                        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
-                            !js_should_enumerate_proto_key((Item){.map = m}, se)) {
-                            skip = true;
-                        }
-                        if (!skip) {
+                        if (!((len >= 2 && s[0] == '_' && s[1] == '_') ||
+                              (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0))) {
                             Item val = _map_read_field(se, m->data);
                             if (val.item != JS_DELETED_SENTINEL_VAL && js_props_query_enumerable(m, se, s, len)) {
                                 int64_t idx = js_parse_array_index(s, len);
@@ -9180,14 +8822,10 @@ extern "C" Item js_object_keys(Item object) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = false;
-        if (js_is_internal_enumeration_key(s, len)) {
+        if (len >= 2 && s[0] == '_' && s[1] == '_') {
             skip = true;
         }
         if (is_error_object && len == 5 && strncmp(s, "stack", 5) == 0) {
-            skip = true;
-        }
-        if (!skip && len == 9 && strncmp(s, "__proto__", 9) == 0 &&
-            !js_should_enumerate_proto_key(object, e)) {
             skip = true;
         }
         if (!skip) {
@@ -9321,7 +8959,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 for (ShapeEntry* e = tm->shape; e; e = e->next) {
                     const char* s = e->name->str;
                     int len = (int)e->name->length;
-                    bool skip = js_is_internal_enumeration_key(s, len);
+                    bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
                     if (!skip) {
                         Item val = _map_read_field(e, m->data);
                         if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -9404,7 +9042,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 // (default-set non-enumerable on class/object prototypes;
                 //  user-defined static class fields override to enumerable).
                 bool skip = false;
-                if (js_is_internal_enumeration_key(s, len)) {
+                if (len >= 2 && s[0] == '_' && s[1] == '_') {
                     skip = true;
                 }
 
@@ -9939,73 +9577,12 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     return true;
 }
 
-static Item g_last_three_byte_uri_prefix_string = {0};
-static uint32_t g_last_three_byte_uri_prefix_cp = 0;
-static uint64_t g_last_three_byte_uri_prefix_epoch = 0;
-
-static inline bool js_test262_percent_escape_three_byte_prefix(String* s, uint32_t* prefix_out) {
-    if (!s || s->len != 9 || !s->is_ascii) return false;
-    if (s->chars[0] != '%' || s->chars[3] != '%' || s->chars[6] != '%') return false;
-    int b0_high = js_test262_upper_hex_digit(s->chars[1]);
-    int b0_low = js_test262_upper_hex_digit(s->chars[2]);
-    int b1_high = js_test262_upper_hex_digit(s->chars[4]);
-    int b1_low = js_test262_upper_hex_digit(s->chars[5]);
-    int b2_high = js_test262_upper_hex_digit(s->chars[7]);
-    int b2_low = js_test262_upper_hex_digit(s->chars[8]);
-    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
-    uint32_t byte0 = (uint32_t)((b0_high << 4) | b0_low);
-    uint32_t byte1 = (uint32_t)((b1_high << 4) | b1_low);
-    uint32_t byte2 = (uint32_t)((b2_high << 4) | b2_low);
-    if (byte0 < 0xF0 || byte0 > 0xF4) return false;
-    if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80) return false;
-    *prefix_out = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |
-                  ((byte2 & 0x3F) << 6);
-    return true;
-}
-
-static Item js_test262_concat_percent_hex_u32(Item left_item, uint32_t n) {
+extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     Item left_val = (get_type_id(left_item) == LMD_TYPE_STRING) ? left_item : js_to_string(left_item);
     if (js_check_exception()) return ItemNull;
     String* left = it2s(left_val);
     if (!left) left = heap_create_name("", 0);
 
-    static const char hex[] = "0123456789ABCDEF";
-    uint32_t byte = n & 0xFF;
-    int64_t left_len = left->len;
-    String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
-    result->len = left_len + 3;
-    result->is_ascii = left->is_ascii;
-    memcpy(result->chars, left->chars, left_len);
-    result->chars[left_len] = '%';
-    result->chars[left_len + 1] = hex[(byte >> 4) & 0xF];
-    result->chars[left_len + 2] = hex[byte & 0xF];
-    result->chars[left_len + 3] = '\0';
-    Item result_item = (Item){.item = s2it(result)};
-    uint32_t cp = 0;
-    uint64_t epoch = js_get_heap_epoch();
-    if (left_item.item == g_last_three_byte_uri_prefix_string.item &&
-        g_last_three_byte_uri_prefix_epoch == epoch &&
-        (byte & 0xC0) == 0x80) {
-        cp = g_last_three_byte_uri_prefix_cp | (byte & 0x3F);
-        if (cp >= 0x10000 && cp <= 0x10FFFF) {
-            js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
-        }
-    } else if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
-        js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
-    }
-    if (result->len == 9 && js_test262_percent_escape_three_byte_prefix(result, &cp)) {
-        g_last_three_byte_uri_prefix_string = result_item;
-        g_last_three_byte_uri_prefix_cp = cp;
-        g_last_three_byte_uri_prefix_epoch = epoch;
-    }
-    return result_item;
-}
-
-extern "C" Item js_test262_concat_percent_hex_int(Item left_item, int64_t n_raw) {
-    return js_test262_concat_percent_hex_u32(left_item, (uint32_t)n_raw);
-}
-
-extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     uint32_t n = 0;
     TypeId n_type = get_type_id(n_item);
     if (n_type == LMD_TYPE_INT) {
@@ -10023,7 +9600,24 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
             n = (uint32_t)mod;
         }
     }
-    return js_test262_concat_percent_hex_u32(left_item, n);
+
+    static const char hex[] = "0123456789ABCDEF";
+    uint32_t byte = n & 0xFF;
+    int64_t left_len = left->len;
+    String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
+    result->len = left_len + 3;
+    result->is_ascii = left->is_ascii;
+    memcpy(result->chars, left->chars, left_len);
+    result->chars[left_len] = '%';
+    result->chars[left_len + 1] = hex[(byte >> 4) & 0xF];
+    result->chars[left_len + 2] = hex[byte & 0xF];
+    result->chars[left_len + 3] = '\0';
+    Item result_item = (Item){.item = s2it(result)};
+    uint32_t cp = 0;
+    if (js_test262_percent_escape_cp_from_append(left, byte, &cp)) {
+        js_string_remember_four_byte_uri_escape_cp(result_item, (int64_t)cp);
+    }
+    return result_item;
 }
 
 // =============================================================================
@@ -10202,35 +9796,59 @@ extern "C" void js_validate_native_function_source(Item source_item) {
 // Native compareArray / assert.compareArray for test262 batch mode
 // =============================================================================
 
-static Item compare_array_length_value(Item v) {
-    extern Item js_property_access(Item object, Item key);
-    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-    return js_property_access(v, len_key);
+// check if item is an array or typed array (array-like for comparison)
+static bool is_array_like(Item v) {
+    int depth = 0;
+    while (js_is_proxy(v) && depth < 32) {
+        JsProxyData* pd = js_get_proxy_data(v);
+        if (!pd || pd->revoked) return false;
+        v = (Item){.item = pd->target};
+        depth++;
+    }
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_ARRAY) return true;
+    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_TYPED_ARRAY) return true;
+    if (t == LMD_TYPE_MAP && ((Container*)(uintptr_t)v.item)->map_kind == MAP_KIND_ARRAYBUFFER) return true;
+    return false;
 }
 
-static int64_t compare_array_iteration_count(Item len_val) {
-    Item len_num = js_to_number(len_val);
-    double len = js_get_number(len_num);
-    if (!(len > 0.0) || isinf(len)) return 0;
-    double count = ceil(len);
-    if (count > 9007199254740991.0) return 0;
-    return (int64_t)count;
+// get length of array or typed array (for compareArray)
+static int64_t array_like_length(Item v) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_property_access(Item object, Item key);
+    TypeId t = get_type_id(v);
+    if (js_is_proxy(v)) {
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item len_val = js_property_access(v, len_key);
+        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
+        Item len_num = js_to_number(len_val);
+        if (get_type_id(len_num) == LMD_TYPE_INT) return (int64_t)it2i(len_num);
+        return 0;
+    }
+    if (t == LMD_TYPE_ARRAY) return js_array_length(v);
+    // for typed arrays, use property access for "length"
+    if (t == LMD_TYPE_MAP) {
+        Item len_key = (Item){.item = s2it(heap_create_name("length"))};
+        Item len_val = js_property_access(v, len_key);
+        if (get_type_id(len_val) == LMD_TYPE_INT) return (int64_t)it2i(len_val);
+    }
+    return 0;
 }
 
 // compareArray(a, b): element-wise SameValue comparison, returns bool Item
 extern "C" Item js_compare_array(Item a, Item b) {
-    extern Item js_property_access(Item object, Item key);
+    extern Item js_array_get_int(Item array, int64_t index);
 
-    Item len_a = compare_array_length_value(a);
-    Item len_b = compare_array_length_value(b);
-    if (!it2b(js_strict_equal(len_b, len_a))) return (Item){.item = b2it(false)};
+    if (!is_array_like(a) || !is_array_like(b))
+        return (Item){.item = b2it(false)};
 
-    int64_t len = compare_array_iteration_count(len_a);
+    int64_t len_a = array_like_length(a);
+    int64_t len_b = array_like_length(b);
+    if (len_a != len_b) return (Item){.item = b2it(false)};
 
-    for (int64_t i = 0; i < len; i++) {
-        Item index_key = (Item){.item = i2it((int)i)};
-        Item ai = js_property_access(a, index_key);
-        Item bi = js_property_access(b, index_key);
+    for (int64_t i = 0; i < len_a; i++) {
+        Item ai = js_array_get_int(a, i);
+        Item bi = js_array_get_int(b, i);
         if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};
@@ -10238,17 +9856,20 @@ extern "C" Item js_compare_array(Item a, Item b) {
 
 // helper: format array as "[elem1, elem2, ...]" for error messages
 static Item assert_format_array(Item arr) {
-    extern Item js_property_access(Item object, Item key);
+    extern Item js_array_get_int(Item array, int64_t index);
     extern Item js_to_string_val(Item value);
 
-    int64_t len = compare_array_iteration_count(compare_array_length_value(arr));
+    if (!is_array_like(arr)) {
+        return (Item){.item = s2it(heap_create_name("(not an array)"))};
+    }
+    int64_t len = array_like_length(arr);
     // pre-pass: compute total length
     int total = 2; // "[]"
     char* strs[256];
     int slens[256];
     int maxn = len > 256 ? 256 : (int)len;
     for (int i = 0; i < maxn; i++) {
-        Item elem = js_property_access(arr, (Item){.item = i2it(i)});
+        Item elem = js_array_get_int(arr, i);
         Item s = js_to_string_val(elem);
         String* ss = it2s(s);
         strs[i] = ss ? ss->chars : (char*)"undefined";
@@ -10661,16 +10282,18 @@ extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
             return;
         }
 
-        // Test262's JS harness checks constructor identity, not instanceof:
-        //   thrown.constructor !== expectedErrorConstructor
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        Item thrown_ctor = js_property_get(thrown, ctor_key);
-        bool is_instance = (thrown_ctor.item == expected_ctor.item);
+        // check: thrown instanceof expectedErrorConstructor
+        Item instanceof_result = js_instanceof(thrown, expected_ctor);
+        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
 
         if (!is_instance) {
             // type mismatch — build error message
             Item name_key = (Item){.item = s2it(heap_create_name("name"))};
             Item exp_name = js_property_get(expected_ctor, name_key);
+            // get actual constructor name via prototype chain
+            extern Item js_prototype_lookup(Item obj, Item key);
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+            Item thrown_ctor = js_prototype_lookup(thrown, ctor_key);
             Item act_name = (get_type_id(thrown_ctor) != LMD_TYPE_UNDEFINED && get_type_id(thrown_ctor) != LMD_TYPE_NULL)
                 ? js_property_get(thrown_ctor, name_key) : make_js_undefined();
             String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
@@ -13461,61 +13084,6 @@ static Item js_throw_uri_error(const char* msg) {
     return ItemNull;
 }
 
-static Item js_throw_cached_uri_malformed(void) {
-    static Item cached_error = {0};
-    static uint64_t cached_epoch = 0;
-    if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
-        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-        extern Item js_new_error_with_name(Item type_name, Item message);
-        cached_error = js_new_error_with_name(tn, msg);
-        cached_epoch = js_get_heap_epoch();
-    }
-    extern void js_throw_value_with_message(Item value, const char* message);
-    js_throw_value_with_message(cached_error, "URIError: URI malformed");
-    return ItemNull;
-}
-
-static inline int js_uri_hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-extern "C" Item js_decodeURI_percent_fromCharCode_1(Item code_item, int64_t component) {
-    int code = js_from_char_code_to_uint16(code_item);
-    char input[6];
-    int len = 0;
-    input[len++] = '%';
-    len += encode_charcode_utf8(input + len, code);
-    input[len++] = '1';
-    input[len] = '\0';
-
-    if (len < 3 || js_uri_hex_digit(input[1]) < 0 || js_uri_hex_digit(input[2]) < 0) {
-        return js_throw_cached_uri_malformed();
-    }
-
-    size_t decoded_len = 0;
-    char* decoded = component ?
-        url_decode_component(input, (size_t)len, &decoded_len) :
-        url_decode_uri(input, (size_t)len, &decoded_len);
-    if (!decoded) return js_throw_cached_uri_malformed();
-    String* result = (String*)heap_alloc(sizeof(String) + decoded_len + 1, LMD_TYPE_STRING);
-    result->len = (int)decoded_len;
-    result->is_ascii = true;
-    for (size_t i = 0; i < decoded_len; i++) {
-        if (((unsigned char*)decoded)[i] >= 0x80) {
-            result->is_ascii = false;
-            break;
-        }
-    }
-    memcpy(result->chars, decoded, decoded_len);
-    result->chars[decoded_len] = '\0';
-    mem_free(decoded);
-    return (Item){.item = s2it(result)};
-}
-
 extern "C" Item js_encodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -13531,83 +13099,11 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
-static bool js_uri_has_malformed_percent_triplet(String* s) {
-    if (!s) return false;
-    for (int64_t i = 0; i < s->len; i++) {
-        if (s->chars[i] != '%') continue;
-        if (i + 2 >= s->len) return true;
-        if (js_uri_hex_digit(s->chars[i + 1]) < 0 ||
-            js_uri_hex_digit(s->chars[i + 2]) < 0) {
-            return true;
-        }
-        i += 2;
-    }
-    return false;
-}
-
-static bool js_uri_has_percent(String* s) {
-    if (!s) return false;
-    for (int64_t i = 0; i < s->len; i++) {
-        if (s->chars[i] == '%') return true;
-    }
-    return false;
-}
-
-static int js_uri_percent_byte_at(String* s, int64_t pos) {
-    if (!s || pos + 2 >= s->len || s->chars[pos] != '%') return -1;
-    int hi = js_uri_hex_digit(s->chars[pos + 1]);
-    int lo = js_uri_hex_digit(s->chars[pos + 2]);
-    if (hi < 0 || lo < 0) return -1;
-    return (hi << 4) | lo;
-}
-
-static bool js_uri_byte_is_continuation(int byte) {
-    return (byte & 0xC0) == 0x80;
-}
-
-static bool js_uri_percent_sequences_are_well_formed_utf8(String* s) {
-    if (!s) return false;
-    for (int64_t i = 0; i < s->len; i++) {
-        if (s->chars[i] != '%') continue;
-        int b0 = js_uri_percent_byte_at(s, i);
-        if (b0 < 0) return false;
-        if (b0 < 0x80) {
-            i += 2;
-            continue;
-        }
-        int needed = 0;
-        int min_b1 = 0x80;
-        int max_b1 = 0xBF;
-        if (b0 >= 0xC2 && b0 <= 0xDF) {
-            needed = 1;
-        } else if (b0 == 0xE0) {
-            needed = 2; min_b1 = 0xA0;
-        } else if (b0 >= 0xE1 && b0 <= 0xEC) {
-            needed = 2;
-        } else if (b0 == 0xED) {
-            needed = 2; max_b1 = 0x9F;
-        } else if (b0 >= 0xEE && b0 <= 0xEF) {
-            needed = 2;
-        } else if (b0 == 0xF0) {
-            needed = 3; min_b1 = 0x90;
-        } else if (b0 >= 0xF1 && b0 <= 0xF3) {
-            needed = 3;
-        } else if (b0 == 0xF4) {
-            needed = 3; max_b1 = 0x8F;
-        } else {
-            return false;
-        }
-        int64_t p = i + 3;
-        int b1 = js_uri_percent_byte_at(s, p);
-        if (b1 < min_b1 || b1 > max_b1) return false;
-        p += 3;
-        for (int k = 1; k < needed; k++, p += 3) {
-            int bx = js_uri_percent_byte_at(s, p);
-            if (!js_uri_byte_is_continuation(bx)) return false;
-        }
-        i += 3 * needed + 2;
-    }
-    return true;
+static inline int js_uri_hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
 }
 
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
@@ -13655,7 +13151,6 @@ static bool js_uri_try_decode_four_byte_escape(String* s, Item* result) {
 }
 
 static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
-    js_uri_global_cache_ensure_gc_roots();
     int b0 = 0xF0 | (int)(cp >> 18);
     int b1 = 0x80 | (int)((cp >> 12) & 0x3F);
     int b2 = 0x80 | (int)((cp >> 6) & 0x3F);
@@ -13680,13 +13175,22 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
-    if (!js_uri_has_percent(s)) return str_val;
-    if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
-    if (!js_uri_percent_sequences_are_well_formed_utf8(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        return js_throw_cached_uri_malformed();
+        // Cache URIError object per-epoch to avoid expensive error creation
+        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
+        return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
     mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
@@ -13717,13 +13221,20 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
-    if (!js_uri_has_percent(s)) return str_val;
-    if (js_uri_has_malformed_percent_triplet(s)) return js_throw_cached_uri_malformed();
-    if (!js_uri_percent_sequences_are_well_formed_utf8(s)) return js_throw_cached_uri_malformed();
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        return js_throw_cached_uri_malformed();
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
+        return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
     mem_free(decoded); // from url_decode_* in lib/url.c - raw malloc;
@@ -14345,7 +13856,6 @@ extern "C" Item js_get_global_this() {
             {"UIEvent", 7}, {"FocusEvent", 10}, {"MouseEvent", 10},
             {"WheelEvent", 10}, {"KeyboardEvent", 13},
             {"CompositionEvent", 16}, {"InputEvent", 10}, {"PointerEvent", 12},
-            {"StaticRange", 11},  // CE-7 (Radiant_Design_Content_Editable.md §10)
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -14726,18 +14236,6 @@ extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     return found ? result : fallback;
 }
 
-extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference);
-
-extern "C" Item js_get_with_binding_or_global_reference(Item key, int64_t strict_reference) {
-    if (js_with_stack_depth > 0) {
-        bool found = false;
-        Item result = js_with_scope_lookup(key, &found, strict_reference != 0);
-        if (found) return result;
-        if (js_check_exception()) return ItemNull;
-    }
-    return js_get_global_property_reference(key, strict_reference);
-}
-
 extern "C" int64_t js_probe_with_binding(Item key) {
     if (js_with_stack_depth <= 0) return 0;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14807,34 +14305,6 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
-extern "C" int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict) {
-    if (get_type_id(scope_obj) == LMD_TYPE_UNDEFINED) return 0;
-    if (!js_with_scope_is_object(scope_obj)) return 0;
-    if (it2b(js_in(key, scope_obj))) {
-        if (js_check_exception()) return 1;
-        js_property_set(scope_obj, key, value);
-        return 1;
-    }
-    if (js_check_exception()) return 1;
-    if (strict) {
-        js_throw_binding_reference_error(key);
-        return 1;
-    }
-    js_property_set(scope_obj, key, value);
-    return 1;
-}
-
-extern "C" Item js_last_with_binding_base_or_undefined(Item key) {
-    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
-        return make_js_undefined();
-    }
-    Item scope_obj = js_last_with_binding_scope;
-    if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
-    return scope_obj;
-}
-
-static int js_global_lexical_find_binding(Item key);
-
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14855,53 +14325,9 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
             if (js_check_exception()) return (Item){.item = b2it(false)};
         }
     }
-    if (js_global_lexical_find_binding(key) >= 0) return (Item){.item = b2it(false)};
     if (declared_binding) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
     return js_delete_property(global, key);
-}
-
-#define JS_GLOBAL_LEXICAL_BIND_MAX 512
-typedef struct JsGlobalLexicalBinding {
-    Item key;
-    Item value;
-    bool immutable;
-} JsGlobalLexicalBinding;
-
-static JsGlobalLexicalBinding js_global_lexical_bindings[JS_GLOBAL_LEXICAL_BIND_MAX];
-static int js_global_lexical_binding_count = 0;
-
-static int js_global_lexical_find_binding(Item key) {
-    key = js_to_property_key(key);
-    if (js_check_exception()) return -1;
-    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
-        if (js_with_binding_key_same(js_global_lexical_bindings[i].key, key)) return i;
-    }
-    return -1;
-}
-
-extern "C" void js_reset_global_lexical_bindings(void) {
-    js_global_lexical_binding_count = 0;
-}
-
-extern "C" void js_define_global_lexical_binding(Item key, Item value, int64_t immutable) {
-    key = js_to_property_key(key);
-    if (js_check_exception()) return;
-    int idx = js_global_lexical_find_binding(key);
-    if (idx >= 0) {
-        js_global_lexical_bindings[idx].value = value;
-        js_global_lexical_bindings[idx].immutable = immutable != 0;
-        return;
-    }
-    if (js_global_lexical_binding_count >= JS_GLOBAL_LEXICAL_BIND_MAX) {
-        log_error("js-global-lexical: binding table overflow");
-        return;
-    }
-    JsGlobalLexicalBinding* binding =
-        &js_global_lexical_bindings[js_global_lexical_binding_count++];
-    binding->key = key;
-    binding->value = value;
-    binding->immutable = immutable != 0;
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14913,8 +14339,6 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
-    int lex_idx = js_global_lexical_find_binding(key);
-    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -14929,8 +14353,6 @@ extern "C" Item js_get_global_property_strict(Item key) {
         Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
-    int lex_idx = js_global_lexical_find_binding(key);
-    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
@@ -14970,7 +14392,6 @@ extern "C" int64_t js_global_binding_exists(Item key) {
         if (js_check_exception()) return 0;
     }
     Item global = js_get_global_this();
-    if (js_global_lexical_find_binding(key) >= 0) return 1;
     Item exists = js_in(key, global);
     if (js_check_exception()) return 0;
     return it2b(exists) ? 1 : 0;
@@ -15035,15 +14456,6 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
         }
     }
     js_last_with_binding_valid = false;
-    int lex_idx = js_global_lexical_find_binding(key);
-    if (lex_idx >= 0) {
-        if (js_global_lexical_bindings[lex_idx].immutable) {
-            js_throw_type_error("Assignment to constant global lexical binding");
-            return;
-        }
-        js_global_lexical_bindings[lex_idx].value = value;
-        return;
-    }
     Item global = js_get_global_this();
     if (strict && !it2b(js_in(key, global))) {
         if (js_check_exception()) return;
@@ -15061,39 +14473,27 @@ extern "C" void js_set_global_property(Item key, Item value) {
 }
 
 extern "C" void js_set_global_var_property_fast(Item key, Item value) {
-    Item global = js_get_global_this();
-    if (get_type_id(key) == LMD_TYPE_STRING &&
-        get_type_id(global) == LMD_TYPE_MAP && global.map) {
-        String* str = it2s(key);
-        if (str && str->len > 0) {
-            ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
-            bool found = false;
-            Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
-            TypeId slot_type = get_type_id(slot);
-            TypeId value_type = get_type_id(value);
-            bool scalar_value = value_type == LMD_TYPE_NULL ||
-                value_type == LMD_TYPE_BOOL ||
-                value_type == LMD_TYPE_INT ||
-                value_type == LMD_TYPE_INT64 ||
-                value_type == LMD_TYPE_FLOAT ||
-                value_type == LMD_TYPE_STRING ||
-                value_type == LMD_TYPE_SYMBOL ||
-                value_type == LMD_TYPE_DECIMAL ||
-                value_type == LMD_TYPE_DTIME ||
-                value_type == LMD_TYPE_UNDEFINED;
-            if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
-                se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
-                js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
-                slot_type == value_type && scalar_value &&
-                js_global_lexical_find_binding(key) < 0) {
-                fn_map_set(global, key, value);
-                return;
+    if (js_with_stack_depth == 0 && get_type_id(key) == LMD_TYPE_STRING) {
+        Item global = js_get_global_this();
+        if (get_type_id(global) == LMD_TYPE_MAP && global.map) {
+            String* str = it2s(key);
+            if (str && str->len > 0) {
+                ShapeEntry* se = js_find_shape_entry(global, str->chars, (int)str->len);
+                bool found = false;
+                Item slot = js_map_get_fast_ext(global.map, str->chars, (int)str->len, &found);
+                TypeId slot_type = get_type_id(slot);
+                TypeId value_type = get_type_id(value);
+                if (found && slot.item != JS_DELETED_SENTINEL_VAL &&
+                    se && !jspd_is_deleted(se) && !jspd_is_accessor(se) &&
+                    js_props_query_writable(global.map, se, str->chars, (int)str->len) &&
+                    slot_type == value_type) {
+                    fn_map_set(global, key, value);
+                    return;
+                }
             }
         }
     }
-    js_last_with_binding_valid = false;
-    if (js_global_lexical_find_binding(key) >= 0) return;
-    js_property_set(global, key, value);
+    js_set_global_property_impl(key, value, false);
 }
 
 extern "C" void js_set_global_property_strict(Item key, Item value) {
@@ -15163,47 +14563,10 @@ extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
 }
 
-extern "C" void js_define_global_function_property(Item key, Item value) {
-    Item global = js_get_global_this();
-    Item name = js_to_string(key);
-    if (get_type_id(name) != LMD_TYPE_STRING) return;
-    String* str = it2s(name);
-    if (!str || str->len <= 0 || str->len >= 200) return;
-    JsPropertyDescriptor existing;
-    bool has_existing = js_get_own_property_descriptor(global, str->chars, (int)str->len, &existing);
-    bool can_replace_existing = has_existing && (
-        js_pd_is_configurable(&existing) ||
-        (js_pd_is_data(&existing) &&
-         (existing.flags & JS_PD_WRITABLE) &&
-         (existing.flags & JS_PD_ENUMERABLE)));
-    if (can_replace_existing && get_type_id(global) == LMD_TYPE_MAP) {
-        js_shape_entry_set_accessor(global, str->chars, (int)str->len, false);
-        map_put(global.map, str, value, js_input);
-        js_attr_set_writable(global, str->chars, (int)str->len, true);
-        js_attr_set_enumerable(global, str->chars, (int)str->len, true);
-        js_attr_set_configurable(global, str->chars, (int)str->len, false);
-        return;
-    }
-    JsPropertyDescriptor pd;
-    memset(&pd, 0, sizeof(pd));
-    pd.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
-        JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
-    js_pd_set_configurable(&pd, false);
-    pd.value = value;
-    bool is_new_property = !has_existing;
-    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
-}
-
 extern "C" void js_evalscript_check_global_var_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
-    if (js_global_lexical_find_binding(key) >= 0) {
-        const char* msg_str = "Var declaration conflicts with existing global lexical declaration";
-        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
-        js_throw_syntax_error(msg);
-        return;
-    }
     Item global = js_get_global_this();
     if (it2b(js_has_own_property(global, key))) return;
     if (js_is_truthy(js_object_is_extensible(global))) return;
@@ -15214,12 +14577,6 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
-    if (js_global_lexical_find_binding(key) >= 0) {
-        const char* msg_str = "Function declaration conflicts with existing global lexical declaration";
-        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
-        js_throw_syntax_error(msg);
-        return;
-    }
     Item global = js_get_global_this();
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -15238,15 +14595,10 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     js_throw_type_error("Cannot declare global function over incompatible global property");
 }
 
-extern "C" void js_check_global_lex_decl(Item key) {
+extern "C" void js_evalscript_check_global_lex_decl(Item key) {
+    if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
-    if (js_global_lexical_find_binding(key) >= 0) {
-        const char* msg_str = "Lexical declaration conflicts with existing global lexical declaration";
-        Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
-        js_throw_syntax_error(msg);
-        return;
-    }
     Item global = js_get_global_this();
     if (!it2b(js_has_own_property(global, key))) return;
     Item name = js_to_string(key);
@@ -15260,11 +14612,6 @@ extern "C" void js_check_global_lex_decl(Item key) {
     const char* msg_str = "Lexical declaration conflicts with existing global var declaration";
     Item msg = (Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))};
     js_throw_syntax_error(msg);
-}
-
-extern "C" void js_evalscript_check_global_lex_decl(Item key) {
-    if (!js_262_eval_script_is_active()) return;
-    js_check_global_lex_decl(key);
 }
 
 // Direct eval bridge: function-scope eval code is compiled as a small script,
@@ -15396,17 +14743,6 @@ static int js_eval_local_find_binding(Item key) {
 }
 
 extern "C" Item js_eval_local_get_binding_or_fallback(Item key, Item fallback) {
-    int idx = js_eval_local_find_binding(key);
-    return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
-}
-
-extern "C" Item js_eval_global_lexical_or_local_binding_or_fallback(Item key, Item fallback) {
-    // Global direct eval exports configurable var/function bindings into the
-    // caller frame for subsequent script reads. A later `evalScript("let x")`
-    // creates a global lexical binding, and ES global environment lookup must
-    // prefer that lexical record over the configurable object-record binding.
-    int lex_idx = js_global_lexical_find_binding(key);
-    if (lex_idx >= 0) return js_global_lexical_bindings[lex_idx].value;
     int idx = js_eval_local_find_binding(key);
     return idx >= 0 ? js_eval_local_bindings[idx].value : fallback;
 }
@@ -15658,7 +14994,6 @@ enum JsConstructorId {
     JS_CTOR_COMPOSITION_EVENT,
     JS_CTOR_INPUT_EVENT,
     JS_CTOR_POINTER_EVENT,
-    JS_CTOR_STATIC_RANGE,  // CE-7 (Radiant_Design_Content_Editable.md §6.1, §10)
     JS_CTOR_MAX
 };
 
@@ -16321,7 +15656,6 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_COMPOSITION_EVENT) fn->func_ptr = (void*)js_ctor_composition_event_fn;
     else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
-    else if (ctor_id == JS_CTOR_STATIC_RANGE) fn->func_ptr = (void*)js_ctor_static_range_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_SHARED_ARRAY_BUFFER ||
@@ -16453,9 +15787,6 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"CompositionEvent", 16, JS_CTOR_COMPOSITION_EVENT, 2},
         {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
         {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
-        // CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): immutable
-        // range snapshot used by InputEvent.getTargetRanges().
-        {"StaticRange", 11, JS_CTOR_STATIC_RANGE, 1},
         {NULL, 0, 0, 0}
     };
 
@@ -16472,7 +15803,6 @@ extern "C" Item js_get_constructor(Item name_item) {
 // =============================================================================
 
 #include "../../lib/hashmap.h"
-#include "../../lib/hashmap_helpers.h"
 
 // symbol registry entry for Symbol.for() / Symbol.keyFor()
 struct JsSymbolEntry {
@@ -16524,11 +15854,20 @@ static void js_symbol_desc_init() {
 #define JS_SYMBOL_ID_IS_CONCAT_SPREADABLE 12
 #define JS_SYMBOL_ID_MATCH_ALL     13
 
-HASHMAP_DEFINE_STRKEY(js_symbol_entry, JsSymbolEntry, key)
+static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    return strcmp(((const JsSymbolEntry*)a)->key, ((const JsSymbolEntry*)b)->key);
+}
+
+static uint64_t js_symbol_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsSymbolEntry* e = (const JsSymbolEntry*)item;
+    return hashmap_sip(e->key, strlen(e->key), seed0, seed1);
+}
 
 static void js_symbol_init_registry() {
     if (!js_symbol_registry) {
-        js_symbol_registry = js_symbol_entry_new(16);
+        js_symbol_registry = hashmap_new(sizeof(JsSymbolEntry), 16, 0, 0,
+            js_symbol_entry_hash, js_symbol_entry_compare, NULL, NULL);
     }
 }
 

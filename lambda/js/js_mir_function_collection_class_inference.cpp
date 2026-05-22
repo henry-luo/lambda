@@ -336,7 +336,7 @@ int jm_formal_length(JsFunctionNode* fn) {
             needs_correction = true;
             break; // stop at first default
         }
-        if ((int)p->node_type == (int)TS_AST_NODE_PARAMETER) {
+        if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
             TsParameterNode* tsp = (TsParameterNode*)p;
             if (tsp->default_value) {
                 needs_correction = true;
@@ -360,7 +360,7 @@ void jm_get_param_name(JsAstNode* param_node, int index, char* out, int out_size
     if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
         snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
-    } else if ((int)param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+    } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
         // TsParameterNode: delegate to the wrapped pattern
         TsParameterNode* tsp = (TsParameterNode*)param_node;
         jm_get_param_name(tsp->pattern, index, out, out_size);
@@ -1545,7 +1545,7 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                                         if (param->node_type == JS_AST_NODE_IDENTIFIER) {
                                             JsIdentifierNode* pid = (JsIdentifierNode*)param;
                                             pname = pid->name->chars; plen = (int)pid->name->len;
-                                        } else if ((int)param->node_type == (int)TS_AST_NODE_PARAMETER) {
+                                        } else if (param->node_type == (int)TS_AST_NODE_PARAMETER) {
                                             TsParameterNode* tsp = (TsParameterNode*)param;
                                             if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER) {
                                                 JsIdentifierNode* pid = (JsIdentifierNode*)tsp->pattern;
@@ -1924,7 +1924,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             // Also detect params that are not identifiers (e.g. corrupted rest params
             // where the AST builder produces a LITERAL node instead of REST_ELEMENT)
             if (check_p->node_type != JS_AST_NODE_IDENTIFIER &&
-                (int)check_p->node_type != (int)TS_AST_NODE_PARAMETER) {
+                check_p->node_type != (int)TS_AST_NODE_PARAMETER) {
                 fc->has_non_simple_params = true;
                 break;
             }
@@ -1941,7 +1941,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         int ann_count = 0;
         JsAstNode* p = fn->params;
         while (p) {
-            if ((int)p->node_type == (int)TS_AST_NODE_PARAMETER) {
+            if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
                 TsParameterNode* tsp = (TsParameterNode*)p;
                 if (tsp->ts_type) ann_count++;
             }
@@ -1952,13 +1952,13 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             use_annotations = true;
             p = fn->params;
             for (int i = 0; i < pc && p; i++, p = p->next) {
-                if ((int)p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
                     TsParameterNode* tsp = (TsParameterNode*)p;
                     if (tsp->ts_type && tsp->ts_type->type_expr && !tsp->optional) {
                         TypeId tid = ts_predefined_name_to_type_id(NULL, 0);  // default
                         // resolve from the predefined_type or type_expr
                         TsTypeNode* tex = tsp->ts_type->type_expr;
-                        if ((int)tex->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        if (tex->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
                             TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)tex;
                             tid = pt->predefined_id;
                         } else {
@@ -1969,7 +1969,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                     } else {
                         fc->param_types[i] = LMD_TYPE_ANY;
                     }
-                } else if ((int)p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                } else if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
                     fc->param_types[i] = LMD_TYPE_ANY;
                 } else {
                     // not a TsParameterNode — use body-scan for this param
@@ -2254,7 +2254,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
     // Phase 3.4: check for explicit TS return type annotation
     if (fn->ts_return_type) {
         TsTypeAnnotationNode* ann = fn->ts_return_type;
-        if (ann->type_expr && (int)ann->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+        if (ann->type_expr && ann->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
             TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
             fc->return_type = pt->predefined_id;
             log_debug("js-mir P3.4: annotation-based return type for %s: %s",
@@ -2470,9 +2470,6 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
     }
     case JS_AST_NODE_FOR_STATEMENT: {
         JsForNode* n = (JsForNode*)node;
-        jm_prescan_widen_walk(n->init, float_arrays, widen_vars);
-        jm_prescan_widen_walk(n->test, float_arrays, widen_vars);
-        jm_prescan_widen_walk(n->update, float_arrays, widen_vars);
         jm_prescan_widen_walk(n->body, float_arrays, widen_vars);
         break;
     }
@@ -2640,28 +2637,21 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
-    // Evaluate arguments before allocating the argument buffer. Direct-call
-    // callers may pass their own formal parameter registers as arguments; a
-    // runtime allocation before those reads can clobber incoming ABI registers
-    // before MIR has copied them into stable temporaries.
-    MIR_reg_t* arg_vals = (MIR_reg_t*)alloca((size_t)arg_count * sizeof(MIR_reg_t));
-    JsAstNode* arg = first_arg;
-    for (int i = 0; i < arg_count && arg; i++) {
-        arg_vals[i] = jm_transpile_box_item(mt, arg);
-        jm_emit_exc_propagate_check(mt);
-        arg = arg->next;
-    }
-
     // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64,
     // where MIR's top-alloca consolidation assigns wrong offsets when the top alloca
     // appears after the inline call site.
     MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 
-    for (int i = 0; i < arg_count; i++) {
+    // Evaluate and store each argument
+    JsAstNode* arg = first_arg;
+    for (int i = 0; i < arg_count && arg; i++) {
+        MIR_reg_t val = jm_transpile_box_item(mt, arg);
+        jm_emit_exc_propagate_check(mt);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, i * 8, args_ptr, 0, 1),
-            MIR_new_reg_op(mt->ctx, arg_vals[i])));
+            MIR_new_reg_op(mt->ctx, val)));
+        arg = arg->next;
     }
 
     return args_ptr;

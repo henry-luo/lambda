@@ -42,7 +42,6 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
-extern Item js_box_native_int64(int64_t value);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -68,11 +67,9 @@ extern Item js_to_numeric(Item value);
 extern Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern Item js_bigint_not_constructor(void);
-extern double js_get_number_import(Item value);
 extern Item js_increment(Item value);
 extern Item js_decrement(Item value);
 extern Item js_number_function(Item value);
-extern double js_get_number_mir(Item value);
 // BigInt creation (lambda-decimal.cpp)
 extern Item bigint_from_int64(int64_t val);
 extern Item bigint_from_string(const char* str, int len);
@@ -188,20 +185,10 @@ extern Item js_string_concat(Item left, Item right);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
-extern Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item, Item radix_item);
-extern Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
-extern int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item, Item second_item, int64_t component);
-extern int64_t js_uri_decode_equals_from_char_code_raw_ints(Item str_item, int64_t first_raw, int64_t second_raw, int64_t component);
-extern Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item, int64_t component);
-extern Item js_uri_decode_identity(Item str_item, int64_t component);
-extern int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item code_item, int64_t component);
-extern int64_t js_uri_decode_identity_raw(Item str_item, int64_t component);
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
-extern Item js_test262_concat_percent_hex_int(Item left_item, int64_t n_raw);
 extern void js_validate_native_function_source(Item source_item);
-extern int64_t js_eval_line_comment_middle_is_terminator(Item middle_item);
 // Phase 8C: Image() constructor (defined in js_dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
@@ -872,8 +859,6 @@ extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
 extern int64_t js_probe_with_binding(Item key);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
-extern int64_t js_set_with_binding_base_if_valid(Item scope_obj, Item key, Item value, int64_t strict);
-extern Item js_last_with_binding_base_or_undefined(Item key);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
 extern void js_set_global_property(Item key, Item value);
@@ -887,9 +872,6 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
-extern void js_define_global_function_property(Item key, Item value);
-extern void js_define_global_lexical_binding(Item key, Item value, int64_t immutable);
-extern void js_check_global_lex_decl(Item key);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_evalscript_check_global_lex_decl(Item key);
@@ -906,7 +888,6 @@ extern void js_eval_private_pop_frame(void);
 extern void js_eval_private_bind(Item unscoped_key, Item scoped_key);
 extern Item js_eval_private_resolve(Item unscoped_key);
 extern Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
-extern Item js_eval_global_lexical_or_local_binding_or_fallback(Item key, Item fallback);
 extern void js_eval_local_export_var(Item key, Item value);
 extern void js_check_unresolved_capture(Item value, const char* name, int64_t len);
 extern Item js_resolve_unresolved_binding(Item value, const char* name, int64_t len, int64_t in_typeof);
@@ -918,7 +899,6 @@ extern Item js_map_group_by(Item items, Item callback);
 
 // Function formal length (ES spec .length)
 extern void js_set_formal_length(Item fn_item, int length);
-extern void js_set_closure_env_module_var(Item fn_item, int64_t env_slot, int64_t module_index);
 
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
@@ -1066,7 +1046,6 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     {"is_truthy", FPTR(is_truthy)},
     {"v2it", FPTR(v2it)},
-    {"js_box_native_int64", FPTR(js_box_native_int64)},
     {"push_d", FPTR(push_d)},
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
@@ -1331,7 +1310,6 @@ JitImport jit_runtime_imports[] = {
     // JavaScript runtime functions
     // ========================================================================
     {"js_to_number", FPTR(js_to_number)},
-    {"js_get_number", FPTR(js_get_number_mir)},
     {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},
@@ -1447,8 +1425,6 @@ JitImport jit_runtime_imports[] = {
     {"js_func_bind", FPTR(js_func_bind)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
     {"js_builtin_eval", FPTR(js_builtin_eval)},
-    {"js_builtin_eval_regexp_literal_fast", FPTR(js_builtin_eval_regexp_literal_fast)},
-    {"js_eval_line_comment_middle_is_terminator", FPTR(js_eval_line_comment_middle_is_terminator)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},
@@ -1508,15 +1484,8 @@ JitImport jit_runtime_imports[] = {
     {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
-    {"js_uri_decode_equals_from_char_code_raw", FPTR(js_uri_decode_equals_from_char_code_raw)},
-    {"js_uri_decode_equals_from_char_code_raw_ints", FPTR(js_uri_decode_equals_from_char_code_raw_ints)},
-    {"js_uri_decode_equals_from_char_code1", FPTR(js_uri_decode_equals_from_char_code1)},
-    {"js_uri_decode_identity", FPTR(js_uri_decode_identity)},
-    {"js_uri_decode_equals_from_char_code1_raw", FPTR(js_uri_decode_equals_from_char_code1_raw)},
-    {"js_uri_decode_identity_raw", FPTR(js_uri_decode_identity_raw)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
     {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
-    {"js_test262_concat_percent_hex_int", FPTR(js_test262_concat_percent_hex_int)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
     {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
@@ -1560,8 +1529,6 @@ JitImport jit_runtime_imports[] = {
     // global functions
     {"js_parseInt", FPTR(js_parseInt)},
     {"js_parseFloat", FPTR(js_parseFloat)},
-    {"js_parseInt_concat_fromCharCode", FPTR(js_parseInt_concat_fromCharCode)},
-    {"js_parseFloat_concat_fromCharCode", FPTR(js_parseFloat_concat_fromCharCode)},
     {"js_isNaN", FPTR(js_isNaN)},
     {"js_isFinite", FPTR(js_isFinite)},
     {"js_toFixed", FPTR(js_toFixed)},
@@ -1722,14 +1689,12 @@ JitImport jit_runtime_imports[] = {
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
-    {"js_set_closure_env_module_var", FPTR(js_set_closure_env_module_var)},
     // v12: Language features
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
     {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
     {"js_encodeURI", FPTR(js_encodeURI)},
     {"js_decodeURI", FPTR(js_decodeURI)},
-    {"js_decodeURI_percent_fromCharCode_1", FPTR(js_decodeURI_percent_fromCharCode_1)},
     {"js_unescape", FPTR(js_unescape)},
     {"js_escape", FPTR(js_escape)},
     {"js_atob", FPTR(js_atob)},
@@ -1749,12 +1714,9 @@ JitImport jit_runtime_imports[] = {
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_with_depth_active", FPTR(js_with_depth_active)},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
-    {"js_get_with_binding_or_global_reference", FPTR(js_get_with_binding_or_global_reference)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
-    {"js_set_with_binding_base_if_valid", FPTR(js_set_with_binding_base_if_valid)},
-    {"js_last_with_binding_base_or_undefined", FPTR(js_last_with_binding_base_or_undefined)},
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},
     {"js_set_global_property", FPTR(js_set_global_property)},
@@ -1767,9 +1729,6 @@ JitImport jit_runtime_imports[] = {
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
-    {"js_define_global_function_property", FPTR(js_define_global_function_property)},
-    {"js_define_global_lexical_binding", FPTR(js_define_global_lexical_binding)},
-    {"js_check_global_lex_decl", FPTR(js_check_global_lex_decl)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
@@ -1786,7 +1745,6 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_private_bind", FPTR(js_eval_private_bind)},
     {"js_eval_private_resolve", FPTR(js_eval_private_resolve)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
-    {"js_eval_global_lexical_or_local_binding_or_fallback", FPTR(js_eval_global_lexical_or_local_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
     {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
     {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},

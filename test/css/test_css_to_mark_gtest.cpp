@@ -710,11 +710,11 @@ protected:
                 if (!formatted_css || !formatted_css->chars) {
                     printf("❌ CSS formatting failed for: %s\n", file_name);
                 } else {
-                    printf("✅ CSS formatting succeeded for: %s (formatted length: %zu)\n",
+                    printf("✅ CSS formatting succeeded for: %s (formatted length: %u)\n",
                            file_name, formatted_css->len);
 
                     // Show first part of formatted CSS
-                    printf("Formatted CSS content (%zu chars):\n", formatted_css->len);
+                    printf("Formatted CSS content (%u chars):\n", formatted_css->len);
                     printf("%.200s%s\n", formatted_css->chars,
                            formatted_css->len > 200 ? "..." : "");
 
@@ -1125,12 +1125,12 @@ TEST_F(CssAllFilesTest, ParseKnownCssFrameworks) {
             // Test tokenization for framework files
             struct stat st;
             if (stat(it->c_str(), &st) == 0) {
-                printf("Debug: File %s size is %ld bytes\n", framework.c_str(), st.st_size);
+                printf("Debug: File %s size is %lld bytes\n", framework.c_str(), st.st_size);
                 if (st.st_size < 50000) {
                     printf("Debug: Calling validateComplexCssStructures for %s\n", framework.c_str());
                     validateComplexCssStructures(it->c_str(), framework.c_str());
                 } else {
-                    printf("Debug: Skipping %s - too large (%ld bytes)\n", framework.c_str(), st.st_size);
+                    printf("Debug: Skipping %s - too large (%lld bytes)\n", framework.c_str(), st.st_size);
                 }
             } else {
                 printf("Debug: Cannot stat file for %s\n", framework.c_str());

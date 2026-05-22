@@ -149,6 +149,11 @@ typedef enum JsAstNodeType {
 
     // v20: Tagged template literals
     JS_AST_NODE_TAGGED_TEMPLATE,
+
+    // the TypeScript parser stores TS_AST_NODE_* values in JsAstNode::node_type.
+    // Keep the enum range wide enough so newer clang does not treat those
+    // extension-node comparisons as impossible after the JS rollback.
+    JS_AST_NODE_TS_EXTENSION_SENTINEL = 1100,
 } JsAstNodeType;
 
 // JavaScript operators

@@ -67,7 +67,6 @@ struct JsModuleConstEntry {
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
     bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
-    bool is_preamble;          // true if inherited from the test262 harness preamble
 };
 
 // Evidence counters for parameter type inference.
@@ -135,16 +134,12 @@ struct JsMirVarEntry {
     bool from_env;           // true if loaded from closure env
     int env_slot;            // slot index in env array
     MIR_reg_t env_reg;       // register holding env pointer (for write-back)
-    bool module_var_backed;  // true when this env slot mirrors a top-level module var
     bool from_shared_env;    // true if captured from a shared scope_env (reload after calls)
     bool in_scope_env;       // true if this var is in parent func's scope env (write-back on assign)
     int scope_env_slot;      // slot in scope env
     MIR_reg_t scope_env_reg; // register holding scope env pointer
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
     bool is_js_array;        // A2: true if variable is known to hold a regular JS array
-    MIR_reg_t uri_escape_cp_reg;    // decoded UTF-8 code point accumulator for percent-escape strings
-    MIR_reg_t uri_escape_valid_reg; // 0/1 guard for the accumulator above
-    int uri_escape_byte_count;      // number of UTF-8 bytes accumulated, 0 when unavailable
     JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
     Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
     bool is_let_const;       // v20: true if declared with let/const (TDZ enforcement)
@@ -186,8 +181,7 @@ struct JsCaptureEntry {
     bool is_let_const;   // v29 TDZ: true if captured variable is let/const (needs TDZ check)
     bool is_const;       // true if captured variable is const (assignment throws)
     bool is_nfe_binding; // named function expression self-binding
-    bool force_env_capture; // true when a module-var-named binding must stay env-backed
-    bool module_var_backed; // true when this capture is the module binding, not a local shadow
+    bool force_env_capture; // true when a lexical loop head shadows a module var
 };
 
 // Function entry for pre-pass collection
@@ -359,8 +353,6 @@ struct JsMirTranspiler {
     JsLoopLabels loop_stack[32];
     int loop_depth;
     int iteration_depth;
-    bool allow_iteration_scope_env_capture;
-    bool suppress_module_var_writeback;
 
     // Active for-of iterator stack for return cleanup
     MIR_reg_t for_of_iterators[32];
@@ -413,7 +405,6 @@ struct JsMirTranspiler {
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
     char last_closure_capture_names[512][128];
-    int last_closure_capture_slots[512];
     bool last_closure_has_env;
 
     // Assignment target hint for closure self-capture detection in copy-env path
@@ -431,7 +422,6 @@ struct JsMirTranspiler {
     bool is_module;                  // true when compiling an ES module (not main script)
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
     bool is_eval_direct;             // true when compiling eval code as direct script (sloppy-mode var export)
-    bool is_eval_var_env_global;      // true when direct/indirect eval var environment is global
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 

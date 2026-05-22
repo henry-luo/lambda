@@ -2,100 +2,6 @@
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
-void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings);
-static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt);
-static void jm_sync_module_var_global_properties_after_callback(JsMirTranspiler* mt);
-
-static void jm_reload_after_possible_runtime_callback(JsMirTranspiler* mt) {
-    if (!mt) return;
-    if (!mt->suppress_module_var_writeback) {
-        // Runtime callbacks can observe top-level `var` bindings through the
-        // global object and can also force local mirrors to be reloaded. Flush
-        // live mirrors first so native loop counters are not overwritten by
-        // stale module slots after a DOM/user-code callback boundary.
-        jm_writeback_module_var_locals_before_callback(mt);
-    }
-    jm_scope_env_reload_vars(mt);
-    if (!mt->suppress_module_var_writeback) {
-        // Deferred loop bodies intentionally keep module-var slots stale until
-        // the loop exit sync. Reloading from the module table during that window
-        // can copy boxed stale values into native loop counters.
-        jm_reload_module_var_locals_after_eval(mt, false);
-        jm_sync_module_var_global_properties_after_callback(mt);
-    }
-    jm_env_reload_shared_captures(mt);
-    jm_readback_closure_env(mt);
-}
-
-static JsMirVarEntry* jm_find_closure_readback_var(JsMirTranspiler* mt, const char* name) {
-    if (!mt || !name) return NULL;
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
-    for (int depth = mt->scope_depth; depth >= 0; depth--) {
-        if (!mt->var_scopes[depth]) continue;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
-        if (!found) continue;
-        JsMirVarEntry* var = &found->var;
-        if (var->from_block_func_decl && !var->in_scope_env && !var->from_env &&
-                !var->from_shared_env && !var->module_var_backed) {
-            // a sloppy Annex B block function creates a lexical binding that can
-            // shadow an outer captured name such as `arguments`. Closure
-            // readback targets the env-backed captured binding, not this local
-            // block function object, so keep walking outward.
-            continue;
-        }
-        return var;
-    }
-    return NULL;
-}
-
-static bool jm_is_implicit_arguments_local(JsMirTranspiler* mt, const JsVarScopeEntry* entry) {
-    if (!mt || !entry || !mt->current_fc || !mt->current_fc->uses_arguments) return false;
-    if (strcmp(entry->name, "_js_arguments") != 0) return false;
-    const JsMirVarEntry* var = &entry->var;
-    return !var->from_block_func_decl && !var->module_var_backed &&
-        !var->from_env && !var->from_shared_env;
-}
-
-static MIR_reg_t jm_emit_double_const(JsMirTranspiler* mt, const char* prefix, double value) {
-    MIR_reg_t result = jm_new_reg(mt, prefix, MIR_T_D);
-    if (value == INFINITY || value == -INFINITY) {
-        MIR_reg_t one_item = jm_box_int_const(mt, 1);
-        MIR_reg_t zero_item = jm_box_int_const(mt, 0);
-        MIR_reg_t one = jm_call_1(mt, "js_get_number", MIR_T_D,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, one_item));
-        MIR_reg_t zero = jm_call_1(mt, "js_get_number", MIR_T_D,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, zero_item));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
-            MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, one),
-            MIR_new_reg_op(mt->ctx, zero)));
-        if (value == -INFINITY) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DNEG,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, result)));
-        }
-        return result;
-    }
-    if (value != value) {
-        MIR_reg_t zero_item = jm_box_int_const(mt, 0);
-        MIR_reg_t zero_a = jm_call_1(mt, "js_get_number", MIR_T_D,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, zero_item));
-        MIR_reg_t zero_b = jm_call_1(mt, "js_get_number", MIR_T_D,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, zero_item));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
-            MIR_new_reg_op(mt->ctx, result),
-            MIR_new_reg_op(mt->ctx, zero_a),
-            MIR_new_reg_op(mt->ctx, zero_b)));
-        return result;
-    }
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_double_op(mt->ctx, value)));
-    return result;
-}
-
 static bool jm_function_decl_entry_is_direct_binding(JsFunctionNode* fn) {
     if (!fn) return false;
     TSNode fn_node = fn->base.node;
@@ -143,11 +49,6 @@ static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
     return false;
 }
 
-static bool jm_current_function_captures_with_env(JsMirTranspiler* mt) {
-    return mt && mt->current_fc && mt->current_fc->node &&
-        jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node);
-}
-
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
     if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
     int idx = mt->current_func_index;
@@ -164,115 +65,11 @@ static void jm_emit_global_var_property_sync(JsMirTranspiler* mt, JsModuleConstE
     if (!mt || !mc || !name || name->len <= 0 || value == 0) return;
     if (mt->is_module || mt->is_eval_direct) return;
     if (mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) return;
-    if (mc->is_iife_var || mc->is_implicit_global || mc->is_preamble) return;
+    if (mc->is_iife_var || mc->is_implicit_global) return;
     MIR_reg_t key = jm_box_string_literal(mt, name->chars, (int)name->len);
     jm_call_void_2(mt, "js_set_global_var_property_fast",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-}
-
-static bool jm_is_eval_direct_preamble_var_binding(JsMirTranspiler* mt,
-                                                   JsModuleConstEntry* mc) {
-    if (!mt || !mc || !mt->is_eval_direct || mt->is_module || mt->is_global_strict) return false;
-    if (!mt->preamble_entries || mt->preamble_entry_count <= 0) return false;
-    if (mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) return false;
-    if (mc->is_nested_func_hoist) return false;
-    return (int)mc->int_val >= 0 && (int)mc->int_val < mt->preamble_var_count;
-}
-
-static void jm_emit_eval_direct_preamble_var_property_sync(JsMirTranspiler* mt,
-                                                           JsModuleConstEntry* mc,
-                                                           String* name,
-                                                           MIR_reg_t value) {
-    if (!jm_is_eval_direct_preamble_var_binding(mt, mc) || !name || name->len <= 0 || value == 0) return;
-    MIR_reg_t key = jm_box_string_literal(mt, name->chars, (int)name->len);
-    jm_call_void_2(mt, "js_set_global_var_property_fast",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-}
-
-static bool jm_current_block_function_self_binding(JsMirTranspiler* mt, const char* vname) {
-    if (!mt || !mt->current_fc || !mt->current_fc->node || !vname) return false;
-    JsFunctionNode* fn = mt->current_fc->node;
-    if (fn->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) return false;
-    if (jm_function_decl_entry_is_direct_binding(fn)) return false;
-    if (!fn->name || !fn->name->chars) return false;
-    char self_name[128];
-    snprintf(self_name, sizeof(self_name), "_js_%.*s",
-        (int)fn->name->len, fn->name->chars);
-    return strcmp(self_name, vname) == 0;
-}
-
-static void jm_emit_captured_module_var_writeback(JsMirTranspiler* mt, const char* vname,
-                                                  MIR_reg_t value) {
-    if (!mt || !vname || value == 0 || !mt->module_consts) return;
-    if (jm_current_block_function_self_binding(mt, vname)) return;
-    JsModuleConstEntry lookup;
-    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-    if (!mc || mc->const_type != MCONST_MODVAR) return;
-    jm_call_void_2(mt, "js_set_module_var",
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-    if (strncmp(vname, "_js_", 4) == 0) {
-        const char* bare_name = vname + 4;
-        String* js_name = heap_create_name(bare_name, strlen(bare_name));
-        jm_emit_global_var_property_sync(mt, mc, js_name, value);
-        jm_emit_eval_direct_preamble_var_property_sync(mt, mc, js_name, value);
-        if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
-            // direct eval reads identifier values from its local frame first;
-            // keep that mirror coherent when a module-backed binding is written.
-            MIR_reg_t key = jm_box_string_literal(mt, bare_name, (int)strlen(bare_name));
-            jm_call_void_2(mt, "js_eval_local_export_var",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-        }
-    }
-}
-
-static void jm_emit_eval_local_binding_writeback(JsMirTranspiler* mt, String* name,
-                                                 MIR_reg_t value) {
-    // direct eval keeps caller bindings in an eval-local frame before falling
-    // back to module/global storage. Any direct MIR write to such a binding must
-    // refresh that frame or later identifier reads inside the same eval see the
-    // stale preamble value.
-    if (!mt || !mt->is_eval_direct || mt->eval_local_frame_reg == 0 ||
-        !name || !value) {
-        return;
-    }
-    MIR_reg_t key = jm_box_string_literal(mt, name->chars, (int)name->len);
-    jm_call_void_2(mt, "js_eval_local_export_var",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-}
-
-static void jm_assign_var_entry_from_boxed(JsMirTranspiler* mt,
-                                           JsMirVarEntry* var,
-                                           MIR_reg_t boxed_value) {
-    if (!mt || !var || !var->reg || !boxed_value) return;
-    if ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) &&
-        !var->from_env && !var->from_shared_env) {
-        MIR_reg_t num_value = jm_call_1(mt, "js_to_number", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
-        if (var->type_id == LMD_TYPE_INT) {
-            MIR_reg_t native_d = jm_call_1(mt, "js_get_number", MIR_T_D,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, num_value));
-            MIR_reg_t native_i = jm_emit_double_to_int(mt, native_d);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_reg_op(mt->ctx, native_i)));
-        } else {
-            MIR_reg_t native_d = jm_call_1(mt, "js_get_number", MIR_T_D,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, num_value));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_reg_op(mt->ctx, native_d)));
-        }
-    } else {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, var->reg),
-            MIR_new_reg_op(mt->ctx, boxed_value)));
-    }
 }
 
 bool jm_is_private_name(String* name) {
@@ -573,15 +370,6 @@ static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
     return jm_call_0(mt, "js_get_this", MIR_T_I64);
 }
 
-static MIR_reg_t jm_emit_current_new_target(JsMirTranspiler* mt) {
-    if (mt && mt->current_fc && mt->current_fc->node &&
-        mt->current_fc->node->is_arrow) {
-        JsMirVarEntry* var = jm_find_var(mt, "_js_new.target");
-        if (var) return var->reg;
-    }
-    return jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-}
-
 static bool jm_class_has_public_instance_fields(JsClassEntry* ce) {
     if (!ce) return false;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
@@ -650,14 +438,7 @@ static void jm_emit_public_instance_fields_for_super(JsMirTranspiler* mt, MIR_re
             continue;
         }
 
-        MIR_reg_t val;
-        if (inf->initializer) {
-            jm_call_void_0(mt, "js_private_field_init_begin");
-            val = jm_transpile_box_item(mt, inf->initializer);
-            jm_call_void_0(mt, "js_private_field_init_end");
-        } else {
-            val = jm_emit_undefined(mt);
-        }
+        MIR_reg_t val = inf->initializer ? jm_transpile_box_item(mt, inf->initializer) : jm_emit_undefined(mt);
         jm_emit_exc_propagate_check(mt);
         jm_call_3(mt, "js_create_data_property", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -865,13 +646,6 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
     if (ref->strict) {
         jm_emit_exc_propagate_check(mt);
     }
-    // A property write can invoke an accessor setter or Proxy trap. Those calls
-    // may mutate globals captured as module/local mirrors, so refresh before
-    // later expressions read stale registers.
-    jm_emit_exc_propagate_check(mt);
-    jm_scope_env_reload_vars(mt);
-    jm_reload_module_var_locals_after_eval(mt, false);
-    jm_env_reload_shared_captures(mt);
     return result;
 }
 
@@ -984,32 +758,12 @@ MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit) {
 
 static MIR_reg_t jm_apply_with_identifier_fallback(JsMirTranspiler* mt, JsIdentifierNode* id, MIR_reg_t fallback) {
     if (!mt || !id || !id->name) return fallback;
-    if (mt->with_depth > 0 && js_is_diagnose_enabled()) {
-        log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
-            mt->filename ? mt->filename : "(unknown)");
-    }
     MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
     MIR_reg_t result = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
     jm_emit_exc_propagate_check(mt);
-    jm_reload_after_possible_runtime_callback(mt);
     return result;
-}
-
-static JsMirVarEntry* jm_find_nearest_block_func_binding(JsMirTranspiler* mt, const char* name) {
-    if (!mt || !name) return NULL;
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
-    for (int depth = mt->scope_depth; depth >= 0; depth--) {
-        if (!mt->var_scopes[depth]) continue;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[depth], &key);
-        if (!found) continue;
-        if (found->var.from_block_func_decl) return &found->var;
-        if (!found->var.from_env && !found->var.from_shared_env) return NULL;
-    }
-    return NULL;
 }
 
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
@@ -1026,18 +780,13 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     // v18q: Handle 'arguments' keyword: return the function's arguments array-like object
     if (id->name->len == 9 && strncmp(id->name->chars, "arguments", 9) == 0) {
-        // Annex B block functions named `arguments` are lexical block bindings.
-        // They must shadow the function's implicit arguments object inside the
-        // block, while the Annex B var-environment update is still skipped.
-        JsMirVarEntry* block_fn_var = jm_find_nearest_block_func_binding(mt, "_js_arguments");
-        if (block_fn_var) return block_fn_var->reg;
         JsMirVarEntry* var = jm_find_var(mt, "_js_arguments");
         if (var) return var->reg;
     }
 
     // v20: Handle 'new.target' meta-property
     if (id->name->len == 10 && strncmp(id->name->chars, "new.target", 10) == 0) {
-        return jm_emit_current_new_target(mt);
+        return jm_call_0(mt, "js_get_new_target", MIR_T_I64);
     }
 
     // Handle 'undefined' keyword: return JS undefined value
@@ -1051,20 +800,20 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     // Handle 'NaN' — IEEE 754 Not a Number global constant
     if (id->name->len == 3 && strncmp(id->name->chars, "NaN", 3) == 0) {
-        MIR_reg_t key = jm_box_string_literal(mt, "NaN", 3);
-        MIR_reg_t val = jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-        jm_emit_exc_propagate_check(mt);
-        return jm_apply_with_identifier_fallback(mt, id, val);
+        MIR_reg_t d = jm_new_reg(mt, "nan_val", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, d),
+            MIR_new_double_op(mt->ctx, 0.0/0.0)));
+        return jm_apply_with_identifier_fallback(mt, id, jm_box_float(mt, d));
     }
 
     // Handle 'Infinity' — IEEE 754 positive infinity global constant
     if (id->name->len == 8 && strncmp(id->name->chars, "Infinity", 8) == 0) {
-        MIR_reg_t key = jm_box_string_literal(mt, "Infinity", 8);
-        MIR_reg_t val = jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-        jm_emit_exc_propagate_check(mt);
-        return jm_apply_with_identifier_fallback(mt, id, val);
+        MIR_reg_t d = jm_new_reg(mt, "inf_val", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, d),
+            MIR_new_double_op(mt->ctx, INFINITY)));
+        return jm_apply_with_identifier_fallback(mt, id, jm_box_float(mt, d));
     }
 
     // v12: Handle 'globalThis' keyword
@@ -1105,29 +854,18 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         }
         MIR_reg_t var_read_reg = var->reg;
         MIR_reg_t lookup_key = 0;
-        bool block_function_self_binding = jm_current_block_function_self_binding(mt, vname);
-        if (var->from_env && mt->eval_local_frame_reg != 0 && !block_function_self_binding) {
+        if (var->from_env && mt->eval_local_frame_reg != 0) {
             lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-            const char* eval_lookup = (mt->in_main && !mt->is_module) ?
-                "js_eval_global_lexical_or_local_binding_or_fallback" :
-                "js_eval_local_get_binding_or_fallback";
-            var_read_reg = jm_call_2(mt, eval_lookup, MIR_T_I64,
+            var_read_reg = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
-        bool should_check_with = mt->with_depth > 0 ||
-            ((var->from_env || var->from_shared_env) && jm_current_function_captures_with_env(mt));
-        if (should_check_with) {
-            if (mt->with_depth > 0 && js_is_diagnose_enabled()) {
-                log_warn("js-diagnose: fast-path-hit=with.read.dynamic file=%s",
-                    mt->filename ? mt->filename : "(unknown)");
-            }
+        if (mt->with_depth > 0) {
             if (!lookup_key) lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
             var_read_reg = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var_read_reg));
             jm_emit_exc_propagate_check(mt);
-            jm_reload_after_possible_runtime_callback(mt);
         }
         if (var->from_env) {
             jm_call_void_3(mt, "js_check_unresolved_capture",
@@ -1199,11 +937,18 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 return jm_apply_with_identifier_fallback(mt, id, cls);
             }
             case MCONST_FUNC: {
-                // Function declarations that capture mutable module bindings need
-                // the same closure metadata as function expressions.
+                // Function declaration: create function object from func_item
                 int fi = (int)mc->int_val;
                 if (fi >= 0 && fi < mt->func_count && mt->func_entries[fi].func_item) {
-                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, &mt->func_entries[fi]);
+                    JsFuncCollected* func = &mt->func_entries[fi];
+                    int fpc = func->param_count;
+                    if (func->has_rest_param) fpc = -fpc;
+                    MIR_reg_t fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
+                    const char* js_name = (func->node && func->node->name) ? func->node->name->chars : NULL;
+                    jm_emit_set_function_name(mt, fn_reg, js_name, func->formal_length);
+                    jm_emit_set_function_source(mt, fn_reg, func->node);
                     return jm_apply_with_identifier_fallback(mt, id, fn_reg);
                 }
                 log_error("js-mir: MCONST_FUNC '%s' has null func_item (fi=%d)", vname, fi);
@@ -1212,20 +957,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             case MCONST_MODVAR: {
                 MIR_reg_t mv = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-                if (mt->in_main && !mt->is_module && !mt->is_eval_direct &&
-                    mc->var_kind == JS_VAR_VAR && !mc->is_iife_var &&
-                    !mc->is_implicit_global && !mc->is_nested_func_hoist &&
-                    !mc->is_preamble) {
-                    const char* js_name = mc->name;
-                    if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-                    MIR_reg_t global_val = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-                    return jm_apply_with_identifier_fallback(mt, id, global_val);
-                }
-                // Direct eval inherits caller var bindings through module slots.
-                // The global property mirror is kept in sync for global object
-                // observability, but the module slot remains the canonical value.
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {
                     const char* js_name = mc->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
@@ -1306,12 +1037,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, read_done)));
                     jm_emit_label(mt, use_module);
                     jm_emit_label(mt, read_done);
-                }
-                if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
-                    MIR_reg_t eval_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                    mv = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mv));
                 }
                 mv = jm_call_4(mt, "js_resolve_unresolved_binding", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mv),
@@ -1446,13 +1171,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         bool throw_unresolvable = !mt->in_typeof;
         bool strict_reference = mt->is_global_strict || mt->is_module ||
             (mt->current_fc && mt->current_fc->is_strict);
-        if (mt->eval_local_frame_reg != 0 &&
-            (!mt->current_fc || mt->current_fc->has_direct_eval)) {
+        if (mt->eval_local_frame_reg != 0 && mt->current_fc && mt->current_fc->has_direct_eval) {
             MIR_reg_t missing = jm_emit_item_error(mt);
-            const char* eval_lookup = (mt->in_main && !mt->is_module) ?
-                "js_eval_global_lexical_or_local_binding_or_fallback" :
-                "js_eval_local_get_binding_or_fallback";
-            MIR_reg_t candidate = jm_call_2(mt, eval_lookup, MIR_T_I64,
+            MIR_reg_t candidate = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, missing));
             MIR_reg_t is_missing = jm_new_reg(mt, "eval_id_missing", MIR_T_I64);
@@ -1499,45 +1220,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         }
         return result;
     }
-}
-
-static bool jm_soft_keyword_alias_has_binding(JsMirTranspiler* mt, const char* alias, int alias_len) {
-    if (!mt || !alias || alias_len <= 0) return false;
-
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", alias_len, alias);
-    if (jm_find_var(mt, vname)) return true;
-
-    if (mt->module_consts) {
-        JsModuleConstEntry lookup;
-        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-        if (hashmap_get(mt->module_consts, &lookup)) return true;
-    }
-
-    return false;
-}
-
-static MIR_reg_t jm_transpile_soft_keyword_identifier(JsMirTranspiler* mt,
-        const char* public_name, int public_len, const char* alias, int alias_len) {
-    JsIdentifierNode id;
-    memset(&id, 0, sizeof(id));
-    id.base.node_type = JS_AST_NODE_IDENTIFIER;
-
-    const char* effective_name = public_name;
-    int effective_len = public_len;
-    if (jm_soft_keyword_alias_has_binding(mt, alias, alias_len)) {
-        effective_name = alias;
-        effective_len = alias_len;
-    }
-
-    id.name = name_pool_create_len(mt->tp->name_pool, effective_name, effective_len);
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", effective_len, effective_name);
-    JsMirVarEntry* var = jm_find_var(mt, vname);
-    if (var && jm_is_native_type(var->type_id)) {
-        return jm_box_native(mt, var->reg, var->type_id);
-    }
-    return jm_transpile_identifier(mt, &id);
 }
 
 void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt) {
@@ -1656,370 +1338,10 @@ static bool jm_match_string_from_char_code2(JsMirTranspiler* mt, JsAstNode* node
     return true;
 }
 
-static bool jm_match_string_from_char_code1(JsAstNode* node, JsAstNode** arg) {
-    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
-    JsCallNode* call = (JsCallNode*)node;
-    if (jm_count_args(call->arguments) != 1 || !call->callee ||
-        call->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION) {
-        return false;
-    }
-    JsMemberNode* member = (JsMemberNode*)call->callee;
-    if (member->computed || !member->object || !member->property ||
-        member->object->node_type != JS_AST_NODE_IDENTIFIER ||
-        member->property->node_type != JS_AST_NODE_IDENTIFIER) {
-        return false;
-    }
-    JsIdentifierNode* object = (JsIdentifierNode*)member->object;
-    JsIdentifierNode* property = (JsIdentifierNode*)member->property;
-    if (!jm_identifier_matches(object->name, "String", 6) ||
-        !jm_identifier_matches(property->name, "fromCharCode", 12)) {
-        return false;
-    }
-    *arg = call->arguments;
-    return true;
-}
-
-static bool jm_match_string_literal(JsAstNode* node, const char* text, int len) {
-    if (!node || node->node_type != JS_AST_NODE_LITERAL || !text || len < 0) return false;
-    JsLiteralNode* lit = (JsLiteralNode*)node;
-    return lit->literal_type == JS_LITERAL_STRING && lit->value.string_value &&
-        lit->value.string_value->len == (size_t)len &&
-        strncmp(lit->value.string_value->chars, text, (size_t)len) == 0;
-}
-
-static bool jm_arg_has_local_module_shadow(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!mt || !node || !mt->module_consts) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        if (!id->name) return false;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
-        if (!jm_find_var(mt, vname)) return false;
-        JsModuleConstEntry lookup;
-        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-        return hashmap_get(mt->module_consts, &lookup) != NULL;
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* m = (JsMemberNode*)node;
-        return jm_arg_has_local_module_shadow(mt, m->object) ||
-            (m->computed && jm_arg_has_local_module_shadow(mt, m->property));
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* c = (JsCallNode*)node;
-        if (jm_arg_has_local_module_shadow(mt, c->callee)) return true;
-        for (JsAstNode* a = c->arguments; a; a = a->next) {
-            if (jm_arg_has_local_module_shadow(mt, a)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* b = (JsBinaryNode*)node;
-        return jm_arg_has_local_module_shadow(mt, b->left) ||
-            jm_arg_has_local_module_shadow(mt, b->right);
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* u = (JsUnaryNode*)node;
-        return jm_arg_has_local_module_shadow(mt, u->operand);
-    }
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* a = (JsAssignmentNode*)node;
-        return jm_arg_has_local_module_shadow(mt, a->left) ||
-            jm_arg_has_local_module_shadow(mt, a->right);
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* c = (JsConditionalNode*)node;
-        return jm_arg_has_local_module_shadow(mt, c->test) ||
-            jm_arg_has_local_module_shadow(mt, c->consequent) ||
-            jm_arg_has_local_module_shadow(mt, c->alternate);
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        for (JsAstNode* e = seq->expressions; e; e = e->next) {
-            if (jm_arg_has_local_module_shadow(mt, e)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* arr = (JsArrayNode*)node;
-        for (JsAstNode* e = arr->elements; e; e = e->next) {
-            if (jm_arg_has_local_module_shadow(mt, e)) return true;
-        }
-        return false;
-    }
-    default:
-        return false;
-    }
-}
-
-static bool jm_call_args_have_local_module_shadow(JsMirTranspiler* mt, JsAstNode* arg) {
-    for (JsAstNode* a = arg; a; a = a->next) {
-        if (jm_arg_has_local_module_shadow(mt, a)) return true;
-    }
-    return false;
-}
-
-static bool jm_function_observes_arguments_object(JsFuncCollected* fc) {
-    if (!fc) return false;
-    if (fc->uses_arguments) return true;
-    JsFunctionNode* fn = fc->node;
-    if (!fn || fn->is_arrow) return false;
-    struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (!refs) return false;
-    if (fn->body) jm_collect_body_refs(fn->body, refs);
-    jm_collect_param_default_refs(fn->params, refs);
-    bool found = jm_name_set_has(refs, "_js_arguments");
-    hashmap_free(refs);
-    return found;
-}
-
-static bool jm_eval_line_comment_suffix_vname(String* suffix, char* vname_out,
-        size_t vname_size) {
-    if (!suffix || !vname_out || vname_size == 0) return false;
-    const char* tail = " = -1";
-    size_t tail_len = 5;
-    if (suffix->len <= tail_len ||
-        strncmp(suffix->chars + suffix->len - tail_len, tail, tail_len) != 0) {
-        return false;
-    }
-    size_t name_len = suffix->len - tail_len;
-    if (name_len == 0 || name_len + 5 > vname_size) return false;
-    const char* name = suffix->chars;
-    char first = name[0];
-    if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') ||
-          first == '_' || first == '$')) {
-        return false;
-    }
-    for (size_t i = 1; i < name_len; i++) {
-        char ch = name[i];
-        if (!((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-              (ch >= '0' && ch <= '9') || ch == '_' || ch == '$')) {
-            return false;
-        }
-    }
-    snprintf(vname_out, vname_size, "_js_%.*s", (int)name_len, name);
-    return true;
-}
-
-static bool jm_match_eval_line_comment_var_concat(JsAstNode* node,
-        JsAstNode** middle_out, char* vname_out, size_t vname_size) {
-    if (!node || !middle_out || !vname_out || vname_size == 0 ||
-        node->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
-        return false;
-    }
-    JsBinaryNode* outer = (JsBinaryNode*)node;
-    if (outer->op != JS_OP_ADD || !outer->left || !outer->right ||
-        outer->left->node_type != JS_AST_NODE_BINARY_EXPRESSION ||
-        outer->right->node_type != JS_AST_NODE_LITERAL) {
-        return false;
-    }
-    JsBinaryNode* inner = (JsBinaryNode*)outer->left;
-    if (inner->op != JS_OP_ADD ||
-        !jm_match_string_literal(inner->left, "//var ", 6) ||
-        !inner->right) {
-        return false;
-    }
-    JsLiteralNode* suffix = (JsLiteralNode*)outer->right;
-    if (suffix->literal_type != JS_LITERAL_STRING ||
-        !jm_eval_line_comment_suffix_vname(suffix->value.string_value,
-            vname_out, vname_size)) {
-        return false;
-    }
-    if (inner->right->node_type != JS_AST_NODE_IDENTIFIER &&
-        inner->right->node_type != JS_AST_NODE_LITERAL) {
-        return false;
-    }
-    *middle_out = inner->right;
-    return true;
-}
-
-static MIR_reg_t jm_try_eval_line_comment_var_fast(JsMirTranspiler* mt, JsCallNode* call) {
-    if (!call || !call->arguments || call->arguments->next) return 0;
-    JsAstNode* middle = NULL;
-    char vname[128];
-    if (!jm_match_eval_line_comment_var_concat(call->arguments, &middle,
-            vname, sizeof(vname))) {
-        return 0;
-    }
-
-    MIR_reg_t result = jm_new_reg(mt, "eval_line_comment_res", MIR_T_I64);
-    MIR_reg_t undef = jm_emit_undefined(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, undef)));
-
-    MIR_reg_t middle_val = jm_transpile_box_item(mt, middle);
-    MIR_reg_t is_terminator = jm_call_1(mt, "js_eval_line_comment_middle_is_terminator",
-        MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, middle_val));
-    jm_emit_exc_propagate_check(mt);
-
-    MIR_label_t assign_label = jm_new_label(mt);
-    MIR_label_t done_label = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, assign_label),
-        MIR_new_reg_op(mt->ctx, is_terminator)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, done_label)));
-    jm_emit_label(mt, assign_label);
-    MIR_reg_t value = jm_box_int_const(mt, -1);
-    jm_bind_destructure_var(mt, vname, value);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_reg_op(mt->ctx, value)));
-    jm_emit_label(mt, done_label);
-    return result;
-}
-
-static bool jm_match_percent_from_char_code_suffix1(JsAstNode* node, JsAstNode** code_arg) {
-    if (!node || node->node_type != JS_AST_NODE_BINARY_EXPRESSION) return false;
-    JsBinaryNode* outer = (JsBinaryNode*)node;
-    if (outer->op != JS_OP_ADD || !jm_match_string_literal(outer->right, "1", 1) ||
-        !outer->left || outer->left->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
-        return false;
-    }
-    JsBinaryNode* inner = (JsBinaryNode*)outer->left;
-    if (inner->op != JS_OP_ADD || !jm_match_string_literal(inner->left, "%", 1)) return false;
-    return jm_match_string_from_char_code1(inner->right, code_arg);
-}
-
-static bool jm_match_literal_plus_from_char_code1(JsAstNode* node,
-        String** prefix_out, JsAstNode** code_arg) {
-    // test262 parseInt/parseFloat Unicode sweeps repeatedly parse
-    // "<literal>" + String.fromCharCode(code). Match only that allocation-heavy
-    // shape so lowering can call a stack-string runtime helper without changing
-    // general string concatenation semantics.
-    if (!node || !prefix_out || !code_arg ||
-            node->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
-        return false;
-    }
-    JsBinaryNode* bin = (JsBinaryNode*)node;
-    if (bin->op != JS_OP_ADD || !bin->left || !bin->right ||
-            bin->left->node_type != JS_AST_NODE_LITERAL) {
-        return false;
-    }
-    JsLiteralNode* lit = (JsLiteralNode*)bin->left;
-    if (lit->literal_type != JS_LITERAL_STRING || !lit->value.string_value) {
-        return false;
-    }
-    if (!jm_match_string_from_char_code1(bin->right, code_arg)) return false;
-    *prefix_out = lit->value.string_value;
-    return true;
-}
-
 static bool jm_uri_compare_arg_is_simple(JsAstNode* node) {
     if (!node) return false;
     return node->node_type == JS_AST_NODE_IDENTIFIER ||
            node->node_type == JS_AST_NODE_LITERAL;
-}
-
-static JsMirVarEntry* jm_uri_escape_var_for_identifier(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!mt || !node || node->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
-    JsIdentifierNode* id = (JsIdentifierNode*)node;
-    char vname[128];
-    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
-    JsMirVarEntry* var = jm_find_var(mt, vname);
-    if (!var || !var->uri_escape_cp_reg || !var->uri_escape_valid_reg ||
-        var->uri_escape_byte_count != 4) {
-        return NULL;
-    }
-    return var;
-}
-
-static MIR_reg_t jm_emit_uri_escape_cp_equals_surrogate_pair(JsMirTranspiler* mt,
-        JsMirVarEntry* uri_var, MIR_reg_t first_reg, MIR_reg_t second_reg) {
-    MIR_reg_t first_ge = jm_new_reg(mt, "uri_h_ge", MIR_T_I64);
-    MIR_reg_t first_le = jm_new_reg(mt, "uri_h_le", MIR_T_I64);
-    MIR_reg_t second_ge = jm_new_reg(mt, "uri_l_ge", MIR_T_I64);
-    MIR_reg_t second_le = jm_new_reg(mt, "uri_l_le", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
-        MIR_new_reg_op(mt->ctx, first_ge), MIR_new_reg_op(mt->ctx, first_reg),
-        MIR_new_int_op(mt->ctx, 0xD800)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LES,
-        MIR_new_reg_op(mt->ctx, first_le), MIR_new_reg_op(mt->ctx, first_reg),
-        MIR_new_int_op(mt->ctx, 0xDBFF)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
-        MIR_new_reg_op(mt->ctx, second_ge), MIR_new_reg_op(mt->ctx, second_reg),
-        MIR_new_int_op(mt->ctx, 0xDC00)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LES,
-        MIR_new_reg_op(mt->ctx, second_le), MIR_new_reg_op(mt->ctx, second_reg),
-        MIR_new_int_op(mt->ctx, 0xDFFF)));
-
-    MIR_reg_t first_off = jm_new_reg(mt, "uri_h_off", MIR_T_I64);
-    MIR_reg_t second_off = jm_new_reg(mt, "uri_l_off", MIR_T_I64);
-    MIR_reg_t high_bits = jm_new_reg(mt, "uri_h_bits", MIR_T_I64);
-    MIR_reg_t pair_cp = jm_new_reg(mt, "uri_pair_cp", MIR_T_I64);
-    MIR_reg_t cp_eq = jm_new_reg(mt, "uri_cp_eq", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
-        MIR_new_reg_op(mt->ctx, first_off), MIR_new_reg_op(mt->ctx, first_reg),
-        MIR_new_int_op(mt->ctx, 0xD800)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
-        MIR_new_reg_op(mt->ctx, second_off), MIR_new_reg_op(mt->ctx, second_reg),
-        MIR_new_int_op(mt->ctx, 0xDC00)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH,
-        MIR_new_reg_op(mt->ctx, high_bits), MIR_new_reg_op(mt->ctx, first_off),
-        MIR_new_int_op(mt->ctx, 10)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, pair_cp), MIR_new_reg_op(mt->ctx, high_bits),
-        MIR_new_reg_op(mt->ctx, second_off)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, pair_cp), MIR_new_reg_op(mt->ctx, pair_cp),
-        MIR_new_int_op(mt->ctx, 0x10000)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-        MIR_new_reg_op(mt->ctx, cp_eq), MIR_new_reg_op(mt->ctx, pair_cp),
-        MIR_new_reg_op(mt->ctx, uri_var->uri_escape_cp_reg)));
-
-    MIR_reg_t valid = jm_new_reg(mt, "uri_valid_pair", MIR_T_I64);
-    MIR_reg_t matched = jm_new_reg(mt, "uri_cp_match", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, uri_var->uri_escape_valid_reg),
-        MIR_new_reg_op(mt->ctx, first_ge)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, valid),
-        MIR_new_reg_op(mt->ctx, first_le)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, valid),
-        MIR_new_reg_op(mt->ctx, second_ge)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, valid), MIR_new_reg_op(mt->ctx, valid),
-        MIR_new_reg_op(mt->ctx, second_le)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, matched), MIR_new_reg_op(mt->ctx, valid),
-        MIR_new_reg_op(mt->ctx, cp_eq)));
-    return matched;
-}
-
-static bool jm_same_simple_expr(JsAstNode* left, JsAstNode* right) {
-    if (!left || !right || left->node_type != right->node_type) return false;
-    if (left->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* l = (JsIdentifierNode*)left;
-        JsIdentifierNode* r = (JsIdentifierNode*)right;
-        return l->name && r->name && l->name->len == r->name->len &&
-               strncmp(l->name->chars, r->name->chars, l->name->len) == 0;
-    }
-    if (left->node_type == JS_AST_NODE_LITERAL) {
-        JsLiteralNode* l = (JsLiteralNode*)left;
-        JsLiteralNode* r = (JsLiteralNode*)right;
-        if (l->literal_type != r->literal_type) return false;
-        if (l->literal_type == JS_LITERAL_STRING) {
-            return l->value.string_value && r->value.string_value &&
-                   l->value.string_value->len == r->value.string_value->len &&
-                   strncmp(l->value.string_value->chars, r->value.string_value->chars,
-                           l->value.string_value->len) == 0;
-        }
-        if (l->literal_type == JS_LITERAL_NUMBER) {
-            return l->value.number_value == r->value.number_value;
-        }
-        if (l->literal_type == JS_LITERAL_BOOLEAN) {
-            return l->value.boolean_value == r->value.boolean_value;
-        }
-        if (l->literal_type == JS_LITERAL_NULL ||
-            l->literal_type == JS_LITERAL_UNDEFINED) {
-            return true;
-        }
-    }
-    return false;
 }
 
 static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_arg) {
@@ -2035,168 +1357,16 @@ static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_
     return true;
 }
 
-static MIR_reg_t jm_snapshot_reg(JsMirTranspiler* mt, MIR_reg_t src,
-                                 MIR_type_t type, const char* prefix) {
-    if (!mt || src == 0) return src;
-    MIR_reg_t dst = jm_new_reg(mt, prefix, type);
-    MIR_insn_code_t mov = MIR_MOV;
-    if (type == MIR_T_D) mov = MIR_DMOV;
-    else if (type == MIR_T_F) mov = MIR_FMOV;
-    jm_emit(mt, MIR_new_insn(mt->ctx, mov,
-        MIR_new_reg_op(mt->ctx, dst),
-        MIR_new_reg_op(mt->ctx, src)));
-    return dst;
-}
-
-static MIR_reg_t jm_snapshot_native_value(JsMirTranspiler* mt, MIR_reg_t src,
-                                          TypeId type, const char* prefix) {
-    if (!mt || src == 0) return src;
-    MIR_type_t actual = MIR_reg_type(mt->ctx, src, mt->current_func);
-    if (actual == MIR_T_D || actual == MIR_T_F || actual == MIR_T_I64) {
-        return jm_snapshot_reg(mt, src, actual, prefix);
-    }
-    return jm_snapshot_reg(mt, src, type == LMD_TYPE_FLOAT ? MIR_T_D : MIR_T_I64, prefix);
-}
-
-static bool jm_int_compound_op_can_stay_native(JsOperator op) {
-    switch (op) {
-    case JS_OP_ADD_ASSIGN:
-    case JS_OP_SUB_ASSIGN:
-    case JS_OP_MUL_ASSIGN:
-    case JS_OP_BIT_AND_ASSIGN:
-    case JS_OP_BIT_OR_ASSIGN:
-    case JS_OP_BIT_XOR_ASSIGN:
-    case JS_OP_LSHIFT_ASSIGN:
-    case JS_OP_RSHIFT_ASSIGN:
-    case JS_OP_URSHIFT_ASSIGN:
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool jm_float_compound_op_can_stay_native(JsOperator op) {
-    switch (op) {
-    case JS_OP_ADD_ASSIGN:
-    case JS_OP_SUB_ASSIGN:
-    case JS_OP_MUL_ASSIGN:
-    case JS_OP_DIV_ASSIGN:
-        return true;
-    default:
-        return false;
-    }
-}
-
-static bool jm_function_refs_module_modvar(JsMirTranspiler* mt, JsFuncCollected* fc) {
-    if (!mt || !fc || !fc->node || !fc->node->body || !mt->module_consts) return false;
-    struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_body_refs(fc->node->body, refs);
-    jm_collect_func_assignments(fc->node->body, refs);
-    bool found = false;
-    size_t iter = 0;
-    void* item;
-    while (hashmap_iter(refs, &iter, &item)) {
-        JsNameSetEntry* ref = (JsNameSetEntry*)item;
-        if (!ref) continue;
-        JsModuleConstEntry lookup;
-        snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
-        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-        if (mc && mc->const_type == MCONST_MODVAR) {
-            found = true;
-            break;
-        }
-    }
-    hashmap_free(refs);
-    return found;
-}
-
-static bool jm_node_contains_nested_function_value(JsAstNode* node) {
-    if (!node) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-        return true;
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-        return false;
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        for (JsAstNode* s = blk->statements; s; s = s->next) {
-            if (jm_node_contains_nested_function_value(s)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT:
-        return jm_node_contains_nested_function_value(((JsExpressionStatementNode*)node)->expression);
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
-        return jm_node_contains_nested_function_value(asgn->left) ||
-               jm_node_contains_nested_function_value(asgn->right);
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-        for (JsAstNode* d = vd->declarations; d; d = d->next) {
-            if (jm_node_contains_nested_function_value(d)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
-        return jm_node_contains_nested_function_value(decl->init);
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        if (jm_node_contains_nested_function_value(call->callee)) return true;
-        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (jm_node_contains_nested_function_value(arg)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* mem = (JsMemberNode*)node;
-        return jm_node_contains_nested_function_value(mem->object) ||
-               (mem->computed && jm_node_contains_nested_function_value(mem->property));
-    }
-    case JS_AST_NODE_RETURN_STATEMENT:
-        return jm_node_contains_nested_function_value(((JsReturnNode*)node)->argument);
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        return jm_node_contains_nested_function_value(ifn->test) ||
-               jm_node_contains_nested_function_value(ifn->consequent) ||
-               jm_node_contains_nested_function_value(ifn->alternate);
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION:
-        return jm_node_contains_nested_function_value(((JsUnaryNode*)node)->operand);
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* bin = (JsBinaryNode*)node;
-        return jm_node_contains_nested_function_value(bin->left) ||
-               jm_node_contains_nested_function_value(bin->right);
-    }
-    default:
-        return false;
-    }
-}
-
 // Binary expression: native arithmetic fast path + boxed fallback
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (bin->op == JS_OP_ADD) {
         JsAstNode* n_arg = NULL;
         if (jm_match_decimal_to_percent_hex_call(bin->right, &n_arg)) {
             MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
-            left_reg = jm_snapshot_reg(mt, left_reg, MIR_T_I64, "lhs_item");
-            TypeId n_type = jm_get_effective_type(mt, n_arg);
-            if (n_type == LMD_TYPE_INT) {
-                MIR_reg_t n_reg = jm_transpile_as_native(mt, n_arg, n_type, LMD_TYPE_INT);
-                return jm_call_2(mt, "js_test262_concat_percent_hex_int", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
-            } else {
-                MIR_reg_t n_reg = jm_transpile_box_item(mt, n_arg);
-                return jm_call_2(mt, "js_test262_concat_percent_hex", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
-            }
+            MIR_reg_t n_reg = jm_transpile_box_item(mt, n_arg);
+            return jm_call_2(mt, "js_test262_concat_percent_hex", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n_reg));
         }
     }
 
@@ -2204,7 +1374,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         JsAstNode* uri_arg = NULL;
         JsAstNode* first_arg = NULL;
         JsAstNode* second_arg = NULL;
-        JsAstNode* code_arg = NULL;
         int64_t component = 0;
         if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
             jm_match_string_from_char_code2(mt, bin->right, &first_arg, &second_arg) &&
@@ -2225,35 +1394,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             }
             return result;
         }
-        if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
-            jm_match_string_from_char_code1(bin->right, &code_arg) &&
-            jm_uri_compare_arg_is_simple(uri_arg) &&
-            jm_uri_compare_arg_is_simple(code_arg)) {
-            MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-            MIR_reg_t code_reg = jm_transpile_box_item(mt, code_arg);
-            MIR_reg_t result = jm_call_3(mt, "js_uri_decode_equals_from_char_code1", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-            if (bin->op == JS_OP_STRICT_NE) {
-                return jm_call_1(mt, "js_logical_not", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
-            }
-            return result;
-        }
-        if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
-            jm_uri_compare_arg_is_simple(uri_arg) &&
-            jm_same_simple_expr(uri_arg, bin->right)) {
-            MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-            MIR_reg_t result = jm_call_2(mt, "js_uri_decode_identity", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-            if (bin->op == JS_OP_STRICT_NE) {
-                return jm_call_1(mt, "js_logical_not", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
-            }
-            return result;
-        }
     }
 
     // --- Native arithmetic fast path ---
@@ -2265,7 +1405,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
 
     if (bin->op == JS_OP_ADD && left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
         MIR_reg_t left_reg = jm_transpile_box_item(mt, bin->left);
-        left_reg = jm_snapshot_reg(mt, left_reg, MIR_T_I64, "lhs_item");
         MIR_reg_t right_reg = jm_transpile_box_item(mt, bin->right);
         return jm_call_2(mt, "js_string_concat", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, left_reg),
@@ -2281,7 +1420,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_ADD: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "add", use_float ? MIR_T_D : MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DADD : MIR_ADD,
@@ -2291,7 +1429,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_SUB: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "sub", use_float ? MIR_T_D : MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DSUB : MIR_SUB,
@@ -2301,7 +1438,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_MUL: {
             if (use_float) {
                 MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                fl = jm_snapshot_native_value(mt, fl, LMD_TYPE_FLOAT, "lhs");
                 MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
                 MIR_reg_t r = jm_new_reg(mt, "mul", MIR_T_D);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMUL,
@@ -2311,7 +1447,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 // INT*INT: multiply via doubles to match JS double-precision semantics
                 // (64-bit int multiply would give extra precision beyond 2^53)
                 MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                fl = jm_snapshot_native_value(mt, fl, LMD_TYPE_FLOAT, "lhs");
                 MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
                 MIR_reg_t dmul = jm_new_reg(mt, "dmul", MIR_T_D);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMUL,
@@ -2327,7 +1462,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             // JS division always produces float (7/2 === 3.5)
             if (both_int) {
                 MIR_reg_t dl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                dl = jm_snapshot_native_value(mt, dl, LMD_TYPE_FLOAT, "lhs");
                 MIR_reg_t dr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
                 MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
@@ -2335,7 +1469,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 return r;
             } else {
                 MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-                fl = jm_snapshot_native_value(mt, fl, LMD_TYPE_FLOAT, "lhs");
                 MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
                 MIR_reg_t r = jm_new_reg(mt, "div", MIR_T_D);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
@@ -2346,7 +1479,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_MOD: {
             // Use float modulo for both int and float: correctly handles x % 0 → NaN
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
-            fl = jm_snapshot_native_value(mt, fl, LMD_TYPE_FLOAT, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
             MIR_reg_t fmod_r = jm_call_2(mt, "fmod", MIR_T_D,
                 MIR_T_D, MIR_new_reg_op(mt->ctx, fl),
@@ -2360,7 +1492,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_LT: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "lt", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLT : MIR_LTS,
@@ -2370,7 +1501,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_LE: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "le", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DLE : MIR_LES,
@@ -2380,7 +1510,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_GT: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "gt", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGT : MIR_GTS,
@@ -2390,7 +1519,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_GE: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "ge", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DGE : MIR_GES,
@@ -2401,7 +1529,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_STRICT_EQ: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "eq", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DEQ : MIR_EQ,
@@ -2412,7 +1539,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         case JS_OP_STRICT_NE: {
             TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
             MIR_reg_t fl = jm_transpile_as_native(mt, bin->left, left_type, arith_t);
-            fl = jm_snapshot_native_value(mt, fl, arith_t, "lhs");
             MIR_reg_t fr = jm_transpile_as_native(mt, bin->right, right_type, arith_t);
             MIR_reg_t r = jm_new_reg(mt, "ne", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, use_float ? MIR_DNE : MIR_NE,
@@ -2428,7 +1554,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 ? jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
                     MIR_T_D, MIR_new_reg_op(mt->ctx, jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT)));
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = (right_type == LMD_TYPE_INT)
                 ? jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
@@ -2448,7 +1573,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 ? jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
                     MIR_T_D, MIR_new_reg_op(mt->ctx, jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT)));
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = (right_type == LMD_TYPE_INT)
                 ? jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
@@ -2468,7 +1592,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 ? jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
                     MIR_T_D, MIR_new_reg_op(mt->ctx, jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT)));
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = (right_type == LMD_TYPE_INT)
                 ? jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT)
                 : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
@@ -2485,7 +1608,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
         case JS_OP_BIT_LSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
             MIR_reg_t rcount = jm_new_reg(mt, "lsh_count", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -2504,7 +1626,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
         case JS_OP_BIT_RSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
             MIR_reg_t rcount = jm_new_reg(mt, "rsh_count", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -2522,7 +1643,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
         case JS_OP_BIT_URSHIFT: {
             MIR_reg_t li = jm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
-            li = jm_snapshot_native_value(mt, li, LMD_TYPE_INT, "lhs");
             MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
             MIR_reg_t rcount = jm_new_reg(mt, "ursh_count", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
@@ -2719,7 +1839,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     } else {
         left = jm_transpile_box_item(mt, bin->left);
     }
-    left = jm_snapshot_reg(mt, left, MIR_T_I64, "lhs_item");
 
     int left_spill_slot = -1;
     if (mt->in_generator && jm_has_yield(bin->right)) {
@@ -2765,7 +1884,6 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (bin->op == JS_OP_INSTANCEOF || bin->op == JS_OP_IN) {
         jm_emit_exc_propagate_check(mt);
     }
-    jm_reload_after_possible_runtime_callback(mt);
     return result;
 }
 
@@ -2910,8 +2028,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 jm_emit_exc_propagate_check(mt);
                 return jm_emit_undefined(mt);
             }
-            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_INT &&
-                !var->from_env && !var->from_shared_env) {
+            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_INT && !var->from_env) {
                 // native int: postfix returns old value, prefix returns new
                 MIR_reg_t old_val = 0;
                 if (!un->prefix) {
@@ -2924,25 +2041,16 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_int_op(mt->ctx, 1)));
-                MIR_reg_t boxed_updated = 0;
-                if ((var->in_scope_env && var->scope_env_reg != 0) ||
-                    (mt->in_main && mt->module_consts)) {
-                    boxed_updated = jm_box_native(mt, var->reg, LMD_TYPE_INT);
-                }
                 // Propagate to scope env so inner closures see updated value
                 if (var->in_scope_env && var->scope_env_reg != 0) {
+                    MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, boxed_updated)));
+                        MIR_new_reg_op(mt->ctx, boxed)));
                 }
-                if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                    jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
-            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT &&
-                !var->from_env && !var->from_shared_env) {
+            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
                 // native float: postfix returns old value
                 MIR_reg_t old_val = 0;
                 if (!un->prefix) {
@@ -2959,21 +2067,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, one)));
-                MIR_reg_t boxed_updated = 0;
-                if ((var->in_scope_env && var->scope_env_reg != 0) ||
-                    (mt->in_main && mt->module_consts)) {
-                    boxed_updated = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
-                }
                 // Propagate to scope env
                 if (var->in_scope_env && var->scope_env_reg != 0) {
+                    MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, boxed_updated)));
+                        MIR_new_reg_op(mt->ctx, boxed)));
                 }
-                if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                    jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
         }
@@ -2997,7 +2097,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
 
         // boxed fallback — must ToNumeric first per spec (++ always numeric, supports BigInt)
         MIR_reg_t inc_with_key = 0;
-        MIR_reg_t inc_with_base = 0;
         MIR_reg_t operand;
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER && mt->with_depth > 0) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
@@ -3006,8 +2105,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             JsMirVarEntry* var = jm_find_var(mt, vname);
             if (var) {
                 inc_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                MIR_reg_t fallback = ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) &&
-                    !var->from_env && !var->from_shared_env) ?
+                MIR_reg_t fallback = ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) && !var->from_env) ?
                     jm_box_native(mt, var->reg, var->type_id) : var->reg;
                 operand = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
@@ -3026,30 +2124,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
                     jm_emit_exc_propagate_check(mt);
                 } else {
-                    inc_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                    bool strict_ref = mt->is_global_strict || mt->is_module ||
-                        (mt->current_fc && mt->current_fc->is_strict);
-                    operand = jm_call_2(mt, "js_get_with_binding_or_global_reference", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_ref ? 1 : 0));
-                    jm_emit_exc_propagate_check(mt);
+                    operand = jm_transpile_box_item(mt, un->operand);
                 }
             } else {
-                inc_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                bool strict_ref = mt->is_global_strict || mt->is_module ||
-                    (mt->current_fc && mt->current_fc->is_strict);
-                operand = jm_call_2(mt, "js_get_with_binding_or_global_reference", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, strict_ref ? 1 : 0));
-                jm_emit_exc_propagate_check(mt);
+                operand = jm_transpile_box_item(mt, un->operand);
             }
         } else {
             operand = jm_transpile_box_item(mt, un->operand);
-        }
-        if (inc_with_key) {
-            inc_with_base = jm_call_1(mt, "js_last_with_binding_base_or_undefined", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key));
-            jm_reload_after_possible_runtime_callback(mt);
         }
         // ToNumeric the operand: "1"++ should be 2, not "11"
         MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
@@ -3074,16 +2155,10 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (!inc_with_key) inc_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                 bool strict_put = mt->is_global_strict || mt->is_module ||
                     (mt->current_fc && mt->current_fc->is_strict);
-                MIR_reg_t wrote_with = inc_with_base ?
-                    jm_call_4(mt, "js_set_with_binding_base_if_valid", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_base),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0)) :
-                    jm_call_3(mt, "js_set_last_with_binding_if_valid", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
+                MIR_reg_t wrote_with = jm_call_3(mt, "js_set_last_with_binding_if_valid", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, inc_with_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
                 if (strict_put) jm_emit_exc_propagate_check(mt);
                 MIR_label_t inc_local_write_label = jm_new_label(mt);
                 inc_with_done_label = jm_new_label(mt);
@@ -3095,8 +2170,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 jm_emit_label(mt, inc_local_write_label);
             }
             if (var) {
-                if ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) &&
-                    !var->from_env && !var->from_shared_env) {
+                if ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) && !var->from_env) {
                     MIR_reg_t num_result = jm_call_1(mt, "js_to_number", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     if (var->type_id == LMD_TYPE_INT) {
@@ -3121,33 +2195,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (var->from_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, result)));
-                    if (var->module_var_backed) {
-                        // Local-shadow captures may share the module var name;
-                        // only module-backed env slots write through globally.
-                        jm_emit_captured_module_var_writeback(mt, vname, result);
-                    }
-                }
-                if (var->from_shared_env) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, result)));
-                    if (var->module_var_backed) {
-                        // Shared env captures follow the same shadowing rule as
-                        // per-closure captures.
-                        jm_emit_captured_module_var_writeback(mt, vname, result);
-                    }
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
                 if (var->in_scope_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, result)));
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
-                if (mt->module_consts && !mt->suppress_module_var_writeback &&
-                    (!var->from_env || var->module_var_backed)) {
-                    jm_emit_captured_module_var_writeback(mt, vname, result);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, result);
             } else if (mt->module_consts) {
                 // Module-level variable: write back via js_set_module_var
                 JsModuleConstEntry lookup;
@@ -3165,9 +2219,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
-                    jm_emit_global_var_property_sync(mt, mc, id->name, result);
-                    jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, result);
-                    jm_emit_eval_local_binding_writeback(mt, id->name, result);
                     jm_scope_env_mark_and_writeback(mt, vname, result);
                 } else if (!mc) {
                     // Implicit global: write back to global object
@@ -3206,8 +2257,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 jm_emit_exc_propagate_check(mt);
                 return jm_emit_undefined(mt);
             }
-            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_INT &&
-                !var->from_env && !var->from_shared_env) {
+            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_INT && !var->from_env) {
                 MIR_reg_t old_val = 0;
                 if (!un->prefix) {
                     old_val = jm_new_reg(mt, "dec_old", MIR_T_I64);
@@ -3219,25 +2269,16 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_int_op(mt->ctx, 1)));
-                MIR_reg_t boxed_updated = 0;
-                if ((var->in_scope_env && var->scope_env_reg != 0) ||
-                    (mt->in_main && mt->module_consts)) {
-                    boxed_updated = jm_box_native(mt, var->reg, LMD_TYPE_INT);
-                }
                 // Propagate to scope env so inner closures see updated value
                 if (var->in_scope_env && var->scope_env_reg != 0) {
+                    MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, boxed_updated)));
+                        MIR_new_reg_op(mt->ctx, boxed)));
                 }
-                if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                    jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
-            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT &&
-                !var->from_env && !var->from_shared_env) {
+            if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
                 MIR_reg_t old_val = 0;
                 if (!un->prefix) {
                     old_val = jm_new_reg(mt, "dec_old_d", MIR_T_D);
@@ -3253,21 +2294,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, var->reg),
                     MIR_new_reg_op(mt->ctx, one)));
-                MIR_reg_t boxed_updated = 0;
-                if ((var->in_scope_env && var->scope_env_reg != 0) ||
-                    (mt->in_main && mt->module_consts)) {
-                    boxed_updated = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
-                }
                 // Propagate to scope env
                 if (var->in_scope_env && var->scope_env_reg != 0) {
+                    MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, boxed_updated)));
+                        MIR_new_reg_op(mt->ctx, boxed)));
                 }
-                if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                    jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
         }
@@ -3291,7 +2324,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
 
         // boxed fallback — must ToNumeric first per spec (-- always numeric, supports BigInt)
         MIR_reg_t dec_with_key = 0;
-        MIR_reg_t dec_with_base = 0;
         MIR_reg_t operand;
         if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER && mt->with_depth > 0) {
             JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
@@ -3300,8 +2332,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             JsMirVarEntry* var = jm_find_var(mt, vname);
             if (var) {
                 dec_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                MIR_reg_t fallback = ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) &&
-                    !var->from_env && !var->from_shared_env) ?
+                MIR_reg_t fallback = ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) && !var->from_env) ?
                     jm_box_native(mt, var->reg, var->type_id) : var->reg;
                 operand = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
@@ -3320,30 +2351,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fallback));
                     jm_emit_exc_propagate_check(mt);
                 } else {
-                    dec_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                    bool strict_ref = mt->is_global_strict || mt->is_module ||
-                        (mt->current_fc && mt->current_fc->is_strict);
-                    operand = jm_call_2(mt, "js_get_with_binding_or_global_reference", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_ref ? 1 : 0));
-                    jm_emit_exc_propagate_check(mt);
+                    operand = jm_transpile_box_item(mt, un->operand);
                 }
             } else {
-                dec_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                bool strict_ref = mt->is_global_strict || mt->is_module ||
-                    (mt->current_fc && mt->current_fc->is_strict);
-                operand = jm_call_2(mt, "js_get_with_binding_or_global_reference", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, strict_ref ? 1 : 0));
-                jm_emit_exc_propagate_check(mt);
+                operand = jm_transpile_box_item(mt, un->operand);
             }
         } else {
             operand = jm_transpile_box_item(mt, un->operand);
-        }
-        if (dec_with_key) {
-            dec_with_base = jm_call_1(mt, "js_last_with_binding_base_or_undefined", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key));
-            jm_reload_after_possible_runtime_callback(mt);
         }
         // ToNumeric the operand: "5"-- should be 4, not NaN
         MIR_reg_t num_operand = jm_call_1(mt, "js_to_numeric", MIR_T_I64,
@@ -3368,16 +2382,10 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (!dec_with_key) dec_with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                 bool strict_put = mt->is_global_strict || mt->is_module ||
                     (mt->current_fc && mt->current_fc->is_strict);
-                MIR_reg_t wrote_with = dec_with_base ?
-                    jm_call_4(mt, "js_set_with_binding_base_if_valid", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_base),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0)) :
-                    jm_call_3(mt, "js_set_last_with_binding_if_valid", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
+                MIR_reg_t wrote_with = jm_call_3(mt, "js_set_last_with_binding_if_valid", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_with_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, strict_put ? 1 : 0));
                 if (strict_put) jm_emit_exc_propagate_check(mt);
                 MIR_label_t dec_local_write_label = jm_new_label(mt);
                 dec_with_done_label = jm_new_label(mt);
@@ -3389,8 +2397,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 jm_emit_label(mt, dec_local_write_label);
             }
             if (var) {
-                if ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) &&
-                    !var->from_env && !var->from_shared_env) {
+                if ((var->type_id == LMD_TYPE_INT || var->type_id == LMD_TYPE_FLOAT) && !var->from_env) {
                     MIR_reg_t num_result = jm_call_1(mt, "js_to_number", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     if (var->type_id == LMD_TYPE_INT) {
@@ -3415,23 +2422,13 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (var->from_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, result)));
-                    if (var->module_var_backed) {
-                        // A captured function-local shadow must not write the
-                        // same-named module var during decrement.
-                        jm_emit_captured_module_var_writeback(mt, vname, result);
-                    }
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
                 if (var->in_scope_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, result)));
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
-                if (mt->module_consts && !mt->suppress_module_var_writeback &&
-                    (!var->from_env || var->module_var_backed)) {
-                    jm_emit_captured_module_var_writeback(mt, vname, result);
-                }
-                jm_emit_eval_local_binding_writeback(mt, id->name, result);
             } else if (mt->module_consts) {
                 // Module-level variable: write back via js_set_module_var
                 JsModuleConstEntry lookup;
@@ -3449,9 +2446,6 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     jm_call_void_2(mt, "js_set_module_var",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
-                    jm_emit_global_var_property_sync(mt, mc, id->name, result);
-                    jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, result);
-                    jm_emit_eval_local_binding_writeback(mt, id->name, result);
                     jm_scope_env_mark_and_writeback(mt, vname, result);
                 } else if (!mc) {
                     // Implicit global: write back to global object
@@ -3620,123 +2614,6 @@ static JsIdentifierNode* jm_destructure_binding_identifier_target(JsAstNode* tar
     return (JsIdentifierNode*)target;
 }
 
-static void jm_sync_script_var_global_property(JsMirTranspiler* mt,
-        JsModuleConstEntry* module_var, const char* js_name, int js_name_len, MIR_reg_t val) {
-    if (!mt || !module_var || !js_name || js_name_len <= 0 || !val) return;
-    if (mt->is_module || mt->is_eval_direct) return;
-    if (module_var->var_kind != JS_VAR_VAR ||
-        module_var->is_iife_var ||
-        module_var->is_implicit_global ||
-        module_var->is_nested_func_hoist ||
-        module_var->is_preamble) {
-        return;
-    }
-    MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, js_name_len);
-    jm_call_void_2(mt, "js_define_global_var_property",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-    jm_call_void_2(mt, "js_set_global_property",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-}
-
-static void jm_writeback_module_var_locals_before_callback(JsMirTranspiler* mt) {
-    if (!mt || !mt->module_consts || mt->suppress_module_var_writeback) return;
-
-    for (int depth = 0; depth <= mt->scope_depth; depth++) {
-        if (!mt->var_scopes[depth]) continue;
-        size_t iter = 0; void* item;
-        while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
-            JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
-            if (!entry || strncmp(entry->name, "_js_", 4) != 0) continue;
-            if (!entry->var.reg) continue;
-            if (entry->var.from_block_func_decl) {
-                // annex B block functions have a lexical block binding separate
-                // from the optional var-environment propagation target. Module
-                // mirror writeback is name-keyed, so writing this binding would
-                // collapse that distinction for names such as `arguments`.
-                continue;
-            }
-            if (jm_is_implicit_arguments_local(mt, entry)) {
-                // the implicit function `arguments` object is created by FDI,
-                // not by a script/module var binding. A same-named Annex B
-                // block function can still create a module mirror entry in
-                // IIFE lowering, so never publish this local through that slot.
-                continue;
-            }
-
-            MIR_reg_t value = entry->var.reg;
-            if (entry->var.mir_type == MIR_T_D) {
-                value = jm_box_native(mt, entry->var.reg, LMD_TYPE_FLOAT);
-            } else if (jm_is_native_type(entry->var.type_id)) {
-                value = jm_box_native(mt, entry->var.reg, entry->var.type_id);
-            }
-            if (entry->var.in_scope_env && entry->var.scope_env_reg != 0 &&
-                entry->var.scope_env_slot >= 0) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                        entry->var.scope_env_slot * (int)sizeof(uint64_t),
-                        entry->var.scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, value)));
-            }
-
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", entry->name);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (!mc || mc->const_type != MCONST_MODVAR) continue;
-            if (mc->is_implicit_global || mc->is_nested_func_hoist || mc->is_preamble) continue;
-            if (mt->current_func_index >= 0 && !entry->var.module_var_backed &&
-                !(mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body)) {
-                continue;
-            }
-            if (!mc->is_iife_var &&
-                ((!mt->in_main && depth > 0) || (mt->in_main && depth > 1))) {
-                continue;
-            }
-
-            jm_call_void_2(mt, "js_set_module_var",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-
-            const char* js_name = entry->name + 4;
-            jm_sync_script_var_global_property(mt, mc, js_name, (int)strlen(js_name), value);
-        }
-    }
-}
-
-static void jm_sync_module_var_global_properties_after_callback(JsMirTranspiler* mt) {
-    if (!mt || !mt->module_consts || mt->suppress_module_var_writeback) return;
-    if (mt->is_eval_direct || mt->is_module) return;
-
-    // after a callback, the canonical top-level `var` value lives in the module
-    // table. Re-export it to the global object so later user callbacks observe
-    // the same binding value as MIR locals.
-    size_t miter = 0; void* mitem;
-    while (hashmap_iter(mt->module_consts, &miter, &mitem)) {
-        JsModuleConstEntry* mc = (JsModuleConstEntry*)mitem;
-        if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) continue;
-        if (mc->is_iife_var || mc->is_implicit_global || mc->is_nested_func_hoist ||
-            mc->is_preamble) {
-            continue;
-        }
-        if (strncmp(mc->name, "_js_", 4) != 0) continue;
-        const char* js_name = mc->name + 4;
-        MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-        MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-        MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-        MIR_label_t l_next_module_export = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-            MIR_new_label_op(mt->ctx, l_next_module_export),
-            MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
-        jm_call_void_2(mt, "js_set_global_var_property_fast",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-        jm_emit_label(mt, l_next_module_export);
-    }
-}
-
 static void jm_emit_destructure_pre_binding_probe(JsMirTranspiler* mt, JsAstNode* target) {
     if (!mt || mt->with_depth <= 0 || mt->destructure_assignment_mode) return;
     JsIdentifierNode* id = jm_destructure_binding_identifier_target(target);
@@ -3765,12 +2642,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         }
     }
 
-    // nested lexical destructuring can shadow a top-level module var; avoid
-    // treating that local binding as a write to the module/global slot.
-    bool local_lexical_shadow_of_module = module_var && var && var->is_let_const &&
-        mt->in_main && mt->scope_depth > 1;
-    bool local_shadows_module = module_var && var &&
-        (!mt->destructure_assignment_mode || local_lexical_shadow_of_module);
+    bool local_shadows_module = module_var && var && !mt->destructure_assignment_mode;
     if (module_var && var && mt->current_fc && mt->current_fc->node) {
         if (jm_func_has_param_named(mt->current_fc->node, js_name, js_name_len)) {
             local_shadows_module = true;
@@ -3783,18 +2655,6 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         }
     }
     bool writes_module_binding = module_var && !local_shadows_module;
-    auto sync_assignment_local_mirror = [&]() {
-        if (!mt->destructure_assignment_mode) return;
-        if (!mt->in_main || mt->with_depth > 0 || mt->is_eval_direct) return;
-        if (var && var->reg) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, val)));
-            var->type_id = LMD_TYPE_ANY;
-            var->mir_type = MIR_T_I64;
-            return;
-        }
-        jm_set_var(mt, vname, val, MIR_T_I64, LMD_TYPE_ANY);
-    };
     if (writes_module_binding) {
         if (!mt->destructure_assignment_mode &&
             (module_var->var_kind == JS_VAR_LET || module_var->var_kind == JS_VAR_CONST)) {
@@ -3828,14 +2688,11 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
             jm_emit_label(mt, l_skip_set);
             jm_emit_label(mt, l_done);
-            sync_assignment_local_mirror();
             return;
         }
         jm_call_void_2(mt, "js_set_module_var",
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_var->int_val),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-        jm_sync_script_var_global_property(mt, module_var, js_name, js_name_len, val);
-        sync_assignment_local_mirror();
         return;
     }
 
@@ -3912,10 +2769,6 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
-                !local_lexical_shadow_of_module) {
-                jm_emit_captured_module_var_writeback(mt, vname, val);
-            }
             var->tdz_active = false;
             return;
         }
@@ -3950,10 +2803,6 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
-                !local_lexical_shadow_of_module) {
-                jm_emit_captured_module_var_writeback(mt, vname, val);
-            }
             jm_emit_label(mt, l_done);
             return;
         }
@@ -3985,20 +2834,6 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                     MIR_new_reg_op(mt->ctx, val)));
             }
-            if (mt->module_consts && var->module_var_backed) {
-                // A from-env capture can be either the actual module binding or
-                // a function-local `var` that shadows a module name. Only the
-                // former may write through to the module/global slot.
-                JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
-                    jm_call_void_2(mt, "js_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                    jm_sync_script_var_global_property(mt, mc, js_name, js_name_len, val);
-                }
-            }
             jm_emit_label(mt, l_done);
             return;
         }
@@ -4019,10 +2854,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
     }
-    if (var && var->from_env && var->module_var_backed &&
-        mt->current_func_index >= 0 && mt->module_consts) {
-        // Env captures of local shadows share the same name as a module var,
-        // but they must not clobber the module binding on assignment.
+    if (var && var->from_env && mt->current_func_index >= 0 && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -4044,16 +2876,15 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     // body whose locals were promoted to module vars. In a nested function, a
     // local declaration that shadows a module var name (e.g. `const {x: n} = e`
     // where `n` is also a top-level const) must NOT clobber the module slot.
-    if (mt->module_consts) {
+    bool is_local_let_const = (var && var->is_let_const);
+    if (!is_local_let_const && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
         bool at_module_scope = mt->in_main ||
             (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
-        bool local_let_const_shadow = local_lexical_shadow_of_module ||
-            (var && var->is_let_const && !at_module_scope);
         if (mc && mc->const_type == MCONST_MODVAR) {
-            if (at_module_scope && !local_let_const_shadow) {
+            if (at_module_scope) {
                 jm_call_void_2(mt, "js_set_module_var",
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
@@ -4070,7 +2901,7 @@ MIR_reg_t jm_emit_destructure_default(JsMirTranspiler* mt, MIR_reg_t val, JsAstN
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
         MIR_new_label_op(mt->ctx, l_has),
         MIR_new_reg_op(mt->ctx, val),
-        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
     MIR_reg_t def = jm_transpile_box_item(mt, default_expr);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, def)));
@@ -4125,12 +2956,6 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
             }
         }
         jm_emit_destructure_target(mt, ap->left, resolved);
-    } else if (target->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
-        JsAssignmentNode* ap = (JsAssignmentNode*)target;
-        if (ap->op == JS_OP_ASSIGN) {
-            MIR_reg_t resolved = jm_emit_destructure_default(mt, val, ap->right);
-            jm_emit_destructure_target(mt, ap->left, resolved);
-        }
     } else if (target->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
         // assignment target: obj.prop or obj[expr]
         JsMemberNode* member = (JsMemberNode*)target;
@@ -4332,9 +3157,6 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
                     jm_gen_spill_load(mt, iter_done, empty_target_iter_done_spill);
                 }
                 jm_emit_label(mt, rest_end);
-                if (mt->destructure_assignment_mode && mt->in_main) {
-                    jm_reload_module_var_locals_after_eval(mt, false);
-                }
             }
         } else if (elem->node_type == JS_AST_NODE_NULL) {
             // elision: advance iterator but discard value
@@ -4482,9 +3304,6 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
             }
             jm_emit_iterator_close_on_exception_if_open(mt, iterator, iter_done, skip_arr_destr);
             jm_emit_label(mt, elem_end);
-            if (mt->destructure_assignment_mode && mt->in_main) {
-                jm_reload_module_var_locals_after_eval(mt, false);
-            }
         }
         elem = elem->next;
     }
@@ -4594,9 +3413,6 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
             MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            jm_scope_env_reload_vars(mt);
-            jm_reload_module_var_locals_after_eval(mt, false);
-            jm_env_reload_shared_captures(mt);
             int target_src_spill = -1;
             bool target_has_yield = mt->in_generator && jm_has_yield(target);
             if (target_has_yield) {
@@ -4656,9 +3472,6 @@ void jm_emit_object_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MI
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, exclude_count));
-                jm_scope_env_reload_vars(mt);
-                jm_reload_module_var_locals_after_eval(mt, false);
-                jm_env_reload_shared_captures(mt);
                 jm_emit_destructure_target(mt, sp->argument, rest);
             }
         }
@@ -4722,12 +3535,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     }
                     // P5: For typed INT module variables, use inline native arithmetic
                     // for compound assignments instead of calling js_add/js_subtract/etc.
-                    // This stays enabled only while modvar_type proves the module slot
-                    // still has a native-compatible mirror.
-                    TypeId p5_rtype = jm_get_effective_type(mt, asgn->right);
-                    if (mt->with_depth <= 0 && mc->modvar_type == LMD_TYPE_INT &&
-                        asgn->op != JS_OP_ASSIGN && p5_rtype == LMD_TYPE_INT &&
-                        jm_int_compound_op_can_stay_native(asgn->op)) {
+                    // This eliminates one function call per iteration in tight loops.
+                    if (mt->with_depth <= 0 && mc->modvar_type == LMD_TYPE_INT && asgn->op != JS_OP_ASSIGN) {
                         MIR_insn_code_t p5_mir_op = MIR_ADD;
                         bool p5_handled = true;
                         switch (asgn->op) {
@@ -4749,6 +3558,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             // inline unbox: native_old = old << 8 >> 8
                             MIR_reg_t old_nat = jm_emit_unbox_int(mt, old_boxed);
                             // native rhs
+                            TypeId p5_rtype = jm_get_effective_type(mt, asgn->right);
                             MIR_reg_t rhs_nat = jm_transpile_as_native(mt, asgn->right, p5_rtype, LMD_TYPE_INT);
                             // inline arithmetic
                             MIR_reg_t new_nat = jm_new_reg(mt, "mvn", MIR_T_I64);
@@ -4762,7 +3572,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_new));
                             jm_emit_global_var_property_sync(mt, mc, id->name, boxed_new);
-                            jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, boxed_new);
                             jm_scope_env_mark_and_writeback(mt, vname, boxed_new);
                             return boxed_new;
                         }
@@ -4810,7 +3619,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                         jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                        jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
                         jm_scope_env_mark_and_writeback(mt, vname, rhs);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, result),
@@ -4819,24 +3627,15 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         return result;
                     }
                     MIR_reg_t rhs;
-                    MIR_reg_t simple_native_rhs = 0;
                     if (asgn->op != JS_OP_ASSIGN) {
                         // Compound assignment: read current value, apply op, store result
                         MIR_reg_t old_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-                        MIR_reg_t eval_compound_key = 0;
-                        if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
-                            eval_compound_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                            old_val = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_compound_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
-                        }
                         MIR_reg_t with_key = 0;
                         bool strict_put = mt->is_global_strict || mt->is_module ||
                             (mt->current_fc && mt->current_fc->is_strict);
                         if (mt->with_depth > 0) {
-                            with_key = eval_compound_key ? eval_compound_key :
-                                jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+                            with_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                             old_val = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, with_key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val));
@@ -4884,7 +3683,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                             jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                            jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
                             jm_scope_env_mark_and_writeback(mt, vname, rhs);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, module_result),
@@ -4902,49 +3700,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, simple_with_key));
                             jm_emit_exc_propagate_check(mt);
                         }
-                        TypeId simple_rhs_type = jm_get_effective_type(mt, asgn->right);
-                        // direct eval and type-changing writes can invalidate the native
-                        // mirror, so use the fast path only when the module metadata agrees.
-                        if (mc->var_kind == JS_VAR_VAR &&
-                            mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct &&
-                            simple_rhs_type == LMD_TYPE_INT &&
-                            mc->modvar_type == LMD_TYPE_INT) {
-                            simple_native_rhs = jm_transpile_as_native(mt, asgn->right,
-                                simple_rhs_type, LMD_TYPE_INT);
-                            rhs = jm_box_native(mt, simple_native_rhs, LMD_TYPE_INT);
-                            jm_set_var(mt, vname, simple_native_rhs, MIR_T_I64, LMD_TYPE_INT);
-                        } else if (mc->var_kind == JS_VAR_VAR &&
-                            mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct &&
-                            simple_rhs_type == LMD_TYPE_FLOAT &&
-                            (mc->modvar_type == LMD_TYPE_INT || mc->modvar_type == LMD_TYPE_FLOAT)) {
-                            simple_native_rhs = jm_transpile_as_native(mt, asgn->right,
-                                simple_rhs_type, LMD_TYPE_FLOAT);
-                            rhs = jm_box_native(mt, simple_native_rhs, LMD_TYPE_FLOAT);
-                            jm_set_var(mt, vname, simple_native_rhs, MIR_T_D, LMD_TYPE_FLOAT);
-                        } else {
-                            rhs = jm_transpile_box_item(mt, asgn->right);
-                            if (mc->var_kind == JS_VAR_VAR &&
-                                mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct) {
-                                bool updated_existing = false;
-                                JsVarScopeEntry key;
-                                memset(&key, 0, sizeof(key));
-                                snprintf(key.name, sizeof(key.name), "%s", vname);
-                                for (int sd = 0; sd <= mt->scope_depth; sd++) {
-                                    if (!mt->var_scopes[sd]) continue;
-                                    JsVarScopeEntry* existing_entry =
-                                        (JsVarScopeEntry*)hashmap_get(mt->var_scopes[sd], &key);
-                                    if (!existing_entry) continue;
-                                    existing_entry->var.reg = rhs;
-                                    existing_entry->var.mir_type = MIR_T_I64;
-                                    existing_entry->var.type_id = LMD_TYPE_ANY;
-                                    existing_entry->var.typed_array_type = -1;
-                                    updated_existing = true;
-                                }
-                                if (!updated_existing) {
-                                    jm_set_var(mt, vname, rhs, MIR_T_I64, LMD_TYPE_ANY);
-                                }
-                            }
-                        }
+                        rhs = jm_transpile_box_item(mt, asgn->right);
                         // function name inference for simple module-var assignment:
                         // cover = function(){} → cover.name === "cover"
                         // Suppressed when LHS is parenthesized (IsIdentifierRef is false per spec)
@@ -4979,7 +3735,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                             jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                            jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
                             jm_scope_env_mark_and_writeback(mt, vname, rhs);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, module_result),
@@ -5001,9 +3756,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         jm_call_void_2(mt, "js_set_global_property",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
-                        jm_call_void_2(mt, "js_eval_local_export_var",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, eval_key),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, store_result),
                             MIR_new_reg_op(mt->ctx, rhs)));
@@ -5014,8 +3766,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                         jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                        jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
-                        jm_emit_eval_local_binding_writeback(mt, id->name, rhs);
                         jm_scope_env_mark_and_writeback(mt, vname, rhs);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, store_result),
@@ -5027,8 +3777,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                     jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
-                    jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
-                    jm_emit_eval_local_binding_writeback(mt, id->name, rhs);
                     // Write back to scope env if captured by child closures
                     jm_scope_env_mark_and_writeback(mt, vname, rhs);
                     return rhs;
@@ -5200,19 +3948,9 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         }
 
         // --- Native-typed variable fast path ---
-        if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_INT &&
-            !var->from_env && !var->from_shared_env) {
+        if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_INT && !var->from_env) {
             TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
             if (asgn->op == JS_OP_ASSIGN && rhs_type != LMD_TYPE_INT) {
-                var->type_id = LMD_TYPE_ANY;
-                var->mir_type = MIR_T_I64;
-            } else if (asgn->op != JS_OP_ASSIGN &&
-                       (rhs_type != LMD_TYPE_INT ||
-                        !jm_int_compound_op_can_stay_native(asgn->op))) {
-                MIR_reg_t old_boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, var->reg),
-                    MIR_new_reg_op(mt->ctx, old_boxed)));
                 var->type_id = LMD_TYPE_ANY;
                 var->mir_type = MIR_T_I64;
             } else {
@@ -5258,35 +3996,18 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     jm_arguments_writeback_param(mt, api, boxed);
                 }
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
-                jm_emit_captured_module_var_writeback(mt, vname, boxed);
-            }
-            {
-                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed);
-            }
             return var->reg;
             }
         }
 
-        if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT &&
-            !var->from_env && !var->from_shared_env) {
-            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-            bool rhs_numeric = rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT;
-            if (asgn->op != JS_OP_ASSIGN &&
-                (!rhs_numeric || !jm_float_compound_op_can_stay_native(asgn->op))) {
-                MIR_reg_t old_boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, var->reg),
-                    MIR_new_reg_op(mt->ctx, old_boxed)));
-                var->type_id = LMD_TYPE_ANY;
-                var->mir_type = MIR_T_I64;
-            } else if (asgn->op == JS_OP_ASSIGN) {
+        if (mt->with_depth <= 0 && var->type_id == LMD_TYPE_FLOAT && !var->from_env) {
+            if (asgn->op == JS_OP_ASSIGN) {
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
                 MIR_reg_t rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                     MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, rhs)));
             } else {
+                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
                 MIR_reg_t rval = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
                 MIR_insn_code_t op = MIR_DADD;
                 switch (asgn->op) {
@@ -5316,14 +4037,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     jm_arguments_writeback_param(mt, api, boxed);
                 }
             }
-            if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
-                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
-                jm_emit_captured_module_var_writeback(mt, vname, boxed);
-            }
-            {
-                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
-                jm_emit_eval_local_binding_writeback(mt, id->name, boxed);
-            }
             return var->reg;
         }
 
@@ -5340,35 +4053,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_call_1(mt, "js_capture_with_binding", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, simple_with_key));
                 jm_emit_exc_propagate_check(mt);
-            }
-            if (mt->in_main && mt->with_depth <= 0 && !mt->is_eval_direct &&
-                mt->module_consts && !var->from_env && !var->from_shared_env) {
-                JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-                if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == JS_VAR_VAR &&
-                    rhs_type == LMD_TYPE_INT && var->type_id == LMD_TYPE_INT &&
-                    var->mir_type == MIR_T_I64) {
-                    // this path mutates the cached var shape to native int. It is
-                    // only valid when the binding is already native; otherwise a
-                    // skipped branch like `var x; if (false) x = 1` would leave
-                    // the old undefined Item bits read back as an integer.
-                    MIR_reg_t native_rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
-                    MIR_reg_t boxed_rhs = jm_box_native(mt, native_rhs, LMD_TYPE_INT);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, var->reg),
-                        MIR_new_reg_op(mt->ctx, native_rhs)));
-                    var->type_id = LMD_TYPE_INT;
-                    var->mir_type = MIR_T_I64;
-                    jm_call_void_2(mt, "js_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_rhs));
-                    jm_emit_global_var_property_sync(mt, mc, id->name, boxed_rhs);
-                    jm_scope_env_mark_and_writeback(mt, vname, boxed_rhs);
-                    mt->assign_target_vname = NULL;
-                    return var->reg;
-                }
             }
             rhs = jm_transpile_box_item(mt, asgn->right);
             mt->assign_target_vname = NULL;
@@ -5399,31 +4083,26 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                     MIR_new_label_op(mt->ctx, local_done_label)));
                 jm_emit_label(mt, local_write_label);
-                jm_assign_var_entry_from_boxed(mt, var, rhs);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, rhs)));
                 if (var->from_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, rhs)));
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
                 if (var->in_scope_env) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, rhs)));
+                        MIR_new_reg_op(mt->ctx, var->reg)));
                 }
                 {
                     int api = jm_arguments_param_index(mt, vname);
-                    if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
-                }
-                if (mt->module_consts && !mt->suppress_module_var_writeback) {
-                    if (!var->from_env || var->module_var_backed) {
-                        // A local captured through env can shadow a module var
-                        // with the same name; only module-backed captures sync.
-                        jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                    }
+                    if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, local_result),
-                    MIR_new_reg_op(mt->ctx, rhs)));
+                    MIR_new_reg_op(mt->ctx, var->reg)));
                 jm_emit_label(mt, local_done_label);
                 return local_result;
             }
@@ -5470,54 +4149,29 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_emit_named_evaluation_for_identifier(mt, asgn->right, rhs, id->name);
             }
 
-            jm_assign_var_entry_from_boxed(mt, var, rhs);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, rhs)));
             if (var->from_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
-                if (var->module_var_backed) {
-                    // Assignment to a captured local shadow must stay local.
-                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                }
-            }
-            if (var->from_shared_env) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
-                if (var->module_var_backed) {
-                    // Shared-env captures follow the same module-shadow boundary.
-                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                }
+                    MIR_new_reg_op(mt->ctx, var->reg)));
             }
             if (var->in_scope_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
+                    MIR_new_reg_op(mt->ctx, var->reg)));
             }
             {
                 int api = jm_arguments_param_index(mt, vname);
-                if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
-            }
-            if (mt->module_consts && !mt->suppress_module_var_writeback &&
-                (!var->from_env || var->module_var_backed)) {
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                JsModuleConstEntry wb_lookup;
-                snprintf(wb_lookup.name, sizeof(wb_lookup.name), "%s", vname);
-                JsModuleConstEntry* wb_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &wb_lookup);
-                if (wb_mc && wb_mc->const_type == MCONST_MODVAR) {
-                    jm_call_void_2(mt, "js_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)wb_mc->int_val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
-                    jm_emit_global_var_property_sync(mt, wb_mc, id->name, rhs);
-                }
+                if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
             }
 
             jm_emit_label(mt, l_end);
-            return rhs;
+            return var->reg;
         } else {
             // Compound assignment: var op= expr -> var = js_op(var, expr)
             MIR_reg_t old_val = var->reg;
-            old_val = jm_snapshot_reg(mt, old_val, MIR_T_I64, "lhs_item");
             MIR_reg_t with_key = 0;
             bool strict_put = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict);
@@ -5572,41 +4226,26 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                 MIR_new_label_op(mt->ctx, local_done_label)));
             jm_emit_label(mt, local_write_label);
-            jm_assign_var_entry_from_boxed(mt, var, rhs);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, rhs)));
             if (var->from_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
-                if (var->module_var_backed) {
-                    // With-fallback local writes must not escape through a
-                    // same-named module var unless this capture is module-backed.
-                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                }
-            }
-            if (var->from_shared_env) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
-                if (var->module_var_backed) {
-                    jm_emit_captured_module_var_writeback(mt, vname, rhs);
-                }
+                    MIR_new_reg_op(mt->ctx, var->reg)));
             }
             if (var->in_scope_env) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, rhs)));
+                    MIR_new_reg_op(mt->ctx, var->reg)));
             }
             {
                 int api = jm_arguments_param_index(mt, vname);
-                if (api >= 0) jm_arguments_writeback_param(mt, api, rhs);
-            }
-            if (mt->module_consts && !mt->suppress_module_var_writeback &&
-                (!var->from_env || var->module_var_backed)) {
-                jm_emit_captured_module_var_writeback(mt, vname, rhs);
+                if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, local_result),
-                MIR_new_reg_op(mt->ctx, rhs)));
+                MIR_new_reg_op(mt->ctx, var->reg)));
             jm_emit_label(mt, local_done_label);
             return local_result;
         }
@@ -5620,19 +4259,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, var->reg)));
-            if (var->module_var_backed) {
-                // The captured binding may be a function-local shadow. Avoid
-                // writing it through to the global/module var by name alone.
-                jm_emit_captured_module_var_writeback(mt, vname, var->reg);
-            }
-        }
-        if (var->from_shared_env) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, var->reg)));
-            if (var->module_var_backed) {
-                jm_emit_captured_module_var_writeback(mt, vname, var->reg);
-            }
         }
         // Write-back to scope env if this is a parent-scope variable captured by children
         if (var->in_scope_env) {
@@ -5645,11 +4271,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             int api = jm_arguments_param_index(mt, vname);
             if (api >= 0) jm_arguments_writeback_param(mt, api, var->reg);
         }
-        if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback &&
-            (!var->from_env || var->module_var_backed)) {
-            jm_emit_captured_module_var_writeback(mt, vname, var->reg);
-        }
-        jm_emit_eval_local_binding_writeback(mt, id->name, var->reg);
         return var->reg;
     }
 
@@ -5750,15 +4371,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             TypeId idx_type = jm_get_effective_type(mt, member->property);
             bool strict_member_set = mt->is_global_strict || mt->is_module ||
                 (mt->current_fc && mt->current_fc->is_strict);
-            JsMirVarEntry* arr_var = jm_get_js_array_var(mt, member->object);
-            bool is_arguments_object = false;
-            if (member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
-                is_arguments_object = obj_id->name && obj_id->name->len == 9 &&
-                    strncmp(obj_id->name->chars, "arguments", 9) == 0;
-            }
-            if (idx_type == LMD_TYPE_INT && !strict_member_set &&
-                (arr_var || is_arguments_object)) {
+            if (idx_type == LMD_TYPE_INT && !strict_member_set) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
                 MIR_reg_t idx_native = jm_transpile_as_native(mt, member->property, idx_type, LMD_TYPE_INT);
                 MIR_reg_t new_val;
@@ -6152,7 +4765,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 jm_emit_exc_propagate_check(mt);
                 MIR_reg_t super_set_result = jm_emit_put_value(mt, &ref, new_val);
                 jm_emit_exc_propagate_check(mt);
-                jm_reload_after_possible_runtime_callback(mt);
                 return super_set_result;
             }
         }
@@ -6202,8 +4814,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             jm_emit_label(mt, l_assign);
             new_val = jm_transpile_box_item(mt, asgn->right);
             jm_emit_put_value(mt, &ref, new_val);
-            jm_emit_exc_propagate_check(mt);
-            jm_reload_after_possible_runtime_callback(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, new_val)));
@@ -6220,8 +4830,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         }
 
         MIR_reg_t result = jm_emit_put_value(mt, &ref, new_val);
-        jm_emit_exc_propagate_check(mt);
-        jm_reload_after_possible_runtime_callback(mt);
 
         // v20: arguments[i] → param aliasing
         // When writing arguments[N] with a literal integer index that maps to a param,
@@ -6342,7 +4950,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         mt->destructure_assignment_mode = true;
         jm_emit_array_destructure(mt, asgn->left, src);
         mt->destructure_assignment_mode = prev_dstr_assignment;
-        jm_emit_exc_propagate_check(mt);
         if (src_spill >= 0) {
             jm_gen_spill_load(mt, src, src_spill);
         }
@@ -6369,7 +4976,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
             hashmap_free(se_names);
         }
-        jm_reload_module_var_locals_after_eval(mt, false);
         return src;
     }
 
@@ -6387,7 +4993,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         mt->destructure_assignment_mode = true;
         jm_emit_object_destructure(mt, asgn->left, src);
         mt->destructure_assignment_mode = prev_dstr_assignment;
-        jm_emit_exc_propagate_check(mt);
         if (src_spill >= 0) {
             jm_gen_spill_load(mt, src, src_spill);
         }
@@ -6414,7 +5019,6 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
             hashmap_free(se_names);
         }
-        jm_reload_module_var_locals_after_eval(mt, false);
         return src;
     }
 
@@ -6658,11 +5262,15 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     // Math.min() → Infinity, Math.max() → -Infinity (0 args)
     if (argc == 0) {
         if (MATH_MATCH("min", 3)) {
-            MIR_reg_t r = jm_emit_double_const(mt, "inf", INFINITY);
+            MIR_reg_t r = jm_new_reg(mt, "inf", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, INFINITY)));
             return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
         }
         if (MATH_MATCH("max", 3)) {
-            MIR_reg_t r = jm_emit_double_const(mt, "ninf", -INFINITY);
+            MIR_reg_t r = jm_new_reg(mt, "ninf", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, -INFINITY)));
             return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
         }
     }
@@ -6977,33 +5585,14 @@ bool jm_is_window_getComputedStyle(JsCallNode* call) {
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure_has_env) return;
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
-        JsMirVarEntry* var = jm_find_closure_readback_var(mt, mt->last_closure_capture_names[i]);
+        JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
         if (!var) continue;
-        int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-        MIR_reg_t source_boxed = 0;
-        if (mt->module_consts && var->module_var_backed) {
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", mt->last_closure_capture_names[i]);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (mc && mc->const_type == MCONST_MODVAR) {
-                // Runtime callback entry/exit sync makes the module var table the
-                // canonical value for module-backed captures. Reading an older
-                // closure env slot here can overwrite that fresh value in callers.
-                // For local shadows, the env slot is the authority and the module
-                // table merely has a same-named top-level binding.
-                source_boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-            }
-        }
         if (jm_is_native_type(var->type_id)) {
             // Read boxed value from env slot, unbox to native type
-            MIR_reg_t boxed = source_boxed;
-            if (!boxed) {
-                boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, boxed),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
-            }
+            MIR_reg_t boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, boxed),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
             if (var->type_id == LMD_TYPE_FLOAT) {
                 MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
@@ -7014,33 +5603,10 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
                     MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, unboxed)));
             }
         } else {
-            if (source_boxed) {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, var->reg),
-                    MIR_new_reg_op(mt->ctx, source_boxed)));
-            } else {
-                // Boxed variable — direct read from env
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, var->reg),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
-            }
-        }
-        if (source_boxed && (var->from_env || var->from_shared_env) &&
-            var->env_reg != 0 && var->env_slot >= 0) {
-            // Keep the current function's env mirror aligned with the module
-            // value so a later closure sync cannot reintroduce the old slot.
+            // Boxed variable — direct read from env
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, source_boxed)));
-        }
-        if (source_boxed && var->in_scope_env && var->scope_env_reg != 0 &&
-            var->scope_env_slot >= 0) {
-            // Shared scope envs are another mutable mirror of the same binding.
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, source_boxed)));
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
         }
     }
     mt->last_closure_has_env = false;
@@ -7058,14 +5624,6 @@ bool jm_should_inline(JsFuncCollected* fc) {
     // require exactly one statement and it must be a return
     if (!blk->statements || blk->statements->next) return false;
     return blk->statements->node_type == JS_AST_NODE_RETURN_STATEMENT;
-}
-
-static void jm_emit_evaluate_remaining_call_args(JsMirTranspiler* mt, JsAstNode* arg) {
-    while (arg) {
-        (void)jm_transpile_box_item(mt, arg);
-        jm_emit_exc_propagate_check(mt);
-        arg = arg->next;
-    }
 }
 
 // P6: Inline a single-return-statement function at the call site.
@@ -7087,7 +5645,7 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
         JsAstNode* default_expr = NULL;  // default value expression if present
         if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
             pid_node = param_node;
-        } else if ((int)param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+        } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
             TsParameterNode* tsp = (TsParameterNode*)param_node;
             if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER)
                 pid_node = tsp->pattern;
@@ -7147,8 +5705,6 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
         param_node = param_node->next;
     }
 
-    jm_emit_evaluate_remaining_call_args(mt, arg_node);
-
     // Transpile the single return expression inline
     MIR_reg_t result;
     if (ret_stmt->argument) {
@@ -7174,7 +5730,7 @@ static bool jm_eval_env_is_bridgeable_var(const char* name, const JsMirVarEntry*
     if (strncmp(name, "_js_", 4) != 0) return false;
     if (strcmp(name, "_js_this") == 0 || strcmp(name, "_js_new.target") == 0) return false;
     if (strstr(name, "__dup") != NULL) return false;
-    if (var->is_const || var->tdz_active) return false;
+    if (var->is_let_const || var->is_const || var->tdz_active) return false;
     if (var->mir_type != MIR_T_I64) return false;
     return true;
 }
@@ -7198,13 +5754,9 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
             hashmap_set(bridged, &seen);
             const char* js_name = entry->name + 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-            MIR_reg_t value_reg = entry->var.reg;
-            if (jm_is_native_type(entry->var.type_id)) {
-                value_reg = jm_box_native(mt, entry->var.reg, entry->var.type_id);
-            }
             jm_call_void_2(mt, "js_eval_env_bind",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, entry->var.reg));
         }
     }
     return bridged;
@@ -7256,204 +5808,15 @@ static void jm_eval_env_writeback_bindings(JsMirTranspiler* mt, struct hashmap* 
         MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
         MIR_reg_t value_reg = jm_call_1(mt, "js_get_global_property", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-        if (var->mir_type == MIR_T_D) {
-            MIR_reg_t numeric = jm_call_1(mt, "js_to_number", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
-            MIR_reg_t value = jm_call_1(mt, "js_get_number", MIR_T_D,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, numeric));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, value)));
-            var->type_id = LMD_TYPE_FLOAT;
-        } else if (var->type_id == LMD_TYPE_INT && var->mir_type == MIR_T_I64) {
-            MIR_reg_t value = jm_call_1(mt, "it2i", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, value)));
-            var->type_id = LMD_TYPE_INT;
-        } else {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, value_reg)));
-            var->type_id = LMD_TYPE_ANY;
-            var->mir_type = MIR_T_I64;
-        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, value_reg)));
+        var->type_id = LMD_TYPE_ANY;
+        var->mir_type = MIR_T_I64;
         jm_scope_env_mark_and_writeback(mt, seen->name, value_reg);
         int param_index = jm_arguments_param_index(mt, seen->name);
         if (param_index >= 0) jm_arguments_writeback_param(mt, param_index, value_reg);
     }
     hashmap_free(bridged);
-}
-
-void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings) {
-    if (!mt || !mt->module_consts) return;
-    if (mt->suppress_module_var_writeback) {
-        // Loop lowering can batch module-var writeback while the native loop
-        // counters hold the current values. During that window the module table
-        // is intentionally stale, so any reload would copy boxed old values back
-        // into native locals.
-        return;
-    }
-    if (sync_eval_bindings && mt->eval_local_frame_reg != 0 && !mt->is_module) {
-        size_t miter = 0; void* mitem;
-        while (hashmap_iter(mt->module_consts, &miter, &mitem)) {
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)mitem;
-            if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR) continue;
-            if (mc->is_implicit_global) continue;
-            if (strncmp(mc->name, "_js_", 4) != 0) continue;
-            const char* js_name = mc->name + 4;
-            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-            MIR_reg_t shadowed_by_eval_env = jm_call_1(mt, "js_eval_env_has_binding", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-            MIR_label_t l_next_module_var = jm_new_label(mt);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_next_module_var),
-                MIR_new_reg_op(mt->ctx, shadowed_by_eval_env)));
-            MIR_reg_t module_val = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-            MIR_reg_t value = module_val;
-            value = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, module_val));
-            jm_call_void_2(mt, "js_set_module_var",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
-            jm_emit_label(mt, l_next_module_var);
-        }
-    }
-    if (sync_eval_bindings && !mt->is_eval_direct && !mt->is_module) {
-        // direct eval and callback reloads share the same "module table back to
-        // global property" repair step; keep it centralized so the shadowing
-        // rules stay identical.
-        jm_sync_module_var_global_properties_after_callback(mt);
-    }
-    for (int depth = 0; depth <= mt->scope_depth; depth++) {
-        if (!mt->var_scopes[depth]) continue;
-        size_t iter = 0; void* item;
-        while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
-            JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
-            if (!entry || !entry->name || strncmp(entry->name, "_js_", 4) != 0) continue;
-            if (!entry->var.reg) continue;
-            if (entry->var.from_block_func_decl) {
-                // keep Annex B lexical block-function bindings out of module
-                // reloads; any var-environment update is represented by a
-                // distinct binding and must not overwrite the block binding.
-                continue;
-            }
-            if (jm_is_implicit_arguments_local(mt, entry)) {
-                // keep the implicit arguments object independent from any
-                // same-named module var mirror created for Annex B handling.
-                continue;
-            }
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", entry->name);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (!mc || mc->const_type != MCONST_MODVAR) continue;
-            if (mt->current_func_index >= 0 && !entry->var.module_var_backed &&
-                !(mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body)) {
-                // Runtime-callback reloads are keyed by module var name, but a
-                // function-local shadow can share that name. Only true
-                // module-backed captures should be refreshed from the module table.
-                continue;
-            }
-            if (!mc->is_iife_var &&
-                ((!mt->in_main && depth > 0) || (mt->in_main && depth > 1))) {
-                continue;
-            }
-            MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-            if (sync_eval_bindings && mt->eval_local_frame_reg != 0) {
-                const char* js_name = entry->name + 4;
-                MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
-                boxed = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-            }
-            if ((entry->var.from_env || entry->var.from_shared_env) &&
-                entry->var.env_reg != 0 && entry->var.env_slot >= 0) {
-                // Runtime callbacks can update a captured top-level `var`
-                // through a nested closure. Refresh the current closure env too,
-                // otherwise js_call_function's exit sync can write the stale
-                // outer env value back over the callback's module-var update.
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                        entry->var.env_slot * (int)sizeof(uint64_t), entry->var.env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, boxed)));
-            }
-            if (entry->var.in_scope_env && entry->var.scope_env_reg != 0 &&
-                entry->var.scope_env_slot >= 0) {
-                // Shared scope env captures need the same refresh so child
-                // closures created after the callback inherit the updated value.
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                        entry->var.scope_env_slot * (int)sizeof(uint64_t),
-                        entry->var.scope_env_reg, 0, 1),
-                    MIR_new_reg_op(mt->ctx, boxed)));
-            }
-            if (sync_eval_bindings && mt->eval_local_frame_reg != 0 && boxed &&
-                (entry->var.type_id == LMD_TYPE_INT || entry->var.mir_type == MIR_T_D)) {
-                // direct eval can replace a native numeric module mirror with an
-                // arbitrary boxed value, so widen the local before reloading it.
-                TypeId native_reload_type =
-                    entry->var.mir_type == MIR_T_D ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
-                MIR_reg_t local_boxed = jm_box_native(mt, entry->var.reg, native_reload_type);
-                if (entry->var.mir_type == MIR_T_I64) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, entry->var.reg),
-                        MIR_new_reg_op(mt->ctx, local_boxed)));
-                    local_boxed = entry->var.reg;
-                } else {
-                    entry->var.reg = local_boxed;
-                }
-                entry->var.type_id = LMD_TYPE_ANY;
-                entry->var.mir_type = MIR_T_I64;
-                MIR_label_t l_reload_value = jm_new_label(mt);
-                MIR_label_t l_after_reload = jm_new_label(mt);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                    MIR_new_label_op(mt->ctx, l_reload_value),
-                    MIR_new_reg_op(mt->ctx, boxed),
-                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                    MIR_new_label_op(mt->ctx, l_after_reload)));
-                jm_emit_label(mt, l_reload_value);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, local_boxed),
-                    MIR_new_reg_op(mt->ctx, boxed)));
-                jm_emit_label(mt, l_after_reload);
-                continue;
-            }
-            if (!sync_eval_bindings && jm_is_native_type(entry->var.type_id) &&
-                entry->var.type_id != LMD_TYPE_INT && entry->var.mir_type != MIR_T_D) {
-                // callback reloads must refresh native numeric loop mirrors, but
-                // other native locals are not module-var mirrors and should not be
-                // widened or overwritten from boxed module slots.
-                continue;
-            }
-            if (entry->var.type_id == LMD_TYPE_INT && entry->var.mir_type == MIR_T_I64) {
-                MIR_reg_t value = jm_call_1(mt, "it2i", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, entry->var.reg),
-                    MIR_new_reg_op(mt->ctx, value)));
-            } else if (entry->var.mir_type == MIR_T_D) {
-                MIR_reg_t numeric = jm_call_1(mt, "js_to_number", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-                MIR_reg_t value = jm_call_1(mt, "js_get_number", MIR_T_D,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, numeric));
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                    MIR_new_reg_op(mt->ctx, entry->var.reg),
-                    MIR_new_reg_op(mt->ctx, value)));
-                entry->var.type_id = LMD_TYPE_FLOAT;
-            } else {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, entry->var.reg),
-                    MIR_new_reg_op(mt->ctx, boxed)));
-                entry->var.type_id = LMD_TYPE_ANY;
-                entry->var.mir_type = MIR_T_I64;
-            }
-        }
-    }
 }
 
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
@@ -7554,6 +5917,38 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (!mt->current_class) {
                 mt->current_class = jm_find_innermost_class_for_node(mt, (JsAstNode*)call);
             }
+            if (mt->current_class && mt->current_class->node && mt->current_class->node->superclass &&
+                (mt->current_class->node->superclass->node_type == JS_AST_NODE_NULL ||
+                 (mt->current_class->node->superclass->node_type == JS_AST_NODE_LITERAL &&
+                  ((JsLiteralNode*)mt->current_class->node->superclass)->literal_type == JS_LITERAL_NULL))) {
+                // `super()` in `class C extends null` is specified to evaluate
+                // arguments, then fail IsConstructor on Function.prototype.
+                // Route it through the runtime super-call helper with a null
+                // callee so the throw happens before any derived fields bind.
+                bool null_super_has_spread = false;
+                for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                    if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { null_super_has_spread = true; break; }
+                }
+                MIR_reg_t args_ptr = null_super_has_spread ?
+                    jm_build_spread_args_array(mt, call->arguments) :
+                    jm_build_args_array(mt, call->arguments, arg_count);
+                MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
+                MIR_reg_t null_callee = jm_emit_null(mt);
+                MIR_reg_t super_result;
+                if (null_super_has_spread) {
+                    super_result = jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                } else {
+                    super_result = jm_call_4(mt, "js_super_call_class", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                }
+                return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
+            }
             if (mt->current_class && mt->current_class->superclass) {
                 JsClassEntry* parent = mt->current_class->superclass;
                 if (parent->constructor && parent->constructor->fc && parent->constructor->fc->func_item) {
@@ -7652,34 +6047,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             } else {
                 // No user-defined superclass — check for builtin parent class (Error, etc.)
-                JsAstNode* heritage = (mt->current_class && mt->current_class->node) ?
-                    mt->current_class->node->superclass : NULL;
-                bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
-                    (heritage->node_type == JS_AST_NODE_LITERAL &&
-                     ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));
-                if (heritage_is_null) {
-                    bool null_super_has_spread = false;
-                    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
-                        if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { null_super_has_spread = true; break; }
-                    }
-                    MIR_reg_t args_ptr = null_super_has_spread ?
-                        jm_build_spread_args_array(mt, call->arguments) :
-                        jm_build_args_array(mt, call->arguments, arg_count);
-                    MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
-                    MIR_reg_t null_ctor = jm_emit_null(mt);
-                    MIR_reg_t super_result = null_super_has_spread ?
-                        jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_ctor),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr)) :
-                        jm_call_4(mt, "js_super_call_native", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_ctor),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-                    jm_emit_exc_propagate_check(mt);
-                    return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
-                }
                 // When super(msg) is called in a class extending Error, set this.message and this.name
                 if (mt->current_class && mt->current_class->node &&
                     mt->current_class->node->superclass &&
@@ -7720,6 +6087,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // object (e.g. Event, URL) get their own props merged onto `this` — without
                         // this merge the derived `this` would lack the base fields like `type`.
                         {
+                            MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             bool super_has_spread = false;
                             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                                 if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }
@@ -7728,10 +6096,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 jm_build_spread_args_array(mt, call->arguments) :
                                 jm_build_args_array(mt, call->arguments, arg_count);
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
-                            // Reflect.construct may allocate `this` from an arbitrary newTarget,
-                            // so receiver.prototype.constructor cannot always lead back to the
-                            // derived class; keep the lexical heritage value as the spec fallback.
-                            MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
                             parent_fn = jm_call_2(mt, "js_get_super_constructor_from_receiver", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn));
@@ -8103,12 +6467,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, actual_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, expected_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
-                    if (strcmp(native_fn, "js_assert_throws") == 0) {
-                        jm_scope_env_reload_vars(mt);
-                        jm_reload_module_var_locals_after_eval(mt, true);
-                        jm_scope_env_reload_vars(mt);
-                        jm_env_reload_shared_captures(mt);
-                    }
                     return jm_emit_undefined(mt);
                 }
             }
@@ -8704,14 +7062,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
                 if (second_arg) {
                     MIR_reg_t reviver = jm_transpile_box_item(mt, second_arg);
-                    MIR_reg_t result = jm_call_2(mt, "js_json_parse_full", MIR_T_I64,
+                    return jm_call_2(mt, "js_json_parse_full", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, reviver));
-                    jm_scope_env_reload_vars(mt);
-                    jm_reload_module_var_locals_after_eval(mt, true);
-                    jm_env_reload_shared_captures(mt);
-                    jm_readback_closure_env(mt);
-                    return result;
                 }
                 return jm_call_1(mt, "js_json_parse", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
@@ -8726,23 +7079,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t replacer = jm_transpile_box_item(mt, second_arg);
                     JsAstNode* third_arg = second_arg->next;
                     MIR_reg_t space = third_arg ? jm_transpile_box_item(mt, third_arg) : jm_emit_null(mt);
-                    MIR_reg_t result = jm_call_3(mt, "js_json_stringify_full", MIR_T_I64,
+                    return jm_call_3(mt, "js_json_stringify_full", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, replacer),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, space));
-                    jm_scope_env_reload_vars(mt);
-                    jm_reload_module_var_locals_after_eval(mt, true);
-                    jm_env_reload_shared_captures(mt);
-                    jm_readback_closure_env(mt);
-                    return result;
                 }
-                MIR_reg_t result = jm_call_1(mt, "js_json_stringify", MIR_T_I64,
+                return jm_call_1(mt, "js_json_stringify", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-                jm_scope_env_reload_vars(mt);
-                jm_reload_module_var_locals_after_eval(mt, true);
-                jm_env_reload_shared_captures(mt);
-                jm_readback_closure_env(mt);
-                return result;
             }
             // Array.from(iterable, mapFn?)
             if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
@@ -9325,19 +7668,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     JsAstNode* p7_arg = ((JsCallNode*)call)->arguments;
                     for (int i = 0; i < p7_fc->param_count; i++) {
                         if (p7_arg) {
-                            MIR_reg_t val = (p7_fc->param_types[i] == LMD_TYPE_FLOAT ||
-                                    p7_fc->param_types[i] == LMD_TYPE_INT) ?
-                                jm_transpile_as_native(mt, p7_arg, jm_get_effective_type(mt, p7_arg),
-                                    p7_fc->param_types[i]) :
-                                jm_transpile_box_item(mt, p7_arg);
+                            MIR_reg_t val = jm_transpile_as_native(mt, p7_arg,
+                                jm_get_effective_type(mt, p7_arg), p7_fc->param_types[i]);
                             p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, val);
                             p7_arg = p7_arg->next;
                         } else {
                             MIR_reg_t zero = jm_new_reg(mt, "p7z", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, zero),
-                                MIR_new_int_op(mt->ctx,
-                                    p7_fc->param_types[i] == LMD_TYPE_INT ? 0 : (int64_t)ITEM_JS_UNDEFINED)));
+                                MIR_new_reg_op(mt->ctx, zero), MIR_new_int_op(mt->ctx, 0)));
                             p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, zero);
                         }
                     }
@@ -9462,20 +7800,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return opt_result;
             }
 
-            {
-                MIR_reg_t recv_nullish = jm_call_1(mt, "js_is_nullish", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
-                MIR_label_t recv_ok = jm_new_label(mt);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-                    MIR_new_label_op(mt->ctx, recv_ok),
-                    MIR_new_reg_op(mt->ctx, recv_nullish)));
-                jm_call_2(mt, "js_property_access", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
-                jm_emit_exc_propagate_check(mt);
-                jm_emit_label(mt, recv_ok);
-            }
-
             // Check for spread args — if present, use apply-based dispatch
             bool method_has_spread = false;
             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
@@ -9489,10 +7813,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
-                // Method dispatch can run user callbacks in the runtime (for
-                // example RegExp string iterators calling a custom exec). Bring
-                // module mirrors and env-backed captures back into the caller.
-                jm_reload_after_possible_runtime_callback(mt);
+                jm_readback_closure_env(mt);
                 return r;
             }
 
@@ -9666,13 +7987,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
 
             if (recv_type == LMD_TYPE_STRING) {
-                MIR_reg_t r = jm_call_4(mt, "js_string_method", MIR_T_I64,
+                return jm_call_4(mt, "js_string_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
-                jm_readback_closure_env(mt);
-                return r;
             }
             if (recv_type == LMD_TYPE_ARRAY) {
                 MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
@@ -9699,10 +8018,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_exc_propagate_check(mt);
-                // Map-backed builtins include iterator methods that can call
-                // user code from C++ (RegExpStringIterator.next -> custom exec).
-                // Refresh module mirrors and env-backed captures before returning.
-                jm_reload_after_possible_runtime_callback(mt);
+                jm_readback_closure_env(mt);
                 return r;
             }
 
@@ -9858,10 +8174,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
             }
             jm_emit_label(mt, l_end);
-            // Method dispatch can run user callbacks in the runtime (for
-            // example RegExp string iterators calling a custom exec). Bring
-            // module mirrors and env-backed captures back into the caller.
-            jm_reload_after_possible_runtime_callback(mt);
+            // Read back mutable captures from closure env after any callback-invoking method
+            jm_readback_closure_env(mt);
             return result;
         }
     }
@@ -9876,30 +8190,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             int nl = (int)id->name->len;
 
             // parseInt(str, radix?)
-            if (nl == 8 && strncmp(n, "parseInt", 8) == 0) {
-                // Keep the common global-builtin call out of the JS function
-                // wrapper path. In diagnose mode this also tells slow-test
-                // triage whether the direct runtime call was selected.
-                if (js_is_diagnose_enabled()) {
-                    log_warn("js-diagnose: fast-path-hit=parseInt.direct file=%s",
-                        mt->filename ? mt->filename : "<unknown>");
-                }
-                String* prefix = NULL;
-                JsAstNode* code_arg = NULL;
-                if (call->arguments &&
-                        jm_match_literal_plus_from_char_code1(call->arguments, &prefix, &code_arg)) {
-                    MIR_reg_t prefix_reg = jm_box_string_literal(mt, prefix->chars, (int)prefix->len);
-                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
-                    MIR_reg_t radix = (call->arguments->next)
-                        ? jm_transpile_box_item(mt, call->arguments->next)
-                        : jm_box_int_const(mt, 0);
-                    // parse from the prefix/code-unit pair directly; the js262
-                    // Unicode sweeps otherwise allocate two short strings per loop.
-                    return jm_call_3(mt, "js_parseInt_concat_fromCharCode", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, prefix_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, radix));
-                }
+            if (nl == 8 && strncmp(n, "parseInt", 8) == 0 && !jm_find_var(mt, "_js_parseInt")) {
                 MIR_reg_t str = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t radix = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
@@ -9909,24 +8200,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, radix));
             }
             // parseFloat(str)
-            if (nl == 10 && strncmp(n, "parseFloat", 10) == 0) {
-                // Same direct-call reason as parseInt: the remaining slow rows
-                // should be attributed to loop/runtime overhead, not to missed
-                // global builtin dispatch.
-                if (js_is_diagnose_enabled()) {
-                    log_warn("js-diagnose: fast-path-hit=parseFloat.direct file=%s",
-                        mt->filename ? mt->filename : "<unknown>");
-                }
-                String* prefix = NULL;
-                JsAstNode* code_arg = NULL;
-                if (call->arguments &&
-                        jm_match_literal_plus_from_char_code1(call->arguments, &prefix, &code_arg)) {
-                    MIR_reg_t prefix_reg = jm_box_string_literal(mt, prefix->chars, (int)prefix->len);
-                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
-                    return jm_call_2(mt, "js_parseFloat_concat_fromCharCode", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, prefix_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
-                }
+            if (nl == 10 && strncmp(n, "parseFloat", 10) == 0 && !jm_find_var(mt, "_js_parseFloat")) {
                 MIR_reg_t str = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_parseFloat", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str));
@@ -10039,13 +8313,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // v12: decodeURIComponent(str)
             if (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0 && !jm_find_var(mt, "_js_decodeURIComponent")) {
-                JsAstNode* code_arg = NULL;
-                if (jm_match_percent_from_char_code_suffix1(call->arguments, &code_arg)) {
-                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
-                    return jm_call_2(mt, "js_decodeURI_percent_fromCharCode_1", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
-                }
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_decodeURIComponent", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
@@ -10058,13 +8325,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             // v20: decodeURI(str)
             if (nl == 9 && strncmp(n, "decodeURI", 9) == 0 && !jm_find_var(mt, "_js_decodeURI")) {
-                JsAstNode* code_arg = NULL;
-                if (jm_match_percent_from_char_code_suffix1(call->arguments, &code_arg)) {
-                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
-                    return jm_call_2(mt, "js_decodeURI_percent_fromCharCode_1", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                }
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_decodeURI", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
@@ -10107,10 +8367,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                     if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { eval_has_spread = true; break; }
                 }
-                if (!eval_has_spread) {
-                    MIR_reg_t line_comment_result = jm_try_eval_line_comment_var_fast(mt, call);
-                    if (line_comment_result) return line_comment_result;
-                }
                 MIR_reg_t eval_result_slot = 0;
                 MIR_label_t eval_spread_done = 0;
                 MIR_reg_t arg;
@@ -10137,40 +8393,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 } else {
                     arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 }
-                MIR_label_t eval_fast_done = 0;
-                MIR_label_t eval_slow = 0;
-                if (!eval_has_spread) {
-                    eval_result_slot = jm_new_reg(mt, "eval_res", MIR_T_I64);
-                    eval_fast_done = jm_new_label(mt);
-                    eval_slow = jm_new_label(mt);
-                    MIR_reg_t eval_fast = jm_call_1(mt, "js_builtin_eval_regexp_literal_fast", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
-                    MIR_reg_t fast_is_null = jm_new_reg(mt, "eval_fast_null", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-                        MIR_new_reg_op(mt->ctx, fast_is_null),
-                        MIR_new_reg_op(mt->ctx, eval_fast),
-                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
-                    MIR_label_t eval_return_fast = jm_new_label(mt);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-                        MIR_new_label_op(mt->ctx, eval_return_fast),
-                        MIR_new_reg_op(mt->ctx, fast_is_null)));
-                    MIR_reg_t eval_fast_exception = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
-                        MIR_new_label_op(mt->ctx, eval_slow),
-                        MIR_new_reg_op(mt->ctx, eval_fast_exception)));
-                    jm_emit_label(mt, eval_return_fast);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, eval_result_slot),
-                        MIR_new_reg_op(mt->ctx, eval_fast)));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                        MIR_new_label_op(mt->ctx, eval_fast_done)));
-                    jm_emit_label(mt, eval_slow);
-                }
                 struct hashmap* eval_bridged = NULL;
                 int64_t eval_flags = 3;
-                if (!mt->current_fc) {
-                    eval_flags |= 8;
-                }
                 if (mt->is_global_strict || mt->is_module || (mt->current_fc && mt->current_fc->is_strict)) {
                     eval_flags |= 4;
                 }
@@ -10187,7 +8411,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (eval_private_pushed) {
                     jm_call_void_0(mt, "js_eval_private_pop_frame");
                 }
-                jm_reload_module_var_locals_after_eval(mt, true);
                 if (mt->eval_local_frame_reg != 0) {
                     jm_eval_env_writeback_bindings(mt, eval_bridged);
                     jm_call_void_0(mt, "js_eval_env_pop_frame");
@@ -10198,10 +8421,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_emit_label(mt, eval_spread_done);
                     return eval_result_slot;
                 }
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, eval_result_slot), MIR_new_reg_op(mt->ctx, eval_result)));
-                jm_emit_label(mt, eval_fast_done);
-                return eval_result_slot;
+                return eval_result;
             }
             // ES spec §20.2.1.1: Function(p1, p2, ..., body) is equivalent to new Function(...)
             if (nl == 8 && strncmp(n, "Function", 8) == 0) {
@@ -10449,17 +8669,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             if (direct_has_spread) fc = NULL;  // nullify so we fall through to fallback
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
-            if (fc && jm_function_observes_arguments_object(fc)) fc = NULL;  // arguments needs runtime pending args from js_invoke_fn
+            if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
             if (fc && fc->is_reassigned) fc = NULL;
             if (fc && fc->node && fc->node->is_generator && jm_count_params(fc->node) == 0) fc = NULL;
-            if (fc && jm_call_args_have_local_module_shadow(mt, call->arguments)) fc = NULL;
-            if (fc && jm_function_refs_module_modvar(mt, fc)) fc = NULL;
-            if (fc && fc->node && jm_node_contains_nested_function_value(fc->node->body)) {
-                // A direct MIR call has no JsFunction wrapper around it, so nested
-                // callback closures can update module vars without the runtime
-                // closure/module synchronization that js_call_function provides.
-                fc = NULL;
-            }
             if (fc && (mt->with_depth > 0 ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)resolved_fn) ||
@@ -10504,13 +8716,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             JsAstNode* arg = call->arguments;
                             for (int i = 0; i < fc->param_count; i++) {
                                 if (arg) {
-                                    if (fc->param_types[i] == LMD_TYPE_FLOAT ||
-                                        fc->param_types[i] == LMD_TYPE_INT) {
-                                        temps[i] = jm_transpile_as_native(mt, arg,
-                                            jm_get_effective_type(mt, arg), fc->param_types[i]);
-                                    } else {
-                                        temps[i] = jm_transpile_box_item(mt, arg);
-                                    }
+                                    temps[i] = jm_transpile_as_native(mt, arg,
+                                        jm_get_effective_type(mt, arg), fc->param_types[i]);
                                     arg = arg->next;
                                 } else {
                                     MIR_type_t mt2 = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
@@ -10522,12 +8729,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                     } else {
                                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                             MIR_new_reg_op(mt->ctx, temps[i]),
-                                            MIR_new_int_op(mt->ctx,
-                                                fc->param_types[i] == LMD_TYPE_INT ? 0 : (int64_t)ITEM_JS_UNDEFINED)));
+                                            MIR_new_int_op(mt->ctx, 0)));
                                     }
                                 }
                             }
-                            jm_emit_evaluate_remaining_call_args(mt, arg);
 
                             // Phase 2: Assign temps → parameter registers
                             JsAstNode* pnode = mt->tco_func->node->params;
@@ -10600,23 +8805,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         JsAstNode* arg = call->arguments;
                         for (int i = 0; i < fc->param_count; i++) {
                             if (arg) {
-                                MIR_reg_t val = (fc->param_types[i] == LMD_TYPE_FLOAT ||
-                                        fc->param_types[i] == LMD_TYPE_INT) ?
-                                    jm_transpile_as_native(mt, arg, jm_get_effective_type(mt, arg),
-                                        fc->param_types[i]) :
-                                    jm_transpile_box_item(mt, arg);
+                                MIR_reg_t val = jm_transpile_as_native(mt, arg,
+                                    jm_get_effective_type(mt, arg), fc->param_types[i]);
                                 ops[oi++] = MIR_new_reg_op(mt->ctx, val);
                                 arg = arg->next;
                             } else {
                                 MIR_reg_t undef = jm_new_reg(mt, "nz", MIR_T_I64);
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, undef),
-                                    MIR_new_int_op(mt->ctx,
-                                        fc->param_types[i] == LMD_TYPE_INT ? 0 : (int64_t)ITEM_JS_UNDEFINED)));
+                                    MIR_new_reg_op(mt->ctx, undef), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                                 ops[oi++] = MIR_new_reg_op(mt->ctx, undef);
                             }
                         }
-                        jm_emit_evaluate_remaining_call_args(mt, arg);
 
                         jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
                         return result; // returns NATIVE value
@@ -10669,7 +8868,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         ops[oi++] = MIR_new_reg_op(mt->ctx, undef_val);
                     }
                 }
-                jm_emit_evaluate_remaining_call_args(mt, arg);
 
                 // Set this AFTER evaluating args (so `this` in args
                 // still reads the caller's this binding, not undefined)
@@ -10689,10 +8887,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // save with-scope depth before direct call (function may return from inside 'with')
                 MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
-                // direct MIR calls bypass js_call_function, so flush top-level
-                // module mirrors here before any callee-side callback can read
-                // them through the global object.
-                jm_writeback_module_var_locals_before_callback(mt);
                 jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
 
                 // restore with-scope depth after direct call
@@ -10705,11 +8899,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_set_direct_new_target",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, prev_nt_dc));
 
-                // Direct MIR calls bypass js_call_function, but the callee can
-                // still run runtime callbacks (for example RegExp matchAll
-                // invoking a custom exec). Refresh module mirrors before the
-                // caller observes top-level vars again.
-                jm_reload_after_possible_runtime_callback(mt);
                 return result;
                 } // end if (fc->func_item)
             }
@@ -10758,14 +8947,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    MIR_reg_t plain_call_this = jm_emit_undefined(mt);
-    if (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* plain_id = (JsIdentifierNode*)call->callee;
-        MIR_reg_t plain_key = jm_box_string_literal(mt, plain_id->name->chars, (int)plain_id->name->len);
-        plain_call_this = jm_call_1(mt, "js_last_with_binding_base_or_undefined", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_key));
-    }
-
     // Optional chaining propagation: if callee is from an optional chain,
     // it may be undefined from short-circuiting — skip the call.
     if (!call->optional && jm_has_optional_chain(call->callee)) {
@@ -10794,26 +8975,21 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-            // optional-chain fallback calls can invoke user code; preserve live
-            // MIR locals in module slots before crossing that boundary.
-            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-            // optional-chain fallback calls can invoke user code; preserve live
-            // MIR locals in module slots before crossing that boundary.
-            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
         }
@@ -10850,26 +9026,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
+        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-            // optional-call fallback can invoke user code; preserve live MIR
-            // locals in module slots before crossing that boundary.
-            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-            // optional-call fallback can invoke user code; preserve live MIR
-            // locals in module slots before crossing that boundary.
-            jm_writeback_module_var_locals_before_callback(mt);
             call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
                 MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
         }
@@ -10887,30 +9059,26 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-        // js_apply_function may run user callbacks that read globals or mutate
-        // module vars, so synchronize mirrors before and after the call.
-        jm_writeback_module_var_locals_before_callback(mt);
+        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
+        MIR_reg_t null_this = jm_emit_undefined(mt);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_exc_propagate_check(mt);
-        jm_reload_after_possible_runtime_callback(mt);
         return call_result;
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
     if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-    // js_call_function may run user callbacks that read globals or mutate module
-    // vars, so synchronize mirrors before and after the call.
-    jm_writeback_module_var_locals_before_callback(mt);
+    // v17: pass undefined as this for plain calls (strict mode: this === undefined)
+    MIR_reg_t null_this = jm_emit_undefined(mt);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, plain_call_this),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     jm_emit_exc_propagate_check(mt);
-    jm_reload_after_possible_runtime_callback(mt);
     return call_result;
 }
 
@@ -12037,7 +10205,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         jm_emit_exc_propagate_check(mt);
-        jm_reload_module_var_locals_after_eval(mt, false);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, val)));
         jm_emit_label(mt, l_end);
@@ -12089,7 +10256,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         jm_emit_exc_propagate_check(mt);
-        jm_reload_module_var_locals_after_eval(mt, false);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, val)));
         jm_emit_label(mt, l_end);
@@ -12115,7 +10281,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
     jm_emit_exc_propagate_check(mt);
-    jm_reload_module_var_locals_after_eval(mt, false);
     return val;
 }
 
@@ -12289,8 +10454,6 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 key = jm_transpile_box_item(mt, p->key);
                 key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                jm_emit_exc_propagate_check(mt);
-                jm_reload_after_possible_runtime_callback(mt);
                 // Phase-5C: accessor properties no longer wrap the key with
                 // __get_/__set_ prefix; we'll dispatch via
                 // js_install_user_accessor below using the bare key.
@@ -12477,8 +10640,6 @@ MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLiteralNo
             // Convert to string: js_to_string(value)
             MIR_reg_t str_item = jm_call_1(mt, "js_to_string", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, eval));
-            jm_emit_exc_propagate_check(mt);
-            jm_reload_after_possible_runtime_callback(mt);
             // Unbox string: it2s(str_item) -> String*
             MIR_reg_t str_ptr = jm_call_1(mt, "it2s", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, str_item));
@@ -12592,25 +10753,18 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
     if (tmpl) {
         TSNode node = tmpl->base.node;
         uint64_t source_part = (mt->tp && mt->tp->source) ? (uint64_t)(uintptr_t)mt->tp->source : 0;
-        uint64_t module_part = mt->module ? (uint64_t)(uintptr_t)mt->module : 0;
         uint64_t start_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_start_byte(node);
         uint64_t end_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_end_byte(node);
         site_id ^= source_part; site_id *= 1099511628211ULL;
-        site_id ^= module_part; site_id *= 1099511628211ULL;
         site_id ^= start_part; site_id *= 1099511628211ULL;
         site_id ^= end_part; site_id *= 1099511628211ULL;
     }
-
-    MIR_reg_t site_reg = jm_new_reg(mt, "template_site_id", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, site_reg),
-        MIR_new_int_op(mt->ctx, (int64_t)site_id)));
 
     MIR_reg_t tmpl_obj = jm_call_4(mt, "js_build_template_object_cached", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cooked_arr),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, raw_arr),
         MIR_T_I64, MIR_new_int_op(mt->ctx, quasi_count),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, site_reg));
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
 
     // build args array: [template_object, ...expressions]
     int total_argc = 1 + expr_count;
@@ -12630,14 +10784,11 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
     }
 
     // call tag function: js_call_function(tag, this, args, argc)
-    MIR_reg_t result = jm_call_4(mt, "js_call_function", MIR_T_I64,
+    return jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, tag_fn),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
         MIR_T_I64, MIR_new_int_op(mt->ctx, total_argc));
-    jm_emit_exc_propagate_check(mt);
-    jm_reload_after_possible_runtime_callback(mt);
-    return result;
 }
 
 // Helper: create a function or closure value for an inner function declaration.
@@ -12654,61 +10805,6 @@ static int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, b
     return env_size;
 }
 
-static bool jm_capture_can_use_module_slot(JsMirTranspiler* mt, JsCaptureEntry* cap) {
-    // Module-backed captures are resolved from the module table by the callee.
-    // Treating them as missing local scope-env slots forced mixed captures into
-    // copied closure envs, which broke per-iteration locals such as destructured
-    // `for-of` bindings captured beside top-level helpers.
-    if (!mt || !cap || !mt->module_consts || cap->force_env_capture) return false;
-    JsModuleConstEntry lookup;
-    snprintf(lookup.name, sizeof(lookup.name), "%s", cap->name);
-    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-    return mc && mc->const_type == MCONST_MODVAR;
-}
-
-static void jm_mark_closure_env_module_var_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
-                                                     MIR_reg_t fn_reg, bool has_remapped) {
-    if (!mt || !fc || !fn_reg || !mt->module_consts) return;
-    struct hashmap* assigned_names = NULL;
-    for (int ci = 0; ci < fc->capture_count; ci++) {
-        bool assigned_module_capture = fc->captures[ci].force_env_capture;
-        if (!assigned_module_capture && fc->node && fc->node->body) {
-            if (!assigned_names) {
-                assigned_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                    jm_name_hash, jm_name_cmp, NULL, NULL);
-                jm_collect_func_assignments(fc->node->body, assigned_names);
-            }
-            assigned_module_capture = jm_name_set_has(assigned_names, fc->captures[ci].name);
-        }
-        if (!assigned_module_capture) continue;
-        int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
-        if (slot < 0) continue;
-        JsMirVarEntry* local_var = jm_find_var(mt, fc->captures[ci].name);
-        // A function-local shadow is captured from the local env, not from the
-        // module var table. This includes `var`, not just lexical bindings:
-        // otherwise an inner IIFE assignment to a shadowed name can clobber the
-        // top-level module var with the same identifier.
-        if (local_var && !local_var->module_var_backed) {
-            continue;
-        }
-        JsModuleConstEntry lookup;
-        snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
-        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-        if (!mc || mc->const_type != MCONST_MODVAR) continue;
-        // Some module-var captures are introduced late during batch propagation.
-        // Rechecking the module table here keeps runtime-called closures from
-        // trapping writes in their private env when the capture metadata was
-        // originally pruned as a read-only module lookup.
-        fc->captures[ci].module_var_backed = true;
-        fc->captures[ci].force_env_capture = true;
-        jm_call_void_3(mt, "js_set_closure_env_module_var",
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
-    }
-    if (assigned_names) hashmap_free(assigned_names);
-}
-
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
@@ -12722,45 +10818,20 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
             }
-            if (cv && !cv->module_var_backed) {
-                // The nearest binding wins even when it is stored in scope_env:
-                // a function-local `var` can shadow a top-level var with the
-                // same name and nested closures must update that local cell.
-                fc->captures[ci].module_var_backed = false;
-            } else if (cv && cv->module_var_backed &&
-                (cv->from_env || cv->from_shared_env || cv->in_scope_env)) {
-                // When a child captures through a parent env, inherit whether
-                // that parent slot is truly module-backed.
-                fc->captures[ci].module_var_backed = cv->module_var_backed;
-            }
             if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
-                cv->scope_env_slot >= 0) {
+                cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
                 fc->captures[ci].scope_env_slot = cv->scope_env_slot;
-            } else if (mt->module_consts) {
-                JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
-                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
-                    fc->captures[ci].scope_env_slot = -1;
-                }
             }
         }
         // Check if this closure should use the parent's shared scope env.
-        // The prepass slot mapping is the source of truth for hoisted and
-        // transitive captures; some valid captures do not have a local var entry
-        // at the creation site. Reject only captures that lack a shared slot, or
-        // let/const captures whose per-iteration env does not match.
-        bool use_scope_env = (mt->scope_env_reg != 0);
+        // Share scope env so var-scoped closures can persist mutations to outer
+        // variables.  But in loops, if any captured variable is let/const, we must
+        // NOT share — let/const need per-iteration binding semantics.
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (fc->captures[ci].scope_env_slot < 0) {
-                    if (jm_capture_can_use_module_slot(mt, &fc->captures[ci])) {
-                        // Top-level bindings are read from the module table by
-                        // the callee; they should not force local mutable
-                        // captures like iterator indexes into copied envs.
-                        continue;
-                    }
                     use_scope_env = false;
                     break;
                 }
@@ -12772,7 +10843,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0 && !mt->allow_iteration_scope_env_capture) {
+        if (use_scope_env && mt->iteration_depth > 0) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }
@@ -12784,13 +10855,9 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
-            jm_mark_closure_env_module_var_captures(mt, fc, fn_reg, true);
         } else {
-            // fallback: allocate own dense env and copy live values at creation time.
-            bool has_remapped = false;
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                fc->captures[ci].scope_env_slot = -1;
-            }
+            // Fallback: allocate own env and copy values (per-closure env, not shared).
+            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture: if the function references its own name, we must
@@ -12807,7 +10874,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int slot = ci;
+                int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12824,14 +10891,6 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, val),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
-                    } else if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
-                        // block lexicals may live only in the active scope env; copy
-                        // from there instead of the stale TDZ register.
-                        val = jm_new_reg(mt, "cscope_live", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, val),
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
                     } else {
                         val = var->reg;
                         if (jm_is_native_type(var->type_id))
@@ -12839,8 +10898,6 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 } else if (strcmp(fc->captures[ci].name, "_js_this") == 0) {
                     val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
-                } else if (strcmp(fc->captures[ci].name, "_js_new.target") == 0) {
-                    val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
                 } else if (mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
@@ -12870,7 +10927,6 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
-            jm_mark_closure_env_module_var_captures(mt, fc, fn_reg, has_remapped);
 
             // Patch self-reference: store the closure itself in its own env slot
             if (self_ref_slot >= 0) {
@@ -12932,40 +10988,19 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
     if (fc->capture_count > 0) {
         for (int ci = 0; ci < fc->capture_count; ci++) {
             JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
-            if (cv && !cv->module_var_backed) {
-                // Function expressions follow function declarations: the nearest
-                // local/env binding shadows a top-level homonym for capture sync.
-                fc->captures[ci].module_var_backed = false;
-            }
             if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
-                cv->scope_env_slot >= 0) {
+                cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
                 fc->captures[ci].scope_env_slot = cv->scope_env_slot;
-            } else if (mt->module_consts) {
-                JsModuleConstEntry lookup;
-                snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
-                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-                if (mc && mc->const_type == MCONST_MODVAR) {
-                    fc->captures[ci].scope_env_slot = -1;
-                }
             }
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
             }
         }
-        // Function expressions follow declarations: trust the prepass slot map
-        // for hoisted/transitive captures, while still keeping let/const tied to
-        // the exact per-iteration env.
-        bool use_scope_env = (mt->scope_env_reg != 0);
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (fc->captures[ci].scope_env_slot < 0) {
-                    if (jm_capture_can_use_module_slot(mt, &fc->captures[ci])) {
-                        // Module-backed captures are resolved by name in the
-                        // callee, so keep sharing the env slots that represent
-                        // true mutable local captures.
-                        continue;
-                    }
                     use_scope_env = false;
                     break;
                 }
@@ -12977,7 +11012,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0 && !mt->allow_iteration_scope_env_capture) {
+        if (use_scope_env && mt->iteration_depth > 0) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }
@@ -12988,8 +11023,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             mt->last_closure_capture_count = fc->capture_count;
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
-                mt->last_closure_capture_slots[ci] = fc->captures[ci].scope_env_slot >= 0 ?
-                    fc->captures[ci].scope_env_slot : ci;
             }
             mt->last_closure_has_env = true;
 
@@ -12998,7 +11031,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->scope_env_reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, mt->scope_env_slot_count));
-            jm_mark_closure_env_module_var_captures(mt, fc, fn_reg, true);
 
             // Patch NFE self-reference in shared scope_env: the parent scope_env
             // includes the NFE name as a slot (from Phase 1.7), but the parent
@@ -13031,10 +11063,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         } else {
-            bool has_remapped = false;
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                fc->captures[ci].scope_env_slot = -1;
-            }
+            bool has_remapped = (fc->captures[0].scope_env_slot >= 0);
             int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
 
             // Detect self-capture via assignment target hint:
@@ -13052,7 +11081,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
 
             for (int i = 0; i < fc->capture_count; i++) {
-                int slot = i;
+                int slot = has_remapped ? fc->captures[i].scope_env_slot : i;
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -13069,14 +11098,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, value_to_store),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
-                    } else if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
-                        // copied closures must read captured block lexicals from
-                        // the active scope env so initialized values beat TDZ.
-                        value_to_store = jm_new_reg(mt, "fscope_live", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, value_to_store),
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
                     } else {
                         value_to_store = var->reg;
                         if (jm_is_native_type(var->type_id)) {
@@ -13092,11 +11113,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                             MIR_new_reg_op(mt->ctx, this_val)));
-                    } else if (strcmp(fc->captures[i].name, "_js_new.target") == 0) {
-                        MIR_reg_t nt_val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
-                            MIR_new_reg_op(mt->ctx, nt_val)));
                     } else {
                     bool found_const = false;
                     if (mt->module_consts) {
@@ -13142,7 +11158,15 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                             case MCONST_FUNC: {
                                 int fii = (int)mc->int_val;
                                 if (fii >= 0 && fii < mt->func_count && mt->func_entries[fii].func_item) {
-                                    const_val = jm_create_func_or_closure(mt, &mt->func_entries[fii]);
+                                    JsFuncCollected* func = &mt->func_entries[fii];
+                                    int fpc = func->param_count;
+                                    if (func->has_rest_param) fpc = -fpc;
+                                    const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
+                                    const char* fn_name = (func->node && func->node->name) ? func->node->name->chars : NULL;
+                                    jm_emit_set_function_name(mt, const_val, fn_name, func->formal_length);
+                                    jm_emit_set_function_source(mt, const_val, func->node);
                                 } else {
                                     const_val = jm_emit_null(mt);
                                 }
@@ -13176,8 +11200,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             mt->last_closure_capture_count = fc->capture_count;
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
-                mt->last_closure_capture_slots[ci] = has_remapped && fc->captures[ci].scope_env_slot >= 0 ?
-                    fc->captures[ci].scope_env_slot : ci;
             }
             mt->last_closure_has_env = true;
 
@@ -13186,7 +11208,6 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
-            jm_mark_closure_env_module_var_captures(mt, fc, fn_reg, has_remapped);
 
             // Patch self-reference: store the closure itself in its copied env slot
             if (self_ref_slot_fe >= 0) {
@@ -13248,11 +11269,7 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var && jm_is_native_type(var->type_id)) {
-            MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
-            if (mt->with_depth > 0) {
-                return jm_apply_with_identifier_fallback(mt, id, boxed);
-            }
-            return boxed;
+            return jm_box_native(mt, var->reg, var->type_id);
         }
         return jm_transpile_identifier(mt, id);
     }
@@ -13483,91 +11500,21 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
                 JsAstNode* uri_arg = NULL;
                 JsAstNode* first_arg = NULL;
                 JsAstNode* second_arg = NULL;
-                JsAstNode* code_arg = NULL;
                 int64_t component = 0;
                 if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
                     jm_match_string_from_char_code2(mt, bin->right, &first_arg, &second_arg) &&
                     jm_uri_compare_arg_is_simple(uri_arg) &&
                     jm_uri_compare_arg_is_simple(first_arg) &&
                     jm_uri_compare_arg_is_simple(second_arg)) {
-                    TypeId first_type = jm_get_effective_type(mt, first_arg);
-                    TypeId second_type = jm_get_effective_type(mt, second_arg);
-                    MIR_reg_t raw;
-                    JsMirVarEntry* uri_escape_var = jm_uri_escape_var_for_identifier(mt, uri_arg);
-                    if (uri_escape_var && first_type == LMD_TYPE_INT && second_type == LMD_TYPE_INT) {
-                        MIR_reg_t first_reg = jm_transpile_as_native(mt, first_arg, first_type, LMD_TYPE_INT);
-                        MIR_reg_t second_reg = jm_transpile_as_native(mt, second_arg, second_type, LMD_TYPE_INT);
-                        raw = jm_emit_uri_escape_cp_equals_surrogate_pair(mt, uri_escape_var,
-                            first_reg, second_reg);
-                    } else {
-                        MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-                        if (first_type == LMD_TYPE_INT && second_type == LMD_TYPE_INT) {
-                            MIR_reg_t first_reg = jm_transpile_as_native(mt, first_arg, first_type, LMD_TYPE_INT);
-                            MIR_reg_t second_reg = jm_transpile_as_native(mt, second_arg, second_type, LMD_TYPE_INT);
-                        raw = jm_call_4(mt, "js_uri_decode_equals_from_char_code_raw_ints", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, first_reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, second_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-                        } else {
-                            MIR_reg_t first_reg = jm_transpile_box_item(mt, first_arg);
-                            MIR_reg_t second_reg = jm_transpile_box_item(mt, second_arg);
-                            raw = jm_call_4(mt, "js_uri_decode_equals_from_char_code_raw", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, second_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-                        }
-                    }
-                    if (bin->op == JS_OP_STRICT_NE) {
-                        MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
-                            MIR_new_reg_op(mt->ctx, inv),
-                            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 1)));
-                        raw = inv;
-                    }
-                    return raw;
-                }
-                if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
-                    jm_match_string_from_char_code1(bin->right, &code_arg) &&
-                    jm_uri_compare_arg_is_simple(uri_arg) &&
-                    jm_uri_compare_arg_is_simple(code_arg)) {
                     MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-                    TypeId code_type = jm_get_effective_type(mt, code_arg);
-                    MIR_reg_t raw = 0;
-                    if (code_type == LMD_TYPE_INT) {
-                        // The three-byte URI js262 loops compute the expected
-                        // code point as a native int. Avoid boxing it thousands
-                        // of times before the runtime helper immediately
-                        // converts it back to a uint16 code unit.
-                        MIR_reg_t code_reg = jm_transpile_as_native(mt, code_arg, code_type, LMD_TYPE_INT);
-                        raw = jm_call_3(mt, "js_uri_decode_equals_from_char_code1_raw_int", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-                    } else {
-                        MIR_reg_t code_reg = jm_transpile_box_item(mt, code_arg);
-                        raw = jm_call_3(mt, "js_uri_decode_equals_from_char_code1_raw", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, code_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, component));
-                    }
-                    if (bin->op == JS_OP_STRICT_NE) {
-                        MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
-                            MIR_new_reg_op(mt->ctx, inv),
-                            MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 1)));
-                        raw = inv;
-                    }
-                    return raw;
-                }
-                if (jm_match_uri_decode_call(mt, bin->left, &uri_arg, &component) &&
-                    jm_uri_compare_arg_is_simple(uri_arg) &&
-                    jm_same_simple_expr(uri_arg, bin->right)) {
-                    MIR_reg_t uri_reg = jm_transpile_box_item(mt, uri_arg);
-                    MIR_reg_t raw = jm_call_2(mt, "js_uri_decode_identity_raw", MIR_T_I64,
+                    MIR_reg_t first_reg = jm_transpile_box_item(mt, first_arg);
+                    MIR_reg_t second_reg = jm_transpile_box_item(mt, second_arg);
+                    MIR_reg_t boxed = jm_call_4(mt, "js_uri_decode_equals_from_char_code", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, uri_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, first_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, second_reg),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, component));
+                    MIR_reg_t raw = jm_emit_is_truthy(mt, boxed, expr);
                     if (bin->op == JS_OP_STRICT_NE) {
                         MIR_reg_t inv = jm_new_reg(mt, "uri_ne", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
@@ -13643,14 +11590,13 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // (or something it calls transitively) may have modified captured
         // variables via the shared scope env
         jm_scope_env_reload_vars(mt);
-        jm_reload_module_var_locals_after_eval(mt, false);
-        // reload captured variables before checking for exceptions so catch
-        // blocks observe mutations performed by callbacks that also throw.
-        jm_env_reload_shared_captures(mt);
         // check for pending exception after every call — if the callee threw,
         // we must not continue evaluating the enclosing expression (e.g.
         // `return !!fn()` must not execute `!!` if fn() threw)
         jm_emit_exc_propagate_check(mt);
+        // also reload captured variables from parent's shared scope_env —
+        // sibling closures may have modified them during the call
+        jm_env_reload_shared_captures(mt);
         return r;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
@@ -13676,23 +11622,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return jm_transpile_conditional(mt, (JsConditionalNode*)expr);
     case JS_AST_NODE_TEMPLATE_LITERAL:
         return jm_transpile_template_literal(mt, (JsTemplateLiteralNode*)expr);
-    case JS_AST_NODE_TAGGED_TEMPLATE: {
-        MIR_reg_t r = jm_transpile_tagged_template(mt, (JsTaggedTemplateNode*)expr);
-        jm_scope_env_reload_vars(mt);
-        jm_reload_module_var_locals_after_eval(mt, false);
-        jm_env_reload_shared_captures(mt);
-        jm_emit_exc_propagate_check(mt);
-        return r;
-    }
+    case JS_AST_NODE_TAGGED_TEMPLATE:
+        return jm_transpile_tagged_template(mt, (JsTaggedTemplateNode*)expr);
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
         return jm_transpile_assignment(mt, (JsAssignmentNode*)expr);
     case JS_AST_NODE_NEW_EXPRESSION: {
         MIR_reg_t r = jm_transpile_new_expr(mt, (JsCallNode*)expr);
         jm_scope_env_reload_vars(mt);
-        jm_reload_module_var_locals_after_eval(mt, false);
-        jm_env_reload_shared_captures(mt);
         // check for pending exception after constructor call
         jm_emit_exc_propagate_check(mt);
+        jm_env_reload_shared_captures(mt);
         return r;
     }
     case JS_AST_NODE_SEQUENCE_EXPRESSION: {
@@ -13709,21 +11648,12 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_REGEX: {
         // v11: regex literal /pattern/flags → js_create_regex(pattern, len, flags, len)
         JsRegexNode* re = (JsRegexNode*)expr;
-        // Regex literal bytes are referenced from generated MIR at runtime.
-        // Match string literal lowering: with-preamble/module code can outlive
-        // the transient transpiler pool, so intern the bytes in the persistent
-        // eval-context name pool when available.
-        bool use_persistent_pool = (mt->is_module || mt->preamble_entries != nullptr)
-                                   && context && context->name_pool;
-        NamePool* np = use_persistent_pool ? context->name_pool : mt->tp->name_pool;
-        String* pattern = name_pool_create_len(np, re->pattern, re->pattern_len);
-        String* flags = name_pool_create_len(np, re->flags, re->flags_len);
         MIR_reg_t pat_ptr = jm_new_reg(mt, "re_pat", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)pattern->chars)));
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->pattern)));
         MIR_reg_t flags_ptr = jm_new_reg(mt, "re_flags", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_ptr),
-            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)flags->chars)));
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->flags)));
         return jm_call_4(mt, "js_create_regex", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
             MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
@@ -13733,7 +11663,11 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_YIELD_EXPRESSION: {
         JsYieldNode* yield_node = (JsYieldNode*)expr;
         if (!mt->in_generator && !yield_node->argument && !yield_node->delegate) {
-            return jm_transpile_soft_keyword_identifier(mt, "yield", 5, "yi$ld", 5);
+            JsIdentifierNode yield_id;
+            memset(&yield_id, 0, sizeof(yield_id));
+            yield_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+            yield_id.name = name_pool_create_len(mt->tp->name_pool, "yield", 5);
+            return jm_transpile_identifier(mt, &yield_id);
         }
         MIR_reg_t val;
         if (yield_node->argument) {
@@ -14308,8 +12242,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
-                        jm_emit_exc_propagate_check(mt);
-                        jm_reload_after_possible_runtime_callback(mt);
                         jm_call_void_1(mt, "js_check_class_prototype_parent",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                         jm_emit_exc_propagate_check(mt);
@@ -14346,8 +12278,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                                 MIR_reg_t err_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_ctor),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key2));
-                                jm_emit_exc_propagate_check(mt);
-                                jm_reload_after_possible_runtime_callback(mt);
                                 jm_call_void_1(mt, "js_check_class_prototype_parent",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, err_proto));
                                 jm_emit_exc_propagate_check(mt);
@@ -14362,8 +12292,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                                 MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
-                                jm_emit_exc_propagate_check(mt);
-                                jm_reload_after_possible_runtime_callback(mt);
                                 jm_call_void_1(mt, "js_check_class_prototype_parent",
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                                 jm_emit_exc_propagate_check(mt);
@@ -14392,8 +12320,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_reg_t sp_proto = jm_call_2(mt, "js_property_get", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, super_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_key));
-                        jm_emit_exc_propagate_check(mt);
-                        jm_reload_after_possible_runtime_callback(mt);
                         jm_call_void_1(mt, "js_check_class_prototype_parent",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                         jm_emit_exc_propagate_check(mt);
@@ -14448,6 +12374,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                    // old class lowering only sets mk for computed or named methods;
+                    // initialize it so stricter current debug builds can keep the
+                    // existing skip path for malformed method entries.
                     MIR_reg_t mk = 0;
                     if (me->computed && me->key_expr) {
                         // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
@@ -14645,13 +12574,17 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         if (static_field_index >= ce->static_field_count) continue;
                         JsStaticFieldEntry* sf = &ce->static_fields[static_field_index++];
                         if (sf->computed && sf->key_expr && sf->key_module_var_index >= 0) {
-                            int cls_spill = -1;
+                            // computed class field keys are evaluated during class definition.
+                            // If the key contains `yield`, the generator can suspend before
+                            // static fields are installed, so preserve the class object across
+                            // the key evaluation and resume path.
+                            int cls_key_spill = -1;
                             if (mt->in_generator && jm_has_yield(sf->key_expr)) {
-                                cls_spill = jm_gen_spill_save(mt, cls_obj);
+                                cls_key_spill = jm_gen_spill_save(mt, cls_obj);
                             }
                             MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
-                            if (cls_spill >= 0) {
-                                jm_gen_spill_load(mt, cls_obj, cls_spill);
+                            if (cls_key_spill >= 0) {
+                                jm_gen_spill_load(mt, cls_obj, cls_key_spill);
                             }
                             key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -14665,13 +12598,16 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         if (instance_field_index >= ce->instance_field_count) continue;
                         JsInstanceFieldEntry* inf = &ce->instance_fields[instance_field_index++];
                         if (inf->computed && inf->key_expr && inf->key_module_var_index >= 0) {
-                            int cls_spill = -1;
+                            // instance computed keys share the same class-evaluation phase as
+                            // static keys; a yielding key must not leave the class object
+                            // register stale for later metadata/static initialization.
+                            int cls_key_spill = -1;
                             if (mt->in_generator && jm_has_yield(inf->key_expr)) {
-                                cls_spill = jm_gen_spill_save(mt, cls_obj);
+                                cls_key_spill = jm_gen_spill_save(mt, cls_obj);
                             }
                             MIR_reg_t key = jm_transpile_box_item(mt, inf->key_expr);
-                            if (cls_spill >= 0) {
-                                jm_gen_spill_load(mt, cls_obj, cls_spill);
+                            if (cls_key_spill >= 0) {
+                                jm_gen_spill_load(mt, cls_obj, cls_key_spill);
                             }
                             key = jm_call_1(mt, "js_to_property_key", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));

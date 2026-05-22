@@ -322,7 +322,6 @@ JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
 bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId narrowed_type);
 void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node);
 void jm_scope_env_reload_vars(JsMirTranspiler* mt);
-void jm_reload_module_var_locals_after_eval(JsMirTranspiler* mt, bool sync_eval_bindings);
 void jm_env_reload_shared_captures(JsMirTranspiler* mt);
 void jm_emit_exc_propagate_check(JsMirTranspiler* mt);
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);

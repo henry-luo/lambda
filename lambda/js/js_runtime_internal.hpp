@@ -86,7 +86,6 @@ struct JsFunction {
     bool eval_initializer_context;
     Item* with_env; // captured with-object environment stack, if any
     int with_env_depth;
-    int* env_module_var_indices; // env slot -> module var index, -1 when not mirrored
 };
 
 #define JS_FUNC_FLAG_GENERATOR 1
