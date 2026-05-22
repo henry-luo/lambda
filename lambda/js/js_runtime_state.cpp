@@ -8,7 +8,32 @@ static void js_ensure_module_vars_gc_rooted() {
     if (!context || !context->heap || !context->heap->gc) return;
     if (rooted_gc == context->heap->gc) return;
     heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
+    // the batch preamble snapshot is copied back into js_module_vars after each
+    // test. URI stress tests can trigger moving GC before that reset, so the
+    // snapshot must be updated by GC too or it will resurrect stale constructor
+    // and helper pointers into the next test.
+    heap_register_gc_root_range((uint64_t*)js_runtime_state.preamble_module_vars,
+                                JS_MAX_MODULE_VARS);
     rooted_gc = context->heap->gc;
+}
+
+static void js_pin_preamble_array_buffers(int count) {
+    if (!context || !context->heap || !context->heap->pool) return;
+    for (int i = 0; i < count; i++) {
+        Item value = js_runtime_state.preamble_module_vars[i];
+        if (get_type_id(value) != LMD_TYPE_ARRAY) continue;
+        Array* arr = value.array;
+        if (!arr || !arr->items || arr->capacity <= 0) continue;
+        size_t byte_size = (size_t)arr->capacity * sizeof(Item);
+        Item* stable_items = (Item*)pool_calloc(context->heap->pool, byte_size);
+        if (!stable_items) continue;
+        // Batch preamble arrays are retained as helper state across many test
+        // executions. Their dense storage must not stay in the nursery data
+        // zone, where decodeURI-sized allocation bursts can compact/reset it
+        // while the shallow preamble snapshot still points at the same Array.
+        memcpy(stable_items, arr->items, byte_size);
+        arr->items = stable_items;
+    }
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -159,6 +184,7 @@ extern "C" void js_capture_preamble_module_vars(int count) {
     }
     js_runtime_state.preamble_module_var_count = count;
     js_runtime_state.preamble_module_snapshot_valid = true;
+    js_pin_preamble_array_buffers(count);
 }
 
 // Save/restore module vars for nested require() — prevents inner module

@@ -9,6 +9,49 @@ correct tests take seconds or hit the per-test timeout.
 
 ## 0. Latest Progress
 
+2026-05-22 update: the interrupted full-suite rerun left
+`temp/_t262_timing_o0.tsv` with 411 rows at or above 3s: 274 TypedArray, 68 URI,
+34 Atomics, 6 Set, 12 language, and 17 other rows.  The older optimized timing
+snapshots (`temp/_t262_timing_o2.tsv` / `_o3.tsv`) had only 13-16 slow rows and
+zero slow TypedArray/Atomics/Set rows, so this is a real performance regression
+in the current JS path.
+
+One harness issue was also found: the `test262-full` and
+`test262-update-baseline` make targets ran through `build-test`, which can
+replace `lambda.exe` with the debug/O0 runtime unless `.lambda_release_build`
+already exists.  The Makefile now rebuilds the release `lambda.exe` immediately
+before `test262-baseline`, `test262-full`, and `test262-update-baseline` run.
+That prevents false slow-list inflation, but a focused release probe still shows
+real slow behavior:
+
+```text
+built_ins_decodeURI_S15_1_3_1_A2_5_T1_js: timeout@15s
+built_ins_TypedArray_prototype_copyWithin_negative_out_of_bounds_start_js: ~7.2s
+built_ins_TypedArray_prototype_set_typedarray_arg_set_values_same_buffer_same_type_js: ~4.8s
+```
+
+TypedArray follow-up: a single-file reproduction of the copyWithin test shape
+runs in about 0.13s, while the js262 batch row took about 7.2s before the fix.
+That isolated the cost to repeated test262 helper lowering, not the
+`copyWithin` memmove.  The runner now precompiles `compareArray.js`,
+`testTypedArray.js`, and `testBigIntTypedArray.js` in the batch preamble along
+with `nativeFunctionMatcher.js`.  Focused release timing improved:
+
+```text
+built_ins_TypedArray_prototype_copyWithin_negative_out_of_bounds_start_js:
+  7189ms -> 666ms
+built_ins_TypedArray_prototype_set_typedarray_arg_set_values_same_buffer_same_type_js:
+  ~4760ms -> 697ms
+built_ins_Atomics_and_bigint_bad_range_js:
+  ~9280ms in the interrupted timing file -> 271ms focused release probe
+```
+
+The URI A2.5 row and the Set set-like class-order rows still time out and
+remain separate runtime/lowering issues.  URI is missing the expected
+`uri.escape.*` fast-forward diagnostics; the Set class-order tests are dominated
+by dynamic class/getter/iterator/spread behavior rather than the shared
+TypedArray harness helper cost.
+
 2026-05-21 update: the latest release recheck showed the two URI A2.5 rows are
 still timing out, so the earlier "26ms row timing" result should be treated as
 a focused-run success that did not survive the current tree.  They are now in
