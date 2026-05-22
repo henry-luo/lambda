@@ -1,6 +1,7 @@
 #include "render_text.hpp"
 #include "render_glyph.hpp"
 #include "render_background.hpp"
+#include "render_painter.hpp"
 #include "render_profiler.hpp"
 #include "layout_text.hpp"
 #include "layout.hpp"
@@ -581,7 +582,7 @@ bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
         int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
         int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
         if (rdcon->dl) {
-            dl_box_blur_region(rdcon->dl, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
+            rc_box_blur_region(rdcon, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
         } else {
             render_painter_flush_vector_batch(rdcon);
             box_blur_region(&rdcon->scratch, rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);

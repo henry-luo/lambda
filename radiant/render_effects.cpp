@@ -3,6 +3,7 @@
 #include "render_composite.hpp"
 #include "render_filter.hpp"
 #include "render_geometry.hpp"
+#include "render_painter.hpp"
 #include "render_profiler.hpp"
 
 #include "../lib/log.h"
@@ -49,7 +50,7 @@ static RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
     backdrop.height = height;
 
     if (rdcon->dl) {
-        dl_save_backdrop(rdcon->dl, bx0, by0, width, height);
+        rc_save_backdrop(rdcon, bx0, by0, width, height);
         backdrop.active = true;
         return backdrop;
     }
@@ -79,7 +80,7 @@ static void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* back
     }
     RenderContext* rdcon = backdrop->context;
     if (rdcon->dl) {
-        dl_composite_opacity(rdcon->dl, backdrop->x, backdrop->y,
+        rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
                              backdrop->width, backdrop->height, 1.0f);
     } else if (backdrop->pixels) {
         render_painter_flush_vector_batch(rdcon);
@@ -99,7 +100,7 @@ static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop
     }
     RenderContext* rdcon = backdrop->context;
     if (rdcon->dl) {
-        dl_composite_opacity(rdcon->dl, backdrop->x, backdrop->y,
+        rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
                              backdrop->width, backdrop->height, opacity);
     } else if (backdrop->pixels) {
         render_painter_flush_vector_batch(rdcon);
@@ -119,7 +120,7 @@ static void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
     }
     RenderContext* rdcon = backdrop->context;
     if (rdcon->dl) {
-        dl_apply_blend_mode(rdcon->dl, backdrop->x, backdrop->y,
+        rc_apply_blend_mode(rdcon, backdrop->x, backdrop->y,
                             backdrop->width, backdrop->height, (int)blend_mode);
     } else if (backdrop->pixels) {
         render_painter_flush_vector_batch(rdcon);
@@ -273,7 +274,7 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
               filter_rect.width, filter_rect.height);
 
     if (rdcon->dl) {
-        dl_apply_filter(rdcon->dl, filter_rect.x, filter_rect.y,
+        rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
                         filter_rect.width, filter_rect.height,
                         block->filter, clip);
     } else {

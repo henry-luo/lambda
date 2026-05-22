@@ -37,6 +37,30 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
 void rc_pop_clip(RenderContext* rdcon);
+void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h);
+void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
+                          float opacity, bool premultiplied_source = false);
+void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
+                         int blend_mode);
+void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
+                     void* filter, const Bound* clip);
+void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+                        float blur_radius, int clip_type, const float* clip_params,
+                        int exclude_type = 0, const float* exclude_params = nullptr,
+                        bool premultiply_source = false,
+                        bool tint_source = false, Color tint_color = Color{});
+void rc_box_blur_inset(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+                       int pad, float blur_radius, uint32_t bg_color);
+void rc_shadow_clip_save(RenderContext* rdcon, int rx, int ry, int rw, int rh);
+void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float* exclude_params,
+                            int save_rx, int save_ry, int save_rw, int save_rh,
+                            int restore_inside);
+void rc_outer_shadow(RenderContext* rdcon,
+                     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                     float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                     Color color, float blur_radius,
+                     int exclude_type, const float* exclude_params,
+                     int clip_type, const float* clip_params);
 void render_painter_begin_vector_batch(RenderContext* rdcon);
 void render_painter_flush_vector_batch(RenderContext* rdcon);
 void render_painter_end_vector_batch(RenderContext* rdcon);

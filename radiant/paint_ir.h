@@ -62,6 +62,11 @@ typedef enum {
     PAINT_COMPOSITE_OPACITY,
     PAINT_APPLY_BLEND_MODE,
     PAINT_APPLY_FILTER,
+    PAINT_BOX_BLUR_REGION,
+    PAINT_BOX_BLUR_INSET,
+    PAINT_SHADOW_CLIP_SAVE,
+    PAINT_SHADOW_CLIP_RESTORE,
+    PAINT_OUTER_SHADOW,
 
     // ── Higher-level semantic ops (contract only; lowered in later phases) ──
     // A run of glyphs sharing a font/colour — NOT rasterised bitmaps. Raster
@@ -177,8 +182,50 @@ typedef struct {
 typedef struct {
     float x, y, w, h;
     void* filter;            // FilterProp* — borrowed
+    bool has_clip;
     Bound clip;              // rectangular clip bounds at recording time
 } PaintApplyFilter;
+
+typedef struct {
+    int rx, ry, rw, rh;
+    float blur_radius;
+    int clip_type;
+    float clip_params[8];
+    int exclude_type;
+    float exclude_params[8];
+    bool premultiply_source;
+    bool tint_source;
+    Color tint_color;
+} PaintBoxBlurRegion;
+
+typedef struct {
+    int rx, ry, rw, rh;
+    int pad;
+    float blur_radius;
+    uint32_t bg_color;
+} PaintBoxBlurInset;
+
+typedef struct {
+    int rx, ry, rw, rh;
+} PaintShadowClipSave;
+
+typedef struct {
+    int exclude_type;
+    float exclude_params[8];
+    int save_rx, save_ry, save_rw, save_rh;
+    int restore_inside;
+} PaintShadowClipRestore;
+
+typedef struct {
+    float shadow_x, shadow_y, shadow_w, shadow_h;
+    float sr_tl, sr_tr, sr_br, sr_bl;
+    Color color;
+    float blur_radius;
+    int exclude_type;
+    float exclude_params[8];
+    int clip_type;
+    float clip_params[8];
+} PaintOuterShadow;
 
 // ── Higher-level semantic payloads (contract; not yet lowered) ─────────────
 
@@ -246,6 +293,11 @@ typedef struct PaintCmd {
         PaintCompositeOpacity   composite_opacity;
         PaintApplyBlendMode     apply_blend_mode;
         PaintApplyFilter        apply_filter;
+        PaintBoxBlurRegion      box_blur_region;
+        PaintBoxBlurInset       box_blur_inset;
+        PaintShadowClipSave     shadow_clip_save;
+        PaintShadowClipRestore  shadow_clip_restore;
+        PaintOuterShadow        outer_shadow;
         PaintEffectGroup        effect_group;
         PaintSvgSubscene        svg_subscene;
         PaintGlyphRun           glyph_run;
@@ -310,6 +362,22 @@ void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
 void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode);
 void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
                         void* filter, const Bound* clip);
+void paint_box_blur_region(PaintList* pl, int rx, int ry, int rw, int rh,
+                           float blur_radius, int clip_type, const float* clip_params,
+                           int exclude_type, const float* exclude_params,
+                           bool premultiply_source, bool tint_source, Color tint_color);
+void paint_box_blur_inset(PaintList* pl, int rx, int ry, int rw, int rh,
+                          int pad, float blur_radius, uint32_t bg_color);
+void paint_shadow_clip_save(PaintList* pl, int rx, int ry, int rw, int rh);
+void paint_shadow_clip_restore(PaintList* pl, int exclude_type, const float* exclude_params,
+                               int save_rx, int save_ry, int save_rw, int save_rh,
+                               int restore_inside);
+void paint_outer_shadow(PaintList* pl,
+                        float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                        float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                        Color color, float blur_radius,
+                        int exclude_type, const float* exclude_params,
+                        int clip_type, const float* clip_params);
 
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList

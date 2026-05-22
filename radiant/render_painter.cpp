@@ -153,6 +153,120 @@ void rc_pop_clip(RenderContext* rdcon) {
     else rdt_pop_clip(&rdcon->vec);
 }
 
+void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h) {
+    if (rc_paint_active(rdcon)) {
+        paint_save_backdrop(rdcon->paint_list, x0, y0, w, h);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) dl_save_backdrop(rdcon->dl, x0, y0, w, h);
+}
+
+void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
+                          float opacity, bool premultiplied_source) {
+    if (rc_paint_active(rdcon)) {
+        paint_composite_opacity(rdcon->paint_list, x0, y0, w, h,
+                                opacity, premultiplied_source);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_composite_opacity(rdcon->dl, x0, y0, w, h, opacity, premultiplied_source);
+    }
+}
+
+void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
+                         int blend_mode) {
+    if (rc_paint_active(rdcon)) {
+        paint_apply_blend_mode(rdcon->paint_list, x0, y0, w, h, blend_mode);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_apply_blend_mode(rdcon->dl, x0, y0, w, h, blend_mode);
+    }
+}
+
+void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
+                     void* filter, const Bound* clip) {
+    if (rc_paint_active(rdcon)) {
+        paint_apply_filter(rdcon->paint_list, x, y, w, h, filter, clip);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_apply_filter(rdcon->dl, x, y, w, h, filter, clip);
+    }
+}
+
+void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+                        float blur_radius, int clip_type, const float* clip_params,
+                        int exclude_type, const float* exclude_params,
+                        bool premultiply_source,
+                        bool tint_source, Color tint_color) {
+    if (rc_paint_active(rdcon)) {
+        paint_box_blur_region(rdcon->paint_list, rx, ry, rw, rh, blur_radius,
+                              clip_type, clip_params, exclude_type, exclude_params,
+                              premultiply_source, tint_source, tint_color);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_box_blur_region(rdcon->dl, rx, ry, rw, rh, blur_radius,
+                           clip_type, clip_params, exclude_type, exclude_params,
+                           premultiply_source, tint_source, tint_color);
+    }
+}
+
+void rc_box_blur_inset(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+                       int pad, float blur_radius, uint32_t bg_color) {
+    if (rc_paint_active(rdcon)) {
+        paint_box_blur_inset(rdcon->paint_list, rx, ry, rw, rh, pad,
+                             blur_radius, bg_color);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_box_blur_inset(rdcon->dl, rx, ry, rw, rh, pad, blur_radius, bg_color);
+    }
+}
+
+void rc_shadow_clip_save(RenderContext* rdcon, int rx, int ry, int rw, int rh) {
+    if (rc_paint_active(rdcon)) {
+        paint_shadow_clip_save(rdcon->paint_list, rx, ry, rw, rh);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_shadow_clip_save(rdcon->dl, rx, ry, rw, rh);
+    }
+}
+
+void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float* exclude_params,
+                            int save_rx, int save_ry, int save_rw, int save_rh,
+                            int restore_inside) {
+    if (rc_paint_active(rdcon)) {
+        paint_shadow_clip_restore(rdcon->paint_list, exclude_type, exclude_params,
+                                  save_rx, save_ry, save_rw, save_rh,
+                                  restore_inside);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_shadow_clip_restore(rdcon->dl, exclude_type, exclude_params,
+                               save_rx, save_ry, save_rw, save_rh,
+                               restore_inside);
+    }
+}
+
+void rc_outer_shadow(RenderContext* rdcon,
+                     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                     float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                     Color color, float blur_radius,
+                     int exclude_type, const float* exclude_params,
+                     int clip_type, const float* clip_params) {
+    if (rc_paint_active(rdcon)) {
+        paint_outer_shadow(rdcon->paint_list,
+                           shadow_x, shadow_y, shadow_w, shadow_h,
+                           sr_tl, sr_tr, sr_br, sr_bl,
+                           color, blur_radius,
+                           exclude_type, exclude_params,
+                           clip_type, clip_params);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_outer_shadow(rdcon->dl,
+                        shadow_x, shadow_y, shadow_w, shadow_h,
+                        sr_tl, sr_tr, sr_br, sr_bl,
+                        color, blur_radius,
+                        exclude_type, exclude_params,
+                        clip_type, clip_params);
+    }
+}
+
 void render_painter_begin_vector_batch(RenderContext* rdcon) {
     if (!rdcon || rdcon->dl) return;
     rdt_vector_begin_batch(&rdcon->vec);

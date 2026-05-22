@@ -53,6 +53,14 @@ static PaintCmd* paint_alloc_cmd(PaintList* pl, PaintOp op) {
     return cmd;
 }
 
+static void paint_copy_effect_params(float* dst, int type, const float* params) {
+    if (type && params) {
+        memcpy(dst, params, 8 * sizeof(float));
+    } else {
+        memset(dst, 0, 8 * sizeof(float));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PaintBuilder — recording API
 // ---------------------------------------------------------------------------
@@ -205,7 +213,80 @@ void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
     cmd->apply_filter.w = w;
     cmd->apply_filter.h = h;
     cmd->apply_filter.filter = filter;
+    cmd->apply_filter.has_clip = clip != nullptr;
     if (clip) cmd->apply_filter.clip = *clip;
+}
+
+void paint_box_blur_region(PaintList* pl, int rx, int ry, int rw, int rh,
+                           float blur_radius, int clip_type, const float* clip_params,
+                           int exclude_type, const float* exclude_params,
+                           bool premultiply_source, bool tint_source, Color tint_color) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BOX_BLUR_REGION);
+    if (!cmd) return;
+    cmd->box_blur_region.rx = rx;
+    cmd->box_blur_region.ry = ry;
+    cmd->box_blur_region.rw = rw;
+    cmd->box_blur_region.rh = rh;
+    cmd->box_blur_region.blur_radius = blur_radius;
+    cmd->box_blur_region.clip_type = clip_type;
+    paint_copy_effect_params(cmd->box_blur_region.clip_params, clip_type, clip_params);
+    cmd->box_blur_region.exclude_type = exclude_type;
+    paint_copy_effect_params(cmd->box_blur_region.exclude_params, exclude_type, exclude_params);
+    cmd->box_blur_region.premultiply_source = premultiply_source;
+    cmd->box_blur_region.tint_source = tint_source;
+    cmd->box_blur_region.tint_color = tint_color;
+}
+
+void paint_box_blur_inset(PaintList* pl, int rx, int ry, int rw, int rh,
+                          int pad, float blur_radius, uint32_t bg_color) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BOX_BLUR_INSET);
+    if (!cmd) return;
+    cmd->box_blur_inset = { rx, ry, rw, rh, pad, blur_radius, bg_color };
+}
+
+void paint_shadow_clip_save(PaintList* pl, int rx, int ry, int rw, int rh) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_SHADOW_CLIP_SAVE);
+    if (!cmd) return;
+    cmd->shadow_clip_save = { rx, ry, rw, rh };
+}
+
+void paint_shadow_clip_restore(PaintList* pl, int exclude_type, const float* exclude_params,
+                               int save_rx, int save_ry, int save_rw, int save_rh,
+                               int restore_inside) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_SHADOW_CLIP_RESTORE);
+    if (!cmd) return;
+    cmd->shadow_clip_restore.exclude_type = exclude_type;
+    paint_copy_effect_params(cmd->shadow_clip_restore.exclude_params,
+                             exclude_type, exclude_params);
+    cmd->shadow_clip_restore.save_rx = save_rx;
+    cmd->shadow_clip_restore.save_ry = save_ry;
+    cmd->shadow_clip_restore.save_rw = save_rw;
+    cmd->shadow_clip_restore.save_rh = save_rh;
+    cmd->shadow_clip_restore.restore_inside = restore_inside;
+}
+
+void paint_outer_shadow(PaintList* pl,
+                        float shadow_x, float shadow_y, float shadow_w, float shadow_h,
+                        float sr_tl, float sr_tr, float sr_br, float sr_bl,
+                        Color color, float blur_radius,
+                        int exclude_type, const float* exclude_params,
+                        int clip_type, const float* clip_params) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_OUTER_SHADOW);
+    if (!cmd) return;
+    cmd->outer_shadow.shadow_x = shadow_x;
+    cmd->outer_shadow.shadow_y = shadow_y;
+    cmd->outer_shadow.shadow_w = shadow_w;
+    cmd->outer_shadow.shadow_h = shadow_h;
+    cmd->outer_shadow.sr_tl = sr_tl;
+    cmd->outer_shadow.sr_tr = sr_tr;
+    cmd->outer_shadow.sr_br = sr_br;
+    cmd->outer_shadow.sr_bl = sr_bl;
+    cmd->outer_shadow.color = color;
+    cmd->outer_shadow.blur_radius = blur_radius;
+    cmd->outer_shadow.exclude_type = exclude_type;
+    paint_copy_effect_params(cmd->outer_shadow.exclude_params, exclude_type, exclude_params);
+    cmd->outer_shadow.clip_type = clip_type;
+    paint_copy_effect_params(cmd->outer_shadow.clip_params, clip_type, clip_params);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +359,64 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
         case PAINT_POP_CLIP:
             dl_pop_clip(dl);
             break;
+        case PAINT_SAVE_BACKDROP: {
+            const PaintSaveBackdrop* p = &cmd->save_backdrop;
+            dl_save_backdrop(dl, p->x0, p->y0, p->w, p->h);
+            break;
+        }
+        case PAINT_COMPOSITE_OPACITY: {
+            const PaintCompositeOpacity* p = &cmd->composite_opacity;
+            dl_composite_opacity(dl, p->x0, p->y0, p->w, p->h,
+                                 p->opacity, p->premultiplied_source);
+            break;
+        }
+        case PAINT_APPLY_BLEND_MODE: {
+            const PaintApplyBlendMode* p = &cmd->apply_blend_mode;
+            dl_apply_blend_mode(dl, p->x0, p->y0, p->w, p->h, p->blend_mode);
+            break;
+        }
+        case PAINT_APPLY_FILTER: {
+            const PaintApplyFilter* p = &cmd->apply_filter;
+            dl_apply_filter(dl, p->x, p->y, p->w, p->h, p->filter,
+                            p->has_clip ? &p->clip : nullptr);
+            break;
+        }
+        case PAINT_BOX_BLUR_REGION: {
+            const PaintBoxBlurRegion* p = &cmd->box_blur_region;
+            dl_box_blur_region(dl, p->rx, p->ry, p->rw, p->rh, p->blur_radius,
+                               p->clip_type, p->clip_params,
+                               p->exclude_type, p->exclude_params,
+                               p->premultiply_source, p->tint_source, p->tint_color);
+            break;
+        }
+        case PAINT_BOX_BLUR_INSET: {
+            const PaintBoxBlurInset* p = &cmd->box_blur_inset;
+            dl_box_blur_inset(dl, p->rx, p->ry, p->rw, p->rh,
+                              p->pad, p->blur_radius, p->bg_color);
+            break;
+        }
+        case PAINT_SHADOW_CLIP_SAVE: {
+            const PaintShadowClipSave* p = &cmd->shadow_clip_save;
+            dl_shadow_clip_save(dl, p->rx, p->ry, p->rw, p->rh);
+            break;
+        }
+        case PAINT_SHADOW_CLIP_RESTORE: {
+            const PaintShadowClipRestore* p = &cmd->shadow_clip_restore;
+            dl_shadow_clip_restore(dl, p->exclude_type, p->exclude_params,
+                                   p->save_rx, p->save_ry, p->save_rw, p->save_rh,
+                                   p->restore_inside);
+            break;
+        }
+        case PAINT_OUTER_SHADOW: {
+            const PaintOuterShadow* p = &cmd->outer_shadow;
+            dl_outer_shadow(dl,
+                            p->shadow_x, p->shadow_y, p->shadow_w, p->shadow_h,
+                            p->sr_tl, p->sr_tr, p->sr_br, p->sr_bl,
+                            p->color, p->blur_radius,
+                            p->exclude_type, p->exclude_params,
+                            p->clip_type, p->clip_params);
+            break;
+        }
 
         // Higher-level semantic ops are lowered in later phases (E: effects,
         // F: inline SVG). They are not yet emitted by the live render path.
