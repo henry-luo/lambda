@@ -935,6 +935,43 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
     return true;
 }
 
+bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context) {
+    if (!p || !fn) return false;
+    for (int i = 0; i < p->count; i++) {
+        const RdtPath::Entry* e = &p->entries[i];
+        RdtPathCommand command = RDT_PATH_MOVE;
+        int arg_count = 0;
+        switch (e->cmd) {
+        case RdtPath::CMD_MOVE:
+            command = RDT_PATH_MOVE;
+            arg_count = 2;
+            break;
+        case RdtPath::CMD_LINE:
+            command = RDT_PATH_LINE;
+            arg_count = 2;
+            break;
+        case RdtPath::CMD_CUBIC:
+            command = RDT_PATH_CUBIC;
+            arg_count = 6;
+            break;
+        case RdtPath::CMD_CLOSE:
+            command = RDT_PATH_CLOSE;
+            arg_count = 0;
+            break;
+        case RdtPath::CMD_RECT:
+            command = RDT_PATH_RECT;
+            arg_count = 6;
+            break;
+        case RdtPath::CMD_CIRCLE:
+            command = RDT_PATH_CIRCLE;
+            arg_count = 4;
+            break;
+        }
+        if (!fn(context, command, e->args, arg_count)) return false;
+    }
+    return true;
+}
+
 // ============================================================================
 // Fill
 // ============================================================================

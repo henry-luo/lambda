@@ -29,6 +29,7 @@
 // ==========================================================================
 
 #include "display_list.h"   // DisplayList + all rdt_* / Color / Bound / ClipShape types
+#include "../lib/strbuf.h"  // StrBuf for vector lowerings
 
 #ifdef __cplusplus
 extern "C" {
@@ -435,6 +436,30 @@ void paint_outer_shadow(PaintList* pl,
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
+
+// ---------------------------------------------------------------------------
+// SVG lowering: PaintIR -> SVG fragment
+//
+// Phase D foothold. This lowering intentionally starts with the primitive
+// commands whose SVG representation is exact and target-neutral. Unsupported
+// commands are counted explicitly so callers can choose native support,
+// raster fallback, or diagnostic handling as the capability table grows.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    int indent_level;
+    bool emit_unsupported_comments;
+} PaintSvgLoweringOptions;
+
+typedef struct {
+    int command_count;
+    int emitted_count;
+    int unsupported_count;
+} PaintSvgLoweringStats;
+
+void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
+                        const PaintSvgLoweringOptions* options,
+                        PaintSvgLoweringStats* stats);
 
 #ifdef __cplusplus
 }

@@ -920,3 +920,128 @@ TEST_F(PaintIrParityTest, ClearRewindsCountForReuse) {
     paint_fill_rect(&pl, 0.0f, 0.0f, 2.0f, 2.0f, test_color(0xffffffff));
     EXPECT_EQ(paint_list_count(&pl), 1);
 }
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsRectPrimitives) {
+    Color solid = {};
+    solid.r = 1;
+    solid.g = 2;
+    solid.b = 3;
+    solid.a = 255;
+
+    Color translucent = {};
+    translucent.r = 4;
+    translucent.g = 5;
+    translucent.b = 6;
+    translucent.a = 128;
+
+    paint_fill_rect(&pl, 1.25f, 2.5f, 30.0f, 40.75f, solid);
+    paint_fill_rounded_rect(&pl, 5.0f, 6.0f, 70.0f, 80.0f, 3.5f, 4.5f, translucent);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.indent_level = 1;
+    options.emit_unsupported_comments = true;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 2);
+    EXPECT_EQ(stats.emitted_count, 2);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.25\" y=\"2.50\" width=\"30.00\" height=\"40.75\" fill=\"rgb(1,2,3)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"5.00\" y=\"6.00\" width=\"70.00\" height=\"80.00\" rx=\"3.50\" ry=\"4.50\" fill=\"rgba(4,5,6,0.502)\" />"),
+        nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringCountsUnsupportedOps) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+    paint_fill_path(&pl, path, test_color(0xff010203), RDT_FILL_WINDING, nullptr);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.emit_unsupported_comments = true;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 0);
+    EXPECT_EQ(stats.unsupported_count, 1);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_FILL_PATH -->"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsInspectableFillPath) {
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_move_to(path, 1.0f, 2.0f);
+    rdt_path_line_to(path, 11.0f, 2.0f);
+    rdt_path_line_to(path, 11.0f, 12.0f);
+    rdt_path_close(path);
+
+    Color color = {};
+    color.r = 8;
+    color.g = 9;
+    color.b = 10;
+    color.a = 255;
+    RdtMatrix transform = rdt_matrix_translate(3.0f, 4.0f);
+    paint_fill_path(&pl, path, color, RDT_FILL_EVEN_ODD, &transform);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<path d=\"M1.00,2.00 L11.00,2.00 L11.00,12.00 Z \" fill=\"rgb(8,9,10)\" fill-rule=\"evenodd\" transform=\"matrix(1 0 0 1 3 4)\" />"),
+        nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(path);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsInspectableStrokePath) {
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_move_to(path, 0.0f, 0.0f);
+    rdt_path_cubic_to(path, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f);
+
+    Color color = {};
+    color.r = 20;
+    color.g = 30;
+    color.b = 40;
+    color.a = 128;
+    float dashes[2] = {2.0f, 4.0f};
+    paint_stroke_path(&pl, path, color, 1.5f,
+                      RDT_CAP_ROUND, RDT_JOIN_BEVEL,
+                      dashes, 2, 0.5f, nullptr);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<path d=\"M0.00,0.00 C1.00,2.00 3.00,4.00 5.00,6.00 \" fill=\"none\" stroke=\"rgba(20,30,40,0.502)\" stroke-width=\"1.50\" stroke-linecap=\"round\" stroke-linejoin=\"bevel\" stroke-dasharray=\"2.00 4.00\" stroke-dashoffset=\"0.50\" />"),
+        nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(path);
+}

@@ -460,6 +460,70 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
     return true;
 }
 
+typedef struct CGPathVisitContext {
+    RdtPathVisitFn fn;
+    void* context;
+    bool ok;
+} CGPathVisitContext;
+
+static void cg_path_visit_apply(void* info, const CGPathElement* element) {
+    CGPathVisitContext* visit = (CGPathVisitContext*)info;
+    if (!visit || !visit->ok || !visit->fn || !element) return;
+
+    float args[6] = {};
+    RdtPathCommand command = RDT_PATH_MOVE;
+    int arg_count = 0;
+
+    switch (element->type) {
+    case kCGPathElementMoveToPoint:
+        command = RDT_PATH_MOVE;
+        arg_count = 2;
+        args[0] = (float)element->points[0].x;
+        args[1] = (float)element->points[0].y;
+        break;
+    case kCGPathElementAddLineToPoint:
+        command = RDT_PATH_LINE;
+        arg_count = 2;
+        args[0] = (float)element->points[0].x;
+        args[1] = (float)element->points[0].y;
+        break;
+    case kCGPathElementAddQuadCurveToPoint:
+        command = RDT_PATH_QUAD;
+        arg_count = 4;
+        args[0] = (float)element->points[0].x;
+        args[1] = (float)element->points[0].y;
+        args[2] = (float)element->points[1].x;
+        args[3] = (float)element->points[1].y;
+        break;
+    case kCGPathElementAddCurveToPoint:
+        command = RDT_PATH_CUBIC;
+        arg_count = 6;
+        args[0] = (float)element->points[0].x;
+        args[1] = (float)element->points[0].y;
+        args[2] = (float)element->points[1].x;
+        args[3] = (float)element->points[1].y;
+        args[4] = (float)element->points[2].x;
+        args[5] = (float)element->points[2].y;
+        break;
+    case kCGPathElementCloseSubpath:
+        command = RDT_PATH_CLOSE;
+        arg_count = 0;
+        break;
+    }
+
+    visit->ok = visit->fn(visit->context, command, args, arg_count);
+}
+
+bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context) {
+    if (!p || !p->cg || !fn) return false;
+    CGPathVisitContext visit = {};
+    visit.fn = fn;
+    visit.context = context;
+    visit.ok = true;
+    CGPathApply(p->cg, &visit, cg_path_visit_apply);
+    return visit.ok;
+}
+
 // ============================================================================
 // Fill
 // ============================================================================
