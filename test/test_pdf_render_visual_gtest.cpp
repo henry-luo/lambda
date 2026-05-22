@@ -189,6 +189,7 @@ static bool write_file_all(const char* path, const char* data, size_t len) {
     return written == len;
 }
 
+
 static bool has_pdf_ext(const char* name) {
     size_t len = strlen(name);
     return len > 4 && strcmp(name + len - 4, ".pdf") == 0;
@@ -492,6 +493,43 @@ static void compare_pngs(const char* reference_path, const char* lambda_path,
     image_free(got.pixels);
 }
 
+static void expect_pngs_exactly_equal(const char* expected_path, const char* actual_path) {
+    ImageData expected;
+    ImageData actual;
+    ASSERT_TRUE(load_png_rgba(expected_path, &expected))
+        << "failed to load expected PNG: " << expected_path;
+    ASSERT_TRUE(load_png_rgba(actual_path, &actual))
+        << "failed to load actual PNG: " << actual_path;
+
+    ASSERT_EQ(expected.width, actual.width) << "width mismatch for " << actual_path;
+    ASSERT_EQ(expected.height, actual.height) << "height mismatch for " << actual_path;
+
+    size_t byte_count = (size_t)expected.width * (size_t)expected.height * 4;
+    const unsigned char* expected_pixels = expected.pixels;
+    const unsigned char* actual_pixels = actual.pixels;
+    size_t first_mismatch = byte_count;
+    for (size_t i = 0; i < byte_count; i++) {
+        if (expected_pixels[i] != actual_pixels[i]) {
+            first_mismatch = i;
+            break;
+        }
+    }
+
+    if (first_mismatch != byte_count) {
+        size_t pixel_index = first_mismatch / 4;
+        size_t channel = first_mismatch % 4;
+        int x = (int)(pixel_index % (size_t)expected.width);
+        int y = (int)(pixel_index / (size_t)expected.width);
+        ADD_FAILURE() << "PNG mismatch at x=" << x << " y=" << y
+                      << " channel=" << channel
+                      << " expected=" << (int)expected_pixels[first_mismatch]
+                      << " actual=" << (int)actual_pixels[first_mismatch];
+    }
+
+    image_free(expected.pixels);
+    image_free(actual.pixels);
+}
+
 static void report_pdf_failures(const PdfPageResult* results, int result_count) {
     int failure_count = 0;
     for (int i = 0; i < result_count; i++) {
@@ -539,6 +577,66 @@ static int count_pdf_regressions(const PdfPageResult* results, int result_count)
         if (results[i].regressed) count++;
     }
     return count;
+}
+
+TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/tiled_png_parity.html";
+    const char* normal_png = "temp/render_output_parity/normal.png";
+    const char* tiled_png = "temp/render_output_parity/tiled.png";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>"
+        "html,body{margin:0;padding:0;background:#f6f4ee;}"
+        ".page{width:180px;height:920px;background:linear-gradient(180deg,#f6f4ee,#dbeafe);}"
+        ".card{position:absolute;left:18px;top:22px;width:138px;height:116px;"
+        "background:#ef4444;border:7px solid #111827;border-radius:18px;}"
+        ".band{position:absolute;left:0;top:196px;width:180px;height:86px;background:#22c55e;}"
+        ".round{position:absolute;left:42px;top:340px;width:96px;height:96px;"
+        "background:radial-gradient(circle,#fde68a,#f59e0b);border-radius:48px;}"
+        ".foot{position:absolute;left:24px;top:760px;width:132px;height:92px;"
+        "background:#3b82f6;border-radius:12px;box-shadow:0 0 0 6px #0f172a;}"
+        "</style></head><body><div class=\"page\">"
+        "<div class=\"card\"></div><div class=\"band\"></div>"
+        "<div class=\"round\"></div><div class=\"foot\"></div>"
+        "</div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qnormal[PATH_MAX + 8];
+    char qtiled[PATH_MAX + 8];
+    char normal_cmd[PATH_MAX * 4 + 256];
+    char tiled_cmd[PATH_MAX * 4 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(normal_png, qnormal, sizeof(qnormal));
+    shell_quote(tiled_png, qtiled, sizeof(qtiled));
+
+    snprintf(normal_cmd, sizeof(normal_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 %s render %s%s -o %s -vw 180 --pixel-ratio 1 > temp/render_output_parity/normal.out 2> temp/render_output_parity/normal.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qnormal);
+    snprintf(tiled_cmd, sizeof(tiled_cmd),
+             "RADIANT_TILE_THRESHOLD=1 RADIANT_TILE_STRIP_H=64 %s render %s%s -o %s -vw 180 --pixel-ratio 1 > temp/render_output_parity/tiled.out 2> temp/render_output_parity/tiled.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qtiled);
+
+    int normal_status = system(normal_cmd);
+    int tiled_status = system(tiled_cmd);
+
+    ASSERT_TRUE(WIFEXITED(normal_status));
+    ASSERT_EQ(WEXITSTATUS(normal_status), 0);
+    ASSERT_TRUE(WIFEXITED(tiled_status));
+    ASSERT_EQ(WEXITSTATUS(tiled_status), 0);
+    ASSERT_TRUE(file_exists(normal_png));
+    ASSERT_TRUE(file_exists(tiled_png));
+    expect_pngs_exactly_equal(normal_png, tiled_png);
 }
 
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {

@@ -325,6 +325,39 @@ TEST_F(PdfWriterTest, MoveToLineTo) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, CurveToClosePath) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+
+    HPDF_STATUS status;
+
+    status = HPDF_Page_MoveTo(page, 50.0f, 50.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_CurveTo(page, 75.0f, 100.0f, 125.0f, 100.0f, 150.0f, 50.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_ClosePath(page);
+    EXPECT_EQ(status, HPDF_OK);
+
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, ClipPath) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+
+    HPDF_STATUS status;
+
+    status = HPDF_Page_Rectangle(page, 10.0f, 20.0f, 30.0f, 40.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    status = HPDF_Page_Clip(page);
+    EXPECT_EQ(status, HPDF_OK);
+
+    HPDF_Free(doc);
+}
+
 TEST_F(PdfWriterTest, FillPath) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_Page page = HPDF_AddPage(doc);

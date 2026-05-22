@@ -546,6 +546,34 @@ HPDF_STATUS HPDF_Page_LineTo(HPDF_Page page, float x, float y) {
     return HPDF_OK;
 }
 
+HPDF_STATUS HPDF_Page_CurveTo(HPDF_Page page, float x1, float y1,
+                              float x2, float y2, float x3, float y3) {
+    if (!page) return HPDF_ERROR_INVALID_PARAM;
+
+    pdf_format_float(page->content, x1);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, y1);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, x2);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, y2);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, x3);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, y3);
+    strbuf_append_str(page->content, " c\n");
+
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page) {
+    if (!page) return HPDF_ERROR_INVALID_PARAM;
+
+    strbuf_append_str(page->content, "h\n");
+
+    return HPDF_OK;
+}
+
 /*---------------------------------------------------------------------------*/
 /*  Path Painting Functions                                                  */
 /*---------------------------------------------------------------------------*/
@@ -571,6 +599,14 @@ HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page) {
     
     strbuf_append_str(page->content, "b\n");
     
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_Clip(HPDF_Page page) {
+    if (!page) return HPDF_ERROR_INVALID_PARAM;
+
+    strbuf_append_str(page->content, "W\nn\n");
+
     return HPDF_OK;
 }
 

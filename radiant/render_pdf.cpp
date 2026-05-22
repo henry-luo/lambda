@@ -1,7 +1,10 @@
 #include "render.hpp"
 #include "render_backend.h"
+#include "render_backend_caps.hpp"
 #include "render_export_support.hpp"
 #include "paint_ir.h"
+#include "render_border.hpp"
+#include "render_path.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -18,6 +21,8 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+
+#define PDF_PATH_KAPPA 0.5522847498f
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -90,13 +95,327 @@ static void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width
     }
 }
 
+static float pdf_coord_y(PdfRenderContext* ctx, float y) {
+    return ctx->page_height - y;
+}
+
+static bool pdf_page_move_to(PdfRenderContext* ctx, float x, float y) {
+    return HPDF_Page_MoveTo(ctx->current_page, x, pdf_coord_y(ctx, y)) == HPDF_OK;
+}
+
+static bool pdf_page_line_to(PdfRenderContext* ctx, float x, float y) {
+    return HPDF_Page_LineTo(ctx->current_page, x, pdf_coord_y(ctx, y)) == HPDF_OK;
+}
+
+static bool pdf_page_curve_to(PdfRenderContext* ctx,
+                              float x1, float y1, float x2, float y2,
+                              float x3, float y3) {
+    return HPDF_Page_CurveTo(ctx->current_page,
+                             x1, pdf_coord_y(ctx, y1),
+                             x2, pdf_coord_y(ctx, y2),
+                             x3, pdf_coord_y(ctx, y3)) == HPDF_OK;
+}
+
+static bool pdf_page_close_path(PdfRenderContext* ctx) {
+    return HPDF_Page_ClosePath(ctx->current_page) == HPDF_OK;
+}
+
+typedef struct PdfPathContext {
+    PdfRenderContext* pdf;
+    const RdtMatrix* transform;
+    bool has_command;
+    bool has_current;
+    float current_x;
+    float current_y;
+    float subpath_x;
+    float subpath_y;
+} PdfPathContext;
+
+static void pdf_path_set_current(PdfPathContext* ctx, float x, float y) {
+    ctx->current_x = x;
+    ctx->current_y = y;
+    ctx->has_current = true;
+}
+
+static void pdf_path_transform_point(PdfPathContext* ctx, float x, float y,
+                                     float* out_x, float* out_y) {
+    if (ctx->transform) {
+        *out_x = ctx->transform->e11 * x + ctx->transform->e12 * y + ctx->transform->e13;
+        *out_y = ctx->transform->e21 * x + ctx->transform->e22 * y + ctx->transform->e23;
+    } else {
+        *out_x = x;
+        *out_y = y;
+    }
+}
+
+static bool pdf_path_move_to(PdfPathContext* ctx, float x, float y) {
+    float tx = 0.0f, ty = 0.0f;
+    pdf_path_transform_point(ctx, x, y, &tx, &ty);
+    if (!pdf_page_move_to(ctx->pdf, tx, ty)) return false;
+    pdf_path_set_current(ctx, x, y);
+    ctx->subpath_x = x;
+    ctx->subpath_y = y;
+    return true;
+}
+
+static bool pdf_path_line_to(PdfPathContext* ctx, float x, float y) {
+    float tx = 0.0f, ty = 0.0f;
+    pdf_path_transform_point(ctx, x, y, &tx, &ty);
+    if (!pdf_page_line_to(ctx->pdf, tx, ty)) return false;
+    pdf_path_set_current(ctx, x, y);
+    return true;
+}
+
+static bool pdf_path_curve_to(PdfPathContext* ctx,
+                              float x1, float y1, float x2, float y2,
+                              float x3, float y3) {
+    float tx1 = 0.0f, ty1 = 0.0f;
+    float tx2 = 0.0f, ty2 = 0.0f;
+    float tx3 = 0.0f, ty3 = 0.0f;
+    pdf_path_transform_point(ctx, x1, y1, &tx1, &ty1);
+    pdf_path_transform_point(ctx, x2, y2, &tx2, &ty2);
+    pdf_path_transform_point(ctx, x3, y3, &tx3, &ty3);
+    if (!pdf_page_curve_to(ctx->pdf, tx1, ty1, tx2, ty2, tx3, ty3)) return false;
+    pdf_path_set_current(ctx, x3, y3);
+    return true;
+}
+
+static bool pdf_path_close_path(PdfPathContext* ctx) {
+    if (!pdf_page_close_path(ctx->pdf)) return false;
+    pdf_path_set_current(ctx, ctx->subpath_x, ctx->subpath_y);
+    return true;
+}
+
+static bool pdf_path_emit_rounded_rect(PdfPathContext* ctx,
+                                       float x, float y, float w, float h,
+                                       float rx, float ry) {
+    if (rx < 0.0f) rx = 0.0f;
+    if (ry < 0.0f) ry = 0.0f;
+    if (rx > w * 0.5f) rx = w * 0.5f;
+    if (ry > h * 0.5f) ry = h * 0.5f;
+
+    if (rx == 0.0f && ry == 0.0f) {
+        if (!ctx->transform) {
+            float pdf_y = ctx->pdf->page_height - y - h;
+            if (HPDF_Page_Rectangle(ctx->pdf->current_page, x, pdf_y, w, h) != HPDF_OK) {
+                return false;
+            }
+            pdf_path_set_current(ctx, x, y);
+            ctx->subpath_x = x;
+            ctx->subpath_y = y;
+            return true;
+        }
+        if (!pdf_path_move_to(ctx, x, y)) return false;
+        if (!pdf_path_line_to(ctx, x + w, y)) return false;
+        if (!pdf_path_line_to(ctx, x + w, y + h)) return false;
+        if (!pdf_path_line_to(ctx, x, y + h)) return false;
+        return pdf_path_close_path(ctx);
+    }
+
+    float sx = x + rx;
+    float sy = y;
+    if (!pdf_path_move_to(ctx, sx, sy)) return false;
+
+    if (!pdf_path_line_to(ctx, x + w - rx, y)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           x + w - rx + rx * PDF_PATH_KAPPA, y,
+                           x + w, y + ry - ry * PDF_PATH_KAPPA,
+                           x + w, y + ry)) return false;
+    if (!pdf_path_line_to(ctx, x + w, y + h - ry)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           x + w, y + h - ry + ry * PDF_PATH_KAPPA,
+                           x + w - rx + rx * PDF_PATH_KAPPA, y + h,
+                           x + w - rx, y + h)) return false;
+    if (!pdf_path_line_to(ctx, x + rx, y + h)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           x + rx - rx * PDF_PATH_KAPPA, y + h,
+                           x, y + h - ry + ry * PDF_PATH_KAPPA,
+                           x, y + h - ry)) return false;
+    if (!pdf_path_line_to(ctx, x, y + ry)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           x, y + ry - ry * PDF_PATH_KAPPA,
+                           x + rx - rx * PDF_PATH_KAPPA, y,
+                           sx, sy)) return false;
+    return pdf_path_close_path(ctx);
+}
+
+static bool pdf_path_emit_circle(PdfPathContext* ctx,
+                                 float cx, float cy, float rx, float ry) {
+    if (rx <= 0.0f || ry <= 0.0f) return false;
+
+    float sx = cx + rx;
+    float sy = cy;
+    if (!pdf_path_move_to(ctx, sx, sy)) return false;
+
+    if (!pdf_path_curve_to(ctx,
+                           cx + rx, cy + ry * PDF_PATH_KAPPA,
+                           cx + rx * PDF_PATH_KAPPA, cy + ry,
+                           cx, cy + ry)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           cx - rx * PDF_PATH_KAPPA, cy + ry,
+                           cx - rx, cy + ry * PDF_PATH_KAPPA,
+                           cx - rx, cy)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           cx - rx, cy - ry * PDF_PATH_KAPPA,
+                           cx - rx * PDF_PATH_KAPPA, cy - ry,
+                           cx, cy - ry)) return false;
+    if (!pdf_path_curve_to(ctx,
+                           cx + rx * PDF_PATH_KAPPA, cy - ry,
+                           cx + rx, cy - ry * PDF_PATH_KAPPA,
+                           sx, sy)) return false;
+    return pdf_path_close_path(ctx);
+}
+
+static bool pdf_path_visit(void* context, RdtPathCommand command,
+                           const float* args, int arg_count) {
+    PdfPathContext* ctx = (PdfPathContext*)context;
+    if (!ctx || !ctx->pdf) return false;
+    ctx->has_command = true;
+
+    switch (command) {
+    case RDT_PATH_MOVE:
+        if (arg_count < 2) return false;
+        if (!pdf_path_move_to(ctx, args[0], args[1])) return false;
+        break;
+    case RDT_PATH_LINE:
+        if (arg_count < 2) return false;
+        if (!pdf_path_line_to(ctx, args[0], args[1])) return false;
+        break;
+    case RDT_PATH_QUAD: {
+        if (arg_count < 4 || !ctx->has_current) return false;
+        float c1x = ctx->current_x + (args[0] - ctx->current_x) * (2.0f / 3.0f);
+        float c1y = ctx->current_y + (args[1] - ctx->current_y) * (2.0f / 3.0f);
+        float c2x = args[2] + (args[0] - args[2]) * (2.0f / 3.0f);
+        float c2y = args[3] + (args[1] - args[3]) * (2.0f / 3.0f);
+        if (!pdf_path_curve_to(ctx, c1x, c1y, c2x, c2y, args[2], args[3])) return false;
+        break;
+    }
+    case RDT_PATH_CUBIC:
+        if (arg_count < 6) return false;
+        if (!pdf_path_curve_to(ctx, args[0], args[1], args[2], args[3],
+                               args[4], args[5])) return false;
+        break;
+    case RDT_PATH_CLOSE:
+        if (!pdf_path_close_path(ctx)) return false;
+        break;
+    case RDT_PATH_RECT:
+        if (arg_count < 6) return false;
+        if (!pdf_path_emit_rounded_rect(ctx, args[0], args[1], args[2], args[3],
+                                        args[4], args[5])) return false;
+        break;
+    case RDT_PATH_CIRCLE:
+        if (arg_count < 4) return false;
+        if (!pdf_path_emit_circle(ctx, args[0], args[1], args[2], args[3])) return false;
+        break;
+    }
+
+    return true;
+}
+
+static bool pdf_render_path(PdfRenderContext* ctx, RdtPath* path,
+                            const RdtMatrix* transform) {
+    if (!ctx || !path) return false;
+    PdfPathContext path_ctx = {};
+    path_ctx.pdf = ctx;
+    path_ctx.transform = transform;
+    if (!rdt_path_visit(path, pdf_path_visit, &path_ctx)) return false;
+    return path_ctx.has_command;
+}
+
+static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
+                               const RdtMatrix* transform) {
+    if (!ctx || !path) return false;
+    if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) return false;
+    if (!pdf_render_path(ctx, path, transform)) {
+        HPDF_Page_GRestore(ctx->current_page);
+        return false;
+    }
+    if (HPDF_Page_Clip(ctx->current_page) != HPDF_OK) {
+        HPDF_Page_GRestore(ctx->current_page);
+        return false;
+    }
+    return true;
+}
+
 static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+    const RenderExportTargetCaps* caps =
+        render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
+    int active_clip_depth = 0;
+    int skipped_clip_depth = 0;
     for (int i = 0; i < ctx->paint_list.count; i++) {
         PaintCmd* cmd = &ctx->paint_list.cmds[i];
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
+            if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
             pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+            break;
+        }
+        case PAINT_FILL_ROUNDED_RECT: {
+            if (!caps || !caps->rounded_rects) break;
+            PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
+            if (p->color.a == 0) break;
+            pdf_set_color(ctx, p->color);
+            PdfPathContext path_ctx = {};
+            path_ctx.pdf = ctx;
+            if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
+                                           p->rx, p->ry)) {
+                HPDF_Page_Fill(ctx->current_page);
+            }
+            break;
+        }
+        case PAINT_FILL_PATH: {
+            if (!caps || !caps->paths) break;
+            PaintFillPath* p = &cmd->fill_path;
+            if (p->color.a == 0 || p->rule != RDT_FILL_WINDING) break;
+            if (p->has_transform && !caps->transforms) break;
+            pdf_set_color(ctx, p->color);
+            if (pdf_render_path(ctx, p->path, p->has_transform ? &p->transform : nullptr)) {
+                HPDF_Page_Fill(ctx->current_page);
+            }
+            break;
+        }
+        case PAINT_STROKE_PATH: {
+            if (!caps || !caps->strokes) break;
+            PaintStrokePath* p = &cmd->stroke_path;
+            if (p->color.a == 0 || p->dash_count > 0) break;
+            if (p->has_transform && !caps->transforms) break;
+            pdf_set_color(ctx, p->color);
+            HPDF_Page_SetLineWidth(ctx->current_page, p->width);
+            if (pdf_render_path(ctx, p->path, p->has_transform ? &p->transform : nullptr)) {
+                HPDF_Page_Stroke(ctx->current_page);
+            }
+            break;
+        }
+        case PAINT_PUSH_CLIP: {
+            if (skipped_clip_depth > 0) {
+                skipped_clip_depth++;
+                break;
+            }
+            if (!caps || !caps->clips) {
+                skipped_clip_depth++;
+                break;
+            }
+            PaintPushClip* p = &cmd->push_clip;
+            if (p->has_transform && !caps->transforms) {
+                skipped_clip_depth++;
+                break;
+            }
+            if (pdf_push_clip_path(ctx, p->clip_path,
+                                   p->has_transform ? &p->transform : nullptr)) {
+                active_clip_depth++;
+            } else {
+                skipped_clip_depth++;
+            }
+            break;
+        }
+        case PAINT_POP_CLIP: {
+            if (skipped_clip_depth > 0) {
+                skipped_clip_depth--;
+            } else if (active_clip_depth > 0) {
+                HPDF_Page_GRestore(ctx->current_page);
+                active_clip_depth--;
+            }
             break;
         }
         default:
@@ -111,6 +430,56 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
                                 Color color) {
     paint_fill_rect(&ctx->paint_list, x, y, width, height, color);
     pdf_lower_paint_list(ctx);
+}
+
+static void pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
+    paint_fill_path(&ctx->paint_list, path, color, RDT_FILL_WINDING, nullptr);
+    pdf_lower_paint_list(ctx);
+}
+
+static void pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
+                                  Color color, float width) {
+    paint_stroke_path(&ctx->paint_list, path, color, width,
+                      RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
+    pdf_lower_paint_list(ctx);
+}
+
+static Corner pdf_corner_inset(const Corner* radius, float inset_x, float inset_y) {
+    Corner out = *radius;
+    out.top_left = fmaxf(0.0f, out.top_left - inset_x);
+    out.top_left_y = fmaxf(0.0f, out.top_left_y - inset_y);
+    out.top_right = fmaxf(0.0f, out.top_right - inset_x);
+    out.top_right_y = fmaxf(0.0f, out.top_right_y - inset_y);
+    out.bottom_right = fmaxf(0.0f, out.bottom_right - inset_x);
+    out.bottom_right_y = fmaxf(0.0f, out.bottom_right_y - inset_y);
+    out.bottom_left = fmaxf(0.0f, out.bottom_left - inset_x);
+    out.bottom_left_y = fmaxf(0.0f, out.bottom_left_y - inset_y);
+    return out;
+}
+
+static bool pdf_has_border_radius(const BorderProp* border) {
+    if (!border) return false;
+    const Corner* radius = &border->radius;
+    return radius->top_left > 0.0f || radius->top_right > 0.0f ||
+           radius->bottom_right > 0.0f || radius->bottom_left > 0.0f ||
+           radius->top_left_y > 0.0f || radius->top_right_y > 0.0f ||
+           radius->bottom_right_y > 0.0f || radius->bottom_left_y > 0.0f;
+}
+
+static bool pdf_border_is_uniform_solid(const BorderProp* border) {
+    if (!border || border->width.top <= 0.0f || border->top_color.a == 0) {
+        return false;
+    }
+    return border->width.top == border->width.right &&
+           border->width.right == border->width.bottom &&
+           border->width.bottom == border->width.left &&
+           border->top_style == CSS_VALUE_SOLID &&
+           border->right_style == CSS_VALUE_SOLID &&
+           border->bottom_style == CSS_VALUE_SOLID &&
+           border->left_style == CSS_VALUE_SOLID &&
+           border->top_color.c == border->right_color.c &&
+           border->right_color.c == border->bottom_color.c &&
+           border->bottom_color.c == border->left_color.c;
 }
 
 // Render text view
@@ -299,12 +668,42 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
 
     // Background
     if (view->bound->background && view->bound->background->color.a > 0) {
-        pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
+        if (pdf_has_border_radius(view->bound->border)) {
+            Corner background_radius = view->bound->border->radius;
+            constrain_corner_radii(&background_radius, width, height);
+            Rect background_rect = {abs_x, abs_y, width, height};
+            RdtPath* background_path =
+                render_path_create_rounded_rect(background_rect, &background_radius);
+            if (background_path) {
+                pdf_paint_fill_path(ctx, background_path, view->bound->background->color);
+                rdt_path_free(background_path);
+            } else {
+                pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
+            }
+        } else {
+            pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
+        }
     }
 
     // Borders
     if (view->bound->border) {
         BorderProp* border = view->bound->border;
+        if (pdf_has_border_radius(border) && pdf_border_is_uniform_solid(border) &&
+            width > border->width.top && height > border->width.top) {
+            float border_width = border->width.top;
+            float half_width = border_width * 0.5f;
+            Corner border_radius = border->radius;
+            constrain_corner_radii(&border_radius, width, height);
+            Corner stroke_radius = pdf_corner_inset(&border_radius, half_width, half_width);
+            Rect stroke_rect = {abs_x + half_width, abs_y + half_width,
+                                width - border_width, height - border_width};
+            RdtPath* stroke_path = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
+            if (stroke_path) {
+                pdf_paint_stroke_path(ctx, stroke_path, border->top_color, border_width);
+                rdt_path_free(stroke_path);
+                return;
+            }
+        }
         if (border->width.top > 0 && border->top_color.a > 0)
             pdf_paint_fill_rect(ctx, abs_x, abs_y, width, (float)border->width.top, border->top_color);
         if (border->width.right > 0 && border->right_color.a > 0)

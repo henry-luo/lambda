@@ -690,6 +690,55 @@ static void paint_svg_note_unsupported(StrBuf* out, int indent_level, PaintOp op
     strbuf_append_format(out, "<!-- unsupported %s -->\n", paint_op_name(op));
 }
 
+static bool paint_svg_caps_allow_rect(const RenderExportTargetCaps* caps) {
+    return caps && caps->rects;
+}
+
+static bool paint_svg_caps_allow_rounded_rect(const RenderExportTargetCaps* caps) {
+    return caps && caps->rounded_rects;
+}
+
+static bool paint_svg_caps_allow_path(const RenderExportTargetCaps* caps,
+                                      bool has_transform) {
+    if (!caps || !caps->paths) return false;
+    return !has_transform || caps->transforms;
+}
+
+static bool paint_svg_caps_allow_stroke(const RenderExportTargetCaps* caps,
+                                        bool has_transform) {
+    if (!caps || !caps->paths || !caps->strokes) return false;
+    return !has_transform || caps->transforms;
+}
+
+static bool paint_svg_caps_allow_gradient(const RenderExportTargetCaps* caps,
+                                          bool has_transform) {
+    if (!caps || !caps->paths || !caps->gradients) return false;
+    return !has_transform || caps->transforms;
+}
+
+static bool paint_svg_caps_allow_clip(const RenderExportTargetCaps* caps,
+                                      bool has_transform) {
+    if (!caps || !caps->paths || !caps->clips) return false;
+    return !has_transform || caps->transforms;
+}
+
+static void paint_svg_append_gradient_stops(StrBuf* out,
+                                            const RdtGradientStop* stops,
+                                            int stop_count,
+                                            int indent_level) {
+    for (int stop_i = 0; stop_i < stop_count; stop_i++) {
+        const RdtGradientStop* stop = &stops[stop_i];
+        paint_svg_indent(out, indent_level);
+        strbuf_append_format(out,
+            "<stop offset=\"%.4f\" stop-color=\"rgb(%d,%d,%d)\"",
+            stop->offset, stop->r, stop->g, stop->b);
+        if (stop->a < 255) {
+            strbuf_append_format(out, " stop-opacity=\"%.4f\"", stop->a / 255.0f);
+        }
+        strbuf_append_str(out, " />\n");
+    }
+}
+
 void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
                         const PaintSvgLoweringOptions* options,
                         PaintSvgLoweringStats* stats) {
@@ -702,12 +751,23 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
     PaintSvgLoweringStats* active_stats = stats ? stats : &local_stats;
     int indent_level = options ? options->indent_level : 0;
     bool emit_unsupported_comments = options ? options->emit_unsupported_comments : false;
+    int resource_id_base = options ? options->resource_id_base : 0;
+    const RenderExportTargetCaps* caps = options && options->caps
+        ? options->caps
+        : render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
+    int open_clip_depth = 0;
+    int skipped_clip_depth = 0;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
         active_stats->command_count++;
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
+            if (!paint_svg_caps_allow_rect(caps)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
             const PaintFillRect* p = &cmd->fill_rect;
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out,
@@ -719,6 +779,11 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
             break;
         }
         case PAINT_FILL_ROUNDED_RECT: {
+            if (!paint_svg_caps_allow_rounded_rect(caps)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
             const PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out,
@@ -731,6 +796,11 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
         }
         case PAINT_FILL_PATH: {
             const PaintFillPath* p = &cmd->fill_path;
+            if (!paint_svg_caps_allow_path(caps, p->has_transform)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
             StrBuf* path_data = strbuf_new();
             if (!paint_svg_path_to_string(p->path, path_data)) {
                 strbuf_free(path_data);
@@ -754,6 +824,11 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
         }
         case PAINT_STROKE_PATH: {
             const PaintStrokePath* p = &cmd->stroke_path;
+            if (!paint_svg_caps_allow_stroke(caps, p->has_transform)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
             StrBuf* path_data = strbuf_new();
             if (!paint_svg_path_to_string(p->path, path_data)) {
                 strbuf_free(path_data);
@@ -783,6 +858,143 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
             paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
             strbuf_append_str(out, " />\n");
             strbuf_free(path_data);
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_FILL_LINEAR_GRADIENT: {
+            const PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
+            if (!paint_svg_caps_allow_gradient(caps, p->has_transform) ||
+                !p->stops || p->stop_count <= 0) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            StrBuf* path_data = strbuf_new();
+            if (!paint_svg_path_to_string(p->path, path_data)) {
+                strbuf_free(path_data);
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            int gradient_id = resource_id_base + i;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<defs><linearGradient id=\"paint-ir-linear-%d\" gradientUnits=\"userSpaceOnUse\" "
+                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\">\n",
+                gradient_id, p->x1, p->y1, p->x2, p->y2);
+            paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
+                                            indent_level + 1);
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "</linearGradient></defs>\n");
+
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-linear-%d)\"",
+                                 path_data->str, gradient_id);
+            if (p->rule == RDT_FILL_EVEN_ODD) {
+                strbuf_append_str(out, " fill-rule=\"evenodd\"");
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " />\n");
+            strbuf_free(path_data);
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_FILL_RADIAL_GRADIENT: {
+            const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
+            if (!paint_svg_caps_allow_gradient(caps, p->has_transform) ||
+                !p->stops || p->stop_count <= 0) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            StrBuf* path_data = strbuf_new();
+            if (!paint_svg_path_to_string(p->path, path_data)) {
+                strbuf_free(path_data);
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            int gradient_id = resource_id_base + i;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<defs><radialGradient id=\"paint-ir-radial-%d\" gradientUnits=\"userSpaceOnUse\" "
+                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\">\n",
+                gradient_id, p->cx, p->cy, p->r);
+            paint_svg_append_gradient_stops(out, p->stops, p->stop_count,
+                                            indent_level + 1);
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "</radialGradient></defs>\n");
+
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-radial-%d)\"",
+                                 path_data->str, gradient_id);
+            if (p->rule == RDT_FILL_EVEN_ODD) {
+                strbuf_append_str(out, " fill-rule=\"evenodd\"");
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " />\n");
+            strbuf_free(path_data);
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_PUSH_CLIP: {
+            const PaintPushClip* p = &cmd->push_clip;
+            if (skipped_clip_depth > 0) {
+                skipped_clip_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            if (!paint_svg_caps_allow_clip(caps, p->has_transform)) {
+                skipped_clip_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            StrBuf* path_data = strbuf_new();
+            if (!paint_svg_path_to_string(p->clip_path, path_data)) {
+                strbuf_free(path_data);
+                skipped_clip_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            int clip_id = resource_id_base + i;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<defs><clipPath id=\"paint-ir-clip-%d\"><path d=\"%s\"",
+                clip_id, path_data->str);
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " /></clipPath></defs>\n");
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<g clip-path=\"url(#paint-ir-clip-%d)\">\n", clip_id);
+            strbuf_free(path_data);
+            open_clip_depth++;
+            indent_level++;
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_POP_CLIP: {
+            if (skipped_clip_depth > 0) {
+                skipped_clip_depth--;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            if (open_clip_depth <= 0) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            open_clip_depth--;
+            indent_level--;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "</g>\n");
             active_stats->emitted_count++;
             break;
         }

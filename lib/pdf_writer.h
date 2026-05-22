@@ -246,6 +246,29 @@ HPDF_STATUS HPDF_Page_MoveTo(HPDF_Page page, float x, float y);
  */
 HPDF_STATUS HPDF_Page_LineTo(HPDF_Page page, float x, float y);
 
+/**
+ * Append a cubic Bezier curve from current point to specified point.
+ *
+ * @param page  Page handle
+ * @param x1    First control point X coordinate
+ * @param y1    First control point Y coordinate
+ * @param x2    Second control point X coordinate
+ * @param y2    Second control point Y coordinate
+ * @param x3    End point X coordinate
+ * @param y3    End point Y coordinate
+ * @return      HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_CurveTo(HPDF_Page page, float x1, float y1,
+                              float x2, float y2, float x3, float y3);
+
+/**
+ * Close the current path.
+ *
+ * @param page  Page handle
+ * @return      HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page);
+
 /*---------------------------------------------------------------------------*/
 /*  Path Painting Functions                                                  */
 /*---------------------------------------------------------------------------*/
@@ -273,6 +296,15 @@ HPDF_STATUS HPDF_Page_Stroke(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page);
+
+/**
+ * Intersect the current clipping path with the current path using the
+ * non-zero winding rule, then end the current path.
+ *
+ * @param page  Page handle
+ * @return      HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_Clip(HPDF_Page page);
 
 /*---------------------------------------------------------------------------*/
 /*  Text Functions                                                           */

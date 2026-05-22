@@ -1045,3 +1045,168 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsInspectableStrokePath) {
     strbuf_free(out);
     rdt_path_free(path);
 }
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsClipGroup) {
+    RdtPath* clip_path = rdt_path_new();
+    ASSERT_NE(clip_path, nullptr);
+    rdt_path_add_rect(clip_path, 1.0f, 2.0f, 30.0f, 40.0f, 3.0f, 4.0f);
+
+    RdtMatrix transform = rdt_matrix_translate(5.0f, 6.0f);
+    Color fill_color = {};
+    fill_color.r = 1;
+    fill_color.g = 2;
+    fill_color.b = 3;
+    fill_color.a = 255;
+    paint_push_clip(&pl, clip_path, &transform);
+    paint_fill_rect(&pl, 10.0f, 11.0f, 12.0f, 13.0f, fill_color);
+    paint_pop_clip(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.resource_id_base = 30;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<defs><clipPath id=\"paint-ir-clip-30\"><path d=\"M4.00,2.00 L28.00,2.00 A3.00,4.00 0 0 1 31.00,6.00 L31.00,38.00 A3.00,4.00 0 0 1 28.00,42.00 L4.00,42.00 A3.00,4.00 0 0 1 1.00,38.00 L1.00,6.00 A3.00,4.00 0 0 1 4.00,2.00 Z \" transform=\"matrix(1 0 0 1 5 6)\" /></clipPath></defs>"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "<g clip-path=\"url(#paint-ir-clip-30)\">"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"10.00\" y=\"11.00\" width=\"12.00\" height=\"13.00\" fill=\"rgb(1,2,3)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(clip_path);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
+    Color color = {};
+    color.r = 1;
+    color.g = 2;
+    color.b = 3;
+    color.a = 255;
+
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_move_to(path, 0.0f, 0.0f);
+    rdt_path_line_to(path, 10.0f, 0.0f);
+    rdt_path_close(path);
+
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, color);
+    paint_fill_rounded_rect(&pl, 5.0f, 6.0f, 7.0f, 8.0f, 2.0f, 2.0f, color);
+    paint_fill_path(&pl, path, color, RDT_FILL_WINDING, nullptr);
+    paint_stroke_path(&pl, path, color, 1.25f, RDT_CAP_BUTT, RDT_JOIN_MITER,
+                      nullptr, 0, 0.0f, nullptr);
+    RdtGradientStop stops[2] = {
+        {0.0f, 1, 2, 3, 255},
+        {1.0f, 4, 5, 6, 255}
+    };
+    paint_fill_linear_gradient(&pl, path, 0.0f, 0.0f, 10.0f, 10.0f,
+                               stops, 2, RDT_FILL_WINDING, nullptr);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.emit_unsupported_comments = true;
+    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 5);
+    EXPECT_EQ(stats.emitted_count, 4);
+    EXPECT_EQ(stats.unsupported_count, 1);
+    EXPECT_NE(strstr(out->str,
+        "<rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(1,2,3)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<rect x=\"5.00\" y=\"6.00\" width=\"7.00\" height=\"8.00\" rx=\"2.00\" ry=\"2.00\" fill=\"rgb(1,2,3)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "<path d=\"M0.00,0.00 L10.00,0.00 Z \" fill=\"rgb(1,2,3)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<path d=\"M0.00,0.00 L10.00,0.00 Z \" fill=\"none\" stroke=\"rgb(1,2,3)\" stroke-width=\"1.25\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_FILL_LINEAR_GRADIENT -->"), nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(path);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsLinearGradientPath) {
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 1.0f, 2.0f, 30.0f, 40.0f, 0.0f, 0.0f);
+
+    RdtGradientStop stops[2] = {
+        {0.0f, 10, 20, 30, 255},
+        {1.0f, 40, 50, 60, 128}
+    };
+    paint_fill_linear_gradient(&pl, path, 1.0f, 2.0f, 31.0f, 42.0f,
+                               stops, 2, RDT_FILL_WINDING, nullptr);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.resource_id_base = 70;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<defs><linearGradient id=\"paint-ir-linear-70\" gradientUnits=\"userSpaceOnUse\" x1=\"1.000\" y1=\"2.000\" x2=\"31.000\" y2=\"42.000\">"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<stop offset=\"1.0000\" stop-color=\"rgb(40,50,60)\" stop-opacity=\"0.5020\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<path d=\"M1.00,2.00 L31.00,2.00 L31.00,42.00 L1.00,42.00 Z \" fill=\"url(#paint-ir-linear-70)\" />"),
+        nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(path);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsRadialGradientPath) {
+    RdtPath* path = rdt_path_new();
+    ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0.0f, 0.0f, 20.0f, 10.0f, 0.0f, 0.0f);
+
+    RdtGradientStop stops[2] = {
+        {0.25f, 1, 2, 3, 255},
+        {0.75f, 4, 5, 6, 255}
+    };
+    paint_fill_radial_gradient(&pl, path, 10.0f, 5.0f, 8.0f,
+                               stops, 2, RDT_FILL_EVEN_ODD, nullptr);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.resource_id_base = 90;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<defs><radialGradient id=\"paint-ir-radial-90\" gradientUnits=\"userSpaceOnUse\" cx=\"10.000\" cy=\"5.000\" r=\"8.000\">"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<path d=\"M0.00,0.00 L20.00,0.00 L20.00,10.00 L0.00,10.00 Z \" fill=\"url(#paint-ir-radial-90)\" fill-rule=\"evenodd\" />"),
+        nullptr);
+
+    strbuf_free(out);
+    rdt_path_free(path);
+}
