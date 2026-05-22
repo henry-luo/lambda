@@ -631,14 +631,52 @@ static void jm_try_mark_uri_escape_metadata(JsMirTranspiler* mt, const char* vna
     }
     MIR_reg_t byte_reg = jm_transpile_as_native(mt, byte_arg, byte_type, LMD_TYPE_INT);
     MIR_reg_t low_bits = jm_new_reg(mt, "uri_byte_bits", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
-        MIR_new_reg_op(mt->ctx, low_bits), MIR_new_reg_op(mt->ctx, byte_reg),
-        MIR_new_int_op(mt->ctx, is_first_byte ? 0x07 : 0x3F)));
+    if (is_first_byte) {
+        MIR_reg_t is_four_byte = jm_new_reg(mt, "uri_b0_four", MIR_T_I64);
+        MIR_reg_t three_bits = jm_new_reg(mt, "uri_b0_3b_bits", MIR_T_I64);
+        MIR_reg_t four_bits = jm_new_reg(mt, "uri_b0_4b_bits", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GES,
+            MIR_new_reg_op(mt->ctx, is_four_byte),
+            MIR_new_reg_op(mt->ctx, byte_reg), MIR_new_int_op(mt->ctx, 0xF0)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, three_bits), MIR_new_reg_op(mt->ctx, byte_reg),
+            MIR_new_int_op(mt->ctx, 0x0F)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, four_bits), MIR_new_reg_op(mt->ctx, byte_reg),
+            MIR_new_int_op(mt->ctx, 0x07)));
+        MIR_label_t l_three = jm_new_label(mt);
+        MIR_label_t l_done_bits = jm_new_label(mt);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_three),
+            MIR_new_reg_op(mt->ctx, is_four_byte)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, low_bits), MIR_new_reg_op(mt->ctx, four_bits)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done_bits)));
+        jm_emit_label(mt, l_three);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, low_bits), MIR_new_reg_op(mt->ctx, three_bits)));
+        jm_emit_label(mt, l_done_bits);
+    } else {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, low_bits), MIR_new_reg_op(mt->ctx, byte_reg),
+            MIR_new_int_op(mt->ctx, 0x3F)));
+    }
 
     if (is_first_byte) {
         target->uri_escape_cp_reg = low_bits;
-        target->uri_escape_valid_reg = jm_emit_i64_range_check(mt, byte_reg, 0xF0, 0xF4,
-            "uri_b0_ok");
+        // Track both three-byte and four-byte URI prefixes. The later loop
+        // matcher decides which shape is safe to fast-forward, but the metadata
+        // must preserve the right leading-byte payload bits for both ranges.
+        MIR_reg_t three_ok = jm_emit_i64_range_check(mt, byte_reg, 0xE0, 0xEF,
+            "uri_b0_3_ok");
+        MIR_reg_t four_ok = jm_emit_i64_range_check(mt, byte_reg, 0xF0, 0xF4,
+            "uri_b0_4_ok");
+        MIR_reg_t first_ok = jm_new_reg(mt, "uri_b0_ok", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+            MIR_new_reg_op(mt->ctx, first_ok),
+            MIR_new_reg_op(mt->ctx, three_ok),
+            MIR_new_reg_op(mt->ctx, four_ok)));
+        target->uri_escape_valid_reg = first_ok;
         target->uri_escape_byte_count = 1;
         jm_diagnose_fast_path_note(mt, "uri.escape.metadata", "marked-first-byte");
         return;
@@ -1148,6 +1186,186 @@ static bool jm_emit_uri_escape_inner_loop_fast_forward(JsMirTranspiler* mt,
     return true;
 }
 
+static bool jm_stmt_match_uri_decode_continue_if_one_arg(JsAstNode* node,
+        const char* hex_vname) {
+    if (!node || node->node_type != JS_AST_NODE_IF_STATEMENT) return false;
+    JsIfNode* ifn = (JsIfNode*)node;
+    if (ifn->alternate || !ifn->consequent ||
+        ifn->consequent->node_type != JS_AST_NODE_CONTINUE_STATEMENT ||
+        !ifn->test || ifn->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* cmp = (JsBinaryNode*)ifn->test;
+    if (cmp->op != JS_OP_STRICT_EQ ||
+        !cmp->left || cmp->left->node_type != JS_AST_NODE_CALL_EXPRESSION ||
+        !cmp->right || cmp->right->node_type != JS_AST_NODE_CALL_EXPRESSION) {
+        return false;
+    }
+    JsCallNode* decode = (JsCallNode*)cmp->left;
+    if (!decode->callee || decode->callee->node_type != JS_AST_NODE_IDENTIFIER ||
+        !decode->arguments || decode->arguments->next ||
+        !jm_stmt_identifier_matches_vname(decode->arguments, hex_vname)) {
+        return false;
+    }
+    JsIdentifierNode* dec_id = (JsIdentifierNode*)decode->callee;
+    if (!jm_stmt_identifier_name_matches(dec_id->name, "decodeURI", 9) &&
+        !jm_stmt_identifier_name_matches(dec_id->name, "decodeURIComponent", 18)) {
+        return false;
+    }
+    JsCallNode* from = (JsCallNode*)cmp->right;
+    if (!from->callee || from->callee->node_type != JS_AST_NODE_MEMBER_EXPRESSION ||
+        !from->arguments || from->arguments->next) {
+        return false;
+    }
+    JsMemberNode* member = (JsMemberNode*)from->callee;
+    if (member->computed || !member->object || !member->property ||
+        member->object->node_type != JS_AST_NODE_IDENTIFIER ||
+        member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* obj = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+    return jm_stmt_identifier_name_matches(obj->name, "String", 6) &&
+        jm_stmt_identifier_name_matches(prop->name, "fromCharCode", 12);
+}
+
+static bool jm_stmt_match_uri_escape_three_byte_loop(JsMirTranspiler* mt, JsForNode* for_node,
+        char* byte_vname_out, size_t byte_vname_size,
+        char* count_vname_out, size_t count_vname_size,
+        MIR_reg_t* prefix_valid_out) {
+    if (!mt || !for_node || !byte_vname_out || byte_vname_size == 0 ||
+        !count_vname_out || count_vname_size == 0 || !prefix_valid_out ||
+        !for_node->body || for_node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
+        return false;
+    }
+    byte_vname_out[0] = 0;
+    count_vname_out[0] = 0;
+    *prefix_valid_out = 0;
+
+    JsBlockNode* blk = (JsBlockNode*)for_node->body;
+    JsAstNode* count_stmt = blk->statements;
+    JsAstNode* hex_decl = count_stmt ? count_stmt->next : NULL;
+    JsAstNode* index_decl = hex_decl ? hex_decl->next : NULL;
+    if (!count_stmt || !hex_decl || !index_decl) return false;
+
+    char count_vname[128];
+    char hex_vname[128];
+    JsAstNode* hex_init = NULL;
+    if (!jm_stmt_match_increment_vname(count_stmt, count_vname, sizeof(count_vname)) ||
+        !jm_stmt_single_var_decl(hex_decl, hex_vname, sizeof(hex_vname), &hex_init)) {
+        return false;
+    }
+    if (!hex_init || hex_init->node_type != JS_AST_NODE_BINARY_EXPRESSION) return false;
+    JsBinaryNode* hex_bin = (JsBinaryNode*)hex_init;
+    JsAstNode* byte_arg = NULL;
+    if (hex_bin->op != JS_OP_ADD ||
+        !hex_bin->left || hex_bin->left->node_type != JS_AST_NODE_IDENTIFIER ||
+        !jm_stmt_match_decimal_to_percent_hex_call(hex_bin->right, &byte_arg) ||
+        !byte_arg || byte_arg->node_type != JS_AST_NODE_IDENTIFIER) {
+        return false;
+    }
+    JsIdentifierNode* byte_id = (JsIdentifierNode*)byte_arg;
+    char byte_vname[128];
+    snprintf(byte_vname, sizeof(byte_vname), "_js_%.*s",
+        (int)byte_id->name->len, byte_id->name->chars);
+
+    if (!for_node->test || for_node->test->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* test_bin = (JsBinaryNode*)for_node->test;
+    if (test_bin->op != JS_OP_LE ||
+        !jm_stmt_identifier_matches_vname(test_bin->left, byte_vname) ||
+        !jm_stmt_match_numeric_literal_i64(test_bin->right, 0xBF)) {
+        return false;
+    }
+    char update_vname[128];
+    if (!jm_for_update_identifier_vname(for_node->update, update_vname, sizeof(update_vname)) ||
+        strcmp(update_vname, byte_vname) != 0) {
+        return false;
+    }
+
+    JsIdentifierNode* left_id = (JsIdentifierNode*)hex_bin->left;
+    char left_vname[128];
+    snprintf(left_vname, sizeof(left_vname), "_js_%.*s",
+        (int)left_id->name->len, left_id->name->chars);
+    JsMirVarEntry* left_var = jm_find_var(mt, left_vname);
+    if (!left_var || left_var->uri_escape_byte_count != 2 ||
+        !left_var->uri_escape_cp_reg || !left_var->uri_escape_valid_reg) {
+        jm_diagnose_fast_path_note(mt, "uri.escape.three-byte-loop-fast-forward", "missing-prefix-metadata");
+        return false;
+    }
+
+    bool found_decode_continue = false;
+    int scan_count = 0;
+    for (JsAstNode* scan = index_decl->next; scan && scan_count < 8;
+            scan = scan->next, scan_count++) {
+        if (jm_stmt_match_uri_decode_continue_if_one_arg(scan, hex_vname)) {
+            found_decode_continue = true;
+            break;
+        }
+    }
+    if (!found_decode_continue) {
+        jm_diagnose_fast_path_note(mt, "uri.escape.three-byte-loop-fast-forward", "missing-decode-continue");
+        return false;
+    }
+
+    snprintf(byte_vname_out, byte_vname_size, "%s", byte_vname);
+    snprintf(count_vname_out, count_vname_size, "%s", count_vname);
+    *prefix_valid_out = left_var->uri_escape_valid_reg;
+    return true;
+}
+
+static bool jm_emit_uri_escape_three_byte_loop_fast_forward(JsMirTranspiler* mt,
+        JsForNode* for_node, MIR_label_t l_end) {
+    if (!mt || !for_node || !l_end) return false;
+    char byte_vname[128];
+    char count_vname[128];
+    MIR_reg_t prefix_valid = 0;
+    if (!jm_stmt_match_uri_escape_three_byte_loop(mt, for_node,
+            byte_vname, sizeof(byte_vname),
+            count_vname, sizeof(count_vname),
+            &prefix_valid)) {
+        return false;
+    }
+    jm_diagnose_fast_path_note(mt, "uri.escape.three-byte-loop-fast-forward", "matched-shape");
+
+    JsMirVarEntry* byte_var = jm_find_var(mt, byte_vname);
+    JsMirVarEntry* count_var = jm_find_var(mt, count_vname);
+    if (!jm_uri_escape_var_can_native_int_update(byte_var) ||
+        !jm_uri_escape_var_can_native_int_update(count_var)) {
+        jm_diagnose_fast_path_note(mt, "uri.escape.three-byte-loop-fast-forward", "native-update-rejected");
+        return false;
+    }
+
+    MIR_reg_t byte_reg = jm_ensure_native_int(mt, byte_var->reg, byte_var->type_id);
+    MIR_reg_t byte_in_range = jm_emit_i64_range_check(mt, byte_reg, 0x80, 0xBF,
+        "uri_b3_3_loop_ok");
+    MIR_reg_t can_fast_forward = jm_new_reg(mt, "uri_3b_ff_ok", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, can_fast_forward),
+        MIR_new_reg_op(mt->ctx, prefix_valid),
+        MIR_new_reg_op(mt->ctx, byte_in_range)));
+    MIR_label_t slow_path = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, slow_path),
+        MIR_new_reg_op(mt->ctx, can_fast_forward)));
+
+    // All remaining continuation bytes for this prefix decode to the expected
+    // single UTF-16 code unit, so only the externally visible count/counter
+    // effects need to be materialized.
+    MIR_reg_t count_delta = jm_new_reg(mt, "uri_3b_count_delta", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+        MIR_new_reg_op(mt->ctx, count_delta),
+        MIR_new_int_op(mt->ctx, 0xC0),
+        MIR_new_reg_op(mt->ctx, byte_reg)));
+    if (!jm_emit_uri_escape_add_count_delta(mt, count_var, count_delta)) return false;
+    if (!jm_emit_uri_escape_assign_int_const(mt, byte_var, 0xC0)) return false;
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    jm_emit_label(mt, slow_path);
+    jm_diagnose_fast_path(mt, "uri.escape.three-byte-loop-fast-forward");
+    return true;
+}
+
 static bool jm_stmt_match_uri_escape_b3_loop(JsMirTranspiler* mt, JsForNode* for_node,
         char* b3_vname_out, size_t b3_vname_size,
         char* b4_vname_out, size_t b4_vname_size,
@@ -1418,7 +1636,12 @@ static bool jm_ast_may_observe_script_var_property(JsAstNode* node) {
             for (JsAstNode* dnode = vd->declarations; dnode; dnode = dnode->next) {
                 if (dnode->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
                 JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)dnode;
-                if (d->init) return true;
+                // inspect the initializer instead of treating every declaration
+                // as observable. Hot js262 URI loops declare temporary strings
+                // from pure helper calls; marking those as observable disables
+                // deferred module-var writeback and forces global sync on every
+                // loop iteration.
+                if (jm_ast_may_observe_script_var_property(d->init)) return true;
             }
             break;
         }
@@ -3423,6 +3646,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         if (for_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             jm_push_scope(mt);
             jm_init_block_tdz(mt, for_node->body);  // v20 TDZ
+            jm_emit_uri_escape_three_byte_loop_fast_forward(mt, for_node, l_end);
             jm_emit_uri_escape_b3_loop_fast_forward(mt, for_node, l_end);
             jm_emit_uri_escape_inner_loop_fast_forward(mt, for_node, l_end);
             JsBlockNode* blk = (JsBlockNode*)for_node->body;

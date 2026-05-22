@@ -4609,6 +4609,27 @@ extern "C" int64_t js_uri_decode_equals_from_char_code1_raw(Item str_item, Item 
     return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
 }
 
+extern "C" int64_t js_uri_decode_equals_from_char_code1_raw_int(Item str_item, int64_t code_raw,
+                                                                int64_t component) {
+    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
+    if (js_exception_pending) return 0;
+    String* s = it2s(str_val);
+    uint32_t cp = 0;
+    if (js_uri_try_decode_percent_utf16_cp(s, &cp)) {
+        if (!component && js_uri_is_reserved_cp(cp)) return 0;
+        return cp == (((uint32_t)code_raw) & 0xFFFFu) ? 1 : 0;
+    }
+
+    // Keep the uncommon fallback spec-correct for non-percent or malformed
+    // shapes; the hot js262 URI loops stay on the decoded-codepoint branch.
+    Item code_item = (Item){.item = i2it((int32_t)code_raw)};
+    Item decoded = component ? js_decodeURIComponent(str_item) : js_decodeURI(str_item);
+    if (js_exception_pending) return 0;
+    Item expected = js_string_fromCharCode(code_item);
+    if (js_exception_pending) return 0;
+    return it2b(js_strict_equal(decoded, expected)) ? 1 : 0;
+}
+
 extern "C" Item js_uri_decode_equals_from_char_code1(Item str_item, Item code_item,
                                                      int64_t component) {
     int64_t matched = js_uri_decode_equals_from_char_code1_raw(str_item, code_item, component);
