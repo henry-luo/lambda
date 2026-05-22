@@ -3696,16 +3696,80 @@ extern "C" Item js_parseFloat(Item str_item) {
     // null-terminate at the end of valid decimal literal and parse
     char saved = *q;
     *q = '\0';
-    char* endptr;
-    double val = strtod(start, &endptr);
-    *q = saved;
+    char* fast_p = start;
+    bool neg = false;
+    if (*fast_p == '+' || *fast_p == '-') {
+        neg = *fast_p == '-';
+        fast_p++;
+    }
+    double fast_val = 0.0;
+    int digit_count = 0;
+    while (*fast_p >= '0' && *fast_p <= '9') {
+        if (digit_count < 16) fast_val = fast_val * 10.0 + (double)(*fast_p - '0');
+        digit_count++;
+        fast_p++;
+    }
+    int frac_digits = 0;
+    if (*fast_p == '.') {
+        fast_p++;
+        while (*fast_p >= '0' && *fast_p <= '9') {
+            if (digit_count < 16) {
+                fast_val = fast_val * 10.0 + (double)(*fast_p - '0');
+                frac_digits++;
+            }
+            digit_count++;
+            fast_p++;
+        }
+    }
+    int exp_val = 0;
+    bool exp_neg = false;
+    if (*fast_p == 'e' || *fast_p == 'E') {
+        fast_p++;
+        if (*fast_p == '+' || *fast_p == '-') {
+            exp_neg = *fast_p == '-';
+            fast_p++;
+        }
+        while (*fast_p >= '0' && *fast_p <= '9') {
+            if (exp_val < 400) exp_val = exp_val * 10 + (*fast_p - '0');
+            fast_p++;
+        }
+    }
+    int decimal_exp = (exp_neg ? -exp_val : exp_val) - frac_digits;
+    bool fast_ok = fast_p == q && digit_count > 0 && digit_count <= 15 &&
+        decimal_exp >= -308 && decimal_exp <= 308;
+    double val = 0.0;
+    if (fast_ok) {
+        // Most js262 parseFloat sweeps use short decimal prefixes. Avoid
+        // strtod's locale/errno machinery in that hot path and keep strtod as
+        // the fallback for long or delicate decimals.
+        val = fast_val;
+        if (decimal_exp != 0) val *= pow(10.0, (double)decimal_exp);
+        if (neg) val = -val;
+        *q = saved;
+    } else {
+        char* endptr;
+        val = strtod(start, &endptr);
+        *q = saved;
+        if (endptr == start) {
+            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *fp = NAN;
+            return (Item){.item = d2it(fp)};
+        }
+    }
 
-    if (endptr == start) {
+    if (!fast_ok && q == start) {
         double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *fp = NAN;
         return (Item){.item = d2it(fp)};
     }
 
+    if (isfinite(val) && !(val == 0.0 && signbit(val)) &&
+            val >= (double)INT56_MIN && val <= (double)INT56_MAX &&
+            val == (double)(int64_t)val) {
+        // hot parseFloat test262 loops often produce integral numbers; returning
+        // the immediate int representation avoids one heap allocation per call.
+        return (Item){.item = i2it((int64_t)val)};
+    }
     double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *fp = val;
     return (Item){.item = d2it(fp)};
@@ -4702,6 +4766,68 @@ static int encode_charcode_full_utf8(char* buf, int code) {
         buf[3] = (char)(0x80 | (code & 0x3F));
         return 4;
     }
+}
+
+typedef struct JsInlineStringBuf {
+    uint32_t len;
+    uint8_t is_ascii;
+    char chars[256];
+} JsInlineStringBuf;
+
+static bool js_build_prefix_from_char_code_stack(Item prefix_item, Item code_item,
+                                                 JsInlineStringBuf* out) {
+    // The parseInt/parseFloat Unicode sweeps form a short literal prefix plus
+    // one UTF-16 code unit. Building the temporary String on the stack avoids
+    // two heap strings per iteration, while longer or non-string inputs fall
+    // back to the normal allocating path below.
+    if (!out) return false;
+    Item prefix_val = (get_type_id(prefix_item) == LMD_TYPE_STRING)
+        ? prefix_item : js_to_string(prefix_item);
+    if (js_exception_pending) return false;
+    String* prefix = it2s(prefix_val);
+    if (!prefix) return false;
+    int code = js_from_char_code_to_uint16(code_item);
+    if (js_exception_pending) return false;
+
+    char suffix[4];
+    int suffix_len = encode_charcode_utf8(suffix, code);
+    if (prefix->len + (uint32_t)suffix_len >= sizeof(out->chars)) return false;
+    memcpy(out->chars, prefix->chars, prefix->len);
+    memcpy(out->chars + prefix->len, suffix, suffix_len);
+    out->len = prefix->len + (uint32_t)suffix_len;
+    out->is_ascii = prefix->is_ascii && code < 128;
+    out->chars[out->len] = '\0';
+    return true;
+}
+
+extern "C" Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item,
+                                                Item radix_item) {
+    JsInlineStringBuf buf;
+    if (js_build_prefix_from_char_code_stack(prefix_item, code_item, &buf)) {
+        // test262 Unicode sweeps build short prefixes plus one code unit; parse
+        // from a stack string to avoid allocating both fromCharCode and concat.
+        Item combined = (Item){.item = s2it((String*)&buf)};
+        return js_parseInt(combined, radix_item);
+    }
+    Item suffix = js_string_fromCharCode(code_item);
+    if (js_exception_pending) return ItemNull;
+    Item combined = js_add(prefix_item, suffix);
+    if (js_exception_pending) return ItemNull;
+    return js_parseInt(combined, radix_item);
+}
+
+extern "C" Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item) {
+    JsInlineStringBuf buf;
+    if (js_build_prefix_from_char_code_stack(prefix_item, code_item, &buf)) {
+        // same allocation-free path as parseInt for parseFloat Unicode sweeps.
+        Item combined = (Item){.item = s2it((String*)&buf)};
+        return js_parseFloat(combined);
+    }
+    Item suffix = js_string_fromCharCode(code_item);
+    if (js_exception_pending) return ItemNull;
+    Item combined = js_add(prefix_item, suffix);
+    if (js_exception_pending) return ItemNull;
+    return js_parseFloat(combined);
 }
 
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)

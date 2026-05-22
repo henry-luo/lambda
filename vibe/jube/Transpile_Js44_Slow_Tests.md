@@ -9,6 +9,30 @@ correct tests take seconds or hit the per-test timeout.
 
 ## 0. Latest Progress
 
+2026-05-22 design-note update: the current fixes are now commented at the
+non-obvious lowering/runtime points so future js262 triage can tell why each
+path exists:
+
+- direct-eval binding writeback now documents why writes must refresh the
+  eval-local frame, not only the module/global mirror;
+- closure creation now documents why module-backed captures are allowed to
+  share the parent scope env beside true local captures;
+- parseInt/parseFloat lowering now documents the direct global-builtin
+  dispatch and the special literal-plus-`String.fromCharCode` shape used by
+  the Unicode sweep tests;
+- the runtime stack-string helper now documents why it avoids allocating the
+  intermediate `fromCharCode` and concatenated strings.
+
+Important performance finding from the current per-call investigation: diagnose
+logging confirms the `parseFloat.direct` fast path can be selected, but the
+small parseFloat probe still takes about 10-11s in the debug build.  A 65k empty
+loop is fast, while a similarly small `count = count + 1` loop is slow.  That
+points away from missed parse dispatch and toward broad per-iteration MIR
+overhead introduced since `d6092bc8a`, especially binary-expression LHS
+snapshots and top-level module/global writeback around simple assignments.
+Those are the next root-cause candidates to fix; final timing claims still need
+release-build verification per the repo rules.
+
 2026-05-22 HEAD regression check: after returning from the stable
 `d6092bc8a` reference build to HEAD, the URI diagnose rows reproduced as real
 release-build runtime regressions.  The four URI rows no longer time out after

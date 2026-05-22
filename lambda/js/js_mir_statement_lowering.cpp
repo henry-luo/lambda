@@ -3555,6 +3555,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
     bool defer_loop_body_writeback =
         mt->in_main && mt->module_consts &&
+        !mt->is_eval_direct &&
         !jm_ast_may_observe_script_var_property(for_node->test) &&
         !jm_ast_may_observe_script_var_property(for_node->update) &&
         !jm_ast_may_observe_script_var_property(for_node->body);
@@ -3570,6 +3571,11 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     bool defer_update_writeback =
         jm_for_update_identifier_vname(for_node->update, deferred_update_vname, sizeof(deferred_update_vname)) &&
         mt->in_main && mt->module_consts &&
+        !mt->is_eval_direct &&
+        // Direct eval may operate on caller bindings through the eval-local
+        // environment. Deferring module writeback there can leave the next loop
+        // condition reading a stale caller value, turning finite eval loops into
+        // timeouts.
         !jm_ast_may_observe_script_var_property(for_node->test) &&
         !jm_ast_may_observe_script_var_property(for_node->body) &&
         !(strncmp(deferred_update_vname, "_js_", 4) == 0 &&
@@ -3604,11 +3610,13 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Reload scope-env variables so the loop condition sees values updated by
     // inner-function (closure) calls made during the previous iteration.
     jm_scope_env_reload_vars(mt);
-    if (!defer_loop_body_writeback && !defer_update_writeback) {
+    if (!defer_loop_body_writeback && !defer_update_writeback && !mt->is_eval_direct) {
         // Native top-level `var` counters are mirrored in module slots. Observable
         // update writebacks call runtime helpers, so refresh the local mirror at
         // the loop boundary; skip loops using deferred writeback because their
-        // module slots are intentionally stale until the loop exits.
+        // module slots are intentionally stale until the loop exits. Direct eval
+        // keeps caller vars in eval-local bindings during the loop, so this
+        // boundary reload would overwrite the live local value.
         jm_reload_module_var_locals_after_eval(mt, true);
     }
 
@@ -7630,11 +7638,13 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             if (may_update_outer_binding) {
                 jm_scope_env_reload_vars(mt);
-                if (!mt->suppress_module_var_writeback) {
+                if (!mt->suppress_module_var_writeback && !mt->is_eval_direct) {
                     // When a loop body defers module-var writeback, the module
                     // table is intentionally stale until loop exit. Reloading it
                     // after an expression statement would corrupt native counters
-                    // that still hold newer in-loop values.
+                    // that still hold newer in-loop values. Direct eval also
+                    // carries live caller bindings in the eval-local frame, so
+                    // reloading module mirrors here can undo the expression.
                     jm_module_var_reload_vars(mt);
                 }
             }
