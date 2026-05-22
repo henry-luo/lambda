@@ -100,6 +100,13 @@
     #include <dirent.h>
     #include <fcntl.h>
     #include <spawn.h>
+    #include <sys/utsname.h>
+    #ifdef __APPLE__
+        #include <sys/sysctl.h>
+    #endif
+    #ifdef __linux__
+        #include <sys/sysinfo.h>
+    #endif
 #endif
 
 // =============================================================================
@@ -1492,6 +1499,76 @@ static std::string get_git_commit_hash() {
     return hash.empty() ? "unknown" : hash;
 }
 
+static const char* get_test_gtest_build_mode() {
+#ifdef NDEBUG
+    return "release";
+#else
+    return "debug";
+#endif
+}
+
+static const char* get_lambda_runtime_build_mode() {
+    // js262 measures the checked-in lambda.exe, not this gtest binary.  The
+    // release make target leaves this marker so the baseline records the actual
+    // runtime build that produced the pass/fail/timing data.
+    if (access(".lambda_release_build", F_OK) == 0) return "release";
+    return "debug-or-unknown";
+}
+
+static std::string get_host_os_summary() {
+#ifdef _WIN32
+    return "Windows";
+#else
+    struct utsname u;
+    if (uname(&u) != 0) return "unknown";
+    std::string out = u.sysname;
+    out += " ";
+    out += u.release;
+    out += " ";
+    out += u.machine;
+    return out;
+#endif
+}
+
+static long long get_host_memory_bytes() {
+#ifdef __APPLE__
+    int64_t mem = 0;
+    size_t len = sizeof(mem);
+    if (sysctlbyname("hw.memsize", &mem, &len, NULL, 0) == 0 && mem > 0) {
+        return (long long)mem;
+    }
+#elif defined(__linux__)
+    struct sysinfo info;
+    if (sysinfo(&info) == 0) {
+        return (long long)info.totalram * (long long)info.mem_unit;
+    }
+#endif
+    return 0;
+}
+
+static long get_host_cpu_cores() {
+#ifdef __APPLE__
+    int cores = 0;
+    size_t len = sizeof(cores);
+    if (sysctlbyname("hw.ncpu", &cores, &len, NULL, 0) == 0 && cores > 0) {
+        return cores;
+    }
+#endif
+#ifdef _SC_NPROCESSORS_ONLN
+    long online_cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if (online_cores > 0) return online_cores;
+#endif
+    return 0;
+}
+
+static std::string format_memory_gib(long long bytes) {
+    if (bytes <= 0) return "unknown";
+    char buf[64];
+    double gib = (double)bytes / (1024.0 * 1024.0 * 1024.0);
+    snprintf(buf, sizeof(buf), "%.1f GiB", gib);
+    return buf;
+}
+
 // Write baseline file with header comments
 static void write_baseline_file(const char* path, std::vector<std::string>& passing,
                                  int total_tests, int skipped, int batched, int failed) {
@@ -1504,6 +1581,11 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Update it only by running this gtest with --update-baseline.\n");
     fprintf(f, "# The update gate admits only fully passing tests: batch-safe, non-crashing, non-regressing, and under the slow-test threshold.\n");
     fprintf(f, "# Commit: %s\n", commit.c_str());
+    fprintf(f, "# Lambda runtime build: %s\n", get_lambda_runtime_build_mode());
+    fprintf(f, "# GTest binary build: %s\n", get_test_gtest_build_mode());
+    fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
+    fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
+            get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
     fprintf(f, "# Scope: ES2020 (skip ES2021+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
     fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",

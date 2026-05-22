@@ -3162,18 +3162,22 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t loop_var;
     bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
     bool is_let_const_loop = false;
+    bool is_const_loop = false;
     if (fo->kind == 1 || fo->kind == 2) {  // 1=let, 2=const (from fo->kind, not fo->left type)
         is_let_const_loop = true;
+        is_const_loop = (fo->kind == 2);
     }
     if (!is_let_const_loop && left_is_decl) {
         JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)fo->left;
         if (decl->kind == JS_VAR_LET || decl->kind == JS_VAR_CONST) {
             is_let_const_loop = true;
+            is_const_loop = (decl->kind == JS_VAR_CONST);
         }
     }
     // v90: Also detect let/const via fo->kind when left is IDENTIFIER (e.g., for (let p in x))
     if (!is_let_const_loop && (fo->kind == 1 || fo->kind == 2)) {
         is_let_const_loop = true;
+        is_const_loop = (fo->kind == 2);
     }
     if (var_name) {
         char vname[128];
@@ -3191,7 +3195,12 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         // Mark let/const loop variables so closure per-iteration binding works
         if (is_let_const_loop) {
             JsMirVarEntry* ve = jm_find_var(mt, vname);
-            if (ve) ve->is_let_const = true;
+            if (ve) {
+                ve->is_let_const = true;
+                // const loop declarations still receive a fresh value each
+                // iteration, but writes from the loop body must throw.
+                ve->is_const = is_const_loop;
+            }
         }
     } else {
         loop_var = jm_new_reg(mt, "_destr_elem", MIR_T_I64);

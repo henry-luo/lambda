@@ -3054,6 +3054,24 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             }
                         }
 
+                        if (strcmp(cap_name, "_js_new.target") == 0) {
+                            // new.target is lexical for arrows but is not a real
+                            // variable in the enclosing function. Keep it as the
+                            // child's direct pseudo-capture so Phase 1.7 can seed a
+                            // scope-env slot from the parent's runtime new.target,
+                            // but do not propagate it as a parent closure capture.
+                            continue;
+                        }
+
+                        bool cap_is_parent_nfe = false;
+                        if (parent->node && parent->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
+                            parent->node->name && parent->node->name->chars) {
+                            char parent_self_name[128];
+                            snprintf(parent_self_name, sizeof(parent_self_name), "_js_%.*s",
+                                (int)parent->node->name->len, parent->node->name->chars);
+                            cap_is_parent_nfe = (strcmp(cap_name, parent_self_name) == 0);
+                        }
+
                         // Add as capture to parent
                         jm_ensure_captures_capacity(parent);
                         snprintf(parent->captures[parent->capture_count].name, 128, "%s", cap_name);
@@ -3061,7 +3079,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
-                        parent->captures[parent->capture_count].is_nfe_binding = child->captures[ci].is_nfe_binding;
+                        // A child closure can reference its enclosing named function
+                        // expression's private name. Preserve that as an NFE binding
+                        // so creation patches a private env slot instead of falling
+                        // through to an outer same-named var.
+                        parent->captures[parent->capture_count].is_nfe_binding =
+                            child->captures[ci].is_nfe_binding || cap_is_parent_nfe;
                         parent->captures[parent->capture_count].force_env_capture = child->captures[ci].force_env_capture;
                         parent->capture_count++;
                         changed = true;

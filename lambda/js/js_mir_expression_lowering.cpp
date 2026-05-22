@@ -370,6 +370,18 @@ static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
     return jm_call_0(mt, "js_get_this", MIR_T_I64);
 }
 
+static MIR_reg_t jm_emit_current_new_target(JsMirTranspiler* mt) {
+    if (mt && mt->current_fc && mt->current_fc->node && mt->current_fc->node->is_arrow) {
+        JsMirVarEntry* var = jm_find_var(mt, "_js_new.target");
+        if (var) {
+            // new.target is lexical inside arrows; a later direct call would clear
+            // the runtime slot, so use the captured value when one exists.
+            return var->reg;
+        }
+    }
+    return jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+}
+
 static bool jm_class_has_public_instance_fields(JsClassEntry* ce) {
     if (!ce) return false;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
@@ -784,9 +796,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         if (var) return var->reg;
     }
 
-    // v20: Handle 'new.target' meta-property
+    // Handle 'new.target' meta-property, including arrow lexical capture.
     if (id->name->len == 10 && strncmp(id->name->chars, "new.target", 10) == 0) {
-        return jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+        return jm_emit_current_new_target(mt);
     }
 
     // Handle 'undefined' keyword: return JS undefined value
@@ -5819,6 +5831,17 @@ static void jm_eval_env_writeback_bindings(JsMirTranspiler* mt, struct hashmap* 
     hashmap_free(bridged);
 }
 
+static void jm_transpile_discard_call_args(JsMirTranspiler* mt, JsAstNode* arg) {
+    while (arg) {
+        // Direct-call fast paths still owe JS its argument evaluation order:
+        // extra actual arguments can throw or mutate state even when no formal
+        // parameter receives them.
+        jm_transpile_box_item(mt, arg);
+        jm_emit_exc_propagate_check(mt);
+        arg = arg->next;
+    }
+}
+
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     int arg_count = jm_count_args(call->arguments);
 
@@ -7365,6 +7388,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (recv_key_spill >= 0) {
                 jm_gen_spill_load(mt, recv, recv_key_spill);
             }
+            if (!m->optional) {
+                // A non-optional member call must finish evaluating the
+                // callee reference before arguments run. Nullish receivers
+                // throw here, so argument side effects must not happen.
+                jm_call_void_1(mt, "js_require_object_coercible",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                jm_emit_exc_propagate_check(mt);
+            }
             bool args_have_yield = false;
             if (mt->in_generator) {
                 for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
@@ -7679,6 +7710,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, zero);
                         }
                     }
+                    jm_transpile_discard_call_args(mt, p7_arg);
                     jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p7_nops, p7_ops));
                     return p7_result; // returns native value
                 }
@@ -7712,6 +7744,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(mt, (JsAstNode*)m->property, prop->name);
             MIR_reg_t method_name = jm_box_string_literal(mt, method_key_name->chars, method_key_name->len);
+
+            if (!m->optional && !jm_has_optional_chain(m->object)) {
+                // Match CallExpression evaluation order: obj.method(args)
+                // checks the receiver while creating the callee Reference,
+                // before the argument list is evaluated.
+                jm_call_void_1(mt, "js_require_object_coercible",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                jm_emit_exc_propagate_check(mt);
+            }
 
             if (!m->optional && jm_has_optional_chain(m->object)) {
                 MIR_label_t l_opt_skip = jm_new_label(mt);
@@ -7907,6 +7948,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                     MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                             }
                         }
+                        jm_transpile_discard_call_args(mt, p3_arg);
 
                         // Save/set this, clear new.target (AFTER arg transpilation)
                         MIR_reg_t p3_prev_this = jm_call_0(mt, "js_get_this", MIR_T_I64);
@@ -8733,6 +8775,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                     }
                                 }
                             }
+                            jm_transpile_discard_call_args(mt, arg);
 
                             // Phase 2: Assign temps → parameter registers
                             JsAstNode* pnode = mt->tco_func->node->params;
@@ -8814,12 +8857,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                     MIR_new_reg_op(mt->ctx, undef), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                                 ops[oi++] = MIR_new_reg_op(mt->ctx, undef);
+                                }
                             }
-                        }
+                            jm_transpile_discard_call_args(mt, arg);
 
-                        jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
-                        return result; // returns NATIVE value
-                    }
+                            jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                            return result; // returns NATIVE value
+                        }
                 }
 
                 // Direct call to local function (only for non-closures;
@@ -8866,8 +8910,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, undef_val), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
                         ops[oi++] = MIR_new_reg_op(mt->ctx, undef_val);
+                        }
                     }
-                }
+                    jm_transpile_discard_call_args(mt, arg);
 
                 // Set this AFTER evaluating args (so `this` in args
                 // still reads the caller's this binding, not undefined)
@@ -10831,6 +10876,13 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (fc->captures[ci].is_nfe_binding) {
+                    // Named function expressions have a private immutable name
+                    // binding. Reusing the parent scope env can overwrite an
+                    // outer binding with the same name, so keep this capture private.
+                    use_scope_env = false;
+                    break;
+                }
                 if (fc->captures[ci].scope_env_slot < 0) {
                     use_scope_env = false;
                     break;
@@ -10898,6 +10950,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 } else if (strcmp(fc->captures[ci].name, "_js_this") == 0) {
                     val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
+                } else if (strcmp(fc->captures[ci].name, "_js_new.target") == 0) {
+                    // Arrow closures capture new.target at creation time; the
+                    // dynamic runtime value is cleared when the arrow is called.
+                    val = jm_emit_current_new_target(mt);
                 } else if (mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
@@ -11000,6 +11056,13 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
+                if (fc->captures[ci].is_nfe_binding) {
+                    // Named function expressions have a private immutable name
+                    // binding. Reusing the parent scope env can overwrite an
+                    // outer binding with the same name, so keep this capture private.
+                    use_scope_env = false;
+                    break;
+                }
                 if (fc->captures[ci].scope_env_slot < 0) {
                     use_scope_env = false;
                     break;
@@ -11113,6 +11176,13 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                             MIR_new_reg_op(mt->ctx, this_val)));
+                    } else if (strcmp(fc->captures[i].name, "_js_new.target") == 0) {
+                        // Preserve arrow lexical new.target in the closure env,
+                        // instead of relying on the call-time runtime slot.
+                        MIR_reg_t new_target_val = jm_emit_current_new_target(mt);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
+                            MIR_new_reg_op(mt->ctx, new_target_val)));
                     } else {
                     bool found_const = false;
                     if (mt->module_consts) {
