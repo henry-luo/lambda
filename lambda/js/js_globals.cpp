@@ -8562,6 +8562,41 @@ static bool js_shape_name_seen_before(ShapeEntry* first, ShapeEntry* current,
     return false;
 }
 
+static bool js_name_starts_with(const char* name, int name_len, const char* prefix, int prefix_len) {
+    return name && name_len >= prefix_len && strncmp(name, prefix, prefix_len) == 0;
+}
+
+static bool js_is_engine_internal_enumeration_key(const char* name, int name_len) {
+    if (!name || name_len < 2 || name[0] != '_' || name[1] != '_') return false;
+    // User code may declare globals such as `__declared__var`; only suppress
+    // keys that the runtime itself synthesizes for attributes, symbols, slots,
+    // and class/private metadata. A blanket `__*` skip hides real JS properties.
+    if (js_name_starts_with(name, name_len, "__nw_", 5) ||
+        js_name_starts_with(name, name_len, "__ne_", 5) ||
+        js_name_starts_with(name, name_len, "__nc_", 5) ||
+        js_name_starts_with(name, name_len, "__get_", 6) ||
+        js_name_starts_with(name, name_len, "__set_", 6) ||
+        js_name_starts_with(name, name_len, "__sym_", 6) ||
+        js_name_starts_with(name, name_len, "__private_", 10) ||
+        js_name_starts_with(name, name_len, "__brand_", 8) ||
+        js_name_starts_with(name, name_len, "__if_", 5)) {
+        return true;
+    }
+    if ((name_len == 14 && strncmp(name, "__class_name__", 14) == 0) ||
+        (name_len == 18 && strncmp(name, "__instance_proto__", 18) == 0) ||
+        (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
+        (name_len == 23 && strncmp(name, "__class_private_index__", 23) == 0) ||
+        (name_len == 17 && strncmp(name, "__non_extensible__", 17) == 0) ||
+        (name_len == 10 && strncmp(name, "__sealed__", 10) == 0) ||
+        (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
+        (name_len == 12 && strncmp(name, "__is_proto__", 12) == 0) ||
+        (name_len == 18 && strncmp(name, "__json_own_proto__", 18) == 0) ||
+        (name_len == 4 && strncmp(name, "__rd", 4) == 0)) {
+        return true;
+    }
+    return false;
+}
+
 static bool js_internal_symbol_name_to_symbol(const char* name, int name_len, Item* out_symbol) {
     if (!name || name_len <= 6 || strncmp(name, "__sym_", 6) != 0) return false;
     int64_t id = 0;
@@ -8699,8 +8734,9 @@ extern "C" Item js_object_keys(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                // skip internal markers (__xx_xxx), deleted sentinels, non-enumerable
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                // skip engine markers only; user-visible names may also start
+                // with "__" and still must enumerate.
+                if (js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 // skip non-enumerable (Stage A3: shape-flag-first)
@@ -8739,8 +8775,9 @@ extern "C" Item js_object_keys(Item object) {
                     if ((slen == 6 && strncmp(s, "length", 6) == 0) ||
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
-                    // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    // skip engine markers only; user-visible names may also start
+                    // with "__" and still must enumerate.
+                    if (js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8780,8 +8817,7 @@ extern "C" Item js_object_keys(Item object) {
                     while (se) {
                         const char* s = se->name->str;
                         int len = (int)se->name->length;
-                        if (!((len >= 2 && s[0] == '_' && s[1] == '_') ||
-                              (len == 18 && strncmp(s, "__primitiveValue__", 18) == 0))) {
+                        if (!js_is_engine_internal_enumeration_key(s, len)) {
                             Item val = _map_read_field(se, m->data);
                             if (val.item != JS_DELETED_SENTINEL_VAL && js_props_query_enumerable(m, se, s, len)) {
                                 int64_t idx = js_parse_array_index(s, len);
@@ -8822,7 +8858,7 @@ extern "C" Item js_object_keys(Item object) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         bool skip = false;
-        if (len >= 2 && s[0] == '_' && s[1] == '_') {
+        if (js_is_engine_internal_enumeration_key(s, len)) {
             skip = true;
         }
         if (is_error_object && len == 5 && strncmp(s, "stack", 5) == 0) {
@@ -8959,7 +8995,7 @@ extern "C" Item js_for_in_keys(Item object) {
                 for (ShapeEntry* e = tm->shape; e; e = e->next) {
                     const char* s = e->name->str;
                     int len = (int)e->name->length;
-                    bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                    bool skip = js_is_engine_internal_enumeration_key(s, len);
                     if (!skip) {
                         Item val = _map_read_field(e, m->data);
                         if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
@@ -9036,13 +9072,13 @@ extern "C" Item js_for_in_keys(Item object) {
                 const char* s = e->name->str;
                 int len = (int)e->name->length;
 
-                // skip engine-internal properties (double-underscore prefix).
+                // skip engine-internal marker properties.
                 // 'constructor' is not unconditionally skipped here — its
                 // enumerability is determined by the __ne_ marker below
                 // (default-set non-enumerable on class/object prototypes;
                 //  user-defined static class fields override to enumerable).
                 bool skip = false;
-                if (len >= 2 && s[0] == '_' && s[1] == '_') {
+                if (js_is_engine_internal_enumeration_key(s, len)) {
                     skip = true;
                 }
 
@@ -14236,6 +14272,18 @@ extern "C" Item js_get_with_binding_or_fallback(Item key, Item fallback) {
     return found ? result : fallback;
 }
 
+extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
+    // plain identifier calls inside `with` keep the Object Environment Record as
+    // the call reference base; reuse the exact binding found while reading the
+    // callee so argument side effects cannot change the chosen `this`.
+    if (!js_last_with_binding_valid || !js_with_binding_key_same(js_last_with_binding_key, key)) {
+        return make_js_undefined();
+    }
+    Item scope_obj = js_last_with_binding_scope;
+    if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
+    return scope_obj;
+}
+
 extern "C" int64_t js_probe_with_binding(Item key) {
     if (js_with_stack_depth <= 0) return 0;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14305,6 +14353,26 @@ extern "C" int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64
     return 1;
 }
 
+extern "C" int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict) {
+    // `var x = rhs` in a with statement resolves x before evaluating rhs.
+    // Store through that saved base even if rhs deletes or shadows the property.
+    if (!js_with_scope_is_object(scope_obj)) return 0;
+    if (it2b(js_in(key, scope_obj))) {
+        if (js_check_exception()) return 1;
+        js_property_set(scope_obj, key, value);
+        return 1;
+    }
+    if (js_check_exception()) return 1;
+    if (strict) {
+        js_throw_binding_reference_error(key);
+        return 1;
+    }
+    js_property_set(scope_obj, key, value);
+    return 1;
+}
+
+extern "C" int64_t js_global_lexical_binding_exists(Item key);
+
 extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_binding) {
     if (js_with_stack_depth > 0) {
         for (int i = js_with_stack_depth - 1; i >= 0; i--) {
@@ -14326,8 +14394,91 @@ extern "C" Item js_delete_identifier_with_binding(Item key, int64_t declared_bin
         }
     }
     if (declared_binding) return (Item){.item = b2it(false)};
+    if (js_global_lexical_binding_exists(key)) return (Item){.item = b2it(false)};
     Item global = js_get_global_this();
     return js_delete_property(global, key);
+}
+
+#define JS_GLOBAL_LEX_BIND_MAX 1024
+
+typedef struct JsGlobalLexicalBinding {
+    Item key;
+    Item value;
+    bool immutable;
+} JsGlobalLexicalBinding;
+
+static JsGlobalLexicalBinding js_global_lexical_bindings[JS_GLOBAL_LEX_BIND_MAX];
+static int js_global_lexical_binding_count = 0;
+static uint64_t js_global_lexical_epoch = 0;
+static Item js_global_lexical_global = {0};
+
+extern "C" uint64_t js_get_heap_epoch();
+
+static void js_global_lexical_refresh(void) {
+    Item global = js_get_global_this();
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_global_lexical_epoch == epoch &&
+        js_global_lexical_global.item == global.item) {
+        return;
+    }
+    js_global_lexical_epoch = epoch;
+    js_global_lexical_global = global;
+    js_global_lexical_binding_count = 0;
+}
+
+static int js_global_lexical_find(Item key) {
+    js_global_lexical_refresh();
+    for (int i = js_global_lexical_binding_count - 1; i >= 0; i--) {
+        if (js_with_binding_key_same(js_global_lexical_bindings[i].key, key)) return i;
+    }
+    return -1;
+}
+
+extern "C" int64_t js_global_lexical_binding_exists(Item key) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return 0;
+    return js_global_lexical_find(key) >= 0 ? 1 : 0;
+}
+
+extern "C" Item js_global_lexical_get_or_fallback(Item key, Item fallback) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return fallback;
+    int idx = js_global_lexical_find(key);
+    return idx >= 0 ? js_global_lexical_bindings[idx].value : fallback;
+}
+
+extern "C" int64_t js_global_lexical_set_if_exists(Item key, Item value) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return 1;
+    int idx = js_global_lexical_find(key);
+    if (idx < 0) return 0;
+    if (js_global_lexical_bindings[idx].immutable) {
+        js_throw_type_error("Assignment to constant variable");
+        return 1;
+    }
+    js_global_lexical_bindings[idx].value = value;
+    return 1;
+}
+
+extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutable) {
+    key = js_to_property_key(key);
+    if (js_check_exception()) return;
+    int idx = js_global_lexical_find(key);
+    if (idx >= 0) {
+        js_global_lexical_bindings[idx].value = value;
+        js_global_lexical_bindings[idx].immutable = immutable != 0;
+        return;
+    }
+    if (js_global_lexical_binding_count >= JS_GLOBAL_LEX_BIND_MAX) {
+        log_error("js-global-lexical: binding table overflow");
+        return;
+    }
+    // Script global lexical declarations live in the global environment record
+    // but not on the global object, so Object.hasOwnProperty must stay false.
+    JsGlobalLexicalBinding* binding = &js_global_lexical_bindings[js_global_lexical_binding_count++];
+    binding->key = key;
+    binding->value = value;
+    binding->immutable = immutable != 0;
 }
 
 // js_get_global_property: look up a property on the global object by name string
@@ -14339,6 +14490,8 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
+    Item lex = js_global_lexical_get_or_fallback(key, ItemError);
+    if (lex.item != ItemError.item) return lex;
     Item global = js_get_global_this();
     return js_property_get(global, key);
 }
@@ -14353,6 +14506,8 @@ extern "C" Item js_get_global_property_strict(Item key) {
         Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
+    Item lex = js_global_lexical_get_or_fallback(key, ItemError);
+    if (lex.item != ItemError.item) return lex;
     Item global = js_get_global_this();
     Item result = js_property_get(global, key);
     // property_get returns JS undefined for missing keys.
@@ -14456,6 +14611,7 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
         }
     }
     js_last_with_binding_valid = false;
+    if (js_global_lexical_set_if_exists(key, value)) return;
     Item global = js_get_global_this();
     if (strict && !it2b(js_in(key, global))) {
         if (js_check_exception()) return;
@@ -14532,10 +14688,9 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     pd.value = value;
     bool is_new_property = !it2b(js_has_own_property(global, key));
     if (!is_new_property) return;
-    if (is_new_property && get_type_id(value) == LMD_TYPE_UNDEFINED && get_type_id(global) == LMD_TYPE_MAP) {
-        map_put(global.map, str, value, js_input);
-        is_new_property = false;
-    }
+    // Keep the descriptor path authoritative for global `var`: pre-inserting
+    // undefined makes the property look existing, which skips the
+    // non-configurable attribute required by CreateGlobalVarBinding.
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
     if (js_global_var_cached_defined_count < 64) {
         js_global_var_cached_defined_keys[js_global_var_cached_defined_count++] = key;
@@ -14563,10 +14718,39 @@ extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
 }
 
+extern "C" void js_define_global_function_property(Item key, Item value) {
+    Item global = js_get_global_this();
+    Item name = js_to_string(key);
+    if (get_type_id(name) != LMD_TYPE_STRING) return;
+    String* str = it2s(name);
+    if (!str || str->len <= 0 || str->len >= 200) return;
+    JsPropertyDescriptor existing;
+    bool has_existing = js_get_own_property_descriptor(global, str->chars, (int)str->len, &existing);
+    JsPropertyDescriptor pd;
+    memset(&pd, 0, sizeof(pd));
+    pd.flags = JS_PD_HAS_VALUE;
+    pd.value = value;
+    bool is_new_property = !has_existing;
+    if (!has_existing || js_pd_is_configurable(&existing)) {
+        // CreateGlobalFunctionBinding turns absent/configurable properties into
+        // writable+enumerable+non-configurable globals. Non-configurable data
+        // properties that passed CanDeclareGlobalFunction keep their attributes.
+        pd.flags |= JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+            JS_PD_HAS_CONFIGURABLE | JS_PD_WRITABLE | JS_PD_ENUMERABLE;
+        js_pd_set_configurable(&pd, false);
+    }
+    js_define_own_property_from_descriptor(global, str->chars, (int)str->len, &pd, is_new_property);
+}
+
 extern "C" void js_evalscript_check_global_var_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_binding_exists(key)) {
+        const char* msg_str = "Var declaration conflicts with existing lexical declaration";
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))});
+        return;
+    }
     Item global = js_get_global_this();
     if (it2b(js_has_own_property(global, key))) return;
     if (js_is_truthy(js_object_is_extensible(global))) return;
@@ -14577,6 +14761,11 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
     if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_binding_exists(key)) {
+        const char* msg_str = "Function declaration conflicts with existing lexical declaration";
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))});
+        return;
+    }
     Item global = js_get_global_this();
     Item name = js_to_string(key);
     if (get_type_id(name) != LMD_TYPE_STRING) return;
@@ -14596,9 +14785,13 @@ extern "C" void js_evalscript_check_global_function_decl(Item key) {
 }
 
 extern "C" void js_evalscript_check_global_lex_decl(Item key) {
-    if (!js_262_eval_script_is_active()) return;
     key = js_to_property_key(key);
     if (js_check_exception()) return;
+    if (js_global_lexical_binding_exists(key)) {
+        const char* msg_str = "Lexical declaration conflicts with existing lexical declaration";
+        js_throw_syntax_error((Item){.item = s2it(heap_create_name(msg_str, strlen(msg_str)))});
+        return;
+    }
     Item global = js_get_global_this();
     if (!it2b(js_has_own_property(global, key))) return;
     Item name = js_to_string(key);

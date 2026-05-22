@@ -49,6 +49,11 @@ static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
     return false;
 }
 
+static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
+    return mt && mt->current_fc && mt->current_fc->node &&
+        jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node);
+}
+
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
     if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
     int idx = mt->current_func_index;
@@ -778,6 +783,23 @@ static MIR_reg_t jm_apply_with_identifier_fallback(JsMirTranspiler* mt, JsIdenti
     return result;
 }
 
+static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* call) {
+    MIR_reg_t this_arg = jm_emit_undefined(mt);
+    if (!mt || (!mt->with_depth && !jm_current_function_captures_with_scope(mt)) ||
+            !call || !call->callee ||
+            call->callee->node_type != JS_AST_NODE_IDENTIFIER) {
+        return this_arg;
+    }
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    if (!id->name) return this_arg;
+    MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+    // `with (obj) { method(); }` is an identifier reference whose base is the
+    // with object, not an ordinary plain call. Reuse the callee lookup result
+    // so later argument evaluation cannot change the selected receiver.
+    return jm_call_1(mt, "js_get_last_with_binding_base_or_undefined", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+}
+
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     // Handle 'this' keyword: use captured _js_this if in arrow function, else js_get_this()
     if (id->name->len == 4 && strncmp(id->name->chars, "this", 4) == 0) {
@@ -872,8 +894,12 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
-        if (mt->with_depth > 0) {
+        bool read_with_outer_binding = var->from_env && jm_current_function_captures_with_scope(mt);
+        if (mt->with_depth > 0 || read_with_outer_binding) {
             if (!lookup_key) lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+            // Functions created inside `with` capture that Object Environment Record
+            // at runtime. For captured outer variables, emit the same with lookup the
+            // enclosing body would use; local/parameter bindings are left untouched.
             var_read_reg = jm_call_2(mt, "js_get_with_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var_read_reg));
@@ -9020,7 +9046,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
-        MIR_reg_t null_this = jm_emit_undefined(mt);
+        MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
@@ -9071,8 +9097,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
-        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-        MIR_reg_t null_this = jm_emit_undefined(mt);
+        // v17: pass undefined as this for ordinary plain calls; `with` identifier
+        // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
+        MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         MIR_reg_t call_result;
         if (fallback_has_spread) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
@@ -9104,8 +9131,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-        // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-        MIR_reg_t null_this = jm_emit_undefined(mt);
+        // v17: pass undefined as this for ordinary plain calls; `with` identifier
+        // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
+        MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
@@ -9116,8 +9144,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
     if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-    // v17: pass undefined as this for plain calls (strict mode: this === undefined)
-    MIR_reg_t null_this = jm_emit_undefined(mt);
+    // v17: pass undefined as this for ordinary plain calls; `with` identifier
+    // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
+    MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),

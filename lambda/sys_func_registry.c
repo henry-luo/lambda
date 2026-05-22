@@ -856,15 +856,18 @@ extern int js_with_save_depth(void);
 extern void js_with_restore_depth(int depth);
 extern int64_t js_with_depth_active(void);
 extern Item js_get_with_binding_or_fallback(Item key, Item fallback);
+extern Item js_get_last_with_binding_base_or_undefined(Item key);
 extern int64_t js_probe_with_binding(Item key);
 extern int64_t js_capture_with_binding(Item key);
 extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+extern int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
 extern void js_set_global_property(Item key, Item value);
 extern void js_set_global_var_property_fast(Item key, Item value);
 extern void js_set_global_property_strict(Item key, Item value);
 extern void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
+extern void js_register_global_var_module_binding(Item key, int64_t index);
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_init_class_instance_fields(Item callee, Item object);
@@ -872,6 +875,11 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
+extern void js_define_global_function_property(Item key, Item value);
+extern void js_global_lexical_declare(Item key, Item value, int64_t immutable);
+extern int64_t js_global_lexical_binding_exists(Item key);
+extern Item js_global_lexical_get_or_fallback(Item key, Item fallback);
+extern int64_t js_global_lexical_set_if_exists(Item key, Item value);
 extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_evalscript_check_global_lex_decl(Item key);
@@ -1689,6 +1697,7 @@ JitImport jit_runtime_imports[] = {
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
+    {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding)},
     // v12: Language features
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
@@ -1714,9 +1723,11 @@ JitImport jit_runtime_imports[] = {
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
     {"js_with_depth_active", FPTR(js_with_depth_active)},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
+    {"js_get_last_with_binding_base_or_undefined", FPTR(js_get_last_with_binding_base_or_undefined)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
     {"js_capture_with_binding", FPTR(js_capture_with_binding)},
     {"js_set_last_with_binding_if_valid", FPTR(js_set_last_with_binding_if_valid)},
+    {"js_set_with_binding_base", FPTR(js_set_with_binding_base)},
     {"js_delete_identifier_with_binding", FPTR(js_delete_identifier_with_binding)},
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},
     {"js_set_global_property", FPTR(js_set_global_property)},
@@ -1729,6 +1740,11 @@ JitImport jit_runtime_imports[] = {
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
+    {"js_define_global_function_property", FPTR(js_define_global_function_property)},
+    {"js_global_lexical_declare", FPTR(js_global_lexical_declare)},
+    {"js_global_lexical_binding_exists", FPTR(js_global_lexical_binding_exists)},
+    {"js_global_lexical_get_or_fallback", FPTR(js_global_lexical_get_or_fallback)},
+    {"js_global_lexical_set_if_exists", FPTR(js_global_lexical_set_if_exists)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},

@@ -517,6 +517,7 @@ void js_runtime_set_input(void* input);
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
+void js_register_global_var_module_binding(Item key, int64_t index);
 
 /**
  * Reset all JS runtime global state between batch test runs.
@@ -583,7 +584,13 @@ void js_set_global_property(Item key, Item value);
 void js_set_global_var_property_fast(Item key, Item value);
 void js_set_global_property_strict(Item key, Item value);
 void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
+void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);
+void js_define_global_function_property(Item key, Item value);
+void js_global_lexical_declare(Item key, Item value, int64_t immutable);
+int64_t js_global_lexical_binding_exists(Item key);
+Item js_global_lexical_get_or_fallback(Item key, Item fallback);
+int64_t js_global_lexical_set_if_exists(Item key, Item value);
 void js_evalscript_check_global_lex_decl(Item key);
 void js_mark_private_method_non_writable(Item object, Item name);
 void js_set_method_home_from_target(Item target, Item fn_item);
@@ -606,9 +613,11 @@ void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
+Item js_get_last_with_binding_base_or_undefined(Item key);
 int64_t js_probe_with_binding(Item key);
 int64_t js_capture_with_binding(Item key);
 int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
+int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 void js_eval_env_bind(Item key, Item value);
 int64_t js_eval_env_has_binding(Item key);
 int64_t js_eval_env_is_active(void);
