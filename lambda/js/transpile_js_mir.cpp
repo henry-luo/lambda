@@ -34,6 +34,9 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+// keep the newer CLI --diagnose switch linkable after rolling the JS runtime
+// back to d609; the reverted runtime ignores the flag unless diagnose probes
+// are reintroduced later.
 static int g_js_diagnose_enabled = 0;
 
 extern "C" void js_set_diagnose_enabled(int enabled) {

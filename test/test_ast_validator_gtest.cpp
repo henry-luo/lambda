@@ -58,6 +58,10 @@ PathSegment* create_path_segment(PathSegmentType type, const char* name, long in
                 segment->data.attr_name.length = strlen(name);
             }
             break;
+        case PATH_UNION:
+            // PATH_UNION carries no extra payload in PathSegment; handle it so
+            // this local test helper stays exhaustive as validator paths evolve.
+            break;
     }
 
     return segment;

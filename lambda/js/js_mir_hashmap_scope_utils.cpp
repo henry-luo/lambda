@@ -182,7 +182,6 @@ JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type , TypeId type_id ) {
-    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
@@ -191,16 +190,10 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.type_id = type_id;
     entry.var.typed_array_type = -1;  // P9: not a typed array by default
 
-    // preserve metadata only from the target scope; a new shadowing binding
-    // must not inherit an outer let/catch scope-env slot.
+    // Preserve metadata from TDZ-hoisted entries
     {
-        JsVarScopeEntry key;
-        memset(&key, 0, sizeof(key));
-        snprintf(key.name, sizeof(key.name), "%s", name);
-        JsVarScopeEntry* existing_entry = mt->var_scopes[target_depth] ?
-            (JsVarScopeEntry*)hashmap_get(mt->var_scopes[target_depth], &key) : NULL;
-        if (existing_entry) {
-            JsMirVarEntry* existing = &existing_entry->var;
+        JsMirVarEntry* existing = jm_find_var(mt, name);
+        if (existing) {
             // v15: In generators, preserve env slot info from hoisted variables
             if (mt->in_generator && existing->from_env) {
                 entry.var.from_env = true;
@@ -226,6 +219,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         }
     }
 
+    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     hashmap_set(mt->var_scopes[target_depth], &entry);
 }
 

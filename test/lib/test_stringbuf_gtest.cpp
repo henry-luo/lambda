@@ -575,7 +575,7 @@ TEST_F(StringBufTest, TestDualStringBufStress) {
     ASSERT_NE(result1, nullptr) << "buf1 stringbuf_to_string should succeed";
     ASSERT_NE(result2, nullptr) << "buf2 stringbuf_to_string should succeed";
 
-    printf("DEBUG: Stress test completed - buf1 size=%zu, buf2 size=%zu\n",
+    printf("DEBUG: Stress test completed - buf1 size=%u, buf2 size=%u\n",
            result1->len, result2->len);
 
     stringbuf_free(buf1);

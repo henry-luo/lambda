@@ -627,6 +627,8 @@ extern "C" Item js_to_string(Item value) {
                 // instead of throwing.
                 if (value.map &&
                     js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+                    // newer clang does not model this switch fallthrough in the
+                    // reverted runtime; return the intended default directly.
                     return (Item){.item = s2it(heap_create_name("[object Object]"))};
                 }
                 js_throw_type_error("Cannot convert object to primitive value");
@@ -1079,14 +1081,6 @@ double js_get_number(Item value) {
     }
 }
 
-extern "C" double js_get_number_import(Item value) {
-    return js_get_number(value);
-}
-
-extern "C" double js_get_number_mir(Item value) {
-    return js_get_number(value);
-}
-
 Item js_make_number(double d) {
     // Check if it can be represented as an integer
     // Guard with isfinite to avoid UB from (int64_t)Infinity/NaN
@@ -1101,17 +1095,6 @@ Item js_make_number(double d) {
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     *ptr = d;
     return (Item){.item = d2it(ptr)};
-}
-
-extern "C" Item js_box_native_int64(int64_t value) {
-    // Native MIR counters are untagged int64 values. Box them with the same
-    // symbol-collision and int56 bounds used by js_make_number(), otherwise
-    // loop counters can become values that look like internal Symbol encodings.
-    if (value >= INT56_MIN && value <= INT56_MAX &&
-        value > -(int64_t)JS_SYMBOL_BASE) {
-        return (Item){.item = i2it(value)};
-    }
-    return js_make_number((double)value);
 }
 
 // =============================================================================
@@ -1169,28 +1152,10 @@ static inline int js_upper_hex_digit_value(char c) {
 }
 
 extern "C" uint64_t js_get_heap_epoch();
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
-extern __thread EvalContext* context;
 
 static Item g_last_four_byte_uri_escape_string = {0};
 static uint32_t g_last_four_byte_uri_escape_cp = 0;
 static uint64_t g_last_four_byte_uri_escape_epoch = 0;
-static Item g_uri_percent_prefix_cache[16] = {{0}};
-static Item g_uri_percent_byte_cache[256] = {{0}};
-
-static void js_uri_value_cache_ensure_gc_roots() {
-    static void* rooted_gc = NULL;
-    if (!context || !context->heap || !context->heap->gc) return;
-    if (rooted_gc == context->heap->gc) return;
-    // decodeURI stress tests can trigger GC mid-loop. These static caches hold
-    // GC-managed String Items, so they must be roots or a later cache hit can
-    // return a swept/reused string and poison following batch tests.
-    heap_register_gc_root(&g_last_four_byte_uri_escape_string.item);
-    heap_register_gc_root_range((uint64_t*)g_uri_percent_prefix_cache, 16);
-    heap_register_gc_root_range((uint64_t*)g_uri_percent_byte_cache, 256);
-    rooted_gc = context->heap->gc;
-}
 
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
@@ -1221,7 +1186,6 @@ static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
 }
 
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
-    js_uri_value_cache_ensure_gc_roots();
     if (str_item.item == g_last_four_byte_uri_escape_string.item &&
         g_last_four_byte_uri_escape_epoch == js_get_heap_epoch()) {
         return (int64_t)g_last_four_byte_uri_escape_cp;
@@ -1230,7 +1194,6 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
 }
 
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp) {
-    js_uri_value_cache_ensure_gc_roots();
     if (cp < 0x10000 || cp > 0x10FFFF) return;
     g_last_four_byte_uri_escape_string = str_item;
     g_last_four_byte_uri_escape_cp = (uint32_t)cp;
@@ -1238,31 +1201,30 @@ extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_
 }
 
 static inline Item js_try_concat_percent_hex(String* left, String* right) {
-    js_uri_value_cache_ensure_gc_roots();
     if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
     char right_ch = right->chars[0];
     int right_value = js_upper_hex_digit_value(right_ch);
     if (right_value < 0) return ItemNull;
     if (left->len == 1 && left->chars[0] == '%') {
-        if (g_uri_percent_prefix_cache[right_value].item)
-            return g_uri_percent_prefix_cache[right_value];
+        static Item prefix_cache[16] = {0};
+        if (prefix_cache[right_value].item) return prefix_cache[right_value];
         char buf[2];
         buf[0] = '%';
         buf[1] = right_ch;
-        g_uri_percent_prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
-        return g_uri_percent_prefix_cache[right_value];
+        prefix_cache[right_value] = (Item){.item = s2it(heap_create_name(buf, 2))};
+        return prefix_cache[right_value];
     }
     int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
     if (left_value >= 0) {
         int byte_value = (left_value << 4) | right_value;
-        if (g_uri_percent_byte_cache[byte_value].item)
-            return g_uri_percent_byte_cache[byte_value];
+        static Item byte_cache[256] = {0};
+        if (byte_cache[byte_value].item) return byte_cache[byte_value];
         char buf[3];
         buf[0] = '%';
         buf[1] = left->chars[1];
         buf[2] = right_ch;
-        g_uri_percent_byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
-        return g_uri_percent_byte_cache[byte_value];
+        byte_cache[byte_value] = (Item){.item = s2it(heap_create_name(buf, 3))};
+        return byte_cache[byte_value];
     }
     return ItemNull;
 }
@@ -1282,7 +1244,6 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
     if (result->len == 12 && js_percent_escape_four_byte_cp(result, &cp)) {
-        js_uri_value_cache_ensure_gc_roots();
         g_last_four_byte_uri_escape_string = result_item;
         g_last_four_byte_uri_escape_cp = cp;
         g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();

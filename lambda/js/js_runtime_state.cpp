@@ -8,32 +8,7 @@ static void js_ensure_module_vars_gc_rooted() {
     if (!context || !context->heap || !context->heap->gc) return;
     if (rooted_gc == context->heap->gc) return;
     heap_register_gc_root_range((uint64_t*)js_module_vars, JS_MAX_MODULE_VARS);
-    // the batch preamble snapshot is copied back into js_module_vars after each
-    // test. URI stress tests can trigger moving GC before that reset, so the
-    // snapshot must be updated by GC too or it will resurrect stale constructor
-    // and helper pointers into the next test.
-    heap_register_gc_root_range((uint64_t*)js_runtime_state.preamble_module_vars,
-                                JS_MAX_MODULE_VARS);
     rooted_gc = context->heap->gc;
-}
-
-static void js_pin_preamble_array_buffers(int count) {
-    if (!context || !context->heap || !context->heap->pool) return;
-    for (int i = 0; i < count; i++) {
-        Item value = js_runtime_state.preamble_module_vars[i];
-        if (get_type_id(value) != LMD_TYPE_ARRAY) continue;
-        Array* arr = value.array;
-        if (!arr || !arr->items || arr->capacity <= 0) continue;
-        size_t byte_size = (size_t)arr->capacity * sizeof(Item);
-        Item* stable_items = (Item*)pool_calloc(context->heap->pool, byte_size);
-        if (!stable_items) continue;
-        // Batch preamble arrays are retained as helper state across many test
-        // executions. Their dense storage must not stay in the nursery data
-        // zone, where decodeURI-sized allocation bursts can compact/reset it
-        // while the shallow preamble snapshot still points at the same Array.
-        memcpy(stable_items, arr->items, byte_size);
-        arr->items = stable_items;
-    }
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -66,7 +41,6 @@ extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_in(Item key, Item object);
-extern "C" void js_reset_global_lexical_bindings(void);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
@@ -164,27 +138,6 @@ extern "C" void js_reset_module_vars() {
     js_ensure_module_vars_gc_rooted();
     memset(js_module_vars, 0, sizeof(js_module_vars));
     js_module_var_count = 0;
-    memset(js_runtime_state.preamble_module_vars, 0,
-           sizeof(js_runtime_state.preamble_module_vars));
-    js_runtime_state.preamble_module_var_count = 0;
-    js_runtime_state.preamble_module_snapshot_valid = false;
-}
-
-extern "C" void js_capture_preamble_module_vars(int count) {
-    if (count < 0) count = 0;
-    if (count > JS_MAX_MODULE_VARS) count = JS_MAX_MODULE_VARS;
-    js_ensure_module_vars_gc_rooted();
-    if (count > 0) {
-        memcpy(js_runtime_state.preamble_module_vars, js_active_module_vars,
-               (size_t)count * sizeof(Item));
-    }
-    if (count < JS_MAX_MODULE_VARS) {
-        memset(js_runtime_state.preamble_module_vars + count, 0,
-               (size_t)(JS_MAX_MODULE_VARS - count) * sizeof(Item));
-    }
-    js_runtime_state.preamble_module_var_count = count;
-    js_runtime_state.preamble_module_snapshot_valid = true;
-    js_pin_preamble_array_buffers(count);
 }
 
 // Save/restore module vars for nested require() — prevents inner module
@@ -263,16 +216,6 @@ extern "C" void js_throw_value(Item value) {
         String* s = it2s(value);
         snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
                  "%.*s", s->len, s->chars);
-    }
-}
-
-extern "C" void js_throw_value_with_message(Item value, const char* message) {
-    js_exception_pending = true;
-    js_exception_value = value;
-    if (message) {
-        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf), "%s", message);
-    } else {
-        js_exception_msg_buf[0] = '\0';
     }
 }
 
@@ -371,7 +314,6 @@ extern "C" void js_batch_reset() {
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
-    js_reset_global_lexical_bindings();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
@@ -441,17 +383,11 @@ extern "C" int js_get_module_var_count() {
 // to avoid re-initializing the harness between tests.
 extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_ensure_module_vars_gc_rooted();
-    // Restore harness module vars from the preamble snapshot on every reset.
-    // Tests may assign to names such as Test262Error; keeping the mutated value
-    // would poison later tests in the same hot-reload batch.
-    if (js_runtime_state.preamble_module_snapshot_valid &&
-        checkpoint_var_count > 0 &&
-        checkpoint_var_count <= js_runtime_state.preamble_module_var_count) {
-        memcpy(js_module_vars, js_runtime_state.preamble_module_vars,
-               (size_t)checkpoint_var_count * sizeof(Item));
-    } else if (js_active_module_vars != js_module_vars && checkpoint_var_count > 0) {
-        // First reset after compiling the preamble may still be using the
-        // pool-allocated per-module array.
+    // If preamble ran with a pool-allocated module vars array, copy preamble vars
+    // [0..checkpoint) into the static js_module_vars so tests can access them via
+    // js_get_module_var(). Tests skip re-including preamble files (e.g.
+    // nativeFunctionMatcher.js), so those module vars would otherwise stay zero.
+    if (js_active_module_vars != js_module_vars && checkpoint_var_count > 0) {
         memcpy(js_module_vars, js_active_module_vars,
                (size_t)checkpoint_var_count * sizeof(Item));
     }
@@ -495,7 +431,6 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset globalThis, constructor cache, process object — stale heap pointers
     extern void js_globals_batch_reset(void);
     js_globals_batch_reset();
-    js_reset_global_lexical_bindings();
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
@@ -761,11 +696,6 @@ extern "C" void js_runtime_set_input(void* input) {
     heap_register_gc_root(&js_new_target.item);
     heap_register_gc_root(&js_pending_new_target.item);
     heap_register_gc_root(&js_exception_value.item);
-    heap_register_gc_root(&js_regexp_last_match.input.item);
-    heap_register_gc_root(&js_regexp_last_match.match.item);
-    for (int i = 0; i < JS_REGEXP_MAX_PAREN; i++) {
-        heap_register_gc_root(&js_regexp_last_match.groups[i].item);
-    }
 }
 
 extern "C" Item js_get_this() {

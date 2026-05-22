@@ -287,7 +287,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     bool generate_native = false;
     if (fc->has_native_version &&
         !has_captures && param_count > 0 && param_count <= 16 &&
-        !fc->uses_arguments && fc->ctor_prop_count <= 0 &&
         (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
@@ -442,11 +441,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0) {
-                    // Annex B FDI appends the implicit arguments object name to
-                    // parameterNames. A sloppy block function named `arguments`
-                    // still gets its block lexical binding, but must not create
-                    // the var-scope hoist that would replace the arguments object.
+                    strcmp(e->name, "_js_arguments") == 0 &&
+                    jm_function_has_formal_arguments_binding(fn)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -481,13 +477,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                if (fc && fc->uses_arguments && strcmp(lce->name, "_js_arguments") == 0) {
-                    // Block functions named `arguments` get initialized when
-                    // entering their block. Initializing that name in the
-                    // function body scope would shadow the implicit arguments
-                    // object before the block is reached.
-                    continue;
-                }
                 JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     // Create register for let/const (no longer hoisted by jm_collect_body_locals)
@@ -978,30 +967,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
 
-            MIR_reg_t cap_env_reg = mt->gen_env_reg;
-            int cap_env_slot = cap_offset + ci;
-            if (has_scope_slot) {
-                cap_env_reg = jm_new_reg(mt, "gshared_env", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, cap_env_reg),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                        (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
-                cap_env_slot = fc->captures[ci].scope_env_slot;
-            }
             MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, cap_reg),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    cap_env_slot * (int)sizeof(uint64_t), cap_env_reg, 0, 1)));
+                    (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
             snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
             entry.var.reg = cap_reg;
             entry.var.from_env = true;
-            entry.var.module_var_backed = fc->captures[ci].module_var_backed;
-            entry.var.from_shared_env = has_scope_slot;
-            entry.var.env_slot = cap_env_slot;
-            entry.var.env_reg = cap_env_reg;
+            entry.var.env_slot = cap_offset + ci;
+            entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
             entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
                 jm_capture_is_nfe_binding(mt, fc, fc->captures[ci].name);
@@ -1062,7 +1039,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, vr),
-                        MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
                     JsVarScopeEntry entry;
                     memset(&entry, 0, sizeof(entry));
                     snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
@@ -1454,7 +1431,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
-                entry.var.module_var_backed = fc->captures[ci].module_var_backed;
                 entry.var.env_slot = cap_offset + ci;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
@@ -1771,15 +1747,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int saved_func_index = mt->current_func_index;
     MIR_reg_t saved_eval_completion_reg = mt->eval_completion_reg;
     MIR_reg_t saved_eval_local_frame_reg = mt->eval_local_frame_reg;
-    MIR_reg_t saved_last_closure_env_reg = mt->last_closure_env_reg;
-    int saved_last_closure_capture_count = mt->last_closure_capture_count;
-    int saved_last_closure_capture_slots[512];
-    char saved_last_closure_capture_names[512][128];
-    bool saved_last_closure_has_env = mt->last_closure_has_env;
-    memcpy(saved_last_closure_capture_slots, mt->last_closure_capture_slots,
-        sizeof(saved_last_closure_capture_slots));
-    memcpy(saved_last_closure_capture_names, mt->last_closure_capture_names,
-        sizeof(saved_last_closure_capture_names));
 
     // Set current function index for scope env lookups
     mt->current_func_index = (int)(fc - mt->func_entries);
@@ -1787,12 +1754,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->scope_env_slot_count = 0;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
     mt->eval_local_frame_reg = 0;
-    // function bodies maintain their own synchronous callback readback state.
-    // Leaving a nested function's last closure env in the parent codegen can
-    // make same-named outer bindings read back from the wrong closure env.
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    mt->last_closure_has_env = false;  // clear stale closure env from previous function
 
     // Determine if this function is a class method and set current_class
     mt->current_class = NULL;
@@ -1936,60 +1898,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- v15: Generator wrapper (creates generator object instead of running body) ---
     if (fn->is_generator && gen_sm_func_item) {
-        if (has_captures) {
-            MIR_reg_t wrapper_env = MIR_reg(mt->ctx, "_js_env", func);
-            char wrapper_self_capture_name[128] = {0};
-            if (fn->name && fn->name->chars) {
-                snprintf(wrapper_self_capture_name, sizeof(wrapper_self_capture_name), "_js_%.*s",
-                    (int)fn->name->len, fn->name->chars);
-            }
-            for (int ci = 0; ci < fc->capture_count; ci++) {
-                bool has_scope_slot = (fc->captures[ci].scope_env_slot >= 0);
-                bool is_self_capture = (wrapper_self_capture_name[0] &&
-                    strcmp(fc->captures[ci].name, wrapper_self_capture_name) == 0);
-                if (!has_scope_slot && !is_self_capture) {
-                    int pi = fc->parent_index;
-                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env) {
-                        continue;
-                    }
-                    if (mt->module_consts) {
-                        JsModuleConstEntry mclookup;
-                        snprintf(mclookup.name, sizeof(mclookup.name), "%s", fc->captures[ci].name);
-                        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                        if (mc && mc->const_type == MCONST_MODVAR && !fc->captures[ci].force_env_capture) {
-                            continue;
-                        }
-                    }
-                }
-
-                int slot = has_scope_slot ? fc->captures[ci].scope_env_slot : ci;
-                MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, cap_reg),
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                        slot * (int)sizeof(uint64_t), wrapper_env, 0, 1)));
-
-                JsVarScopeEntry entry;
-                memset(&entry, 0, sizeof(entry));
-                snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
-                entry.var.reg = cap_reg;
-                entry.var.from_env = true;
-                entry.var.module_var_backed = fc->captures[ci].module_var_backed;
-                entry.var.from_shared_env = has_scope_slot;
-                entry.var.env_slot = slot;
-                entry.var.env_reg = wrapper_env;
-                entry.var.typed_array_type = -1;
-                entry.var.is_nfe_binding = fc->captures[ci].is_nfe_binding ||
-                    jm_capture_is_nfe_binding(mt, fc, fc->captures[ci].name);
-                if (fc->captures[ci].is_let_const) {
-                    entry.var.tdz_active = true;
-                    entry.var.is_let_const = true;
-                    entry.var.is_const = fc->captures[ci].is_const;
-                }
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
-            }
-        }
-
         bool gen_has_default_params = jm_param_tree_has_assignment_pattern(fn->params);
         if (gen_has_default_params) {
             JsAstNode* seed_param = fn->params;
@@ -2069,18 +1977,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (has_captures) {
             MIR_reg_t outer_env = MIR_reg(mt->ctx, "_js_env", func);
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                bool has_scope_slot = fc->captures[ci].scope_env_slot >= 0;
-                int src_slot = has_scope_slot ? fc->captures[ci].scope_env_slot : ci;
+                int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
                 MIR_reg_t cap_val = jm_new_reg(mt, "gcap", MIR_T_I64);
-                if (has_scope_slot) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, cap_val),
-                        MIR_new_reg_op(mt->ctx, outer_env)));
-                } else {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, cap_val),
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, src_slot * (int)sizeof(uint64_t), outer_env, 0, 1)));
-                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cap_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, src_slot * (int)sizeof(uint64_t), outer_env, 0, 1)));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), gen_env, 0, 1),
                     MIR_new_reg_op(mt->ctx, cap_val)));
@@ -2343,6 +2244,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 bool is_self_capture = (self_capture_name[0] &&
                     strcmp(fc->captures[i].name, self_capture_name) == 0);
                 if (!has_scope_slot && !is_self_capture) {
+                    // When parent uses shared scope env but this capture didn't get a
+                    // slot (scope_env overflow), skip loading — the dense index 'i'
+                    // would read the wrong slot. Let identifier resolution handle it
+                    // (via id->entry for function decls, or module_consts for MODVARs).
+                    int pi = fc->parent_index;
+                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_scope_env) {
+                        continue;
+                    }
                     // For per-closure envs, also skip MODVAR captures
                     if (mt->module_consts) {
                         JsModuleConstEntry mclookup;
@@ -2411,7 +2320,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[i].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
-                entry.var.module_var_backed = fc->captures[i].module_var_backed;
                 entry.var.from_shared_env = (has_scope_slot && gp_slot < 0);
                 // v29: For grandparent reads, store the grandparent env info
                 // so scope_env_reload_vars and write-back use the correct env
@@ -2501,30 +2409,25 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // Register parameter variables
-        MIR_reg_t param_env_reg = 0;
         param_node = fn->params;
         for (int i = 0; i < param_count; i++) {
             if (param_node) {
                 char vname[128];
                 jm_get_param_name(param_node, i, vname, sizeof(vname));
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
-                MIR_reg_t param_reg = jm_new_reg(mt, "param", MIR_T_I64);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, param_reg),
-                    MIR_new_reg_op(mt->ctx, preg)));
                 bool is_default_param = (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN);
                 JsAstNode* param_binding = param_node;
                 if (is_default_param) param_binding = ((JsAssignmentPatternNode*)param_node)->left;
                 if (!(has_default_params && param_binding && param_binding->node_type == JS_AST_NODE_IDENTIFIER)) {
-                jm_set_var(mt, vname, param_reg);
+                jm_set_var(mt, vname, preg);
                 }
 
                 // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
                 // access on this param can resolve field types via jm_get_effective_type.
-                if ((int)param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
+                if (param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
                     TsParameterNode* tsp = (TsParameterNode*)param_node;
                     if (tsp->ts_type && tsp->ts_type->type_expr &&
-                        (int)tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
                         Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, tsp->ts_type->type_expr);
                         if (resolved && resolved->type_id == LMD_TYPE_MAP) {
                             JsMirVarEntry* pvar = jm_find_var(mt, vname);
@@ -2548,12 +2451,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_label_t skip_label = jm_new_label(mt);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
                             MIR_new_label_op(mt->ctx, skip_label),
-                            MIR_new_reg_op(mt->ctx, param_reg),
+                            MIR_new_reg_op(mt->ctx, preg),
                             MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
                         // emit default value and store into param reg
                         MIR_reg_t def_val = jm_transpile_default_param_value(mt, fn, ap->right);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, param_reg),
+                            MIR_new_reg_op(mt->ctx, preg),
                             MIR_new_reg_op(mt->ctx, def_val)));
                         jm_emit_label(mt, skip_label);
                     }
@@ -2564,7 +2467,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     if (pvar) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, pvar->reg),
-                            MIR_new_reg_op(mt->ctx, param_reg)));
+                            MIR_new_reg_op(mt->ctx, preg)));
                         pvar->tdz_active = false;
                     }
                 }
@@ -2582,7 +2485,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                     // Throw TypeError if arg is null/undefined (RequireObjectCoercible)
                     jm_call_void_1(mt, "js_require_object_coercible",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, param_reg));
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
                     MIR_reg_t param_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
                     MIR_label_t skip_param_destr = jm_new_label(mt);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, skip_param_destr),
@@ -2605,7 +2508,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 key = jm_transpile_box_item(mt, p->key);
                             }
                             MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, param_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
                             // determine target variable (value of property, or key for shorthand)
                             JsAstNode* target = p->value ? p->value : p->key;
@@ -2649,36 +2552,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // For array-destructured params: function f([a, b]) → extract by index
                 if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
                     // v20: use recursive destructuring helper
-                    jm_emit_array_destructure(mt, destr_pat, param_reg);
+                    jm_emit_array_destructure(mt, destr_pat, preg);
                 }
                 // v20: object-destructured params: function f({a, b})
                 if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    jm_emit_object_destructure(mt, destr_pat, param_reg);
+                    jm_emit_object_destructure(mt, destr_pat, preg);
                 }
             }
             param_node = param_node ? param_node->next : NULL;
-        }
-        if (param_count > 0) {
-            param_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
-            param_node = fn->params;
-            for (int i = 0; i < param_count; i++) {
-                if (param_node) {
-                    char vname[128];
-                    jm_get_param_name(param_node, i, vname, sizeof(vname));
-                    JsMirVarEntry* stable_pvar = jm_find_var(mt, vname);
-                    if (stable_pvar && stable_pvar->reg) {
-                        stable_pvar->in_scope_env = true;
-                        stable_pvar->scope_env_slot = i;
-                        stable_pvar->scope_env_reg = param_env_reg;
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                i * (int)sizeof(uint64_t), param_env_reg, 0, 1),
-                            MIR_new_reg_op(mt->ctx, stable_pvar->reg)));
-                    }
-                }
-                param_node = param_node ? param_node->next : NULL;
-            }
         }
 
         // P9: Pre-scan variable types before transpiling body
@@ -2711,11 +2592,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 if (e->from_func_decl && fc && fc->uses_arguments &&
-                    strcmp(e->name, "_js_arguments") == 0) {
-                    // Annex B FDI appends the implicit arguments object name to
-                    // parameterNames. A sloppy block function named `arguments`
-                    // still gets its block lexical binding, but must not create
-                    // the var-scope hoist that would replace the arguments object.
+                    strcmp(e->name, "_js_arguments") == 0 &&
+                    jm_function_has_formal_arguments_binding(fn)) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
@@ -2749,13 +2627,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                if (fc && fc->uses_arguments && strcmp(lce->name, "_js_arguments") == 0) {
-                    // Block functions named `arguments` get initialized when
-                    // entering their block. Initializing that name in the
-                    // function body scope would shadow the implicit arguments
-                    // object before the block is reached.
-                    continue;
-                }
                 JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
@@ -2876,19 +2747,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     this_entry.var.scope_env_reg = mt->scope_env_reg;
                     this_entry.var.typed_array_type = -1;
                     hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
-                } else if (strcmp(sname, "_js_new.target") == 0) {
-                    val = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
-                    JsVarScopeEntry nt_entry;
-                    memset(&nt_entry, 0, sizeof(nt_entry));
-                    snprintf(nt_entry.name, sizeof(nt_entry.name), "_js_new.target");
-                    nt_entry.var.reg = val;
-                    nt_entry.var.mir_type = MIR_T_I64;
-                    nt_entry.var.type_id = LMD_TYPE_ANY;
-                    nt_entry.var.in_scope_env = true;
-                    nt_entry.var.scope_env_slot = s;
-                    nt_entry.var.scope_env_reg = mt->scope_env_reg;
-                    nt_entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &nt_entry);
                 } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments &&
                            !has_formal_arguments_binding) {
                     bool args_aliased = !fc->has_non_simple_params &&
@@ -3224,13 +3082,6 @@ finish_boxed:
     mt->current_func_index = saved_func_index;
     mt->eval_completion_reg = saved_eval_completion_reg;
     mt->eval_local_frame_reg = saved_eval_local_frame_reg;
-    mt->last_closure_env_reg = saved_last_closure_env_reg;
-    mt->last_closure_capture_count = saved_last_closure_capture_count;
-    mt->last_closure_has_env = saved_last_closure_has_env;
-    memcpy(mt->last_closure_capture_slots, saved_last_closure_capture_slots,
-        sizeof(saved_last_closure_capture_slots));
-    memcpy(mt->last_closure_capture_names, saved_last_closure_capture_names,
-        sizeof(saved_last_closure_capture_names));
 }
 
 // ============================================================================

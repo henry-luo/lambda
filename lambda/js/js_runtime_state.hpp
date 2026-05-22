@@ -10,9 +10,9 @@
 
 #define JS_REGEXP_MAX_PAREN 9
 struct JsRegexpLastMatch {
-    Item input;
-    Item match;
-    Item groups[JS_REGEXP_MAX_PAREN];
+    String* input;
+    String* match;
+    String* groups[JS_REGEXP_MAX_PAREN];
     int group_count;
     int match_start;
     int match_end;
@@ -29,9 +29,6 @@ struct JsRuntimeState {
     Item module_vars[JS_MAX_MODULE_VARS] = {};
     Item* active_module_vars = module_vars;
     int module_var_count = 0;
-    Item preamble_module_vars[JS_MAX_MODULE_VARS] = {};
-    int preamble_module_var_count = 0;
-    bool preamble_module_snapshot_valid = false;
     uint64_t heap_epoch = 1;
 
     JsRegexpLastMatch regexp_last_match = {};
