@@ -14,6 +14,37 @@ static JsMirVarEntry* jm_find_var_in_scope_depth(JsMirTranspiler* mt, const char
     return found ? &found->var : NULL;
 }
 
+static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name) return NULL;
+    int start_depth = mt->scope_depth;
+    if (start_depth >= 64) start_depth = 63;
+    for (int depth = start_depth; depth >= 0; depth--) {
+        JsMirVarEntry* var = jm_find_var_in_scope_depth(mt, name, depth);
+        if (var && var->from_catch_param) return var;
+    }
+    return NULL;
+}
+
+static void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
+        const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY) {
+    if (!mt || !name || !mt->last_closure_has_env || mt->last_closure_env_reg == 0) return;
+    for (int i = 0; i < mt->last_closure_capture_count; i++) {
+        if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
+        MIR_reg_t val = val_reg;
+        if (jm_is_native_type(type_id)) {
+            val = jm_box_native(mt, val_reg, type_id);
+        }
+        // closures created before a same-scope let/const initializer copy the
+        // TDZ value. Write the initialized value into that fresh env so the
+        // closure observes JS's by-reference lexical binding semantics.
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t),
+                mt->last_closure_env_reg, 0, 1),
+            MIR_new_reg_op(mt->ctx, val)));
+        return;
+    }
+}
+
 static bool jm_has_outer_block_func_binding(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return false;
     for (int depth = 2; depth < mt->scope_depth && depth < 64; depth++) {
@@ -111,7 +142,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                 JsMirVarEntry* catch_param_var = NULL;
                 if (var->kind == JS_VAR_VAR && d->init && mt->scope_depth >= 0) {
-                    catch_param_var = jm_find_var_in_scope_depth(mt, vname, mt->scope_depth);
+                    // catch parameters live in their own environment, with the
+                    // catch body as a nested block. Sloppy Annex B var writes
+                    // still update the nearest catch parameter binding.
+                    catch_param_var = jm_find_nearest_catch_param_var(mt, vname);
                     if (catch_param_var && catch_param_var->from_catch_param && catch_param_var->reg) {
                         MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -423,6 +457,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
+                        jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_INT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
                             MIR_reg_t boxed_reg = jm_box_int_reg(mt, reg);
                             jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
@@ -449,6 +484,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
+                        jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_FLOAT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
                             MIR_reg_t boxed_reg = jm_box_float(mt, reg);
                             jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
@@ -477,6 +513,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
+                        jm_write_last_closure_capture_if_matching(mt, vname, reg, init_type);
                         jm_declare_evalscript_global_lexical_if_needed(mt, var, id, val);
                         jm_define_global_var_property_for_main_var(mt, var, id, val);
 
@@ -4237,11 +4274,15 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                         jm_emit_label(mt, skip_global_class_lex);
                     }
-                    if (mt->in_main && !mt->is_module && !mt->is_eval_direct) {
+                    if (mt->in_main && !mt->is_module && !mt->is_eval_direct &&
+                        mt->scope_depth <= 1) {
                         MIR_reg_t class_key = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
-                        // Top-level class declarations are global lexical
-                        // bindings. Keep the side table current so later
-                        // evalScript calls can detect collisions and resolve it.
+                        // Only a class declared directly at script top level
+                        // (main body scope) is a global lexical binding. A class
+                        // nested in a block/switch case is block-scoped and must
+                        // not leak to the global lexical side table, otherwise it
+                        // stays resolvable after the block exits
+                        // (switch/scope-lex-class expects a ReferenceError).
                         jm_call_void_3(mt, "js_global_lexical_declare",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
@@ -5060,7 +5101,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 pushed_catch_ctx = true;
             }
 
-            // Bind the catch parameter
+            // catch has two lexical environments: one for the parameter and a
+            // nested one for the body. Keeping them separate lets destructuring
+            // defaults capture the parameter without seeing body let/const TDZ.
             jm_push_scope(mt);
             if (catch_node->param && catch_node->param->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* param_id = (JsIdentifierNode*)catch_node->param;
@@ -5069,6 +5112,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_set_var(mt, vname, thrown_val);
                 JsMirVarEntry* catch_entry = jm_find_var(mt, vname);
                 if (catch_entry) catch_entry->from_catch_param = true;
+                jm_scope_env_mark_and_writeback(mt, vname, thrown_val);
             } else if (catch_node->param && catch_node->param->node_type == JS_AST_NODE_OBJECT_PATTERN) {
                 struct hashmap* catch_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -5083,7 +5127,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_new_reg_op(mt->ctx, undef_val)));
                     jm_set_var(mt, ne->name, preg);
                     JsMirVarEntry* ve = jm_find_var(mt, ne->name);
-                    if (ve) ve->is_let_const = true;
+                    if (ve) {
+                        ve->is_let_const = true;
+                        ve->from_catch_param = true;
+                    }
+                    jm_scope_env_mark_and_writeback(mt, ne->name, preg);
                 }
                 hashmap_free(catch_names);
                 jm_emit_object_destructure(mt, catch_node->param, thrown_val);
@@ -5101,7 +5149,11 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         MIR_new_reg_op(mt->ctx, undef_val)));
                     jm_set_var(mt, ne->name, preg);
                     JsMirVarEntry* ve = jm_find_var(mt, ne->name);
-                    if (ve) ve->is_let_const = true;
+                    if (ve) {
+                        ve->is_let_const = true;
+                        ve->from_catch_param = true;
+                    }
+                    jm_scope_env_mark_and_writeback(mt, ne->name, preg);
                 }
                 hashmap_free(catch_names);
                 jm_emit_array_destructure(mt, catch_node->param, thrown_val);
@@ -5109,10 +5161,12 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
             // Transpile catch body
             if (catch_node->body && catch_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                jm_push_scope(mt);
                 jm_init_block_tdz(mt, catch_node->body);  // v20 TDZ
                 JsBlockNode* blk = (JsBlockNode*)catch_node->body;
                 JsAstNode* s = blk->statements;
                 while (s) { jm_transpile_statement(mt, s); s = s->next; }
+                jm_pop_scope(mt);
             }
             jm_pop_scope(mt);
 
@@ -5166,6 +5220,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, saved_cptn),
                     MIR_new_reg_op(mt->ctx, mt->eval_completion_reg)));
+                // finally has its own statement-list completion. If it exits
+                // abruptly through `break;` or `continue;`, that empty abrupt
+                // completion must update to undefined, not inherit try's value.
+                jm_eval_cptn_reset(mt);
             }
 
             // Save and clear any pending exception so finally body starts

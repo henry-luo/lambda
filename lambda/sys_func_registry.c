@@ -184,6 +184,7 @@ extern Item js_array_indexOf_int(Item arr, int64_t search);
 extern Item js_string_concat(Item left, Item right);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
+extern Item js_string_replace_nonws_global_fast_no_dollar(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
@@ -1490,6 +1491,7 @@ JitImport jit_runtime_imports[] = {
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
+    {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},

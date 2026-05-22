@@ -8582,7 +8582,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         js_name_starts_with(name, name_len, "__if_", 5)) {
         return true;
     }
-    if ((name_len == 14 && strncmp(name, "__class_name__", 14) == 0) ||
+    if ((name_len == 9 && strncmp(name, "__proto__", 9) == 0) ||
+        (name_len == 15 && strncmp(name, "__source_text__", 15) == 0) ||
+        (name_len == 14 && strncmp(name, "__class_name__", 14) == 0) ||
         (name_len == 18 && strncmp(name, "__instance_proto__", 18) == 0) ||
         (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
         (name_len == 23 && strncmp(name, "__class_private_index__", 23) == 0) ||

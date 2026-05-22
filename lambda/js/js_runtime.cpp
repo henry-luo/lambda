@@ -17940,7 +17940,7 @@ static Item js_try_fast_replace_non_whitespace(Item regex, Item str, Item replac
     return (Item){.item = s2it(result)};
 }
 
-extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) {
+static Item js_string_replace_nonws_global_fast_impl(Item str, Item replacement, bool replacement_known_no_dollar) {
     if (get_type_id(str) != LMD_TYPE_STRING) {
         str = js_to_string(str);
         if (js_exception_pending) return ItemNull;
@@ -17949,13 +17949,14 @@ extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) 
         replacement = js_to_string(replacement);
         if (js_exception_pending) return ItemNull;
     }
-    String* s = it2s(str);
-    String* repl = it2s(replacement);
-    if (!s || !repl || js_replacement_has_dollar_pattern(repl)) return str;
     int64_t cached_cp = js_string_last_fromCharCode_cp(str);
     if (cached_cp >= 0) {
         return js_regexp_s_whitespace((int)cached_cp) ? str : replacement;
     }
+    String* s = it2s(str);
+    String* repl = it2s(replacement);
+    if (!s || !repl) return str;
+    if (!replacement_known_no_dollar && js_replacement_has_dollar_pattern(repl)) return str;
     int single_cp = 0;
     int single_width = js_utf8_decode_one_bmp(s->chars, (int)s->len, 0, &single_cp);
     if (single_width == (int)s->len && single_width > 0) {
@@ -17994,6 +17995,17 @@ extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) 
     String* result = heap_strcpy(buf->str, buf->length);
     strbuf_free(buf);
     return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_string_replace_nonws_global_fast(Item str, Item replacement) {
+    return js_string_replace_nonws_global_fast_impl(str, replacement, false);
+}
+
+extern "C" Item js_string_replace_nonws_global_fast_no_dollar(Item str, Item replacement) {
+    // MIR only calls this for literal replacements that were scanned at
+    // compile time and contain no '$' patterns.  Keeping that fact in the
+    // callee avoids rechecking the same literal inside tight test262 scans.
+    return js_string_replace_nonws_global_fast_impl(str, replacement, true);
 }
 
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
@@ -21300,11 +21312,27 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             Array* a = object.array;
             int64_t own_idx = k;
             Item elem = ItemNull;
-            while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
-                if (it2b(js_strict_equal(elem, search_val))) {
-                    return (Item){.item = i2it(own_idx)};
+            if (get_type_id(search_val) == LMD_TYPE_INT) {
+                // Dense integer lookup is a hot path for test262 membership
+                // tables.  Avoid routing every integer slot through generic
+                // strict equality; non-integer slots still need the full path
+                // for ES semantics such as Number-vs-BigInt/object mismatch.
+                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                    if (elem.item == search_val.item) {
+                        return (Item){.item = i2it(own_idx)};
+                    }
+                    if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                        return (Item){.item = i2it(own_idx)};
+                    }
+                    own_idx++;
                 }
-                own_idx++;
+            } else {
+                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                    if (it2b(js_strict_equal(elem, search_val))) {
+                        return (Item){.item = i2it(own_idx)};
+                    }
+                    own_idx++;
+                }
             }
             return (Item){.item = i2it(-1)};
         }
@@ -21345,11 +21373,26 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
         Array* a = object.array;
         int64_t own_idx = k;
         Item elem = ItemNull;
-        while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
-            if (it2b(js_strict_equal(elem, search_val))) {
-                return (Item){.item = i2it(own_idx)};
+        if (get_type_id(search_val) == LMD_TYPE_INT) {
+            // Mirror the forward indexOf fast path for lastIndexOf(int): keep
+            // the common dense-int scan branch-free while preserving generic
+            // strict equality for non-integer elements.
+            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+                if (elem.item == search_val.item) {
+                    return (Item){.item = i2it(own_idx)};
+                }
+                if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                    return (Item){.item = i2it(own_idx)};
+                }
+                own_idx--;
             }
-            own_idx--;
+        } else {
+            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+                if (it2b(js_strict_equal(elem, search_val))) {
+                    return (Item){.item = i2it(own_idx)};
+                }
+                own_idx--;
+            }
         }
         return (Item){.item = i2it(-1)};
     }
@@ -25321,6 +25364,7 @@ static Item js_string_iterator_proto_cache = {0};
 static Item js_map_iterator_proto_cache = {0};
 static Item js_set_iterator_proto_cache = {0};
 static Item js_regexp_string_iterator_proto_cache = {0};
+extern "C" int js_is_diagnose_enabled(void);
 
 extern "C" void js_iterator_proto_cache_reset(void) {
     js_iterator_proto_cache = (Item){0};
@@ -25333,7 +25377,18 @@ extern "C" void js_iterator_proto_cache_reset(void) {
 
 static Item js_make_iterator_proto(Item* cache, int next_builtin_id,
                                    const char* tag, int tag_len) {
-    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
+    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) {
+        if (next_builtin_id <= 0) return *cache;
+        bool has_next = false;
+        js_map_get_fast(cache->map, "next", 4, &has_next);
+        if (has_next) return *cache;
+        // Iterator prototype caches are static C++ Items, not GC roots.  Large
+        // batched TypedArray tests can collect the hidden prototype after the
+        // last iterator dies and later reuse its map storage.  A genuine
+        // user-visible deletion leaves a deleted own slot, so only a missing
+        // builtin slot is treated as stale cache state and recreated.
+        *cache = (Item){0};
+    }
 
     Item proto = js_new_object();
     if (next_builtin_id > 0) {
@@ -25514,6 +25569,14 @@ static bool js_iterator_cache_next_method(Item iterator) {
     if (it_tid != LMD_TYPE_MAP && it_tid != LMD_TYPE_ELEMENT && it_tid != LMD_TYPE_ARRAY) {
         js_throw_type_error("iterator is not an object");
         return false;
+    }
+    if (it_tid == LMD_TYPE_MAP && iterator.map->map_kind == MAP_KIND_ITERATOR) {
+        // Lightweight built-in iterators intentionally do not materialize a
+        // public `next` property.  js_iterator_step dispatches them by
+        // MAP_KIND_ITERATOR, so caching a property here would reject valid
+        // iterators returned from user @@iterator wrappers, which shows up in
+        // hot-reload test262 batches as TypedArray construction failures.
+        return true;
     }
     Item next_fn = js_property_get_str(iterator, "next", 4);
     if (js_check_exception()) return false;
@@ -25889,6 +25952,19 @@ extern "C" Item js_iterator_step(Item iterator) {
             String* val_key = heap_create_name("value", 5);
             return js_property_get(result, (Item){.item = s2it(val_key)});
         }
+        if (js_is_diagnose_enabled()) {
+            bool has_array = false, has_index = false, has_kind = false;
+            if (get_type_id(iterator) == LMD_TYPE_MAP) {
+                js_map_get_fast_ext(iterator.map, "__array__", 9, &has_array);
+                js_map_get_fast_ext(iterator.map, "__index__", 9, &has_index);
+                js_map_get_fast_ext(iterator.map, "__kind__", 8, &has_kind);
+            }
+            log_warn("js-diagnose: iterator-step-missing-next tid=%d map_kind=%d next_tid=%d has_array=%d has_index=%d has_kind=%d",
+                (int)iterator_tid,
+                get_type_id(iterator) == LMD_TYPE_MAP ? (int)iterator.map->map_kind : -1,
+                (int)get_type_id(next_fn),
+                has_array ? 1 : 0, has_index ? 1 : 0, has_kind ? 1 : 0);
+        }
     }
 
     js_throw_type_error("iterator next is not a function");
@@ -26052,7 +26128,13 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         }
     }
 
-    Item iterator = js_get_iterator(iterable);
+    // IterableToArray must still observe the iterator protocol for arrays:
+    // test262 mutates ArrayIteratorPrototype.next and relies on holes being
+    // read through iterator semantics.  The batch crash fix is limited to
+    // using the lazy getter here, so lightweight built-in iterators returned
+    // from user @@iterator wrappers are stepped by js_iterator_step instead of
+    // being rejected for not materializing an own `.next` property.
+    Item iterator = js_get_iterator_lazy(iterable);
     if (js_exception_pending) return ItemNull;
     Item arr = js_array_new(0);
     for (int safety = 0; safety < 100000; safety++) {
