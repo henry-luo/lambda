@@ -91,6 +91,13 @@ Main files:
 
 This is different from display-list tiled replay. It reruns view-tree rendering per strip and currently does not share the same record-once, replay-many pipeline used by normal raster output.
 
+It diverges on *two* axes, not one. Besides re-walking the tree per strip, it
+never sets `rdcon.dl`, so every `rc_*` call falls to the immediate `RdtVector`
+branch. The strip path therefore also bypasses retained fragments, dirty replay,
+and any effect implemented as a display-list post-op (opacity/blend/filter/shadow
+groups). It is the *only* remaining consumer of immediate mode in normal output,
+together with offscreen SVG-picture rasterisation.
+
 This path is memory-efficient, but because it is not just a target wrapper around the same display-list replay, it can diverge from screen/PNG behavior.
 
 ### 4. SVG Export
@@ -135,18 +142,50 @@ Main files:
 - `rdt_vector_tvg.cpp`
 - `rdt_vector_cg.mm`
 
-Inline SVG is a subpath used by multiple targets.
+Inline SVG is a subpath used by multiple targets. "SVG" actually refers to two
+inputs that both end up as the same `Element*` SVG DOM:
 
-Current flow:
+- inline `<svg>` in HTML, parsed onto `DomElement::native_element`,
+- external `.svg` files (`<img src>`, `background-image`, data URIs), parsed by
+  `rdt_picture_load*` into an `RdtPicture` of kind `KIND_SVG_DOM` (`svg_root`).
 
-1. HTML layout creates a view for `<svg>`.
-2. Raster rendering calls `render_inline_svg()`.
-3. `render_inline_svg()` computes the SVG content viewport, sets clipping, and calls `render_svg_to_vec()`.
-4. `render_svg_to_vec()` walks the SVG element tree and emits `RdtVector` operations.
+#### Raster: inline and file SVG already share one painter
 
-When called during raster display-list recording, the vector operations become display-list commands. When called from picture/native contexts, they may draw through `RdtVector` directly.
+For screen/PNG/JPEG, both inputs converge on `render_svg_to_vec()`:
 
-Because inline SVG has its own parser/style/filter/paint logic, it can diverge from both CSS painting and exported SVG/PDF behavior unless all final drawing goes through the same painter/display-list command model.
+1. inline `<svg>` → `render_inline_svg()` → `render_svg_to_vec(vec, svg_root, …, dl, …)`,
+2. `.svg` picture → `rdt_picture_draw` (KIND_SVG_DOM) → `render_svg_to_vec(vec, pic->svg_root, …)`.
+
+This is deliberate (see the comment in `rdt_vector_tvg.cpp`): the file-SVG
+picture goes through the same code path as inline `<svg>` so font and style
+resolution stay uniform with HTML body text. Inline SVG passes `rdcon->dl`
+through so it records into the display list; an offscreen picture passes
+`dl == null` and draws immediately to `RdtVector`. This part of the system is
+already unified and should be preserved.
+
+`render_svg_to_vec()` carries its **own** copy of the `if (dl) dl_* else rdt_*`
+dispatch (`render_svg_inline.cpp`), a third clone of the `rc_*` painter gateway
+(alongside `render_painter.cpp` and the inline-effects code). The SVG *paint
+semantics* are shared between inline and file SVG, but the painter dispatch is
+duplicated.
+
+#### Export: inline SVG diverges three ways
+
+Across output targets the same inline `<svg>` has three different fates:
+
+- **Raster** (`render_svg_to_vec`): full Radiant SVG paint/style/filter resolution.
+- **SVG export** (`render_inline_svg_passthrough`): re-serialises the SVG DOM as
+  text into a `<g transform>`; Radiant's SVG painter never runs. This is also a
+  *correctness* gap, not just duplication — passthrough does not reflect the HTML
+  cascade (`color`/`currentColor`, `fill`, `stroke`) that the painted path
+  applies from `view->in_line`.
+- **PDF export** (`render_inline_svg` callback is NULL): inline SVG is silently
+  dropped.
+
+So a fix to SVG rendering only lands in the raster path; SVG export passes the
+buck to the consumer renderer and PDF shows nothing. This is the clearest single
+example of "fixed in one path, broken in another," and the unified inline-SVG
+design below (Proposal §5) targets it directly.
 
 ## Display-List Design
 
@@ -328,13 +367,51 @@ These should flow through the same dirty tracker used by display-list replay so 
 
 The current system has strong abstractions, but behavior can still diverge because equivalent paint logic exists in multiple places.
 
-Main divergence points:
+### Root cause: the per-element paint algorithm is duplicated
+
+The deepest divergence is not "the same paint semantics live in two files." It is
+that the algorithm for *how to paint one element* exists twice:
+
+- `render_walk_block()` in `render_walk.cpp` runs the sequence
+  font → boundary → position → inline-SVG → image → opacity → transform → children.
+  This is what SVG and PDF export use.
+- The raster path never runs that body. `render_walk_children()` sees the raster
+  backend has set the `render_block`/`render_inline` full-node overrides and calls
+  them directly, so raster re-implements the same per-element sequence in
+  `render_block_view()` (`render_block.cpp`) with its own transform scope,
+  `render_bound`, opacity, and stacking handling.
+
+So the "shared walker" is shared only as a *traversal skeleton*; for raster it is
+a visitor that immediately hands control back to a parallel renderer. Two
+implementations of the per-element paint algorithm is the structural reason the
+same bug must be fixed in several places.
+
+### Concrete duplication: boundary rendering is implemented three times, not at parity
+
+Background + border + shadow + outline ("boundary") is implemented separately in
+each target, and the three are not equivalent:
+
+- raster: `render_border.cpp` / `render_background.cpp` — full (gradients,
+  border-radius, 3D border styles, box-shadow),
+- SVG: `render_bound_svg` (`render_svg.cpp`, ~400 lines re-deriving rounded-rect
+  paths and 3D border darken/lighten),
+- PDF: `pdf_cb_render_bound` (`render_pdf.cpp`) — four plain rects: **no
+  border-radius, no gradients, no shadow, no border styles.**
+
+A fix to border-radius or gradient backgrounds in raster cannot reach PDF because
+the code is not there. This is the bug class this document exists to remove.
+
+### Main divergence points
 
 - raster record path versus single display-list replay,
 - single display-list replay versus tiled replay,
-- normal raster output versus strip-based large tiled PNG export,
-- raster output versus SVG/PDF backend callbacks,
-- inline SVG direct vector drawing versus inline SVG display-list recording,
+- normal raster output versus strip-based large tiled PNG export (which also
+  bypasses the display list entirely — see §3 above),
+- raster output versus SVG/PDF backend callbacks (boundary, text, effects),
+- inline SVG painted via `render_svg_to_vec` versus SVG-export text passthrough
+  versus PDF-export drop (see §6 above),
+- the `if (dl) dl_* else rdt_*` painter dispatch cloned in three places
+  (`render_painter.cpp`, the SVG primitive helpers, the inline-SVG effect code),
 - CSS effects in block rendering versus display-list effect replay,
 - image/surface/video/webview paths with borrowed resources and resource generation checks,
 - clip and transform handling in backend walkers versus raster state helpers.
@@ -345,47 +422,87 @@ Any feature implemented below the wrong boundary risks needing several parallel 
 
 The target design is not one giant renderer. The target is one shared semantic paint model with small backend-specific lowering layers.
 
-### 1. Make Display List The Canonical Paint IR
+### 1. Two IR levels: a semantic paint IR above the raster display list
 
-Use `DisplayList` as the canonical intermediate representation for page painting.
+The natural temptation is "make `DisplayList` the canonical IR for all targets."
+That is a trap, because **today's `DisplayList` is already a raster lowering, not a
+target-neutral paint IR.** Its op set is pixel-domain:
+
+- `DL_FILL_SURFACE_RECT`, `DL_BLIT_SURFACE_SCALED` (direct surface pixels),
+- `DL_COMPOSITE_OPACITY` / `DL_SAVE_BACKDROP` / `DL_APPLY_BLEND_MODE` carrying
+  *physical pixel* `x0,y0,w,h` and `premultiplied_source`,
+- `DL_BOX_BLUR_REGION` / `DL_BOX_BLUR_INSET` / `DL_OUTER_SHADOW` (multi-pass pixel
+  box blur),
+- `DL_DRAW_GLYPH` carrying a **rasterised `GlyphBitmap`**, not a glyph id + run.
+
+If SVG/PDF consume *this* list, text becomes images of glyphs (no selectable
+`<text>`, huge files) and every pixel-only op has no vector meaning, so each
+vector backend must reinterpret or skip it. The divergence does not disappear; it
+relocates into the lowering layer. "N parallel renderers" becomes "1 raster IR +
+N backends each special-casing raster-only ops."
+
+The fix is to recognise **two levels** and make the shared layer the higher one:
+
+- **Semantic paint IR** (target-neutral, the canonical shared layer): glyph *runs*
+  (font + positions + text + color), `BeginEffectGroup(opacity, blend, filter,
+  backdrop, clip, transform, isolation)` / `EndEffectGroup`, fills/strokes,
+  paths, gradients, images, the clip/transform stack, and nested SVG subscenes.
+  No physical pixels, no premultiplied compositing, no rasterised glyphs.
+- **Raster display list** (today's `DisplayList`): one *lowering* of the semantic
+  IR — glyph run → bitmap, effect group → backdrop-save + blur + composite, etc.
+  Tiled replay re-replays this list.
 
 Target flow:
 
 ```text
 ViewTree
   -> shared paint walker
-  -> DisplayListBuilder
-  -> DisplayList validation/bounds
-  -> backend replay/lowering
+  -> PaintBuilder           (emits the semantic paint IR)
+  -> PaintIR validation/bounds
+  -> per-target lowering:
+       raster lowering  -> DisplayList -> RdtVector / ImageSurface (single + tiled)
+       svg   lowering   -> SVG markup (native <text>, gradients, filters)
+       pdf   lowering   -> PDF drawing commands
   -> screen/png/jpeg/pdf/svg
 ```
 
 In this model:
 
-- CSS layout and paint-order decisions happen once during DL record.
-- clipping, opacity, filters, transforms, shadows, images, glyphs, and SVG subscenes are represented as commands.
-- targets differ mainly in how commands are replayed/lowered.
+- CSS layout and paint-order decisions happen once during the paint-IR record.
+- clipping, opacity, filters, transforms, shadows, images, glyphs, and SVG
+  subscenes are represented as semantic commands.
+- targets differ only in lowering; the raster display list is just the most
+  detailed lowering, not the contract every backend must understand.
 
-Raster replay lowers commands to `RdtVector` and `ImageSurface`.
-SVG replay lowers commands to SVG markup.
-PDF replay lowers commands to PDF commands.
+This prevents SVG/PDF export from reimplementing the view-tree paint semantics
+independently, *and* avoids forcing vector backends to special-case raster-only
+ops.
 
-This prevents SVG/PDF export from reimplementing the view-tree paint semantics independently.
+> Pragmatic migration note: the semantic IR can start as a thin layer *above*
+> today's `DisplayList`. Raster keeps lowering to `DisplayList` unchanged; the
+> first win is making raster's `render_block_view` and the SVG/PDF
+> `render_walk_block` both *emit the same paint IR*, collapsing the duplicated
+> per-element algorithm before any backend is rewritten.
 
-### 2. Split DisplayList Into Stable Layers
+### 2. Split The Pipeline Into Stable Layers
 
-Recommended layers:
+Recommended layers, top (semantic) to bottom (raster):
 
-- `DisplayListBuilder`: record commands from views.
-- `DisplayListStorage`: command ownership, copied payloads, resource refs.
-- `DisplayListBounds`: item and fragment bounds, effect expansion.
-- `DisplayListValidator`: command invariants and resource generation checks.
-- `DisplayListReplayRaster`: raster lowering.
-- `DisplayListReplaySvg`: SVG lowering.
-- `DisplayListReplayPdf`: PDF lowering.
-- `DisplayListReplayTiled`: tile orchestration over the same raster command replay.
+- `PaintBuilder`: record the semantic paint IR from views (the single per-element
+  paint algorithm; replaces both `render_walk_block` and `render_block_view`).
+- `PaintIRStorage`: command ownership, copied payloads, resource refs.
+- `PaintIRBounds`: item and fragment bounds, effect expansion.
+- `PaintIRValidator`: command invariants, stack balance, resource generation checks.
+- `LowerRaster`: semantic IR → `DisplayList` (the existing raster command set).
+- `LowerSvg`: semantic IR → SVG markup (native `<text>`, gradients, filters).
+- `LowerPdf`: semantic IR → PDF drawing commands.
+- `DisplayListReplayRaster` / `DisplayListReplayTiled`: replay the raster
+  `DisplayList` to a surface, single or per-tile. Tiled replay is replay-only — it
+  never re-walks views.
 
-The important rule: a new paint feature adds one command or command family, then implements all required lowerings in named files. It should not add one-off view-walker code in each target.
+The important rule: a new paint feature adds one *semantic* command or command
+family, then implements its lowering in each `Lower*` file. It should not add
+one-off view-walker code in each target.
 
 ### 3. Collapse Tiled PNG Export Onto Display-List Replay
 
@@ -409,42 +526,95 @@ Benefits:
 - retained fragments and command bounds remain useful,
 - tile-only bugs are constrained to replay/lowering.
 
-### 4. Route SVG And PDF Export Through Display-List Lowering
+This should be paired with an explicit deliverable: **delete immediate mode.**
+Once tiled PNG and offscreen SVG-picture rasterisation both record into a display
+list, nothing sets `rdcon.dl == null`, so the `else rdt_*` branch in every `rc_*`
+helper (and its two clones in the SVG primitive/effect code) can be removed. That
+collapses the painter to a single recording path and eliminates a whole class of
+"record vs immediate" divergence at its source.
 
-SVG/PDF should eventually stop walking the view tree directly for paint semantics.
+### 4. Route SVG And PDF Export Through Paint-IR Lowering
+
+SVG/PDF should stop walking the view tree directly for paint semantics and lower
+the semantic paint IR instead.
 
 Target flow:
 
 ```text
-ViewTree -> DisplayList -> SVG/PDF replay backend
+ViewTree -> PaintBuilder -> PaintIR -> LowerSvg / LowerPdf
 ```
 
-`render_walk.cpp` can remain as the shared builder traversal, but it should build `DisplayList` through the same paint builder used by raster. SVG/PDF target code should consume commands, not re-decide how a block paints.
+`render_walk.cpp` can remain as the shared traversal, but it should drive the same
+`PaintBuilder` used by raster. SVG/PDF target code consumes semantic commands, not
+re-decides how a block paints (this is what removes the triple boundary
+implementation called out above).
 
-Some commands may be unsupported in vector export. That should be explicit:
+Some commands may be unsupported in a vector target. That must be explicit, and
+backed by a **per-target capability table** — note that the existing
+`render_backend_caps.hpp` describes only the raster `RdtVector` backend (ThorVG /
+CoreGraphics) and must be extended to SVG/PDF export. Each `Lower*` consults its
+capabilities and chooses:
 
-- native vector lowering when possible,
-- isolated raster fallback picture when necessary,
-- clear unsupported marker in logs/tests.
+- native vector lowering when supported,
+- isolated raster fallback picture (render the subtree to an image, embed it) when
+  not,
+- a clear unsupported marker in logs/tests so the fallback is observable, never
+  silent (today PDF silently drops inline SVG — exactly what this prevents).
 
-### 5. Make Inline SVG Produce A Sub-DisplayList Or RdtPicture Command
+### 5. Unify Inline And File SVG As A Nested Paint-IR Subscene
 
-Inline SVG should not be a special branch that behaves differently depending on caller.
+Start from what already works: inline `<svg>` and external `.svg` files both reach
+`render_svg_to_vec()` for raster, so their *paint semantics are already shared*.
+The job is not to unify those two inputs — it is to make `render_svg_to_vec`
+produce the shared semantic paint IR (one nested **SVG subscene** command) instead
+of driving `RdtVector`/`DisplayList` directly, so that the one painter feeds every
+target. Concretely this replaces three behaviours with one:
+
+- raster's direct `render_svg_to_vec` → `RdtVector` drawing,
+- SVG export's `render_inline_svg_passthrough` (DOM-to-text re-serialisation),
+- PDF export's NULL inline-SVG callback (drop).
 
 Preferred model:
 
-- parse SVG DOM once,
-- resolve SVG style/resources,
-- record SVG paint into either:
-  - a nested display-list fragment, or
-  - an immutable `RdtPicture` command with resource generation,
-- replay/lower that command consistently across raster/SVG/PDF targets.
+- parse the SVG DOM once (inline from `native_element`, file via
+  `rdt_picture_load*`); cache file SVGs as today,
+- resolve SVG style/resources once,
+- have `render_svg_to_vec` emit a **`SvgSubscene` paint-IR command**: a nested
+  paint-IR fragment plus the data needed to place and inherit it, then lower that
+  one command per target:
+  - raster lowering → today's `DisplayList` ops (unchanged behaviour),
+  - SVG lowering → native SVG markup (or, when the subscene uses unsupported
+    features, the existing passthrough re-serialisation as an explicit fallback),
+  - PDF lowering → PDF commands, or a raster-fallback picture when unsupported —
+    never a silent drop.
 
-This would reduce bugs where inline SVG direct vector drawing differs from display-list replay or export.
+**Inheritance and geometry that must survive lowering.** The reason passthrough is
+not just duplication but a correctness bug is that it ignores state the painted
+path applies. The `SvgSubscene` command must carry, so every lowering reproduces
+it:
+
+- the inherited `currentColor` and cascaded `fill` / `stroke` / `stroke-width`
+  taken from `view->in_line` (`has_color`, `has_svg_fill`, `svg_stroke_*`) — see
+  `render_inline_svg`,
+- the content viewport, `viewBox`, and `preserveAspectRatio`-derived transform
+  (the scale/translate composition in `render_svg_to_vec`),
+- the content clip established for the SVG box,
+- `source_path` for resolving nested SVG refs and the recursion guard,
+- a resource generation, so the subscene is retainable and stale-reuse is rejected
+  (it is an immutable parsed DOM — a natural fit for generation tagging).
+
+This makes inline SVG behave identically across raster, SVG export, and PDF export,
+and removes the third clone of the painter dispatch (the SVG primitive/effect
+helpers fold into the same `PaintBuilder` gateway).
 
 ### 6. Centralize Effect Groups
 
-Opacity, filter, blend, shadow, mask, backdrop, and clip should be one command model.
+Opacity, filter, blend, shadow, mask, backdrop, and clip should be one command
+model. These are **semantic-IR** commands (§1, §2). The pixel-domain ops in
+today's `DisplayList` — `DL_COMPOSITE_OPACITY`, `DL_SAVE_BACKDROP`,
+`DL_APPLY_BLEND_MODE`, `DL_BOX_BLUR_REGION`/`_INSET`, `DL_OUTER_SHADOW` — become
+the *raster lowering* of one effect group, not the contract vector backends must
+read.
 
 Recommended command structure:
 
@@ -487,6 +657,12 @@ Borrowed payloads should always carry a generation or immutable ownership marker
 
 Replay and retained-fragment reuse should reject stale generations. Commands with borrowed pointers and no generation should be marked non-retainable.
 
+This is mostly an *enforcement* gap, not new design: the fields already exist
+(`resource_generation` on `DlDrawImage` / `DlDrawGlyph`, `src_generation` on
+`DlBlitSurfaceScaled`, etc.). What is missing is the `PaintIRValidator` rule that
+marks any borrowed-pointer command lacking a generation as non-retainable, so the
+guarantee holds by construction rather than by convention.
+
 ### 9. Add Cross-Path Parity Tests
 
 For each new paint feature, require parity fixtures across relevant paths:
@@ -519,57 +695,85 @@ Every render should log or expose:
 - tile count/thread count,
 - dirty replay yes/no,
 - retained fragment reused/captured/rejected counts,
-- backend name and capability table.
+- backend name and capability table,
+- per-command-family lowering taken (native vs raster-fallback vs unsupported).
 
-This makes it obvious which path produced a bug.
+This makes it obvious which path produced a bug. Much of this already exists —
+`render_profiler.cpp` emits record/replay timings, tile/thread counts, and
+selective/tiled flags — so this is an *extension* of the profiler (add backend
+capability, lowering choice, and fallback markers), not a new facility.
 
 ## Suggested Incremental Plan
 
+The ordering matters. The risky step is pointing vector export at a shared IR;
+everything before it should de-risk that without changing pixels. In particular,
+**do not** rewrite SVG/PDF to consume the IR until raster already emits and
+re-consumes it at parity — otherwise the raster bias in today's `DisplayList`
+(§1) leaks into the vector backends.
+
 ### Phase A: Guard Existing Paths
 
-- Add a render-path trace struct emitted per frame.
+- Add a render-path trace struct emitted per frame (extend `render_profiler.cpp`).
 - Add assertions for display-list stack balance and command validity.
 - Add focused tests for single replay versus tiled replay equivalence.
 - Add tests for normal PNG versus large tiled PNG export equivalence.
+- Hygiene: delete checked-in `*.bak` files (`render_svg.cpp.bak`,
+  `render_img.cpp.bak`, `layout_table.cpp.bak`) so nobody edits a dead copy.
 
-### Phase B: Unify Tiled PNG Export
+### Phase B: Unify Tiled PNG Export And Delete Immediate Mode
 
-- Record display list once for large PNG export.
-- Replay strips from the same command list.
+- Record the display list once for large PNG export; replay strips from it.
 - Remove per-strip view-tree render except as a fallback.
+- Route offscreen SVG-picture rasterisation through a display list too.
+- With no remaining `rdcon.dl == null` callers, delete the `else rdt_*` branch in
+  every `rc_*` helper and its two clones (SVG primitive/effect dispatch). One
+  recording path remains.
 
-### Phase C: Formalize DisplayListBuilder
+### Phase C: Introduce The Semantic Paint IR Above The Display List
 
-- Move raster callback paint emission behind a builder-facing API.
-- Make all `rc_*` calls explicit builder commands when recording.
-- Document which helper is allowed to record commands and which helper may only lower commands.
+- Define the semantic paint IR (glyph runs, effect groups, paths, gradients,
+  images, clip/transform stack, SVG subscene).
+- Make a single `PaintBuilder` the one per-element paint algorithm, replacing both
+  `render_walk_block` (export) and `render_block_view` (raster).
+- Keep raster lowering to today's `DisplayList` so pixels do not change; verify
+  with the baseline raster tests.
+- This collapses the duplicated per-element algorithm — the root cause — before
+  any backend is rewritten.
 
-### Phase D: Add SVG/PDF Display-List Replayers
+### Phase D: Route SVG/PDF Export Through Paint-IR Lowering
 
-- Start with simple commands: rects, paths, text, images, clips, transforms.
-- Keep existing `render_svg.cpp` and `render_pdf.cpp` as fallback paths during migration.
-- Flip individual command families to DL lowering as parity tests pass.
+- Build per-target capability tables (extend `render_backend_caps.hpp` to SVG/PDF).
+- Start with simple command families: rects, paths, text, images, clips, transforms.
+- Keep existing `render_svg.cpp` / `render_pdf.cpp` paths as fallback during migration.
+- Flip families to IR lowering as parity fixtures pass; replace PDF's minimal
+  boundary and SVG's re-derived boundary with the shared lowering.
 
 ### Phase E: Consolidate Effects
 
-- Replace ad hoc opacity/filter/blend command sequences with explicit effect group commands.
-- Implement raster lowering first.
-- Add SVG/PDF native lowering or raster fallback for unsupported effects.
+- Replace ad hoc opacity/filter/blend sequences with explicit effect-group IR commands.
+- Implement raster lowering first (the existing pixel ops become that lowering).
+- Add SVG/PDF native lowering or raster-fallback picture for unsupported effects;
+  log the fallback (never silent).
 
-### Phase F: Inline SVG As Nested Paint IR
+### Phase F: Inline SVG As A Nested Paint-IR Subscene
 
-- Record inline SVG into nested display-list fragments or cached pictures.
-- Use the same resource-generation and bounds rules as normal display-list fragments.
-- Lower nested SVG consistently for raster, SVG export, and PDF export.
+- Make `render_svg_to_vec` emit one `SvgSubscene` IR command instead of driving
+  `RdtVector`/`DisplayList` directly.
+- Carry inherited `currentColor`/`fill`/`stroke`, the viewBox/`preserveAspectRatio`
+  transform, the content clip, `source_path`, and a resource generation (§5).
+- Lower the subscene consistently for raster, SVG export (replacing passthrough),
+  and PDF export (replacing the dropped callback).
+- Use the same resource-generation and bounds rules as normal IR fragments.
 
 ## Target Rule
 
 New rendering features should be implemented at the highest shared layer possible:
 
-1. paint semantics in the display-list builder,
-2. command ownership and bounds in display-list storage/bounds,
-3. target-specific behavior only in replay/lowering,
-4. fallback decisions behind backend capability checks,
+1. paint semantics in the `PaintBuilder` (semantic paint IR),
+2. command ownership and bounds in paint-IR storage/bounds,
+3. target-specific behavior only in per-target lowering (raster `DisplayList`,
+   SVG, PDF),
+4. fallback decisions behind per-target capability checks,
 5. tests that compare all enabled lowerings.
 
 If a fix requires editing raster replay, tiled replay, SVG export, PDF export, and inline SVG separately, the feature is probably sitting below the right abstraction boundary.
