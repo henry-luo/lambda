@@ -10842,12 +10842,21 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
 }
 
 static bool js_super_callee_is_constructor(Item callee) {
-    if (js_is_proxy(callee)) return js_proxy_has_callable_target(callee);
+    if (js_is_proxy(callee)) {
+        // class heritage and super() use ES IsConstructor, not merely callable.
+        // Proxy targets such as arrow/generator functions are callable enough to
+        // have traps, but must still be rejected before reading `.prototype`.
+        return js_is_constructor_internal(callee);
+    }
     TypeId type = get_type_id(callee);
     if (type == LMD_TYPE_MAP) return js_is_class_object_item(callee);
     if (type != LMD_TYPE_FUNC) return false;
     JsFunction* fn = (JsFunction*)callee.function;
     if (!fn) return false;
+    if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
+        Item target = js_bound_function_ultimate_target(callee);
+        if (target.item != callee.item) return js_is_constructor_internal(target);
+    }
     if (fn->builtin_id > 0 || fn->builtin_id == -2) return false;
     if (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_METHOD |
             JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC |
@@ -10905,6 +10914,14 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
 extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int argc) {
+    TypeId callee_type = get_type_id(callee);
+    if (callee.item == ITEM_JS_UNDEFINED || callee_type == LMD_TYPE_UNDEFINED ||
+            callee.item == ItemNull.item || callee_type == LMD_TYPE_NULL) {
+        // `extends null` gives the derived constructor Function.prototype as its
+        // [[Prototype]], so a later super() must fail IsConstructor instead of
+        // silently acting like an empty base-class constructor.
+        return js_throw_type_error("Super constructor is not a constructor");
+    }
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         return js_call_function(callee, this_val, args, argc);
     }
@@ -11428,6 +11445,13 @@ extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
 static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return ItemNull;
+    Item new_target = js_get_new_target();
+    if (new_target.item == ITEM_JS_UNDEFINED || new_target.item == ItemNull.item || new_target.item == 0) {
+        // Bound class constructors keep [[Construct]], but they still lack
+        // [[Call]].  Calling the bound function normally must throw before the
+        // underlying class constructor is entered.
+        return js_throw_type_error("Class constructor cannot be invoked without 'new'");
+    }
     Item target = env[0];
     int argc = 0;
     Item* args = NULL;
@@ -11440,10 +11464,7 @@ static Item js_bound_class_construct_stub(Item env_item, Item rest_array) {
             }
         }
     }
-    Item new_target = js_get_new_target();
-    if (new_target.item != ITEM_JS_UNDEFINED && new_target.item != ItemNull.item && new_target.item != 0) {
-        js_set_new_target(new_target);
-    }
+    js_set_new_target(new_target);
     return js_new_from_class_object(target, args, argc);
 }
 

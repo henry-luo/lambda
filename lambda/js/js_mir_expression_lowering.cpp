@@ -5917,6 +5917,38 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (!mt->current_class) {
                 mt->current_class = jm_find_innermost_class_for_node(mt, (JsAstNode*)call);
             }
+            if (mt->current_class && mt->current_class->node && mt->current_class->node->superclass &&
+                (mt->current_class->node->superclass->node_type == JS_AST_NODE_NULL ||
+                 (mt->current_class->node->superclass->node_type == JS_AST_NODE_LITERAL &&
+                  ((JsLiteralNode*)mt->current_class->node->superclass)->literal_type == JS_LITERAL_NULL))) {
+                // `super()` in `class C extends null` is specified to evaluate
+                // arguments, then fail IsConstructor on Function.prototype.
+                // Route it through the runtime super-call helper with a null
+                // callee so the throw happens before any derived fields bind.
+                bool null_super_has_spread = false;
+                for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                    if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { null_super_has_spread = true; break; }
+                }
+                MIR_reg_t args_ptr = null_super_has_spread ?
+                    jm_build_spread_args_array(mt, call->arguments) :
+                    jm_build_args_array(mt, call->arguments, arg_count);
+                MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
+                MIR_reg_t null_callee = jm_emit_null(mt);
+                MIR_reg_t super_result;
+                if (null_super_has_spread) {
+                    super_result = jm_call_3(mt, "js_super_apply_native", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                } else {
+                    super_result = jm_call_4(mt, "js_super_call_class", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                }
+                return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
+            }
             if (mt->current_class && mt->current_class->superclass) {
                 JsClassEntry* parent = mt->current_class->superclass;
                 if (parent->constructor && parent->constructor->fc && parent->constructor->fc->func_item) {
