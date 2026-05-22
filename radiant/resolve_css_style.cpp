@@ -197,6 +197,61 @@ static void resolve_background_url_function(LayoutContext* lycon, const CssDecla
     resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
 }
 
+static const CssValue* css_find_background_function(const CssValue* value,
+                                                    const char* const* names,
+                                                    int name_count) {
+    if (!value || !names || name_count <= 0) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        value->data.function->name) {
+        const char* fn = value->data.function->name;
+        size_t fn_len = strlen(fn);
+        for (int i = 0; i < name_count; i++) {
+            if (names[i] && str_ieq_const(fn, fn_len, names[i])) {
+                return value;
+            }
+        }
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) return nullptr;
+    for (int i = 0; i < value->data.list.count; i++) {
+        const CssValue* found = css_find_background_function(value->data.list.values[i],
+                                                            names, name_count);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static const CssValue* css_find_background_url_layer(const CssValue* value) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
+        return value;
+    }
+    static const char* const names[] = {"url"};
+    const CssValue* found = css_find_background_function(value, names, 1);
+    if (found || value->type != CSS_VALUE_TYPE_LIST || !value->data.list.values) {
+        return found;
+    }
+    for (int i = 0; i < value->data.list.count; i++) {
+        found = css_find_background_url_layer(value->data.list.values[i]);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static const CssValue* css_find_background_linear_gradient_layer(const CssValue* value) {
+    static const char* const names[] = {"linear-gradient", "repeating-linear-gradient"};
+    return css_find_background_function(value, names, 2);
+}
+
+static const CssValue* css_find_background_radial_gradient_layer(const CssValue* value) {
+    static const char* const names[] = {"radial-gradient", "repeating-radial-gradient"};
+    return css_find_background_function(value, names, 2);
+}
+
+static const CssValue* css_find_background_conic_gradient_layer(const CssValue* value) {
+    static const char* const names[] = {"conic-gradient", "repeating-conic-gradient"};
+    return css_find_background_function(value, names, 2);
+}
+
 static bool css_value_is_background_color_candidate(const CssValue* value) {
     if (!value) return false;
     if (value->type == CSS_VALUE_TYPE_COLOR) return true;
@@ -11776,31 +11831,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 int linear_count = 0;
                 for (int i = 0; i < count - 1; i++) {  // exclude last layer (base color)
                     CssValue* layer = layers[i];
-                    if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                        layer->data.function && layer->data.function->name) {
-                        const char* fn = layer->data.function->name;
-                        if (str_ieq_const(fn, strlen(fn), "radial-gradient") ||
-                            str_ieq_const(fn, strlen(fn), "repeating-radial-gradient")) {
-                            radial_count++;
-                        } else if (str_ieq_const(fn, strlen(fn), "linear-gradient") ||
-                                   str_ieq_const(fn, strlen(fn), "repeating-linear-gradient")) {
-                            linear_count++;
-                        }
-                    }
+                    if (css_find_background_radial_gradient_layer(layer)) radial_count++;
+                    else if (css_find_background_linear_gradient_layer(layer)) linear_count++;
                 }
 
                 // Also check if the last layer is a gradient (not a solid color)
-                if (last_layer && last_layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                    last_layer->data.function && last_layer->data.function->name) {
-                    const char* fn = last_layer->data.function->name;
-                    if (str_ieq_const(fn, strlen(fn), "linear-gradient") ||
-                        str_ieq_const(fn, strlen(fn), "repeating-linear-gradient")) {
-                        linear_count++;
-                    } else if (str_ieq_const(fn, strlen(fn), "radial-gradient") ||
-                               str_ieq_const(fn, strlen(fn), "repeating-radial-gradient")) {
-                        radial_count++;
-                    }
-                }
+                if (css_find_background_linear_gradient_layer(last_layer)) linear_count++;
+                else if (css_find_background_radial_gradient_layer(last_layer)) radial_count++;
 
                 // Allocate arrays for gradient layers
                 if (radial_count > 0) {
@@ -11815,51 +11852,48 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Process all gradient layers (from bottom to top visually, i.e., last-to-first in CSS)
                 for (int i = count - 1; i >= 0; i--) {
                     CssValue* layer = layers[i];
-                    if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
-                        layer->data.function && layer->data.function->name) {
-                        const char* func_name = layer->data.function->name;
+                    const CssValue* radial_layer = css_find_background_radial_gradient_layer(layer);
+                    const CssValue* linear_layer = css_find_background_linear_gradient_layer(layer);
+                    const CssValue* conic_layer = css_find_background_conic_gradient_layer(layer);
+                    const CssValue* url_layer = css_find_background_url_layer(layer);
 
-                        if (str_ieq_const(func_name, strlen(func_name), "radial-gradient") ||
-                            str_ieq_const(func_name, strlen(func_name), "repeating-radial-gradient")) {
+                    if (radial_layer) {
+                        CssDeclaration gradient_decl = *decl;
+                        gradient_decl.value = (CssValue*)radial_layer;
+                        log_debug("[Lambda CSS Background] Processing radial gradient layer %d", i);
+                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+
+                        if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
+                            bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
+                            bg->radial_gradient = nullptr;
+                        }
+                    } else if (linear_layer) {
+                        CssDeclaration gradient_decl = *decl;
+                        gradient_decl.value = (CssValue*)linear_layer;
+                        log_debug("[Lambda CSS Background] Processing linear gradient layer %d", i);
+                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+
+                        if (bg->linear_gradient && bg->linear_layer_count < linear_count) {
+                            bg->linear_layers[bg->linear_layer_count++] = bg->linear_gradient;
+                            bg->linear_gradient = nullptr;
+                            bg->gradient_type = GRADIENT_NONE;
+                        }
+                    } else if (conic_layer) {
+                        if (!bg->conic_gradient) {
                             CssDeclaration gradient_decl = *decl;
-                            gradient_decl.value = layer;
-                            log_debug("[Lambda CSS Background] Processing radial gradient layer %d: %s", i, func_name);
+                            gradient_decl.value = (CssValue*)conic_layer;
+                            log_debug("[Lambda CSS Background] Processing conic gradient layer %d", i);
                             resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-
-                            if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
-                                bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
-                                bg->radial_gradient = nullptr;
-                            }
-                        } else if (str_ieq_const(func_name, strlen(func_name), "linear-gradient") ||
-                                   str_ieq_const(func_name, strlen(func_name), "repeating-linear-gradient")) {
-                            CssDeclaration gradient_decl = *decl;
-                            gradient_decl.value = layer;
-                            log_debug("[Lambda CSS Background] Processing linear gradient layer %d: %s", i, func_name);
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-
-                            if (bg->linear_gradient && bg->linear_layer_count < linear_count) {
-                                bg->linear_layers[bg->linear_layer_count++] = bg->linear_gradient;
-                                bg->linear_gradient = nullptr;
-                                bg->gradient_type = GRADIENT_NONE;
-                            }
-                        } else if (str_ieq_const(func_name, strlen(func_name), "conic-gradient") ||
-                                   str_ieq_const(func_name, strlen(func_name), "repeating-conic-gradient")) {
-                            if (!bg->conic_gradient) {
-                                CssDeclaration gradient_decl = *decl;
-                                gradient_decl.value = layer;
-                                log_debug("[Lambda CSS Background] Processing conic gradient layer %d: %s", i, func_name);
-                                resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
-                            }
-                        } else if (str_ieq_const(func_name, strlen(func_name), "url")) {
-                            // url() image layer — route to background-image handler.
-                            // Currently we only retain the topmost url() (single image slot).
-                            if (!bg->image) {
-                                CssDeclaration img_decl = *decl;
-                                img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
-                                img_decl.value = layer;
-                                log_debug("[Lambda CSS Background] Processing url image layer %d", i);
-                                resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
-                            }
+                        }
+                    } else if (url_layer) {
+                        // url() image layer — route to background-image handler.
+                        // Currently we only retain the topmost url() (single image slot).
+                        if (!bg->image) {
+                            CssDeclaration img_decl = *decl;
+                            img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
+                            img_decl.value = (CssValue*)url_layer;
+                            log_debug("[Lambda CSS Background] Processing url image layer %d", i);
+                            resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
                         }
                     }
                 }
