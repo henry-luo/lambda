@@ -31,7 +31,9 @@
       "Bash(echo \"exit: $?\")",
       "Bash(PATH=/clang64/bin:__TRACKED_VAR__ premake5 gmake --file=../../premake5.mac.lua)",
       "Bash(./test/test_display_list_gtest.exe --gtest_filter='PaintIrParityTest.*')",
-      "Bash(./test/test_display_list_gtest.exe)"
+      "Bash(./test/test_display_list_gtest.exe)",
+      "Bash(./lambda.exe render *)",
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 400 node test_radiant_render.js --strip-parity)"
     ]
   }
 }

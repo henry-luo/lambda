@@ -51,6 +51,18 @@ typedef enum {
     PAINT_PUSH_CLIP,
     PAINT_POP_CLIP,
 
+    // ── Raster-lowering tier (pixel-domain ops) ────────────────────────────
+    // These mirror the pixel-domain DisplayList commands 1:1. Per the design
+    // doc §1 they are *not* the semantic contract — they are the raster
+    // lowering of the higher-level PAINT_*_EFFECT_GROUP op below. Routing them
+    // through the PaintBuilder during migration gives the raster path a single
+    // emission gateway (Phase C) while the effect-group op is fleshed out; a
+    // vector backend consumes the effect group, not these.
+    PAINT_SAVE_BACKDROP,
+    PAINT_COMPOSITE_OPACITY,
+    PAINT_APPLY_BLEND_MODE,
+    PAINT_APPLY_FILTER,
+
     // ── Higher-level semantic ops (contract only; lowered in later phases) ──
     // A run of glyphs sharing a font/colour — NOT rasterised bitmaps. Raster
     // lowering rasterises each glyph to a DL_DRAW_GLYPH; SVG lowering emits a
@@ -145,6 +157,29 @@ typedef struct {
     RdtMatrix transform;
 } PaintPushClip;
 
+// ── Raster-lowering tier payloads (mirror the pixel-domain Dl* structs) ────
+
+typedef struct {
+    int x0, y0, w, h;       // physical pixel region
+} PaintSaveBackdrop;
+
+typedef struct {
+    int x0, y0, w, h;       // physical pixel region
+    float opacity;
+    bool premultiplied_source;
+} PaintCompositeOpacity;
+
+typedef struct {
+    int x0, y0, w, h;       // physical pixel region
+    int blend_mode;          // CssEnum
+} PaintApplyBlendMode;
+
+typedef struct {
+    float x, y, w, h;
+    void* filter;            // FilterProp* — borrowed
+    Bound clip;              // rectangular clip bounds at recording time
+} PaintApplyFilter;
+
 // ── Higher-level semantic payloads (contract; not yet lowered) ─────────────
 
 // Effect group descriptor. Mirrors the CSS stacking effect inputs so every
@@ -207,6 +242,10 @@ typedef struct PaintCmd {
         PaintDrawImage          draw_image;
         PaintDrawPicture        draw_picture;
         PaintPushClip           push_clip;
+        PaintSaveBackdrop       save_backdrop;
+        PaintCompositeOpacity   composite_opacity;
+        PaintApplyBlendMode     apply_blend_mode;
+        PaintApplyFilter        apply_filter;
         PaintEffectGroup        effect_group;
         PaintSvgSubscene        svg_subscene;
         PaintGlyphRun           glyph_run;
@@ -263,6 +302,14 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform);
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform);
 void paint_pop_clip(PaintList* pl);
+
+// Raster-lowering tier (pixel-domain effect ops; see enum comment).
+void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h);
+void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
+                             float opacity, bool premultiplied_source);
+void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode);
+void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
+                        void* filter, const Bound* clip);
 
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList

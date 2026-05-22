@@ -9,6 +9,7 @@
 #include "render_svg.hpp"
 #include "render_video.hpp"
 #include "retained_display_list.hpp"
+#include "paint_ir.h"
 #include "state_store.hpp"
 #include "tile_pool.h"
 
@@ -105,6 +106,10 @@ void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree
     }
 
     scratch_init(&rdcon->scratch, view_tree->arena);
+    // Semantic paint IR target: routes the rc_* primitive gateway through the
+    // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
+    rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);
+    paint_list_init(rdcon->paint_list, view_tree->arena);
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
     const RenderBackendCaps* caps = render_backend_get_caps(&rdcon->vec);
@@ -132,6 +137,11 @@ void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree
 }
 
 void render_output_cleanup_context(RenderContext* rdcon) {
+    if (rdcon->paint_list) {
+        paint_list_destroy(rdcon->paint_list);
+        mem_free(rdcon->paint_list);
+        rdcon->paint_list = nullptr;
+    }
     scratch_release(&rdcon->scratch);
     rdt_vector_destroy(&rdcon->vec);
 }

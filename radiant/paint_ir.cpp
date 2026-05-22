@@ -177,6 +177,37 @@ void paint_pop_clip(PaintList* pl) {
     paint_alloc_cmd(pl, PAINT_POP_CLIP);
 }
 
+void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_SAVE_BACKDROP);
+    if (!cmd) return;
+    cmd->save_backdrop = { x0, y0, w, h };
+}
+
+void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
+                             float opacity, bool premultiplied_source) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_COMPOSITE_OPACITY);
+    if (!cmd) return;
+    cmd->composite_opacity = { x0, y0, w, h, opacity, premultiplied_source };
+}
+
+void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_APPLY_BLEND_MODE);
+    if (!cmd) return;
+    cmd->apply_blend_mode = { x0, y0, w, h, blend_mode };
+}
+
+void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
+                        void* filter, const Bound* clip) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_APPLY_FILTER);
+    if (!cmd) return;
+    cmd->apply_filter.x = x;
+    cmd->apply_filter.y = y;
+    cmd->apply_filter.w = w;
+    cmd->apply_filter.h = h;
+    cmd->apply_filter.filter = filter;
+    if (clip) cmd->apply_filter.clip = *clip;
+}
+
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------

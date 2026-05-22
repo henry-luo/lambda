@@ -12,6 +12,13 @@
 struct RenderProfiler;
 typedef struct RenderProfiler RenderProfiler;
 
+// Semantic paint IR recording target (paint_ir.h). When non-NULL on a
+// RenderContext that is recording (dl != NULL), the rc_* painter gateway emits
+// through the PaintBuilder and lowers to the display list, so the live raster
+// path flows through the semantic IR. NULL = legacy direct dl_* path.
+struct PaintList;
+typedef struct PaintList PaintList;
+
 typedef struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
@@ -24,6 +31,10 @@ typedef struct RenderContext {
     // Display list for deferred rendering (Phase 1)
     // When non-NULL, render functions record to dl instead of drawing directly.
     DisplayList* dl;
+    // Semantic paint IR recording target (Phase C). When non-NULL alongside dl,
+    // the rc_* gateway records primitives through the PaintBuilder and lowers
+    // them to dl (byte-identical to direct dl_*). NULL = legacy direct path.
+    PaintList* paint_list;
     RetainedDisplayListCache* retained_dl_cache;
 
     // Transform state
