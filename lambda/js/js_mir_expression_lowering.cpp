@@ -7613,7 +7613,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     repl_fast->literal_type == JS_LITERAL_STRING && !repl_has_dollar) {
                     MIR_reg_t recv_fast = jm_transpile_box_item(mt, m->object);
                     MIR_reg_t repl_reg = jm_transpile_box_item(mt, call->arguments->next);
-                    return jm_call_2(mt, "js_string_replace_nonws_global_fast", MIR_T_I64,
+                    // The literal replacement has already been checked for '$'
+                    // patterns above, so call the narrower helper.  This path
+                    // is used by Unicode whitespace stress tests where the same
+                    // replacement is applied tens of thousands of times.
+                    return jm_call_2(mt, "js_string_replace_nonws_global_fast_no_dollar", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_fast),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, repl_reg));
                 }

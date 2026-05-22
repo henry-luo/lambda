@@ -476,9 +476,17 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* catch_node = (JsCatchNode*)node;
-        if (catch_node->body && jm_ast_node_contains_target(catch_node->body, target))
+        // catch creates a parameter environment before evaluating the catch
+        // body. Defaults inside a destructuring catch parameter must capture
+        // that parameter environment, but must not see body lexical bindings.
+        if (catch_node->param && jm_ast_node_contains_target(catch_node->param, target)) {
             jm_collect_pattern_names_kind(catch_node->param, names, (int)JS_VAR_LET);
-        jm_collect_enclosing_lexicals_for_target(catch_node->body, target, names);
+            jm_collect_enclosing_lexicals_for_target(catch_node->param, target, names);
+        }
+        if (catch_node->body && jm_ast_node_contains_target(catch_node->body, target)) {
+            jm_collect_pattern_names_kind(catch_node->param, names, (int)JS_VAR_LET);
+            jm_collect_enclosing_lexicals_for_target(catch_node->body, target, names);
+        }
         break;
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {

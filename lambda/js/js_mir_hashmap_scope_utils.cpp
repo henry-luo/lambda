@@ -182,6 +182,7 @@ JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type , TypeId type_id ) {
+    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%s", name);
@@ -190,7 +191,13 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.type_id = type_id;
     entry.var.typed_array_type = -1;  // P9: not a typed array by default
 
-    // Preserve metadata from TDZ-hoisted entries
+    // Preserve metadata from an existing same-named binding. This must search
+    // outward (jm_find_var), not only the target scope: a block-scoped let/const
+    // that is captured by a closure is pre-registered in the enclosing function's
+    // scope env, so its TDZ-hoist at the block depth has to inherit that
+    // scope-env slot from the function-scope pre-registration. Restricting the
+    // lookup to the target scope drops that slot and the closure observes a
+    // permanent TDZ value (block-scope/shadowing/lookup-from-closure).
     {
         JsMirVarEntry* existing = jm_find_var(mt, name);
         if (existing) {
@@ -219,7 +226,6 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         }
     }
 
-    int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     hashmap_set(mt->var_scopes[target_depth], &entry);
 }
 
