@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "render_backend.h"
 #include "render_export_support.hpp"
+#include "paint_ir.h"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -32,6 +33,7 @@ typedef struct PdfRenderContext {
     FontBox font;
     Color color;
     BlockBlot block;  // Current block context for coordinate transformation
+    PaintList paint_list;
 } PdfRenderContext;
 
 // Forward declarations
@@ -86,6 +88,29 @@ static void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width
     } else {
         HPDF_Page_Stroke(ctx->current_page);
     }
+}
+
+static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+    for (int i = 0; i < ctx->paint_list.count; i++) {
+        PaintCmd* cmd = &ctx->paint_list.cmds[i];
+        switch (cmd->op) {
+        case PAINT_FILL_RECT: {
+            PaintFillRect* p = &cmd->fill_rect;
+            pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    paint_list_clear(&ctx->paint_list);
+}
+
+static void pdf_paint_fill_rect(PdfRenderContext* ctx,
+                                float x, float y, float width, float height,
+                                Color color) {
+    paint_fill_rect(&ctx->paint_list, x, y, width, height, color);
+    pdf_lower_paint_list(ctx);
 }
 
 // Render text view
@@ -274,20 +299,20 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
 
     // Background
     if (view->bound->background && view->bound->background->color.a > 0) {
-        pdf_render_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color, true);
+        pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
     }
 
     // Borders
     if (view->bound->border) {
         BorderProp* border = view->bound->border;
         if (border->width.top > 0 && border->top_color.a > 0)
-            pdf_render_rect(ctx, abs_x, abs_y, width, (float)border->width.top, border->top_color, true);
+            pdf_paint_fill_rect(ctx, abs_x, abs_y, width, (float)border->width.top, border->top_color);
         if (border->width.right > 0 && border->right_color.a > 0)
-            pdf_render_rect(ctx, abs_x + width - border->width.right, abs_y, (float)border->width.right, height, border->right_color, true);
+            pdf_paint_fill_rect(ctx, abs_x + width - border->width.right, abs_y, (float)border->width.right, height, border->right_color);
         if (border->width.bottom > 0 && border->bottom_color.a > 0)
-            pdf_render_rect(ctx, abs_x, abs_y + height - border->width.bottom, width, (float)border->width.bottom, border->bottom_color, true);
+            pdf_paint_fill_rect(ctx, abs_x, abs_y + height - border->width.bottom, width, (float)border->width.bottom, border->bottom_color);
         if (border->width.left > 0 && border->left_color.a > 0)
-            pdf_render_rect(ctx, abs_x, abs_y, (float)border->width.left, height, border->left_color, true);
+            pdf_paint_fill_rect(ctx, abs_x, abs_y, (float)border->width.left, height, border->left_color);
     }
 }
 
@@ -373,6 +398,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.color.r = 0; ctx.color.g = 0; ctx.color.b = 0; ctx.color.a = 255; // Black text
     ctx.current_x = 0;
     ctx.current_y = 0;
+    paint_list_init(&ctx.paint_list, nullptr);
 
     // Initialize block context (starting at origin)
     ctx.block.x = 0;
@@ -402,6 +428,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
         render_walk_children(&backend, &walk_state, root_view);
     }
 
+    paint_list_destroy(&ctx.paint_list);
     return ctx.pdf_doc;
 }
 

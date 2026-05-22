@@ -1,4 +1,5 @@
 #include "../radiant/rdt_vector.hpp"
+#include <string.h>
 
 static const RdtPath* g_test_path = nullptr;
 static bool g_test_path_has_bounds = false;
@@ -10,7 +11,18 @@ static float g_test_path_bottom = 0.0f;
 static RdtPicture* g_test_picture = nullptr;
 static float g_test_picture_w = 0.0f;
 static float g_test_picture_h = 0.0f;
-static char g_test_new_path;
+
+struct RdtPath {
+    struct Entry {
+        RdtPathCommand command;
+        float args[6];
+        int arg_count;
+    };
+    Entry entries[32];
+    int count;
+};
+
+static RdtPath g_test_new_path;
 
 void test_display_list_stub_set_path_bounds(const RdtPath* path,
                                             bool has_bounds,
@@ -35,19 +47,72 @@ RdtPath* rdt_path_clone(const RdtPath* src) {
 }
 
 RdtPath* rdt_path_new(void) {
-    return (RdtPath*)&g_test_new_path;
+    memset(&g_test_new_path, 0, sizeof(g_test_new_path));
+    return &g_test_new_path;
 }
 
 void rdt_path_move_to(RdtPath* path, float x, float y) {
-    (void)path; (void)x; (void)y;
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_MOVE;
+    e->arg_count = 2;
+    e->args[0] = x;
+    e->args[1] = y;
 }
 
 void rdt_path_line_to(RdtPath* path, float x, float y) {
-    (void)path; (void)x; (void)y;
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_LINE;
+    e->arg_count = 2;
+    e->args[0] = x;
+    e->args[1] = y;
+}
+
+void rdt_path_cubic_to(RdtPath* path, float cx1, float cy1,
+                       float cx2, float cy2, float x, float y) {
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_CUBIC;
+    e->arg_count = 6;
+    e->args[0] = cx1;
+    e->args[1] = cy1;
+    e->args[2] = cx2;
+    e->args[3] = cy2;
+    e->args[4] = x;
+    e->args[5] = y;
 }
 
 void rdt_path_close(RdtPath* path) {
-    (void)path;
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_CLOSE;
+    e->arg_count = 0;
+}
+
+void rdt_path_add_rect(RdtPath* path, float x, float y, float w, float h,
+                       float rx, float ry) {
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_RECT;
+    e->arg_count = 6;
+    e->args[0] = x;
+    e->args[1] = y;
+    e->args[2] = w;
+    e->args[3] = h;
+    e->args[4] = rx;
+    e->args[5] = ry;
+}
+
+void rdt_path_add_circle(RdtPath* path, float cx, float cy, float rx, float ry) {
+    if (!path || path->count >= 32) return;
+    RdtPath::Entry* e = &path->entries[path->count++];
+    e->command = RDT_PATH_CIRCLE;
+    e->arg_count = 4;
+    e->args[0] = cx;
+    e->args[1] = cy;
+    e->args[2] = rx;
+    e->args[3] = ry;
 }
 
 void rdt_path_free(RdtPath* path) {
@@ -61,6 +126,15 @@ bool rdt_path_get_bounds(const RdtPath* path, float* left, float* top,
     if (top) *top = g_test_path_top;
     if (right) *right = g_test_path_right;
     if (bottom) *bottom = g_test_path_bottom;
+    return true;
+}
+
+bool rdt_path_visit(const RdtPath* path, RdtPathVisitFn fn, void* context) {
+    if (!path || path != &g_test_new_path || !fn) return false;
+    for (int i = 0; i < path->count; i++) {
+        const RdtPath::Entry* e = &path->entries[i];
+        if (!fn(context, e->command, e->args, e->arg_count)) return false;
+    }
     return true;
 }
 

@@ -163,6 +163,24 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     cmd->draw_image.resource_owner = resource_owner;
 }
 
+void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
+                      Color color, bool is_color_emoji, const Bound* clip,
+                      const RdtMatrix* transform, uint64_t resource_generation) {
+    if (!bitmap) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_GLYPH);
+    if (!cmd) return;
+    cmd->draw_glyph.bitmap = *bitmap;
+    cmd->draw_glyph.x = x;
+    cmd->draw_glyph.y = y;
+    cmd->draw_glyph.color = color;
+    cmd->draw_glyph.is_color_emoji = is_color_emoji;
+    cmd->draw_glyph.has_clip = clip != nullptr;
+    if (clip) cmd->draw_glyph.clip = *clip;
+    cmd->draw_glyph.has_transform = transform != nullptr;
+    if (transform) cmd->draw_glyph.transform = *transform;
+    cmd->draw_glyph.resource_generation = resource_generation;
+}
+
 void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_PICTURE);
@@ -171,6 +189,39 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
     cmd->draw_picture.opacity = opacity;
     cmd->draw_picture.has_transform = transform != nullptr;
     if (transform) cmd->draw_picture.transform = *transform;
+}
+
+void paint_video_placeholder(PaintList* pl, void* video,
+                             float dst_x, float dst_y, float dst_w, float dst_h,
+                             int object_fit, const Bound* clip,
+                             uint64_t video_generation) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_VIDEO_PLACEHOLDER);
+    if (!cmd) return;
+    cmd->video_placeholder.video = video;
+    cmd->video_placeholder.dst_x = dst_x;
+    cmd->video_placeholder.dst_y = dst_y;
+    cmd->video_placeholder.dst_w = dst_w;
+    cmd->video_placeholder.dst_h = dst_h;
+    cmd->video_placeholder.object_fit = object_fit;
+    cmd->video_placeholder.has_clip = clip != nullptr;
+    if (clip) cmd->video_placeholder.clip = *clip;
+    cmd->video_placeholder.video_generation = video_generation;
+}
+
+void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+                                     float dst_x, float dst_y, float dst_w, float dst_h,
+                                     const Bound* clip,
+                                     uint64_t surface_generation) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_WEBVIEW_LAYER_PLACEHOLDER);
+    if (!cmd) return;
+    cmd->webview_layer_placeholder.surface = surface;
+    cmd->webview_layer_placeholder.dst_x = dst_x;
+    cmd->webview_layer_placeholder.dst_y = dst_y;
+    cmd->webview_layer_placeholder.dst_w = dst_w;
+    cmd->webview_layer_placeholder.dst_h = dst_h;
+    cmd->webview_layer_placeholder.has_clip = clip != nullptr;
+    if (clip) cmd->webview_layer_placeholder.clip = *clip;
+    cmd->webview_layer_placeholder.surface_generation = surface_generation;
 }
 
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform) {
@@ -345,10 +396,34 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
                           owner, owner ? owner->generation : 0);
             break;
         }
+        case PAINT_DRAW_GLYPH: {
+            const PaintDrawGlyph* p = &cmd->draw_glyph;
+            dl_draw_glyph(dl, (GlyphBitmap*)&p->bitmap, p->x, p->y,
+                          p->color, p->is_color_emoji,
+                          p->has_clip ? &p->clip : nullptr,
+                          p->has_transform ? &p->transform : nullptr,
+                          p->resource_generation);
+            break;
+        }
         case PAINT_DRAW_PICTURE: {
             const PaintDrawPicture* p = &cmd->draw_picture;
             dl_draw_picture(dl, p->picture, p->opacity,
                             p->has_transform ? &p->transform : nullptr);
+            break;
+        }
+        case PAINT_VIDEO_PLACEHOLDER: {
+            const PaintVideoPlaceholder* p = &cmd->video_placeholder;
+            dl_video_placeholder(dl, p->video, p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                 p->object_fit, p->has_clip ? &p->clip : nullptr,
+                                 p->video_generation);
+            break;
+        }
+        case PAINT_WEBVIEW_LAYER_PLACEHOLDER: {
+            const PaintWebviewLayerPlaceholder* p = &cmd->webview_layer_placeholder;
+            dl_webview_layer_placeholder(dl, p->surface,
+                                         p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                         p->has_clip ? &p->clip : nullptr,
+                                         p->surface_generation);
             break;
         }
         case PAINT_PUSH_CLIP: {
@@ -424,6 +499,296 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
         case PAINT_BEGIN_EFFECT_GROUP:
         case PAINT_END_EFFECT_GROUP:
         case PAINT_SVG_SUBSCENE:
+            break;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SVG lowering: PaintIR -> SVG fragment
+// ---------------------------------------------------------------------------
+
+static void paint_svg_indent(StrBuf* out, int indent_level) {
+    for (int i = 0; i < indent_level; i++) {
+        strbuf_append_str(out, "  ");
+    }
+}
+
+static void paint_svg_append_color(StrBuf* out, Color color) {
+    if (color.a == 0) {
+        strbuf_append_str(out, "transparent");
+    } else if (color.a == 255) {
+        strbuf_append_format(out, "rgb(%d,%d,%d)", color.r, color.g, color.b);
+    } else {
+        strbuf_append_format(out, "rgba(%d,%d,%d,%.3f)",
+                             color.r, color.g, color.b, color.a / 255.0f);
+    }
+}
+
+static void paint_svg_append_matrix_attr(StrBuf* out, const RdtMatrix* matrix) {
+    if (!matrix) return;
+    strbuf_append_format(out, " transform=\"matrix(%.6g %.6g %.6g %.6g %.6g %.6g)\"",
+                         matrix->e11, matrix->e21, matrix->e12,
+                         matrix->e22, matrix->e13, matrix->e23);
+}
+
+static const char* paint_svg_stroke_cap_name(RdtStrokeCap cap) {
+    switch (cap) {
+    case RDT_CAP_ROUND: return "round";
+    case RDT_CAP_SQUARE: return "square";
+    case RDT_CAP_BUTT:
+    default:
+        return "butt";
+    }
+}
+
+static const char* paint_svg_stroke_join_name(RdtStrokeJoin join) {
+    switch (join) {
+    case RDT_JOIN_ROUND: return "round";
+    case RDT_JOIN_BEVEL: return "bevel";
+    case RDT_JOIN_MITER:
+    default:
+        return "miter";
+    }
+}
+
+static void paint_svg_append_rounded_rect_path(StrBuf* out,
+                                               float x, float y, float w, float h,
+                                               float rx, float ry) {
+    if (rx < 0.0f) rx = 0.0f;
+    if (ry < 0.0f) ry = 0.0f;
+    float half_w = w * 0.5f;
+    float half_h = h * 0.5f;
+    if (rx > half_w) rx = half_w;
+    if (ry > half_h) ry = half_h;
+
+    if (rx <= 0.0f && ry <= 0.0f) {
+        strbuf_append_format(out,
+            "M%.2f,%.2f L%.2f,%.2f L%.2f,%.2f L%.2f,%.2f Z",
+            x, y, x + w, y, x + w, y + h, x, y + h);
+        return;
+    }
+
+    strbuf_append_format(out,
+        "M%.2f,%.2f L%.2f,%.2f "
+        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
+        "L%.2f,%.2f "
+        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
+        "L%.2f,%.2f "
+        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
+        "L%.2f,%.2f "
+        "A%.2f,%.2f 0 0 1 %.2f,%.2f Z",
+        x + rx, y, x + w - rx, y,
+        rx, ry, x + w, y + ry,
+        x + w, y + h - ry,
+        rx, ry, x + w - rx, y + h,
+        x + rx, y + h,
+        rx, ry, x, y + h - ry,
+        x, y + ry,
+        rx, ry, x + rx, y);
+}
+
+typedef struct PaintSvgPathContext {
+    StrBuf* out;
+    bool has_command;
+} PaintSvgPathContext;
+
+static bool paint_svg_path_visit(void* context, RdtPathCommand command,
+                                 const float* args, int arg_count) {
+    PaintSvgPathContext* ctx = (PaintSvgPathContext*)context;
+    if (!ctx || !ctx->out) return false;
+    ctx->has_command = true;
+
+    switch (command) {
+    case RDT_PATH_MOVE:
+        if (arg_count < 2) return false;
+        strbuf_append_format(ctx->out, "M%.2f,%.2f ", args[0], args[1]);
+        break;
+    case RDT_PATH_LINE:
+        if (arg_count < 2) return false;
+        strbuf_append_format(ctx->out, "L%.2f,%.2f ", args[0], args[1]);
+        break;
+    case RDT_PATH_QUAD:
+        if (arg_count < 4) return false;
+        strbuf_append_format(ctx->out, "Q%.2f,%.2f %.2f,%.2f ",
+                             args[0], args[1], args[2], args[3]);
+        break;
+    case RDT_PATH_CUBIC:
+        if (arg_count < 6) return false;
+        strbuf_append_format(ctx->out, "C%.2f,%.2f %.2f,%.2f %.2f,%.2f ",
+                             args[0], args[1], args[2], args[3], args[4], args[5]);
+        break;
+    case RDT_PATH_CLOSE:
+        strbuf_append_str(ctx->out, "Z ");
+        break;
+    case RDT_PATH_RECT:
+        if (arg_count < 6) return false;
+        paint_svg_append_rounded_rect_path(ctx->out,
+                                           args[0], args[1], args[2], args[3],
+                                           args[4], args[5]);
+        strbuf_append_char(ctx->out, ' ');
+        break;
+    case RDT_PATH_CIRCLE:
+        if (arg_count < 4) return false;
+        strbuf_append_format(ctx->out,
+            "M%.2f,%.2f A%.2f,%.2f 0 1 0 %.2f,%.2f "
+            "A%.2f,%.2f 0 1 0 %.2f,%.2f Z ",
+            args[0] - args[2], args[1], args[2], args[3],
+            args[0] + args[2], args[1],
+            args[2], args[3], args[0] - args[2], args[1]);
+        break;
+    }
+    return true;
+}
+
+static bool paint_svg_path_to_string(RdtPath* path, StrBuf* out) {
+    if (!path || !out) return false;
+    PaintSvgPathContext ctx = {};
+    ctx.out = out;
+    if (!rdt_path_visit(path, paint_svg_path_visit, &ctx)) return false;
+    return ctx.has_command;
+}
+
+static const char* paint_op_name(PaintOp op) {
+    switch (op) {
+    case PAINT_FILL_RECT: return "PAINT_FILL_RECT";
+    case PAINT_FILL_ROUNDED_RECT: return "PAINT_FILL_ROUNDED_RECT";
+    case PAINT_FILL_PATH: return "PAINT_FILL_PATH";
+    case PAINT_STROKE_PATH: return "PAINT_STROKE_PATH";
+    case PAINT_FILL_LINEAR_GRADIENT: return "PAINT_FILL_LINEAR_GRADIENT";
+    case PAINT_FILL_RADIAL_GRADIENT: return "PAINT_FILL_RADIAL_GRADIENT";
+    case PAINT_DRAW_IMAGE: return "PAINT_DRAW_IMAGE";
+    case PAINT_DRAW_GLYPH: return "PAINT_DRAW_GLYPH";
+    case PAINT_DRAW_PICTURE: return "PAINT_DRAW_PICTURE";
+    case PAINT_VIDEO_PLACEHOLDER: return "PAINT_VIDEO_PLACEHOLDER";
+    case PAINT_WEBVIEW_LAYER_PLACEHOLDER: return "PAINT_WEBVIEW_LAYER_PLACEHOLDER";
+    case PAINT_PUSH_CLIP: return "PAINT_PUSH_CLIP";
+    case PAINT_POP_CLIP: return "PAINT_POP_CLIP";
+    case PAINT_SAVE_BACKDROP: return "PAINT_SAVE_BACKDROP";
+    case PAINT_COMPOSITE_OPACITY: return "PAINT_COMPOSITE_OPACITY";
+    case PAINT_APPLY_BLEND_MODE: return "PAINT_APPLY_BLEND_MODE";
+    case PAINT_APPLY_FILTER: return "PAINT_APPLY_FILTER";
+    case PAINT_BOX_BLUR_REGION: return "PAINT_BOX_BLUR_REGION";
+    case PAINT_BOX_BLUR_INSET: return "PAINT_BOX_BLUR_INSET";
+    case PAINT_SHADOW_CLIP_SAVE: return "PAINT_SHADOW_CLIP_SAVE";
+    case PAINT_SHADOW_CLIP_RESTORE: return "PAINT_SHADOW_CLIP_RESTORE";
+    case PAINT_OUTER_SHADOW: return "PAINT_OUTER_SHADOW";
+    case PAINT_GLYPH_RUN: return "PAINT_GLYPH_RUN";
+    case PAINT_BEGIN_EFFECT_GROUP: return "PAINT_BEGIN_EFFECT_GROUP";
+    case PAINT_END_EFFECT_GROUP: return "PAINT_END_EFFECT_GROUP";
+    case PAINT_SVG_SUBSCENE: return "PAINT_SVG_SUBSCENE";
+    }
+    return "PAINT_UNKNOWN";
+}
+
+static void paint_svg_note_unsupported(StrBuf* out, int indent_level, PaintOp op,
+                                       bool emit_comment,
+                                       PaintSvgLoweringStats* stats) {
+    stats->unsupported_count++;
+    if (!emit_comment) return;
+    paint_svg_indent(out, indent_level);
+    strbuf_append_format(out, "<!-- unsupported %s -->\n", paint_op_name(op));
+}
+
+void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
+                        const PaintSvgLoweringOptions* options,
+                        PaintSvgLoweringStats* stats) {
+    if (stats) {
+        memset(stats, 0, sizeof(PaintSvgLoweringStats));
+    }
+    if (!pl || !out) return;
+
+    PaintSvgLoweringStats local_stats = {};
+    PaintSvgLoweringStats* active_stats = stats ? stats : &local_stats;
+    int indent_level = options ? options->indent_level : 0;
+    bool emit_unsupported_comments = options ? options->emit_unsupported_comments : false;
+
+    for (int i = 0; i < pl->count; i++) {
+        const PaintCmd* cmd = &pl->cmds[i];
+        active_stats->command_count++;
+        switch (cmd->op) {
+        case PAINT_FILL_RECT: {
+            const PaintFillRect* p = &cmd->fill_rect;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"",
+                p->x, p->y, p->w, p->h);
+            paint_svg_append_color(out, p->color);
+            strbuf_append_str(out, "\" />\n");
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_FILL_ROUNDED_RECT: {
+            const PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" fill=\"",
+                p->x, p->y, p->w, p->h, p->rx, p->ry);
+            paint_svg_append_color(out, p->color);
+            strbuf_append_str(out, "\" />\n");
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_FILL_PATH: {
+            const PaintFillPath* p = &cmd->fill_path;
+            StrBuf* path_data = strbuf_new();
+            if (!paint_svg_path_to_string(p->path, path_data)) {
+                strbuf_free(path_data);
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<path d=\"%s\" fill=\"", path_data->str);
+            paint_svg_append_color(out, p->color);
+            strbuf_append_char(out, '"');
+            if (p->rule == RDT_FILL_EVEN_ODD) {
+                strbuf_append_str(out, " fill-rule=\"evenodd\"");
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " />\n");
+            strbuf_free(path_data);
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_STROKE_PATH: {
+            const PaintStrokePath* p = &cmd->stroke_path;
+            StrBuf* path_data = strbuf_new();
+            if (!paint_svg_path_to_string(p->path, path_data)) {
+                strbuf_free(path_data);
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<path d=\"%s\" fill=\"none\" stroke=\"", path_data->str);
+            paint_svg_append_color(out, p->color);
+            strbuf_append_format(out,
+                "\" stroke-width=\"%.2f\" stroke-linecap=\"%s\" stroke-linejoin=\"%s\"",
+                p->width, paint_svg_stroke_cap_name(p->cap),
+                paint_svg_stroke_join_name(p->join));
+            if (p->dash_array && p->dash_count > 0) {
+                strbuf_append_str(out, " stroke-dasharray=\"");
+                for (int dash_i = 0; dash_i < p->dash_count; dash_i++) {
+                    if (dash_i > 0) strbuf_append_char(out, ' ');
+                    strbuf_append_format(out, "%.2f", p->dash_array[dash_i]);
+                }
+                strbuf_append_char(out, '"');
+                if (p->dash_phase != 0.0f) {
+                    strbuf_append_format(out, " stroke-dashoffset=\"%.2f\"", p->dash_phase);
+                }
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " />\n");
+            strbuf_free(path_data);
+            active_stats->emitted_count++;
+            break;
+        }
+        default:
+            paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                       emit_unsupported_comments, active_stats);
             break;
         }
     }

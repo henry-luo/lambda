@@ -41,6 +41,19 @@ typedef enum {
     RDT_FILL_EVEN_ODD = 1,
 } RdtFillRule;
 
+typedef enum {
+    RDT_PATH_MOVE,
+    RDT_PATH_LINE,
+    RDT_PATH_QUAD,
+    RDT_PATH_CUBIC,
+    RDT_PATH_CLOSE,
+    RDT_PATH_RECT,
+    RDT_PATH_CIRCLE,
+} RdtPathCommand;
+
+typedef bool (*RdtPathVisitFn)(void* context, RdtPathCommand command,
+                               const float* args, int arg_count);
+
 typedef struct {
     float offset;          // 0.0 – 1.0
     uint8_t r, g, b, a;
@@ -133,6 +146,10 @@ RdtPath* rdt_path_clone(const RdtPath* src);
 // Returns false when the path has no drawable geometry.
 bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom);
+
+// Visit a path's portable command stream. Returns false when the path cannot
+// be inspected by the active backend or when the callback aborts traversal.
+bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 
 // ---------------------------------------------------------------------------
 // Fill

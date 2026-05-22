@@ -4,6 +4,8 @@
 #include "render_geometry.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+#include "paint_ir.h"
+#include "render_path.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
 #include "../lib/tagged.hpp"
@@ -43,6 +45,7 @@ typedef struct {
     BlockBlot block;
     Color color;
     UiContext* ui_context;
+    PaintList paint_list;
     bool _transform_emitted;  // tracks begin/end_transform pairing
 } SvgRenderContext;
 
@@ -56,6 +59,13 @@ static void svg_indent(SvgRenderContext* ctx) {
     for (int i = 0; i < ctx->indent_level; i++) {
         strbuf_append_str(ctx->svg_content, "  ");
     }
+}
+
+static void svg_lower_paint_list(SvgRenderContext* ctx) {
+    PaintSvgLoweringOptions options = {};
+    options.indent_level = ctx->indent_level;
+    paint_ir_lower_svg(&ctx->paint_list, ctx->svg_content, &options, nullptr);
+    paint_list_clear(&ctx->paint_list);
 }
 
 static void svg_color_to_string(Color color, char* result) {
@@ -384,6 +394,18 @@ static bool svg_has_border_radius(BorderProp* border) {
                       border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
 }
 
+static bool svg_get_uniform_border_radius(BorderProp* border, float* radius) {
+    if (!svg_has_border_radius(border)) return false;
+    float value = border->radius.top_left;
+    if (border->radius.top_right != value ||
+        border->radius.bottom_right != value ||
+        border->radius.bottom_left != value) {
+        return false;
+    }
+    if (radius) *radius = value;
+    return true;
+}
+
 // ── SVG border style helpers ─────────────────────────────────────────────────
 
 /**
@@ -627,23 +649,36 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
     // Render background
     if (view->bound->background && view->bound->background->color.a > 0) {
-        char bg_color[32];
-        svg_color_to_string(view->bound->background->color, bg_color);
-
-        svg_indent(ctx);
-
         // Check for border radius
         if (svg_has_border_radius(view->bound->border)) {
             BorderProp* border = view->bound->border;
-            strbuf_append_format(ctx->svg_content, "<path d=\"");
-            svg_append_rounded_rect_path(ctx->svg_content, x, y, width, height,
-                border->radius.top_left, border->radius.top_right,
-                border->radius.bottom_right, border->radius.bottom_left);
-            strbuf_append_format(ctx->svg_content, "\" fill=\"%s\" />\n", bg_color);
+            float radius = 0.0f;
+            if (svg_get_uniform_border_radius(border, &radius)) {
+                paint_fill_rounded_rect(&ctx->paint_list, x, y, width, height,
+                                        radius, radius,
+                                        view->bound->background->color);
+                svg_lower_paint_list(ctx);
+            } else {
+                Rect rect = {x, y, width, height};
+                Corner radius_shape = {};
+                radius_shape.top_left = border->radius.top_left;
+                radius_shape.top_right = border->radius.top_right;
+                radius_shape.bottom_right = border->radius.bottom_right;
+                radius_shape.bottom_left = border->radius.bottom_left;
+                radius_shape.top_left_y = border->radius.top_left;
+                radius_shape.top_right_y = border->radius.top_right;
+                radius_shape.bottom_right_y = border->radius.bottom_right;
+                radius_shape.bottom_left_y = border->radius.bottom_left;
+                RdtPath* path = render_path_create_rounded_rect(rect, &radius_shape);
+                paint_fill_path(&ctx->paint_list, path, view->bound->background->color,
+                                RDT_FILL_WINDING, nullptr);
+                svg_lower_paint_list(ctx);
+                rdt_path_free(path);
+            }
         } else {
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" />\n",
-                x, y, width, height, bg_color);
+            paint_fill_rect(&ctx->paint_list, x, y, width, height,
+                            view->bound->background->color);
+            svg_lower_paint_list(ctx);
         }
     }
 
@@ -1501,10 +1536,8 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
         case CSS_VALUE_SQUARE: {
             float sx = center_x - bullet_size / 2.0f;
             float sy = center_y - bullet_size / 2.0f;
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" />\n",
-                sx, sy, bullet_size, bullet_size, color_str);
+            paint_fill_rect(&ctx->paint_list, sx, sy, bullet_size, bullet_size, color);
+            svg_lower_paint_list(ctx);
             break;
         }
         case CSS_VALUE_DISCLOSURE_CLOSED: {
@@ -1678,6 +1711,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.viewport_width = width;
     ctx.viewport_height = height;
     ctx.ui_context = uicon;
+    paint_list_init(&ctx.paint_list, nullptr);
 
     // Initialize default font and color
     ctx.color.r = 0; ctx.color.g = 0; ctx.color.b = 0; ctx.color.a = 255; // Black text
@@ -1697,10 +1731,13 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.indent_level++;
 
     // Add background
-    svg_indent(&ctx);
-    strbuf_append_format(ctx.svg_content,
-        "<rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"white\" />\n",
-        width, height);
+    Color white = {};
+    white.r = 255;
+    white.g = 255;
+    white.b = 255;
+    white.a = 255;
+    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, white);
+    svg_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker
     RenderBackend backend = svg_make_backend(&ctx);
@@ -1728,6 +1765,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     // Extract the final SVG string
     char* result = mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
     strbuf_free(ctx.svg_content);
+    paint_list_destroy(&ctx.paint_list);
 
     return result;
 }

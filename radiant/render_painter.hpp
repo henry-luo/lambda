@@ -33,8 +33,19 @@ void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
                    ImageSurface* resource_owner = nullptr);
+void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
+                   Color color, bool is_color_emoji, const Bound* clip,
+                   const RdtMatrix* transform, uint64_t resource_generation);
 void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
+void rc_video_placeholder(RenderContext* rdcon, void* video,
+                          float dst_x, float dst_y, float dst_w, float dst_h,
+                          int object_fit, const Bound* clip,
+                          uint64_t video_generation);
+void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
+                                  float dst_x, float dst_y, float dst_w, float dst_h,
+                                  const Bound* clip,
+                                  uint64_t surface_generation);
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
 void rc_pop_clip(RenderContext* rdcon);
 void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h);
