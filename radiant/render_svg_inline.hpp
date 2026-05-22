@@ -1,12 +1,12 @@
 #pragma once
 /**
- * render_svg_inline.hpp - Inline SVG Rendering via RdtVector
+ * render_svg_inline.hpp - Inline SVG Rendering via PaintIR/DisplayList
  *
  * Renders SVG elements embedded in HTML documents by converting SVG
- * element trees directly to RdtVector draw calls.
+ * element trees into the shared painter recording path.
  *
  * Key functions:
- * - render_svg_to_vec(): Convert SVG Element tree to rdt_ draw calls
+ * - render_svg_to_vec(): Convert SVG Element tree to painter commands
  * - render_inline_svg(): Render SVG block in document context
  */
 
@@ -131,8 +131,8 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
 /**
- * Render SVG element tree directly to an RdtVector using rdt_ draw calls.
- * No ThorVG scene tree is constructed — shapes are drawn immediately.
+ * Render SVG element tree into painter commands targeting a display list.
+ * No ThorVG scene tree is constructed for native shapes.
  *
  * @param vec Target vector renderer
  * @param svg_element The <svg> Element from HTML5 parser
@@ -158,6 +158,25 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       bool initial_stroke_none = true,
                       float initial_stroke_width = -1.0f,
                       PaintList* paint_list = nullptr);
+
+/**
+ * Render an SVG element tree through DisplayList record/replay into an existing
+ * RdtVector target. This is used for offscreen SVG pictures so they follow the
+ * same replay path as raster output instead of immediate rdt_* emission.
+ */
+void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
+                      float viewport_width, float viewport_height,
+                      Pool* pool, float pixel_ratio = 1.0f,
+                      FontContext* font_ctx = nullptr,
+                      const RdtMatrix* base_transform = nullptr,
+                      const Color* initial_current_color = nullptr,
+                      const Color* initial_fill_color = nullptr,
+                      const char* source_path = nullptr,
+                      float initial_opacity = 1.0f,
+                      bool initial_fill_none = false,
+                      const Color* initial_stroke_color = nullptr,
+                      bool initial_stroke_none = true,
+                      float initial_stroke_width = -1.0f);
 
 /**
  * Render inline SVG element in document context

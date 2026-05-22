@@ -332,6 +332,16 @@ typedef struct DisplayList {
     ScratchArena arena;      // all variable-length data (paths, stops, dashes)
 } DisplayList;
 
+typedef struct DisplayListValidationResult {
+    bool valid;
+    int first_error_index;
+    const char* message;
+    int clip_depth;
+    int backdrop_depth;
+    int shadow_clip_depth;
+    int element_depth;
+} DisplayListValidationResult;
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -461,6 +471,8 @@ void dl_end_element(DisplayList* dl, int begin_index);
 
 int dl_item_count(const DisplayList* dl);
 bool dl_contains_glyphs(const DisplayList* dl);
+bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result);
+bool dl_validate_or_log(const DisplayList* dl, const char* context);
 
 #ifdef __cplusplus
 }

@@ -1,25 +1,26 @@
 /**
- * render_svg_inline.cpp - Inline SVG Rendering via RdtVector
+ * render_svg_inline.cpp - Inline SVG Rendering via PaintIR/DisplayList
  *
- * Converts SVG element trees directly to rdt_ draw calls.
- * No ThorVG scene tree is constructed — shapes are drawn immediately
- * to the target RdtVector with accumulated transforms.
+ * Converts SVG element trees to paint/display-list commands with accumulated
+ * transforms. No ThorVG scene tree is constructed for the inline path.
  */
 
 #include "render_svg_inline.hpp"
 #include "render.hpp"
-#include "render_background.hpp"
-#include "render_composite.hpp"
+#include "display_list_replay.hpp"
 #include "render_geometry.hpp"
 #include "render_glyph.hpp"
 #include "render_painter.hpp"
 #include "paint_ir.h"
+#include "tile_pool.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
+#include "../lib/arena.h"
 #include "../lib/font/font.h"
 #include "../lib/font/font_internal.h"
+#include "../lib/mempool.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
@@ -150,10 +151,10 @@ static void svg_resource_stack_pop(const char* path) {
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// SVG display-list dispatch helpers (ctx->dl aware)
+// SVG PaintIR/display-list dispatch helpers
 // ---------------------------------------------------------------------------
 static inline bool svg_paint_active(SvgRenderContext* ctx) {
-    return ctx->paint_list && ctx->dl;
+    return ctx && ctx->paint_list && ctx->dl;
 }
 
 static inline void svg_lower_pending(SvgRenderContext* ctx) {
@@ -161,13 +162,21 @@ static inline void svg_lower_pending(SvgRenderContext* ctx) {
     paint_list_clear(ctx->paint_list);
 }
 
+static inline bool svg_dl_active(SvgRenderContext* ctx) {
+    return ctx && ctx->dl;
+}
+
+static inline void svg_missing_dl(const char* op) {
+    log_error("[SVG] %s called without display list", op ? op : "paint op");
+}
+
 static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color color,
                                  RdtFillRule rule, const RdtMatrix* xform) {
     if (svg_paint_active(ctx)) {
         paint_fill_path(ctx->paint_list, path, color, rule, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
-    else rdt_fill_path(ctx->vec, path, color, rule, xform);
+    } else if (svg_dl_active(ctx)) dl_fill_path(ctx->dl, path, color, rule, xform);
+    else svg_missing_dl("svg_fill_path");
 }
 
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
@@ -177,8 +186,8 @@ static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color c
         paint_stroke_path(ctx->paint_list, path, color, width, cap, join,
                           dash, dash_count, 0, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
-    else rdt_stroke_path(ctx->vec, path, color, width, cap, join, dash, dash_count, 0, xform);
+    } else if (svg_dl_active(ctx)) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
+    else svg_missing_dl("svg_stroke_path");
 }
 static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
@@ -188,8 +197,8 @@ static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path
         paint_fill_linear_gradient(ctx->paint_list, path, x1, y1, x2, y2,
                                    stops, count, rule, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
-    else rdt_fill_linear_gradient(ctx->vec, path, x1, y1, x2, y2, stops, count, rule, xform);
+    } else if (svg_dl_active(ctx)) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
+    else svg_missing_dl("svg_fill_linear_gradient");
 }
 static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float cx, float cy, float r,
@@ -199,38 +208,40 @@ static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path
         paint_fill_radial_gradient(ctx->paint_list, path, cx, cy, r,
                                    stops, count, rule, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
-    else rdt_fill_radial_gradient(ctx->vec, path, cx, cy, r, stops, count, rule, xform);
+    } else if (svg_dl_active(ctx)) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
+    else svg_missing_dl("svg_fill_radial_gradient");
 }
 static inline void svg_draw_picture(SvgRenderContext* ctx, RdtPicture* pic,
                                     uint8_t opacity, const RdtMatrix* xform) {
     if (svg_paint_active(ctx)) {
         paint_draw_picture(ctx->paint_list, pic, opacity, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_draw_picture(ctx->dl, pic, opacity, xform);
-    else rdt_picture_draw(ctx->vec, pic, opacity, xform);
+    } else if (svg_dl_active(ctx)) dl_draw_picture(ctx->dl, pic, opacity, xform);
+    else svg_missing_dl("svg_draw_picture");
 }
 static inline void svg_push_clip(SvgRenderContext* ctx, RdtPath* path, const RdtMatrix* xform) {
     if (svg_paint_active(ctx)) {
         paint_push_clip(ctx->paint_list, path, xform);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_push_clip(ctx->dl, path, xform);
-    else rdt_push_clip(ctx->vec, path, xform);
+    } else if (svg_dl_active(ctx)) dl_push_clip(ctx->dl, path, xform);
+    else svg_missing_dl("svg_push_clip");
 }
 static inline void svg_pop_clip(SvgRenderContext* ctx) {
     if (svg_paint_active(ctx)) {
         paint_pop_clip(ctx->paint_list);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) dl_pop_clip(ctx->dl);
-    else rdt_pop_clip(ctx->vec);
+    } else if (svg_dl_active(ctx)) dl_pop_clip(ctx->dl);
+    else svg_missing_dl("svg_pop_clip");
 }
 
 static inline void svg_save_backdrop(SvgRenderContext* ctx, int x0, int y0, int w, int h) {
     if (svg_paint_active(ctx)) {
         paint_save_backdrop(ctx->paint_list, x0, y0, w, h);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) {
+    } else if (svg_dl_active(ctx)) {
         dl_save_backdrop(ctx->dl, x0, y0, w, h);
+    } else {
+        svg_missing_dl("svg_save_backdrop");
     }
 }
 
@@ -240,8 +251,10 @@ static inline void svg_composite_opacity(SvgRenderContext* ctx, int x0, int y0, 
         paint_composite_opacity(ctx->paint_list, x0, y0, w, h,
                                 opacity, premultiplied_source);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) {
+    } else if (svg_dl_active(ctx)) {
         dl_composite_opacity(ctx->dl, x0, y0, w, h, opacity, premultiplied_source);
+    } else {
+        svg_missing_dl("svg_composite_opacity");
     }
 }
 
@@ -255,10 +268,12 @@ static inline void svg_box_blur_region(SvgRenderContext* ctx, int rx, int ry, in
                               clip_type, clip_params, exclude_type, exclude_params,
                               premultiply_source, tint_source, tint_color);
         svg_lower_pending(ctx);
-    } else if (ctx->dl) {
+    } else if (svg_dl_active(ctx)) {
         dl_box_blur_region(ctx->dl, rx, ry, rw, rh, blur_radius,
                            clip_type, clip_params, exclude_type, exclude_params,
                            premultiply_source, tint_source, tint_color);
+    } else {
+        svg_missing_dl("svg_box_blur_region");
     }
 }
 
@@ -1319,90 +1334,24 @@ static bool resolve_svg_gaussian_blur_filter(SvgRenderContext* ctx, Element* ele
     return true;
 }
 
-static bool svg_filter_clamp_to_surface(SvgGaussianBlurFilter* filter, ImageSurface* surface) {
-    if (!filter || !filter->active || !surface) return false;
-    int x0 = filter->x;
-    int y0 = filter->y;
-    int x1 = filter->x + filter->width;
-    int y1 = filter->y + filter->height;
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 > surface->width) x1 = surface->width;
-    if (y1 > surface->height) y1 = surface->height;
-    filter->x = x0;
-    filter->y = y0;
-    filter->width = x1 - x0;
-    filter->height = y1 - y0;
-    return filter->width > 0 && filter->height > 0;
-}
-
 static bool svg_begin_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
     if (!ctx || !filter || !filter->active) return false;
-    if (ctx->dl) {
-        svg_save_backdrop(ctx, filter->x, filter->y, filter->width, filter->height);
-        return true;
-    }
-
-    RenderContext* rdcon = g_svg_active_rdcon;
-    if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) {
-        return false;
-    }
-    ImageSurface* surface = rdcon->ui_context->surface;
-    if (!surface->pixels || !svg_filter_clamp_to_surface(filter, surface)) {
-        return false;
-    }
-
-    render_painter_flush_vector_batch(rdcon);
-    filter->backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch,
-        (size_t)filter->width * (size_t)filter->height * sizeof(uint32_t));
-    if (!filter->backdrop) return false;
-    if (!render_composite_copy_backdrop(surface, filter->backdrop,
-                                        filter->x, filter->y,
-                                        filter->width, filter->height, true)) {
-        scratch_free(&rdcon->scratch, filter->backdrop);
-        filter->backdrop = nullptr;
-        return false;
-    }
+    svg_save_backdrop(ctx, filter->x, filter->y, filter->width, filter->height);
     return true;
 }
 
 static void svg_finish_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
     if (!ctx || !filter || !filter->active) return;
-    if (ctx->dl) {
-        svg_box_blur_region(ctx, filter->x, filter->y, filter->width, filter->height,
-                            filter->blur_radius, 0, nullptr, 0, nullptr, true,
-                            filter->tint_source, filter->tint_color);
-        svg_composite_opacity(ctx, filter->x, filter->y,
-                              filter->width, filter->height, 1.0f, true);
-        filter->active = false;
-        return;
-    }
-
-    RenderContext* rdcon = g_svg_active_rdcon;
-    if (!rdcon || !filter->backdrop || !rdcon->ui_context || !rdcon->ui_context->surface) {
-        return;
-    }
-    render_painter_flush_vector_batch(rdcon);
-    ImageSurface* surface = rdcon->ui_context->surface;
-    premultiply_surface_region(surface, filter->x, filter->y,
-                               filter->width, filter->height);
-    if (filter->tint_source) {
-        tint_premultiplied_surface_region(surface, filter->x, filter->y,
-                                          filter->width, filter->height,
-                                          filter->tint_color);
-    }
-    box_blur_region(&rdcon->scratch, surface, filter->x, filter->y,
-                    filter->width, filter->height, filter->blur_radius);
-    render_composite_source_over_premul(surface, filter->backdrop,
-                                        filter->x, filter->y,
-                                        filter->width, filter->height);
-    scratch_free(&rdcon->scratch, filter->backdrop);
-    filter->backdrop = nullptr;
+    svg_box_blur_region(ctx, filter->x, filter->y, filter->width, filter->height,
+                        filter->blur_radius, 0, nullptr, 0, nullptr, true,
+                        filter->tint_source, filter->tint_color);
+    svg_composite_opacity(ctx, filter->x, filter->y,
+                          filter->width, filter->height, 1.0f, true);
     filter->active = false;
 }
 
 // ============================================================================
-// Apply gradient fill via rdt_ API
+// Apply gradient fill via the SVG painter gateway
 // ============================================================================
 
 static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
@@ -1511,7 +1460,7 @@ static bool draw_pattern_fill(SvgRenderContext* ctx, RdtPath* path, Element* pat
 }
 
 // ============================================================================
-// Draw fill and stroke for an SVG shape via rdt_ API
+// Draw fill and stroke for an SVG shape via the SVG painter gateway
 // ============================================================================
 
 static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* elem,
@@ -1668,7 +1617,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 }
 
 // ============================================================================
-// SVG Shape Renderers (draw directly via rdt_ API)
+// SVG Shape Renderers
 // ============================================================================
 
 static void render_svg_rect(SvgRenderContext* ctx, Element* elem) {
@@ -2984,85 +2933,6 @@ static float measure_svg_text_width(const char* text, float font_size_px,
     return len * font_size_px * 0.55f;
 }
 
-static uint32_t glyph_sample_pixel(const GlyphBitmap* bitmap, int src_y, int src_x) {
-    if (!bitmap || !bitmap->buffer || src_y < 0 || src_y >= bitmap->height ||
-        src_x < 0 || src_x >= bitmap->width) return 0;
-    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
-        int byte_index = src_x / 8;
-        int bit_index = 7 - (src_x % 8);
-        uint8_t byte_val = bitmap->buffer[src_y * bitmap->pitch + byte_index];
-        return (byte_val & (1 << bit_index)) ? 255 : 0;
-    }
-    if (bitmap->pixel_mode == GLYPH_PIXEL_GRAY) {
-        return bitmap->buffer[src_y * bitmap->pitch + src_x];
-    }
-    if (bitmap->pixel_mode == GLYPH_PIXEL_LCD) {
-        const uint8_t* p = bitmap->buffer + src_y * bitmap->pitch + src_x * 3;
-        return ((uint32_t)p[0] + (uint32_t)p[1] + (uint32_t)p[2] + 1) / 3;
-    }
-    return 0;
-}
-
-static uint32_t glyph_sample_coverage(const GlyphBitmap* bitmap, float src_y, float src_x) {
-    if (!bitmap || !bitmap->buffer) return 0;
-    if (bitmap->pixel_mode == GLYPH_PIXEL_MONO) {
-        int sx = (int)floorf(src_x + 0.5f);
-        int sy = (int)floorf(src_y + 0.5f);
-        return glyph_sample_pixel(bitmap, sy, sx);
-    }
-    if (bitmap->pixel_mode != GLYPH_PIXEL_GRAY && bitmap->pixel_mode != GLYPH_PIXEL_LCD) return 0;
-
-    int sx0 = (int)floorf(src_x);
-    int sy0 = (int)floorf(src_y);
-    float tx = src_x - (float)sx0;
-    float ty = src_y - (float)sy0;
-    int sx1 = sx0 + 1;
-    int sy1 = sy0 + 1;
-    if (sx0 < 0) { sx0 = 0; tx = 0.0f; }
-    if (sy0 < 0) { sy0 = 0; ty = 0.0f; }
-    if (sx1 >= bitmap->width) sx1 = bitmap->width - 1;
-    if (sy1 >= bitmap->height) sy1 = bitmap->height - 1;
-    if (sx0 >= bitmap->width || sy0 >= bitmap->height) return 0;
-    float c00 = (float)glyph_sample_pixel(bitmap, sy0, sx0);
-    float c10 = (float)glyph_sample_pixel(bitmap, sy0, sx1);
-    float c01 = (float)glyph_sample_pixel(bitmap, sy1, sx0);
-    float c11 = (float)glyph_sample_pixel(bitmap, sy1, sx1);
-    float top = c00 * (1.0f - tx) + c10 * tx;
-    float bottom = c01 * (1.0f - tx) + c11 * tx;
-    return (uint32_t)(top * (1.0f - ty) + bottom * ty + 0.5f);
-}
-
-static inline void svg_blend_glyph_coverage_pixel(uint8_t* p, Color color, uint32_t coverage) {
-    uint32_t src_a = (coverage * color.a + 127) / 255;
-    if (src_a == 0) return;
-    uint32_t inv_a = 255 - src_a;
-
-    if (p[3] == 255) {
-        if (color.c == 0xFF000000) {
-            p[0] = p[0] * inv_a / 255;
-            p[1] = p[1] * inv_a / 255;
-            p[2] = p[2] * inv_a / 255;
-            p[3] = 0xFF;
-        } else {
-            p[0] = (p[0] * inv_a + color.r * src_a) / 255;
-            p[1] = (p[1] * inv_a + color.g * src_a) / 255;
-            p[2] = (p[2] * inv_a + color.b * src_a) / 255;
-            p[3] = 0xFF;
-        }
-        return;
-    }
-
-    uint32_t dst_a = p[3];
-    uint32_t out_a = src_a + (dst_a * inv_a + 127) / 255;
-    uint32_t out_r = (color.r * src_a + 127) / 255 + (p[0] * inv_a + 127) / 255;
-    uint32_t out_g = (color.g * src_a + 127) / 255 + (p[1] * inv_a + 127) / 255;
-    uint32_t out_b = (color.b * src_a + 127) / 255 + (p[2] * inv_a + 127) / 255;
-    p[0] = (uint8_t)(out_r > 255 ? 255 : out_r);
-    p[1] = (uint8_t)(out_g > 255 ? 255 : out_g);
-    p[2] = (uint8_t)(out_b > 255 ? 255 : out_b);
-    p[3] = (uint8_t)(out_a > 255 ? 255 : out_a);
-}
-
 static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,
                               float x, float y, float scale_x, float shear_x,
                               float scale_y = 1.0f) {
@@ -3074,63 +2944,16 @@ static void draw_glyph_affine(RenderContext* rdcon, GlyphBitmap* bitmap,
         return;
     }
 
-    if (rdcon->dl) {
-        bool saved_has_transform = rdcon->has_transform;
-        RdtMatrix saved_transform = rdcon->transform;
-        RdtMatrix local = { scale_x, shear_x, x - scale_x * x - shear_x * y,
-                            0, scale_y, y - scale_y * y,
-                            0, 0, 1 };
-        rdcon->has_transform = true;
-        rdcon->transform = saved_has_transform ? rdt_matrix_multiply(&local, &saved_transform) : local;
-        draw_glyph(rdcon, bitmap, lroundf(x), lroundf(y));
-        rdcon->has_transform = saved_has_transform;
-        rdcon->transform = saved_transform;
-        return;
-    }
-
-    if (bitmap->height <= 0 || bitmap->width <= 0) return;
-
-    float x0 = x;
-    float y0 = y;
-    float x1 = x + scale_x * (float)bitmap->width;
-    float y1 = y;
-    float x2 = x + scale_x * (float)bitmap->width + shear_x * (float)bitmap->height;
-    float y2 = y + scale_y * (float)bitmap->height;
-    float x3 = x + shear_x * (float)bitmap->height;
-    float y3 = y + scale_y * (float)bitmap->height;
-    float min_x = fminf(fminf(x0, x1), fminf(x2, x3));
-    float max_x = fmaxf(fmaxf(x0, x1), fmaxf(x2, x3));
-    float min_y = fminf(fminf(y0, y1), fminf(y2, y3));
-    float max_y = fmaxf(fmaxf(y0, y1), fmaxf(y2, y3));
-
-    int left = (int)floorf(fmaxf(rdcon->block.clip.left, min_x));
-    int right = (int)ceilf(fminf(rdcon->block.clip.right, max_x));
-    int top = (int)floorf(fmaxf(rdcon->block.clip.top, min_y));
-    int bottom = (int)ceilf(fminf(rdcon->block.clip.bottom, max_y));
-    if (left >= right || top >= bottom) return;
-
-    ImageSurface* surface = rdcon->ui_context ? rdcon->ui_context->surface : nullptr;
-    if (!surface || !surface->pixels) return;
-
-    float inv_scale = 1.0f / scale_x;
-    for (int dst_y = top; dst_y < bottom; dst_y++) {
-        if (dst_y < surface->tile_offset_y || dst_y >= surface->tile_offset_y + surface->height) continue;
-        float local_y = ((float)dst_y + 0.5f - y) / scale_y;
-        if (local_y < 0.0f || local_y >= (float)bitmap->height) continue;
-        uint8_t* row_pixels = (uint8_t*)surface->pixels +
-            (dst_y - surface->tile_offset_y) * surface->pitch;
-        for (int dst_x = left; dst_x < right; dst_x++) {
-            if (dst_x < 0 || dst_x >= surface->width) continue;
-            float local_x = (float)dst_x + 0.5f - x - shear_x * local_y;
-            float src_x = local_x * inv_scale - 0.5f;
-            float src_y = local_y - 0.5f;
-            uint32_t intensity = glyph_sample_coverage(bitmap, src_y, src_x);
-            if (intensity == 0) continue;
-
-            uint8_t* p = row_pixels + dst_x * 4;
-            svg_blend_glyph_coverage_pixel(p, rdcon->color, intensity);
-        }
-    }
+    bool saved_has_transform = rdcon->has_transform;
+    RdtMatrix saved_transform = rdcon->transform;
+    RdtMatrix local = { scale_x, shear_x, x - scale_x * x - shear_x * y,
+                        0, scale_y, y - scale_y * y,
+                        0, 0, 1 };
+    rdcon->has_transform = true;
+    rdcon->transform = saved_has_transform ? rdt_matrix_multiply(&local, &saved_transform) : local;
+    draw_glyph(rdcon, bitmap, lroundf(x), lroundf(y));
+    rdcon->has_transform = saved_has_transform;
+    rdcon->transform = saved_transform;
 }
 
 static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const char* text,
@@ -3811,9 +3634,6 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
             RdtMatrix translate = rdt_matrix_translate(x, y);
             RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
             svg_draw_picture(ctx, rdt_pic, op, &final_m);
-            if (!ctx->dl) {
-                rdt_picture_free(rdt_pic);
-            }
             log_debug("[SVG] <image> loaded nested SVG data URI at (%.1f, %.1f) size %.1fx%.1f", x, y, width, height);
             return;
         }
@@ -3900,9 +3720,6 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
         RdtMatrix translate = rdt_matrix_translate(x, y);
         RdtMatrix final_m = rdt_matrix_multiply(&m, &translate);
         svg_draw_picture(ctx, rdt_pic, op, &final_m);
-        if (!ctx->dl) {
-            rdt_picture_free(rdt_pic);
-        }
         log_debug("[SVG] <image> loaded nested SVG: %s at (%.1f, %.1f) size %.1fx%.1f", resolved_href ? resolved_href : href, x, y, width, height);
         if (resolved_href) mem_free(resolved_href);
         return;
@@ -4108,11 +3925,9 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
             }
             if (op_w > 0 && op_h > 0) {
                 use_opacity_layer = true;
-                if (ctx->dl) {
-                    svg_save_backdrop(ctx, op_x0, op_y0, op_w, op_h);
-                }
-                log_debug("[SVG-GROUP] opacity=%.2f, save backdrop (%d,%d,%d,%d) dl=%d",
-                          group_op, op_x0, op_y0, op_w, op_h, ctx->dl != nullptr);
+                svg_save_backdrop(ctx, op_x0, op_y0, op_w, op_h);
+                log_debug("[SVG-GROUP] opacity=%.2f, save backdrop (%d,%d,%d,%d)",
+                          group_op, op_x0, op_y0, op_w, op_h);
             }
         }
     }
@@ -4182,9 +3997,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
 
     // composite opacity layer if active
     if (use_opacity_layer && op_w > 0 && op_h > 0) {
-        if (ctx->dl) {
-            svg_composite_opacity(ctx, op_x0, op_y0, op_w, op_h, group_op);
-        }
+        svg_composite_opacity(ctx, op_x0, op_y0, op_w, op_h, group_op);
         log_debug("[SVG-GROUP] composite opacity=%.2f over backdrop", group_op);
     }
 
@@ -4655,7 +4468,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     process_svg_root_resources(&ctx, svg_element);
     svg_apply_inherited_paint_attrs(&ctx, svg_element);
 
-    // render children directly to vec
+    // render children through the SVG painter gateway
     for (int64_t i = 0; i < svg_element->length; i++) {
         Element* child = get_child_element_at(svg_element, i);
         if (!child) continue;
@@ -4666,6 +4479,75 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     if (ctx.style_rules) mem_free(ctx.style_rules);
     if (ctx.defs) mem_free(ctx.defs);
     if (pushed_source) svg_resource_stack_pop(source_path);
+}
+
+void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
+                       float viewport_width, float viewport_height,
+                       Pool* pool, float pixel_ratio, FontContext* font_ctx,
+                       const RdtMatrix* base_transform,
+                       const Color* initial_current_color,
+                       const Color* initial_fill_color,
+                       const char* source_path, float initial_opacity,
+                       bool initial_fill_none,
+                       const Color* initial_stroke_color,
+                       bool initial_stroke_none,
+                       float initial_stroke_width) {
+    if (!vec || !svg_element) return;
+
+    RdtVectorTarget target = {};
+    if (!rdt_vector_get_target(vec, &target)) {
+        log_error("[SVG] display-list SVG picture render missing vector target");
+        return;
+    }
+
+    Pool* temp_pool = pool_create();
+    if (!temp_pool) return;
+    Arena* temp_arena = arena_create_default(temp_pool);
+    if (!temp_arena) {
+        pool_destroy(temp_pool);
+        return;
+    }
+
+    DisplayList dl = {};
+    PaintList paint_list = {};
+    ScratchArena scratch = {};
+    dl_init(&dl, temp_arena);
+    paint_list_init(&paint_list, temp_arena);
+    scratch_init(&scratch, temp_arena);
+
+    render_svg_to_vec(vec, svg_element, viewport_width, viewport_height,
+                      pool, pixel_ratio, font_ctx, base_transform, &dl,
+                      initial_current_color, initial_fill_color, source_path,
+                      initial_opacity, initial_fill_none,
+                      initial_stroke_color, initial_stroke_none,
+                      initial_stroke_width, &paint_list);
+
+    if (dl_validate_or_log(&dl, "render_svg_picture_display_list")) {
+        ImageSurface surface = {};
+        surface.format = IMAGE_FORMAT_PNG;
+        surface.width = target.width;
+        surface.height = target.height;
+        surface.pitch = target.stride * 4;
+        surface.pixels = target.pixels;
+        surface.tile_offset_y = 0;
+
+        if (target.tile_offset_x != 0.0f || target.tile_offset_y != 0.0f) {
+            dl_replay_tile(&dl, vec, &surface, &scratch,
+                           target.tile_offset_x, target.tile_offset_y,
+                           (float)target.width, (float)target.height,
+                           pixel_ratio > 0.0f ? pixel_ratio : 1.0f);
+        } else {
+            Bound clip = {0.0f, 0.0f, (float)target.width, (float)target.height};
+            dl_replay(&dl, vec, &surface, &clip, &scratch,
+                      pixel_ratio > 0.0f ? pixel_ratio : 1.0f, nullptr);
+        }
+    }
+
+    scratch_release(&scratch);
+    paint_list_destroy(&paint_list);
+    dl_destroy(&dl);
+    arena_destroy(temp_arena);
+    pool_destroy(temp_pool);
 }
 
 // ============================================================================
@@ -4733,7 +4615,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         rdt_path_free(clip_path);
     }
 
-    // render SVG directly to the framebuffer
+    // render SVG through the shared painter gateway
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     Color initial_current_color = rdcon->color;
     Color initial_fill_color = {};

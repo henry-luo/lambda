@@ -3,7 +3,6 @@
 #include "render.hpp"
 #include "render_geometry.hpp"
 #include "render_painter.hpp"
-#include "render_raster.hpp"
 #include "render_selection.hpp"
 #include "render_state.hpp"
 #include "webview.h"
@@ -93,6 +92,8 @@ static bool render_media_rasterize_svg_image(ImageSurface* surface, int target_w
                     (uint32_t)target_width); // INT_CAST_OK: target dimensions are validated positive raster pixels.
     int saved_clip_depth = rdt_clip_save_depth();
 
+    // Intentional local/offscreen draw: this rasterizes an SVG resource into
+    // its ImageSurface cache, outside the live RenderContext painter pipeline.
     RdtPicture* pic = rdt_picture_dup(surface->pic);
     if (pic) {
         rdt_picture_set_size(pic, (float)target_width, (float)target_height);
@@ -149,7 +150,8 @@ void render_svg(ImageSurface* surface) {
     // isolated off-screen SVG rasterization
     int saved_clip_depth = rdt_clip_save_depth();
 
-    // Draw SVG picture at target size (takes ownership from surface)
+    // Intentional local/offscreen draw: this consumes the decoded SVG picture
+    // into a pixel cache before normal image painting routes through rc_*.
     RdtPicture* pic = surface->pic;
     surface->pic = NULL;  // ownership transferred
     if (pic) {
@@ -234,7 +236,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     bool pushed_content_clip = render_media_push_content_clip(rdcon, &rect, &img_rect);
     if (img->format == IMAGE_FORMAT_SVG) {
         bool drew_svg = false;
-        if (rdcon->dl && img->pic) {
+        if (img->pic) {
             log_debug("render svg image as display-list picture at x:%f, y:%f, wd:%f, hg:%f",
                       img_rect.x, img_rect.y, img_rect.width, img_rect.height);
             RdtPicture* pic = rdt_picture_dup(img->pic);
@@ -266,11 +268,10 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
             if (pic) {
                 render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
                                                  content_opacity);
-                if (!rdcon->dl) {
-                    rdt_picture_free(pic);
-                }
+                drew_svg = true;
             }
-        } else {
+        }
+        if (!drew_svg) {
             log_debug("failed to render svg image: no vector picture or raster pixels");
         }
     } else {
@@ -357,23 +358,10 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
               dst_x, dst_y, dst_w, dst_h,
               wv->surface->width, wv->surface->height);
 
-    if (rdcon->dl) {
-        rc_webview_layer_placeholder(rdcon, wv->surface,
-                                     dst_x, dst_y, dst_w, dst_h,
-                                     &rdcon->block.clip,
-                                     wv->surface ? wv->surface->generation : 0);
-    } else {
-        // fallback: direct blit (single-threaded path)
-        render_painter_flush_vector_batch(rdcon);
-        Rect rect = { dst_x, dst_y, dst_w, dst_h };
-        RasterPaintContext raster = {
-            rdcon->ui_context->surface,
-            &rdcon->block.clip,
-            rdcon->clip_shapes,
-            rdcon->clip_shape_depth
-        };
-        raster_blit_surface_scaled(&raster, wv->surface, NULL, &rect, SCALE_MODE_LINEAR);
-    }
+    rc_webview_layer_placeholder(rdcon, wv->surface,
+                                 dst_x, dst_y, dst_w, dst_h,
+                                 &rdcon->block.clip,
+                                 wv->surface ? wv->surface->generation : 0);
 }
 
 void render_video_content(RenderContext* rdcon, ViewBlock* view) {
@@ -391,12 +379,10 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f controls=%d",
               dst_x, dst_y, dst_w, dst_h, view->embed->has_controls);
 
-    if (rdcon->dl) {
-        rc_video_placeholder(rdcon, view->embed->video,
-                             dst_x, dst_y, dst_w, dst_h,
-                             object_fit_flags, &rdcon->block.clip,
-                             rdcon->ui_context && rdcon->ui_context->document &&
-                             rdcon->ui_context->document->state ?
-                                 rdcon->ui_context->document->state->video_frame_generation : 0);
-    }
+    rc_video_placeholder(rdcon, view->embed->video,
+                         dst_x, dst_y, dst_w, dst_h,
+                         object_fit_flags, &rdcon->block.clip,
+                         rdcon->ui_context && rdcon->ui_context->document &&
+                         rdcon->ui_context->document->state ?
+                             rdcon->ui_context->document->state->video_frame_generation : 0);
 }

@@ -1,7 +1,5 @@
 #include "render_effects.hpp"
 
-#include "render_composite.hpp"
-#include "render_filter.hpp"
 #include "render_geometry.hpp"
 #include "render_painter.hpp"
 #include "render_profiler.hpp"
@@ -49,23 +47,7 @@ static RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
     backdrop.width = width;
     backdrop.height = height;
 
-    if (rdcon->dl) {
-        rc_save_backdrop(rdcon, bx0, by0, width, height);
-        backdrop.active = true;
-        return backdrop;
-    }
-
-    render_painter_flush_vector_batch(rdcon);
-    backdrop.pixels = (uint32_t*)scratch_alloc(&rdcon->scratch, (size_t)width * height * sizeof(uint32_t));
-    if (!backdrop.pixels) {
-        return backdrop;
-    }
-    if (!render_composite_copy_backdrop(surface, backdrop.pixels, bx0, by0, width, height, true)) {
-        scratch_free(&rdcon->scratch, backdrop.pixels);
-        backdrop.pixels = nullptr;
-        return backdrop;
-    }
-
+    rc_save_backdrop(rdcon, bx0, by0, width, height);
     backdrop.active = true;
     return backdrop;
 }
@@ -79,17 +61,8 @@ static void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* back
         return;
     }
     RenderContext* rdcon = backdrop->context;
-    if (rdcon->dl) {
-        rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
-                             backdrop->width, backdrop->height, 1.0f);
-    } else if (backdrop->pixels) {
-        render_painter_flush_vector_batch(rdcon);
-        render_composite_source_over_premul(rdcon->ui_context->surface, backdrop->pixels,
-                                            backdrop->x, backdrop->y,
-                                            backdrop->width, backdrop->height);
-        scratch_free(&rdcon->scratch, backdrop->pixels);
-        backdrop->pixels = nullptr;
-    }
+    rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
+                         backdrop->width, backdrop->height, 1.0f);
     backdrop->active = false;
 }
 
@@ -99,17 +72,8 @@ static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop
         return;
     }
     RenderContext* rdcon = backdrop->context;
-    if (rdcon->dl) {
-        rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
-                             backdrop->width, backdrop->height, opacity);
-    } else if (backdrop->pixels) {
-        render_painter_flush_vector_batch(rdcon);
-        render_composite_opacity(rdcon->ui_context->surface, backdrop->pixels,
-                                 backdrop->x, backdrop->y,
-                                 backdrop->width, backdrop->height, opacity);
-        scratch_free(&rdcon->scratch, backdrop->pixels);
-        backdrop->pixels = nullptr;
-    }
+    rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
+                         backdrop->width, backdrop->height, opacity);
     backdrop->active = false;
 }
 
@@ -119,17 +83,8 @@ static void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
         return;
     }
     RenderContext* rdcon = backdrop->context;
-    if (rdcon->dl) {
-        rc_apply_blend_mode(rdcon, backdrop->x, backdrop->y,
-                            backdrop->width, backdrop->height, (int)blend_mode);
-    } else if (backdrop->pixels) {
-        render_painter_flush_vector_batch(rdcon);
-        render_composite_apply_blend(rdcon->ui_context->surface, backdrop->pixels,
-                                     backdrop->x, backdrop->y,
-                                     backdrop->width, backdrop->height, blend_mode);
-        scratch_free(&rdcon->scratch, backdrop->pixels);
-        backdrop->pixels = nullptr;
-    }
+    rc_apply_blend_mode(rdcon, backdrop->x, backdrop->y,
+                        backdrop->width, backdrop->height, (int)blend_mode);
     backdrop->active = false;
 }
 
@@ -273,16 +228,9 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
               block->node_name(), filter_rect.x, filter_rect.y,
               filter_rect.width, filter_rect.height);
 
-    if (rdcon->dl) {
-        rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
-                        filter_rect.width, filter_rect.height,
-                        block->filter, clip);
-    } else {
-        const RenderBackendCaps* caps = render_backend_get_caps(&rdcon->vec);
-        render_painter_flush_vector_batch(rdcon);
-        render_filter_apply_with_backend(caps, &rdcon->scratch, rdcon->ui_context->surface,
-                                         block->filter, &filter_rect, clip);
-    }
+    rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
+                    filter_rect.width, filter_rect.height,
+                    block->filter, clip);
     return true;
 }
 

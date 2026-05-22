@@ -3,10 +3,12 @@
 // ==========================================================================
 
 #include "display_list.h"
+#include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include <string.h>
 
 #define DL_INITIAL_CAPACITY 2048
+#define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
 
 DisplayItem* dl_alloc_item(DisplayList* dl) {
     if (!dl) return nullptr;
@@ -146,6 +148,344 @@ bool dl_contains_glyphs(const DisplayList* dl) {
     for (int i = 0; i < dl->count; i++) {
         if (dl->items[i].op == DL_DRAW_GLYPH) return true;
     }
+    return false;
+}
+
+static void dl_validation_set(DisplayListValidationResult* result, bool valid,
+                              int index, const char* message, int clip_depth,
+                              int backdrop_depth, int shadow_clip_depth,
+                              int element_depth) {
+    if (!result) return;
+    result->valid = valid;
+    result->first_error_index = index;
+    result->message = message;
+    result->clip_depth = clip_depth;
+    result->backdrop_depth = backdrop_depth;
+    result->shadow_clip_depth = shadow_clip_depth;
+    result->element_depth = element_depth;
+}
+
+static bool dl_validation_fail(DisplayListValidationResult* result, int index,
+                               const char* message, int clip_depth,
+                               int backdrop_depth, int shadow_clip_depth,
+                               int element_depth) {
+    dl_validation_set(result, false, index, message, clip_depth, backdrop_depth,
+                      shadow_clip_depth, element_depth);
+    return false;
+}
+
+static bool dl_validate_positive_image(const DlDrawImage* image) {
+    return image->pixels && image->src_w > 0 && image->src_h > 0 &&
+           image->src_stride > 0 && image->dst_w >= 0.0f && image->dst_h >= 0.0f;
+}
+
+bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
+    dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    if (!dl) {
+        return dl_validation_fail(result, -1, "display list is null", 0, 0, 0, 0);
+    }
+    if (dl->count < 0 || dl->capacity < 0 || dl->count > dl->capacity) {
+        return dl_validation_fail(result, -1, "display list count/capacity is invalid",
+                                  0, 0, 0, 0);
+    }
+    if (dl->count > 0 && !dl->items) {
+        return dl_validation_fail(result, -1, "display list has items but no storage",
+                                  0, 0, 0, 0);
+    }
+
+    int clip_depth = 0;
+    int backdrop_depth = 0;
+    int shadow_clip_depth = 0;
+    int element_depth = 0;
+    int element_stack[DL_VALIDATE_ELEMENT_STACK_LIMIT];
+
+    for (int i = 0; i < dl->count; i++) {
+        const DisplayItem* item = &dl->items[i];
+        if (item->op < DL_FILL_RECT || item->op > DL_END_ELEMENT) {
+            return dl_validation_fail(result, i, "unknown display op",
+                                      clip_depth, backdrop_depth, shadow_clip_depth,
+                                      element_depth);
+        }
+
+        switch (item->op) {
+            case DL_FILL_RECT:
+                if (item->fill_rect.w < 0.0f || item->fill_rect.h < 0.0f) {
+                    return dl_validation_fail(result, i, "fill rect has negative size",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_FILL_ROUNDED_RECT:
+                if (item->fill_rounded_rect.w < 0.0f || item->fill_rounded_rect.h < 0.0f ||
+                    item->fill_rounded_rect.rx < 0.0f || item->fill_rounded_rect.ry < 0.0f) {
+                    return dl_validation_fail(result, i, "rounded rect has negative size",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_FILL_PATH:
+                if (!item->fill_path.path) {
+                    return dl_validation_fail(result, i, "fill path is null",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_STROKE_PATH:
+                if (!item->stroke_path.path || item->stroke_path.width < 0.0f ||
+                    item->stroke_path.dash_count < 0 ||
+                    (item->stroke_path.dash_count > 0 && !item->stroke_path.dash_array)) {
+                    return dl_validation_fail(result, i, "stroke path payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_FILL_LINEAR_GRADIENT:
+                if (!item->fill_linear_gradient.path || !item->fill_linear_gradient.stops ||
+                    item->fill_linear_gradient.stop_count <= 0) {
+                    return dl_validation_fail(result, i, "linear gradient payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_FILL_RADIAL_GRADIENT:
+                if (!item->fill_radial_gradient.path || !item->fill_radial_gradient.stops ||
+                    item->fill_radial_gradient.stop_count <= 0 ||
+                    item->fill_radial_gradient.r < 0.0f) {
+                    return dl_validation_fail(result, i, "radial gradient payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_DRAW_IMAGE:
+                if (!dl_validate_positive_image(&item->draw_image)) {
+                    return dl_validation_fail(result, i, "draw image payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_DRAW_GLYPH:
+                if (!item->draw_glyph.bitmap.buffer || item->draw_glyph.bitmap.width <= 0 ||
+                    item->draw_glyph.bitmap.height <= 0 || item->draw_glyph.bitmap.pitch <= 0) {
+                    return dl_validation_fail(result, i, "glyph payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_DRAW_PICTURE:
+                if (!item->draw_picture.picture) {
+                    return dl_validation_fail(result, i, "picture payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_PUSH_CLIP:
+                if (!item->push_clip.path) {
+                    return dl_validation_fail(result, i, "clip path is null",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                clip_depth++;
+                break;
+            case DL_POP_CLIP:
+                if (clip_depth <= 0) {
+                    return dl_validation_fail(result, i, "clip pop without matching push",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                clip_depth--;
+                break;
+            case DL_FILL_SURFACE_RECT:
+                if (item->fill_surface_rect.w < 0.0f || item->fill_surface_rect.h < 0.0f) {
+                    return dl_validation_fail(result, i, "surface fill has negative size",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_BLIT_SURFACE_SCALED:
+                if (!item->blit_surface_scaled.src_surface ||
+                    item->blit_surface_scaled.dst_w < 0.0f ||
+                    item->blit_surface_scaled.dst_h < 0.0f) {
+                    return dl_validation_fail(result, i, "surface blit payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_COMPOSITE_OPACITY:
+                if (backdrop_depth <= 0) {
+                    return dl_validation_fail(result, i, "opacity composite without saved backdrop",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                if (item->composite_opacity.w < 0 || item->composite_opacity.h < 0) {
+                    return dl_validation_fail(result, i, "opacity composite has negative region",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                backdrop_depth--;
+                break;
+            case DL_SAVE_BACKDROP:
+                if (item->save_backdrop.w < 0 || item->save_backdrop.h < 0) {
+                    return dl_validation_fail(result, i, "saved backdrop has negative region",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                backdrop_depth++;
+                break;
+            case DL_APPLY_BLEND_MODE:
+                if (backdrop_depth <= 0) {
+                    return dl_validation_fail(result, i, "blend mode without saved backdrop",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                if (item->apply_blend_mode.w < 0 || item->apply_blend_mode.h < 0) {
+                    return dl_validation_fail(result, i, "blend mode has negative region",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                backdrop_depth--;
+                break;
+            case DL_APPLY_FILTER:
+                if (!item->apply_filter.filter ||
+                    item->apply_filter.w < 0.0f || item->apply_filter.h < 0.0f) {
+                    return dl_validation_fail(result, i, "filter payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_BOX_BLUR_REGION:
+                if (item->box_blur_region.rw < 0 || item->box_blur_region.rh < 0 ||
+                    item->box_blur_region.blur_radius < 0.0f) {
+                    return dl_validation_fail(result, i, "box blur region payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_BOX_BLUR_INSET:
+                if (item->box_blur_inset.rw < 0 || item->box_blur_inset.rh < 0 ||
+                    item->box_blur_inset.pad < 0 ||
+                    item->box_blur_inset.blur_radius < 0.0f) {
+                    return dl_validation_fail(result, i, "inset blur payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_SHADOW_CLIP_SAVE:
+                if (item->shadow_clip_save.rw < 0 || item->shadow_clip_save.rh < 0) {
+                    return dl_validation_fail(result, i, "shadow clip save has negative region",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                shadow_clip_depth++;
+                break;
+            case DL_SHADOW_CLIP_RESTORE:
+                if (shadow_clip_depth <= 0) {
+                    return dl_validation_fail(result, i, "shadow clip restore without save",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                if (item->shadow_clip_restore.save_rw < 0 ||
+                    item->shadow_clip_restore.save_rh < 0) {
+                    return dl_validation_fail(result, i, "shadow clip restore has negative region",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                shadow_clip_depth--;
+                break;
+            case DL_OUTER_SHADOW:
+                if (item->outer_shadow.shadow_w < 0.0f || item->outer_shadow.shadow_h < 0.0f ||
+                    item->outer_shadow.blur_radius < 0.0f) {
+                    return dl_validation_fail(result, i, "outer shadow payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_VIDEO_PLACEHOLDER:
+                if (!item->video_placeholder.video ||
+                    item->video_placeholder.dst_w < 0.0f ||
+                    item->video_placeholder.dst_h < 0.0f) {
+                    return dl_validation_fail(result, i, "video placeholder payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_WEBVIEW_LAYER_PLACEHOLDER:
+                if (!item->webview_layer_placeholder.surface ||
+                    item->webview_layer_placeholder.dst_w < 0.0f ||
+                    item->webview_layer_placeholder.dst_h < 0.0f) {
+                    return dl_validation_fail(result, i, "webview placeholder payload is invalid",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                break;
+            case DL_BEGIN_ELEMENT: {
+                int match = item->element_marker.matching_index;
+                if (match <= i || match >= dl->count ||
+                    dl->items[match].op != DL_END_ELEMENT ||
+                    dl->items[match].element_marker.matching_index != i) {
+                    return dl_validation_fail(result, i, "element begin marker is not paired",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                if (element_depth >= DL_VALIDATE_ELEMENT_STACK_LIMIT) {
+                    return dl_validation_fail(result, i, "element marker nesting is too deep",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                element_stack[element_depth++] = i;
+                break;
+            }
+            case DL_END_ELEMENT: {
+                int match = item->element_marker.matching_index;
+                if (element_depth <= 0 || match < 0 || match >= i ||
+                    dl->items[match].op != DL_BEGIN_ELEMENT ||
+                    dl->items[match].element_marker.matching_index != i ||
+                    element_stack[element_depth - 1] != match) {
+                    return dl_validation_fail(result, i, "element end marker is not paired",
+                                              clip_depth, backdrop_depth, shadow_clip_depth,
+                                              element_depth);
+                }
+                element_depth--;
+                break;
+            }
+        }
+    }
+
+    if (clip_depth != 0) {
+        return dl_validation_fail(result, dl->count, "clip stack is unbalanced",
+                                  clip_depth, backdrop_depth, shadow_clip_depth,
+                                  element_depth);
+    }
+    if (backdrop_depth != 0) {
+        return dl_validation_fail(result, dl->count, "backdrop stack is unbalanced",
+                                  clip_depth, backdrop_depth, shadow_clip_depth,
+                                  element_depth);
+    }
+    if (shadow_clip_depth != 0) {
+        return dl_validation_fail(result, dl->count, "shadow clip stack is unbalanced",
+                                  clip_depth, backdrop_depth, shadow_clip_depth,
+                                  element_depth);
+    }
+    if (element_depth != 0) {
+        return dl_validation_fail(result, dl->count, "element marker stack is unbalanced",
+                                  clip_depth, backdrop_depth, shadow_clip_depth,
+                                  element_depth);
+    }
+
+    dl_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    return true;
+}
+
+bool dl_validate_or_log(const DisplayList* dl, const char* context) {
+    DisplayListValidationResult result = {};
+    if (dl_validate(dl, &result)) return true;
+    log_error("[DL_VALIDATE] %s: invalid display list at item %d: %s (clip=%d backdrop=%d shadow_clip=%d element=%d)",
+              context ? context : "unknown",
+              result.first_error_index,
+              result.message ? result.message : "invalid",
+              result.clip_depth,
+              result.backdrop_depth,
+              result.shadow_clip_depth,
+              result.element_depth);
     return false;
 }
 

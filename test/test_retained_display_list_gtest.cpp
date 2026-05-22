@@ -519,6 +519,32 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
     dl_destroy(&source);
 }
 
+TEST_F(RetainedDisplayListTest, RejectsBorrowedImageWithoutGenerationAtCapture) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    uint32_t pixels[4] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff};
+    int begin = dl_begin_element(&source, 79, 0.0f, 0.0f, 2.0f, 2.0f);
+    DisplayItem* image = dl_alloc_item(&source);
+    ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->bounds[2] = 2.0f;
+    image->bounds[3] = 2.0f;
+    image->draw_image.pixels = pixels;
+    image->draw_image.resource_owner = nullptr;
+    image->draw_image.resource_generation = 0;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+
+    EXPECT_EQ(retained_dl_cache_get(cache, 79), nullptr);
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
 TEST_F(RetainedDisplayListTest, RejectsBorrowedGlyphWithoutGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
@@ -542,11 +568,66 @@ TEST_F(RetainedDisplayListTest, RejectsBorrowedGlyphWithoutGeneration) {
     retained_dl_cache_capture(cache, &source);
 
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 88);
-    ASSERT_NE(fragment, nullptr);
-    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
+    EXPECT_EQ(fragment, nullptr);
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, RejectsBorrowedFilterAtCapture) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    int fake_filter = 1;
+    int begin = dl_begin_element(&source, 87, 0.0f, 0.0f, 10.0f, 10.0f);
+    DisplayItem* filter = dl_alloc_item(&source);
+    ASSERT_NE(filter, nullptr);
+    filter->op = DL_APPLY_FILTER;
+    filter->bounds[2] = 10.0f;
+    filter->bounds[3] = 10.0f;
+    filter->apply_filter.filter = &fake_filter;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+
+    EXPECT_EQ(retained_dl_cache_get(cache, 87), nullptr);
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, UnsafeRecaptureClearsPreviousFragment) {
+    DisplayList safe_source = {};
+    dl_init(&safe_source, arena);
+    int safe_begin = dl_begin_element(&safe_source, 86, 0.0f, 0.0f, 10.0f, 10.0f);
+    ASSERT_NE(retained_test_add_rect(&safe_source, 1.0f, 1.0f, 4.0f, 4.0f), nullptr);
+    dl_end_element(&safe_source, safe_begin);
+
+    DisplayList unsafe_source = {};
+    dl_init(&unsafe_source, arena);
+    int fake_filter = 1;
+    int unsafe_begin = dl_begin_element(&unsafe_source, 86, 0.0f, 0.0f, 10.0f, 10.0f);
+    DisplayItem* filter = dl_alloc_item(&unsafe_source);
+    ASSERT_NE(filter, nullptr);
+    filter->op = DL_APPLY_FILTER;
+    filter->bounds[2] = 10.0f;
+    filter->bounds[3] = 10.0f;
+    filter->apply_filter.filter = &fake_filter;
+    dl_end_element(&unsafe_source, unsafe_begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &safe_source);
+    ASSERT_NE(retained_dl_cache_get(cache, 86), nullptr);
+
+    retained_dl_cache_capture(cache, &unsafe_source);
+    EXPECT_EQ(retained_dl_cache_get(cache, 86), nullptr);
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&unsafe_source);
+    dl_destroy(&safe_source);
 }
 
 TEST_F(RetainedDisplayListTest, KeepsBorrowedGlyphWhenGenerationMatches) {

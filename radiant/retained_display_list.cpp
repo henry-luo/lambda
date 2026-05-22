@@ -276,6 +276,62 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     return fragment;
 }
 
+static bool retained_dl_item_retainable(const DisplayItem* item) {
+    if (!item) return false;
+    switch (item->op) {
+        case DL_DRAW_IMAGE:
+            if (item->draw_image.pixels &&
+                (!item->draw_image.resource_owner ||
+                 item->draw_image.resource_generation == 0)) {
+                return false;
+            }
+            break;
+        case DL_DRAW_GLYPH:
+            if (item->draw_glyph.bitmap.buffer &&
+                item->draw_glyph.resource_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_BLIT_SURFACE_SCALED:
+            if (item->blit_surface_scaled.src_surface &&
+                item->blit_surface_scaled.src_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_VIDEO_PLACEHOLDER:
+            if (item->video_placeholder.video &&
+                item->video_placeholder.video_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_WEBVIEW_LAYER_PLACEHOLDER:
+            if (item->webview_layer_placeholder.surface &&
+                item->webview_layer_placeholder.surface_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_APPLY_FILTER:
+            if (item->apply_filter.filter) {
+                return false;
+            }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
+static bool retained_dl_range_retainable(const DisplayList* source,
+                                         int start, int end) {
+    if (!source || start < 0 || end < start || end >= source->count) return false;
+    for (int i = start; i <= end; i++) {
+        if (!retained_dl_item_retainable(&source->items[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
                                            const DisplayList* source,
                                            int begin_index) {
@@ -294,6 +350,10 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
     if (!fragment || !fragment->initialized) return;
 
     dl_clear(&fragment->list);
+    if (!retained_dl_range_retainable(source, begin_index, end_index)) {
+        log_debug("[RETAINED_DL] skipped non-retainable view %u", view_id);
+        return;
+    }
     if (!retained_dl_copy_range(&fragment->list, source, begin_index, end_index)) {
         dl_clear(&fragment->list);
         return;

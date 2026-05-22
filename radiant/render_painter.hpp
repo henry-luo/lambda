@@ -8,7 +8,7 @@ struct RenderContext;
 typedef struct RenderContext RenderContext;
 
 // ---------------------------------------------------------------------------
-// rc_* — Render-context drawing wrappers (dispatch to display list or rdt_*)
+// rc_* — Render-context drawing wrappers (record through PaintIR/DisplayList)
 // ---------------------------------------------------------------------------
 
 void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color);
@@ -72,9 +72,6 @@ void rc_outer_shadow(RenderContext* rdcon,
                      Color color, float blur_radius,
                      int exclude_type, const float* exclude_params,
                      int clip_type, const float* clip_params);
-void render_painter_begin_vector_batch(RenderContext* rdcon);
-void render_painter_flush_vector_batch(RenderContext* rdcon);
-void render_painter_end_vector_batch(RenderContext* rdcon);
 
 void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,

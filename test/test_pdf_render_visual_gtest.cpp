@@ -639,6 +639,125 @@ TEST(RenderOutputParity, NormalPngMatchesForcedTiledPng) {
     expect_pngs_exactly_equal(normal_png, tiled_png);
 }
 
+TEST(RenderOutputParity, ThreadedTiledReplayMatchesSingleReplay) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/threaded_replay_parity.html";
+    const char* single_png = "temp/render_output_parity/single_replay.png";
+    const char* tiled_png = "temp/render_output_parity/threaded_tiled_replay.png";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>"
+        "html,body{margin:0;padding:0;background:#fbfbf7;}"
+        ".page{position:relative;width:220px;height:640px;background:#fbfbf7;}"
+        ".a{position:absolute;left:14px;top:18px;width:72px;height:118px;background:#ef4444;}"
+        ".b{position:absolute;left:108px;top:72px;width:84px;height:190px;background:#22c55e;}"
+        ".c{position:absolute;left:32px;top:292px;width:148px;height:92px;background:#3b82f6;}"
+        ".d{position:absolute;left:56px;top:458px;width:110px;height:118px;background:#f59e0b;}"
+        "</style></head><body><div class=\"page\">"
+        "<div class=\"a\"></div><div class=\"b\"></div><div class=\"c\"></div><div class=\"d\"></div>"
+        "</div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsingle[PATH_MAX + 8];
+    char qtiled[PATH_MAX + 8];
+    char single_cmd[PATH_MAX * 4 + 256];
+    char tiled_cmd[PATH_MAX * 4 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(single_png, qsingle, sizeof(qsingle));
+    shell_quote(tiled_png, qtiled, sizeof(qtiled));
+
+    snprintf(single_cmd, sizeof(single_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=1 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/single_replay.out 2> temp/render_output_parity/single_replay.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsingle);
+    snprintf(tiled_cmd, sizeof(tiled_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=2 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/threaded_tiled_replay.out 2> temp/render_output_parity/threaded_tiled_replay.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qtiled);
+
+    int single_status = system(single_cmd);
+    int tiled_status = system(tiled_cmd);
+
+    ASSERT_TRUE(WIFEXITED(single_status));
+    ASSERT_EQ(WEXITSTATUS(single_status), 0);
+    ASSERT_TRUE(WIFEXITED(tiled_status));
+    ASSERT_EQ(WEXITSTATUS(tiled_status), 0);
+    ASSERT_TRUE(file_exists(single_png));
+    ASSERT_TRUE(file_exists(tiled_png));
+    expect_pngs_exactly_equal(single_png, tiled_png);
+}
+
+TEST(RenderOutputParity, SvgPictureReplayMatchesThreadedTiledReplay) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/svg_picture_replay.html";
+    const char* single_png = "temp/render_output_parity/svg_picture_single.png";
+    const char* tiled_png = "temp/render_output_parity/svg_picture_tiled.png";
+    const char* svg_uri =
+        "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20"
+        "width%3D%22120%22%20height%3D%2280%22%20viewBox%3D%220%200%20120%2080%22%3E"
+        "%3Crect%20x%3D%220%22%20y%3D%220%22%20width%3D%22120%22%20height%3D%2280%22%20fill%3D%22%23fef3c7%22%2F%3E"
+        "%3Crect%20x%3D%2210%22%20y%3D%2210%22%20width%3D%22100%22%20height%3D%2260%22%20fill%3D%22%233b82f6%22%2F%3E"
+        "%3Ctext%20x%3D%2216%22%20y%3D%2252%22%20font-size%3D%2228%22%20font-family%3D%22Arial%22%20fill%3D%22%23ffffff%22%3EOK%3C%2Ftext%3E"
+        "%3C%2Fsvg%3E";
+    char html[4096];
+    snprintf(html, sizeof(html),
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>"
+        "html,body{margin:0;padding:0;background:#f8fafc;}"
+        ".page{position:relative;width:220px;height:620px;background:#f8fafc;}"
+        ".top{position:absolute;left:18px;top:24px;width:94px;height:96px;background:#22c55e;}"
+        "img{position:absolute;left:48px;top:280px;width:120px;height:80px;}"
+        ".bottom{position:absolute;left:28px;top:460px;width:164px;height:78px;background:#ef4444;}"
+        "</style></head><body><div class=\"page\">"
+        "<div class=\"top\"></div><img src=\"%s\" alt=\"svg\"><div class=\"bottom\"></div>"
+        "</div></body></html>", svg_uri);
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsingle[PATH_MAX + 8];
+    char qtiled[PATH_MAX + 8];
+    char single_cmd[PATH_MAX * 4 + 256];
+    char tiled_cmd[PATH_MAX * 4 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(single_png, qsingle, sizeof(qsingle));
+    shell_quote(tiled_png, qtiled, sizeof(qtiled));
+
+    snprintf(single_cmd, sizeof(single_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=1 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/svg_picture_single.out 2> temp/render_output_parity/svg_picture_single.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsingle);
+    snprintf(tiled_cmd, sizeof(tiled_cmd),
+             "RADIANT_TILE_THRESHOLD=1000000000 RADIANT_RENDER_THREADS=2 %s render %s%s -o %s -vw 220 --pixel-ratio 1 > temp/render_output_parity/svg_picture_tiled.out 2> temp/render_output_parity/svg_picture_tiled.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qtiled);
+
+    int single_status = system(single_cmd);
+    int tiled_status = system(tiled_cmd);
+
+    ASSERT_TRUE(WIFEXITED(single_status));
+    ASSERT_EQ(WEXITSTATUS(single_status), 0);
+    ASSERT_TRUE(WIFEXITED(tiled_status));
+    ASSERT_EQ(WEXITSTATUS(tiled_status), 0);
+    ASSERT_TRUE(file_exists(single_png));
+    ASSERT_TRUE(file_exists(tiled_png));
+    expect_pngs_exactly_equal(single_png, tiled_png);
+}
+
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {
     for (int i = 0; i < result_count; i++) {
         BaselineEntry* baseline_entry = find_baseline_entry(baseline, results[i].test_id);

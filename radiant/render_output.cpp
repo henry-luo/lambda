@@ -96,6 +96,18 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
     target->pixel_ratio = 1.0f;
 }
 
+static const char* render_output_path_trace_target(RenderOutputKind kind) {
+    switch (kind) {
+        case RENDER_OUTPUT_SCREEN: return "screen";
+        case RENDER_OUTPUT_PNG: return "png";
+        case RENDER_OUTPUT_JPEG: return "jpeg";
+        case RENDER_OUTPUT_TILED_PNG: return "tiled_png";
+        case RENDER_OUTPUT_PDF: return "pdf";
+        case RENDER_OUTPUT_SVG: return "svg";
+    }
+    return "unknown";
+}
+
 void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                 RenderProfiler* profiler) {
     memset(rdcon, 0, sizeof(RenderContext));
@@ -229,11 +241,7 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
         return;
     }
 
-    render_painter_begin_vector_batch(rdcon);
-
     render_raster_view_tree(rdcon, view_tree);
-
-    render_painter_end_vector_batch(rdcon);
 }
 
 RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
@@ -250,6 +258,9 @@ RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
 
     int render_threads = render_output_thread_count();
     int item_count = dl_item_count(display_list);
+    if (!dl_validate_or_log(display_list, "render_output_replay_display_list")) {
+        return result;
+    }
     bool has_glyphs = dl_contains_glyphs(display_list);
     if (!replay_dirty && render_threads != 1 && item_count > 0 && !has_glyphs) {
         ImageSurface* surface = rdcon->ui_context->surface;
@@ -346,6 +357,11 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         log_debug("[RENDER] no state for overlays: doc=%p, state=%p",
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
+    if (!dl_validate_or_log(&display_list, "render_output_raster")) {
+        dl_destroy(&display_list);
+        render_output_cleanup_context(&rdcon);
+        return 1;
+    }
     retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
 
     auto t_replay_start = high_resolution_clock::now();
@@ -375,6 +391,19 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     render_profiler_emit_event(rdcon.profiler, uicon, rstate, render_ms, replay_ms,
         duration<double, std::milli>(t_sync - t_start).count(), item_count, selective,
         replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
+    RenderPathTrace trace = {};
+    trace.target = render_output_path_trace_target(target->kind);
+    trace.display_list_recorded = true;
+    trace.paint_ir_enabled = rdcon.paint_list != nullptr;
+    trace.selective = selective;
+    trace.tiled_replay = replay_result.tiled;
+    trace.large_tiled_export = false;
+    trace.display_list_items = item_count;
+    trace.tile_count = replay_result.tile_count;
+    trace.thread_count = replay_result.thread_count;
+    trace.surface_width = uicon->surface ? uicon->surface->width : 0;
+    trace.surface_height = uicon->surface ? uicon->surface->height : 0;
+    render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
     if (target->kind == RENDER_OUTPUT_JPEG && target->output_file) {
         save_surface_to_jpeg(rdcon.ui_context->surface, target->output_file,
@@ -514,9 +543,10 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
         int v = atoi(env);
         if (v > 0) TILE_H = v;
     }
+    int tile_count = (total_height + TILE_H - 1) / TILE_H;
     log_info("render_output_render_tiled_png: %dx%d px -> %s (%d tiles of %d px)",
         total_width, total_height, output_file,
-        (total_height + TILE_H - 1) / TILE_H, TILE_H);
+        tile_count, TILE_H);
 
     FILE* fp = fopen(output_file, "wb");
     if (!fp) {
@@ -579,6 +609,16 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     log_info("[TIMING] render_output_render_tiled_png record: %.1fms, %d display list items",
         duration<double, std::milli>(t_record_end - t_record_start).count(),
         dl_item_count(&display_list));
+    if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
+        dl_destroy(&display_list);
+        render_output_cleanup_context(&rdcon);
+        image_surface_destroy(rec_surf);
+        uicon->surface = saved_surface;
+        uicon->window_height = saved_window_height;
+        png_destroy_write_struct(&png, &info);
+        fclose(fp);
+        return;
+    }
 
     for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
         int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
@@ -618,6 +658,21 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
         }
         log_info("render_output_render_tiled_png: tile y=%d..%d done", tile_y, tile_y + tile_h);
     }
+
+    DocState* rstate = uicon->document ? uicon->document->state : nullptr;
+    RenderPathTrace trace = {};
+    trace.target = "tiled_png";
+    trace.display_list_recorded = true;
+    trace.paint_ir_enabled = rdcon.paint_list != nullptr;
+    trace.selective = false;
+    trace.tiled_replay = true;
+    trace.large_tiled_export = true;
+    trace.display_list_items = dl_item_count(&display_list);
+    trace.tile_count = tile_count;
+    trace.thread_count = 1;
+    trace.surface_width = total_width;
+    trace.surface_height = total_height;
+    render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
     dl_destroy(&display_list);
     render_output_cleanup_context(&rdcon);

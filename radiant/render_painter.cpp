@@ -1,27 +1,30 @@
 #include "render.hpp"
-#include "render_raster.hpp"
 #include "render_state.hpp"
 #include "paint_ir.h"
+#include "../lib/log.h"
 
 // ---------------------------------------------------------------------------
 // Painter gateway (rc_*).
 //
-// Three emission modes per primitive:
+// Primary recording mode per primitive:
 //   1. Semantic IR (rdcon->paint_list && rdcon->dl): record through the
 //      PaintBuilder, then lower to the display list immediately so command
 //      order is preserved alongside the non-IR display-list ops. This routes
 //      the live raster path through the semantic paint IR (Phase C) and is
-//      byte-identical to mode 2 (proven by PaintIrParityTest).
-//   2. Display list (rdcon->dl only): legacy direct dl_* recording. Used by
-//      RenderContexts that do not set up a PaintList.
-//   3. Immediate (neither): draw straight to the vector backend.
+//      byte-identical to direct dl_* recording (proven by PaintIrParityTest).
+//   2. Compatibility only (rdcon->dl without paint_list): direct dl_* recording
+//      for transitional/manual contexts. The live render path sets PaintList.
 //
 // rc_paint_active() selects mode 1; rc_lower_pending() flushes the single
 // recorded command and rewinds the reusable PaintList.
 // ---------------------------------------------------------------------------
 
 static inline bool rc_paint_active(RenderContext* rdcon) {
-    return rdcon->paint_list && rdcon->dl;
+    return rdcon && rdcon->paint_list && rdcon->dl;
+}
+
+static inline bool rc_dl_active(RenderContext* rdcon) {
+    return rdcon && rdcon->dl;
 }
 
 static inline void rc_lower_pending(RenderContext* rdcon) {
@@ -29,12 +32,16 @@ static inline void rc_lower_pending(RenderContext* rdcon) {
     paint_list_clear(rdcon->paint_list);
 }
 
+static inline void rc_missing_dl(const char* op) {
+    log_error("[PAINTER] %s called without display list", op ? op : "paint op");
+}
+
 void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
     if (rc_paint_active(rdcon)) {
         paint_fill_rect(rdcon->paint_list, x, y, w, h, color);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_fill_rect(rdcon->dl, x, y, w, h, color);
-    else rdt_fill_rect(&rdcon->vec, x, y, w, h, color);
+    } else if (rc_dl_active(rdcon)) dl_fill_rect(rdcon->dl, x, y, w, h, color);
+    else rc_missing_dl("rc_fill_rect");
 }
 
 void rc_fill_rounded_rect(RenderContext* rdcon, float x, float y, float w, float h,
@@ -42,8 +49,8 @@ void rc_fill_rounded_rect(RenderContext* rdcon, float x, float y, float w, float
     if (rc_paint_active(rdcon)) {
         paint_fill_rounded_rect(rdcon->paint_list, x, y, w, h, rx, ry, color);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_fill_rounded_rect(rdcon->dl, x, y, w, h, rx, ry, color);
-    else rdt_fill_rounded_rect(&rdcon->vec, x, y, w, h, rx, ry, color);
+    } else if (rc_dl_active(rdcon)) dl_fill_rounded_rect(rdcon->dl, x, y, w, h, rx, ry, color);
+    else rc_missing_dl("rc_fill_rounded_rect");
 }
 
 void rc_fill_path(RenderContext* rdcon, RdtPath* path, Color color,
@@ -51,8 +58,8 @@ void rc_fill_path(RenderContext* rdcon, RdtPath* path, Color color,
     if (rc_paint_active(rdcon)) {
         paint_fill_path(rdcon->paint_list, path, color, rule, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_fill_path(rdcon->dl, path, color, rule, transform);
-    else rdt_fill_path(&rdcon->vec, path, color, rule, transform);
+    } else if (rc_dl_active(rdcon)) dl_fill_path(rdcon->dl, path, color, rule, transform);
+    else rc_missing_dl("rc_fill_path");
 }
 
 void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float width,
@@ -63,12 +70,11 @@ void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float widt
         paint_stroke_path(rdcon->paint_list, path, color, width, cap, join,
                           dash_array, dash_count, dash_phase, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_stroke_path(rdcon->dl, path, color, width, cap, join,
                        dash_array, dash_count, dash_phase, transform);
     } else {
-        rdt_stroke_path(&rdcon->vec, path, color, width, cap, join,
-                        dash_array, dash_count, dash_phase, transform);
+        rc_missing_dl("rc_stroke_path");
     }
 }
 
@@ -80,12 +86,11 @@ void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,
         paint_fill_linear_gradient(rdcon->paint_list, path, x1, y1, x2, y2,
                                    stops, stop_count, rule, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_fill_linear_gradient(rdcon->dl, path, x1, y1, x2, y2,
                                 stops, stop_count, rule, transform);
     } else {
-        rdt_fill_linear_gradient(&rdcon->vec, path, x1, y1, x2, y2,
-                                 stops, stop_count, rule, transform);
+        rc_missing_dl("rc_fill_linear_gradient");
     }
 }
 
@@ -97,12 +102,11 @@ void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
         paint_fill_radial_gradient(rdcon->paint_list, path, cx, cy, r,
                                    stops, stop_count, rule, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_fill_radial_gradient(rdcon->dl, path, cx, cy, r,
                                 stops, stop_count, rule, transform);
     } else {
-        rdt_fill_radial_gradient(&rdcon->vec, path, cx, cy, r,
-                                 stops, stop_count, rule, transform);
+        rc_missing_dl("rc_fill_radial_gradient");
     }
 }
 
@@ -116,15 +120,13 @@ void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
                          dst_x, dst_y, dst_w, dst_h, opacity, transform,
                          resource_owner);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_draw_image(rdcon->dl, pixels, src_w, src_h, src_stride,
                       dst_x, dst_y, dst_w, dst_h, opacity, transform,
                       resource_owner,
                       resource_owner ? resource_owner->generation : 0);
     } else {
-        rdt_draw_image(&rdcon->vec, pixels, src_w, src_h, src_stride,
-                       dst_x, dst_y, dst_w, dst_h, opacity, transform,
-                       resource_owner ? resource_owner->generation : 0);
+        rc_missing_dl("rc_draw_image");
     }
 }
 
@@ -135,9 +137,11 @@ void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
         paint_draw_glyph(rdcon->paint_list, bitmap, x, y, color, is_color_emoji,
                          clip, transform, resource_generation);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_draw_glyph(rdcon->dl, bitmap, x, y, color, is_color_emoji,
                       clip, transform, resource_generation);
+    } else {
+        rc_missing_dl("rc_draw_glyph");
     }
 }
 
@@ -146,8 +150,8 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
     if (rc_paint_active(rdcon)) {
         paint_draw_picture(rdcon->paint_list, picture, opacity, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_draw_picture(rdcon->dl, picture, opacity, transform);
-    else rdt_picture_draw(&rdcon->vec, picture, opacity, transform);
+    } else if (rc_dl_active(rdcon)) dl_draw_picture(rdcon->dl, picture, opacity, transform);
+    else rc_missing_dl("rc_draw_picture");
 }
 
 void rc_video_placeholder(RenderContext* rdcon, void* video,
@@ -159,10 +163,12 @@ void rc_video_placeholder(RenderContext* rdcon, void* video,
                                 dst_x, dst_y, dst_w, dst_h,
                                 object_fit, clip, video_generation);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_video_placeholder(rdcon->dl, video,
                              dst_x, dst_y, dst_w, dst_h,
                              object_fit, clip, video_generation);
+    } else {
+        rc_missing_dl("rc_video_placeholder");
     }
 }
 
@@ -175,10 +181,12 @@ void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
                                         dst_x, dst_y, dst_w, dst_h,
                                         clip, surface_generation);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_webview_layer_placeholder(rdcon->dl, surface,
                                      dst_x, dst_y, dst_w, dst_h,
                                      clip, surface_generation);
+    } else {
+        rc_missing_dl("rc_webview_layer_placeholder");
     }
 }
 
@@ -186,23 +194,24 @@ void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* tra
     if (rc_paint_active(rdcon)) {
         paint_push_clip(rdcon->paint_list, clip_path, transform);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_push_clip(rdcon->dl, clip_path, transform);
-    else rdt_push_clip(&rdcon->vec, clip_path, transform);
+    } else if (rc_dl_active(rdcon)) dl_push_clip(rdcon->dl, clip_path, transform);
+    else rc_missing_dl("rc_push_clip");
 }
 
 void rc_pop_clip(RenderContext* rdcon) {
     if (rc_paint_active(rdcon)) {
         paint_pop_clip(rdcon->paint_list);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_pop_clip(rdcon->dl);
-    else rdt_pop_clip(&rdcon->vec);
+    } else if (rc_dl_active(rdcon)) dl_pop_clip(rdcon->dl);
+    else rc_missing_dl("rc_pop_clip");
 }
 
 void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h) {
     if (rc_paint_active(rdcon)) {
         paint_save_backdrop(rdcon->paint_list, x0, y0, w, h);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) dl_save_backdrop(rdcon->dl, x0, y0, w, h);
+    } else if (rc_dl_active(rdcon)) dl_save_backdrop(rdcon->dl, x0, y0, w, h);
+    else rc_missing_dl("rc_save_backdrop");
 }
 
 void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
@@ -211,8 +220,10 @@ void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
         paint_composite_opacity(rdcon->paint_list, x0, y0, w, h,
                                 opacity, premultiplied_source);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_composite_opacity(rdcon->dl, x0, y0, w, h, opacity, premultiplied_source);
+    } else {
+        rc_missing_dl("rc_composite_opacity");
     }
 }
 
@@ -221,8 +232,10 @@ void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
     if (rc_paint_active(rdcon)) {
         paint_apply_blend_mode(rdcon->paint_list, x0, y0, w, h, blend_mode);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_apply_blend_mode(rdcon->dl, x0, y0, w, h, blend_mode);
+    } else {
+        rc_missing_dl("rc_apply_blend_mode");
     }
 }
 
@@ -231,8 +244,10 @@ void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
     if (rc_paint_active(rdcon)) {
         paint_apply_filter(rdcon->paint_list, x, y, w, h, filter, clip);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_apply_filter(rdcon->dl, x, y, w, h, filter, clip);
+    } else {
+        rc_missing_dl("rc_apply_filter");
     }
 }
 
@@ -246,10 +261,12 @@ void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
                               clip_type, clip_params, exclude_type, exclude_params,
                               premultiply_source, tint_source, tint_color);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_box_blur_region(rdcon->dl, rx, ry, rw, rh, blur_radius,
                            clip_type, clip_params, exclude_type, exclude_params,
                            premultiply_source, tint_source, tint_color);
+    } else {
+        rc_missing_dl("rc_box_blur_region");
     }
 }
 
@@ -259,8 +276,10 @@ void rc_box_blur_inset(RenderContext* rdcon, int rx, int ry, int rw, int rh,
         paint_box_blur_inset(rdcon->paint_list, rx, ry, rw, rh, pad,
                              blur_radius, bg_color);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_box_blur_inset(rdcon->dl, rx, ry, rw, rh, pad, blur_radius, bg_color);
+    } else {
+        rc_missing_dl("rc_box_blur_inset");
     }
 }
 
@@ -268,8 +287,10 @@ void rc_shadow_clip_save(RenderContext* rdcon, int rx, int ry, int rw, int rh) {
     if (rc_paint_active(rdcon)) {
         paint_shadow_clip_save(rdcon->paint_list, rx, ry, rw, rh);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_shadow_clip_save(rdcon->dl, rx, ry, rw, rh);
+    } else {
+        rc_missing_dl("rc_shadow_clip_save");
     }
 }
 
@@ -281,10 +302,12 @@ void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float*
                                   save_rx, save_ry, save_rw, save_rh,
                                   restore_inside);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_shadow_clip_restore(rdcon->dl, exclude_type, exclude_params,
                                save_rx, save_ry, save_rw, save_rh,
                                restore_inside);
+    } else {
+        rc_missing_dl("rc_shadow_clip_restore");
     }
 }
 
@@ -302,29 +325,16 @@ void rc_outer_shadow(RenderContext* rdcon,
                            exclude_type, exclude_params,
                            clip_type, clip_params);
         rc_lower_pending(rdcon);
-    } else if (rdcon->dl) {
+    } else if (rc_dl_active(rdcon)) {
         dl_outer_shadow(rdcon->dl,
                         shadow_x, shadow_y, shadow_w, shadow_h,
                         sr_tl, sr_tr, sr_br, sr_bl,
                         color, blur_radius,
                         exclude_type, exclude_params,
                         clip_type, clip_params);
+    } else {
+        rc_missing_dl("rc_outer_shadow");
     }
-}
-
-void render_painter_begin_vector_batch(RenderContext* rdcon) {
-    if (!rdcon || rdcon->dl) return;
-    rdt_vector_begin_batch(&rdcon->vec);
-}
-
-void render_painter_flush_vector_batch(RenderContext* rdcon) {
-    if (!rdcon || rdcon->dl) return;
-    rdt_vector_flush_batch(&rdcon->vec);
-}
-
-void render_painter_end_vector_batch(RenderContext* rdcon) {
-    if (!rdcon || rdcon->dl) return;
-    rdt_vector_end_batch(&rdcon->vec);
 }
 
 void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
@@ -377,13 +387,17 @@ void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixel
 void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth) {
-    if (rdcon->dl) {
+    (void)surface;
+    if (rc_paint_active(rdcon)) {
+        paint_fill_surface_rect(rdcon->paint_list, rect->x, rect->y,
+                                rect->width, rect->height,
+                                color, clip, clip_shapes, clip_depth);
+        rc_lower_pending(rdcon);
+    } else if (rc_dl_active(rdcon)) {
         dl_fill_surface_rect(rdcon->dl, rect->x, rect->y, rect->width, rect->height,
                              color, clip, clip_shapes, clip_depth);
     } else {
-        render_painter_flush_vector_batch(rdcon);
-        RasterPaintContext raster = {surface, clip, clip_shapes, clip_depth};
-        raster_fill_rect(&raster, rect, color);
+        rc_missing_dl("render_painter_fill_surface_rect");
     }
 }
 
@@ -393,15 +407,22 @@ void render_painter_blit_surface_scaled(RenderContext* rdcon,
                                         ScaleMode scale_mode,
                                         ClipShape** clip_shapes, int clip_depth,
                                         uint8_t opacity) {
-    if (rdcon->dl) {
+    (void)src_rect;
+    (void)dst;
+    if (rc_paint_active(rdcon)) {
+        paint_blit_surface_scaled(rdcon->paint_list, src,
+                                  dst_rect->x, dst_rect->y,
+                                  dst_rect->width, dst_rect->height,
+                                  (int)scale_mode, clip, clip_shapes, clip_depth,
+                                  opacity, src ? src->generation : 0);
+        rc_lower_pending(rdcon);
+    } else if (rc_dl_active(rdcon)) {
         dl_blit_surface_scaled(rdcon->dl, src, dst_rect->x, dst_rect->y,
                                dst_rect->width, dst_rect->height, (int)scale_mode,
                                clip, clip_shapes, clip_depth, opacity,
                                src ? src->generation : 0);
     } else {
-        render_painter_flush_vector_batch(rdcon);
-        RasterPaintContext raster = {dst, clip, clip_shapes, clip_depth};
-        raster_blit_surface_scaled(&raster, src, src_rect, dst_rect, scale_mode, opacity);
+        rc_missing_dl("render_painter_blit_surface_scaled");
     }
 }
 

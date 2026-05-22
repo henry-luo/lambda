@@ -6,6 +6,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "paint_ir.h"
+#include "render_paint_boundary.hpp"
 #include "render_path.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
@@ -558,6 +559,11 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     float y = ctx->block.y + view->y;
     float width = view->width;
     float height = view->height;
+
+    if (render_paint_boundary_emit_simple(&ctx->paint_list, view, x, y)) {
+        svg_lower_paint_list(ctx);
+        return;
+    }
 
     // Render box-shadow as SVG filter
     if (view->bound->box_shadow) {

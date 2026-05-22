@@ -1,6 +1,5 @@
 #include "render_background.hpp"
 #include "render_border.hpp"
-#include "render_composite.hpp"
 #include "render_geometry.hpp"
 #include "render_path.hpp"
 #include "render_painter.hpp"
@@ -10,6 +9,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_value.hpp"
+#include <assert.h>
 #include <math.h>
 
 /**
@@ -125,7 +125,6 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // In display-list mode, use DL_SAVE_BACKDROP/DL_APPLY_BLEND_MODE so the blending
     // happens during replay when surface pixels are available.
     ImageSurface* surface = rdcon->ui_context->surface;
-    uint32_t* saved_pixels = nullptr;
     int blend_x0 = 0, blend_y0 = 0, blend_w = 0, blend_h = 0;
     if (has_blend && has_upper_layers) {
         RenderPixelBounds blend_bounds = render_geometry_clip_to_pixel_bounds(rdcon->block.clip, surface);
@@ -134,17 +133,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         blend_w = blend_bounds.width;
         blend_h = blend_bounds.height;
         if (!render_geometry_pixel_bounds_empty(blend_bounds)) {
-            if (rdcon->dl) {
-                // record save/apply pair — replay handles pixel ops
-                rc_save_backdrop(rdcon, blend_x0, blend_y0, blend_w, blend_h);
-            } else if (surface && surface->pixels) {
-                render_painter_flush_vector_batch(rdcon);
-                saved_pixels = (uint32_t*)mem_alloc((size_t)blend_w * blend_h * sizeof(uint32_t), MEM_CAT_RENDER);
-                if (saved_pixels) {
-                    render_composite_copy_backdrop(surface, saved_pixels,
-                        blend_x0, blend_y0, blend_w, blend_h, true);
-                }
-            }
+            rc_save_backdrop(rdcon, blend_x0, blend_y0, blend_w, blend_h);
         }
     }
 
@@ -188,19 +177,10 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     // Apply background-blend-mode: composite upper layers onto saved backdrop
     if (has_blend && has_upper_layers && blend_w > 0 && blend_h > 0) {
-        if (rdcon->dl) {
-            // display-list mode: emit apply-blend that runs during replay
-            rc_apply_blend_mode(rdcon, blend_x0, blend_y0, blend_w, blend_h,
-                                bg->blend_mode);
-            log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
-                      bg->blend_mode, blend_w, blend_h);
-        } else if (saved_pixels) {
-            render_painter_flush_vector_batch(rdcon);
-            render_composite_apply_blend(surface, saved_pixels,
-                blend_x0, blend_y0, blend_w, blend_h, bg->blend_mode);
-            mem_free(saved_pixels);
-            log_debug("[BLEND] Applied background-blend-mode to %dx%d region", blend_w, blend_h);
-        }
+        rc_apply_blend_mode(rdcon, blend_x0, blend_y0, blend_w, blend_h,
+                            bg->blend_mode);
+        log_debug("[BLEND] Recorded DL background-blend-mode=%d for %dx%d region",
+                  bg->blend_mode, blend_w, blend_h);
     }
 
     // Restore original clip
@@ -1309,7 +1289,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             // Blur > 0: use isolated temp-buffer pipeline (rasterise + blur +
             // composite) so the blur kernel doesn't smear neighbouring pixels.
             if (xform && rdcon->ui_context->surface) {
-                ScratchArena* shadow_arena = rdcon->dl ? &rdcon->dl->arena : &rdcon->scratch;
+                assert(rdcon->dl && "transformed box-shadow requires display-list recording");
+                ScratchArena* shadow_arena = &rdcon->dl->arena;
                 int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
                 uint32_t* shadow_pixels = render_outer_shadow_blur_image(
                     shadow_arena, rdcon->ui_context->surface,
@@ -1322,26 +1303,14 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                     rc_draw_image(rdcon, shadow_pixels, sh_w, sh_h, sh_w * 4,
                                   (float)sh_x, (float)sh_y, (float)sh_w, (float)sh_h,
                                   255, xform);
-                    if (!rdcon->dl) {
-                        scratch_free(&rdcon->scratch, shadow_pixels);
-                    }
                 }
-            } else if (rdcon->dl) {
+            } else {
                 rc_outer_shadow(rdcon,
                                 shadow_x, shadow_y, shadow_w, shadow_h,
                                 sr_tl, sr_tr, sr_br, sr_bl,
                                 s->color, s_blur,
                                 exclude_type, exclude_params,
                                 clip_type, clip_params);
-            } else if (rdcon->ui_context->surface) {
-                render_painter_flush_vector_batch(rdcon);
-                render_outer_shadow_blur_composite(
-                    &rdcon->scratch, rdcon->ui_context->surface,
-                    shadow_x, shadow_y, shadow_w, shadow_h,
-                    sr_tl, sr_tr, sr_br, sr_bl,
-                    s->color, s_blur,
-                    exclude_type, exclude_params,
-                    clip_type, clip_params);
             }
             log_debug("[BOX-SHADOW] Applied isolated-buffer blur radius=%.1f on shadow rect (%.1f,%.1f,%.1f,%.1f)",
                       s_blur, shadow_x, shadow_y, shadow_w, shadow_h);
@@ -1357,9 +1326,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                 save_ry = (int)floorf(rect.y);
                 save_rw = (int)ceilf(rect.x + rect.width) - save_rx;
                 save_rh = (int)ceilf(rect.y + rect.height) - save_ry;
-                if (rdcon->dl) {
-                    rc_shadow_clip_save(rdcon, save_rx, save_ry, save_rw, save_rh);
-                }
+                rc_shadow_clip_save(rdcon, save_rx, save_ry, save_rw, save_rh);
             }
 
             // Build shadow path
@@ -1387,7 +1354,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             rdt_path_free(shadow_path);
             rdt_path_free(clip_path);
 
-            if (need_shadow_clip && rdcon->dl) {
+            if (need_shadow_clip) {
                 rc_shadow_clip_restore(rdcon, exclude_type, exclude_params,
                                        save_rx, save_ry, save_rw, save_rh, 1);
             }
@@ -1587,9 +1554,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             inset_clip_params[2] = rect.width; inset_clip_params[3] = rect.height;
             inset_clip_params[4] = r_tl; inset_clip_params[5] = r_tr;
             inset_clip_params[6] = r_br; inset_clip_params[7] = r_bl;
-            if (rdcon->dl) {
-                rc_shadow_clip_save(rdcon, inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh);
-            }
+            rc_shadow_clip_save(rdcon, inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh);
         }
 
         // Clip to element boundary and fill
@@ -1622,23 +1587,15 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             uint32_t bg_pixel = ((uint32_t)bg.a << 24) | ((uint32_t)bg.b << 16) |
                                 ((uint32_t)bg.g << 8) | (uint32_t)bg.r;
 
-            if (rdcon->dl) {
-                rc_box_blur_inset(rdcon, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
-            } else if (rdcon->ui_context->surface) {
-                render_painter_flush_vector_batch(rdcon);
-                box_blur_region_inset(&rdcon->scratch, rdcon->ui_context->surface,
-                                      br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
-            }
+            rc_box_blur_inset(rdcon, br_x, br_y, br_w, br_h, pad, blur_px, bg_pixel);
             log_debug("[BOX-SHADOW INSET] Applied inset blur radius=%.1f pad=%d bg=#%08x on region (%d,%d,%d,%d)",
                       blur_px, pad, bg_pixel, br_x, br_y, br_w, br_h);
         }
 
         // Restore corner pixels outside rounded border-box after inset blur
         if (inset_need_clip) {
-            if (rdcon->dl) {
-                rc_shadow_clip_restore(rdcon, inset_clip_type, inset_clip_params,
-                                       inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh, 0);
-            }
+            rc_shadow_clip_restore(rdcon, inset_clip_type, inset_clip_params,
+                                   inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh, 0);
         }
     }
 
@@ -1974,13 +1931,7 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurfa
     render_painter_draw_picture_rect(rdcon, pic, tile_rect, NULL, 255);
     rc_pop_clip(rdcon);
     rdt_path_free(clip_path);
-    // In display-list mode, rc_draw_picture transfers ownership to the DL;
-    // in immediate mode, rdt_picture_draw consumes pic->paint (sets it to nullptr).
-    // Either way, free the wrapper struct (DL only stores the pointer it received).
-    if (!rdcon->dl) {
-        rdt_picture_free(pic);
-    }
-    // DL mode: pic is now owned by the display list, freed during dl_clear()
+    // rc_draw_picture transfers ownership to the display list.
 }
 
 /**
