@@ -183,6 +183,7 @@ typedef struct {
 typedef struct {
     int x0, y0, w, h;       // physical pixel region
     float opacity;
+    bool premultiplied_source;
 } DlCompositeOpacity;
 
 // Save backdrop pixels before element with mix-blend-mode renders.
@@ -208,6 +209,9 @@ typedef struct {
 typedef struct {
     int rx, ry, rw, rh;      // pixel region to blur
     float blur_radius;        // CSS blur radius in pixels
+    bool premultiply_source;  // convert straight alpha source pixels before blur
+    bool tint_source;         // recolor isolated source from alpha before blur
+    Color tint_color;
     int clip_type;            // ClipShapeType (0 = none, clips blur to CSS clip-path)
     float clip_params[8];    // serialized clip shape parameters
     int exclude_type;         // ClipShapeType for element border-box exclusion (outer box-shadow)
@@ -402,7 +406,7 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
 
 // Post-processing operations (coordinates already in physical pixels)
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
-                          float opacity);
+                          float opacity, bool premultiplied_source = false);
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h);
 
@@ -414,7 +418,9 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
 
 void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
                         int clip_type, const float* clip_params,
-                        int exclude_type = 0, const float* exclude_params = nullptr);
+                        int exclude_type = 0, const float* exclude_params = nullptr,
+                        bool premultiply_source = false,
+                        bool tint_source = false, Color tint_color = Color{});
 
 void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad, float blur_radius, uint32_t bg_color);
 

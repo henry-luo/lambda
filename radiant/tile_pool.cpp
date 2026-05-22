@@ -748,8 +748,13 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     int by = backdrop_region[backdrop_sp][1];
                     int bw = backdrop_region[backdrop_sp][2];
                     int bh = backdrop_region[backdrop_sp][3];
-                    render_composite_opacity(tile_surface, backdrop, bx, by, bw, bh,
-                                             r->opacity);
+                    if (r->premultiplied_source && r->opacity >= 0.999f) {
+                        render_composite_source_over_premul(tile_surface, backdrop,
+                                                            bx, by, bw, bh);
+                    } else {
+                        render_composite_opacity(tile_surface, backdrop, bx, by, bw, bh,
+                                                 r->opacity);
+                    }
                     scratch_free(scratch, backdrop);
                 }
             }
@@ -847,6 +852,13 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             // adjust coordinates relative to tile origin
             int rx = r->rx - (int)tile_x;
             int ry = r->ry - (int)tile_y;
+            if (r->premultiply_source) {
+                premultiply_surface_region(tile_surface, rx, ry, r->rw, r->rh);
+            }
+            if (r->tint_source) {
+                tint_premultiplied_surface_region(tile_surface, rx, ry,
+                                                  r->rw, r->rh, r->tint_color);
+            }
             if (r->clip_type && tile_surface && tile_surface->pixels) {
                 int sw = tile_surface->width, sh = tile_surface->height;
                 int x0 = std::max(0, rx), y0 = std::max(0, ry);

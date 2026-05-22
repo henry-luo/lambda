@@ -781,6 +781,67 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
     scratch_free(sa, temp);
 }
 
+void premultiply_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh) {
+    if (!surface || !surface->pixels || rw <= 0 || rh <= 0) return;
+
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > surface->width) rw = surface->width - rx;
+    if (ry + rh > surface->height) rh = surface->height - ry;
+    if (rw <= 0 || rh <= 0) return;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int stride = surface->pitch / 4;
+    for (int row = 0; row < rh; row++) {
+        uint32_t* dst = pixels + (ry + row) * stride + rx;
+        for (int col = 0; col < rw; col++) {
+            uint32_t p = dst[col];
+            uint32_t a = (p >> 24) & 0xFF;
+            if (a == 0) {
+                dst[col] = 0;
+                continue;
+            }
+            if (a == 255) continue;
+            uint32_t r = p & 0xFF;
+            uint32_t g = (p >> 8) & 0xFF;
+            uint32_t b = (p >> 16) & 0xFF;
+            r = (r * a + 127u) / 255u;
+            g = (g * a + 127u) / 255u;
+            b = (b * a + 127u) / 255u;
+            dst[col] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+}
+
+void tint_premultiplied_surface_region(ImageSurface* surface, int rx, int ry, int rw, int rh,
+                                       Color color) {
+    if (!surface || !surface->pixels || rw <= 0 || rh <= 0) return;
+
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > surface->width) rw = surface->width - rx;
+    if (ry + rh > surface->height) rh = surface->height - ry;
+    if (rw <= 0 || rh <= 0) return;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int stride = surface->pitch / 4;
+    for (int row = 0; row < rh; row++) {
+        uint32_t* dst = pixels + (ry + row) * stride + rx;
+        for (int col = 0; col < rw; col++) {
+            uint32_t p = dst[col];
+            uint32_t a = (p >> 24) & 0xFF;
+            if (a == 0) {
+                dst[col] = 0;
+                continue;
+            }
+            uint32_t r = ((uint32_t)color.r * a + 127u) / 255u;
+            uint32_t g = ((uint32_t)color.g * a + 127u) / 255u;
+            uint32_t b = ((uint32_t)color.b * a + 127u) / 255u;
+            dst[col] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    }
+}
+
 /**
  * Inset box-shadow blur: blur in a temporary buffer with the element background
  * color painted in the padding area, then copy the inner rect back to the surface.

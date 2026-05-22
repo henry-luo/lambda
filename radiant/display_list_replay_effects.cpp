@@ -29,6 +29,13 @@ void dl_replay_box_blur_region(ScratchArena* scratch,
                                ImageSurface* surface,
                                const DlBoxBlurRegion* blur) {
     if (!blur) return;
+    if (blur->premultiply_source) {
+        premultiply_surface_region(surface, blur->rx, blur->ry, blur->rw, blur->rh);
+    }
+    if (blur->tint_source) {
+        tint_premultiplied_surface_region(surface, blur->rx, blur->ry,
+                                          blur->rw, blur->rh, blur->tint_color);
+    }
     if (blur->clip_type && surface && surface->pixels) {
         int sw = surface->width;
         int sh = surface->height;

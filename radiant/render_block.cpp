@@ -252,6 +252,7 @@ void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
     if (!view->bound || !view->bound->outline) return;
     float s = rdcon->scale;
     BlockBlot saved = rdcon->block;
+    RenderTransformScope transform_scope = render_state_push_transform(rdcon, view, &saved);
     rdcon->block.x = saved.x + view->x * s;
     rdcon->block.y = saved.y + view->y * s;
     Rect rect;
@@ -261,6 +262,7 @@ void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
         resolve_border_radius_percentages(&view->bound->border->radius, view->width, view->height);
     }
     render_outline(rdcon, view, rect);
+    render_state_pop_transform(&transform_scope);
     rdcon->block = saved;
 }
 

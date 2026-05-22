@@ -150,7 +150,10 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       const Color* initial_fill_color = nullptr,
                       const char* source_path = nullptr,
                       float initial_opacity = 1.0f,
-                      bool initial_fill_none = false);
+                      bool initial_fill_none = false,
+                      const Color* initial_stroke_color = nullptr,
+                      bool initial_stroke_none = true,
+                      float initial_stroke_width = -1.0f);
 
 /**
  * Render inline SVG element in document context

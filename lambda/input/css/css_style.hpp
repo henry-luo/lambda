@@ -584,6 +584,10 @@ typedef enum CssPropertyId {
     // Vendor-prefixed Properties
     CSS_PROPERTY_WEBKIT_LINE_CLAMP,
 
+    // SVG Paint Properties
+    CSS_PROPERTY_STROKE,
+    CSS_PROPERTY_STROKE_WIDTH,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
