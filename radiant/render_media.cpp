@@ -1,8 +1,8 @@
 #include "render_media.hpp"
 
-#include "display_list.h"
 #include "render.hpp"
 #include "render_geometry.hpp"
+#include "render_painter.hpp"
 #include "render_raster.hpp"
 #include "render_selection.hpp"
 #include "render_state.hpp"
@@ -358,7 +358,7 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
               wv->surface->width, wv->surface->height);
 
     if (rdcon->dl) {
-        dl_webview_layer_placeholder(rdcon->dl, wv->surface,
+        rc_webview_layer_placeholder(rdcon, wv->surface,
                                      dst_x, dst_y, dst_w, dst_h,
                                      &rdcon->block.clip,
                                      wv->surface ? wv->surface->generation : 0);
@@ -392,7 +392,7 @@ void render_video_content(RenderContext* rdcon, ViewBlock* view) {
               dst_x, dst_y, dst_w, dst_h, view->embed->has_controls);
 
     if (rdcon->dl) {
-        dl_video_placeholder(rdcon->dl, view->embed->video,
+        rc_video_placeholder(rdcon, view->embed->video,
                              dst_x, dst_y, dst_w, dst_h,
                              object_fit_flags, &rdcon->block.clip,
                              rdcon->ui_context && rdcon->ui_context->document &&

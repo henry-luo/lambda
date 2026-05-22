@@ -13,6 +13,7 @@
 #include "render_geometry.hpp"
 #include "render_glyph.hpp"
 #include "render_painter.hpp"
+#include "paint_ir.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
@@ -151,44 +152,114 @@ static void svg_resource_stack_pop(const char* path) {
 // ---------------------------------------------------------------------------
 // SVG display-list dispatch helpers (ctx->dl aware)
 // ---------------------------------------------------------------------------
+static inline bool svg_paint_active(SvgRenderContext* ctx) {
+    return ctx->paint_list && ctx->dl;
+}
+
+static inline void svg_lower_pending(SvgRenderContext* ctx) {
+    paint_ir_lower_raster(ctx->paint_list, ctx->dl);
+    paint_list_clear(ctx->paint_list);
+}
+
 static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color color,
                                  RdtFillRule rule, const RdtMatrix* xform) {
-    if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
+    if (svg_paint_active(ctx)) {
+        paint_fill_path(ctx->paint_list, path, color, rule, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_fill_path(ctx->dl, path, color, rule, xform);
     else rdt_fill_path(ctx->vec, path, color, rule, xform);
 }
 
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
-    if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
+    if (svg_paint_active(ctx)) {
+        paint_stroke_path(ctx->paint_list, path, color, width, cap, join,
+                          dash, dash_count, 0, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
     else rdt_stroke_path(ctx->vec, path, color, width, cap, join, dash, dash_count, 0, xform);
 }
 static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
-    if (ctx->dl) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
+    if (svg_paint_active(ctx)) {
+        paint_fill_linear_gradient(ctx->paint_list, path, x1, y1, x2, y2,
+                                   stops, count, rule, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
     else rdt_fill_linear_gradient(ctx->vec, path, x1, y1, x2, y2, stops, count, rule, xform);
 }
 static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float cx, float cy, float r,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
-    if (ctx->dl) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
+    if (svg_paint_active(ctx)) {
+        paint_fill_radial_gradient(ctx->paint_list, path, cx, cy, r,
+                                   stops, count, rule, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
     else rdt_fill_radial_gradient(ctx->vec, path, cx, cy, r, stops, count, rule, xform);
 }
 static inline void svg_draw_picture(SvgRenderContext* ctx, RdtPicture* pic,
                                     uint8_t opacity, const RdtMatrix* xform) {
-    if (ctx->dl) dl_draw_picture(ctx->dl, pic, opacity, xform);
+    if (svg_paint_active(ctx)) {
+        paint_draw_picture(ctx->paint_list, pic, opacity, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_draw_picture(ctx->dl, pic, opacity, xform);
     else rdt_picture_draw(ctx->vec, pic, opacity, xform);
 }
 static inline void svg_push_clip(SvgRenderContext* ctx, RdtPath* path, const RdtMatrix* xform) {
-    if (ctx->dl) dl_push_clip(ctx->dl, path, xform);
+    if (svg_paint_active(ctx)) {
+        paint_push_clip(ctx->paint_list, path, xform);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_push_clip(ctx->dl, path, xform);
     else rdt_push_clip(ctx->vec, path, xform);
 }
 static inline void svg_pop_clip(SvgRenderContext* ctx) {
-    if (ctx->dl) dl_pop_clip(ctx->dl);
+    if (svg_paint_active(ctx)) {
+        paint_pop_clip(ctx->paint_list);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) dl_pop_clip(ctx->dl);
     else rdt_pop_clip(ctx->vec);
+}
+
+static inline void svg_save_backdrop(SvgRenderContext* ctx, int x0, int y0, int w, int h) {
+    if (svg_paint_active(ctx)) {
+        paint_save_backdrop(ctx->paint_list, x0, y0, w, h);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) {
+        dl_save_backdrop(ctx->dl, x0, y0, w, h);
+    }
+}
+
+static inline void svg_composite_opacity(SvgRenderContext* ctx, int x0, int y0, int w, int h,
+                                         float opacity, bool premultiplied_source = false) {
+    if (svg_paint_active(ctx)) {
+        paint_composite_opacity(ctx->paint_list, x0, y0, w, h,
+                                opacity, premultiplied_source);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) {
+        dl_composite_opacity(ctx->dl, x0, y0, w, h, opacity, premultiplied_source);
+    }
+}
+
+static inline void svg_box_blur_region(SvgRenderContext* ctx, int rx, int ry, int rw, int rh,
+                                       float blur_radius, int clip_type, const float* clip_params,
+                                       int exclude_type, const float* exclude_params,
+                                       bool premultiply_source,
+                                       bool tint_source, Color tint_color) {
+    if (svg_paint_active(ctx)) {
+        paint_box_blur_region(ctx->paint_list, rx, ry, rw, rh, blur_radius,
+                              clip_type, clip_params, exclude_type, exclude_params,
+                              premultiply_source, tint_source, tint_color);
+        svg_lower_pending(ctx);
+    } else if (ctx->dl) {
+        dl_box_blur_region(ctx->dl, rx, ry, rw, rh, blur_radius,
+                           clip_type, clip_params, exclude_type, exclude_params,
+                           premultiply_source, tint_source, tint_color);
+    }
 }
 
 static void render_svg_element(SvgRenderContext* ctx, Element* elem);
@@ -1268,7 +1339,7 @@ static bool svg_filter_clamp_to_surface(SvgGaussianBlurFilter* filter, ImageSurf
 static bool svg_begin_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
     if (!ctx || !filter || !filter->active) return false;
     if (ctx->dl) {
-        dl_save_backdrop(ctx->dl, filter->x, filter->y, filter->width, filter->height);
+        svg_save_backdrop(ctx, filter->x, filter->y, filter->width, filter->height);
         return true;
     }
 
@@ -1298,11 +1369,11 @@ static bool svg_begin_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlu
 static void svg_finish_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
     if (!ctx || !filter || !filter->active) return;
     if (ctx->dl) {
-        dl_box_blur_region(ctx->dl, filter->x, filter->y, filter->width, filter->height,
-                           filter->blur_radius, 0, nullptr, 0, nullptr, true,
-                           filter->tint_source, filter->tint_color);
-        dl_composite_opacity(ctx->dl, filter->x, filter->y,
-                             filter->width, filter->height, 1.0f, true);
+        svg_box_blur_region(ctx, filter->x, filter->y, filter->width, filter->height,
+                            filter->blur_radius, 0, nullptr, 0, nullptr, true,
+                            filter->tint_source, filter->tint_color);
+        svg_composite_opacity(ctx, filter->x, filter->y,
+                              filter->width, filter->height, 1.0f, true);
         filter->active = false;
         return;
     }
@@ -4038,7 +4109,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
             if (op_w > 0 && op_h > 0) {
                 use_opacity_layer = true;
                 if (ctx->dl) {
-                    dl_save_backdrop(ctx->dl, op_x0, op_y0, op_w, op_h);
+                    svg_save_backdrop(ctx, op_x0, op_y0, op_w, op_h);
                 }
                 log_debug("[SVG-GROUP] opacity=%.2f, save backdrop (%d,%d,%d,%d) dl=%d",
                           group_op, op_x0, op_y0, op_w, op_h, ctx->dl != nullptr);
@@ -4112,7 +4183,7 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     // composite opacity layer if active
     if (use_opacity_layer && op_w > 0 && op_h > 0) {
         if (ctx->dl) {
-            dl_composite_opacity(ctx->dl, op_x0, op_y0, op_w, op_h, group_op);
+            svg_composite_opacity(ctx, op_x0, op_y0, op_w, op_h, group_op);
         }
         log_debug("[SVG-GROUP] composite opacity=%.2f over backdrop", group_op);
     }
@@ -4459,7 +4530,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
-                       float initial_stroke_width) {
+                       float initial_stroke_width, PaintList* paint_list) {
     if (!svg_element || !vec) return;
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
@@ -4476,6 +4547,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.font_ctx = font_ctx;
     ctx.vec = vec;
     ctx.dl = dl;
+    ctx.paint_list = paint_list;
     ctx.source_path = source_path;
     svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
@@ -4701,7 +4773,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
                       rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
                       rdcon->dl, current_color_ptr, fill_color_ptr, nullptr, 1.0f,
                       initial_fill_none, stroke_color_ptr, initial_stroke_none,
-                      initial_stroke_width);
+                      initial_stroke_width, rdcon->paint_list);
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_content_clip) {

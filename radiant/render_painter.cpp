@@ -128,6 +128,19 @@ void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
     }
 }
 
+void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
+                   Color color, bool is_color_emoji, const Bound* clip,
+                   const RdtMatrix* transform, uint64_t resource_generation) {
+    if (rc_paint_active(rdcon)) {
+        paint_draw_glyph(rdcon->paint_list, bitmap, x, y, color, is_color_emoji,
+                         clip, transform, resource_generation);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_draw_glyph(rdcon->dl, bitmap, x, y, color, is_color_emoji,
+                      clip, transform, resource_generation);
+    }
+}
+
 void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform) {
     if (rc_paint_active(rdcon)) {
@@ -135,6 +148,38 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
         rc_lower_pending(rdcon);
     } else if (rdcon->dl) dl_draw_picture(rdcon->dl, picture, opacity, transform);
     else rdt_picture_draw(&rdcon->vec, picture, opacity, transform);
+}
+
+void rc_video_placeholder(RenderContext* rdcon, void* video,
+                          float dst_x, float dst_y, float dst_w, float dst_h,
+                          int object_fit, const Bound* clip,
+                          uint64_t video_generation) {
+    if (rc_paint_active(rdcon)) {
+        paint_video_placeholder(rdcon->paint_list, video,
+                                dst_x, dst_y, dst_w, dst_h,
+                                object_fit, clip, video_generation);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_video_placeholder(rdcon->dl, video,
+                             dst_x, dst_y, dst_w, dst_h,
+                             object_fit, clip, video_generation);
+    }
+}
+
+void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
+                                  float dst_x, float dst_y, float dst_w, float dst_h,
+                                  const Bound* clip,
+                                  uint64_t surface_generation) {
+    if (rc_paint_active(rdcon)) {
+        paint_webview_layer_placeholder(rdcon->paint_list, surface,
+                                        dst_x, dst_y, dst_w, dst_h,
+                                        clip, surface_generation);
+        rc_lower_pending(rdcon);
+    } else if (rdcon->dl) {
+        dl_webview_layer_placeholder(rdcon->dl, surface,
+                                     dst_x, dst_y, dst_w, dst_h,
+                                     clip, surface_generation);
+    }
 }
 
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform) {

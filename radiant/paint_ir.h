@@ -47,7 +47,10 @@ typedef enum {
     PAINT_FILL_LINEAR_GRADIENT,
     PAINT_FILL_RADIAL_GRADIENT,
     PAINT_DRAW_IMAGE,
+    PAINT_DRAW_GLYPH,
     PAINT_DRAW_PICTURE,
+    PAINT_VIDEO_PLACEHOLDER,
+    PAINT_WEBVIEW_LAYER_PLACEHOLDER,
     PAINT_PUSH_CLIP,
     PAINT_POP_CLIP,
 
@@ -150,11 +153,40 @@ typedef struct {
 } PaintDrawImage;
 
 typedef struct {
+    GlyphBitmap bitmap;      // descriptor copy; bitmap buffer borrowed
+    int x, y;
+    Color color;
+    bool is_color_emoji;
+    bool has_clip;
+    Bound clip;
+    bool has_transform;
+    RdtMatrix transform;
+    uint64_t resource_generation;
+} PaintDrawGlyph;
+
+typedef struct {
     RdtPicture* picture;    // borrowed
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
 } PaintDrawPicture;
+
+typedef struct {
+    void* video;             // borrowed video handle
+    float dst_x, dst_y, dst_w, dst_h;
+    int object_fit;
+    bool has_clip;
+    Bound clip;
+    uint64_t video_generation;
+} PaintVideoPlaceholder;
+
+typedef struct {
+    void* surface;           // ImageSurface* — borrowed
+    float dst_x, dst_y, dst_w, dst_h;
+    bool has_clip;
+    Bound clip;
+    uint64_t surface_generation;
+} PaintWebviewLayerPlaceholder;
 
 typedef struct {
     RdtPath* clip_path;     // borrowed
@@ -287,7 +319,10 @@ typedef struct PaintCmd {
         PaintFillLinearGradient fill_linear_gradient;
         PaintFillRadialGradient fill_radial_gradient;
         PaintDrawImage          draw_image;
+        PaintDrawGlyph          draw_glyph;
         PaintDrawPicture        draw_picture;
+        PaintVideoPlaceholder   video_placeholder;
+        PaintWebviewLayerPlaceholder webview_layer_placeholder;
         PaintPushClip           push_clip;
         PaintSaveBackdrop       save_backdrop;
         PaintCompositeOpacity   composite_opacity;
@@ -350,8 +385,19 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
                       void* resource_owner);
+void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
+                      Color color, bool is_color_emoji, const Bound* clip,
+                      const RdtMatrix* transform, uint64_t resource_generation);
 void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform);
+void paint_video_placeholder(PaintList* pl, void* video,
+                             float dst_x, float dst_y, float dst_w, float dst_h,
+                             int object_fit, const Bound* clip,
+                             uint64_t video_generation);
+void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+                                     float dst_x, float dst_y, float dst_w, float dst_h,
+                                     const Bound* clip,
+                                     uint64_t surface_generation);
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform);
 void paint_pop_clip(PaintList* pl);
 

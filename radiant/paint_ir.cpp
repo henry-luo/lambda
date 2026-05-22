@@ -163,6 +163,24 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     cmd->draw_image.resource_owner = resource_owner;
 }
 
+void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
+                      Color color, bool is_color_emoji, const Bound* clip,
+                      const RdtMatrix* transform, uint64_t resource_generation) {
+    if (!bitmap) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_GLYPH);
+    if (!cmd) return;
+    cmd->draw_glyph.bitmap = *bitmap;
+    cmd->draw_glyph.x = x;
+    cmd->draw_glyph.y = y;
+    cmd->draw_glyph.color = color;
+    cmd->draw_glyph.is_color_emoji = is_color_emoji;
+    cmd->draw_glyph.has_clip = clip != nullptr;
+    if (clip) cmd->draw_glyph.clip = *clip;
+    cmd->draw_glyph.has_transform = transform != nullptr;
+    if (transform) cmd->draw_glyph.transform = *transform;
+    cmd->draw_glyph.resource_generation = resource_generation;
+}
+
 void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_PICTURE);
@@ -171,6 +189,39 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
     cmd->draw_picture.opacity = opacity;
     cmd->draw_picture.has_transform = transform != nullptr;
     if (transform) cmd->draw_picture.transform = *transform;
+}
+
+void paint_video_placeholder(PaintList* pl, void* video,
+                             float dst_x, float dst_y, float dst_w, float dst_h,
+                             int object_fit, const Bound* clip,
+                             uint64_t video_generation) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_VIDEO_PLACEHOLDER);
+    if (!cmd) return;
+    cmd->video_placeholder.video = video;
+    cmd->video_placeholder.dst_x = dst_x;
+    cmd->video_placeholder.dst_y = dst_y;
+    cmd->video_placeholder.dst_w = dst_w;
+    cmd->video_placeholder.dst_h = dst_h;
+    cmd->video_placeholder.object_fit = object_fit;
+    cmd->video_placeholder.has_clip = clip != nullptr;
+    if (clip) cmd->video_placeholder.clip = *clip;
+    cmd->video_placeholder.video_generation = video_generation;
+}
+
+void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+                                     float dst_x, float dst_y, float dst_w, float dst_h,
+                                     const Bound* clip,
+                                     uint64_t surface_generation) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_WEBVIEW_LAYER_PLACEHOLDER);
+    if (!cmd) return;
+    cmd->webview_layer_placeholder.surface = surface;
+    cmd->webview_layer_placeholder.dst_x = dst_x;
+    cmd->webview_layer_placeholder.dst_y = dst_y;
+    cmd->webview_layer_placeholder.dst_w = dst_w;
+    cmd->webview_layer_placeholder.dst_h = dst_h;
+    cmd->webview_layer_placeholder.has_clip = clip != nullptr;
+    if (clip) cmd->webview_layer_placeholder.clip = *clip;
+    cmd->webview_layer_placeholder.surface_generation = surface_generation;
 }
 
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform) {
@@ -345,10 +396,34 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
                           owner, owner ? owner->generation : 0);
             break;
         }
+        case PAINT_DRAW_GLYPH: {
+            const PaintDrawGlyph* p = &cmd->draw_glyph;
+            dl_draw_glyph(dl, (GlyphBitmap*)&p->bitmap, p->x, p->y,
+                          p->color, p->is_color_emoji,
+                          p->has_clip ? &p->clip : nullptr,
+                          p->has_transform ? &p->transform : nullptr,
+                          p->resource_generation);
+            break;
+        }
         case PAINT_DRAW_PICTURE: {
             const PaintDrawPicture* p = &cmd->draw_picture;
             dl_draw_picture(dl, p->picture, p->opacity,
                             p->has_transform ? &p->transform : nullptr);
+            break;
+        }
+        case PAINT_VIDEO_PLACEHOLDER: {
+            const PaintVideoPlaceholder* p = &cmd->video_placeholder;
+            dl_video_placeholder(dl, p->video, p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                 p->object_fit, p->has_clip ? &p->clip : nullptr,
+                                 p->video_generation);
+            break;
+        }
+        case PAINT_WEBVIEW_LAYER_PLACEHOLDER: {
+            const PaintWebviewLayerPlaceholder* p = &cmd->webview_layer_placeholder;
+            dl_webview_layer_placeholder(dl, p->surface,
+                                         p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                         p->has_clip ? &p->clip : nullptr,
+                                         p->surface_generation);
             break;
         }
         case PAINT_PUSH_CLIP: {

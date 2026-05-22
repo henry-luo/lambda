@@ -18,6 +18,8 @@
 
 struct FontContext;  // forward declaration from lib/font/font.h
 typedef struct RenderContext RenderContext;
+struct PaintList;
+typedef struct PaintList PaintList;
 
 typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
 
@@ -53,6 +55,7 @@ struct SvgRenderContext {
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     RdtVector* vec;              // target vector renderer for direct drawing
     DisplayList* dl;             // display list for deferred rendering (Phase 1, may be nullptr)
+    PaintList* paint_list;       // semantic PaintIR gateway when recording to dl
     const char* source_path;      // source SVG path for resolving nested resources
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
@@ -153,7 +156,8 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       bool initial_fill_none = false,
                       const Color* initial_stroke_color = nullptr,
                       bool initial_stroke_none = true,
-                      float initial_stroke_width = -1.0f);
+                      float initial_stroke_width = -1.0f,
+                      PaintList* paint_list = nullptr);
 
 /**
  * Render inline SVG element in document context

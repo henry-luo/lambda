@@ -614,11 +614,37 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
         if (x.has_transform) expect_matrix_eq(x.transform, y.transform);
         break;
     }
+    case DL_DRAW_GLYPH: {
+        const DlDrawGlyph& x = a.draw_glyph;
+        const DlDrawGlyph& y = b.draw_glyph;
+        EXPECT_EQ(x.bitmap.buffer, y.bitmap.buffer);
+        EXPECT_EQ(x.bitmap.width, y.bitmap.width);
+        EXPECT_EQ(x.bitmap.height, y.bitmap.height);
+        EXPECT_EQ(x.bitmap.pitch, y.bitmap.pitch);
+        EXPECT_EQ(x.bitmap.pixel_mode, y.bitmap.pixel_mode);
+        EXPECT_FLOAT_EQ(x.bitmap.bitmap_scale, y.bitmap.bitmap_scale);
+        EXPECT_EQ(x.resource_generation, y.resource_generation);
+        EXPECT_EQ(x.x, y.x);
+        EXPECT_EQ(x.y, y.y);
+        EXPECT_EQ(x.color.c, y.color.c);
+        EXPECT_EQ(x.is_color_emoji, y.is_color_emoji);
+        EXPECT_EQ(memcmp(&x.clip, &y.clip, sizeof(Bound)), 0);
+        EXPECT_EQ(x.has_transform, y.has_transform);
+        if (x.has_transform) expect_matrix_eq(x.transform, y.transform);
+        break;
+    }
     case DL_DRAW_PICTURE:
         EXPECT_EQ(a.draw_picture.picture, b.draw_picture.picture);
         EXPECT_EQ(a.draw_picture.opacity, b.draw_picture.opacity);
         EXPECT_EQ(a.draw_picture.has_transform, b.draw_picture.has_transform);
         if (a.draw_picture.has_transform) expect_matrix_eq(a.draw_picture.transform, b.draw_picture.transform);
+        break;
+    case DL_VIDEO_PLACEHOLDER:
+        EXPECT_EQ(memcmp(&a.video_placeholder, &b.video_placeholder, sizeof(DlVideoPlaceholder)), 0);
+        break;
+    case DL_WEBVIEW_LAYER_PLACEHOLDER:
+        EXPECT_EQ(memcmp(&a.webview_layer_placeholder, &b.webview_layer_placeholder,
+                         sizeof(DlWebviewLayerPlaceholder)), 0);
         break;
     case DL_PUSH_CLIP:
         EXPECT_EQ(a.push_clip.path, b.push_clip.path);
@@ -626,6 +652,38 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
         if (a.push_clip.has_transform) expect_matrix_eq(a.push_clip.transform, b.push_clip.transform);
         break;
     case DL_POP_CLIP:
+        break;
+    case DL_SAVE_BACKDROP:
+        EXPECT_EQ(memcmp(&a.save_backdrop, &b.save_backdrop, sizeof(DlSaveBackdrop)), 0);
+        break;
+    case DL_COMPOSITE_OPACITY:
+        EXPECT_EQ(memcmp(&a.composite_opacity, &b.composite_opacity, sizeof(DlCompositeOpacity)), 0);
+        break;
+    case DL_APPLY_BLEND_MODE:
+        EXPECT_EQ(memcmp(&a.apply_blend_mode, &b.apply_blend_mode, sizeof(DlApplyBlendMode)), 0);
+        break;
+    case DL_APPLY_FILTER:
+        EXPECT_FLOAT_EQ(a.apply_filter.x, b.apply_filter.x);
+        EXPECT_FLOAT_EQ(a.apply_filter.y, b.apply_filter.y);
+        EXPECT_FLOAT_EQ(a.apply_filter.w, b.apply_filter.w);
+        EXPECT_FLOAT_EQ(a.apply_filter.h, b.apply_filter.h);
+        EXPECT_EQ(a.apply_filter.filter, b.apply_filter.filter);
+        EXPECT_EQ(memcmp(&a.apply_filter.clip, &b.apply_filter.clip, sizeof(Bound)), 0);
+        break;
+    case DL_BOX_BLUR_REGION:
+        EXPECT_EQ(memcmp(&a.box_blur_region, &b.box_blur_region, sizeof(DlBoxBlurRegion)), 0);
+        break;
+    case DL_BOX_BLUR_INSET:
+        EXPECT_EQ(memcmp(&a.box_blur_inset, &b.box_blur_inset, sizeof(DlBoxBlurInset)), 0);
+        break;
+    case DL_SHADOW_CLIP_SAVE:
+        EXPECT_EQ(memcmp(&a.shadow_clip_save, &b.shadow_clip_save, sizeof(DlShadowClipSave)), 0);
+        break;
+    case DL_SHADOW_CLIP_RESTORE:
+        EXPECT_EQ(memcmp(&a.shadow_clip_restore, &b.shadow_clip_restore, sizeof(DlShadowClipRestore)), 0);
+        break;
+    case DL_OUTER_SHADOW:
+        EXPECT_EQ(memcmp(&a.outer_shadow, &b.outer_shadow, sizeof(DlOuterShadow)), 0);
         break;
     default:
         ADD_FAILURE() << "unexpected op in parity comparison: " << a.op;
@@ -720,6 +778,53 @@ TEST_F(PaintIrParityTest, DrawImageWithGenerationMatchesDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, DrawGlyphWithGenerationMatchesDirect) {
+    uint8_t glyph_pixels[16] = {};
+    GlyphBitmap bitmap = {};
+    bitmap.buffer = glyph_pixels;
+    bitmap.width = 4;
+    bitmap.height = 4;
+    bitmap.pitch = 4;
+    bitmap.pixel_mode = GLYPH_PIXEL_GRAY;
+    bitmap.bitmap_scale = 1.25f;
+    Bound clip = {1.0f, 2.0f, 12.0f, 14.0f};
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = 2.0f;
+    m.e23 = 3.0f;
+
+    paint_draw_glyph(&pl, &bitmap, 5, 6, test_color(0xffabcdef),
+                     false, &clip, &m, 99);
+    lower();
+    dl_draw_glyph(&direct, &bitmap, 5, 6, test_color(0xffabcdef),
+                  false, &clip, &m, 99);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, ExternalLayerPlaceholdersMatchDirect) {
+    ImageSurface surface = {};
+    surface.generation = 123;
+    Bound clip = {2.0f, 4.0f, 90.0f, 100.0f};
+    char video_token = 0;
+
+    paint_video_placeholder(&pl, &video_token, 10.0f, 11.0f, 50.0f, 60.0f,
+                            0x105, &clip, 77);
+    paint_webview_layer_placeholder(&pl, &surface,
+                                    12.0f, 13.0f, 70.0f, 80.0f,
+                                    &clip, surface.generation);
+    paint_video_placeholder(&pl, &video_token, 1.0f, 2.0f, 3.0f, 4.0f,
+                            6, nullptr, 0);
+    lower();
+
+    dl_video_placeholder(&direct, &video_token, 10.0f, 11.0f, 50.0f, 60.0f,
+                         0x105, &clip, 77);
+    dl_webview_layer_placeholder(&direct, &surface,
+                                 12.0f, 13.0f, 70.0f, 80.0f,
+                                 &clip, surface.generation);
+    dl_video_placeholder(&direct, &video_token, 1.0f, 2.0f, 3.0f, 4.0f,
+                         6, nullptr, 0);
+    expect_lists_equal(lowered, direct);
+}
+
 TEST_F(PaintIrParityTest, ClipPushPopMatchesDirect) {
     char tok = 0;
     RdtPath* path = (RdtPath*)&tok;
@@ -730,6 +835,55 @@ TEST_F(PaintIrParityTest, ClipPushPopMatchesDirect) {
     lower();
     dl_push_clip(&direct, path, &m);
     dl_pop_clip(&direct);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
+    char filter_token = 0;
+    Bound clip = {1, 2, 30, 40};
+
+    paint_save_backdrop(&pl, 2, 3, 20, 30);
+    paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true);
+    paint_apply_blend_mode(&pl, 2, 3, 20, 30, 7);
+    paint_apply_filter(&pl, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
+    paint_apply_filter(&pl, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
+    lower();
+
+    dl_save_backdrop(&direct, 2, 3, 20, 30);
+    dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
+    dl_apply_blend_mode(&direct, 2, 3, 20, 30, 7);
+    dl_apply_filter(&direct, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
+    dl_apply_filter(&direct, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
+    float clip_params[8] = {1.0f, 2.0f, 30.0f, 40.0f, 4.0f, 5.0f, 6.0f, 7.0f};
+    float exclude_params[8] = {8.0f, 9.0f, 50.0f, 60.0f, 10.0f, 11.0f, 12.0f, 13.0f};
+    Color tint = test_color(0x80203040);
+
+    paint_box_blur_region(&pl, 1, 2, 30, 40, 3.5f,
+                          2, clip_params, 3, exclude_params,
+                          true, true, tint);
+    paint_box_blur_inset(&pl, 5, 6, 70, 80, 9, 4.5f, 0xffaabbcc);
+    paint_shadow_clip_save(&pl, 10, 11, 90, 91);
+    paint_shadow_clip_restore(&pl, 3, exclude_params, 10, 11, 90, 91, 1);
+    paint_outer_shadow(&pl, 12.0f, 13.0f, 100.0f, 110.0f,
+                       2.0f, 3.0f, 4.0f, 5.0f,
+                       test_color(0x70445566), 6.5f,
+                       3, exclude_params, 2, clip_params);
+    lower();
+
+    dl_box_blur_region(&direct, 1, 2, 30, 40, 3.5f,
+                       2, clip_params, 3, exclude_params,
+                       true, true, tint);
+    dl_box_blur_inset(&direct, 5, 6, 70, 80, 9, 4.5f, 0xffaabbcc);
+    dl_shadow_clip_save(&direct, 10, 11, 90, 91);
+    dl_shadow_clip_restore(&direct, 3, exclude_params, 10, 11, 90, 91, 1);
+    dl_outer_shadow(&direct, 12.0f, 13.0f, 100.0f, 110.0f,
+                    2.0f, 3.0f, 4.0f, 5.0f,
+                    test_color(0x70445566), 6.5f,
+                    3, exclude_params, 2, clip_params);
     expect_lists_equal(lowered, direct);
 }
 
