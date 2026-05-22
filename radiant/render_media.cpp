@@ -92,6 +92,8 @@ static bool render_media_rasterize_svg_image(ImageSurface* surface, int target_w
                     (uint32_t)target_width); // INT_CAST_OK: target dimensions are validated positive raster pixels.
     int saved_clip_depth = rdt_clip_save_depth();
 
+    // Intentional local/offscreen draw: this rasterizes an SVG resource into
+    // its ImageSurface cache, outside the live RenderContext painter pipeline.
     RdtPicture* pic = rdt_picture_dup(surface->pic);
     if (pic) {
         rdt_picture_set_size(pic, (float)target_width, (float)target_height);
@@ -148,7 +150,8 @@ void render_svg(ImageSurface* surface) {
     // isolated off-screen SVG rasterization
     int saved_clip_depth = rdt_clip_save_depth();
 
-    // Draw SVG picture at target size (takes ownership from surface)
+    // Intentional local/offscreen draw: this consumes the decoded SVG picture
+    // into a pixel cache before normal image painting routes through rc_*.
     RdtPicture* pic = surface->pic;
     surface->pic = NULL;  // ownership transferred
     if (pic) {

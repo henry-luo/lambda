@@ -72,6 +72,8 @@ typedef enum {
     PAINT_SHADOW_CLIP_SAVE,
     PAINT_SHADOW_CLIP_RESTORE,
     PAINT_OUTER_SHADOW,
+    PAINT_FILL_SURFACE_RECT,
+    PAINT_BLIT_SURFACE_SCALED,
 
     // ── Higher-level semantic ops (contract only; lowered in later phases) ──
     // A run of glyphs sharing a font/colour — NOT rasterised bitmaps. Raster
@@ -261,6 +263,27 @@ typedef struct {
     float clip_params[8];
 } PaintOuterShadow;
 
+typedef struct {
+    float x, y, w, h;
+    uint32_t color;          // ABGR8888
+    bool has_clip;
+    Bound clip;
+    ClipShape** clip_shapes; // borrowed; raster lowering clones into DisplayList
+    int clip_depth;
+} PaintFillSurfaceRect;
+
+typedef struct {
+    void* src_surface;       // ImageSurface* — borrowed
+    uint64_t src_generation;
+    float dst_x, dst_y, dst_w, dst_h;
+    int scale_mode;
+    uint8_t opacity;
+    bool has_clip;
+    Bound clip;
+    ClipShape** clip_shapes; // borrowed; raster lowering clones into DisplayList
+    int clip_depth;
+} PaintBlitSurfaceScaled;
+
 // ── Higher-level semantic payloads (contract; not yet lowered) ─────────────
 
 // Effect group descriptor. Mirrors the CSS stacking effect inputs so every
@@ -335,6 +358,8 @@ typedef struct PaintCmd {
         PaintShadowClipSave     shadow_clip_save;
         PaintShadowClipRestore  shadow_clip_restore;
         PaintOuterShadow        outer_shadow;
+        PaintFillSurfaceRect    fill_surface_rect;
+        PaintBlitSurfaceScaled  blit_surface_scaled;
         PaintEffectGroup        effect_group;
         PaintSvgSubscene        svg_subscene;
         PaintGlyphRun           glyph_run;
@@ -352,6 +377,16 @@ typedef struct PaintList {
     Arena* arena;            // backing arena for the cmds array
 } PaintList;
 
+typedef struct PaintIrValidationResult {
+    bool valid;
+    int first_error_index;
+    const char* message;
+    int clip_depth;
+    int backdrop_depth;
+    int shadow_clip_depth;
+    int effect_depth;
+} PaintIrValidationResult;
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -360,6 +395,8 @@ void paint_list_init(PaintList* pl, Arena* backing_arena);
 void paint_list_clear(PaintList* pl);   // rewind count (arena owned by caller)
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
+bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result);
+bool paint_ir_validate_or_log(const PaintList* pl, const char* context);
 
 // ---------------------------------------------------------------------------
 // PaintBuilder — recording API (mirrors the rc_* painter gateway)
@@ -426,6 +463,14 @@ void paint_outer_shadow(PaintList* pl,
                         Color color, float blur_radius,
                         int exclude_type, const float* exclude_params,
                         int clip_type, const float* clip_params);
+void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
+                             uint32_t color, const Bound* clip,
+                             ClipShape** clip_shapes, int clip_depth);
+void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
+                               float dst_x, float dst_y, float dst_w, float dst_h,
+                               int scale_mode, const Bound* clip,
+                               ClipShape** clip_shapes, int clip_depth,
+                               uint8_t opacity, uint64_t src_generation);
 
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList

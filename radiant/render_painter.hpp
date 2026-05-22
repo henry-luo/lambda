@@ -8,7 +8,7 @@ struct RenderContext;
 typedef struct RenderContext RenderContext;
 
 // ---------------------------------------------------------------------------
-// rc_* — Render-context drawing wrappers (dispatch to display list or rdt_*)
+// rc_* — Render-context drawing wrappers (record through PaintIR/DisplayList)
 // ---------------------------------------------------------------------------
 
 void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color);

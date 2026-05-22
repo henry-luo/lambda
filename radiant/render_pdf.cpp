@@ -4,6 +4,7 @@
 #include "render_export_support.hpp"
 #include "render_geometry.hpp"
 #include "paint_ir.h"
+#include "render_paint_boundary.hpp"
 #include "render_border.hpp"
 #include "render_path.hpp"
 #include "view.hpp"
@@ -401,6 +402,10 @@ static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
 }
 
 static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+    if (!paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
+        paint_list_clear(&ctx->paint_list);
+        return;
+    }
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
@@ -748,6 +753,11 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 
 static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (render_paint_boundary_emit_simple(&ctx->paint_list, view, abs_x, abs_y)) {
+        pdf_lower_paint_list(ctx);
+        return;
+    }
+
     float width = view->width;
     float height = view->height;
 

@@ -6,14 +6,14 @@
 // ---------------------------------------------------------------------------
 // Painter gateway (rc_*).
 //
-// Two recording modes per primitive:
+// Primary recording mode per primitive:
 //   1. Semantic IR (rdcon->paint_list && rdcon->dl): record through the
 //      PaintBuilder, then lower to the display list immediately so command
 //      order is preserved alongside the non-IR display-list ops. This routes
 //      the live raster path through the semantic paint IR (Phase C) and is
-//      byte-identical to mode 2 (proven by PaintIrParityTest).
-//   2. Display list (rdcon->dl only): direct dl_* recording. Used by
-//      RenderContexts that do not set up a PaintList.
+//      byte-identical to direct dl_* recording (proven by PaintIrParityTest).
+//   2. Compatibility only (rdcon->dl without paint_list): direct dl_* recording
+//      for transitional/manual contexts. The live render path sets PaintList.
 //
 // rc_paint_active() selects mode 1; rc_lower_pending() flushes the single
 // recorded command and rewinds the reusable PaintList.
@@ -388,7 +388,12 @@ void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surfac
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth) {
     (void)surface;
-    if (rc_dl_active(rdcon)) {
+    if (rc_paint_active(rdcon)) {
+        paint_fill_surface_rect(rdcon->paint_list, rect->x, rect->y,
+                                rect->width, rect->height,
+                                color, clip, clip_shapes, clip_depth);
+        rc_lower_pending(rdcon);
+    } else if (rc_dl_active(rdcon)) {
         dl_fill_surface_rect(rdcon->dl, rect->x, rect->y, rect->width, rect->height,
                              color, clip, clip_shapes, clip_depth);
     } else {
@@ -404,7 +409,14 @@ void render_painter_blit_surface_scaled(RenderContext* rdcon,
                                         uint8_t opacity) {
     (void)src_rect;
     (void)dst;
-    if (rc_dl_active(rdcon)) {
+    if (rc_paint_active(rdcon)) {
+        paint_blit_surface_scaled(rdcon->paint_list, src,
+                                  dst_rect->x, dst_rect->y,
+                                  dst_rect->width, dst_rect->height,
+                                  (int)scale_mode, clip, clip_shapes, clip_depth,
+                                  opacity, src ? src->generation : 0);
+        rc_lower_pending(rdcon);
+    } else if (rc_dl_active(rdcon)) {
         dl_blit_surface_scaled(rdcon->dl, src, dst_rect->x, dst_rect->y,
                                dst_rect->width, dst_rect->height, (int)scale_mode,
                                clip, clip_shapes, clip_depth, opacity,

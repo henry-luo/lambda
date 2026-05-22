@@ -7,6 +7,7 @@
 // ==========================================================================
 
 #include "paint_ir.h"
+#include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include <string.h>
 
@@ -38,6 +39,339 @@ void paint_list_destroy(PaintList* pl) {
 
 int paint_list_count(const PaintList* pl) {
     return pl ? pl->count : 0;
+}
+
+static void paint_ir_validation_set(PaintIrValidationResult* result, bool valid,
+                                    int first_error_index, const char* message,
+                                    int clip_depth, int backdrop_depth,
+                                    int shadow_clip_depth, int effect_depth) {
+    if (!result) return;
+    result->valid = valid;
+    result->first_error_index = first_error_index;
+    result->message = message;
+    result->clip_depth = clip_depth;
+    result->backdrop_depth = backdrop_depth;
+    result->shadow_clip_depth = shadow_clip_depth;
+    result->effect_depth = effect_depth;
+}
+
+static bool paint_ir_validation_fail(PaintIrValidationResult* result, int index,
+                                     const char* message,
+                                     int clip_depth, int backdrop_depth,
+                                     int shadow_clip_depth, int effect_depth) {
+    paint_ir_validation_set(result, false, index, message,
+                            clip_depth, backdrop_depth,
+                            shadow_clip_depth, effect_depth);
+    return false;
+}
+
+static bool paint_ir_validate_positive_image(const PaintDrawImage* image) {
+    return image && image->pixels &&
+           image->src_w > 0 && image->src_h > 0 && image->src_stride > 0 &&
+           image->dst_w >= 0.0f && image->dst_h >= 0.0f;
+}
+
+bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
+    if (!pl) {
+        return paint_ir_validation_fail(result, -1, "paint list is null",
+                                        0, 0, 0, 0);
+    }
+
+    int clip_depth = 0;
+    int backdrop_depth = 0;
+    int shadow_clip_depth = 0;
+    int effect_depth = 0;
+
+    for (int i = 0; i < pl->count; i++) {
+        const PaintCmd* cmd = &pl->cmds[i];
+        switch (cmd->op) {
+        case PAINT_FILL_RECT:
+            if (cmd->fill_rect.w < 0.0f || cmd->fill_rect.h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "fill rect has negative size",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_FILL_ROUNDED_RECT:
+            if (cmd->fill_rounded_rect.w < 0.0f ||
+                cmd->fill_rounded_rect.h < 0.0f ||
+                cmd->fill_rounded_rect.rx < 0.0f ||
+                cmd->fill_rounded_rect.ry < 0.0f) {
+                return paint_ir_validation_fail(result, i, "rounded rect has negative size",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_FILL_PATH:
+            if (!cmd->fill_path.path) {
+                return paint_ir_validation_fail(result, i, "fill path is null",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_STROKE_PATH:
+            if (!cmd->stroke_path.path || cmd->stroke_path.width < 0.0f ||
+                cmd->stroke_path.dash_count < 0 ||
+                (cmd->stroke_path.dash_count > 0 && !cmd->stroke_path.dash_array)) {
+                return paint_ir_validation_fail(result, i, "stroke path payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_FILL_LINEAR_GRADIENT:
+            if (!cmd->fill_linear_gradient.path ||
+                !cmd->fill_linear_gradient.stops ||
+                cmd->fill_linear_gradient.stop_count <= 0) {
+                return paint_ir_validation_fail(result, i, "linear gradient payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_FILL_RADIAL_GRADIENT:
+            if (!cmd->fill_radial_gradient.path ||
+                !cmd->fill_radial_gradient.stops ||
+                cmd->fill_radial_gradient.stop_count <= 0 ||
+                cmd->fill_radial_gradient.r < 0.0f) {
+                return paint_ir_validation_fail(result, i, "radial gradient payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_DRAW_IMAGE:
+            if (!paint_ir_validate_positive_image(&cmd->draw_image)) {
+                return paint_ir_validation_fail(result, i, "draw image payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_DRAW_GLYPH:
+            if (!cmd->draw_glyph.bitmap.buffer ||
+                cmd->draw_glyph.bitmap.width <= 0 ||
+                cmd->draw_glyph.bitmap.height <= 0 ||
+                cmd->draw_glyph.bitmap.pitch <= 0) {
+                return paint_ir_validation_fail(result, i, "glyph payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_DRAW_PICTURE:
+            if (!cmd->draw_picture.picture) {
+                return paint_ir_validation_fail(result, i, "picture payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_VIDEO_PLACEHOLDER:
+            if (!cmd->video_placeholder.video ||
+                cmd->video_placeholder.dst_w < 0.0f ||
+                cmd->video_placeholder.dst_h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "video placeholder payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_WEBVIEW_LAYER_PLACEHOLDER:
+            if (!cmd->webview_layer_placeholder.surface ||
+                cmd->webview_layer_placeholder.dst_w < 0.0f ||
+                cmd->webview_layer_placeholder.dst_h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "webview placeholder payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_PUSH_CLIP:
+            if (!cmd->push_clip.clip_path) {
+                return paint_ir_validation_fail(result, i, "clip path is null",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            clip_depth++;
+            break;
+        case PAINT_POP_CLIP:
+            if (clip_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "clip pop without matching push",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            clip_depth--;
+            break;
+        case PAINT_SAVE_BACKDROP:
+            if (cmd->save_backdrop.w < 0 || cmd->save_backdrop.h < 0) {
+                return paint_ir_validation_fail(result, i, "saved backdrop has negative region",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            backdrop_depth++;
+            break;
+        case PAINT_COMPOSITE_OPACITY:
+            if (backdrop_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "opacity composite without saved backdrop",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            if (cmd->composite_opacity.w < 0 || cmd->composite_opacity.h < 0) {
+                return paint_ir_validation_fail(result, i, "opacity composite has negative region",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            backdrop_depth--;
+            break;
+        case PAINT_APPLY_BLEND_MODE:
+            if (backdrop_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "blend mode without saved backdrop",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            if (cmd->apply_blend_mode.w < 0 || cmd->apply_blend_mode.h < 0) {
+                return paint_ir_validation_fail(result, i, "blend mode has negative region",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            backdrop_depth--;
+            break;
+        case PAINT_APPLY_FILTER:
+            if (!cmd->apply_filter.filter ||
+                cmd->apply_filter.w < 0.0f ||
+                cmd->apply_filter.h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "filter payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_BOX_BLUR_REGION:
+            if (cmd->box_blur_region.rw < 0 ||
+                cmd->box_blur_region.rh < 0 ||
+                cmd->box_blur_region.blur_radius < 0.0f) {
+                return paint_ir_validation_fail(result, i, "box blur region payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_BOX_BLUR_INSET:
+            if (cmd->box_blur_inset.rw < 0 ||
+                cmd->box_blur_inset.rh < 0 ||
+                cmd->box_blur_inset.pad < 0 ||
+                cmd->box_blur_inset.blur_radius < 0.0f) {
+                return paint_ir_validation_fail(result, i, "inset blur payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_SHADOW_CLIP_SAVE:
+            if (cmd->shadow_clip_save.rw < 0 ||
+                cmd->shadow_clip_save.rh < 0) {
+                return paint_ir_validation_fail(result, i, "shadow clip save has negative region",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            shadow_clip_depth++;
+            break;
+        case PAINT_SHADOW_CLIP_RESTORE:
+            if (shadow_clip_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "shadow clip restore without save",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            if (cmd->shadow_clip_restore.save_rw < 0 ||
+                cmd->shadow_clip_restore.save_rh < 0) {
+                return paint_ir_validation_fail(result, i, "shadow clip restore has negative region",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            shadow_clip_depth--;
+            break;
+        case PAINT_OUTER_SHADOW:
+            if (cmd->outer_shadow.shadow_w < 0.0f ||
+                cmd->outer_shadow.shadow_h < 0.0f ||
+                cmd->outer_shadow.blur_radius < 0.0f) {
+                return paint_ir_validation_fail(result, i, "outer shadow payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_FILL_SURFACE_RECT:
+            if (cmd->fill_surface_rect.w < 0.0f ||
+                cmd->fill_surface_rect.h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "surface fill has negative size",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_BLIT_SURFACE_SCALED:
+            if (!cmd->blit_surface_scaled.src_surface ||
+                cmd->blit_surface_scaled.dst_w < 0.0f ||
+                cmd->blit_surface_scaled.dst_h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "surface blit payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_BEGIN_EFFECT_GROUP:
+            effect_depth++;
+            break;
+        case PAINT_END_EFFECT_GROUP:
+            if (effect_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "effect group end without begin",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            effect_depth--;
+            break;
+        case PAINT_GLYPH_RUN:
+            if (!cmd->glyph_run.glyph_ids || !cmd->glyph_run.xs ||
+                !cmd->glyph_run.ys || cmd->glyph_run.count <= 0) {
+                return paint_ir_validation_fail(result, i, "glyph run payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        case PAINT_SVG_SUBSCENE:
+            if (!cmd->svg_subscene.svg_root) {
+                return paint_ir_validation_fail(result, i, "svg subscene root is null",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
+        }
+    }
+
+    if (clip_depth != 0) {
+        return paint_ir_validation_fail(result, pl->count, "clip stack is unbalanced",
+                                        clip_depth, backdrop_depth,
+                                        shadow_clip_depth, effect_depth);
+    }
+    if (backdrop_depth != 0) {
+        return paint_ir_validation_fail(result, pl->count, "backdrop stack is unbalanced",
+                                        clip_depth, backdrop_depth,
+                                        shadow_clip_depth, effect_depth);
+    }
+    if (shadow_clip_depth != 0) {
+        return paint_ir_validation_fail(result, pl->count, "shadow clip stack is unbalanced",
+                                        clip_depth, backdrop_depth,
+                                        shadow_clip_depth, effect_depth);
+    }
+    if (effect_depth != 0) {
+        return paint_ir_validation_fail(result, pl->count, "effect group stack is unbalanced",
+                                        clip_depth, backdrop_depth,
+                                        shadow_clip_depth, effect_depth);
+    }
+
+    paint_ir_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
+    return true;
+}
+
+bool paint_ir_validate_or_log(const PaintList* pl, const char* context) {
+    PaintIrValidationResult result = {};
+    if (paint_ir_validate(pl, &result)) return true;
+    log_error("[PAINT_IR_VALIDATE] %s: invalid PaintIR at item %d: %s (clip=%d backdrop=%d shadow_clip=%d effect=%d)",
+              context ? context : "unknown",
+              result.first_error_index,
+              result.message ? result.message : "invalid",
+              result.clip_depth,
+              result.backdrop_depth,
+              result.shadow_clip_depth,
+              result.effect_depth);
+    return false;
 }
 
 static PaintCmd* paint_alloc_cmd(PaintList* pl, PaintOp op) {
@@ -340,12 +674,50 @@ void paint_outer_shadow(PaintList* pl,
     paint_copy_effect_params(cmd->outer_shadow.clip_params, clip_type, clip_params);
 }
 
+void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
+                             uint32_t color, const Bound* clip,
+                             ClipShape** clip_shapes, int clip_depth) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_SURFACE_RECT);
+    if (!cmd) return;
+    cmd->fill_surface_rect.x = x;
+    cmd->fill_surface_rect.y = y;
+    cmd->fill_surface_rect.w = w;
+    cmd->fill_surface_rect.h = h;
+    cmd->fill_surface_rect.color = color;
+    cmd->fill_surface_rect.has_clip = clip != nullptr;
+    if (clip) cmd->fill_surface_rect.clip = *clip;
+    cmd->fill_surface_rect.clip_shapes = clip_shapes;
+    cmd->fill_surface_rect.clip_depth = clip_depth;
+}
+
+void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
+                               float dst_x, float dst_y, float dst_w, float dst_h,
+                               int scale_mode, const Bound* clip,
+                               ClipShape** clip_shapes, int clip_depth,
+                               uint8_t opacity, uint64_t src_generation) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BLIT_SURFACE_SCALED);
+    if (!cmd) return;
+    cmd->blit_surface_scaled.src_surface = src_surface;
+    cmd->blit_surface_scaled.src_generation = src_generation;
+    cmd->blit_surface_scaled.dst_x = dst_x;
+    cmd->blit_surface_scaled.dst_y = dst_y;
+    cmd->blit_surface_scaled.dst_w = dst_w;
+    cmd->blit_surface_scaled.dst_h = dst_h;
+    cmd->blit_surface_scaled.scale_mode = scale_mode;
+    cmd->blit_surface_scaled.opacity = opacity;
+    cmd->blit_surface_scaled.has_clip = clip != nullptr;
+    if (clip) cmd->blit_surface_scaled.clip = *clip;
+    cmd->blit_surface_scaled.clip_shapes = clip_shapes;
+    cmd->blit_surface_scaled.clip_depth = clip_depth;
+}
+
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
     if (!pl || !dl) return;
+    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_raster")) return;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
@@ -490,6 +862,22 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
                             p->color, p->blur_radius,
                             p->exclude_type, p->exclude_params,
                             p->clip_type, p->clip_params);
+            break;
+        }
+        case PAINT_FILL_SURFACE_RECT: {
+            const PaintFillSurfaceRect* p = &cmd->fill_surface_rect;
+            dl_fill_surface_rect(dl, p->x, p->y, p->w, p->h,
+                                 p->color, p->has_clip ? &p->clip : nullptr,
+                                 p->clip_shapes, p->clip_depth);
+            break;
+        }
+        case PAINT_BLIT_SURFACE_SCALED: {
+            const PaintBlitSurfaceScaled* p = &cmd->blit_surface_scaled;
+            dl_blit_surface_scaled(dl, p->src_surface,
+                                   p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                   p->scale_mode, p->has_clip ? &p->clip : nullptr,
+                                   p->clip_shapes, p->clip_depth,
+                                   p->opacity, p->src_generation);
             break;
         }
 
@@ -673,6 +1061,8 @@ static const char* paint_op_name(PaintOp op) {
     case PAINT_SHADOW_CLIP_SAVE: return "PAINT_SHADOW_CLIP_SAVE";
     case PAINT_SHADOW_CLIP_RESTORE: return "PAINT_SHADOW_CLIP_RESTORE";
     case PAINT_OUTER_SHADOW: return "PAINT_OUTER_SHADOW";
+    case PAINT_FILL_SURFACE_RECT: return "PAINT_FILL_SURFACE_RECT";
+    case PAINT_BLIT_SURFACE_SCALED: return "PAINT_BLIT_SURFACE_SCALED";
     case PAINT_GLYPH_RUN: return "PAINT_GLYPH_RUN";
     case PAINT_BEGIN_EFFECT_GROUP: return "PAINT_BEGIN_EFFECT_GROUP";
     case PAINT_END_EFFECT_GROUP: return "PAINT_END_EFFECT_GROUP";
@@ -746,6 +1136,7 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
         memset(stats, 0, sizeof(PaintSvgLoweringStats));
     }
     if (!pl || !out) return;
+    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_svg")) return;
 
     PaintSvgLoweringStats local_stats = {};
     PaintSvgLoweringStats* active_stats = stats ? stats : &local_stats;

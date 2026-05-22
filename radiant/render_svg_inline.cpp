@@ -151,7 +151,7 @@ static void svg_resource_stack_pop(const char* path) {
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// SVG display-list dispatch helpers
+// SVG PaintIR/display-list dispatch helpers
 // ---------------------------------------------------------------------------
 static inline bool svg_paint_active(SvgRenderContext* ctx) {
     return ctx && ctx->paint_list && ctx->dl;
@@ -1351,7 +1351,7 @@ static void svg_finish_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBl
 }
 
 // ============================================================================
-// Apply gradient fill via rdt_ API
+// Apply gradient fill via the SVG painter gateway
 // ============================================================================
 
 static void draw_gradient_fill(SvgRenderContext* ctx, RdtPath* path, SvgGradDef* def,
@@ -1460,7 +1460,7 @@ static bool draw_pattern_fill(SvgRenderContext* ctx, RdtPath* path, Element* pat
 }
 
 // ============================================================================
-// Draw fill and stroke for an SVG shape via rdt_ API
+// Draw fill and stroke for an SVG shape via the SVG painter gateway
 // ============================================================================
 
 static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* elem,
@@ -1617,7 +1617,7 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 }
 
 // ============================================================================
-// SVG Shape Renderers (draw directly via rdt_ API)
+// SVG Shape Renderers
 // ============================================================================
 
 static void render_svg_rect(SvgRenderContext* ctx, Element* elem) {
@@ -4468,7 +4468,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     process_svg_root_resources(&ctx, svg_element);
     svg_apply_inherited_paint_attrs(&ctx, svg_element);
 
-    // render children directly to vec
+    // render children through the SVG painter gateway
     for (int64_t i = 0; i < svg_element->length; i++) {
         Element* child = get_child_element_at(svg_element, i);
         if (!child) continue;
@@ -4615,7 +4615,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         rdt_path_free(clip_path);
     }
 
-    // render SVG directly to the framebuffer
+    // render SVG through the shared painter gateway
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     Color initial_current_color = rdcon->color;
     Color initial_fill_color = {};

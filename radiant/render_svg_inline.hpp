@@ -1,12 +1,12 @@
 #pragma once
 /**
- * render_svg_inline.hpp - Inline SVG Rendering via RdtVector
+ * render_svg_inline.hpp - Inline SVG Rendering via PaintIR/DisplayList
  *
  * Renders SVG elements embedded in HTML documents by converting SVG
- * element trees directly to RdtVector draw calls.
+ * element trees into the shared painter recording path.
  *
  * Key functions:
- * - render_svg_to_vec(): Convert SVG Element tree to rdt_ draw calls
+ * - render_svg_to_vec(): Convert SVG Element tree to painter commands
  * - render_inline_svg(): Render SVG block in document context
  */
 
@@ -131,8 +131,8 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
 /**
- * Render SVG element tree directly to an RdtVector using rdt_ draw calls.
- * No ThorVG scene tree is constructed — shapes are drawn immediately.
+ * Render SVG element tree into painter commands targeting a display list.
+ * No ThorVG scene tree is constructed for native shapes.
  *
  * @param vec Target vector renderer
  * @param svg_element The <svg> Element from HTML5 parser

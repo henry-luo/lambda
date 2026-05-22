@@ -9,6 +9,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_value.hpp"
+#include <assert.h>
 #include <math.h>
 
 /**
@@ -1288,10 +1289,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             // Blur > 0: use isolated temp-buffer pipeline (rasterise + blur +
             // composite) so the blur kernel doesn't smear neighbouring pixels.
             if (xform && rdcon->ui_context->surface) {
-                if (!rdcon->dl) {
-                    log_error("[BOX-SHADOW] transformed shadow requested without display list");
-                    continue;
-                }
+                assert(rdcon->dl && "transformed box-shadow requires display-list recording");
                 ScratchArena* shadow_arena = &rdcon->dl->arena;
                 int sh_x = 0, sh_y = 0, sh_w = 0, sh_h = 0;
                 uint32_t* shadow_pixels = render_outer_shadow_blur_image(

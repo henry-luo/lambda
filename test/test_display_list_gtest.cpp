@@ -6,6 +6,7 @@
 #include "../radiant/display_list_replay_state.hpp"
 #include "../radiant/display_list_storage.hpp"
 #include "../radiant/paint_ir.h"
+#include "../radiant/render_paint_boundary.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include <string.h>
@@ -740,6 +741,14 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
     case DL_OUTER_SHADOW:
         EXPECT_EQ(memcmp(&a.outer_shadow, &b.outer_shadow, sizeof(DlOuterShadow)), 0);
         break;
+    case DL_FILL_SURFACE_RECT:
+        EXPECT_EQ(memcmp(&a.fill_surface_rect, &b.fill_surface_rect,
+                         sizeof(DlFillSurfaceRect)), 0);
+        break;
+    case DL_BLIT_SURFACE_SCALED:
+        EXPECT_EQ(memcmp(&a.blit_surface_scaled, &b.blit_surface_scaled,
+                         sizeof(DlBlitSurfaceScaled)), 0);
+        break;
     default:
         ADD_FAILURE() << "unexpected op in parity comparison: " << a.op;
         break;
@@ -942,6 +951,188 @@ TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, RasterSurfaceOpsMatchDirect) {
+    ImageSurface src = {};
+    src.generation = 321;
+    Bound clip = {1.0f, 2.0f, 40.0f, 50.0f};
+
+    paint_fill_surface_rect(&pl, 3.0f, 4.0f, 30.0f, 31.0f,
+                            0xff102030, &clip, nullptr, 0);
+    paint_blit_surface_scaled(&pl, &src, 5.0f, 6.0f, 70.0f, 80.0f,
+                              SCALE_MODE_LINEAR, &clip, nullptr, 0,
+                              210, src.generation);
+    lower();
+
+    dl_fill_surface_rect(&direct, 3.0f, 4.0f, 30.0f, 31.0f,
+                         0xff102030, &clip, nullptr, 0);
+    dl_blit_surface_scaled(&direct, &src, 5.0f, 6.0f, 70.0f, 80.0f,
+                           SCALE_MODE_LINEAR, &clip, nullptr, 0,
+                           210, src.generation);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsBackgroundAndSolidBorder) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    BorderProp border = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bound.border = &border;
+    bg.color = test_color(0xff102030);
+    border.width.top = 1.0f;
+    border.width.right = 2.0f;
+    border.width.bottom = 3.0f;
+    border.width.left = 4.0f;
+    border.top_style = CSS_VALUE_SOLID;
+    border.right_style = CSS_VALUE_SOLID;
+    border.bottom_style = CSS_VALUE_SOLID;
+    border.left_style = CSS_VALUE_SOLID;
+    border.top_color = test_color(0xff405060);
+    border.right_color = border.top_color;
+    border.bottom_color = border.top_color;
+    border.left_color = border.top_color;
+
+    ASSERT_TRUE(render_paint_boundary_emit_simple(&pl, &view, 10.0f, 20.0f));
+    lower();
+
+    dl_fill_rect(&direct, 10.0f, 20.0f, 100.0f, 50.0f, bg.color);
+    dl_fill_rect(&direct, 10.0f, 20.0f, 100.0f, 1.0f, border.top_color);
+    dl_fill_rect(&direct, 108.0f, 20.0f, 2.0f, 50.0f, border.right_color);
+    dl_fill_rect(&direct, 10.0f, 67.0f, 100.0f, 3.0f, border.bottom_color);
+    dl_fill_rect(&direct, 10.0f, 20.0f, 4.0f, 50.0f, border.left_color);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsUniformRoundedBackground) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    BorderProp border = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bound.border = &border;
+    bg.color = test_color(0xff203040);
+    border.radius.top_left = 6.0f;
+    border.radius.top_right = 6.0f;
+    border.radius.bottom_right = 6.0f;
+    border.radius.bottom_left = 6.0f;
+    border.radius.top_left_y = 6.0f;
+    border.radius.top_right_y = 6.0f;
+    border.radius.bottom_right_y = 6.0f;
+    border.radius.bottom_left_y = 6.0f;
+
+    ASSERT_TRUE(render_paint_boundary_emit_simple(&pl, &view, 10.0f, 20.0f));
+    lower();
+
+    dl_fill_rounded_rect(&direct, 10.0f, 20.0f, 100.0f, 50.0f,
+                         6.0f, 6.0f, bg.color);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    BorderProp border = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bound.border = &border;
+    bg.color = test_color(0xff203040);
+    border.width.top = 4.0f;
+    border.width.right = 4.0f;
+    border.width.bottom = 4.0f;
+    border.width.left = 4.0f;
+    border.top_style = CSS_VALUE_SOLID;
+    border.right_style = CSS_VALUE_SOLID;
+    border.bottom_style = CSS_VALUE_SOLID;
+    border.left_style = CSS_VALUE_SOLID;
+    border.top_color = test_color(0xff506070);
+    border.right_color = border.top_color;
+    border.bottom_color = border.top_color;
+    border.left_color = border.top_color;
+    border.radius.top_left = 8.0f;
+    border.radius.top_right = 8.0f;
+    border.radius.bottom_right = 8.0f;
+    border.radius.bottom_left = 8.0f;
+    border.radius.top_left_y = 8.0f;
+    border.radius.top_right_y = 8.0f;
+    border.radius.bottom_right_y = 8.0f;
+    border.radius.bottom_left_y = 8.0f;
+
+    ASSERT_TRUE(render_paint_boundary_emit_simple(&pl, &view, 10.0f, 20.0f));
+    lower();
+
+    dl_fill_rounded_rect(&direct, 10.0f, 20.0f, 100.0f, 50.0f,
+                         8.0f, 8.0f, border.top_color);
+    dl_fill_rounded_rect(&direct, 14.0f, 24.0f, 92.0f, 42.0f,
+                         4.0f, 4.0f, bg.color);
+    expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    BorderProp border = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bound.border = &border;
+
+    bg.gradient_type = GRADIENT_LINEAR;
+    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+
+    bg.gradient_type = GRADIENT_NONE;
+    border.width.top = 1.0f;
+    border.top_style = CSS_VALUE_DASHED;
+    border.top_color = test_color(0xff000000);
+    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+
+    border.top_style = CSS_VALUE_SOLID;
+    border.radius.top_left = 2.0f;
+    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+
+    border.width.top = 0.0f;
+    border.top_color = {};
+    border.radius.top_right = 2.0f;
+    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+
+    border.radius = {};
+    border.width.top = 2.0f;
+    border.width.right = 2.0f;
+    border.width.bottom = 2.0f;
+    border.width.left = 2.0f;
+    border.top_style = CSS_VALUE_SOLID;
+    border.right_style = CSS_VALUE_SOLID;
+    border.bottom_style = CSS_VALUE_SOLID;
+    border.left_style = CSS_VALUE_SOLID;
+    border.top_color = test_color(0x80000000);
+    border.right_color = border.top_color;
+    border.bottom_color = border.top_color;
+    border.left_color = border.top_color;
+    border.radius.top_left = 4.0f;
+    border.radius.top_right = 4.0f;
+    border.radius.bottom_right = 4.0f;
+    border.radius.bottom_left = 4.0f;
+    border.radius.top_left_y = 4.0f;
+    border.radius.top_right_y = 4.0f;
+    border.radius.bottom_right_y = 4.0f;
+    border.radius.bottom_left_y = 4.0f;
+    EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
+}
+
 TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
     char tok = 0;
     RdtPath* path = (RdtPath*)&tok;
@@ -974,6 +1165,55 @@ TEST_F(PaintIrParityTest, ClearRewindsCountForReuse) {
     EXPECT_EQ(pl.capacity, cap);
     paint_fill_rect(&pl, 0.0f, 0.0f, 2.0f, 2.0f, test_color(0xffffffff));
     EXPECT_EQ(paint_list_count(&pl), 1);
+}
+
+TEST_F(PaintIrParityTest, ValidateAcceptsBalancedReplayState) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+
+    paint_push_clip(&pl, path, nullptr);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 10.0f, 10.0f, test_color(0xff000000));
+    paint_pop_clip(&pl);
+    paint_save_backdrop(&pl, 0, 0, 10, 10);
+    paint_composite_opacity(&pl, 0, 0, 10, 10, 0.5f, false);
+    paint_shadow_clip_save(&pl, 1, 2, 30, 40);
+    paint_shadow_clip_restore(&pl, 0, nullptr, 1, 2, 30, 40, 1);
+
+    PaintIrValidationResult result = {};
+    EXPECT_TRUE(paint_ir_validate(&pl, &result));
+    EXPECT_TRUE(result.valid);
+    EXPECT_EQ(result.first_error_index, -1);
+}
+
+TEST_F(PaintIrParityTest, ValidateRejectsUnbalancedClipStack) {
+    char tok = 0;
+    RdtPath* path = (RdtPath*)&tok;
+
+    paint_push_clip(&pl, path, nullptr);
+
+    PaintIrValidationResult result = {};
+    EXPECT_FALSE(paint_ir_validate(&pl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, paint_list_count(&pl));
+    EXPECT_EQ(result.clip_depth, 1);
+}
+
+TEST_F(PaintIrParityTest, ValidateRejectsInvalidPayload) {
+    paint_fill_rect(&pl, 0.0f, 0.0f, -1.0f, 10.0f, test_color(0xff000000));
+
+    PaintIrValidationResult result = {};
+    EXPECT_FALSE(paint_ir_validate(&pl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
+}
+
+TEST_F(PaintIrParityTest, ValidateRejectsCompositeWithoutBackdrop) {
+    paint_composite_opacity(&pl, 0, 0, 10, 10, 0.5f, false);
+
+    PaintIrValidationResult result = {};
+    EXPECT_FALSE(paint_ir_validate(&pl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
 }
 
 TEST_F(PaintIrParityTest, SvgLoweringEmitsRectPrimitives) {
