@@ -2060,6 +2060,7 @@
                             "radiant/display_list_record_raster.cpp",
                             "radiant/display_list_replay_glyph.cpp",
                             "radiant/display_list_replay_state.cpp",
+                            "radiant/paint_ir.cpp",
                             "test/test_display_list_stubs.cpp"
                         ],
                         "binary": "test_display_list_gtest.exe",
