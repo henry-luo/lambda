@@ -49,6 +49,72 @@ static const int JS_PRIVATE_CLASS_INDEX_KEY_LEN = 23;
 static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
 static const int JS_BOUND_TARGET_KEY_LEN = 16;
 
+struct JsGlobalVarModuleBinding {
+    Item key;
+    int index;
+};
+
+static JsGlobalVarModuleBinding js_global_var_module_bindings[512];
+static int js_global_var_module_binding_count = 0;
+static uint64_t js_global_var_module_binding_epoch = 0;
+static Item js_global_var_module_binding_global = {0};
+
+extern "C" Item js_get_global_this(void);
+extern "C" uint64_t js_get_heap_epoch(void);
+
+static bool js_global_var_binding_key_same(Item a, Item b) {
+    if (a.item == b.item) return true;
+    if (get_type_id(a) != LMD_TYPE_STRING || get_type_id(b) != LMD_TYPE_STRING) return false;
+    String* as = it2s(a);
+    String* bs = it2s(b);
+    return as && bs && as->len == bs->len &&
+        memcmp(as->chars, bs->chars, (size_t)as->len) == 0;
+}
+
+static void js_global_var_binding_refresh(void) {
+    Item global = js_get_global_this();
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_global_var_module_binding_epoch == epoch &&
+        js_global_var_module_binding_global.item == global.item) {
+        return;
+    }
+    js_global_var_module_binding_epoch = epoch;
+    js_global_var_module_binding_global = global;
+    js_global_var_module_binding_count = 0;
+}
+
+extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
+    js_global_var_binding_refresh();
+    if (get_type_id(key) != LMD_TYPE_STRING || index < 0) return;
+    for (int i = 0; i < js_global_var_module_binding_count; i++) {
+        if (js_global_var_binding_key_same(js_global_var_module_bindings[i].key, key)) {
+            js_global_var_module_bindings[i].index = (int)index;
+            return;
+        }
+    }
+    if (js_global_var_module_binding_count >= 512) return;
+    js_global_var_module_bindings[js_global_var_module_binding_count].key = key;
+    js_global_var_module_bindings[js_global_var_module_binding_count].index = (int)index;
+    js_global_var_module_binding_count++;
+}
+
+static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
+    js_global_var_binding_refresh();
+    if (object.item != js_global_var_module_binding_global.item ||
+        get_type_id(key) != LMD_TYPE_STRING) {
+        return;
+    }
+    for (int i = 0; i < js_global_var_module_binding_count; i++) {
+        if (js_global_var_binding_key_same(js_global_var_module_bindings[i].key, key)) {
+            // Global `var` bindings are backed by the global object. When code
+            // writes through `this.x`/`globalThis.x`, keep the optimized module
+            // slot coherent without making every identifier read a property get.
+            js_set_module_var(js_global_var_module_bindings[i].index, value);
+            return;
+        }
+    }
+}
+
 static bool js_reflect_target_is_object(Item target) {
     TypeId type = get_type_id(target);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY ||
@@ -5302,6 +5368,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         }
                     }
                     fn_map_set(object, key, value);
+                    js_sync_global_var_module_binding(object, key, value);
                     return value;
                 }
             }
@@ -5343,6 +5410,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
             if (str_key) {
                 map_put(m, str_key, value, js_input);
+                js_sync_global_var_module_binding(object, key, value);
             }
         } else {
             log_error("js_property_set: no js_input context for map_put");

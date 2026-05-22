@@ -74,6 +74,25 @@ static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
 }
 
+static void jm_declare_evalscript_global_lexical_if_needed(JsMirTranspiler* mt,
+        JsVariableDeclarationNode* decl, JsIdentifierNode* id, MIR_reg_t boxed_value) {
+    if (!mt || !decl || !id || !id->name || !boxed_value) return;
+    if (!mt->is_eval_direct || (decl->kind != JS_VAR_LET && decl->kind != JS_VAR_CONST)) return;
+    MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
+    MIR_label_t skip_global_lex = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, skip_global_lex),
+        MIR_new_reg_op(mt->ctx, evalscript_active)));
+    MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+    // evalScript uses Script global lexical bindings. They persist for later
+    // identifier resolution but are not properties of globalThis.
+    jm_call_void_3(mt, "js_global_lexical_declare",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, decl->kind == JS_VAR_CONST ? 1 : 0));
+    jm_emit_label(mt, skip_global_lex);
+}
+
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
     // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
     // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
@@ -133,20 +152,26 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                 bool with_var_init_handled = false;
                 if (var->kind == JS_VAR_VAR && d->init && mt->with_depth > 0) {
-                    const char* saved_assign_target = mt->assign_target_vname;
-                    mt->assign_target_vname = vname;
-                    MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
-                    mt->assign_target_vname = saved_assign_target;
                     MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                     MIR_reg_t has_with = jm_call_1(mt, "js_capture_with_binding", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                     jm_emit_exc_propagate_check(mt);
+                    MIR_reg_t with_base = jm_call_1(mt, "js_get_last_with_binding_base_or_undefined", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
+                    const char* saved_assign_target = mt->assign_target_vname;
+                    mt->assign_target_vname = vname;
+                    // Resolve the object-environment binding before the initializer.
+                    // The initializer may delete or replace the property, but the
+                    // assignment target remains the pre-resolved with base.
+                    MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
+                    mt->assign_target_vname = saved_assign_target;
                     MIR_label_t normal_init = jm_new_label(mt);
                     MIR_label_t init_done = jm_new_label(mt);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                         MIR_new_label_op(mt->ctx, normal_init),
                         MIR_new_reg_op(mt->ctx, has_with)));
-                    jm_call_3(mt, "js_set_last_with_binding_if_valid", MIR_T_I64,
+                    jm_call_4(mt, "js_set_with_binding_base", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, with_base),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
@@ -237,9 +262,13 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_label_op(mt->ctx, skip_global_lex),
                                 MIR_new_reg_op(mt->ctx, eval_env_active)));
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                            jm_call_void_2(mt, "js_set_global_property",
+                            // $262.evalScript creates Script global lexical
+                            // bindings: they are visible to identifiers but
+                            // intentionally not own properties of globalThis.
+                            jm_call_void_3(mt, "js_global_lexical_declare",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, var->kind == JS_VAR_CONST ? 1 : 0));
                             jm_emit_label(mt, skip_global_lex);
                         }
                         // v18: function name inference for module-level vars
@@ -288,9 +317,12 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_label_op(mt->ctx, skip_global_lex),
                                 MIR_new_reg_op(mt->ctx, eval_env_active)));
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                            jm_call_void_2(mt, "js_set_global_property",
+                            // $262.evalScript creates Script global lexical
+                            // bindings without adding global object properties.
+                            jm_call_void_3(mt, "js_global_lexical_declare",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, var->kind == JS_VAR_CONST ? 1 : 0));
                             jm_emit_label(mt, skip_global_lex);
                         }
                     } else {
@@ -391,6 +423,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
+                        if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                            MIR_reg_t boxed_reg = jm_box_int_reg(mt, reg);
+                            jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
+                        }
                         if (var->kind == JS_VAR_VAR && mt->in_main && !mt->is_module) {
                             MIR_reg_t boxed_reg = jm_box_int_reg(mt, reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_reg);
@@ -413,6 +449,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
+                        if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                            MIR_reg_t boxed_reg = jm_box_float(mt, reg);
+                            jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
+                        }
                         if (var->kind == JS_VAR_VAR && mt->in_main && !mt->is_module) {
                             MIR_reg_t boxed_reg = jm_box_float(mt, reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_reg);
@@ -437,6 +477,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             }
                         }
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
+                        jm_declare_evalscript_global_lexical_if_needed(mt, var, id, val);
                         jm_define_global_var_property_for_main_var(mt, var, id, val);
 
                         // v18: function name inference for anonymous function expressions
@@ -4179,6 +4220,32 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                    }
+                    if (mt->is_eval_direct) {
+                        MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
+                        MIR_label_t skip_global_class_lex = jm_new_label(mt);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                            MIR_new_label_op(mt->ctx, skip_global_class_lex),
+                            MIR_new_reg_op(mt->ctx, evalscript_active)));
+                        MIR_reg_t class_key = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
+                        // Global class declarations are lexical bindings, not
+                        // global object properties; evalScript must expose them
+                        // to later identifier resolution while hasOwnProperty is false.
+                        jm_call_void_3(mt, "js_global_lexical_declare",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+                        jm_emit_label(mt, skip_global_class_lex);
+                    }
+                    if (mt->in_main && !mt->is_module && !mt->is_eval_direct) {
+                        MIR_reg_t class_key = jm_box_string_literal(mt, cls_node->name->chars, (int)cls_node->name->len);
+                        // Top-level class declarations are global lexical
+                        // bindings. Keep the side table current so later
+                        // evalScript calls can detect collisions and resolve it.
+                        jm_call_void_3(mt, "js_global_lexical_declare",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                     }
                     int ctor_len = 0;
                     if (ce->constructor && ce->constructor->fc)

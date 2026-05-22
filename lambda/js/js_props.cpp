@@ -47,6 +47,7 @@ static inline Item js_props_accessor_result(Item value) {
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
 extern "C++" String* heap_create_name(const char* name, size_t len);
+extern void fn_map_set(Item map_item, Item key, Item value);
 
 // Stage E: debug-only invariant assertions. Compiled out under NDEBUG.
 // Three classes of invariants the property-model kernels enforce:
@@ -693,13 +694,29 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", name_len, name);
         Item nw_k = js_props_str(nw_buf, (int)strlen(nw_buf));
         bool had_nw = false;
-        if (!is_new_property && it2b(js_has_own_property(object, nw_k))) {
+        if (!is_new_property &&
+                js_prop_attrs_fast_path(object, name, name_len, JSPD_NON_WRITABLE) == 0) {
+            // [[DefineOwnProperty]] may legally replace the value of an existing
+            // configurable/non-writable property while also making it writable.
+            // The writable guard in js_property_set is shape-flag aware, so this
+            // descriptor kernel must clear the shape bit before writing the value.
+            had_nw = true;
+            js_attr_set_writable(object, name, name_len, /*writable=*/true);
+        } else if (!is_new_property && it2b(js_has_own_property(object, nw_k))) {
             Item nv = js_property_get(object, nw_k);
             had_nw = js_is_truthy(nv);
             if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/true);
         }
 
-        if (get_type_id(object) == LMD_TYPE_FUNC) {
+        ShapeEntry* value_se = !is_new_property ? js_find_shape_entry(object, name, name_len) : NULL;
+        if (!is_new_property && get_type_id(object) == LMD_TYPE_MAP && value_se) {
+            // [[DefineOwnProperty]] performs an internal slot replacement after
+            // validation. Do not route existing map properties through ordinary
+            // [[Set]], which can still reject on writability/non-extensibility.
+            // Guard on a real shape entry so virtual/special properties stay on
+            // their established setter path.
+            fn_map_set(object, name_item, pd->value);
+        } else if (get_type_id(object) == LMD_TYPE_FUNC) {
             js_func_init_property(object, name_item, pd->value);
         } else {
             js_property_set(object, name_item, pd->value);
