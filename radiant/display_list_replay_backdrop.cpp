@@ -78,8 +78,12 @@ void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
     int by = stack->region[stack->sp][1];
     int bw = stack->region[stack->sp][2];
     int bh = stack->region[stack->sp][3];
-    render_composite_opacity(surface, backdrop, bx, by, bw, bh,
-                             opacity->opacity);
+    if (opacity->premultiplied_source && opacity->opacity >= 0.999f) {
+        render_composite_source_over_premul(surface, backdrop, bx, by, bw, bh);
+    } else {
+        render_composite_opacity(surface, backdrop, bx, by, bw, bh,
+                                 opacity->opacity);
+    }
 }
 
 void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,

@@ -12,6 +12,7 @@
 #include "layout_pass.hpp"
 #include "layout_measure.hpp"
 #include "layout_table.hpp"
+#include "layout_box.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
@@ -3050,60 +3051,66 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
                     block->blk->given_height_type != CSS_VALUE_AUTO)
         ? block->blk->given_height : -1.0f;
 
-    if (width >= 0 && height >= 0) {
-        // Both CSS dimensions specified - use them
-        block->width = width;
-        block->height = height;
-    } else if (width >= 0) {
-        // Width specified, calculate height from aspect ratio
-        block->width = width;
+    bool is_border_box = block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
+    float content_width = -1.0f;
+    float content_height = -1.0f;
+    bool width_is_specified = width >= 0.0f;
+    bool height_is_specified = height >= 0.0f;
+
+    if (width_is_specified) {
+        content_width = is_border_box ? layout_content_width_from_border_box(block, width) : width;
+    }
+    if (height_is_specified) {
+        content_height = is_border_box ? layout_content_height_from_border_box(block, height) : height;
+    }
+
+    if (content_width >= 0 && content_height >= 0) {
+        // both CSS dimensions specified
+    } else if (content_width >= 0) {
+        // width specified, calculate content height from aspect ratio
         if (intrinsic.aspect_ratio > 0) {
-            block->height = width / intrinsic.aspect_ratio;
+            content_height = content_width / intrinsic.aspect_ratio;
         } else {
-            block->height = intrinsic.height;
+            content_height = intrinsic.height;
         }
-    } else if (height >= 0) {
-        // Height specified, calculate width from aspect ratio
-        block->height = height;
+    } else if (content_height >= 0) {
+        // height specified, calculate content width from aspect ratio
         if (intrinsic.aspect_ratio > 0) {
-            block->width = height * intrinsic.aspect_ratio;
+            content_width = content_height * intrinsic.aspect_ratio;
         } else {
-            block->width = intrinsic.width;
+            content_width = intrinsic.width;
         }
     } else {
         // Neither CSS dimension specified - use intrinsic size
         // or parent width if intrinsic width is not available
         if (intrinsic.has_intrinsic_width) {
-            block->width = intrinsic.width;
+            content_width = intrinsic.width;
         } else if (lycon->block.parent && lycon->block.parent->content_width > 0) {
-            block->width = lycon->block.parent->content_width;
+            content_width = lycon->block.parent->content_width;
         } else {
-            block->width = 300;  // HTML default
+            content_width = 300;  // HTML default
         }
 
         if (intrinsic.has_intrinsic_height) {
-            block->height = intrinsic.height;
+            content_height = intrinsic.height;
         } else if (intrinsic.aspect_ratio > 0) {
-            block->height = block->width / intrinsic.aspect_ratio;
+            content_height = content_width / intrinsic.aspect_ratio;
         } else {
-            block->height = 150;  // HTML default
+            content_height = 150;  // HTML default
         }
     }
 
-    // Add padding and border
-    float padding_top = block->bound && block->bound->padding.top > 0 ? block->bound->padding.top : 0;
-    float padding_bottom = block->bound && block->bound->padding.bottom > 0 ? block->bound->padding.bottom : 0;
-    float padding_left = block->bound && block->bound->padding.left > 0 ? block->bound->padding.left : 0;
-    float padding_right = block->bound && block->bound->padding.right > 0 ? block->bound->padding.right : 0;
-    float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
-    float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
-    float border_left = block->bound && block->bound->border ? block->bound->border->width.left : 0;
-    float border_right = block->bound && block->bound->border ? block->bound->border->width.right : 0;
+    block->content_width = content_width > 0.0f ? content_width : 0.0f;
+    block->content_height = content_height > 0.0f ? content_height : 0.0f;
+    block->width = layout_border_width_from_content_box(block, block->content_width);
+    block->height = layout_border_height_from_content_box(block, block->content_height);
 
-    block->content_width = block->width;
-    block->content_height = block->height;
-    block->width += padding_left + padding_right + border_left + border_right;
-    block->height += padding_top + padding_bottom + border_top + border_bottom;
+    if (width_is_specified && is_border_box) {
+        block->width = layout_floor_border_box_width(block, width);
+    }
+    if (height_is_specified && is_border_box) {
+        block->height = layout_floor_border_box_height(block, height);
+    }
 
     log_debug("%s SVG layout result: content=%.1fx%.1f, total=%.1fx%.1f", block->source_loc(),
               block->content_width, block->content_height, block->width, block->height);
@@ -5836,23 +5843,22 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // after inner layout so parent min/available width does not leak into the
     // SVG viewport.
     if (block->tag() == HTM_TAG_SVG && block->blk) {
-        float border_x = block->bound && block->bound->border
-            ? block->bound->border->width.left + block->bound->border->width.right
-            : 0.0f;
-        float border_y = block->bound && block->bound->border
-            ? block->bound->border->width.top + block->bound->border->width.bottom
-            : 0.0f;
+        bool is_border_box = block->blk->box_sizing == CSS_VALUE_BORDER_BOX;
         if (block->blk->given_width >= 0.0f) {
-            block->content_width = block->blk->given_width;
-            block->width = block->content_width +
-                (block->bound ? block->bound->padding.left + block->bound->padding.right : 0.0f) +
-                border_x;
+            block->content_width = is_border_box
+                ? layout_content_width_from_border_box(block, block->blk->given_width)
+                : block->blk->given_width;
+            block->width = is_border_box
+                ? layout_floor_border_box_width(block, block->blk->given_width)
+                : layout_border_width_from_content_box(block, block->content_width);
         }
         if (block->blk->given_height >= 0.0f) {
-            block->content_height = block->blk->given_height;
-            block->height = block->content_height +
-                (block->bound ? block->bound->padding.top + block->bound->padding.bottom : 0.0f) +
-                border_y;
+            block->content_height = is_border_box
+                ? layout_content_height_from_border_box(block, block->blk->given_height)
+                : block->blk->given_height;
+            block->height = is_border_box
+                ? layout_floor_border_box_height(block, block->blk->given_height)
+                : layout_border_height_from_content_box(block, block->content_height);
         }
     }
 

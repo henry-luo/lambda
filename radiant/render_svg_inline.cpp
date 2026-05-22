@@ -8,7 +8,11 @@
 
 #include "render_svg_inline.hpp"
 #include "render.hpp"
+#include "render_background.hpp"
+#include "render_composite.hpp"
+#include "render_geometry.hpp"
 #include "render_glyph.hpp"
+#include "render_painter.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
@@ -23,7 +27,6 @@
 #include "../lib/base64.h"
 #include <ctype.h>
 #include <math.h>
-#include <stdio.h>
 #include <strings.h>
 
 #ifndef LAMBDA_HEADLESS
@@ -1093,6 +1096,240 @@ static void opacity_bounds_from_rect(const RdtMatrix* transform, float x, float 
     *out_h = (int)ceilf(max_y) - *out_y0 + 2;
 }
 
+typedef struct SvgGaussianBlurFilter {
+    bool active;
+    int x;
+    int y;
+    int width;
+    int height;
+    float blur_radius;
+    bool tint_source;
+    Color tint_color;
+    uint32_t* backdrop;
+} SvgGaussianBlurFilter;
+
+static bool parse_svg_url_id(const char* value, char* out_id, size_t out_id_size) {
+    if (!value || !out_id || out_id_size == 0) return false;
+    if (strncmp(value, "url(#", 5) != 0) return false;
+    const char* id_start = value + 5;
+    const char* id_end = strchr(id_start, ')');
+    if (!id_end || id_end == id_start) return false;
+    size_t id_len = (size_t)(id_end - id_start);
+    if (id_len >= out_id_size) return false;
+    memcpy(out_id, id_start, id_len);
+    out_id[id_len] = '\0';
+    return true;
+}
+
+static bool resolve_svg_solid_filter_tint(SvgRenderContext* ctx, Element* elem,
+                                          Color* out_color) {
+    if (!ctx || !elem || !out_color) return false;
+    char fill_buf[256];
+    const char* fill = get_svg_attr_or_style(ctx, elem, "fill",
+                                             fill_buf, sizeof(fill_buf));
+    if (fill) {
+        if (strcmp(fill, "none") == 0 || strncmp(fill, "url(#", 5) == 0) {
+            return false;
+        }
+        *out_color = svg_resolve_color_keyword(ctx, fill);
+        return true;
+    }
+    if (!ctx->fill_none) {
+        *out_color = ctx->fill_color;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_svg_std_deviation(const char* value, float* out_x, float* out_y) {
+    if (!value || !out_x || !out_y) return false;
+    char* end = nullptr;
+    float x = strtof(value, &end);
+    if (end == value || x <= 0.0f) return false;
+    while (*end && (isspace((unsigned char)*end) || *end == ',')) end++;
+    float y = x;
+    if (*end) {
+        char* end_y = nullptr;
+        float parsed_y = strtof(end, &end_y);
+        if (end_y != end && parsed_y > 0.0f) y = parsed_y;
+    }
+    *out_x = x;
+    *out_y = y;
+    return true;
+}
+
+static bool resolve_svg_gaussian_blur_filter(SvgRenderContext* ctx, Element* elem,
+                                             float bx, float by, float bw, float bh,
+                                             const RdtMatrix* transform,
+                                             SvgGaussianBlurFilter* out_filter) {
+    if (!ctx || !elem || !transform || !out_filter || !ctx->defs) return false;
+    memset(out_filter, 0, sizeof(SvgGaussianBlurFilter));
+
+    char filter_buf[256];
+    const char* filter_attr = get_svg_attr_or_style(ctx, elem, "filter",
+                                                    filter_buf, sizeof(filter_buf));
+    char filter_id[128];
+    if (!parse_svg_url_id(filter_attr, filter_id, sizeof(filter_id))) {
+        return false;
+    }
+
+    Element* filter_elem = lookup_elem_def((SvgDefTable*)ctx->defs, filter_id);
+    if (!filter_elem) {
+        log_debug("[SVG-FILTER] filter ref '%s' not found", filter_id);
+        return false;
+    }
+
+    float std_x = 0.0f;
+    float std_y = 0.0f;
+    bool found_blur = false;
+    for (int64_t i = 0; i < filter_elem->length; i++) {
+        Element* child = get_child_element_at(filter_elem, i);
+        if (!child) continue;
+        const char* tag = get_element_tag_name(child);
+        if (!tag || strcmp(tag, "feGaussianBlur") != 0) continue;
+        if (parse_svg_std_deviation(get_svg_attr(child, "stdDeviation"), &std_x, &std_y)) {
+            found_blur = true;
+            break;
+        }
+    }
+    if (!found_blur) {
+        return false;
+    }
+
+    if (bw <= 0.0f || bh <= 0.0f) {
+        bx = 0.0f;
+        by = 0.0f;
+        bw = ctx->current_viewport_w;
+        bh = ctx->current_viewport_h;
+    }
+
+    const char* units = get_svg_attr(filter_elem, "filterUnits");
+    bool user_space = units && strcmp(units, "userSpaceOnUse") == 0;
+    float fx, fy, fw, fh;
+    if (user_space) {
+        fx = parse_svg_length(get_svg_attr(filter_elem, "x"), bx - bw * 0.1f);
+        fy = parse_svg_length(get_svg_attr(filter_elem, "y"), by - bh * 0.1f);
+        fw = parse_svg_length(get_svg_attr(filter_elem, "width"), bw * 1.2f);
+        fh = parse_svg_length(get_svg_attr(filter_elem, "height"), bh * 1.2f);
+    } else {
+        float ux = parse_svg_pct_or_num(get_svg_attr(filter_elem, "x"), -0.1f);
+        float uy = parse_svg_pct_or_num(get_svg_attr(filter_elem, "y"), -0.1f);
+        float uw = parse_svg_pct_or_num(get_svg_attr(filter_elem, "width"), 1.2f);
+        float uh = parse_svg_pct_or_num(get_svg_attr(filter_elem, "height"), 1.2f);
+        fx = bx + ux * bw;
+        fy = by + uy * bh;
+        fw = uw * bw;
+        fh = uh * bh;
+    }
+    if (fw <= 0.0f || fh <= 0.0f) return false;
+
+    int px = 0, py = 0, pw = 0, ph = 0;
+    opacity_bounds_from_rect(transform, fx, fy, fw, fh, &px, &py, &pw, &ph);
+    if (pw <= 0 || ph <= 0) return false;
+
+    float scale_x = sqrtf(transform->e11 * transform->e11 + transform->e21 * transform->e21);
+    float scale_y = sqrtf(transform->e12 * transform->e12 + transform->e22 * transform->e22);
+    if (scale_x <= 0.0f) scale_x = 1.0f;
+    if (scale_y <= 0.0f) scale_y = scale_x;
+    float sigma_px_x = std_x * scale_x;
+    float sigma_px_y = std_y * scale_y;
+    float sigma_px = sigma_px_x > sigma_px_y ? sigma_px_x : sigma_px_y;
+
+    out_filter->active = true;
+    out_filter->x = px;
+    out_filter->y = py;
+    out_filter->width = pw;
+    out_filter->height = ph;
+    // box_blur_region's argument follows the box-shadow convention where
+    // sigma is half the blur radius; SVG stdDeviation is already sigma.
+    out_filter->blur_radius = sigma_px * 2.0f;
+    log_debug("[SVG-FILTER] resolved feGaussianBlur id='%s' std=(%.2f,%.2f) region=(%d,%d,%d,%d)",
+              filter_id, std_x, std_y, px, py, pw, ph);
+    return true;
+}
+
+static bool svg_filter_clamp_to_surface(SvgGaussianBlurFilter* filter, ImageSurface* surface) {
+    if (!filter || !filter->active || !surface) return false;
+    int x0 = filter->x;
+    int y0 = filter->y;
+    int x1 = filter->x + filter->width;
+    int y1 = filter->y + filter->height;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > surface->width) x1 = surface->width;
+    if (y1 > surface->height) y1 = surface->height;
+    filter->x = x0;
+    filter->y = y0;
+    filter->width = x1 - x0;
+    filter->height = y1 - y0;
+    return filter->width > 0 && filter->height > 0;
+}
+
+static bool svg_begin_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
+    if (!ctx || !filter || !filter->active) return false;
+    if (ctx->dl) {
+        dl_save_backdrop(ctx->dl, filter->x, filter->y, filter->width, filter->height);
+        return true;
+    }
+
+    RenderContext* rdcon = g_svg_active_rdcon;
+    if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) {
+        return false;
+    }
+    ImageSurface* surface = rdcon->ui_context->surface;
+    if (!surface->pixels || !svg_filter_clamp_to_surface(filter, surface)) {
+        return false;
+    }
+
+    render_painter_flush_vector_batch(rdcon);
+    filter->backdrop = (uint32_t*)scratch_alloc(&rdcon->scratch,
+        (size_t)filter->width * (size_t)filter->height * sizeof(uint32_t));
+    if (!filter->backdrop) return false;
+    if (!render_composite_copy_backdrop(surface, filter->backdrop,
+                                        filter->x, filter->y,
+                                        filter->width, filter->height, true)) {
+        scratch_free(&rdcon->scratch, filter->backdrop);
+        filter->backdrop = nullptr;
+        return false;
+    }
+    return true;
+}
+
+static void svg_finish_gaussian_blur_filter(SvgRenderContext* ctx, SvgGaussianBlurFilter* filter) {
+    if (!ctx || !filter || !filter->active) return;
+    if (ctx->dl) {
+        dl_box_blur_region(ctx->dl, filter->x, filter->y, filter->width, filter->height,
+                           filter->blur_radius, 0, nullptr, 0, nullptr, true,
+                           filter->tint_source, filter->tint_color);
+        dl_composite_opacity(ctx->dl, filter->x, filter->y,
+                             filter->width, filter->height, 1.0f, true);
+        filter->active = false;
+        return;
+    }
+
+    RenderContext* rdcon = g_svg_active_rdcon;
+    if (!rdcon || !filter->backdrop || !rdcon->ui_context || !rdcon->ui_context->surface) {
+        return;
+    }
+    render_painter_flush_vector_batch(rdcon);
+    ImageSurface* surface = rdcon->ui_context->surface;
+    premultiply_surface_region(surface, filter->x, filter->y,
+                               filter->width, filter->height);
+    if (filter->tint_source) {
+        tint_premultiplied_surface_region(surface, filter->x, filter->y,
+                                          filter->width, filter->height,
+                                          filter->tint_color);
+    }
+    box_blur_region(&rdcon->scratch, surface, filter->x, filter->y,
+                    filter->width, filter->height, filter->blur_radius);
+    render_composite_source_over_premul(surface, filter->backdrop,
+                                        filter->x, filter->y,
+                                        filter->width, filter->height);
+    scratch_free(&rdcon->scratch, filter->backdrop);
+    filter->backdrop = nullptr;
+    filter->active = false;
+}
+
 // ============================================================================
 // Apply gradient fill via rdt_ API
 // ============================================================================
@@ -1210,6 +1447,14 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                                   const RdtMatrix* transform,
                                   float bx, float by, float bw, float bh) {
     if (!path || !elem) return;
+
+    SvgGaussianBlurFilter filter = {};
+    bool use_filter = resolve_svg_gaussian_blur_filter(ctx, elem, bx, by, bw, bh,
+                                                       transform, &filter);
+    if (use_filter) {
+        filter.tint_source = resolve_svg_solid_filter_tint(ctx, elem, &filter.tint_color);
+        use_filter = svg_begin_gaussian_blur_filter(ctx, &filter);
+    }
 
     // --- FILL ---
     char fill_buf[256];
@@ -1344,6 +1589,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
 
         svg_stroke_path(ctx, path, sc, stroke_width, cap, join,
                         dash_count > 0 ? dashes : nullptr, dash_count, transform);
+    }
+
+    if (use_filter) {
+        svg_finish_gaussian_blur_filter(ctx, &filter);
     }
 }
 
@@ -4208,7 +4457,9 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
-                       const char* source_path, float initial_opacity, bool initial_fill_none) {
+                       const char* source_path, float initial_opacity, bool initial_fill_none,
+                       const Color* initial_stroke_color, bool initial_stroke_none,
+                       float initial_stroke_width) {
     if (!svg_element || !vec) return;
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
@@ -4243,6 +4494,13 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
         ctx.fill_none = false;
     }
     ctx.stroke_width = 1.0f;
+    if (!initial_stroke_none && initial_stroke_color) {
+        ctx.stroke_color = *initial_stroke_color;
+        ctx.stroke_none = false;
+    }
+    if (initial_stroke_width >= 0.0f) {
+        ctx.stroke_width = initial_stroke_width;
+    }
     if (initial_opacity < 0.0f) initial_opacity = 0.0f;
     if (initial_opacity > 1.0f) initial_opacity = 1.0f;
     ctx.opacity = initial_opacity;
@@ -4357,19 +4615,24 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",
               view->x, view->y, view->width, view->height, scale);
 
-    // compute document position
-    float x = rdcon->block.x + view->x * scale;
-    float y = rdcon->block.y + view->y * scale;
+    Rect content_rect = render_geometry_block_content_rect(&rdcon->block, view, scale);
+    float viewport_width = scale > 0.0f ? content_rect.width / scale : content_rect.width;
+    float viewport_height = scale > 0.0f ? content_rect.height / scale : content_rect.height;
+    if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
+        log_debug("[SVG] render_inline_svg: skipped empty content viewport %.1fx%.1f",
+                  viewport_width, viewport_height);
+        return;
+    }
 
     log_debug("[SVG] render_inline_svg: doc pos=(%.1f,%.1f) block pos=(%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f)",
-              x, y, rdcon->block.x, rdcon->block.y,
+              content_rect.x, content_rect.y, rdcon->block.x, rdcon->block.y,
               rdcon->block.clip.left, rdcon->block.clip.top,
               rdcon->block.clip.right, rdcon->block.clip.bottom);
 
     // build base transform: Translate(x,y) * Scale(scale)
     RdtMatrix base_transform = {
-        scale, 0, x,
-        0, scale, y,
+        scale, 0, content_rect.x,
+        0, scale, content_rect.y,
         0, 0, 1
     };
 
@@ -4389,14 +4652,26 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         rc_push_clip(rdcon, clip_path, nullptr);
         rdt_path_free(clip_path);
     }
+    bool has_content_clip = content_rect.width > 0.0f && content_rect.height > 0.0f;
+    if (has_content_clip) {
+        RdtPath* clip_path = rdt_path_new();
+        rdt_path_add_rect(clip_path, content_rect.x, content_rect.y,
+                          content_rect.width, content_rect.height, 0, 0);
+        rc_push_clip(rdcon, clip_path, nullptr);
+        rdt_path_free(clip_path);
+    }
 
     // render SVG directly to the framebuffer
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     Color initial_current_color = rdcon->color;
     Color initial_fill_color = {};
+    Color initial_stroke_color = {};
     Color* current_color_ptr = &initial_current_color;
     Color* fill_color_ptr = nullptr;
+    Color* stroke_color_ptr = nullptr;
     bool initial_fill_none = false;
+    bool initial_stroke_none = true;
+    float initial_stroke_width = -1.0f;
     if (view->in_line && view->in_line->has_color) {
         initial_current_color = view->in_line->color;
     }
@@ -4408,14 +4683,30 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
             fill_color_ptr = &initial_fill_color;
         }
     }
+    if (view->in_line && view->in_line->has_svg_stroke) {
+        if (view->in_line->svg_stroke_none) {
+            initial_stroke_none = true;
+        } else {
+            initial_stroke_color = view->in_line->svg_stroke_color;
+            stroke_color_ptr = &initial_stroke_color;
+            initial_stroke_none = false;
+        }
+    }
+    if (view->in_line && view->in_line->has_svg_stroke_width) {
+        initial_stroke_width = view->in_line->svg_stroke_width;
+    }
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
-    render_svg_to_vec(&rdcon->vec, svg_elem, view->width, view->height,
+    render_svg_to_vec(&rdcon->vec, svg_elem, viewport_width, viewport_height,
                       rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
                       rdcon->dl, current_color_ptr, fill_color_ptr, nullptr, 1.0f,
-                      initial_fill_none);
+                      initial_fill_none, stroke_color_ptr, initial_stroke_none,
+                      initial_stroke_width);
     g_svg_active_rdcon = saved_svg_rdcon;
 
+    if (has_content_clip) {
+        rc_pop_clip(rdcon);
+    }
     if (has_clip) {
         rc_pop_clip(rdcon);
     }

@@ -561,6 +561,7 @@ struct InlineProp {
     Color color;
     bool has_color;
     Color svg_fill_color;
+    Color svg_stroke_color;
     CssEnum vertical_align;
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
@@ -568,6 +569,10 @@ struct InlineProp {
     CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
     bool has_svg_fill;
     bool svg_fill_none;
+    bool has_svg_stroke;
+    bool svg_stroke_none;
+    bool has_svg_stroke_width;
+    float svg_stroke_width;
 };
 
 typedef struct Spacing {

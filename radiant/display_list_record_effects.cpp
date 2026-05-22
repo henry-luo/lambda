@@ -62,7 +62,7 @@ static void dl_copy_effect_params(float* dst, int type, const float* params) {
 // ---------------------------------------------------------------------------
 
 void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
-                          float opacity) {
+                          float opacity, bool premultiplied_source) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_COMPOSITE_OPACITY;
     item->bounds[0] = (float)x0; item->bounds[1] = (float)y0;
@@ -72,6 +72,7 @@ void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
     item->composite_opacity.w = w;
     item->composite_opacity.h = h;
     item->composite_opacity.opacity = opacity;
+    item->composite_opacity.premultiplied_source = premultiplied_source;
 }
 
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h) {
@@ -113,7 +114,9 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
 
 void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
                         int clip_type, const float* clip_params,
-                        int exclude_type, const float* exclude_params) {
+                        int exclude_type, const float* exclude_params,
+                        bool premultiply_source,
+                        bool tint_source, Color tint_color) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_BOX_BLUR_REGION;
     item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
@@ -123,6 +126,9 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
     item->box_blur_region.rw = rw;
     item->box_blur_region.rh = rh;
     item->box_blur_region.blur_radius = blur_radius;
+    item->box_blur_region.premultiply_source = premultiply_source;
+    item->box_blur_region.tint_source = tint_source;
+    item->box_blur_region.tint_color = tint_color;
     item->box_blur_region.clip_type = clip_type;
     dl_copy_effect_params(item->box_blur_region.clip_params, clip_type, clip_params);
     item->box_blur_region.exclude_type = exclude_type;

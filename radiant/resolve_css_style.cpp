@@ -3270,6 +3270,9 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
         CSS_PROPERTY_WHITE_SPACE,
+        CSS_PROPERTY_FILL,
+        CSS_PROPERTY_STROKE,
+        CSS_PROPERTY_STROKE_WIDTH,
         CSS_PROPERTY_VISIBILITY,
         CSS_PROPERTY_EMPTY_CELLS,
         CSS_PROPERTY_DIRECTION,
@@ -3882,6 +3885,34 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else {
                 span->in_line->svg_fill_color = resolve_color_value(lycon, value);
                 span->in_line->svg_fill_none = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_STROKE: {
+            log_debug("[CSS] Processing SVG stroke property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            span->in_line->has_svg_stroke = true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->in_line->svg_stroke_none = true;
+            } else {
+                span->in_line->svg_stroke_color = resolve_color_value(lycon, value);
+                span->in_line->svg_stroke_none = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_STROKE_WIDTH: {
+            log_debug("[CSS] Processing SVG stroke-width property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            float width = resolve_length_value(lycon, CSS_PROPERTY_STROKE_WIDTH, value);
+            if (!isnan(width)) {
+                span->in_line->svg_stroke_width = max(width, 0.0f);
+                span->in_line->has_svg_stroke_width = true;
             }
             break;
         }
@@ -7531,8 +7562,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             // Style keyword
                             border_style = keyword;
                         } else {
-                            // Color keyword
-                            border_color = color_name_to_rgb(keyword);
+                            // color keywords include currentColor, which resolves against
+                            // the cascaded color on the same element.
+                            border_color = resolve_color_value(lycon, val);
                             border_color_set = true;
                         }
                     }
@@ -7573,7 +7605,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HIDDEN) {
                         border_style = keyword;
                     } else {
-                        border_color = color_name_to_rgb(keyword);
+                        // color keywords include currentColor, which resolves against
+                        // the cascaded color on the same element.
+                        border_color = resolve_color_value(lycon, value);
                         border_color_set = true;
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
