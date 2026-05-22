@@ -473,6 +473,28 @@ TEST_F(PdfWriterTest, ShowText) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, SetTextMatrix) {
+    const char* filename = "./temp/test_pdf_text_matrix.pdf";
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+    HPDF_Font font = HPDF_GetFont(doc, "Helvetica", NULL);
+
+    HPDF_Page_SetFontAndSize(page, font, 12.0f);
+    EXPECT_EQ(HPDF_Page_SetTextMatrix(page, 1.0f, 0.0f, 0.0f, 1.0f, 10.0f, 20.0f),
+              HPDF_ERROR_INVALID_STATE);
+    EXPECT_EQ(HPDF_Page_BeginText(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetTextMatrix(page, 0.0f, 1.0f, -1.0f, 0.0f, 100.0f, 700.0f),
+              HPDF_OK);
+    EXPECT_EQ(HPDF_Page_ShowText(page, "Rotated"), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_EndText(page), HPDF_OK);
+    EXPECT_EQ(HPDF_SaveToFile(doc, filename), HPDF_OK);
+
+    EXPECT_TRUE(file_contains(filename, "0 1 -1 0 100 700 Tm"));
+    EXPECT_TRUE(file_contains(filename, "Rotated"));
+
+    HPDF_Free(doc);
+}
+
 TEST_F(PdfWriterTest, TextWithSpecialChars) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_Page page = HPDF_AddPage(doc);

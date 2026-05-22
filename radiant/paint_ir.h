@@ -14,8 +14,8 @@
 //   - PaintIR (this file): semantic, target-neutral commands.
 //   - DisplayList (display_list.h): ONE lowering of PaintIR for raster.
 //       paint_ir_lower_raster() turns PaintIR -> DisplayList. Tiled replay
-//       re-replays that DisplayList; SVG/PDF lowerings (later phases) consume
-//       PaintIR directly.
+//       re-replays that DisplayList; SVG/PDF lowerings consume PaintIR directly
+//       as command families are migrated.
 //
 // Migration status (Phase C step 1):
 //   - The vector primitive ops below mirror the rc_* painter gateway 1:1 and
@@ -23,9 +23,9 @@
 //     identical. This is the "thin layer above DisplayList" the design doc's
 //     pragmatic migration note describes.
 //   - The higher-level semantic ops (glyph runs, effect groups, SVG subscene)
-//     are DECLARED here as the canonical contract but are lowered in later
-//     phases (E: effects, F: inline SVG). They are intentionally not yet
-//     emitted by the live render path.
+//     are the canonical contract. Lowering support is deliberately incremental:
+//     SVG already handles text runs and opacity-only groups; richer effects and
+//     nested SVG subscenes still expand in later phases.
 // ==========================================================================
 
 #include "display_list.h"   // DisplayList + all rdt_* / Color / Bound / ClipShape types
@@ -49,12 +49,15 @@ typedef enum {
     PAINT_FILL_LINEAR_GRADIENT,
     PAINT_FILL_RADIAL_GRADIENT,
     PAINT_DRAW_IMAGE,
+    PAINT_DRAW_IMAGE_RESOURCE,
     PAINT_DRAW_GLYPH,
     PAINT_DRAW_PICTURE,
     PAINT_VIDEO_PLACEHOLDER,
     PAINT_WEBVIEW_LAYER_PLACEHOLDER,
     PAINT_PUSH_CLIP,
     PAINT_POP_CLIP,
+    PAINT_PUSH_TRANSFORM,
+    PAINT_POP_TRANSFORM,
 
     // ── Raster-lowering tier (pixel-domain ops) ────────────────────────────
     // These mirror the pixel-domain DisplayList commands 1:1. Per the design
@@ -75,10 +78,10 @@ typedef enum {
     PAINT_FILL_SURFACE_RECT,
     PAINT_BLIT_SURFACE_SCALED,
 
-    // ── Higher-level semantic ops (contract only; lowered in later phases) ──
+    // ── Higher-level semantic ops (incrementally lowered by target) ─────────
     // A run of glyphs sharing a font/colour — NOT rasterised bitmaps. Raster
-    // lowering rasterises each glyph to a DL_DRAW_GLYPH; SVG lowering emits a
-    // native <text> run. (Phase E/F.)
+    // lowering still ignores semantic text runs; SVG lowering emits native
+    // <text> when the run carries a UTF-8 text payload.
     PAINT_GLYPH_RUN,
     // CSS stacking effect (opacity, blend, filter, backdrop, clip, transform,
     // isolation). Raster lowering becomes save-backdrop / composite / blur
@@ -157,6 +160,14 @@ typedef struct {
 } PaintDrawImage;
 
 typedef struct {
+    ImageSurface* image;     // borrowed; lowerers decode or reference URL as needed
+    float dst_x, dst_y, dst_w, dst_h;
+    uint8_t opacity;
+    bool has_transform;
+    RdtMatrix transform;
+} PaintDrawImageResource;
+
+typedef struct {
     GlyphBitmap bitmap;      // descriptor copy; bitmap buffer borrowed
     int x, y;
     Color color;
@@ -197,6 +208,10 @@ typedef struct {
     bool has_transform;
     RdtMatrix transform;
 } PaintPushClip;
+
+typedef struct {
+    RdtMatrix transform;
+} PaintPushTransform;
 
 // ── Raster-lowering tier payloads (mirror the pixel-domain Dl* structs) ────
 
@@ -284,7 +299,7 @@ typedef struct {
     int clip_depth;
 } PaintBlitSurfaceScaled;
 
-// ── Higher-level semantic payloads (contract; not yet lowered) ─────────────
+// ── Higher-level semantic payloads (incrementally lowered by target) ────────
 
 // Effect group descriptor. Mirrors the CSS stacking effect inputs so every
 // backend can decide native-vs-fallback (see design doc §6).
@@ -317,10 +332,18 @@ typedef struct {
     uint64_t resource_generation; // immutable parsed DOM generation (retain-safe)
 } PaintSvgSubscene;
 
-// A semantic glyph run (Phase E). Positions/text/font, not rasterised bitmaps.
+// A semantic glyph run. Positions/text/font, not rasterised bitmaps.
 typedef struct {
     void* font;              // FontBox* / font handle
     Color color;
+    const char* text;        // optional native text payload; UTF-8, borrowed
+    int text_len;            // bytes; 0 means empty, negative means strlen(text)
+    const char* font_family; // borrowed; optional for vector text lowering
+    float font_size;
+    float x, baseline_y;
+    float word_spacing;
+    int font_weight;         // CSS numeric weight; 0 = omit
+    bool italic;
     const uint32_t* glyph_ids;   // borrowed
     const float* xs;             // borrowed pen positions
     const float* ys;
@@ -344,11 +367,13 @@ typedef struct PaintCmd {
         PaintFillLinearGradient fill_linear_gradient;
         PaintFillRadialGradient fill_radial_gradient;
         PaintDrawImage          draw_image;
+        PaintDrawImageResource  draw_image_resource;
         PaintDrawGlyph          draw_glyph;
         PaintDrawPicture        draw_picture;
         PaintVideoPlaceholder   video_placeholder;
         PaintWebviewLayerPlaceholder webview_layer_placeholder;
         PaintPushClip           push_clip;
+        PaintPushTransform      push_transform;
         PaintSaveBackdrop       save_backdrop;
         PaintCompositeOpacity   composite_opacity;
         PaintApplyBlendMode     apply_blend_mode;
@@ -424,6 +449,11 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
                       void* resource_owner);
+void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
+                               float dst_x, float dst_y,
+                               float dst_w, float dst_h,
+                               uint8_t opacity,
+                               const RdtMatrix* transform);
 void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
                       Color color, bool is_color_emoji, const Bound* clip,
                       const RdtMatrix* transform, uint64_t resource_generation);
@@ -439,6 +469,8 @@ void paint_webview_layer_placeholder(PaintList* pl, void* surface,
                                      uint64_t surface_generation);
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform);
 void paint_pop_clip(PaintList* pl);
+void paint_push_transform(PaintList* pl, const RdtMatrix* transform);
+void paint_pop_transform(PaintList* pl);
 
 // Raster-lowering tier (pixel-domain effect ops; see enum comment).
 void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h);
@@ -472,13 +504,19 @@ void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
                                ClipShape** clip_shapes, int clip_depth,
                                uint8_t opacity, uint64_t src_generation);
 
+// Higher-level semantic ops (target lowerings are intentionally incremental).
+void paint_begin_effect_group(PaintList* pl, const PaintEffectGroup* group);
+void paint_end_effect_group(PaintList* pl);
+void paint_svg_subscene(PaintList* pl, const PaintSvgSubscene* subscene);
+void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run);
+
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList
 //
 // Lowers the vector primitive ops 1:1 onto the matching dl_* commands. The
 // resulting DisplayList is identical to recording those dl_* calls directly,
 // which keeps raster output byte-for-byte unchanged. Higher-level semantic ops
-// (glyph run, effect group, SVG subscene) are not yet lowered here.
+// that lack raster expansion here are ignored by this lowering.
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
@@ -505,9 +543,26 @@ typedef struct {
     int unsupported_count;
 } PaintSvgLoweringStats;
 
+typedef struct {
+    int indent_level;
+    int open_clip_depth;
+    int skipped_clip_depth;
+    int open_transform_depth;
+    int skipped_transform_depth;
+    int open_effect_depth;
+    int skipped_effect_depth;
+} PaintSvgLoweringState;
+
+void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level);
+
 void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
                         const PaintSvgLoweringOptions* options,
                         PaintSvgLoweringStats* stats);
+
+void paint_ir_lower_svg_stream(const PaintList* pl, StrBuf* out,
+                               const PaintSvgLoweringOptions* options,
+                               PaintSvgLoweringState* state,
+                               PaintSvgLoweringStats* stats);
 
 #ifdef __cplusplus
 }

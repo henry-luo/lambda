@@ -373,7 +373,9 @@ The deepest divergence is not "the same paint semantics live in two files." It i
 that the algorithm for *how to paint one element* exists twice:
 
 - `render_walk_block()` in `render_walk.cpp` runs the sequence
-  font → boundary → position → inline-SVG → image → opacity → transform → children.
+  font → position → transform → boundary → inline-SVG → image → opacity → children
+  → column-rules, so export transforms now include the block's own paint as well
+  as descendants.
   This is what SVG and PDF export use.
 - The raster path never runs that body. `render_walk_children()` sees the raster
   backend has set the `render_block`/`render_inline` full-node overrides and calls

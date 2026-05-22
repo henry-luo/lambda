@@ -63,7 +63,7 @@ struct RenderBackend {
     void (*end_opacity)(void* ctx);
 
     // ── Transform wrapper ──────────────────────────────────────────────
-    // Called around a block's content when CSS transforms are present.
+    // Called around a block's self-paint and contents when CSS transforms are present.
     void (*begin_transform)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
     void (*end_transform)(void* ctx);
 

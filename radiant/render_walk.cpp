@@ -32,14 +32,20 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
         }
     }
 
-    // render boundary (background, borders, shadow, outline)
-    if (block->bound && backend->render_bound) {
-        backend->render_bound(backend->ctx, block, pa_x + block->x, pa_y + block->y);
-    }
-
     // propagate position
     state->x = pa_x + block->x;
     state->y = pa_y + block->y;
+
+    bool has_transform = block->transform && block->transform->functions;
+    bool opened_transform = has_transform && backend->begin_transform && backend->end_transform;
+    if (opened_transform) {
+        backend->begin_transform(backend->ctx, block, state->x, state->y);
+    }
+
+    // render boundary (background, borders, shadow, outline)
+    if (block->bound && backend->render_bound) {
+        backend->render_bound(backend->ctx, block, state->x, state->y);
+    }
 
     // update inherited color
     if (block->in_line && block->in_line->has_color) {
@@ -50,6 +56,9 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
     if (block->tag_id == HTM_TAG_SVG) {
         if (backend->render_inline_svg) {
             backend->render_inline_svg(backend->ctx, block, state->x, state->y);
+        }
+        if (opened_transform) {
+            backend->end_transform(backend->ctx);
         }
         // restore and return — SVG children are not HTML views
         state->x = pa_x; state->y = pa_y;
@@ -76,13 +85,8 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
                               ? block->in_line->opacity : 1.0f;
         bool has_opacity = elem_opacity < 0.9995f;
 
-        bool has_transform = block->transform && block->transform->functions;
-
         if (has_opacity && backend->begin_opacity) {
             backend->begin_opacity(backend->ctx, elem_opacity);
-        }
-        if (has_transform && backend->begin_transform) {
-            backend->begin_transform(backend->ctx, block, state->x, state->y);
         }
 
         if (backend->begin_block_children) {
@@ -95,9 +99,6 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
             backend->end_block_children(backend->ctx, block);
         }
 
-        if (has_transform && backend->end_transform) {
-            backend->end_transform(backend->ctx);
-        }
         if (has_opacity && backend->end_opacity) {
             backend->end_opacity(backend->ctx);
         }
@@ -108,6 +109,10 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
         }
+    }
+
+    if (opened_transform) {
+        backend->end_transform(backend->ctx);
     }
 
     // restore

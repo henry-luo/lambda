@@ -21,10 +21,19 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
 #define PDF_PATH_KAPPA 0.5522847498f
+#define PDF_PAINT_TRANSFORM_STACK_MAX 64
+
+typedef struct PdfPaintLoweringState {
+    int active_transform_depth;
+    int skipped_transform_depth;
+    RdtMatrix current_transform;
+    RdtMatrix transform_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
+} PdfPaintLoweringState;
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -41,6 +50,10 @@ typedef struct PdfRenderContext {
     Color color;
     BlockBlot block;  // Current block context for coordinate transformation
     PaintList paint_list;
+    PdfPaintLoweringState paint_state;
+    bool transform_emitted_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
+    int transform_emitted_depth;
+    int transform_emitted_overflow_depth;
 } PdfRenderContext;
 
 // Forward declarations
@@ -52,6 +65,13 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx);
 static void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data) {
     log_error("PDF Error: error_no=0x%04X, detail_no=0x%04X",
               (unsigned int)error_no, (unsigned int)detail_no);
+}
+
+static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
+    if (!state) return;
+    memset(state, 0, sizeof(PdfPaintLoweringState));
+    state->current_transform = rdt_matrix_identity();
+    state->transform_stack[0] = state->current_transform;
 }
 
 // Helper function to get PDF font name from system font
@@ -354,6 +374,17 @@ static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
     }
 }
 
+static const RdtMatrix* pdf_compose_transform(const RdtMatrix* stack_transform,
+                                              const RdtMatrix* local_transform,
+                                              RdtMatrix* out) {
+    if (stack_transform && local_transform) {
+        *out = rdt_matrix_multiply(stack_transform, local_transform);
+        return out;
+    }
+    if (stack_transform) return stack_transform;
+    return local_transform;
+}
+
 static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
                                 int src_w, int src_h, int src_stride,
                                 float dst_x, float dst_y, float dst_w, float dst_h,
@@ -401,8 +432,115 @@ static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
     return true;
 }
 
+static void pdf_text_matrix_from_transform(PdfRenderContext* ctx,
+                                           const RdtMatrix* transform,
+                                           float x, float baseline_y,
+                                           float* a, float* b, float* c,
+                                           float* d, float* e, float* f) {
+    float tx = x;
+    float ty = baseline_y;
+    pdf_transform_point(transform, x, baseline_y, &tx, &ty);
+    *a = transform->e11;
+    *b = -transform->e21;
+    *c = -transform->e12;
+    *d = transform->e22;
+    *e = tx;
+    *f = ctx->page_height - ty;
+}
+
+static void pdf_show_text_word(PdfRenderContext* ctx, const char* word,
+                               float x, float baseline_y,
+                               const RdtMatrix* transform) {
+    HPDF_Page_BeginText(ctx->current_page);
+    if (transform) {
+        float a = 1.0f, b = 0.0f, c = 0.0f, d = 1.0f, e = x;
+        float f = ctx->page_height - baseline_y;
+        pdf_text_matrix_from_transform(ctx, transform, x, baseline_y,
+                                       &a, &b, &c, &d, &e, &f);
+        HPDF_Page_SetTextMatrix(ctx->current_page, a, b, c, d, e, f);
+        HPDF_Page_ShowText(ctx->current_page, word);
+    } else {
+        HPDF_Page_TextOut(ctx->current_page, x, ctx->page_height - baseline_y, word);
+    }
+    HPDF_Page_EndText(ctx->current_page);
+}
+
+static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run,
+                                 const RdtMatrix* stack_transform) {
+    if (!ctx || !run || !run->text) return;
+    if (!ctx->current_font) return;
+
+    float font_size = run->font_size > 0.0f ? run->font_size : 16.0f;
+    HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
+    pdf_set_color(ctx, run->color);
+
+    RdtMatrix composed_transform;
+    const RdtMatrix* effective_transform =
+        pdf_compose_transform(stack_transform,
+                              run->has_transform ? &run->transform : NULL,
+                              &composed_transform);
+
+    FontBox* font = (FontBox*)run->font;
+    FontHandle* font_handle = font ? font->font_handle : nullptr;
+    float space_width = font && font->style ? font->style->space_width : 4.0f;
+    float adjusted_space_width = space_width + run->word_spacing;
+    if (adjusted_space_width < 0.0f) adjusted_space_width = space_width;
+
+    int text_len = run->text_len;
+    if (text_len < 0) {
+        text_len = (int)strlen(run->text); // INT_CAST_OK: text run byte length is bounded by source TextRect.
+    }
+    if (text_len <= 0) return;
+
+    float x = run->x;
+    int word_start = 0;
+    for (int i = 0; i <= text_len; i++) {
+        bool at_end = i == text_len;
+        bool at_space = !at_end && run->text[i] == ' ';
+        if (!at_end && !at_space) continue;
+
+        if (i > word_start) {
+            char word[256];
+            int word_len = i - word_start;
+            if (word_len < (int)sizeof(word)) { // INT_CAST_OK: fixed local buffer size check.
+                memcpy(word, run->text + word_start, (size_t)word_len);
+                word[word_len] = '\0';
+
+                pdf_show_text_word(ctx, word, x, run->baseline_y,
+                                   effective_transform);
+
+                if (font_handle) {
+                    for (int j = 0; j < word_len; j++) {
+                        x += font_measure_char(font_handle, (uint32_t)word[j]);
+                    }
+                }
+            }
+        }
+
+        if (!at_end) {
+            x += adjusted_space_width;
+        }
+        word_start = i + 1;
+    }
+}
+
 static void pdf_lower_paint_list(PdfRenderContext* ctx) {
-    if (!paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
+    bool has_transform_command = false;
+    for (int i = 0; i < ctx->paint_list.count; i++) {
+        PaintOp op = ctx->paint_list.cmds[i].op;
+        if (op == PAINT_PUSH_TRANSFORM || op == PAINT_POP_TRANSFORM) {
+            has_transform_command = true;
+            break;
+        }
+    }
+
+    PdfPaintLoweringState* state = &ctx->paint_state;
+    bool streaming_transform =
+        has_transform_command ||
+        state->active_transform_depth > 0 ||
+        state->skipped_transform_depth > 0;
+    if (!streaming_transform &&
+        !paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
         paint_list_clear(&ctx->paint_list);
         return;
     }
@@ -410,13 +548,71 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
     int skipped_clip_depth = 0;
+
     for (int i = 0; i < ctx->paint_list.count; i++) {
         PaintCmd* cmd = &ctx->paint_list.cmds[i];
+        switch (cmd->op) {
+        case PAINT_PUSH_TRANSFORM: {
+            if (state->skipped_transform_depth > 0) {
+                state->skipped_transform_depth++;
+                continue;
+            }
+            if (!caps || !caps->transforms) {
+                state->skipped_transform_depth++;
+                continue;
+            }
+            if (state->active_transform_depth >= PDF_PAINT_TRANSFORM_STACK_MAX) {
+                log_error("[PDF_PAINT_IR] transform stack overflow in lowerer");
+                state->skipped_transform_depth++;
+                continue;
+            }
+            PaintPushTransform* p = &cmd->push_transform;
+            state->transform_stack[state->active_transform_depth] =
+                state->current_transform;
+            state->current_transform = state->active_transform_depth > 0
+                ? rdt_matrix_multiply(&state->current_transform, &p->transform)
+                : p->transform;
+            state->active_transform_depth++;
+            continue;
+        }
+        case PAINT_POP_TRANSFORM:
+            if (state->skipped_transform_depth > 0) {
+                state->skipped_transform_depth--;
+            } else if (state->active_transform_depth > 0) {
+                state->active_transform_depth--;
+                state->current_transform =
+                    state->transform_stack[state->active_transform_depth];
+            } else {
+                log_error("[PDF_PAINT_IR] transform stack underflow in lowerer");
+            }
+            continue;
+        default:
+            break;
+        }
+
+        if (state->skipped_transform_depth > 0) {
+            continue;
+        }
+
+        const RdtMatrix* stack_transform =
+            state->active_transform_depth > 0 ? &state->current_transform : NULL;
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
-            pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+            if (!stack_transform) {
+                pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+                break;
+            }
+            if (p->color.a == 0) break;
+            pdf_set_color(ctx, p->color);
+            PdfPathContext path_ctx = {};
+            path_ctx.pdf = ctx;
+            path_ctx.transform = stack_transform;
+            if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
+                                           0.0f, 0.0f)) {
+                HPDF_Page_Fill(ctx->current_page);
+            }
             break;
         }
         case PAINT_FILL_ROUNDED_RECT: {
@@ -426,6 +622,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             pdf_set_color(ctx, p->color);
             PdfPathContext path_ctx = {};
             path_ctx.pdf = ctx;
+            path_ctx.transform = stack_transform;
             if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
                                            p->rx, p->ry)) {
                 HPDF_Page_Fill(ctx->current_page);
@@ -437,8 +634,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             PaintFillPath* p = &cmd->fill_path;
             if (p->color.a == 0 || p->rule != RDT_FILL_WINDING) break;
             if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
             pdf_set_color(ctx, p->color);
-            if (pdf_render_path(ctx, p->path, p->has_transform ? &p->transform : nullptr)) {
+            if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Fill(ctx->current_page);
             }
             break;
@@ -448,9 +650,14 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             PaintStrokePath* p = &cmd->stroke_path;
             if (p->color.a == 0 || p->dash_count > 0) break;
             if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
             pdf_set_color(ctx, p->color);
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
-            if (pdf_render_path(ctx, p->path, p->has_transform ? &p->transform : nullptr)) {
+            if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Stroke(ctx->current_page);
             }
             break;
@@ -459,9 +666,46 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             if (!caps || !caps->images) break;
             PaintDrawImage* p = &cmd->draw_image;
             if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
             pdf_draw_abgr_image(ctx, p->pixels, p->src_w, p->src_h, p->src_stride,
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
-                                p->opacity, p->has_transform ? &p->transform : nullptr);
+                                p->opacity, effective_transform);
+            break;
+        }
+        case PAINT_DRAW_IMAGE_RESOURCE: {
+            if (!caps || !caps->images) break;
+            PaintDrawImageResource* p = &cmd->draw_image_resource;
+            if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
+            ImageSurface* img = p->image;
+            if (!img || p->dst_w <= 0.0f || p->dst_h <= 0.0f) break;
+            int target_w = (int)ceilf(p->dst_w); // INT_CAST_OK: image decode target width is integer pixels.
+            int target_h = (int)ceilf(p->dst_h); // INT_CAST_OK: image decode target height is integer pixels.
+            if (target_w <= 0 || target_h <= 0) break;
+            image_surface_ensure_decoded(img, target_w, target_h);
+            int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
+            int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
+            int src_stride = img->pitch > 0 ? img->pitch / 4 : src_w;
+            if (!img->pixels || src_w <= 0 || src_h <= 0 || src_stride <= 0) break;
+            pdf_draw_abgr_image(ctx, (const uint32_t*)img->pixels,
+                                src_w, src_h, src_stride,
+                                p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                p->opacity,
+                                effective_transform);
+            break;
+        }
+        case PAINT_GLYPH_RUN: {
+            if (!caps || !caps->glyph_runs) break;
+            PaintGlyphRun* p = &cmd->glyph_run;
+            pdf_render_glyph_run(ctx, p, stack_transform);
             break;
         }
         case PAINT_PUSH_CLIP: {
@@ -478,8 +722,13 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                 skipped_clip_depth++;
                 break;
             }
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
             if (pdf_push_clip_path(ctx, p->clip_path,
-                                   p->has_transform ? &p->transform : nullptr)) {
+                                   effective_transform)) {
                 active_clip_depth++;
             } else {
                 skipped_clip_depth++;
@@ -517,13 +766,10 @@ static void pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color colo
 static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
                                  Rect* dst_rect) {
     if (!ctx || !img || !dst_rect) return;
-    int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
-    int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
-    if (!img->pixels || src_w <= 0 || src_h <= 0) return;
-    paint_draw_image(&ctx->paint_list, (const uint32_t*)img->pixels,
-                     src_w, src_h, src_w,
-                     dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
-                     255, nullptr, img);
+    paint_draw_image_resource(&ctx->paint_list, img,
+                              dst_rect->x, dst_rect->y,
+                              dst_rect->width, dst_rect->height,
+                              255, nullptr);
     pdf_lower_paint_list(ctx);
 }
 
@@ -703,44 +949,20 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         adjusted_space_width = space_width + (extra_space / space_count);
     }
 
-    // Render text word by word with adjusted spacing
-    pdf_set_color(ctx, ctx->color);
     float baseline_offset = font_size * 0.8f;
     float baseline_y = y + baseline_offset;
-    float pdf_y = ctx->page_height - baseline_y;
-
-    float x = base_x;
-    size_t word_start = 0;
-    for (size_t i = 0; i <= strlen(text_content); i++) {
-        if (i == strlen(text_content) || text_content[i] == ' ') {
-            if (i > word_start) {
-                // Render word
-                char word[256];
-                size_t word_len = i - word_start;
-                if (word_len < sizeof(word)) {
-                    strncpy(word, text_content + word_start, word_len);
-                    word[word_len] = '\0';
-
-                    HPDF_Page_BeginText(ctx->current_page);
-                    HPDF_Page_TextOut(ctx->current_page, x, pdf_y, word);
-                    HPDF_Page_EndText(ctx->current_page);
-
-                    // Calculate word width using font metrics
-                    if (ctx->font.font_handle) {
-                        for (size_t j = 0; j < word_len; j++) {
-                            x += font_measure_char(ctx->font.font_handle, (uint32_t)word[j]);
-                        }
-                    }
-                }
-            }
-
-            // Add space (adjusted if justified)
-            if (i < strlen(text_content)) {
-                x += adjusted_space_width;
-            }
-            word_start = i + 1;
-        }
-    }
+    PaintGlyphRun run = {};
+    run.font = &ctx->font;
+    run.color = ctx->color;
+    run.text = text_content;
+    run.text_len = (int)strlen(text_content); // INT_CAST_OK: text run byte length is bounded by TextRect input.
+    run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
+    run.font_size = font_size;
+    run.x = base_x;
+    run.baseline_y = baseline_y;
+    run.word_spacing = adjusted_space_width - space_width;
+    paint_glyph_run(&ctx->paint_list, &run);
+    pdf_lower_paint_list(ctx);
 
     mem_free(text_content);
     text_rect = text_rect->next;
@@ -750,6 +972,92 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 // ============================================================================
 // PDF RenderBackend vtable callbacks
 // ============================================================================
+
+static bool pdf_build_transform_matrix(const TransformProp* tp, float elem_x, float elem_y,
+                                       float elem_w, float elem_h, RdtMatrix* out_matrix) {
+    if (!tp || !tp->functions) return false;
+
+    double ma = 1.0, mb = 0.0, mc = 0.0, md = 1.0, me = 0.0, mf = 0.0;
+    float ox = tp->origin_x_percent ? elem_x + elem_w * tp->origin_x / 100.0f
+                                    : elem_x + tp->origin_x;
+    float oy = tp->origin_y_percent ? elem_y + elem_h * tp->origin_y / 100.0f
+                                    : elem_y + tp->origin_y;
+    me += ox;
+    mf += oy;
+
+    for (TransformFunction* tf = tp->functions; tf; tf = tf->next) {
+        double la = 1.0, lb = 0.0, lc = 0.0, ld = 1.0, le = 0.0, lf = 0.0;
+        switch (tf->type) {
+            case TRANSFORM_TRANSLATE:
+            case TRANSFORM_TRANSLATEX:
+            case TRANSFORM_TRANSLATEY: {
+                float tx = tf->params.translate.x;
+                float ty = tf->params.translate.y;
+                if (!isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
+                if (!isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
+                le = tx; lf = ty;
+                break;
+            }
+            case TRANSFORM_TRANSLATE3D:
+            case TRANSFORM_TRANSLATEZ:
+                le = tf->params.translate3d.x; lf = tf->params.translate3d.y;
+                break;
+            case TRANSFORM_SCALE:
+            case TRANSFORM_SCALEX:
+            case TRANSFORM_SCALEY:
+                la = tf->params.scale.x > 0 ? tf->params.scale.x : 1.0;
+                ld = tf->params.scale.y > 0 ? tf->params.scale.y : 1.0;
+                break;
+            case TRANSFORM_ROTATE:
+            case TRANSFORM_ROTATEZ: {
+                double ang = tf->params.angle;
+                la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
+                break;
+            }
+            case TRANSFORM_SKEWX:
+                lc = tan((double)tf->params.angle);
+                break;
+            case TRANSFORM_SKEWY:
+                lb = tan((double)tf->params.angle);
+                break;
+            case TRANSFORM_MATRIX:
+                la = tf->params.matrix.a; lb = tf->params.matrix.b;
+                lc = tf->params.matrix.c; ld = tf->params.matrix.d;
+                le = tf->params.matrix.e; lf = tf->params.matrix.f;
+                break;
+            default:
+                break;
+        }
+        double na = ma * la + mc * lb;
+        double nb = mb * la + md * lb;
+        double nc = ma * lc + mc * ld;
+        double nd = mb * lc + md * ld;
+        double ne = ma * le + mc * lf + me;
+        double nf = mb * le + md * lf + mf;
+        ma = na; mb = nb; mc = nc; md = nd; me = ne; mf = nf;
+    }
+
+    me -= ox;
+    mf -= oy;
+
+    bool is_identity = fabs(ma - 1.0) < 1e-5 && fabs(mb) < 1e-5 &&
+                       fabs(mc) < 1e-5 && fabs(md - 1.0) < 1e-5 &&
+                       fabs(me) < 1e-5 && fabs(mf) < 1e-5;
+    if (is_identity) return false;
+
+    if (out_matrix) {
+        out_matrix->e11 = ma;
+        out_matrix->e12 = mc;
+        out_matrix->e13 = me;
+        out_matrix->e21 = mb;
+        out_matrix->e22 = md;
+        out_matrix->e23 = mf;
+        out_matrix->e31 = 0.0f;
+        out_matrix->e32 = 0.0f;
+        out_matrix->e33 = 1.0f;
+    }
+    return true;
+}
 
 static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
@@ -829,10 +1137,131 @@ static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    int target_w = (int)ceilf(content_rect.width); // INT_CAST_OK: image decode target width is integer pixels.
-    int target_h = (int)ceilf(content_rect.height); // INT_CAST_OK: image decode target height is integer pixels.
-    image_surface_ensure_decoded(img, target_w, target_h);
     pdf_paint_draw_image(ctx, img, &content_rect);
+}
+
+static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !block || !block->multicol) return;
+
+    MultiColumnProp* mc = block->multicol;
+    int rule_column_count = mc->computed_used_column_count > 0
+        ? mc->computed_used_column_count
+        : mc->computed_column_count;
+    if (rule_column_count <= 1 || mc->rule_width <= 0.0f ||
+        mc->rule_style == CSS_VALUE_NONE || mc->rule_color.a == 0) {
+        return;
+    }
+
+    if (mc->rule_style == CSS_VALUE_DOTTED ||
+        mc->rule_style == CSS_VALUE_DASHED) {
+        log_debug("[PDF_PAINT_IR] column-rule style requires dashed strokes; skipping style=%d",
+                  mc->rule_style);
+        return;
+    }
+
+    float column_width = mc->computed_column_width;
+    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+    float block_x = abs_x;
+    float block_y = abs_y;
+    if (block->bound) {
+        block_x += block->bound->padding.left;
+        block_y += block->bound->padding.top;
+    }
+
+    float rule_height = block->height;
+    if (block->bound) {
+        rule_height -= block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            rule_height -= block->bound->border->width.top +
+                           block->bound->border->width.bottom;
+        }
+    }
+
+    if (rule_height <= 0.0f) {
+        View* child = static_cast<View*>(block->first_child);
+        float max_bottom = 0.0f;
+        while (child) {
+            if (child->is_element()) {
+                ViewBlock* child_block = lam::view_require_block(child);
+                float child_bottom = child_block->y + child_block->height;
+                if (child_bottom > max_bottom) max_bottom = child_bottom;
+            }
+            child = child->next();
+        }
+        rule_height = max_bottom;
+    }
+    if (rule_height <= 0.0f) return;
+
+    for (int i = 0; i < rule_column_count - 1; i++) {
+        float rule_x = block_x + (i + 1) * column_width + i * gap +
+                       gap / 2.0f - mc->rule_width / 2.0f;
+
+        if (mc->rule_style == CSS_VALUE_DOUBLE) {
+            float thin_width = mc->rule_width / 3.0f;
+            RdtPath* left = rdt_path_new();
+            RdtPath* right = rdt_path_new();
+            if (left && right) {
+                rdt_path_move_to(left, rule_x - thin_width, block_y);
+                rdt_path_line_to(left, rule_x - thin_width, block_y + rule_height);
+                pdf_paint_stroke_path(ctx, left, mc->rule_color, thin_width);
+
+                rdt_path_move_to(right, rule_x + thin_width, block_y);
+                rdt_path_line_to(right, rule_x + thin_width, block_y + rule_height);
+                pdf_paint_stroke_path(ctx, right, mc->rule_color, thin_width);
+            }
+            if (left) rdt_path_free(left);
+            if (right) rdt_path_free(right);
+        } else {
+            RdtPath* path = rdt_path_new();
+            if (path) {
+                rdt_path_move_to(path, rule_x, block_y);
+                rdt_path_line_to(path, rule_x, block_y + rule_height);
+                pdf_paint_stroke_path(ctx, path, mc->rule_color, mc->rule_width);
+                rdt_path_free(path);
+            }
+        }
+    }
+}
+
+static void pdf_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !block) return;
+    if (ctx->transform_emitted_depth >= PDF_PAINT_TRANSFORM_STACK_MAX) {
+        log_error("[PDF_PAINT_IR] transform callback stack overflow while rendering %s",
+                  block->node_name());
+        ctx->transform_emitted_overflow_depth++;
+        return;
+    }
+
+    RdtMatrix transform = {};
+    bool has = pdf_build_transform_matrix(block->transform, abs_x, abs_y,
+                                          block->width, block->height,
+                                          &transform);
+    ctx->transform_emitted_stack[ctx->transform_emitted_depth++] = has;
+    if (has) {
+        paint_push_transform(&ctx->paint_list, &transform);
+        pdf_lower_paint_list(ctx);
+    }
+}
+
+static void pdf_cb_end_transform(void* vctx) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    if (ctx->transform_emitted_overflow_depth > 0) {
+        ctx->transform_emitted_overflow_depth--;
+        return;
+    }
+    if (ctx->transform_emitted_depth <= 0) {
+        log_error("[PDF_PAINT_IR] transform callback stack underflow");
+        return;
+    }
+
+    bool emitted = ctx->transform_emitted_stack[--ctx->transform_emitted_depth];
+    if (emitted) {
+        paint_pop_transform(&ctx->paint_list);
+        pdf_lower_paint_list(ctx);
+    }
 }
 
 static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
@@ -858,9 +1287,9 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.end_inline_children   = NULL;
     b.begin_opacity    = NULL;
     b.end_opacity      = NULL;
-    b.begin_transform  = NULL;
-    b.end_transform    = NULL;
-    b.render_column_rules = NULL;
+    b.begin_transform  = pdf_cb_begin_transform;
+    b.end_transform    = pdf_cb_end_transform;
+    b.render_column_rules = pdf_cb_render_column_rules;
     b.on_font_change   = pdf_cb_on_font_change;
     return b;
 }
@@ -873,6 +1302,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
 
     PdfRenderContext ctx;
     memset(&ctx, 0, sizeof(PdfRenderContext));
+    pdf_paint_lowering_state_init(&ctx.paint_state);
 
     // Create PDF document
     ctx.pdf_doc = HPDF_New(pdf_error_handler, NULL);

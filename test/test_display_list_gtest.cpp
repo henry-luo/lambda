@@ -842,6 +842,26 @@ TEST_F(PaintIrParityTest, DrawImageWithGenerationMatchesDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, DrawImageResourceMatchesDirect) {
+    static const uint32_t pixels[4] = {0, 0, 0, 0};
+    ImageSurface image = {};
+    image.width = 2;
+    image.height = 2;
+    image.pitch = 8;
+    image.pixels = (void*)pixels;
+    image.generation = 91;
+    RdtMatrix m = rdt_matrix_identity();
+    m.e13 = 3.0f;
+    m.e23 = 4.0f;
+
+    paint_draw_image_resource(&pl, &image, 1.0f, 1.0f, 8.0f, 8.0f, 200, &m);
+    lower();
+
+    dl_draw_image(&direct, pixels, 2, 2, 2, 1.0f, 1.0f, 8.0f, 8.0f, 200, &m,
+                  &image, image.generation);
+    expect_lists_equal(lowered, direct);
+}
+
 TEST_F(PaintIrParityTest, DrawGlyphWithGenerationMatchesDirect) {
     uint8_t glyph_pixels[16] = {};
     GlyphBitmap bitmap = {};
@@ -908,6 +928,7 @@ TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
 
     paint_save_backdrop(&pl, 2, 3, 20, 30);
     paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true);
+    paint_save_backdrop(&pl, 2, 3, 20, 30);
     paint_apply_blend_mode(&pl, 2, 3, 20, 30, 7);
     paint_apply_filter(&pl, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
     paint_apply_filter(&pl, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
@@ -915,6 +936,7 @@ TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
 
     dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
+    dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_apply_blend_mode(&direct, 2, 3, 20, 30, 7);
     dl_apply_filter(&direct, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
     dl_apply_filter(&direct, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
@@ -1216,6 +1238,109 @@ TEST_F(PaintIrParityTest, ValidateRejectsCompositeWithoutBackdrop) {
     EXPECT_EQ(result.first_error_index, 0);
 }
 
+TEST_F(PaintIrParityTest, SemanticBuildersValidateAndRemainUnsupported) {
+    PaintEffectGroup group = {};
+    group.bounds = {1.0f, 2.0f, 30.0f, 40.0f};
+    group.opacity = 0.75f;
+    group.blend_mode = 1;
+
+    uint32_t glyph_ids[2] = {11, 12};
+    float xs[2] = {3.0f, 8.0f};
+    float ys[2] = {5.0f, 5.0f};
+    PaintGlyphRun glyph_run = {};
+    glyph_run.font = &group;
+    glyph_run.color = test_color(0xff102030);
+    glyph_run.glyph_ids = glyph_ids;
+    glyph_run.xs = xs;
+    glyph_run.ys = ys;
+    glyph_run.count = 2;
+
+    char svg_root = 0;
+    PaintSvgSubscene subscene = {};
+    subscene.svg_root = &svg_root;
+    subscene.color = test_color(0xff405060);
+    subscene.transform = rdt_matrix_identity();
+
+    paint_begin_effect_group(&pl, &group);
+    paint_glyph_run(&pl, &glyph_run);
+    paint_svg_subscene(&pl, &subscene);
+    paint_end_effect_group(&pl);
+
+    PaintIrValidationResult result = {};
+    EXPECT_TRUE(paint_ir_validate(&pl, &result));
+    EXPECT_EQ(paint_list_count(&pl), 4);
+
+    lower();
+    EXPECT_EQ(lowered.count, 0);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+    PaintSvgLoweringOptions options = {};
+    options.emit_unsupported_comments = true;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 4);
+    EXPECT_EQ(stats.emitted_count, 0);
+    EXPECT_EQ(stats.unsupported_count, 4);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_BEGIN_EFFECT_GROUP -->"), nullptr);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_GLYPH_RUN -->"), nullptr);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_SVG_SUBSCENE -->"), nullptr);
+    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_END_EFFECT_GROUP -->"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, ValidateRejectsInvalidSemanticPayload) {
+    PaintEffectGroup group = {};
+    group.bounds = {0.0f, 0.0f, 10.0f, 10.0f};
+    group.opacity = 1.5f;
+    paint_begin_effect_group(&pl, &group);
+    paint_end_effect_group(&pl);
+
+    PaintIrValidationResult result = {};
+    EXPECT_FALSE(paint_ir_validate(&pl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, 0);
+}
+
+TEST_F(PaintIrParityTest, ValidateRejectsUnbalancedTransformStack) {
+    RdtMatrix transform = rdt_matrix_translate(3.0f, 4.0f);
+    paint_push_transform(&pl, &transform);
+
+    PaintIrValidationResult result = {};
+    EXPECT_FALSE(paint_ir_validate(&pl, &result));
+    EXPECT_FALSE(result.valid);
+    EXPECT_EQ(result.first_error_index, paint_list_count(&pl));
+}
+
+TEST_F(PaintIrParityTest, RasterLoweringRejectsInvalidPaintIr) {
+    paint_pop_clip(&pl);
+
+    lower();
+
+    EXPECT_EQ(lowered.count, 0);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringRejectsInvalidPaintIr) {
+    paint_pop_clip(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringOptions options = {};
+    options.emit_unsupported_comments = true;
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, &options, &stats);
+
+    EXPECT_EQ(stats.command_count, 0);
+    EXPECT_EQ(stats.emitted_count, 0);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_STREQ(out->str, "");
+
+    strbuf_free(out);
+}
+
 TEST_F(PaintIrParityTest, SvgLoweringEmitsRectPrimitives) {
     Color solid = {};
     solid.r = 1;
@@ -1249,6 +1374,34 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsRectPrimitives) {
         nullptr);
     EXPECT_NE(strstr(out->str,
         "  <rect x=\"5.00\" y=\"6.00\" width=\"70.00\" height=\"80.00\" rx=\"3.50\" ry=\"4.50\" fill=\"rgba(4,5,6,0.502)\" />"),
+        nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsImageResource) {
+    ImageSurface image = {};
+    Url url = {};
+    url.href = create_string(pool, "assets/a&b.png");
+    image.url = &url;
+
+    RdtMatrix transform = rdt_matrix_identity();
+    transform.e13 = 3.0f;
+    transform.e23 = 4.0f;
+    paint_draw_image_resource(&pl, &image, 10.0f, 11.0f, 50.0f, 60.0f,
+                              128, &transform);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<image x=\"10.00\" y=\"11.00\" width=\"50.00\" height=\"60.00\" href=\"assets/a&amp;b.png\" preserveAspectRatio=\"none\" opacity=\"0.5020\" transform=\"matrix(1 0 0 1 3 4)\" />"),
         nullptr);
 
     strbuf_free(out);
@@ -1379,6 +1532,201 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsClipGroup) {
 
     strbuf_free(out);
     rdt_path_free(clip_path);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsTransformGroup) {
+    RdtMatrix transform = rdt_matrix_translate(5.0f, 6.0f);
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    paint_push_transform(&pl, &transform);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_pop_transform(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str, "<g transform=\"matrix(1 0 0 1 5 6)\">\n"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgStreamingLoweringKeepsTransformOpenAcrossFragments) {
+    RdtMatrix transform = rdt_matrix_translate(5.0f, 6.0f);
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringState state = {};
+    paint_svg_lowering_state_init(&state, 0);
+    PaintSvgLoweringStats stats = {};
+
+    paint_push_transform(&pl, &transform);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_transform_depth, 1);
+    EXPECT_EQ(state.indent_level, 1);
+    paint_list_clear(&pl);
+
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_transform_depth, 1);
+    EXPECT_EQ(state.indent_level, 1);
+    paint_list_clear(&pl);
+
+    paint_pop_transform(&pl);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_transform_depth, 0);
+    EXPECT_EQ(state.indent_level, 0);
+
+    EXPECT_NE(strstr(out->str, "<g transform=\"matrix(1 0 0 1 5 6)\">\n"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsOpacityEffectGroup) {
+    PaintEffectGroup group = {};
+    group.opacity = 0.625f;
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_end_effect_group(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str, "<g opacity=\"0.6250\">\n"), nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgStreamingLoweringKeepsOpacityOpenAcrossFragments) {
+    PaintEffectGroup group = {};
+    group.opacity = 0.5f;
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringState state = {};
+    paint_svg_lowering_state_init(&state, 0);
+    PaintSvgLoweringStats stats = {};
+
+    paint_begin_effect_group(&pl, &group);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_effect_depth, 1);
+    EXPECT_EQ(state.indent_level, 1);
+    paint_list_clear(&pl);
+
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_effect_depth, 1);
+    EXPECT_EQ(state.indent_level, 1);
+    paint_list_clear(&pl);
+
+    paint_end_effect_group(&pl);
+    paint_ir_lower_svg_stream(&pl, out, nullptr, &state, &stats);
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(state.open_effect_depth, 0);
+    EXPECT_EQ(state.indent_level, 0);
+
+    EXPECT_NE(strstr(out->str, "<g opacity=\"0.5000\">\n"), nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsNativeTextRun) {
+    PaintGlyphRun run = {};
+    run.text = "A < B & C";
+    run.text_len = -1;
+    run.font_family = "A&B Sans";
+    run.font_size = 13.5f;
+    run.x = 2.0f;
+    run.baseline_y = 9.0f;
+    run.word_spacing = 1.25f;
+    run.font_weight = 700;
+    run.italic = true;
+    run.color.r = 17;
+    run.color.g = 34;
+    run.color.b = 51;
+    run.color.a = 255;
+    RdtMatrix transform = rdt_matrix_translate(3.0f, 4.0f);
+    run.has_transform = true;
+    run.transform = transform;
+
+    paint_glyph_run(&pl, &run);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 1);
+    EXPECT_EQ(stats.emitted_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<text x=\"2.00\" y=\"9.00\" font-family=\"A&amp;B Sans\" font-size=\"13.50\" fill=\"rgb(17,34,51)\" font-weight=\"700\" font-style=\"italic\" word-spacing=\"1.25\" transform=\"matrix(1 0 0 1 3 4)\">A &lt; B &amp; C</text>"),
+        nullptr);
+
+    strbuf_free(out);
 }
 
 TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
