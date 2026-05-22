@@ -2,6 +2,7 @@
 #include "render_backend.h"
 #include "render_backend_caps.hpp"
 #include "render_export_support.hpp"
+#include "render_geometry.hpp"
 #include "paint_ir.h"
 #include "render_border.hpp"
 #include "render_path.hpp"
@@ -322,6 +323,68 @@ static bool pdf_render_path(PdfRenderContext* ctx, RdtPath* path,
     return path_ctx.has_command;
 }
 
+static int pdf_image_stride_pixels(int src_w, int src_stride) {
+    if (src_stride >= src_w * 4 && (src_stride % 4) == 0) {
+        return src_stride / 4;
+    }
+    return src_stride;
+}
+
+static bool pdf_image_pixels_are_opaque(const uint32_t* pixels,
+                                        int src_w, int src_h, int stride_pixels) {
+    if (!pixels || src_w <= 0 || src_h <= 0 || stride_pixels < src_w) return false;
+    for (int y = 0; y < src_h; y++) {
+        const uint32_t* row = pixels + y * stride_pixels;
+        for (int x = 0; x < src_w; x++) {
+            if ((row[x] >> 24) != 0xff) return false;
+        }
+    }
+    return true;
+}
+
+static void pdf_transform_point(const RdtMatrix* transform, float x, float y,
+                                float* out_x, float* out_y) {
+    if (transform) {
+        *out_x = transform->e11 * x + transform->e12 * y + transform->e13;
+        *out_y = transform->e21 * x + transform->e22 * y + transform->e23;
+    } else {
+        *out_x = x;
+        *out_y = y;
+    }
+}
+
+static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
+                                int src_w, int src_h, int src_stride,
+                                float dst_x, float dst_y, float dst_w, float dst_h,
+                                uint8_t opacity, const RdtMatrix* transform) {
+    if (!ctx || !pixels || src_w <= 0 || src_h <= 0 || dst_w <= 0.0f || dst_h <= 0.0f) {
+        return false;
+    }
+    if (opacity != 255) return false;
+
+    int stride_pixels = pdf_image_stride_pixels(src_w, src_stride);
+    if (!pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels)) {
+        return false;
+    }
+
+    float x0 = 0.0f, y0 = 0.0f;
+    float x1 = 0.0f, y1 = 0.0f;
+    float x2 = 0.0f, y2 = 0.0f;
+    pdf_transform_point(transform, dst_x, dst_y + dst_h, &x0, &y0);
+    pdf_transform_point(transform, dst_x + dst_w, dst_y + dst_h, &x1, &y1);
+    pdf_transform_point(transform, dst_x, dst_y, &x2, &y2);
+
+    float a = x1 - x0;
+    float b = pdf_coord_y(ctx, y1) - pdf_coord_y(ctx, y0);
+    float c = x2 - x0;
+    float d = pdf_coord_y(ctx, y2) - pdf_coord_y(ctx, y0);
+    float e = x0;
+    float f = pdf_coord_y(ctx, y0);
+
+    return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
+                                   stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+}
+
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
                                const RdtMatrix* transform) {
     if (!ctx || !path) return false;
@@ -387,6 +450,15 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             }
             break;
         }
+        case PAINT_DRAW_IMAGE: {
+            if (!caps || !caps->images) break;
+            PaintDrawImage* p = &cmd->draw_image;
+            if (p->has_transform && !caps->transforms) break;
+            pdf_draw_abgr_image(ctx, p->pixels, p->src_w, p->src_h, p->src_stride,
+                                p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                                p->opacity, p->has_transform ? &p->transform : nullptr);
+            break;
+        }
         case PAINT_PUSH_CLIP: {
             if (skipped_clip_depth > 0) {
                 skipped_clip_depth++;
@@ -434,6 +506,19 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
 
 static void pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
     paint_fill_path(&ctx->paint_list, path, color, RDT_FILL_WINDING, nullptr);
+    pdf_lower_paint_list(ctx);
+}
+
+static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
+                                 Rect* dst_rect) {
+    if (!ctx || !img || !dst_rect) return;
+    int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
+    int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
+    if (!img->pixels || src_w <= 0 || src_h <= 0) return;
+    paint_draw_image(&ctx->paint_list, (const uint32_t*)img->pixels,
+                     src_w, src_h, src_w,
+                     dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
+                     255, nullptr, img);
     pdf_lower_paint_list(ctx);
 }
 
@@ -725,6 +810,21 @@ static void pdf_cb_render_text(void* vctx, ViewText* text, float abs_x, float ab
     render_text_view_pdf(ctx, text);
 }
 
+static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !block || !block->embed || !block->embed->img) return;
+    ImageSurface* img = block->embed->img;
+
+    BlockBlot image_block = {};
+    image_block.x = abs_x - block->x;
+    image_block.y = abs_y - block->y;
+    Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
+    int target_w = (int)ceilf(content_rect.width); // INT_CAST_OK: image decode target width is integer pixels.
+    int target_h = (int)ceilf(content_rect.height); // INT_CAST_OK: image decode target height is integer pixels.
+    image_surface_ensure_decoded(img, target_w, target_h);
+    pdf_paint_draw_image(ctx, img, &content_rect);
+}
+
 static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     const char* pdf_font_name = get_pdf_font_name(font_prop->family);
@@ -740,7 +840,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.ctx              = ctx;
     b.render_bound     = pdf_cb_render_bound;
     b.render_text      = pdf_cb_render_text;
-    b.render_image     = NULL;
+    b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = NULL;
     b.begin_block_children  = NULL;
     b.end_block_children    = NULL;

@@ -358,6 +358,31 @@ TEST_F(PdfWriterTest, ClipPath) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, DrawABGRImage) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+    HPDF_Page_SetWidth(page, 100.0f);
+    HPDF_Page_SetHeight(page, 100.0f);
+
+    uint32_t pixels[4] = {
+        0xff0000ff, 0xff00ff00,
+        0xffff0000, 0xffffffff
+    };
+    HPDF_STATUS status = HPDF_Page_DrawABGRImage(page, pixels, 2, 2, 2,
+                                                 20.0f, 0.0f, 0.0f,
+                                                 20.0f, 10.0f, 10.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    const char* filename = "test_output/test_image.pdf";
+    status = HPDF_SaveToFile(doc, filename);
+    EXPECT_EQ(status, HPDF_OK);
+    EXPECT_TRUE(file_contains(filename, "BI"));
+    EXPECT_TRUE(file_contains(filename, "/F /AHx"));
+    EXPECT_TRUE(file_contains(filename, "FF000000FF00"));
+
+    HPDF_Free(doc);
+}
+
 TEST_F(PdfWriterTest, FillPath) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_Page page = HPDF_AddPage(doc);

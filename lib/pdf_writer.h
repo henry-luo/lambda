@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -305,6 +306,23 @@ HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page);
  * @return      HPDF_OK on success
  */
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page);
+
+/**
+ * Draw an ABGR8888 image as an inline RGB image using the supplied PDF
+ * current-transformation matrix.
+ *
+ * @param page    Page handle
+ * @param pixels  Source pixels in ABGR8888 layout
+ * @param width   Source image width in pixels
+ * @param height  Source image height in pixels
+ * @param stride  Source row stride in pixels
+ * @param a,b,c,d,e,f  PDF matrix operands for the image unit square
+ * @return        HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
+                                    int width, int height, int stride,
+                                    float a, float b, float c,
+                                    float d, float e, float f);
 
 /*---------------------------------------------------------------------------*/
 /*  Text Functions                                                           */

@@ -202,6 +202,12 @@ static void pdf_format_float(StrBuf* buf, float value) {
     }
 }
 
+static void pdf_append_hex_byte(StrBuf* buf, uint8_t value) {
+    static const char* hex = "0123456789ABCDEF";
+    strbuf_append_char(buf, hex[(value >> 4) & 0x0f]);
+    strbuf_append_char(buf, hex[value & 0x0f]);
+}
+
 // check if font is already in used_fonts list
 static bool page_has_font(HPDF_Page page, HPDF_Font font) {
     for (int i = 0; i < page->used_fonts->length; i++) {
@@ -606,6 +612,56 @@ HPDF_STATUS HPDF_Page_Clip(HPDF_Page page) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
 
     strbuf_append_str(page->content, "W\nn\n");
+
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
+                                    int width, int height, int stride,
+                                    float a, float b, float c,
+                                    float d, float e, float f) {
+    if (!page || !pixels || width <= 0 || height <= 0 || stride < width) {
+        return HPDF_ERROR_INVALID_PARAM;
+    }
+
+    strbuf_append_str(page->content, "q\n");
+    pdf_format_float(page->content, a);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, b);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, c);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, d);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, e);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, f);
+    strbuf_append_str(page->content, " cm\n");
+    strbuf_append_str(page->content, "BI\n/W ");
+    strbuf_append_int(page->content, width);
+    strbuf_append_str(page->content, "\n/H ");
+    strbuf_append_int(page->content, height);
+    strbuf_append_str(page->content, "\n/CS /RGB\n/BPC 8\n/F /AHx\nID\n");
+
+    int hex_count = 0;
+    for (int y = 0; y < height; y++) {
+        const uint32_t* row = pixels + y * stride;
+        for (int x = 0; x < width; x++) {
+            uint32_t px = row[x];
+            pdf_append_hex_byte(page->content, (uint8_t)(px & 0xff));
+            pdf_append_hex_byte(page->content, (uint8_t)((px >> 8) & 0xff));
+            pdf_append_hex_byte(page->content, (uint8_t)((px >> 16) & 0xff));
+            hex_count += 6;
+            if (hex_count >= 72) {
+                strbuf_append_char(page->content, '\n');
+                hex_count = 0;
+            }
+        }
+    }
+    if (hex_count != 0) {
+        strbuf_append_char(page->content, '\n');
+    }
+    strbuf_append_str(page->content, ">\nEI\nQ\n");
 
     return HPDF_OK;
 }

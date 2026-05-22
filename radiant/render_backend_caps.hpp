@@ -61,7 +61,7 @@ static inline const RenderExportTargetCaps* render_export_target_get_caps(Render
         true,   // paths
         true,   // strokes
         false,  // gradients
-        false,  // images
+        true,   // images
         false,  // glyph_runs
         true,   // clips
         true,   // transforms
