@@ -188,6 +188,8 @@ extern Item js_string_concat(Item left, Item right);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
+extern Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item, Item radix_item);
+extern Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
 extern int64_t js_uri_decode_equals_from_char_code_raw(Item str_item, Item first_item, Item second_item, int64_t component);
 extern int64_t js_uri_decode_equals_from_char_code_raw_ints(Item str_item, int64_t first_raw, int64_t second_raw, int64_t component);
@@ -1558,6 +1560,8 @@ JitImport jit_runtime_imports[] = {
     // global functions
     {"js_parseInt", FPTR(js_parseInt)},
     {"js_parseFloat", FPTR(js_parseFloat)},
+    {"js_parseInt_concat_fromCharCode", FPTR(js_parseInt_concat_fromCharCode)},
+    {"js_parseFloat_concat_fromCharCode", FPTR(js_parseFloat_concat_fromCharCode)},
     {"js_isNaN", FPTR(js_isNaN)},
     {"js_isFinite", FPTR(js_isFinite)},
     {"js_toFixed", FPTR(js_toFixed)},

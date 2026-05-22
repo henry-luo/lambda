@@ -219,7 +219,31 @@ static void jm_emit_captured_module_var_writeback(JsMirTranspiler* mt, const cha
         String* js_name = heap_create_name(bare_name, strlen(bare_name));
         jm_emit_global_var_property_sync(mt, mc, js_name, value);
         jm_emit_eval_direct_preamble_var_property_sync(mt, mc, js_name, value);
+        if (mt->is_eval_direct && mt->eval_local_frame_reg != 0) {
+            // direct eval reads identifier values from its local frame first;
+            // keep that mirror coherent when a module-backed binding is written.
+            MIR_reg_t key = jm_box_string_literal(mt, bare_name, (int)strlen(bare_name));
+            jm_call_void_2(mt, "js_eval_local_export_var",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        }
     }
+}
+
+static void jm_emit_eval_local_binding_writeback(JsMirTranspiler* mt, String* name,
+                                                 MIR_reg_t value) {
+    // direct eval keeps caller bindings in an eval-local frame before falling
+    // back to module/global storage. Any direct MIR write to such a binding must
+    // refresh that frame or later identifier reads inside the same eval see the
+    // stale preamble value.
+    if (!mt || !mt->is_eval_direct || mt->eval_local_frame_reg == 0 ||
+        !name || !value) {
+        return;
+    }
+    MIR_reg_t key = jm_box_string_literal(mt, name->chars, (int)name->len);
+    jm_call_void_2(mt, "js_eval_local_export_var",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
 }
 
 static void jm_assign_var_entry_from_boxed(JsMirTranspiler* mt,
@@ -1860,6 +1884,30 @@ static bool jm_match_percent_from_char_code_suffix1(JsAstNode* node, JsAstNode**
     return jm_match_string_from_char_code1(inner->right, code_arg);
 }
 
+static bool jm_match_literal_plus_from_char_code1(JsAstNode* node,
+        String** prefix_out, JsAstNode** code_arg) {
+    // test262 parseInt/parseFloat Unicode sweeps repeatedly parse
+    // "<literal>" + String.fromCharCode(code). Match only that allocation-heavy
+    // shape so lowering can call a stack-string runtime helper without changing
+    // general string concatenation semantics.
+    if (!node || !prefix_out || !code_arg ||
+            node->node_type != JS_AST_NODE_BINARY_EXPRESSION) {
+        return false;
+    }
+    JsBinaryNode* bin = (JsBinaryNode*)node;
+    if (bin->op != JS_OP_ADD || !bin->left || !bin->right ||
+            bin->left->node_type != JS_AST_NODE_LITERAL) {
+        return false;
+    }
+    JsLiteralNode* lit = (JsLiteralNode*)bin->left;
+    if (lit->literal_type != JS_LITERAL_STRING || !lit->value.string_value) {
+        return false;
+    }
+    if (!jm_match_string_from_char_code1(bin->right, code_arg)) return false;
+    *prefix_out = lit->value.string_value;
+    return true;
+}
+
 static bool jm_uri_compare_arg_is_simple(JsAstNode* node) {
     if (!node) return false;
     return node->node_type == JS_AST_NODE_IDENTIFIER ||
@@ -2890,6 +2938,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
                     jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
             if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT &&
@@ -2924,6 +2973,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
                     jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
         }
@@ -3097,6 +3147,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     (!var->from_env || var->module_var_backed)) {
                     jm_emit_captured_module_var_writeback(mt, vname, result);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, result);
             } else if (mt->module_consts) {
                 // Module-level variable: write back via js_set_module_var
                 JsModuleConstEntry lookup;
@@ -3116,6 +3167,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     jm_emit_global_var_property_sync(mt, mc, id->name, result);
                     jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, result);
+                    jm_emit_eval_local_binding_writeback(mt, id->name, result);
                     jm_scope_env_mark_and_writeback(mt, vname, result);
                 } else if (!mc) {
                     // Implicit global: write back to global object
@@ -3181,6 +3233,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
                     jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
             if (mt->with_depth <= 0 && var && var->type_id == LMD_TYPE_FLOAT &&
@@ -3214,6 +3267,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                 if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
                     jm_emit_captured_module_var_writeback(mt, vname, boxed_updated);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed_updated);
                 return un->prefix ? var->reg : old_val;
             }
         }
@@ -3377,6 +3431,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     (!var->from_env || var->module_var_backed)) {
                     jm_emit_captured_module_var_writeback(mt, vname, result);
                 }
+                jm_emit_eval_local_binding_writeback(mt, id->name, result);
             } else if (mt->module_consts) {
                 // Module-level variable: write back via js_set_module_var
                 JsModuleConstEntry lookup;
@@ -3396,6 +3451,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, result));
                     jm_emit_global_var_property_sync(mt, mc, id->name, result);
                     jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, result);
+                    jm_emit_eval_local_binding_writeback(mt, id->name, result);
                     jm_scope_env_mark_and_writeback(mt, vname, result);
                 } else if (!mc) {
                     // Implicit global: write back to global object
@@ -4959,6 +5015,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                         jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
                         jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
+                        jm_emit_eval_local_binding_writeback(mt, id->name, rhs);
                         jm_scope_env_mark_and_writeback(mt, vname, rhs);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, store_result),
@@ -4971,6 +5028,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
                     jm_emit_global_var_property_sync(mt, mc, id->name, rhs);
                     jm_emit_eval_direct_preamble_var_property_sync(mt, mc, id->name, rhs);
+                    jm_emit_eval_local_binding_writeback(mt, id->name, rhs);
                     // Write back to scope env if captured by child closures
                     jm_scope_env_mark_and_writeback(mt, vname, rhs);
                     return rhs;
@@ -5204,6 +5262,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
                 jm_emit_captured_module_var_writeback(mt, vname, boxed);
             }
+            {
+                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_INT);
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed);
+            }
             return var->reg;
             }
         }
@@ -5257,6 +5319,10 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             if (mt->in_main && mt->module_consts && !mt->suppress_module_var_writeback) {
                 MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
                 jm_emit_captured_module_var_writeback(mt, vname, boxed);
+            }
+            {
+                MIR_reg_t boxed = jm_box_native(mt, var->reg, LMD_TYPE_FLOAT);
+                jm_emit_eval_local_binding_writeback(mt, id->name, boxed);
             }
             return var->reg;
         }
@@ -5583,6 +5649,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             (!var->from_env || var->module_var_backed)) {
             jm_emit_captured_module_var_writeback(mt, vname, var->reg);
         }
+        jm_emit_eval_local_binding_writeback(mt, id->name, var->reg);
         return var->reg;
     }
 
@@ -9809,7 +9876,30 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             int nl = (int)id->name->len;
 
             // parseInt(str, radix?)
-            if (nl == 8 && strncmp(n, "parseInt", 8) == 0 && !jm_find_var(mt, "_js_parseInt")) {
+            if (nl == 8 && strncmp(n, "parseInt", 8) == 0) {
+                // Keep the common global-builtin call out of the JS function
+                // wrapper path. In diagnose mode this also tells slow-test
+                // triage whether the direct runtime call was selected.
+                if (js_is_diagnose_enabled()) {
+                    log_warn("js-diagnose: fast-path-hit=parseInt.direct file=%s",
+                        mt->filename ? mt->filename : "<unknown>");
+                }
+                String* prefix = NULL;
+                JsAstNode* code_arg = NULL;
+                if (call->arguments &&
+                        jm_match_literal_plus_from_char_code1(call->arguments, &prefix, &code_arg)) {
+                    MIR_reg_t prefix_reg = jm_box_string_literal(mt, prefix->chars, (int)prefix->len);
+                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
+                    MIR_reg_t radix = (call->arguments->next)
+                        ? jm_transpile_box_item(mt, call->arguments->next)
+                        : jm_box_int_const(mt, 0);
+                    // parse from the prefix/code-unit pair directly; the js262
+                    // Unicode sweeps otherwise allocate two short strings per loop.
+                    return jm_call_3(mt, "js_parseInt_concat_fromCharCode", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, prefix_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, radix));
+                }
                 MIR_reg_t str = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t radix = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
@@ -9819,7 +9909,24 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, radix));
             }
             // parseFloat(str)
-            if (nl == 10 && strncmp(n, "parseFloat", 10) == 0 && !jm_find_var(mt, "_js_parseFloat")) {
+            if (nl == 10 && strncmp(n, "parseFloat", 10) == 0) {
+                // Same direct-call reason as parseInt: the remaining slow rows
+                // should be attributed to loop/runtime overhead, not to missed
+                // global builtin dispatch.
+                if (js_is_diagnose_enabled()) {
+                    log_warn("js-diagnose: fast-path-hit=parseFloat.direct file=%s",
+                        mt->filename ? mt->filename : "<unknown>");
+                }
+                String* prefix = NULL;
+                JsAstNode* code_arg = NULL;
+                if (call->arguments &&
+                        jm_match_literal_plus_from_char_code1(call->arguments, &prefix, &code_arg)) {
+                    MIR_reg_t prefix_reg = jm_box_string_literal(mt, prefix->chars, (int)prefix->len);
+                    MIR_reg_t code = jm_transpile_box_item(mt, code_arg);
+                    return jm_call_2(mt, "js_parseFloat_concat_fromCharCode", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, prefix_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
+                }
                 MIR_reg_t str = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_parseFloat", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str));
@@ -12547,6 +12654,18 @@ static int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, b
     return env_size;
 }
 
+static bool jm_capture_can_use_module_slot(JsMirTranspiler* mt, JsCaptureEntry* cap) {
+    // Module-backed captures are resolved from the module table by the callee.
+    // Treating them as missing local scope-env slots forced mixed captures into
+    // copied closure envs, which broke per-iteration locals such as destructured
+    // `for-of` bindings captured beside top-level helpers.
+    if (!mt || !cap || !mt->module_consts || cap->force_env_capture) return false;
+    JsModuleConstEntry lookup;
+    snprintf(lookup.name, sizeof(lookup.name), "%s", cap->name);
+    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+    return mc && mc->const_type == MCONST_MODVAR;
+}
+
 static void jm_mark_closure_env_module_var_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
                                                      MIR_reg_t fn_reg, bool has_remapped) {
     if (!mt || !fc || !fn_reg || !mt->module_consts) return;
@@ -12627,18 +12746,27 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
         // Check if this closure should use the parent's shared scope env.
-        // Share only when every capture is present in the current env with the
-        // expected slot; mixed block/module captures need a copied dense env.
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        // The prepass slot mapping is the source of truth for hoisted and
+        // transitive captures; some valid captures do not have a local var entry
+        // at the creation site. Reject only captures that lack a shared slot, or
+        // let/const captures whose per-iteration env does not match.
+        bool use_scope_env = (mt->scope_env_reg != 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (fc->captures[ci].scope_env_slot < 0) {
+                    if (jm_capture_can_use_module_slot(mt, &fc->captures[ci])) {
+                        // Top-level bindings are read from the module table by
+                        // the callee; they should not force local mutable
+                        // captures like iterator indexes into copied envs.
+                        continue;
+                    }
                     use_scope_env = false;
                     break;
                 }
-                if (!cv || !cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
-                    cv->scope_env_slot != fc->captures[ci].scope_env_slot) {
+                if (cv && cv->is_let_const &&
+                    (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                     cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
                     use_scope_env = false;
                     break;
                 }
@@ -12824,18 +12952,26 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 fc->captures[ci].is_let_const = true;
             }
         }
-        // function expressions follow the same rule as declarations: share the
-        // current scope env only when all capture slots are live in that env.
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
+        // Function expressions follow declarations: trust the prepass slot map
+        // for hoisted/transitive captures, while still keeping let/const tied to
+        // the exact per-iteration env.
+        bool use_scope_env = (mt->scope_env_reg != 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (fc->captures[ci].scope_env_slot < 0) {
+                    if (jm_capture_can_use_module_slot(mt, &fc->captures[ci])) {
+                        // Module-backed captures are resolved by name in the
+                        // callee, so keep sharing the env slots that represent
+                        // true mutable local captures.
+                        continue;
+                    }
                     use_scope_env = false;
                     break;
                 }
-                if (!cv || !cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
-                    cv->scope_env_slot != fc->captures[ci].scope_env_slot) {
+                if (cv && cv->is_let_const &&
+                    (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                     cv->scope_env_slot != fc->captures[ci].scope_env_slot)) {
                     use_scope_env = false;
                     break;
                 }

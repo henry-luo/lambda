@@ -242,6 +242,8 @@ int js_is_diagnose_enabled(void);
 
 Item js_parseInt(Item str_item, Item radix_item);
 Item js_parseFloat(Item str_item);
+Item js_parseInt_concat_fromCharCode(Item prefix_item, Item code_item, Item radix_item);
+Item js_parseFloat_concat_fromCharCode(Item prefix_item, Item code_item);
 Item js_isNaN(Item value);
 Item js_isFinite(Item value);
 
