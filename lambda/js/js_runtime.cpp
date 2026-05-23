@@ -13082,6 +13082,9 @@ static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
         if (!in_class && c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?') {
             char kind = pattern[i + 2];
             if (kind == '=' || kind == '!') return true;
+            // lookbehind (?<=...) / (?<!...) — handled by the wrapper post-filter
+            if (kind == '<' && i + 3 < pattern_len &&
+                (pattern[i + 3] == '=' || pattern[i + 3] == '!')) return true;
         }
     }
     return false;
@@ -14355,28 +14358,10 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
         }
     }
-    // 3b. Strip lookbehind assertions (?<=...) and (?<!...) since RE2 doesn't support them
-    //     This prevents RE2 compile failures. Log a warning for diagnostics.
-    {
-        for (const char* lb_prefix : {"(?<=", "(?<!"}) {
-            size_t pos = 0;
-            while ((pos = processed_pattern.find(lb_prefix, pos)) != std::string::npos) {
-                if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
-                int depth = 1;
-                size_t end = pos + strlen(lb_prefix);
-                while (end < processed_pattern.size() && depth > 0) {
-                    if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
-                        end += 2; continue;
-                    }
-                    if (processed_pattern[end] == '(') depth++;
-                    else if (processed_pattern[end] == ')') depth--;
-                    end++;
-                }
-                log_debug("js regex: stripping lookbehind %s from pattern (RE2 unsupported)", lb_prefix);
-                processed_pattern.erase(pos, end - pos);
-            }
-        }
-    }
+    // 3b. Lookbehind (?<=...) / (?<!...) is handled by the wrapper post-filter
+    //     (js_regex_needs_wrapper returns true for lookbehind). The legacy strip
+    //     now only guards the direct-RE2 fallback below, for the rare case where
+    //     the wrapper is unavailable or fails to compile.
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
     //    Must NOT convert lookbehind (?<=...) or (?<!...)
     {
@@ -14467,6 +14452,27 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         if (!re2) {
             // Direct RE2 path for patterns without wrapper-only features. This avoids
             // the wrapper's heavyweight scans for generated Unicode property tests.
+            // Safety net: if a lookbehind survived to here (wrapper unavailable or
+            // failed), strip it so RE2 still compiles (legacy approximate behavior)
+            // rather than throwing a SyntaxError.
+            for (const char* lb_prefix : {"(?<=", "(?<!"}) {
+                size_t lpos = 0;
+                while ((lpos = processed_pattern.find(lb_prefix, lpos)) != std::string::npos) {
+                    if (lpos > 0 && processed_pattern[lpos - 1] == '\\') { lpos++; continue; }
+                    int depth = 1;
+                    size_t end = lpos + strlen(lb_prefix);
+                    while (end < processed_pattern.size() && depth > 0) {
+                        if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
+                            end += 2; continue;
+                        }
+                        if (processed_pattern[end] == '(') depth++;
+                        else if (processed_pattern[end] == ')') depth--;
+                        end++;
+                    }
+                    log_debug("js regex: stripping lookbehind %s (direct RE2 fallback)", lb_prefix);
+                    processed_pattern.erase(lpos, end - lpos);
+                }
+            }
             re2 = new re2::RE2(processed_pattern, opts);
             if (!re2->ok()) {
                 // fall back to original pattern if preprocessing caused errors

@@ -378,7 +378,37 @@ struct RewriteResult {
     int group_remap_count;
 };
 
-static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, bool dot_all = false) {
+// Compile a lookbehind subpattern Y so that matching it (UNANCHORED) against the
+// prefix input[0..p] tells us whether Y can match a substring *ending at* p. The
+// trailing \z anchors the end of the match to the end of that prefix (= p),
+// independent of multiline mode. Returns nullptr on compile failure (caller then
+// degrades to erasing the assertion). Inherits case/multiline/dotAll from flags.
+static re2::RE2* compile_lookbehind_re(const std::string& inner, bool ignore_case,
+                                       bool multiline, bool dot_all) {
+    // RE2's set_one_line(false) does not reliably enable multiline ^/$, so prepend
+    // the inline (?m) flag (mirrors the main compile path in js_runtime.cpp).
+    std::string pat = multiline ? "(?m)" : "";
+    pat.append("(?:");
+    pat.append(inner);
+    pat.append(")\\z");
+    re2::RE2::Options o;
+    o.set_log_errors(false);
+    o.set_encoding(re2::RE2::Options::EncodingUTF8);
+    o.set_case_sensitive(!ignore_case);
+    o.set_one_line(!multiline);
+    o.set_dot_nl(dot_all);
+    re2::RE2* re = new re2::RE2(pat, o);
+    if (!re->ok()) {
+        log_debug("js regex wrapper: lookbehind subpattern compile failed '%s': %s",
+                  pat.c_str(), re->error().c_str());
+        delete re;
+        return nullptr;
+    }
+    return re;
+}
+
+static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, bool dot_all = false,
+                            bool ignore_case = false, bool multiline = false) {
     // Prepass: rewrite empty character classes that RE2 doesn't accept,
     // and rewrite \b inside character classes to backspace (JS treats \b inside
     // a character class as the backspace character, while RE2 treats it as an
@@ -663,9 +693,59 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
             }
             case ASSERT_POS_LOOKBEHIND:
             case ASSERT_NEG_LOOKBEHIND: {
-                // Already stripped in Phase A preprocessing
-                // If somehow still present, just erase
-                result.erase(info.start_pos, info.end_pos - info.start_pos);
+                // (?<=Y) / (?<!Y) → insert a zero-width marker group () at the
+                // assertion's position and attach a JS_PF_LOOKBEHIND post-filter.
+                // At match time the marker group's offset gives the position p that
+                // the lookbehind asserts about; the filter checks whether Y matches
+                // a substring ending at p (over input[0..p]).
+                size_t old_len = info.end_pos - info.start_pos;
+                bool negative = (info.kind == ASSERT_NEG_LOOKBEHIND);
+
+                // Compile Y. Inner capture groups cannot be merged into the result
+                // in this contained pass, so they are erased from RE2 numbering and
+                // reported as non-participating (-1). Backref/nested-lookbehind
+                // bodies that RE2 can't compile degrade to a plain erase (no filter),
+                // matching the previous strip behavior (no throw).
+                re2::RE2* lb_re = compile_lookbehind_re(info.inner, ignore_case, multiline, dot_all);
+                if (!lb_re) {
+                    result.erase(info.start_pos, old_len);
+                    int delta = -(int)old_len;
+                    for (int s = 0; s < synthetic_count; s++) {
+                        if (synthetic[s].position > info.start_pos) {
+                            synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                        }
+                    }
+                    break;
+                }
+
+                int erased_start = count_capture_groups_until(original, info.start_pos) + 1;
+                int erased_count = count_capture_groups(info.inner);
+                for (int eg = 0; eg < erased_count; eg++) {
+                    int group_idx = erased_start + eg;
+                    if (group_idx > 0 && group_idx < JS_REGEX_MAX_GROUPS) {
+                        erased_original_group[group_idx] = true;
+                    }
+                }
+
+                std::string replacement = "()";
+                size_t syn_pos = info.start_pos;
+                result.replace(info.start_pos, old_len, replacement);
+                int delta = (int)replacement.size() - (int)old_len;
+                added_groups++;
+                for (int s = 0; s < synthetic_count; s++) {
+                    if (synthetic[s].position > syn_pos) {
+                        synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                    }
+                }
+
+                int fi = out->filter_count;
+                JsRegexFilter& f = out->filters[out->filter_count++];
+                f.type = JS_PF_LOOKBEHIND;
+                f.reject_pattern = lb_re;
+                f.reject_wrapper = nullptr;
+                f.reject_at_start = -1;   // placeholder → marker group RE2 index
+                f.lb_negative = negative;
+                synthetic[synthetic_count++] = {syn_pos, fi};
                 break;
             }
             case ASSERT_BACKREF: {
@@ -781,7 +861,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
 
             if (f.type == JS_PF_TRIM_GROUP || f.type == JS_PF_ASSERT_MATCH) {
                 f.trim_group_idx = syn_re2_idx[s];
-            } else if (f.type == JS_PF_REJECT_MATCH) {
+            } else if (f.type == JS_PF_REJECT_MATCH || f.type == JS_PF_LOOKBEHIND) {
                 // store the marker group's RE2 index in reject_at_start
                 // (repurposed: positive values = marker group index)
                 f.reject_at_start = syn_re2_idx[s];
@@ -1083,6 +1163,21 @@ static bool js_regex_reject_filter_matches(JsRegexFilter& f, const char* check_s
     return false;
 }
 
+// Evaluate a JS_PF_LOOKBEHIND filter. p is the byte offset in `input` that the
+// lookbehind asserts about (the marker group's position). Returns true if the
+// candidate match should be ACCEPTED, false if it must be rejected. For (?<=Y)
+// the assertion holds iff Y matches a substring ending at p; for (?<!Y) iff it
+// does not. Y is compiled with a trailing \z, so an UNANCHORED search over the
+// prefix input[0..p] succeeds exactly when some substring ending at p matches.
+static bool js_regex_lookbehind_passes(JsRegexFilter& f, const char* input, int p) {
+    bool y_matches = false;
+    if (f.reject_pattern && p >= 0) {
+        re2::StringPiece prefix(input, p);
+        y_matches = f.reject_pattern->Match(prefix, 0, p, re2::RE2::UNANCHORED, nullptr, 0);
+    }
+    return f.lb_negative ? !y_matches : y_matches;
+}
+
 static bool split_pattern_around_capture_group(const std::string& pat, int target_group,
                                                std::string* prefix, std::string* suffix) {
     size_t open_pos = 0, close_pos = 0;
@@ -1165,9 +1260,11 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
                                    re2::RE2::Options* opts) {
     std::string pat(pattern, pattern_len);
 
-    bool has_s = false;
+    bool has_s = false, has_i = false, has_m = false;
     for (int i = 0; i < flags_len; i++) {
         if (flags[i] == 's') has_s = true;
+        else if (flags[i] == 'i') has_i = true;
+        else if (flags[i] == 'm') has_m = true;
     }
 
     // The public RegExp constructor validates the original JS source before
@@ -1176,7 +1273,7 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
     // patterns that need the wrapper for backreferences/lookarounds.
 
     RewriteResult rw;
-    if (!rewrite_pattern(pat, &rw, has_s)) {
+    if (!rewrite_pattern(pat, &rw, has_s, has_i, has_m)) {
         return nullptr;
     }
 
@@ -1507,6 +1604,17 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             match_begin_offset + 1, anchor_start,
                             match_starts, match_ends, max_groups);
                     }
+                } else if (f.type == JS_PF_LOOKBEHIND) {
+                    if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                        groups[f.reject_at_start].data()) {
+                        int p = (int)(groups[f.reject_at_start].data() - input);
+                        if (!js_regex_lookbehind_passes(f, input, p)) {
+                            if (anchor_start) return 0;
+                            return js_regex_wrapper_exec(compiled, input, input_len,
+                                match_begin_offset + 1, anchor_start,
+                                match_starts, match_ends, max_groups);
+                        }
+                    }
                 } else if (f.type == JS_PF_REJECT_MATCH) {
                     if (f.reject_pattern || f.reject_wrapper) {
                         // reject_at_start holds the marker group's RE2 index
@@ -1595,6 +1703,18 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         case JS_PF_ASSERT_MATCH: {
                             if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups)) {
                                 rejected = true;
+                            }
+                            break;
+                        }
+                        case JS_PF_LOOKBEHIND: {
+                            // Skip when the marker group didn't participate (the
+                            // lookbehind is on a different alternation branch).
+                            if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                                groups[f.reject_at_start].data()) {
+                                int p = (int)(groups[f.reject_at_start].data() - input);
+                                if (!js_regex_lookbehind_passes(f, input, p)) {
+                                    rejected = true;
+                                }
                             }
                             break;
                         }

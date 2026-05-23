@@ -30,6 +30,7 @@ enum JsRegexFilterType {
     JS_PF_REJECT_MATCH,      // reject match if rejection pattern matches at the boundary
     JS_PF_GROUP_EQUALITY,    // require capture group[a] == capture group[b] (backreference)
     JS_PF_ASSERT_MATCH,      // require absorbed positive lookahead to equal its anchored match
+    JS_PF_LOOKBEHIND,        // require/forbid lookbehind subpattern matching ending at marker pos
 };
 
 struct JsRegexCompiled;
@@ -37,11 +38,12 @@ struct JsRegexCompiled;
 struct JsRegexFilter {
     JsRegexFilterType type;
     int trim_group_idx;            // for JS_PF_TRIM_GROUP: which group to trim from match end
-    re2::RE2* reject_pattern;      // for JS_PF_REJECT_MATCH: pattern that must NOT match
+    re2::RE2* reject_pattern;      // for JS_PF_REJECT_MATCH / JS_PF_LOOKBEHIND: assertion pattern
     JsRegexCompiled* reject_wrapper; // wrapper-backed reject pattern when assertion needs JS features
-    int reject_at_start;           // for JS_PF_REJECT_MATCH: check at match start (1) or end (0)
+    int reject_at_start;           // for JS_PF_REJECT_MATCH / JS_PF_LOOKBEHIND: marker group's RE2 index
     int eq_group_a;                // for JS_PF_GROUP_EQUALITY: first group index
     int eq_group_b;                // for JS_PF_GROUP_EQUALITY: second group index
+    bool lb_negative;              // for JS_PF_LOOKBEHIND: true = (?<!...), false = (?<=...)
 };
 
 struct JsRegexCompiled {
