@@ -71,6 +71,30 @@ static bool paint_ir_validate_positive_image(const PaintDrawImage* image) {
            image->dst_w >= 0.0f && image->dst_h >= 0.0f;
 }
 
+static bool paint_ir_image_resource_pixels(ImageSurface* image,
+                                           float dst_w, float dst_h,
+                                           const uint32_t** pixels,
+                                           int* src_w, int* src_h,
+                                           int* src_stride) {
+    if (!image || !pixels || !src_w || !src_h || !src_stride ||
+        dst_w <= 0.0f || dst_h <= 0.0f) {
+        return false;
+    }
+
+    int width = image->decoded_width > 0 ? image->decoded_width : image->width;
+    int height = image->decoded_height > 0 ? image->decoded_height : image->height;
+    int stride = image->pitch > 0 ? image->pitch / 4 : width;
+    if (!image->pixels || width <= 0 || height <= 0 || stride <= 0) {
+        return false;
+    }
+
+    *pixels = (const uint32_t*)image->pixels;
+    *src_w = width;
+    *src_h = height;
+    *src_stride = stride;
+    return true;
+}
+
 bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
     if (!pl) {
         return paint_ir_validation_fail(result, -1, "paint list is null",
@@ -81,6 +105,7 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
     int backdrop_depth = 0;
     int shadow_clip_depth = 0;
     int effect_depth = 0;
+    int transform_depth = 0;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
@@ -144,6 +169,15 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
                                                 shadow_clip_depth, effect_depth);
             }
             break;
+        case PAINT_DRAW_IMAGE_RESOURCE:
+            if (!cmd->draw_image_resource.image ||
+                cmd->draw_image_resource.dst_w < 0.0f ||
+                cmd->draw_image_resource.dst_h < 0.0f) {
+                return paint_ir_validation_fail(result, i, "image resource payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            break;
         case PAINT_DRAW_GLYPH:
             if (!cmd->draw_glyph.bitmap.buffer ||
                 cmd->draw_glyph.bitmap.width <= 0 ||
@@ -194,6 +228,17 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
                                                 shadow_clip_depth, effect_depth);
             }
             clip_depth--;
+            break;
+        case PAINT_PUSH_TRANSFORM:
+            transform_depth++;
+            break;
+        case PAINT_POP_TRANSFORM:
+            if (transform_depth <= 0) {
+                return paint_ir_validation_fail(result, i, "transform pop without matching push",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
+            transform_depth--;
             break;
         case PAINT_SAVE_BACKDROP:
             if (cmd->save_backdrop.w < 0 || cmd->save_backdrop.h < 0) {
@@ -307,6 +352,14 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_BEGIN_EFFECT_GROUP:
+            if (cmd->effect_group.bounds.right < cmd->effect_group.bounds.left ||
+                cmd->effect_group.bounds.bottom < cmd->effect_group.bounds.top ||
+                cmd->effect_group.opacity < 0.0f ||
+                cmd->effect_group.opacity > 1.0f) {
+                return paint_ir_validation_fail(result, i, "effect group payload is invalid",
+                                                clip_depth, backdrop_depth,
+                                                shadow_clip_depth, effect_depth);
+            }
             effect_depth++;
             break;
         case PAINT_END_EFFECT_GROUP:
@@ -318,8 +371,15 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             effect_depth--;
             break;
         case PAINT_GLYPH_RUN:
-            if (!cmd->glyph_run.glyph_ids || !cmd->glyph_run.xs ||
-                !cmd->glyph_run.ys || cmd->glyph_run.count <= 0) {
+            if (cmd->glyph_run.text) {
+                if (cmd->glyph_run.text_len < -1 ||
+                    cmd->glyph_run.font_size < 0.0f) {
+                    return paint_ir_validation_fail(result, i, "text run payload is invalid",
+                                                    clip_depth, backdrop_depth,
+                                                    shadow_clip_depth, effect_depth);
+                }
+            } else if (!cmd->glyph_run.glyph_ids || !cmd->glyph_run.xs ||
+                       !cmd->glyph_run.ys || cmd->glyph_run.count <= 0) {
                 return paint_ir_validation_fail(result, i, "glyph run payload is invalid",
                                                 clip_depth, backdrop_depth,
                                                 shadow_clip_depth, effect_depth);
@@ -352,6 +412,11 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
     }
     if (effect_depth != 0) {
         return paint_ir_validation_fail(result, pl->count, "effect group stack is unbalanced",
+                                        clip_depth, backdrop_depth,
+                                        shadow_clip_depth, effect_depth);
+    }
+    if (transform_depth != 0) {
+        return paint_ir_validation_fail(result, pl->count, "transform stack is unbalanced",
                                         clip_depth, backdrop_depth,
                                         shadow_clip_depth, effect_depth);
     }
@@ -497,6 +562,23 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     cmd->draw_image.resource_owner = resource_owner;
 }
 
+void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
+                               float dst_x, float dst_y,
+                               float dst_w, float dst_h,
+                               uint8_t opacity,
+                               const RdtMatrix* transform) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE_RESOURCE);
+    if (!cmd) return;
+    cmd->draw_image_resource.image = image;
+    cmd->draw_image_resource.dst_x = dst_x;
+    cmd->draw_image_resource.dst_y = dst_y;
+    cmd->draw_image_resource.dst_w = dst_w;
+    cmd->draw_image_resource.dst_h = dst_h;
+    cmd->draw_image_resource.opacity = opacity;
+    cmd->draw_image_resource.has_transform = transform != nullptr;
+    if (transform) cmd->draw_image_resource.transform = *transform;
+}
+
 void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
                       Color color, bool is_color_emoji, const Bound* clip,
                       const RdtMatrix* transform, uint64_t resource_generation) {
@@ -568,6 +650,17 @@ void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transfo
 
 void paint_pop_clip(PaintList* pl) {
     paint_alloc_cmd(pl, PAINT_POP_CLIP);
+}
+
+void paint_push_transform(PaintList* pl, const RdtMatrix* transform) {
+    if (!transform) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_PUSH_TRANSFORM);
+    if (!cmd) return;
+    cmd->push_transform.transform = *transform;
+}
+
+void paint_pop_transform(PaintList* pl) {
+    paint_alloc_cmd(pl, PAINT_POP_TRANSFORM);
 }
 
 void paint_save_backdrop(PaintList* pl, int x0, int y0, int w, int h) {
@@ -711,6 +804,34 @@ void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
     cmd->blit_surface_scaled.clip_depth = clip_depth;
 }
 
+void paint_begin_effect_group(PaintList* pl, const PaintEffectGroup* group) {
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BEGIN_EFFECT_GROUP);
+    if (!cmd) return;
+    if (group) {
+        cmd->effect_group = *group;
+    } else {
+        cmd->effect_group.opacity = 1.0f;
+    }
+}
+
+void paint_end_effect_group(PaintList* pl) {
+    paint_alloc_cmd(pl, PAINT_END_EFFECT_GROUP);
+}
+
+void paint_svg_subscene(PaintList* pl, const PaintSvgSubscene* subscene) {
+    if (!subscene) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_SVG_SUBSCENE);
+    if (!cmd) return;
+    cmd->svg_subscene = *subscene;
+}
+
+void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
+    if (!glyph_run) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_GLYPH_RUN);
+    if (!cmd) return;
+    cmd->glyph_run = *glyph_run;
+}
+
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------
@@ -766,6 +887,23 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
                           p->dst_x, p->dst_y, p->dst_w, p->dst_h, p->opacity,
                           p->has_transform ? &p->transform : nullptr,
                           owner, owner ? owner->generation : 0);
+            break;
+        }
+        case PAINT_DRAW_IMAGE_RESOURCE: {
+            const PaintDrawImageResource* p = &cmd->draw_image_resource;
+            const uint32_t* pixels = nullptr;
+            int src_w = 0;
+            int src_h = 0;
+            int src_stride = 0;
+            if (paint_ir_image_resource_pixels(p->image, p->dst_w, p->dst_h,
+                                               &pixels, &src_w, &src_h,
+                                               &src_stride)) {
+                dl_draw_image(dl, pixels, src_w, src_h, src_stride,
+                              p->dst_x, p->dst_y, p->dst_w, p->dst_h,
+                              p->opacity,
+                              p->has_transform ? &p->transform : nullptr,
+                              p->image, p->image->generation);
+            }
             break;
         }
         case PAINT_DRAW_GLYPH: {
@@ -881,8 +1019,10 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
             break;
         }
 
-        // Higher-level semantic ops are lowered in later phases (E: effects,
-        // F: inline SVG). They are not yet emitted by the live render path.
+        // Higher-level semantic ops are target-neutral; the raster lowering
+        // only consumes their pixel-domain expansions during this migration.
+        case PAINT_PUSH_TRANSFORM:
+        case PAINT_POP_TRANSFORM:
         case PAINT_GLYPH_RUN:
         case PAINT_BEGIN_EFFECT_GROUP:
         case PAINT_END_EFFECT_GROUP:
@@ -910,6 +1050,32 @@ static void paint_svg_append_color(StrBuf* out, Color color) {
     } else {
         strbuf_append_format(out, "rgba(%d,%d,%d,%.3f)",
                              color.r, color.g, color.b, color.a / 255.0f);
+    }
+}
+
+static void paint_svg_append_attr_escaped(StrBuf* out, const char* value) {
+    if (!out || !value) return;
+    for (const char* p = value; *p; p++) {
+        switch (*p) {
+        case '<': strbuf_append_str(out, "&lt;"); break;
+        case '>': strbuf_append_str(out, "&gt;"); break;
+        case '&': strbuf_append_str(out, "&amp;"); break;
+        case '"': strbuf_append_str(out, "&quot;"); break;
+        default: strbuf_append_char(out, *p); break;
+        }
+    }
+}
+
+static void paint_svg_append_text_escaped(StrBuf* out, const char* value, int len) {
+    if (!out || !value) return;
+    if (len < 0) len = (int)strlen(value); // INT_CAST_OK: text run byte length is bounded by source string.
+    for (int i = 0; i < len; i++) {
+        switch (value[i]) {
+        case '<': strbuf_append_str(out, "&lt;"); break;
+        case '>': strbuf_append_str(out, "&gt;"); break;
+        case '&': strbuf_append_str(out, "&amp;"); break;
+        default: strbuf_append_char(out, value[i]); break;
+        }
     }
 }
 
@@ -1046,12 +1212,15 @@ static const char* paint_op_name(PaintOp op) {
     case PAINT_FILL_LINEAR_GRADIENT: return "PAINT_FILL_LINEAR_GRADIENT";
     case PAINT_FILL_RADIAL_GRADIENT: return "PAINT_FILL_RADIAL_GRADIENT";
     case PAINT_DRAW_IMAGE: return "PAINT_DRAW_IMAGE";
+    case PAINT_DRAW_IMAGE_RESOURCE: return "PAINT_DRAW_IMAGE_RESOURCE";
     case PAINT_DRAW_GLYPH: return "PAINT_DRAW_GLYPH";
     case PAINT_DRAW_PICTURE: return "PAINT_DRAW_PICTURE";
     case PAINT_VIDEO_PLACEHOLDER: return "PAINT_VIDEO_PLACEHOLDER";
     case PAINT_WEBVIEW_LAYER_PLACEHOLDER: return "PAINT_WEBVIEW_LAYER_PLACEHOLDER";
     case PAINT_PUSH_CLIP: return "PAINT_PUSH_CLIP";
     case PAINT_POP_CLIP: return "PAINT_POP_CLIP";
+    case PAINT_PUSH_TRANSFORM: return "PAINT_PUSH_TRANSFORM";
+    case PAINT_POP_TRANSFORM: return "PAINT_POP_TRANSFORM";
     case PAINT_SAVE_BACKDROP: return "PAINT_SAVE_BACKDROP";
     case PAINT_COMPOSITE_OPACITY: return "PAINT_COMPOSITE_OPACITY";
     case PAINT_APPLY_BLEND_MODE: return "PAINT_APPLY_BLEND_MODE";
@@ -1106,10 +1275,33 @@ static bool paint_svg_caps_allow_gradient(const RenderExportTargetCaps* caps,
     return !has_transform || caps->transforms;
 }
 
+static bool paint_svg_caps_allow_image(const RenderExportTargetCaps* caps,
+                                       bool has_transform) {
+    if (!caps || !caps->images) return false;
+    return !has_transform || caps->transforms;
+}
+
 static bool paint_svg_caps_allow_clip(const RenderExportTargetCaps* caps,
                                       bool has_transform) {
     if (!caps || !caps->paths || !caps->clips) return false;
     return !has_transform || caps->transforms;
+}
+
+static bool paint_svg_caps_allow_glyph_run(const RenderExportTargetCaps* caps,
+                                           const PaintGlyphRun* run) {
+    if (!caps || !caps->glyph_runs || !run || !run->text) return false;
+    return !run->has_transform || caps->transforms;
+}
+
+static bool paint_svg_caps_allow_opacity_group(const RenderExportTargetCaps* caps,
+                                               const PaintEffectGroup* group) {
+    if (!caps || !caps->opacity_groups || !group) return false;
+    return !group->has_clip &&
+           !group->has_transform &&
+           group->blend_mode == 0 &&
+           group->filter == nullptr &&
+           !group->backdrop &&
+           !group->isolation;
 }
 
 static void paint_svg_append_gradient_stops(StrBuf* out,
@@ -1129,29 +1321,53 @@ static void paint_svg_append_gradient_stops(StrBuf* out,
     }
 }
 
-void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
-                        const PaintSvgLoweringOptions* options,
-                        PaintSvgLoweringStats* stats) {
+void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level) {
+    if (!state) return;
+    memset(state, 0, sizeof(PaintSvgLoweringState));
+    state->indent_level = indent_level;
+}
+
+static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
+                                         const PaintSvgLoweringOptions* options,
+                                         PaintSvgLoweringState* state,
+                                         PaintSvgLoweringStats* stats) {
     if (stats) {
         memset(stats, 0, sizeof(PaintSvgLoweringStats));
     }
     if (!pl || !out) return;
-    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_svg")) return;
 
     PaintSvgLoweringStats local_stats = {};
     PaintSvgLoweringStats* active_stats = stats ? stats : &local_stats;
-    int indent_level = options ? options->indent_level : 0;
+    PaintSvgLoweringState local_state = {};
+    if (!state) {
+        paint_svg_lowering_state_init(&local_state,
+                                      options ? options->indent_level : 0);
+        state = &local_state;
+    }
+
+    int indent_level = state->indent_level;
     bool emit_unsupported_comments = options ? options->emit_unsupported_comments : false;
     int resource_id_base = options ? options->resource_id_base : 0;
     const RenderExportTargetCaps* caps = options && options->caps
         ? options->caps
         : render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
-    int open_clip_depth = 0;
-    int skipped_clip_depth = 0;
+    int open_clip_depth = state->open_clip_depth;
+    int skipped_clip_depth = state->skipped_clip_depth;
+    int open_transform_depth = state->open_transform_depth;
+    int skipped_transform_depth = state->skipped_transform_depth;
+    int open_effect_depth = state->open_effect_depth;
+    int skipped_effect_depth = state->skipped_effect_depth;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
         active_stats->command_count++;
+        if (skipped_effect_depth > 0 &&
+            cmd->op != PAINT_BEGIN_EFFECT_GROUP &&
+            cmd->op != PAINT_END_EFFECT_GROUP) {
+            paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                       emit_unsupported_comments, active_stats);
+            continue;
+        }
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             if (!paint_svg_caps_allow_rect(caps)) {
@@ -1332,6 +1548,74 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
             active_stats->emitted_count++;
             break;
         }
+        case PAINT_DRAW_IMAGE_RESOURCE: {
+            const PaintDrawImageResource* p = &cmd->draw_image_resource;
+            ImageSurface* image = p->image;
+            const char* href = (image && image->url && image->url->href)
+                ? image->url->href->chars
+                : nullptr;
+            if (!href || !paint_svg_caps_allow_image(caps, p->has_transform)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"",
+                p->dst_x, p->dst_y, p->dst_w, p->dst_h);
+            paint_svg_append_attr_escaped(out, href);
+            strbuf_append_str(out, "\" preserveAspectRatio=\"none\"");
+            if (p->opacity < 255) {
+                strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity / 255.0f);
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_str(out, " />\n");
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_PUSH_TRANSFORM: {
+            if (skipped_transform_depth > 0) {
+                skipped_transform_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            if (!caps || !caps->transforms) {
+                skipped_transform_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            const PaintPushTransform* p = &cmd->push_transform;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "<g");
+            paint_svg_append_matrix_attr(out, &p->transform);
+            strbuf_append_str(out, ">\n");
+            open_transform_depth++;
+            indent_level++;
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_POP_TRANSFORM: {
+            if (skipped_transform_depth > 0) {
+                skipped_transform_depth--;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            if (open_transform_depth <= 0) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            open_transform_depth--;
+            indent_level--;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "</g>\n");
+            active_stats->emitted_count++;
+            break;
+        }
         case PAINT_PUSH_CLIP: {
             const PaintPushClip* p = &cmd->push_clip;
             if (skipped_clip_depth > 0) {
@@ -1389,10 +1673,119 @@ void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
             active_stats->emitted_count++;
             break;
         }
+        case PAINT_GLYPH_RUN: {
+            const PaintGlyphRun* p = &cmd->glyph_run;
+            if (!paint_svg_caps_allow_glyph_run(caps, p)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out,
+                "<text x=\"%.2f\" y=\"%.2f\" font-family=\"",
+                p->x, p->baseline_y);
+            paint_svg_append_attr_escaped(out, p->font_family ? p->font_family : "Arial");
+            strbuf_append_format(out, "\" font-size=\"%.2f\" fill=\"",
+                                 p->font_size > 0.0f ? p->font_size : 16.0f);
+            paint_svg_append_color(out, p->color);
+            strbuf_append_char(out, '"');
+            if (p->font_weight > 0 && p->font_weight != 400) {
+                strbuf_append_format(out, " font-weight=\"%d\"", p->font_weight);
+            }
+            if (p->italic) {
+                strbuf_append_str(out, " font-style=\"italic\"");
+            }
+            if (p->word_spacing > 0.01f) {
+                strbuf_append_format(out, " word-spacing=\"%.2f\"", p->word_spacing);
+            }
+            paint_svg_append_matrix_attr(out, p->has_transform ? &p->transform : nullptr);
+            strbuf_append_char(out, '>');
+            paint_svg_append_text_escaped(out, p->text, p->text_len);
+            strbuf_append_str(out, "</text>\n");
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_BEGIN_EFFECT_GROUP: {
+            if (skipped_effect_depth > 0) {
+                skipped_effect_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            const PaintEffectGroup* p = &cmd->effect_group;
+            if (!paint_svg_caps_allow_opacity_group(caps, p)) {
+                skipped_effect_depth++;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            paint_svg_indent(out, indent_level);
+            if (p->opacity < 0.9995f) {
+                strbuf_append_format(out, "<g opacity=\"%.4f\">\n", p->opacity);
+            } else {
+                strbuf_append_str(out, "<g>\n");
+            }
+            open_effect_depth++;
+            indent_level++;
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_END_EFFECT_GROUP: {
+            if (skipped_effect_depth > 0) {
+                skipped_effect_depth--;
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            if (open_effect_depth <= 0) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            open_effect_depth--;
+            indent_level--;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "</g>\n");
+            active_stats->emitted_count++;
+            break;
+        }
         default:
             paint_svg_note_unsupported(out, indent_level, cmd->op,
                                        emit_unsupported_comments, active_stats);
             break;
         }
     }
+
+    state->indent_level = indent_level;
+    state->open_clip_depth = open_clip_depth;
+    state->skipped_clip_depth = skipped_clip_depth;
+    state->open_transform_depth = open_transform_depth;
+    state->skipped_transform_depth = skipped_transform_depth;
+    state->open_effect_depth = open_effect_depth;
+    state->skipped_effect_depth = skipped_effect_depth;
+}
+
+void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,
+                        const PaintSvgLoweringOptions* options,
+                        PaintSvgLoweringStats* stats) {
+    if (stats) {
+        memset(stats, 0, sizeof(PaintSvgLoweringStats));
+    }
+    if (!pl || !out) return;
+    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_svg")) return;
+
+    PaintSvgLoweringState state = {};
+    paint_svg_lowering_state_init(&state, options ? options->indent_level : 0);
+    paint_ir_lower_svg_unchecked(pl, out, options, &state, stats);
+}
+
+void paint_ir_lower_svg_stream(const PaintList* pl, StrBuf* out,
+                               const PaintSvgLoweringOptions* options,
+                               PaintSvgLoweringState* state,
+                               PaintSvgLoweringStats* stats) {
+    if (stats) {
+        memset(stats, 0, sizeof(PaintSvgLoweringStats));
+    }
+    if (!pl || !out || !state) return;
+    paint_ir_lower_svg_unchecked(pl, out, options, state, stats);
 }

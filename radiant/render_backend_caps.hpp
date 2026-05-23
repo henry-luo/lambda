@@ -43,11 +43,11 @@ static inline const RenderExportTargetCaps* render_export_target_get_caps(Render
         true,   // paths
         true,   // strokes
         true,   // gradients
-        false,  // images
-        false,  // glyph_runs
+        true,   // images
+        true,   // glyph_runs
         true,   // clips
         true,   // transforms
-        false,  // opacity_groups
+        true,   // opacity_groups
         false,  // blend_modes
         false,  // filters
         false,  // shadows
@@ -62,7 +62,7 @@ static inline const RenderExportTargetCaps* render_export_target_get_caps(Render
         true,   // strokes
         false,  // gradients
         true,   // images
-        false,  // glyph_runs
+        true,   // glyph_runs
         true,   // clips
         true,   // transforms
         false,  // opacity_groups

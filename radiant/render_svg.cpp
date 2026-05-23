@@ -48,8 +48,11 @@ typedef struct {
     Color color;
     UiContext* ui_context;
     PaintList paint_list;
+    PaintSvgLoweringState paint_svg_state;
     int paint_resource_id;
-    bool _transform_emitted;  // tracks begin/end_transform pairing
+    bool transform_emitted_stack[64];
+    int transform_emitted_depth;
+    int transform_emitted_overflow_depth;
 } SvgRenderContext;
 
 // Forward declarations
@@ -69,8 +72,11 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
     options.indent_level = ctx->indent_level;
     options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
     options.resource_id_base = ctx->paint_resource_id;
-    paint_ir_lower_svg(&ctx->paint_list, ctx->svg_content, &options, nullptr);
+    ctx->paint_svg_state.indent_level = ctx->indent_level;
+    paint_ir_lower_svg_stream(&ctx->paint_list, ctx->svg_content, &options,
+                              &ctx->paint_svg_state, nullptr);
     ctx->paint_resource_id += paint_list_count(&ctx->paint_list);
+    ctx->indent_level = ctx->paint_svg_state.indent_level;
     paint_list_clear(&ctx->paint_list);
 }
 
@@ -239,6 +245,52 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         word_spacing = extra_space / space_count;
     }
 
+    // Use CSS font-size from style, fallback to 16 if not available
+    float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
+    // Use font ascender from FontProp (already in pixels), or fallback to 80% of font_size
+    float baseline_y = y + (ctx->font.style->ascender > 0 ? ctx->font.style->ascender : font_size * 0.8f);
+
+    int font_weight = 0;
+    if (ctx->font.style->font_weight_numeric > 0) {
+        font_weight = ctx->font.style->font_weight_numeric;
+    } else if (ctx->font.style->font_weight == CSS_VALUE_BOLD ||
+               ctx->font.style->font_weight == CSS_VALUE_BOLDER) {
+        font_weight = 700;
+    } else if (ctx->font.style->font_weight == CSS_VALUE_LIGHTER) {
+        font_weight = 300;
+    }
+
+    bool italic = ctx->font.style->font_style == CSS_VALUE_ITALIC;
+    bool has_text_deco = ctx->font.style->text_deco != CSS_VALUE_NONE &&
+                         ctx->font.style->text_deco != CSS_VALUE__UNDEF;
+    DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
+    bool has_text_shadow = parent_elem && parent_elem->font &&
+                           parent_elem->font->text_shadow;
+
+    if (!has_text_deco && !has_text_shadow) {
+        PaintGlyphRun run = {};
+        run.font = &ctx->font;
+        run.color = ctx->color;
+        run.text = text_content;
+        run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+        run.font_family = ctx->font.font_handle
+            ? font_handle_get_family_name(ctx->font.font_handle)
+            : "Arial";
+        run.font_size = font_size;
+        run.x = x;
+        run.baseline_y = baseline_y;
+        run.word_spacing = word_spacing;
+        run.font_weight = font_weight;
+        run.italic = italic;
+        paint_glyph_run(&ctx->paint_list, &run);
+        svg_lower_paint_list(ctx);
+
+        mem_free(text_content);
+        text_rect = text_rect->next;
+        if (text_rect) { goto NEXT_RECT; }
+        return;
+    }
+
     // Escape XML entities in text
     size_t transformed_len = strlen(text_content);
     StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
@@ -259,11 +311,6 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     char color_str[32];
     svg_color_to_string(ctx->color, color_str);
 
-    // Use CSS font-size from style, fallback to 16 if not available
-    float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
-    // Use font ascender from FontProp (already in pixels), or fallback to 80% of font_size
-    float baseline_y = y + (ctx->font.style->ascender > 0 ? ctx->font.style->ascender : font_size * 0.8f);
-
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
         x, baseline_y,
@@ -273,21 +320,11 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     // Add font style attributes
     // Use font_weight_numeric (100-900) when available, otherwise map CssEnum keyword
-    {
-        int weight = 0;
-        if (ctx->font.style->font_weight_numeric > 0) {
-            weight = ctx->font.style->font_weight_numeric;
-        } else if (ctx->font.style->font_weight == CSS_VALUE_BOLD || ctx->font.style->font_weight == CSS_VALUE_BOLDER) {
-            weight = 700;
-        } else if (ctx->font.style->font_weight == CSS_VALUE_LIGHTER) {
-            weight = 300;
-        }
-        if (weight > 0 && weight != 400) {
-            strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", weight);
-        }
+    if (font_weight > 0 && font_weight != 400) {
+        strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", font_weight);
     }
 
-    if (ctx->font.style->font_style == CSS_VALUE_ITALIC) {
+    if (italic) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
@@ -315,7 +352,6 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     }
 
     // Add text-shadow as CSS style attribute
-    DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
     if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
         strbuf_append_str(ctx->svg_content, " style=\"text-shadow:");
         TextShadow* ts = parent_elem->font->text_shadow;
@@ -1021,54 +1057,60 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     if (rule_height <= 0) return;
 
-    // Convert color to string
-    char rule_color_str[32];
-    svg_color_to_string(mc->rule_color, rule_color_str);
-
     log_debug("[MULTICOL SVG] Rendering %d column rules, width=%.1f, style=%d, height=%.1f",
               rule_column_count - 1, mc->rule_width, mc->rule_style, rule_height);
 
     // Draw rule between each pair of columns
     for (int i = 0; i < rule_column_count - 1; i++) {
         float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f;
-
-        svg_indent(ctx);
-
-        // Different stroke patterns for different styles
-        if (mc->rule_style == CSS_VALUE_DOTTED) {
-            strbuf_append_format(ctx->svg_content,
-                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
-                "stroke=\"%s\" stroke-width=\"%.2f\" stroke-dasharray=\"%.2f,%.2f\" />\n",
-                rule_x, block_y, rule_x, block_y + rule_height,
-                rule_color_str, mc->rule_width, mc->rule_width, mc->rule_width * 2);
-        } else if (mc->rule_style == CSS_VALUE_DASHED) {
-            strbuf_append_format(ctx->svg_content,
-                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
-                "stroke=\"%s\" stroke-width=\"%.2f\" stroke-dasharray=\"%.2f,%.2f\" />\n",
-                rule_x, block_y, rule_x, block_y + rule_height,
-                rule_color_str, mc->rule_width, mc->rule_width * 3, mc->rule_width * 2);
-        } else if (mc->rule_style == CSS_VALUE_DOUBLE) {
-            // Double: two lines
+        if (mc->rule_style == CSS_VALUE_DOUBLE) {
             float thin_width = mc->rule_width / 3.0f;
             float offset = mc->rule_width / 2.0f;
-            strbuf_append_format(ctx->svg_content,
-                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
-                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
-                rule_x - offset, block_y, rule_x - offset, block_y + rule_height,
-                rule_color_str, thin_width);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
-                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
-                rule_x + offset, block_y, rule_x + offset, block_y + rule_height,
-                rule_color_str, thin_width);
+            RdtPath* left = rdt_path_new();
+            RdtPath* right = rdt_path_new();
+            if (left && right) {
+                rdt_path_move_to(left, rule_x - offset, block_y);
+                rdt_path_line_to(left, rule_x - offset, block_y + rule_height);
+                paint_stroke_path(&ctx->paint_list, left, mc->rule_color, thin_width,
+                                  RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f,
+                                  nullptr);
+                svg_lower_paint_list(ctx);
+
+                rdt_path_move_to(right, rule_x + offset, block_y);
+                rdt_path_line_to(right, rule_x + offset, block_y + rule_height);
+                paint_stroke_path(&ctx->paint_list, right, mc->rule_color, thin_width,
+                                  RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f,
+                                  nullptr);
+                svg_lower_paint_list(ctx);
+            }
+            if (left) rdt_path_free(left);
+            if (right) rdt_path_free(right);
         } else {
-            // Solid (default)
-            strbuf_append_format(ctx->svg_content,
-                "<line x1=\"%.2f\" y1=\"%.2f\" x2=\"%.2f\" y2=\"%.2f\" "
-                "stroke=\"%s\" stroke-width=\"%.2f\" />\n",
-                rule_x, block_y, rule_x, block_y + rule_height,
-                rule_color_str, mc->rule_width);
+            float* dash = nullptr;
+            int dash_count = 0;
+            float dash_pattern[2];
+            if (mc->rule_style == CSS_VALUE_DOTTED) {
+                dash_pattern[0] = mc->rule_width;
+                dash_pattern[1] = mc->rule_width * 2.0f;
+                dash = dash_pattern;
+                dash_count = 2;
+            } else if (mc->rule_style == CSS_VALUE_DASHED) {
+                dash_pattern[0] = mc->rule_width * 3.0f;
+                dash_pattern[1] = mc->rule_width * 2.0f;
+                dash = dash_pattern;
+                dash_count = 2;
+            }
+
+            RdtPath* path = rdt_path_new();
+            if (path) {
+                rdt_path_move_to(path, rule_x, block_y);
+                rdt_path_line_to(path, rule_x, block_y + rule_height);
+                paint_stroke_path(&ctx->paint_list, path, mc->rule_color,
+                                  mc->rule_width, RDT_CAP_BUTT, RDT_JOIN_MITER,
+                                  dash, dash_count, 0.0f, nullptr);
+                svg_lower_paint_list(ctx);
+                rdt_path_free(path);
+            }
         }
 
         log_debug("[MULTICOL SVG] Rule %d at x=%.1f, height=%.1f", i, rule_x, rule_height);
@@ -1276,11 +1318,8 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
               svg_x, svg_y, block->width, block->height);
 }
 
-// Build an SVG transform attribute value from a CSS TransformProp.
-// Returns true if a non-identity transform was written to out_buf.
-// out_buf must be at least 256 bytes.
-static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, float elem_y,
-                                     float elem_w, float elem_h, char* out_buf, int buf_size) {
+static bool svg_build_transform_matrix(const TransformProp* tp, float elem_x, float elem_y,
+                                       float elem_w, float elem_h, RdtMatrix* out_matrix) {
     if (!tp || !tp->functions) return false;
 
     // Compose 2D affine matrix: [a c e; b d f; 0 0 1]
@@ -1352,8 +1391,17 @@ static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, floa
                      && fabs(md-1)<1e-5 && fabs(me)<1e-5 && fabs(mf)<1e-5);
     if (is_identity) return false;
 
-    str_fmt(out_buf, buf_size, "matrix(%.6g,%.6g,%.6g,%.6g,%.6g,%.6g)",
-            ma, mb, mc, md, me, mf);
+    if (out_matrix) {
+        out_matrix->e11 = ma;
+        out_matrix->e12 = mc;
+        out_matrix->e13 = me;
+        out_matrix->e21 = mb;
+        out_matrix->e22 = md;
+        out_matrix->e23 = mf;
+        out_matrix->e31 = 0.0f;
+        out_matrix->e32 = 0.0f;
+        out_matrix->e33 = 1.0f;
+    }
     return true;
 }
 
@@ -1397,12 +1445,10 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
               img_width, img_height, content_rect.x, content_rect.y);
 
     if (img->url && img->url->href) {
-        const char* href = img->url->href->chars;
-        svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content,
-            "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
-            "preserveAspectRatio=\"none\" />\n",
-            content_rect.x, content_rect.y, img_width, img_height, href);
+        paint_draw_image_resource(&ctx->paint_list, img,
+                                  content_rect.x, content_rect.y,
+                                  img_width, img_height, 255, nullptr);
+        svg_lower_paint_list(ctx);
     }
 }
 
@@ -1448,41 +1494,55 @@ static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
 
 static void svg_cb_begin_opacity(void* vctx, float opacity) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    svg_indent(ctx);
-    strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", opacity);
-    ctx->indent_level++;
+    PaintEffectGroup group = {};
+    group.opacity = opacity;
+    paint_begin_effect_group(&ctx->paint_list, &group);
+    svg_lower_paint_list(ctx);
 }
 
 static void svg_cb_end_opacity(void* vctx) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    ctx->indent_level--;
-    svg_indent(ctx);
-    strbuf_append_str(ctx->svg_content, "</g>\n");
+    paint_end_effect_group(&ctx->paint_list);
+    svg_lower_paint_list(ctx);
 }
 
 static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    char transform_buf[256] = {};
-    bool has = svg_build_transform_attr(
+    if (!block) return;
+    if (ctx->transform_emitted_depth >= 64) {
+        log_error("[SVG_PAINT_IR] transform stack overflow while rendering %s",
+                  block->node_name());
+        ctx->transform_emitted_overflow_depth++;
+        return;
+    }
+
+    RdtMatrix transform = {};
+    bool has = svg_build_transform_matrix(
         block->transform,
         abs_x, abs_y,
         block->width, block->height,
-        transform_buf, sizeof(transform_buf));
-    ctx->_transform_emitted = has;
+        &transform);
+    ctx->transform_emitted_stack[ctx->transform_emitted_depth++] = has;
     if (has) {
-        svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g transform=\"%s\">\n", transform_buf);
-        ctx->indent_level++;
+        paint_push_transform(&ctx->paint_list, &transform);
+        svg_lower_paint_list(ctx);
     }
 }
 
 static void svg_cb_end_transform(void* vctx) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    if (ctx->_transform_emitted) {
-        ctx->indent_level--;
-        svg_indent(ctx);
-        strbuf_append_str(ctx->svg_content, "</g>\n");
-        ctx->_transform_emitted = false;
+    if (ctx->transform_emitted_overflow_depth > 0) {
+        ctx->transform_emitted_overflow_depth--;
+        return;
+    }
+    if (ctx->transform_emitted_depth <= 0) {
+        log_error("[SVG_PAINT_IR] transform stack underflow");
+        return;
+    }
+    bool emitted = ctx->transform_emitted_stack[--ctx->transform_emitted_depth];
+    if (emitted) {
+        paint_pop_transform(&ctx->paint_list);
+        svg_lower_paint_list(ctx);
     }
 }
 
@@ -1704,6 +1764,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.viewport_height = height;
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
+    paint_svg_lowering_state_init(&ctx.paint_svg_state, ctx.indent_level);
 
     // Initialize default font and color
     ctx.color.r = 0; ctx.color.g = 0; ctx.color.b = 0; ctx.color.a = 255; // Black text

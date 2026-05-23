@@ -737,6 +737,28 @@ HPDF_STATUS HPDF_Page_MoveTextPos(HPDF_Page page, float x, float y) {
     return HPDF_OK;
 }
 
+HPDF_STATUS HPDF_Page_SetTextMatrix(HPDF_Page page,
+                                    float a, float b, float c,
+                                    float d, float e, float f) {
+    if (!page) return HPDF_ERROR_INVALID_PARAM;
+    if (!page->in_text_object) return HPDF_ERROR_INVALID_STATE;
+
+    pdf_format_float(page->content, a);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, b);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, c);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, d);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, e);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, f);
+    strbuf_append_str(page->content, " Tm\n");
+
+    return HPDF_OK;
+}
+
 HPDF_STATUS HPDF_Page_ShowText(HPDF_Page page, const char* text) {
     if (!page || !text) return HPDF_ERROR_INVALID_PARAM;
     if (!page->in_text_object) return HPDF_ERROR_INVALID_STATE;

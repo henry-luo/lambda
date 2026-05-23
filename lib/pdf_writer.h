@@ -367,6 +367,17 @@ HPDF_STATUS HPDF_Page_TextOut(HPDF_Page page, float x, float y, const char* text
 HPDF_STATUS HPDF_Page_MoveTextPos(HPDF_Page page, float x, float y);
 
 /**
+ * Set text matrix and text line matrix.
+ *
+ * @param page  Page handle
+ * @param a,b,c,d,e,f  PDF text matrix values
+ * @return      HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_SetTextMatrix(HPDF_Page page,
+                                    float a, float b, float c,
+                                    float d, float e, float f);
+
+/**
  * Show text at current position.
  * 
  * @param page  Page handle
