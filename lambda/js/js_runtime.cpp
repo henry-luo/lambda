@@ -13502,6 +13502,152 @@ static bool js_regex_named_groups_valid(const char* pat, int len) {
     return true;
 }
 
+// JS regexp case-folding fixups for the gap between RE2's folding and the spec's
+// Canonicalize. RE2 (?i) uses Unicode full case folding, which (a) fails to fold
+// certain characters whose simple/common fold differs from their full fold
+// (e.g. U+0390 ↔ U+1FD3, the ﬅ/ﬆ ligatures) — these "underfold" cases — and
+// (b) folds the two non-ASCII characters that simple-fold to ASCII (U+017F→s,
+// U+212A→k), which the spec's *non-unicode* Canonicalize must NOT do.
+//
+// g_iu_fold_expand maps a non-ASCII code point to the other members of its
+// simple-fold equivalence group that RE2 won't fold to it. The group key is the
+// utf8proc full casefold+canonical decomposition: two code points are JS-`iu`
+// equivalent iff their folded/decomposed forms match (verified for the precomposed
+// Greek and ligature cases). Only non-ASCII triggers are recorded so ordinary
+// ASCII patterns are never rewritten.
+static std::unordered_map<uint32_t, std::string> g_iu_fold_expand;
+static bool g_iu_fold_built = false;
+
+static void js_regex_build_iu_fold_table() {
+    if (g_iu_fold_built) return;
+    g_iu_fold_built = true;
+    std::unordered_map<std::string, std::vector<uint32_t>> by_fold;
+    utf8proc_int32_t buf[16];
+    for (uint32_t cp = 0; cp <= 0xFFFF; cp++) {
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue;  // surrogate halves
+        int bc = 0;
+        utf8proc_ssize_t n = utf8proc_decompose_char((utf8proc_int32_t)cp, buf,
+            (utf8proc_ssize_t)16,
+            (utf8proc_option_t)(UTF8PROC_CASEFOLD | UTF8PROC_DECOMPOSE), &bc);
+        if (n <= 0 || n > 16) continue;
+        std::string key;
+        char tmp[16];
+        for (int k = 0; k < n; k++) { snprintf(tmp, sizeof(tmp), "%X,", (unsigned)buf[k]); key += tmp; }
+        by_fold[key].push_back(cp);
+    }
+    for (auto& kv : by_fold) {
+        if (kv.second.size() < 2) continue;
+        for (uint32_t cp : kv.second) {
+            if (cp < 0x80) continue;  // keep RE2 folding for ASCII; expand only exotic chars
+            std::string sib;
+            char tmp[16];
+            for (uint32_t other : kv.second) {
+                if (other == cp) continue;
+                snprintf(tmp, sizeof(tmp), "\\x{%X}", (unsigned)other);
+                sib += tmp;
+            }
+            if (!sib.empty()) g_iu_fold_expand[cp] = sib;
+        }
+    }
+}
+
+// Parse a `\x{HEX}` or `\xHH` escape at pat[i] (pat[i]=='\\'). On success fills
+// *cp and *adv (total chars incl. backslash) and returns true.
+static bool js_regex_parse_x_escape(const std::string& pat, int i, int n, uint32_t* cp, int* adv) {
+    if (i + 1 >= n || pat[i] != '\\' || pat[i + 1] != 'x') return false;
+    if (i + 2 < n && pat[i + 2] == '{') {
+        int j = i + 3; uint32_t v = 0; int digits = 0;
+        while (j < n && pat[j] != '}') {
+            int hv = js_regex_hex_value(pat[j]);
+            if (hv < 0) return false;
+            v = (v << 4) | (uint32_t)hv; digits++; j++;
+        }
+        if (digits == 0 || j >= n || pat[j] != '}') return false;
+        *cp = v; *adv = (j + 1) - i; return true;
+    }
+    if (i + 3 < n) {
+        int h0 = js_regex_hex_value(pat[i + 2]), h1 = js_regex_hex_value(pat[i + 3]);
+        if (h0 < 0 || h1 < 0) return false;
+        *cp = (uint32_t)((h0 << 4) | h1); *adv = 4; return true;
+    }
+    return false;
+}
+
+// Rewrite `processed_pattern` to bridge the RE2/Canonicalize folding gap (see
+// g_iu_fold_expand). Only acts on patterns that actually contain the affected
+// characters; everything else is copied verbatim.
+static void js_regex_apply_casefold_fixups(std::string& pat, bool has_unicode, bool ignore_case) {
+    if (!ignore_case) return;
+    if (has_unicode) js_regex_build_iu_fold_table();
+    int n = (int)pat.size();
+    std::string out;
+    out.reserve(pat.size() + 16);
+    bool in_class = false;
+    bool changed = false;
+    bool prev_atom_in_class = false;  // last emitted class token was a literal atom
+    bool dash_pending = false;        // a range '-' (atom '-') is awaiting its end atom
+    for (int i = 0; i < n; ) {
+        char c = pat[i];
+        uint32_t cp = 0; int adv = 0; bool is_atom = false;
+        if (c == '\\' && i + 1 < n) {
+            if (js_regex_parse_x_escape(pat, i, n, &cp, &adv)) {
+                is_atom = true;
+            } else {
+                out += c; out += pat[i + 1]; i += 2;
+                if (in_class) { prev_atom_in_class = false; dash_pending = false; }
+                continue;
+            }
+        } else if (c == '[') {
+            in_class = true; out += c; i++; prev_atom_in_class = false; dash_pending = false; continue;
+        } else if (c == ']' && in_class) {
+            in_class = false; out += c; i++; continue;
+        } else if (in_class && c == '-' && prev_atom_in_class) {
+            // range operator unless it's the final char before ']'
+            if (i + 1 < n && pat[i + 1] != ']') dash_pending = true;
+            out += c; i++; prev_atom_in_class = false; continue;
+        } else if ((unsigned char)c >= 0x80) {
+            uint32_t d; int got = utf8_decode(pat.c_str() + i, (size_t)(n - i), &d);
+            if (got > 0) { cp = d; adv = got; is_atom = true; }
+            else { out += c; i++; continue; }
+        } else {
+            cp = (uint32_t)(unsigned char)c; adv = 1; is_atom = true;
+        }
+
+        if (is_atom) {
+            std::string atom = pat.substr(i, adv);
+            bool range_member = false;
+            if (in_class) {
+                if (dash_pending) range_member = true;  // this atom is a range end
+                else if (i + adv < n && pat[i + adv] == '-' &&
+                         i + adv + 1 < n && pat[i + adv + 1] != ']') range_member = true;  // range start
+            }
+            if (has_unicode) {
+                auto it = (cp >= 0x80) ? g_iu_fold_expand.find(cp) : g_iu_fold_expand.end();
+                if (it != g_iu_fold_expand.end() && !range_member) {
+                    if (in_class) { out += atom; out += it->second; }
+                    else { out += '['; out += atom; out += it->second; out += ']'; }
+                    changed = true;
+                } else {
+                    out += atom;
+                }
+            } else {
+                // non-unicode `i`: U+017F/U+212A must match only themselves, not s/k.
+                if ((cp == 0x017F || cp == 0x212A) && !in_class) {
+                    out += "(?-i:"; out += atom; out += ')';
+                    changed = true;
+                } else {
+                    out += atom;
+                }
+            }
+            if (in_class) { prev_atom_in_class = true; dash_pending = false; }
+            i += adv;
+            continue;
+        }
+        out += c; i++;
+    }
+    if (changed) pat = std::move(out);
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
@@ -14279,6 +14425,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
         }
     }
+
+    // Bridge the RE2/Canonicalize case-folding gap (underfolded simple-fold pairs
+    // for `iu`; the U+017F/U+212A over-fold for non-unicode `i`). No-op unless the
+    // pattern actually contains the affected characters.
+    js_regex_apply_casefold_fixups(processed_pattern, has_unicode, compile_info.ignore_case);
 
     // build RE2 options from flags
     re2::RE2::Options opts;
