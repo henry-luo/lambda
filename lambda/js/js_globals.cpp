@@ -9873,20 +9873,48 @@ static int64_t array_like_length(Item v) {
     return 0;
 }
 
-// compareArray(a, b): element-wise SameValue comparison, returns bool Item
+// compareArray(a, b): element-wise SameValue comparison, returns bool Item.
+// Replicates the test262 harness `compareArray`, which reads a.length / b.length
+// directly and iterates by index — so operands that are not arrays still compare
+// by their `length`. Two plain objects (both length === undefined) therefore
+// compare vacuously equal (0 iterations), matching the harness. The native batch
+// fast-path must not reject non-array operands outright, or it diverges from the
+// JS harness for tests like RegExp/named-groups/unicode-match (compares .groups).
 extern "C" Item js_compare_array(Item a, Item b) {
     extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_access(Item object, Item key);
+    extern Item js_strict_equal(Item left, Item right);
 
-    if (!is_array_like(a) || !is_array_like(b))
-        return (Item){.item = b2it(false)};
+    bool a_arr = is_array_like(a), b_arr = is_array_like(b);
+    if (a_arr && b_arr) {
+        int64_t len_a = array_like_length(a);
+        int64_t len_b = array_like_length(b);
+        if (len_a != len_b) return (Item){.item = b2it(false)};
+        for (int64_t i = 0; i < len_a; i++) {
+            Item ai = js_array_get_int(a, i);
+            Item bi = js_array_get_int(b, i);
+            if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
+        }
+        return (Item){.item = b2it(true)};
+    }
 
-    int64_t len_a = array_like_length(a);
-    int64_t len_b = array_like_length(b);
-    if (len_a != len_b) return (Item){.item = b2it(false)};
-
-    for (int64_t i = 0; i < len_a; i++) {
-        Item ai = js_array_get_int(a, i);
-        Item bi = js_array_get_int(b, i);
+    // Non-array operand(s): follow the harness algorithm verbatim.
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Item la = js_property_access(a, len_key);
+    Item lb = js_property_access(b, len_key);
+    // harness: if (b.length !== a.length) return false;
+    if (!it2b(js_strict_equal(lb, la))) return (Item){.item = b2it(false)};
+    // for (i = 0; i < a.length; i++) — non-numeric a.length yields no iterations.
+    TypeId lat = get_type_id(la);
+    int64_t len;
+    if (lat == LMD_TYPE_INT) len = it2i(la);
+    else if (lat == LMD_TYPE_INT64) len = it2l(la);
+    else if (lat == LMD_TYPE_FLOAT) len = (int64_t)it2d(la);
+    else return (Item){.item = b2it(true)};
+    for (int64_t i = 0; i < len; i++) {
+        Item key = (Item){.item = i2it(i)};
+        Item ai = a_arr ? js_array_get_int(a, i) : js_property_access(a, key);
+        Item bi = b_arr ? js_array_get_int(b, i) : js_property_access(b, key);
         if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
     }
     return (Item){.item = b2it(true)};

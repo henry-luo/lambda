@@ -4868,7 +4868,19 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (sk && sk->len > 0) {
                 int64_t string_index = -1;
                 if (!js_array_parse_index_name(sk->chars, (int)sk->len, &string_index)) {
-                    if (!js_skip_accessor_dispatch) {
+                    // OrdinarySetWithOwnDescriptor: an own data property (stored in
+                    // the array's companion map) shadows any prototype setter, so
+                    // skip the prototype accessor walk when one exists. Otherwise a
+                    // setter on Array.prototype (e.g. test262's `groups` probe)
+                    // would intercept writes to the array's own data property.
+                    bool own_data_prop = false;
+                    if (object.array->extra != 0) {
+                        Map* pm0 = (Map*)(uintptr_t)object.array->extra;
+                        Item pm0_item = (Item){.map = pm0};
+                        ShapeEntry* se0 = js_find_shape_entry(pm0_item, sk->chars, (int)sk->len);
+                        if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
+                    }
+                    if (!own_data_prop && !js_skip_accessor_dispatch) {
                         Item lookup_root = js_get_prototype(object);
                         if (lookup_root.item == ItemNull.item) lookup_root = js_get_prototype_of(object);
                         JsSetterDispatchStatus st = js_ordinary_set_via_accessor(
@@ -10939,6 +10951,11 @@ static bool js_builtin_super_constructs_via_construct(Item callee) {
     const char* name = fn->name->chars;
     int len = (int)fn->name->len;
     return (len == 7 && strncmp(name, "Promise", 7) == 0) ||
+           // Symbol is a valid `extends` target (IsConstructor is true) but its
+           // [[Construct]] throws a TypeError. Routing super() through the
+           // construct path (js_new_from_class_object) reaches that throw, so
+           // `new (class extends Symbol {})()` raises TypeError per spec.
+           (len == 6 && strncmp(name, "Symbol", 6) == 0) ||
            (len == 3 && strncmp(name, "Map", 3) == 0) ||
            (len == 3 && strncmp(name, "Set", 3) == 0) ||
            (len == 7 && strncmp(name, "WeakMap", 7) == 0) ||
@@ -12944,6 +12961,13 @@ static bool js_regex_re2_group_name_needs_alias(const char* name, int name_len) 
                            ch == '_')) {
             return true;
         }
+        // ZWNJ (U+200C, E2 80 8C) and ZWJ (U+200D, E2 80 8D) are valid in JS
+        // IdentifierPart but RE2 rejects them in capture names — force an alias.
+        if (ch == 0xE2 && i + 2 < name_len &&
+            (unsigned char)name[i + 1] == 0x80 &&
+            ((unsigned char)name[i + 2] == 0x8C || (unsigned char)name[i + 2] == 0x8D)) {
+            return true;
+        }
     }
     return false;
 }
@@ -13299,6 +13323,185 @@ static int js_regex_append_legacy_octal_escape(std::string& out, const char* pat
     return last;
 }
 
+// Decode \uHHHH, \u{H..}, and surrogate-pair \u escapes that appear inside regex
+// named-group definitions `(?<name>` and named backreferences `\k<name>` into raw
+// UTF-8. Per spec, a RegExpIdentifierName always interprets \u escapes regardless
+// of the `u` flag, so `(?<\u{1d4d1}…>)` is the same name as the literal-character
+// form. RE2 itself validates the (UTF-8) identifier, so decoding lets escaped
+// names compile, match, and key the `groups` object identically to literal names.
+// Returns true and fills `out` if any name-region escape was decoded; the rest of
+// the pattern (including \u escapes in the body) is copied verbatim. The original
+// `pattern` is preserved by the caller for `.source`.
+static bool js_regex_append_decoded_name(const char* pat, int len, int* pi, std::string& out) {
+    // Decode the name region starting at *pi up to (but not including) '>'.
+    // Returns false only if a name-region \u escape is malformed (caller leaves
+    // such patterns to downstream validation). Advances *pi to the '>' (or end).
+    int i = *pi;
+    bool any = false;
+    while (i < len && pat[i] != '>') {
+        if (pat[i] == '\\' && i + 1 < len && pat[i + 1] == 'u') {
+            uint32_t cp = 0; int consumed = 0;
+            if (i + 2 < len && pat[i + 2] == '{') {
+                int j = i + 3, val = 0, digits = 0;
+                while (j < len && pat[j] != '}') {
+                    int hv = js_regex_hex_value(pat[j]);
+                    if (hv < 0) { digits = -1; break; }
+                    val = val * 16 + hv; digits++; j++;
+                }
+                if (digits > 0 && j < len && pat[j] == '}' && val <= 0x10FFFF) {
+                    cp = (uint32_t)val; consumed = (j + 1) - i;
+                }
+            } else if (i + 5 < len) {
+                int h0 = js_regex_hex_value(pat[i + 2]), h1 = js_regex_hex_value(pat[i + 3]);
+                int h2 = js_regex_hex_value(pat[i + 4]), h3 = js_regex_hex_value(pat[i + 5]);
+                if (h0 >= 0 && h1 >= 0 && h2 >= 0 && h3 >= 0) {
+                    uint32_t u = (uint32_t)((h0 << 12) | (h1 << 8) | (h2 << 4) | h3);
+                    consumed = 6;
+                    // Combine a high+low surrogate pair into one code point.
+                    if (u >= 0xD800 && u <= 0xDBFF && i + 11 < len &&
+                        pat[i + 6] == '\\' && pat[i + 7] == 'u') {
+                        int l0 = js_regex_hex_value(pat[i + 8]), l1 = js_regex_hex_value(pat[i + 9]);
+                        int l2 = js_regex_hex_value(pat[i + 10]), l3 = js_regex_hex_value(pat[i + 11]);
+                        if (l0 >= 0 && l1 >= 0 && l2 >= 0 && l3 >= 0) {
+                            uint32_t lo = (uint32_t)((l0 << 12) | (l1 << 8) | (l2 << 4) | l3);
+                            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                                u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00);
+                                consumed = 12;
+                            }
+                        }
+                    }
+                    cp = u;
+                }
+            }
+            if (consumed > 0) {
+                char ub[8];
+                int n = (int)utf8_encode(cp, ub);
+                out.append(ub, n);
+                i += consumed;
+                any = true;
+                continue;
+            }
+        }
+        out += pat[i];
+        i++;
+    }
+    *pi = i;
+    return any;
+}
+
+static bool js_regex_decode_name_escapes(const char* pat, int len, std::string& out) {
+    // Fast path: only act when both a \u escape and a name region (?< / \k< exist.
+    bool has_u = false, has_name = false;
+    for (int i = 0; i + 1 < len; i++) {
+        if (pat[i] == '\\' && pat[i + 1] == 'u') has_u = true;
+        else if (pat[i] == '(' && pat[i + 1] == '?' && i + 2 < len && pat[i + 2] == '<') has_name = true;
+        else if (pat[i] == '\\' && pat[i + 1] == 'k') has_name = true;
+        if (has_u && has_name) break;
+    }
+    if (!has_u || !has_name) return false;
+
+    std::string result;
+    result.reserve(len + 8);
+    bool changed = false;
+    bool in_class = false;
+    int i = 0;
+    while (i < len) {
+        char c = pat[i];
+        if (c == '\\' && i + 1 < len) {
+            // \k<name> named backreference — decode escapes in the name.
+            if (!in_class && pat[i + 1] == 'k' && i + 2 < len && pat[i + 2] == '<') {
+                result += "\\k<";
+                int j = i + 3;
+                if (js_regex_append_decoded_name(pat, len, &j, result)) changed = true;
+                if (j < len && pat[j] == '>') { result += '>'; j++; }
+                i = j;
+                continue;
+            }
+            result += c;
+            result += pat[i + 1];
+            i += 2;
+            continue;
+        }
+        if (c == '[') { in_class = true; result += c; i++; continue; }
+        if (c == ']' && in_class) { in_class = false; result += c; i++; continue; }
+        // (?<name> named group (not lookbehind (?<= / (?<!)
+        if (!in_class && c == '(' && i + 2 < len && pat[i + 1] == '?' && pat[i + 2] == '<' &&
+            !(i + 3 < len && (pat[i + 3] == '=' || pat[i + 3] == '!'))) {
+            result += "(?<";
+            int j = i + 3;
+            if (js_regex_append_decoded_name(pat, len, &j, result)) changed = true;
+            if (j < len && pat[j] == '>') { result += '>'; j++; }
+            i = j;
+            continue;
+        }
+        result += c;
+        i++;
+    }
+    if (changed) { out = std::move(result); return true; }
+    return false;
+}
+
+static bool js_regex_cp_is_id_start(uint32_t cp) {
+    if (cp == '$' || cp == '_') return true;
+    if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
+    return js_regex_sorted_range_contains(js_regex_generated_ranges_70_id_start,
+        (int)(sizeof(js_regex_generated_ranges_70_id_start) / sizeof(js_regex_generated_ranges_70_id_start[0])),
+        (int)cp);
+}
+
+static bool js_regex_cp_is_id_continue(uint32_t cp) {
+    // ZWNJ (U+200C) and ZWJ (U+200D) are valid in IdentifierPart per spec.
+    if (cp == '$' || cp == '_' || cp == 0x200C || cp == 0x200D) return true;
+    if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+                          (cp >= '0' && cp <= '9');
+    return js_regex_sorted_range_contains(js_regex_generated_ranges_69_id_continue,
+        (int)(sizeof(js_regex_generated_ranges_69_id_continue) / sizeof(js_regex_generated_ranges_69_id_continue[0])),
+        (int)cp);
+}
+
+// Validate that every named-group identifier in the (already name-decoded) pattern
+// is a valid ECMAScript IdentifierName (first code point ID_Start, rest
+// ID_Continue, plus $ _ ZWNJ ZWJ). Only names containing a non-ASCII code point
+// are checked: ASCII names are validated by RE2, but RE2's unicode name rules
+// differ from JS (it accepts e.g. 𝟚 as a start char and emoji). Returns false on
+// the first invalid name so the caller can throw a SyntaxError.
+static bool js_regex_named_groups_valid(const char* pat, int len) {
+    bool in_class = false;
+    int i = 0;
+    while (i < len) {
+        char c = pat[i];
+        if (c == '\\') { i += 2; continue; }
+        if (c == '[') { in_class = true; i++; continue; }
+        if (c == ']' && in_class) { in_class = false; i++; continue; }
+        if (!in_class && c == '(' && i + 2 < len && pat[i + 1] == '?' && pat[i + 2] == '<' &&
+            !(i + 3 < len && (pat[i + 3] == '=' || pat[i + 3] == '!'))) {
+            int name_start = i + 3;
+            int j = name_start;
+            while (j < len && pat[j] != '>') j++;
+            bool has_non_ascii = false;
+            for (int k = name_start; k < j; k++) {
+                if ((unsigned char)pat[k] >= 0x80) { has_non_ascii = true; break; }
+            }
+            if (has_non_ascii) {
+                int k = name_start;
+                bool first = true;
+                while (k < j) {
+                    uint32_t cp = 0;
+                    int adv = utf8_decode(pat + k, j - k, &cp);
+                    if (adv <= 0) return false;
+                    if (first) { if (!js_regex_cp_is_id_start(cp)) return false; first = false; }
+                    else if (!js_regex_cp_is_id_continue(cp)) return false;
+                    k += adv;
+                }
+            }
+            i = j;
+            continue;
+        }
+        i++;
+    }
+    return true;
+}
+
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
     char* literal_buf = NULL;
     int literal_len = 0;
@@ -13335,9 +13538,32 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         }
     }
 
+    // Decode \u escapes inside named-group / \k<> identifier regions so escaped
+    // names validate, compile, match, and key `groups` identically to literal
+    // names. The original `pattern` is preserved below for `.source` and caching.
+    std::string decoded_name_pat;
+    const char* vpat = pattern;
+    int vpat_len = pattern_len;
+    if (js_regex_decode_name_escapes(pattern, pattern_len, decoded_name_pat)) {
+        vpat = decoded_name_pat.c_str();
+        vpat_len = (int)decoded_name_pat.size();
+    }
+
     JsRegExpCompileInfo compile_info;
-    if (!js_regexp_compile_frontend(pattern, pattern_len, flags, flags_len, &compile_info)) {
+    if (!js_regexp_compile_frontend(vpat, vpat_len, flags, flags_len, &compile_info)) {
         Item m = (Item){.item = s2it(heap_create_name(compile_info.error, strlen(compile_info.error)))};
+        js_throw_syntax_error(m);
+        return ItemNull;
+    }
+
+    // Reject named groups whose (decoded) identifier is not a valid ECMAScript
+    // IdentifierName. RE2's unicode name validation is more permissive than JS.
+    if (!js_regex_named_groups_valid(vpat, vpat_len)) {
+        char errbuf[256];
+        snprintf(errbuf, sizeof(errbuf),
+            "Invalid regular expression: /%.*s/%.*s: invalid group specifier name",
+            pattern_len, pattern, flags_len, flags);
+        Item m = (Item){.item = s2it(heap_create_name(errbuf, strlen(errbuf)))};
         js_throw_syntax_error(m);
         return ItemNull;
     }
@@ -13386,8 +13612,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // If v flag is present, preprocess set subtraction [A--B] and intersection [A&&B]
     // by transforming them into RE2-compatible character classes.
     std::string v_processed;
-    const char* effective_pattern = pattern;
-    int effective_pattern_len = pattern_len;
+    const char* effective_pattern = vpat;
+    int effective_pattern_len = vpat_len;
     const int max_named_aliases = 96;
     char* named_alias_re2_names[96];
     int named_alias_re2_lens[96];
@@ -14837,13 +15063,18 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
             const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
                 (int)pair.first.size(), &js_name_len);
             Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
-            js_property_set(groups_obj, key, val);
+            // CreateDataProperty: a group literally named "__proto__" must become
+            // an own data property of the null-prototype groups object, not set
+            // its [[Prototype]].
+            js_create_data_property(groups_obj, key, val);
         }
-        js_property_set(result, groups_key, groups_obj);
+        // CreateDataProperty per spec — define `groups` as an own data property,
+        // bypassing any Array.prototype "groups" setter on the result array.
+        js_create_data_property(result, groups_key, groups_obj);
             return result;
         }
     }
-    js_property_set(result, groups_key, make_js_undefined());
+    js_create_data_property(result, groups_key, make_js_undefined());
     return result;
 }
 
@@ -17456,15 +17687,34 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         JsRegexData* rd = js_get_regex_data(obj);
         if (rd) {
             String* method = it2s(method_name);
-            if (method) {
-                if (method->len == 4 && strncmp(method->chars, "exec", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : make_js_undefined();
-                    return js_regex_exec(obj, str);
+            if (method && method->len == 4 &&
+                (strncmp(method->chars, "exec", 4) == 0 ||
+                 strncmp(method->chars, "test", 4) == 0)) {
+                bool is_exec = (method->chars[0] == 'e');
+                // A RegExp subclass may override exec/test (own property or on its
+                // prototype). Take the native fast path only when the method
+                // resolves to the built-in RegExp.prototype implementation;
+                // otherwise fall through to the generic property-access dispatch so
+                // the override runs (OrdinaryGet + the spec's RegExpExec "if exec is
+                // callable, call it" step). Without this, `class X extends RegExp {
+                // exec(){...} }` would silently invoke the native matcher.
+                bool own = false;
+                Item resolved = js_map_get_fast(obj.map, method->chars, 4, &own);
+                if (!(own && get_type_id(resolved) == LMD_TYPE_FUNC)) {
+                    Item key = (Item){.item = s2it(heap_create_name(method->chars, 4))};
+                    resolved = js_prototype_lookup(obj, key);
                 }
-                if (method->len == 4 && strncmp(method->chars, "test", 4) == 0) {
-                    Item str = argc > 0 ? args[0] : make_js_undefined();
-                    return js_regex_test(obj, str);
+                bool use_native = false;
+                if (get_type_id(resolved) == LMD_TYPE_FUNC) {
+                    JsFunction* rfn = (JsFunction*)resolved.function;
+                    int expected = is_exec ? JS_BUILTIN_REGEXP_EXEC : JS_BUILTIN_REGEXP_TEST;
+                    use_native = (rfn->builtin_id == expected);
                 }
+                if (use_native) {
+                    Item str = argc > 0 ? args[0] : make_js_undefined();
+                    return is_exec ? js_regex_exec(obj, str) : js_regex_test(obj, str);
+                }
+                // overridden (or non-builtin) → generic property-access dispatch below
             }
         }
     }
