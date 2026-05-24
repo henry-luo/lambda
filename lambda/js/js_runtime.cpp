@@ -1427,6 +1427,14 @@ static bool js_private_brand_storage_has_own(Item object, String* field_key_str)
     return js_private_storage_has_own(object, brand_key_item);
 }
 
+// Brand-check bypass scoped to private-field *definition* only. Distinct from
+// js_private_field_initializing (which stays on for the whole field-init phase so
+// eval inside an initializer still sees the field-initializer early-error
+// context). On only while a field's own declaration is being added, so a private
+// access inside an initializer *expression* is brand-checked normally and throws
+// for a not-yet-installed private member (ES PrivateFieldSet ordering).
+static bool js_private_define_active = false;
+
 static void js_init_class_instance_fields_inner(Item callee, Item object, int depth) {
     if (depth > 32) return;
     if (get_type_id(callee) != LMD_TYPE_MAP) return;
@@ -1501,9 +1509,15 @@ static void js_init_class_instance_fields_inner(Item callee, Item object, int de
 
 extern "C" void js_init_class_instance_fields(Item callee, Item object) {
     bool saved_private_init = js_private_field_initializing;
+    bool saved_define = js_private_define_active;
     js_private_field_initializing = true;
+    // This metadata-driven path only installs declarations (literal/undefined
+    // values, no initializer expressions), so the define-bypass can cover the
+    // whole walk — the brand check would otherwise reject adding the fields.
+    js_private_define_active = true;
     js_init_class_instance_fields_inner(callee, object, 0);
     js_private_field_initializing = saved_private_init;
+    js_private_define_active = saved_define;
 }
 
 extern "C" void js_private_brand_add(Item object, Item private_key, Item callee) {
@@ -1523,6 +1537,16 @@ extern "C" void js_private_brand_add(Item object, Item private_key, Item callee)
     if (brand_key_len >= (int)sizeof(brand_key)) brand_key_len = (int)sizeof(brand_key) - 1;
     Item brand_key_item = (Item){.item = s2it(heap_create_name(brand_key, brand_key_len))};
     js_property_set(object, brand_key_item, callee);
+}
+
+// Define (add) a private field's value on the instance, bypassing the brand
+// check for THIS write only (ES PrivateFieldAdd at the field's definition).
+extern "C" Item js_private_field_define(Item object, Item private_key, Item value) {
+    bool saved = js_private_define_active;
+    js_private_define_active = true;
+    js_property_set(object, private_key, value);
+    js_private_define_active = saved;
+    return value;
 }
 
 static Item js_apply_constructed_builtin_prototype(Item result, Item callee, Item effective_new_target) {
@@ -1635,7 +1659,11 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 Item arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item off = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
                 Item tlen = (argc > 2 && args) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_typed_array_construct(ta_type, arg, off, tlen, argc);
+                Item ta_result = js_typed_array_construct(ta_type, arg, off, tlen, argc);
+                // subclass instances must get the derived prototype (GetPrototypeFromConstructor)
+                if (get_type_id(ta_result) == LMD_TYPE_MAP)
+                    ta_result = js_apply_constructed_builtin_prototype(ta_result, callee, effective_new_target);
+                return ta_result;
             }
 
             // ArrayBuffer
@@ -1644,7 +1672,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_has_pending_new_target = false;
                 Item blen_arg = (argc > 0 && args) ? args[0] : ItemNull;
                 Item options_arg = (argc > 1 && args) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
-                return js_arraybuffer_construct_resizable(blen_arg, options_arg);
+                Item ab_result = js_arraybuffer_construct_resizable(blen_arg, options_arg);
+                if (get_type_id(ab_result) == LMD_TYPE_MAP)
+                    ab_result = js_apply_constructed_builtin_prototype(ab_result, callee, effective_new_target);
+                return ab_result;
             }
 
             // SharedArrayBuffer
@@ -5132,7 +5163,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 String* private_key = it2s(key);
                 if (private_key && private_key->len > 10 &&
                     strncmp(private_key->chars, "__private_", 10) == 0 &&
-                    !js_private_field_initializing &&
+                    !js_private_define_active &&
                     js_private_brand_mismatch(object, private_key)) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
@@ -5306,7 +5337,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 // routed through js_ordinary_set_via_accessor.
                 {
                     if (str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0 &&
-                        !js_private_field_initializing &&
+                        !js_private_define_active &&
                         js_private_brand_mismatch(object, str_key)) {
                         char msg[256];
                         snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
@@ -5346,7 +5377,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
                 }
-                if (!has_own_before_set && !js_private_field_initializing &&
+                if (!has_own_before_set && !js_private_define_active &&
                     str_key->len > 10 && strncmp(str_key->chars, "__private_", 10) == 0) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Cannot write private member '#%.*s' to an object whose class did not declare it",
@@ -5638,7 +5669,7 @@ static Item js_private_property_set_checked(Item object, Item key, Item value) {
                     (int)private_key->len - 10, private_key->chars + 10);
                 return js_throw_type_error(msg);
             }
-            if (!js_private_field_initializing &&
+            if (!js_private_define_active &&
                 !js_private_storage_has_own(object, key) &&
                 !js_private_brand_storage_has_own(object, private_key)) {
                 char msg[256];
@@ -11075,8 +11106,12 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
     if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_MAP) {
         ta_type = js_resolve_ta_type_from_class_map(callee);
     }
-    if (ta_type >= 0 && js_is_typed_array(this_val)) {
-        return this_val;
+    if (ta_type >= 0) {
+        // super(args) for a typed-array subclass must create+initialize the backing
+        // with super's args (length/buffer) and the subclass prototype, not reuse a
+        // pre-allocated empty `this`. js_new_from_class_object honours the pending
+        // new.target (the subclass) for the prototype.
+        return js_new_from_class_object(callee, args, argc);
     }
     if (js_builtin_super_constructs_via_construct(callee)) {
         return js_new_from_class_object(callee, args, argc);

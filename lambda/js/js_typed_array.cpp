@@ -1123,7 +1123,12 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
         if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
             use_default_ctor = true;
         } else {
-            if (species_type != LMD_TYPE_FUNC && !js_is_proxy(species)) {
+            // A subclass class object is a constructable MAP (has __instance_proto__),
+            // not a FUNC — accept it as the species constructor.
+            bool species_is_class_object = false;
+            if (species_type == LMD_TYPE_MAP && species.map)
+                js_map_get_fast_ext(species.map, "__instance_proto__", 18, &species_is_class_object);
+            if (species_type != LMD_TYPE_FUNC && !js_is_proxy(species) && !species_is_class_object) {
                 return js_throw_type_error("ArrayBuffer species is not a constructor");
             }
             Item len_arg = (Item){.item = i2it(new_len)};
