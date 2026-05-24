@@ -3479,6 +3479,20 @@
                         "icon": "🟨"
                     },
                     {
+                        "source": "test/test_js_bt_regex_gtest.cpp",
+                        "name": "JS Backtracking Regex Matcher Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "binary": "test_js_bt_regex_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "icon": "🔁"
+                    },
+                    {
                         "source": "test/test_js_props_gtest.cpp",
                         "name": "JS Property-Model Invariant Tests (Stage B)",
                         "dependencies": [],

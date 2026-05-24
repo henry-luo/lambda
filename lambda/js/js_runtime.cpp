@@ -11686,6 +11686,7 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
 
 #include "js_regex_wrapper.h"
 #include "js_regexp_compile.h"
+#include "js_bt_regex.h"
 
 // hidden property key for storing regex data pointer
 static const char* JS_REGEX_DATA_KEY = "__rd";
@@ -11733,6 +11734,7 @@ static void js_regexp_update_last_match(String* input_s,
 struct JsRegexData {
     re2::RE2* re2;            // compiled regex (direct, for patterns without assertions)
     JsRegexCompiled* wrapper; // wrapper with post-filters (for patterns with lookaheads/backrefs)
+    JsBtRegex* bt;            // spec backtracking matcher (backrefs / hard lookbehind)
     const char* literal_pattern; // simple literal pattern handled without RE2
     int literal_pattern_len;
     int special_property_kind; // +/-: fast Unicode property-repeat kind
@@ -12734,6 +12736,7 @@ static inline uint64_t js_regex_content_hash(const char* pat, int plen, const ch
 static int js_regex_num_groups(JsRegexData* rd) {
     if (rd->special_property_kind != 0) return 1;
     if (rd->literal_fast) return 1;
+    if (rd->bt) return js_bt_group_count(rd->bt) + 1; // +1 for full match
     if (rd->wrapper && rd->wrapper->has_filters) {
         return rd->wrapper->original_group_count + 1; // +1 for full match
     }
@@ -12769,6 +12772,22 @@ static bool js_regex_match_internal(JsRegexData* rd, const char* input, int inpu
         }
         if (!found) return false;
         if (num_groups > 0) matches[0] = re2::StringPiece(found, pat_len);
+        return true;
+    }
+    if (rd->bt) {
+        // spec backtracking matcher for backref / hard-lookbehind patterns
+        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        bool anchor_start = (anchor == re2::RE2::ANCHOR_START);
+        int result = js_bt_exec(rd->bt, input, input_len, start_pos, anchor_start,
+                                starts, ends, num_groups);
+        if (result <= 0) return false;
+        for (int i = 0; i < num_groups; i++) {
+            if (starts[i] >= 0 && ends[i] >= starts[i]) {
+                matches[i] = re2::StringPiece(input + starts[i], ends[i] - starts[i]);
+            } else {
+                matches[i] = re2::StringPiece();
+            }
+        }
         return true;
     }
     if (rd->wrapper && rd->wrapper->has_filters) {
@@ -13085,6 +13104,113 @@ static bool js_regex_needs_wrapper(const char* pattern, int pattern_len) {
             // lookbehind (?<=...) / (?<!...) — handled by the wrapper post-filter
             if (kind == '<' && i + 3 < pattern_len &&
                 (pattern[i + 3] == '=' || pattern[i + 3] == '!')) return true;
+        }
+    }
+    return false;
+}
+
+// Route a (preprocessed) pattern to the spec backtracking matcher only when it
+// uses features RE2 + post-filters cannot do correctly:
+//   - a backreference (\N or \k<name>) outside a character class;
+//   - a "hard" lookbehind (?<=…)/(?<!…) whose body contains a capture group,
+//     a backreference, a nested assertion, an alternation, or a variable-length
+//     quantifier. Pure fixed-length lookbehinds stay on the RE2/Tier-2b path.
+// Everything else stays on RE2 exactly as before.
+// Scan a lookahead body starting just after "(?=" / "(?!" for a capturing group.
+// `start` points at the first body char; returns true if a capturing "(" appears.
+static bool js_regex_lookahead_has_capture(const char* pattern, int pattern_len, int start) {
+    int depth = 1;
+    bool in_class = false;
+    for (int j = start; j < pattern_len && depth > 0; j++) {
+        char d = pattern[j];
+        if (d == '\\') { j++; continue; }
+        if (d == '[') { in_class = true; continue; }
+        if (d == ']' && in_class) { in_class = false; continue; }
+        if (in_class) continue;
+        if (d == '(') {
+            depth++;
+            if (j + 1 >= pattern_len || pattern[j + 1] != '?') return true; // capturing group
+        } else if (d == ')') depth--;
+    }
+    return false;
+}
+
+static bool js_regex_needs_backtrack(const char* pattern, int pattern_len) {
+    bool in_class = false;
+    // group stack: per open group, track whether its body contains a bounded
+    // optional ('?') and whether it contains an unbounded quantifier ('*'/'+').
+    // A quantifier applied to a group that is optional but NOT unbounded is the
+    // nullable-discard shape RE2 mishandles (e.g. (a?b??)* ); route it. We must
+    // NOT route when the body is also unbounded (e.g. (.*\n?)* ) — that is the
+    // catastrophic-backtracking shape RE2 already handles correctly and linearly.
+    bool grp_opt[64];
+    bool grp_unb[64];
+    int grp_depth = 0;
+    for (int i = 0; i < pattern_len; i++) {
+        char c = pattern[i];
+        if (c == '\\') {
+            if (i + 1 >= pattern_len) return false;
+            char next = pattern[i + 1];
+            if (!in_class && next >= '1' && next <= '9') return true;   // numeric backref
+            if (!in_class && next == 'k') return true;                   // named backref \k<...>
+            i++;
+            continue;
+        }
+        if (c == '[') { in_class = true; continue; }
+        if (c == ']' && in_class) { in_class = false; continue; }
+        if (in_class) continue;
+        // lookahead containing a capture group: RE2 cannot surface those captures.
+        if (c == '(' && i + 2 < pattern_len && pattern[i + 1] == '?' &&
+            (pattern[i + 2] == '=' || pattern[i + 2] == '!')) {
+            if (js_regex_lookahead_has_capture(pattern, pattern_len, i + 3)) return true;
+        }
+        if (c == '(') {
+            if (grp_depth < 64) { grp_opt[grp_depth] = false; grp_unb[grp_depth] = false; }
+            grp_depth++;
+        } else if (c == ')') {
+            if (grp_depth > 0) grp_depth--;
+            // a quantifier applied to an optional-but-not-unbounded group -> route
+            if (i + 1 < pattern_len && grp_depth < 64) {
+                char q = pattern[i + 1];
+                if ((q == '*' || q == '+' || q == '{') &&
+                    grp_opt[grp_depth] && !grp_unb[grp_depth]) return true;
+            }
+        } else if (grp_depth > 0 && grp_depth <= 64 &&
+                   !(i > 0 && pattern[i - 1] == '(')) {
+            // record bounded vs unbounded quantifiers in the innermost open group
+            // (skip the '?' of a (?: / (?= / (?<name> group marker via the guard).
+            if (c == '?') grp_opt[grp_depth - 1] = true;
+            else if (c == '*' || c == '+') grp_unb[grp_depth - 1] = true;
+        }
+        if (c == '(' && i + 3 < pattern_len && pattern[i + 1] == '?' &&
+            pattern[i + 2] == '<' && (pattern[i + 3] == '=' || pattern[i + 3] == '!')) {
+            // scan the lookbehind body for "hard" features
+            int depth = 1;
+            int j = i + 4;
+            bool hard = false;
+            bool body_class = false;
+            for (; j < pattern_len && depth > 0; j++) {
+                char d = pattern[j];
+                if (d == '\\') {
+                    if (j + 1 < pattern_len) {
+                        char dn = pattern[j + 1];
+                        // backref, or \b/\B word boundary (the RE2 lookbehind slice
+                        // cannot see the boundary char at the right edge).
+                        if (!body_class && ((dn >= '1' && dn <= '9') || dn == 'k' ||
+                                            dn == 'b' || dn == 'B')) hard = true;
+                    }
+                    j++;
+                    continue;
+                }
+                if (d == '[') { body_class = true; continue; }
+                if (d == ']' && body_class) { body_class = false; continue; }
+                if (body_class) continue;
+                if (d == '(') { hard = true; depth++; continue; }
+                if (d == ')') { depth--; continue; }
+                if (d == '|' || d == '*' || d == '+') hard = true;
+                else if (d == '{' || d == '?') hard = true; // variable / optional length
+            }
+            if (hard) return true;
         }
     }
     return false;
@@ -13923,6 +14049,12 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         }
     }
 
+    // Decide routing to the spec backtracking matcher early — before the RE2
+    // preprocessing drops forward backreferences and rewrites named groups — so
+    // those constructs survive into the pattern the backtracker compiles.
+    bool route_to_bt = (special_property_kind == 0) &&
+        js_regex_needs_backtrack(effective_pattern, effective_pattern_len);
+
     // count capture groups for backreference validation (Annex B: \8/\9 identity escapes)
     int total_groups = 0;
     {
@@ -14022,7 +14154,9 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 } else {
                     int groups_before_ref = js_regex_count_capture_groups_before(effective_pattern,
                         effective_pattern_len, i);
-                    if (ref_num > groups_before_ref) {
+                    if (ref_num > groups_before_ref && !route_to_bt) {
+                        // RE2 path: a forward backreference matches the empty string,
+                        // so drop it. The backtracker keeps it and evaluates it per spec.
                         i++;
                         continue;
                     }
@@ -14358,13 +14492,32 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             }
         }
     }
+    // 3c. Route hard backtracking-only patterns (backreferences, capturing /
+    //     variable-length lookbehind, nested lookaround) to the spec backtracker.
+    //     It consumes the normalized pattern here — before the RE2 named-group
+    //     rewrite and (?m) prefix — and parses (?<name>...) natively.
+    JsBtRegex* bt = nullptr;
+    if (route_to_bt) {
+        JsBtFlags btflags;
+        btflags.ignore_case = compile_info.ignore_case;
+        btflags.multiline = compile_info.multiline;
+        btflags.dot_all = compile_info.dot_all;
+        btflags.unicode = has_unicode;
+        btflags.sticky = compile_info.sticky;
+        bt = js_bt_compile(processed_pattern.c_str(), (int)processed_pattern.size(),
+                           btflags, js_input->pool);
+        if (!bt) {
+            log_debug("js bt regex: compile failed for /%.*s/, falling back to RE2",
+                      pattern_len, pattern);
+        }
+    }
     // 3b. Lookbehind (?<=...) / (?<!...) is handled by the wrapper post-filter
     //     (js_regex_needs_wrapper returns true for lookbehind). The legacy strip
     //     now only guards the direct-RE2 fallback below, for the rare case where
     //     the wrapper is unavailable or fails to compile.
     // 4. Convert JS named capture groups (?<name>...) to RE2 syntax (?P<name>...)
     //    Must NOT convert lookbehind (?<=...) or (?<!...)
-    {
+    if (!bt) {
         size_t pos = 0;
         while ((pos = processed_pattern.find("(?<", pos)) != std::string::npos) {
             // skip escaped parens
@@ -14440,7 +14593,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // Try wrapper compilation first (handles lookaheads, backreferences with post-filters)
     JsRegexCompiled* wrapper = nullptr;
     re2::RE2* re2 = nullptr;
-    if (!literal_fast && special_property_kind == 0) {
+    if (!bt && !literal_fast && special_property_kind == 0) {
         if (js_regex_needs_wrapper(processed_pattern.c_str(), (int)processed_pattern.size())) {
             wrapper = js_regex_wrapper_compile(processed_pattern.c_str(),
                                                          (int)processed_pattern.size(),
@@ -14499,6 +14652,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
     rd->re2 = re2;
     rd->wrapper = wrapper;
+    rd->bt = bt;
     rd->global = global;
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
@@ -14598,7 +14752,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     }
     // Store in permanent RE2 cache if no complex wrapper — survives batch resets for cross-test reuse.
     // Even pass-through wrappers (has_filters=false) are cached here since re2 is safe to reuse.
-    if (special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
+    if (!bt && special_property_kind == 0 && !literal_fast && named_alias_count == 0 &&
         !needs_utf16_subject && (!wrapper || !wrapper->has_filters)) {
         re2::RE2* perm_re2 = re2; // re2 points to either wrapper->re2 or directly-compiled re2
         char* perm_flags = new char[flags_len + 1];
@@ -15179,6 +15333,27 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // groups property — populated with named captures if regex has named groups
     // ES spec: groups object must be a null-prototype object (Object.create(null))
     Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
+    if (rd->bt) {
+        int nc = js_bt_named_count(rd->bt);
+        if (nc > 0) {
+            Item groups_obj = js_object_create(ItemNull);
+            for (int gi = 0; gi < nc; gi++) {
+                int nl = 0; const char* nm = js_bt_named_name(rd->bt, gi, &nl);
+                int idx = js_bt_named_index(rd->bt, gi);
+                Item val = make_js_undefined();
+                if (idx >= 0 && idx < num_groups && matches[idx].data()) {
+                    int mlen = (int)matches[idx].size();
+                    val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                }
+                Item key = (Item){.item = s2it(heap_create_name(nm, nl))};
+                js_create_data_property(groups_obj, key, val);
+            }
+            js_create_data_property(result, groups_key, groups_obj);
+        } else {
+            js_create_data_property(result, groups_key, make_js_undefined());
+        }
+        return result;
+    }
     if (!rd->literal_fast && rd->re2) {
         const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
@@ -18217,6 +18392,23 @@ static void js_apply_replacement(StrBuf* buf, const char* repl, int repl_len,
 
 // build a named groups object from regex match data (for replace $<name> and callback)
 static Item js_build_groups_object(JsRegexData* rd, re2::StringPiece* matches, int num_groups) {
+    if (rd->bt) {
+        int nc = js_bt_named_count(rd->bt);
+        if (nc <= 0) return make_js_undefined();
+        Item groups_obj = js_object_create(ItemNull);
+        for (int gi = 0; gi < nc; gi++) {
+            int nl = 0; const char* nm = js_bt_named_name(rd->bt, gi, &nl);
+            int idx = js_bt_named_index(rd->bt, gi);
+            Item val = make_js_undefined();
+            if (idx >= 0 && idx < num_groups && matches[idx].data()) {
+                int mlen = (int)matches[idx].size();
+                val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+            }
+            Item key = (Item){.item = s2it(heap_create_name(nm, nl))};
+            js_property_set(groups_obj, key, val);
+        }
+        return groups_obj;
+    }
     const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
     if (named.empty()) return make_js_undefined();
     Item groups_obj = js_object_create(ItemNull);
@@ -19932,7 +20124,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 if (!s) return ItemNull;
                 Item result = js_array_new(0);
                 int offset = 0;
-                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                int num_groups = js_regex_num_groups(rd);
                 if (num_groups > JS_REGEX_MAX_GROUPS) num_groups = JS_REGEX_MAX_GROUPS;
                 re2::StringPiece matches[JS_REGEX_MAX_GROUPS];
                 while (offset < (int)s->len) {
