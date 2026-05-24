@@ -1776,11 +1776,15 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (nl == 5 && strncmp(n, "Array", 5) == 0) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
-                if (eff_argc == 0) return js_array_new(0);
-                if (eff_argc == 1) return js_array_new_from_item(eff_args[0]);
-                Item arr = js_array_new(0);
-                for (int i = 0; i < eff_argc; i++) js_array_push(arr, eff_args[i]);
-                return arr;
+                Item arr;
+                if (eff_argc == 0) arr = js_array_new(0);
+                else if (eff_argc == 1) arr = js_array_new_from_item(eff_args[0]);
+                else {
+                    arr = js_array_new(0);
+                    for (int i = 0; i < eff_argc; i++) js_array_push(arr, eff_args[i]);
+                }
+                // subclass instances must get the derived prototype (GetPrototypeFromConstructor)
+                return js_apply_constructed_builtin_prototype(arr, callee, effective_new_target);
             }
 
             // Object
@@ -1941,6 +1945,32 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 }
             }
             return result;
+        }
+        // No explicit constructor extending a builtin: run the implicit
+        // `constructor(...args) { super(...args); }` by constructing via the base
+        // builtin's [[Construct]], so the instance carries the base internal slot
+        // (primitive wrapper / exotic Array) with the subclass prototype — instead
+        // of a plain object (Boolean/String) or an empty array that drops args.
+        if (ctor.item == ItemNull.item || get_type_id(ctor) != LMD_TYPE_FUNC) {
+            bool super_own = false;
+            Item super_class = js_map_get_fast(callee.map, "__super_class__", 15, &super_own);
+            if (super_own && get_type_id(super_class) == LMD_TYPE_FUNC) {
+                js_pending_new_target = effective_new_target;
+                js_has_pending_new_target = true;
+                Item result = js_new_from_class_object(super_class, args, argc);
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                if (js_check_exception()) return ItemNull;
+                TypeId rtt = get_type_id(result);
+                if (rtt == LMD_TYPE_MAP || rtt == LMD_TYPE_ARRAY || rtt == LMD_TYPE_ELEMENT) {
+                    // Note: do NOT overwrite __class_name__ here — the base
+                    // [[Construct]] already tagged the instance's class (e.g.
+                    // JS_CLASS_BOOLEAN via its TypeMap), and adding a property
+                    // would reset that tag and break brand checks (valueOf, etc.).
+                    js_init_class_instance_fields(callee, result);
+                }
+                return result;
+            }
         }
         Item obj = js_new_object();
         // Subclass builtin detection: walk the prototype chain of instance_proto
@@ -2560,6 +2590,10 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
 // Still uses last-writer-wins since type changes can create duplicate shape entries.
 // Also handles spread/nested map entries (field->name == NULL).
 Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) {
+    // Synthetic fast iterators (array/string/typed-array, MAP_KIND_ITERATOR) use a
+    // 1-byte sentinel as `type`, not a real TypeMap — they have no named own
+    // properties, so never dereference `type->shape` here.
+    if (m->map_kind == MAP_KIND_ITERATOR) { if (out_found) *out_found = false; return ItemNull; }
     TypeMap* map_type = (TypeMap*)m->type;
     if (!map_type || !map_type->shape) { if (out_found) *out_found = false; return ItemNull; }
 
@@ -10956,6 +10990,12 @@ static bool js_builtin_super_constructs_via_construct(Item callee) {
            // construct path (js_new_from_class_object) reaches that throw, so
            // `new (class extends Symbol {})()` raises TypeError per spec.
            (len == 6 && strncmp(name, "Symbol", 6) == 0) ||
+           // Primitive wrappers and Array need the base [[Construct]] so the
+           // instance carries the internal slot ([[BooleanData]]/[[StringData]])
+           // or exotic-Array element/length behaviour with the subclass prototype.
+           (len == 7 && strncmp(name, "Boolean", 7) == 0) ||
+           (len == 6 && strncmp(name, "String", 6) == 0) ||
+           (len == 5 && strncmp(name, "Array", 5) == 0) ||
            (len == 3 && strncmp(name, "Map", 3) == 0) ||
            (len == 3 && strncmp(name, "Set", 3) == 0) ||
            (len == 7 && strncmp(name, "WeakMap", 7) == 0) ||
@@ -24867,6 +24907,9 @@ extern "C" Item js_get_prototype(Item object) {
     if (js_dom_item_is_selection(object)) return js_dom_selection_get_prototype_value();
     if (js_dom_item_is_range(object)) return js_dom_range_get_prototype_value();
     Map* m = object.map;
+    // Synthetic fast iterators use a 1-byte sentinel as `type`, not a real
+    // TypeMap — never walk their (non-existent) shape for a __proto__ slot.
+    if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;
     bool internal_found = false;
     Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
     if (internal_found && internal_proto.item != JS_DELETED_SENTINEL_VAL) return internal_proto;
@@ -25939,6 +25982,10 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
 // v15: Check if an object is a generator (has __gen_idx property)
 extern "C" bool js_is_generator(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return false;
+    // Synthetic fast iterators (MAP_KIND_ITERATOR) are never generators and have
+    // no real shape — a property lookup on them reads their sentinel type out of
+    // bounds, so short-circuit here.
+    if (obj.map && obj.map->map_kind == MAP_KIND_ITERATOR) return false;
     String* gen_key = heap_create_name("__gen_idx", 9);
     Item idx_item = js_property_get(obj, (Item){.item = s2it(gen_key)});
     return get_type_id(idx_item) == LMD_TYPE_INT;
@@ -26581,6 +26628,17 @@ extern "C" Item js_iterator_close(Item iterator) {
 
     // Generic iterator: call .return() if available
     TypeId tid = get_type_id(iterator);
+
+    // Built-in fast Array/String/TypedArray iterators (MAP_KIND_ITERATOR) use a
+    // 1-byte sentinel as their Map `type` (not a real TypeMap), so a generic
+    // property lookup would read it out of bounds. These iterators have no
+    // `return` method, so per spec IteratorClose completes without doing anything.
+    if (iterator.map &&
+        (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP || tid == LMD_TYPE_OBJECT) &&
+        iterator.map->map_kind == MAP_KIND_ITERATOR) {
+        return make_js_undefined();
+    }
+
     if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT || tid == LMD_TYPE_VMAP || tid == LMD_TYPE_OBJECT) {
         String* return_key = heap_create_name("return", 6);
         Item return_fn = js_property_get(iterator, (Item){.item = s2it(return_key)});

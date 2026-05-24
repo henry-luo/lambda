@@ -6136,7 +6136,28 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // object (e.g. Event, URL) get their own props merged onto `this` — without
                         // this merge the derived `this` would lack the base fields like `type`.
                         {
-                            MIR_reg_t parent_fn = jm_transpile_box_item(mt, mt->current_class->node->superclass);
+                            // Resolve the superclass from the class object's stored
+                            // __super_class__ (captured at class-definition time, when
+                            // the binding was in scope) rather than re-evaluating the
+                            // identifier here — inside the constructor a captured outer
+                            // binding (e.g. a function parameter used as `extends C`)
+                            // may not be visible, which would throw "C is not defined".
+                            // js_get_super_constructor_from_receiver then refines via the
+                            // receiver's prototype chain, so an undefined fallback is fine.
+                            MIR_reg_t parent_fn;
+                            if (mt->current_class->name) {
+                                JsIdentifierNode class_id;
+                                memset(&class_id, 0, sizeof(class_id));
+                                class_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+                                class_id.name = mt->current_class->name;
+                                MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
+                                MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
+                                parent_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, super_key));
+                            } else {
+                                parent_fn = jm_emit_undefined(mt);
+                            }
                             bool super_has_spread = false;
                             for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
                                 if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { super_has_spread = true; break; }

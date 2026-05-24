@@ -2893,13 +2893,12 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_2(mt, "js_set_prototype",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, class_proto));
-                // Set __class_name__ for instanceof
-                if (ce->name) {
-                    MIR_reg_t cn_val = jm_box_string_literal(mt, ce->name->chars, (int)ce->name->len);
-                    jm_call_void_2(mt, "js_set_internal_class_name",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
-                }
+                // NOTE: do NOT stamp __class_name__ on the instance here. The base
+                // [[Construct]] (js_new_from_class_object) already tagged the
+                // instance's class on its TypeMap (e.g. JS_CLASS_BOOLEAN); adding a
+                // property would transition the shape and drop that tag, breaking
+                // brand checks (Boolean/String/Number .valueOf). Subclass identity
+                // comes from the prototype chain. (instanceof uses the proto chain.)
                 jm_emit_own_instance_fields_on_object(mt, ce, result, cls_val, true);
                 return result;
             }
