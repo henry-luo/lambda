@@ -48,6 +48,12 @@ struct EarlyErrorCtx {
     int iteration_label_count;
     bool in_iteration;       // currently inside any iteration statement
     bool in_switch;          // currently inside switch
+
+    // All labels in scope (for break target validation per ContainsUndefinedBreakTarget).
+    // A labeled break may target any enclosing labeled statement, not only iterations.
+    const char* all_labels[64];
+    int all_label_lens[64];
+    int all_label_count;
 };
 
 // ---- helpers ---------------------------------------------------------------
@@ -769,8 +775,17 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_gen = ctx->in_generator;
             bool was_async = ctx->in_async;
             bool was_strict = ctx->in_strict;
+            // labels and iteration/switch context do not cross function boundaries
+            bool was_iteration = ctx->in_iteration;
+            bool was_switch = ctx->in_switch;
+            int was_label_count = ctx->iteration_label_count;
+            int was_all_label_count = ctx->all_label_count;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
+            ctx->in_iteration = false;
+            ctx->in_switch = false;
+            ctx->iteration_label_count = 0;
+            ctx->all_label_count = 0;
 
             // v17: "use strict" with non-simple params is SyntaxError
             check_strict_non_simple(ctx, fn);
@@ -798,6 +813,10 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             ctx->in_generator = was_gen;
             ctx->in_async = was_async;
             ctx->in_strict = was_strict;
+            ctx->in_iteration = was_iteration;
+            ctx->in_switch = was_switch;
+            ctx->iteration_label_count = was_label_count;
+            ctx->all_label_count = was_all_label_count;
             break;
         }
 
@@ -1042,11 +1061,13 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_switch = ctx->in_switch;
             bool was_params = ctx->in_formal_parameters;
             int was_label_count = ctx->iteration_label_count;
+            int was_all_label_count = ctx->all_label_count;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
             ctx->in_iteration = false;
             ctx->in_switch = false;
             ctx->iteration_label_count = 0;
+            ctx->all_label_count = 0;
 
             // v17: "use strict" with non-simple params is SyntaxError
             check_strict_non_simple(ctx, fn);
@@ -1073,6 +1094,7 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             ctx->in_switch = was_switch;
             ctx->in_formal_parameters = was_params;
             ctx->iteration_label_count = was_label_count;
+            ctx->all_label_count = was_all_label_count;
             break;
         }
 
@@ -1137,8 +1159,16 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                     ctx->iteration_label_lens[ctx->iteration_label_count] = ls->label_len;
                     ctx->iteration_label_count++;
                 }
+                // track every label in scope so labeled breaks can be validated
+                int saved_all_count = ctx->all_label_count;
+                if (ls->label && ctx->all_label_count < 64) {
+                    ctx->all_labels[ctx->all_label_count] = ls->label;
+                    ctx->all_label_lens[ctx->all_label_count] = ls->label_len;
+                    ctx->all_label_count++;
+                }
                 walk_statement(ctx, ls->body);
                 ctx->iteration_label_count = saved_count;
+                ctx->all_label_count = saved_all_count;
             }
             break;
         }
@@ -1171,8 +1201,27 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_BREAK_STATEMENT: {
             // break without label: must be inside iteration or switch
             JsBreakContinueNode* bn = (JsBreakContinueNode*)node;
-            if (!bn->label && !ctx->in_iteration && !ctx->in_switch) {
-                ee_error(ctx, node, "Illegal break statement");
+            if (!bn->label) {
+                if (!ctx->in_iteration && !ctx->in_switch) {
+                    ee_error(ctx, node, "Illegal break statement");
+                }
+            } else {
+                // labeled break: the label must denote an enclosing labeled
+                // statement within the same function/script/eval code
+                // (ContainsUndefinedBreakTarget). Labels do not cross function
+                // or eval boundaries.
+                bool found = false;
+                for (int i = 0; i < ctx->all_label_count; i++) {
+                    if (ctx->all_label_lens[i] == bn->label_len &&
+                        strncmp(ctx->all_labels[i], bn->label, bn->label_len) == 0) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ee_error(ctx, node, "Undefined break target: '%.*s'",
+                        bn->label_len, bn->label);
+                }
             }
             break;
         }

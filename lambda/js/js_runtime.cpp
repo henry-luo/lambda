@@ -10928,6 +10928,11 @@ static Item js_super_this_binding_finish(Item result) {
 extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (js_check_exception()) return make_js_undefined();
     Item bound_this = js_is_object_constructor_result(construct_result) ? construct_result : this_val;
+    if (js_super_this_bound_depth <= 0) {
+        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
+        js_throw_reference_error(msg);
+        return make_js_undefined();
+    }
     if (js_super_this_bound_depth > 0) {
         int idx = js_super_this_bound_depth - 1;
         if (js_super_this_bound_stack[idx]) {

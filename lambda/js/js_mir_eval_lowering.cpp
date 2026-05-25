@@ -5,6 +5,8 @@ JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 
+static uint64_t js_eval_template_site_counter = 0;
+
 static bool js_source_contains_import_meta(const char* source, size_t len);
 static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
@@ -1069,6 +1071,7 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
             return ItemNull;
         }
         mt->is_eval_direct = is_global_scope;  // sloppy-mode eval: export vars to globalThis
+        mt->template_site_salt = ++js_eval_template_site_counter;
 
         // Inherit outer script's module_consts so eval() can resolve var declarations
         if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {

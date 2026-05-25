@@ -4057,11 +4057,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         stmt = stmt->next;
     }
 
-    // Bind class names as hoisted variables (needed for captures and shorthand properties)
+    // Bind class names as hoisted variables (needed for captures and shorthand properties).
+    // Only DIRECT program-level class *declarations* bind a name in the enclosing
+    // scope. Nested declarations and named *class expressions* (whose name is an
+    // immutable binding scoped to the class body via inner_module_var_index) must
+    // NOT leak a hoisted var into the surrounding scope.
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
         if (ce->name && ce->name->chars) {
-            if (ce->is_declaration && !jm_is_direct_program_class_decl(program, ce->node)) {
+            if (!ce->is_declaration || !jm_is_direct_program_class_decl(program, ce->node)) {
                 continue;
             }
             char vname[128];

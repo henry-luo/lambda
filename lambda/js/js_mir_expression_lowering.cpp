@@ -164,12 +164,26 @@ static bool jm_class_name_matches(JsClassEntry* ce, String* name) {
         strncmp(ce->name->chars, name->chars, name->len) == 0;
 }
 
-static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String* name) {
+static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String* name, JsAstNode* ref_node) {
     if (!mt || !name) return NULL;
-    if (jm_class_name_matches(mt->current_class, name)) return mt->current_class;
+    // A named *class expression*'s name is an immutable binding scoped to the
+    // class body only (it must not leak to the enclosing scope). So for an
+    // expression, resolve to the inner binding only when the reference actually
+    // lies inside the class's source range. Class *declarations* bind their name
+    // in the enclosing function scope, so references outside the body still
+    // resolve (e.g. `new C()` after a nested `class C {}`).
+    if (jm_class_name_matches(mt->current_class, name) &&
+        (mt->current_class->is_declaration || !ref_node ||
+         jm_class_contains_node(mt->current_class, ref_node, NULL, NULL))) {
+        return mt->current_class;
+    }
     if (mt->current_fc && mt->current_fc->node) {
         JsClassEntry* ce = jm_find_innermost_class_for_node(mt, (JsAstNode*)mt->current_fc->node);
-        if (jm_class_name_matches(ce, name)) return ce;
+        if (jm_class_name_matches(ce, name) &&
+            (ce->is_declaration || !ref_node ||
+             jm_class_contains_node(ce, ref_node, NULL, NULL))) {
+            return ce;
+        }
     }
     return NULL;
 }
@@ -864,7 +878,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     // Check this before ordinary locals/captures so a named class expression
     // like `var Cv = class C { m() { return C; } }` does not read a stale
     // outer/unresolved binding named C.
-    JsClassEntry* inner_class_binding = jm_current_inner_class_binding(mt, id->name);
+    JsClassEntry* inner_class_binding = jm_current_inner_class_binding(mt, id->name, (JsAstNode*)id);
     if (inner_class_binding && inner_class_binding->inner_module_var_index >= 0) {
         return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
@@ -964,7 +978,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             }
             case MCONST_CLASS: {
                 // Inside a class's own scope, the class name is an immutable inner binding.
-                JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
+                JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name, (JsAstNode*)id);
                 if (inner_ce && inner_ce->inner_module_var_index >= 0) {
                     return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_ce->inner_module_var_index));
@@ -3537,7 +3551,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
         char vname[128];
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
-        JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name);
+        JsClassEntry* inner_ce = jm_current_inner_class_binding(mt, id->name, (JsAstNode*)id);
         bool local_shadow = var && !var->from_env && !var->from_shared_env;
         if (inner_ce && !local_shadow) {
             jm_call_void_2(mt, "js_throw_const_assign",
@@ -5772,7 +5786,24 @@ static bool jm_eval_env_is_bridgeable_var(const char* name, const JsMirVarEntry*
     if (strstr(name, "__dup") != NULL) return false;
     if (var->is_let_const || var->is_const || var->tdz_active) return false;
     if (var->mir_type != MIR_T_I64) return false;
+    if (var->reg == 0) return false;
     return true;
+}
+
+static bool jm_eval_env_is_exposable_binding(const char* name, const JsMirVarEntry* var) {
+    if (!name || !var) return false;
+    if (strncmp(name, "_js_", 4) != 0) return false;
+    if (strcmp(name, "_js_this") == 0 || strcmp(name, "_js_new.target") == 0) return false;
+    if (strstr(name, "__dup") != NULL) return false;
+    if (var->tdz_active) return false;
+    if (var->mir_type != MIR_T_I64) return false;
+    if (var->reg == 0) return false;
+    return true;
+}
+
+static bool jm_eval_env_is_exposable_lexical_binding(const char* name, const JsMirVarEntry* var) {
+    if (!jm_eval_env_is_exposable_binding(name, var)) return false;
+    return var->is_let_const || var->is_const;
 }
 
 static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
@@ -5786,7 +5817,7 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
         size_t iter = 0; void* item;
         while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
-            if (!jm_eval_env_is_bridgeable_var(entry->name, &entry->var)) continue;
+            if (!jm_eval_env_is_exposable_binding(entry->name, &entry->var)) continue;
             JsNameSetEntry seen;
             memset(&seen, 0, sizeof(seen));
             snprintf(seen.name, sizeof(seen.name), "%s", entry->name);
@@ -5794,10 +5825,49 @@ static struct hashmap* jm_eval_env_push_bindings(JsMirTranspiler* mt) {
             hashmap_set(bridged, &seen);
             const char* js_name = entry->name + 4;
             MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+            MIR_reg_t value_reg = jm_is_native_type(entry->var.type_id) ?
+                jm_box_native(mt, entry->var.reg, entry->var.type_id) : entry->var.reg;
             jm_call_void_2(mt, "js_eval_env_bind",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, entry->var.reg));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
         }
+    }
+    return bridged;
+}
+
+static struct hashmap* jm_eval_global_lexical_push_bindings(JsMirTranspiler* mt) {
+    struct hashmap* bridged = hashmap_new(sizeof(JsNameSetEntry), 32, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    if (!bridged) return NULL;
+
+    bool pushed = false;
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        if (!mt->var_scopes[depth]) continue;
+        size_t iter = 0; void* item;
+        while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
+            JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
+            if (!jm_eval_env_is_exposable_lexical_binding(entry->name, &entry->var)) continue;
+            JsNameSetEntry seen;
+            memset(&seen, 0, sizeof(seen));
+            snprintf(seen.name, sizeof(seen.name), "%s", entry->name);
+            if (hashmap_get(bridged, &seen)) continue;
+            if (!pushed) {
+                jm_call_void_0(mt, "js_eval_global_lexical_push_frame");
+                pushed = true;
+            }
+            hashmap_set(bridged, &seen);
+            const char* js_name = entry->name + 4;
+            MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, (int)strlen(js_name));
+            MIR_reg_t value_reg = jm_is_native_type(entry->var.type_id) ?
+                jm_box_native(mt, entry->var.reg, entry->var.type_id) : entry->var.reg;
+            jm_call_void_2(mt, "js_eval_global_lexical_bind",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value_reg));
+        }
+    }
+    if (!pushed) {
+        hashmap_free(bridged);
+        return NULL;
     }
     return bridged;
 }
@@ -8520,6 +8590,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_eval_local_note_lexical_bindings(mt);
                     jm_eval_local_note_immutable_bindings(mt);
                     eval_bridged = jm_eval_env_push_bindings(mt);
+                } else {
+                    eval_bridged = jm_eval_global_lexical_push_bindings(mt);
                 }
                 bool eval_private_pushed = jm_emit_eval_private_env_push(mt);
                 MIR_reg_t eval_result = jm_call_2(mt, "js_builtin_eval", MIR_T_I64,
@@ -8528,9 +8600,16 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (eval_private_pushed) {
                     jm_call_void_0(mt, "js_eval_private_pop_frame");
                 }
-                if (mt->eval_local_frame_reg != 0) {
-                    jm_eval_env_writeback_bindings(mt, eval_bridged);
-                    jm_call_void_0(mt, "js_eval_env_pop_frame");
+                if (eval_bridged) {
+                    if (mt->eval_local_frame_reg != 0) {
+                        jm_eval_env_writeback_bindings(mt, eval_bridged);
+                    } else {
+                        hashmap_free(eval_bridged);
+                        jm_call_void_0(mt, "js_eval_global_lexical_pop_frame");
+                    }
+                    if (mt->eval_local_frame_reg != 0) {
+                        jm_call_void_0(mt, "js_eval_env_pop_frame");
+                    }
                 }
                 if (eval_has_spread) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -10881,6 +10960,10 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
         site_id ^= source_part; site_id *= 1099511628211ULL;
         site_id ^= start_part; site_id *= 1099511628211ULL;
         site_id ^= end_part; site_id *= 1099511628211ULL;
+        if (mt->template_site_salt != 0) {
+            site_id ^= mt->template_site_salt;
+            site_id *= 1099511628211ULL;
+        }
     }
 
     MIR_reg_t tmpl_obj = jm_call_4(mt, "js_build_template_object_cached", MIR_T_I64,

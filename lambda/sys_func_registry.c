@@ -886,11 +886,14 @@ extern void js_evalscript_check_global_var_decl(Item key);
 extern void js_evalscript_check_global_function_decl(Item key);
 extern void js_evalscript_check_global_lex_decl(Item key);
 extern void js_eval_env_push_frame(void);
+extern void js_eval_global_lexical_push_frame(void);
 extern void js_eval_env_bind(Item key, Item value);
+extern void js_eval_global_lexical_bind(Item key, Item value);
 extern int64_t js_eval_env_has_binding(Item key);
 extern int64_t js_eval_env_is_active(void);
 extern void js_eval_env_track_global_binding(Item key);
 extern void js_eval_env_pop_frame(void);
+extern void js_eval_global_lexical_pop_frame(void);
 extern void js_eval_local_push_frame(void);
 extern void js_eval_local_pop_frame(void);
 extern void js_eval_private_push_frame(void);
@@ -1754,11 +1757,14 @@ JitImport jit_runtime_imports[] = {
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
     {"js_eval_env_push_frame", FPTR(js_eval_env_push_frame)},
+    {"js_eval_global_lexical_push_frame", FPTR(js_eval_global_lexical_push_frame)},
     {"js_eval_env_bind", FPTR(js_eval_env_bind)},
+    {"js_eval_global_lexical_bind", FPTR(js_eval_global_lexical_bind)},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding)},
     {"js_eval_env_is_active", FPTR(js_eval_env_is_active)},
     {"js_eval_env_track_global_binding", FPTR(js_eval_env_track_global_binding)},
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame)},
+    {"js_eval_global_lexical_pop_frame", FPTR(js_eval_global_lexical_pop_frame)},
     {"js_eval_local_push_frame", FPTR(js_eval_local_push_frame)},
     {"js_eval_local_pop_frame", FPTR(js_eval_local_pop_frame)},
     {"js_eval_private_push_frame", FPTR(js_eval_private_push_frame)},

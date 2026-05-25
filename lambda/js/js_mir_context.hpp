@@ -424,6 +424,7 @@ struct JsMirTranspiler {
     bool is_module;                  // true when compiling an ES module (not main script)
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
     bool is_eval_direct;             // true when compiling eval code as direct script (sloppy-mode var export)
+    uint64_t template_site_salt;      // non-zero for eval compilations; separates eval template sites
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 
