@@ -1,7 +1,7 @@
 # Proposal: Robustly Fixing the Remaining test262 Failures (Subclassable Built-ins, Private-Element Timing, Release-only Crash, Slow URI)
 
 **Date**: 2026-05-24
-**Status**: proposal / design
+**Status**: in progress; P0-P3 landed, release baseline updated
 **Author context**: follow-up to `Transpile_Js262.md` and `Transpile_Js_Regex_Backtrack.md`.
 After the regex backtracker landed (17 RegExp improvements, baseline at 34148),
 the residual `built-ins/*` and `language/*` failures are no longer regex-shaped.
@@ -11,6 +11,52 @@ release-only crash and the batch-collateral noise it creates.
 
 Snapshot used for this analysis: `temp/js262/release_run_001/`
 (release `lambda.exe`, commit `a854e5ff9`).
+
+## 0. Progress update (2026-05-25)
+
+P0-P3 have now landed and the release js262 baseline has been refreshed.
+
+Latest full run (`make release`, then full `--batch-only --update-baseline`
+using the release `lambda.exe`):
+
+- **Fully passed:** 34157 / 34161
+- **Failed:** 4
+- **Skipped:** 8058
+- **Regressions vs baseline:** 0
+- **Improvements vs previous 34148 baseline:** 9
+- **Updated baseline:** `test/js262/test262_baseline.txt` now contains 34157
+  passing entries.
+
+Newly graduated tests:
+
+- `language_expressions_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`
+- `language_statements_class_elements_privatefieldset_typeerror_1_js`
+- `language_statements_class_elements_prod_private_setter_before_super_return_in_field_initializer_js`
+- `language_statements_class_subclass_builtin_objects_ArrayBuffer_regular_subclassing_js`
+- `language_statements_class_subclass_builtin_objects_Array_contructor_calls_super_multiple_arguments_js`
+- `language_statements_class_subclass_builtin_objects_Boolean_regular_subclassing_js`
+- `language_statements_class_subclass_builtin_objects_TypedArray_super_must_be_called_js`
+- `language_statements_class_subclass_builtins_js`
+- `language_statements_let_syntax_let_closure_inside_next_expression_js`
+
+Remaining release-suite work:
+
+- **4 hard failures** remain from the original P4 bucket: lexical
+  `super`/`new.target`, class-expression name binding, eval scope propagation,
+  and eval early-error handling.
+- **2 `functional-replace` named-group entries** remain in
+  `t262_partial.txt` as `CRASH_139`; the P3 focused regression passed these
+  cases, so this is now a partial-list/harness reconciliation item rather than a
+  known correctness failure.
+- **2 slow URI tests** remain as `SLOW_*` partials.
+- The full run still reports the known batch-worker signal 11 after collecting
+  all 50 results for that batch; it produced no promoted failures and no
+  regressions.
+
+Operational note: `test/js262` is a symlink to `../../lambda-test/js262`, so
+baseline writes may appear to succeed while sandboxed writes are denied. The
+2026-05-25 baseline update was verified by checking the file header and the
+34157 non-comment entry count after an escalated write.
 
 ## 1. Goal
 
@@ -22,7 +68,8 @@ makes the non-fully-passing count fluctuate run-to-run.
 - **Correctness from the spec operations**, not per-test patching.
 - **Kill the crash first** — it corrupts whole batches and is the single
   biggest source of flaky non-fully-passing collateral.
-- **No regressions** on the 34148-test baseline; validate `--batch-only` ×2.
+- **No regressions** on the refreshed 34157-test baseline; validate
+  `--batch-only` before each baseline update.
 
 ## 2. Complete failure inventory
 
@@ -182,7 +229,35 @@ are hardcoded in `utils/generate_premake.py` (with `-flto`, `-Wl,-x`). A
 **release+ASAN, no-LTO, no-strip** build was needed to symbolise the fault — this
 confirms the proposal's P6 recommendation to add a permanent release-ASAN lane.
 
-### P1 — Subclassable built-ins: route `super()` through the base [[Construct]] (Cluster A)
+### P1 — Subclassable built-ins: route `super()` through the base [[Construct]]  ✅ DONE (2026-05-24)
+
+All 7 target tests pass; the full `class/subclass/builtin-objects` family (70
+tests) passes with 0 regressions. Implemented across four seams:
+
+- **`js_super_call_native`** (explicit `super()`): added `Boolean`/`String`/`Array`
+  to the construct-via-base-[[Construct]] predicate; typed-array `super(args)` now
+  constructs the backing with super's args (was reusing a pre-allocated empty
+  `this`, dropping the length).
+- **`js_new_from_class_object`**: the `Array`, typed-array and `ArrayBuffer`
+  branches now apply the subclass prototype (`GetPrototypeFromConstructor`); a new
+  branch runs the implicit `constructor(...args){ super(...args); }` via the base
+  `[[Construct]]` for default-constructor subclasses.
+- **Static class lowering** (`js_mir_statement_lowering.cpp`): stopped stamping
+  `__class_name__` on built-in-wrapper instances — that property-add transitioned
+  the Map shape and **dropped the `js_class` brand tag**, breaking
+  `Boolean/String/Number.prototype.valueOf`.
+- **`super()` lowering** (`js_mir_expression_lowering.cpp`): resolve the
+  superclass from the class object's stored `__super_class__` (captured at
+  definition time) instead of re-evaluating the identifier in the constructor
+  scope — fixes `class T extends C` where `C` is a captured param/local
+  (`testWithTypedArrayConstructors(Constructor => class extends Constructor)`).
+- **`ArrayBuffer.prototype.slice` `@@species`** (`js_typed_array.cpp`): accept a
+  subclass class-object (a constructable MAP with `__instance_proto__`) as the
+  species constructor, not only a `FUNC`.
+
+Original design notes follow.
+
+
 
 Implement the derived-class allocation model properly:
 - In the derived-constructor lowering, **do not pre-allocate `this`**. Make
@@ -197,23 +272,71 @@ Implement the derived-class allocation model properly:
 - This single change fixes tests 3–7 and removes the brand-check failures; it is
   also the structural basis for the P0 crash fix.
 
-### P2 — Private-element install timing & brand `TypeError` (Cluster B)
+### P2 — Private-element install timing & brand `TypeError` (Cluster B)  ✅ DONE (2026-05-24)
 
-- Move private-method/accessor installation to the `InitializeInstanceElements`
-  step that runs **when `super()` returns**, ahead of derived field
-  initializers; sequence private fields/methods in source order.
-- Add the brand check on private get/set: throw `TypeError` when the receiver
-  lacks the private brand. Fixes tests 8–10.
+Target tests now pass: `prod-private-setter-before-super-return-in-field-initializer`
+(stmt + expr) and `privatefieldset-typeerror-1`. The pre-existing
+`class C { #a=10; b=this.#a*2 }` → `undefined` bug is also fixed (now `20`).
 
-### P3 — `functional-replace` named groups + per-iteration `let` increment (Clusters E, C-13)
+**Root cause:** the brand-check bypass flag `js_private_field_initializing` did
+*double duty* — it was on for the whole field-init phase and was checked both to
+(a) allow a field's own declaration to add itself, and (b) mark functions for the
+field-initializer eval early-error context. Because it stayed on during
+initializer-*expression* evaluation, a private set inside an initializer
+(`this.#x = 1` before `#x` is declared) silently succeeded instead of throwing.
 
-- Append the named-captures `groups` object as the last argument in the
-  functional `@@replace` path; fixes the 2 functional-replace correctness bugs.
-- Emit `CreatePerIterationEnvironment` around the for-`let` **next-expression**
-  so an increment-expression closure observes the copied/incremented binding;
-  fixes test 13.
+**Fix (the split):** introduce a second, narrowly-scoped flag
+`js_private_define_active` that is on *only* while a field's declaration is being
+added:
+- New `js_private_field_define(obj, key, val)` sets the flag, writes the field,
+  restores it; the field-init codegen uses it for the declaration set.
+- The four private-write brand checks in `js_runtime.cpp` now bypass on
+  `js_private_define_active` instead of `js_private_field_initializing`.
+- `js_init_class_instance_fields` (the `__if_*` metadata path, which installs only
+  literal/undefined declarations, no initializer expressions) sets the new flag
+  for its whole walk.
+- `js_private_field_init_begin/end` are kept around the field-init loops, so
+  `js_private_field_initializing` still marks the eval early-error context.
+
+Net effect: initializer expressions run brand-checked (referencing a
+not-yet-installed private throws), while each field's own declaration still adds
+itself. Validated: **6601/6601** `class/*` baseline tests pass, 0 regressions
+(this also recovered 20 `class_elements_arrow_body_*eval*` early-error tests that
+a first, naive attempt had broken).
+
+Note: a separate **pre-existing** issue remains out of scope here — a *derived*
+class with an explicit constructor (`class D extends B { #p; constructor(){
+super(); this.#p = … } }`) installs `#p` only after the whole ctor body rather
+than right after `super()` returns, so `this.#p = …` in the body throws. It
+predates this work (fails with these changes stashed) and is its own fix.
+
+### P3 — `functional-replace` named groups + per-iteration `let` increment (Clusters E, C-13)  ✅ DONE (2026-05-24)
+
+Target tests now pass:
+`built_ins_RegExp_named_groups_functional_replace_global_js`,
+`built_ins_RegExp_named_groups_functional_replace_non_global_js`, and
+`language_statements_let_syntax_let_closure_inside_next_expression_js`.
+
+**Functional replace:** `String.prototype.replace` now routes regex-backed
+receivers through the built-in `@@replace` path when there is no callable custom
+`Symbol.replace`, so the existing named-captures plumbing appends the `groups`
+object for function replacers. The string method call lowering also reads
+callback-captured env changes back after synchronous string methods.
+
+**Per-iteration for-`let` update:** closure creation in an update expression now
+preserves the update-expression closure env long enough to reload the lexical
+loop binding after the increment and patch the matching capture. This makes
+closures created in the `next` expression observe the copied, post-increment
+binding without broadening the general loop-let closure fallback.
+
+Validated with a 7-test focused regression slice covering the two new
+functional-replace cases, existing `RegExp.prototype[@@replace]` named-group
+cases, and nearby `for (let ...)` closure cases: **7/7 passed**.
 
 ### P4 — Lexical super/new.target, class-expression name binding, eval scope, early errors (Clusters C-11/12, D)
+
+Remaining correctness bucket after the 2026-05-25 baseline update: these are
+the 4 hard failures still outside the 34157-test baseline.
 
 - `ReferenceError` on `super()` with undefined `new.target`; lexical
   `super`/`new.target` in arrows (test 11).
@@ -234,32 +357,35 @@ correctly) rather than forcing them.
 
 ### P6 — Harness hygiene (cross-cutting)
 
+- **Partial list reconciliation remains.** After P3, the two
+  `RegExp/named-groups/functional-replace-*` tests pass in the focused
+  regression slice but are still present in `t262_partial.txt` as `CRASH_139`.
+  They should be re-run through the partial path and removed from the partial
+  file once confirmed in that mode.
+- **Deduplicate slow entries.** The current `t262_partial.txt` preserves the two
+  slow URI entries twice around the functional-replace crash entries. This is a
+  harness hygiene issue, not a compliance regression.
 - **Distinguish genuine crashers from collateral.** A test should only be
   written to `t262_partial.txt` as `CRASH_*` if it crashes **standalone**
   (Phase 2b/individual retry), not merely because it shared a batch with a
   crash-point. The 9 stale `CRASH_139` entries (§2.2) all pass standalone and
   should be removed once P0 lands.
-- **Fix the baseline/partial inconsistency.** The 2 `replaceAll` crashers are
-  currently in *both* the baseline and `t262_partial.txt`; being in the baseline
-  makes the runner execute them and they crash. Until P0 lands, remove them from
-  the baseline so they are cleanly skipped; after P0, they re-enter the baseline
-  as genuine passes.
+- **Baseline/partial inconsistency fixed for the release-only crashers.** The 2
+  `replaceAll` crashers now pass in release and are in the refreshed baseline.
 - **Add a release-ASAN CI lane** to catch optimisation-sensitive memory UB (the
   exact class of bug that hid here) before it reaches the baseline.
 
 ## 5. Incremental plan (validate 0 regressions each step)
 
-1. **P0**: release-ASAN build → locate + fix the `@@replace` crash → focused
-   gtest. Re-run `--batch-only` ×2; expect the non-fully-passing collateral to
-   collapse and the 2 crashers to pass.
-2. **P6** baseline/partial reconciliation alongside P0.
-3. **P1** subclassable built-ins (largest correctness lever; 5 tests). Re-run.
-4. **P2** private elements (3 tests). Re-run.
-5. **P3** functional-replace + for-let increment (3 tests). Re-run.
-6. **P4** super/new.target, class-expr name, eval scope, early error (4 tests).
-7. **P5** decodeURI perf (2 tests) — optional graduation.
-8. Full `--batch-only` ×2 (0 regressions) → `--update-baseline`, capture a fresh
-   `temp/js262/release_run_002/` snapshot for the record.
+1. **P0-P3 complete.** The refreshed release baseline is 34157 passing tests
+   with 0 regressions.
+2. **P6 partial-list cleanup.** Confirm the two functional-replace partials in
+   the partial path, remove them from `t262_partial.txt`, and dedupe the slow URI
+   entries.
+3. **P4** super/new.target, class-expr name, eval scope, early error (4 tests).
+4. **P5** decodeURI perf (2 tests) — optional graduation.
+5. Full `--batch-only` regression run → `--update-baseline` only if the gate
+   stays at 0 regressions / 0 promoted non-fully-passing tests.
 
 Each step: run the targeted tests with `sta.js assert.js compareArray.js
 propertyHelper.js`, then a focused class/RegExp/String batch, then a full release

@@ -406,6 +406,8 @@ struct JsMirTranspiler {
     int last_closure_capture_count;
     char last_closure_capture_names[512][128];
     bool last_closure_has_env;
+    bool allow_loop_let_scope_env_for_immediate_call;
+    bool preserve_last_closure_env_after_readback;
 
     // Assignment target hint for closure self-capture detection in copy-env path
     const char* assign_target_vname;  // set before RHS eval, NULL otherwise

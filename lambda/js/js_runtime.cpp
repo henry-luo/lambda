@@ -19792,6 +19792,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 Item call_args[2] = { str, replace_value };
                 return js_call_function(sym_fn, args[0], call_args, 2);
             }
+            if (js_get_regex_data(args[0])) {
+                Item replace_value = (argc >= 2) ? args[1] : make_js_undefined();
+                return js_regexp_symbol_replace(args[0], str, replace_value);
+            }
         }
         return js_string_replace_impl(str, args, argc, false);
     }

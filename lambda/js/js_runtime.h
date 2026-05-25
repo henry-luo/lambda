@@ -257,6 +257,7 @@ Item js_number_method(Item num, Item method_name, Item* args, int argc);
 
 Item js_string_charCodeAt(Item str_item, Item index_item);
 Item js_string_fromCharCode(Item code_item);
+Item js_string_fromCharCode_int(int64_t code_value);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
 Item js_string_fromCodePoint_array(Item arr_item);

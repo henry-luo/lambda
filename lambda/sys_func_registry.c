@@ -1545,6 +1545,7 @@ JitImport jit_runtime_imports[] = {
     {"js_toFixed", FPTR(js_toFixed)},
     {"js_string_charCodeAt", FPTR(js_string_charCodeAt)},
     {"js_string_fromCharCode", FPTR(js_string_fromCharCode)},
+    {"js_string_fromCharCode_int", FPTR(js_string_fromCharCode_int)},
     {"js_string_fromCharCode_array", FPTR(js_string_fromCharCode_array)},
     {"js_string_fromCodePoint", FPTR(js_string_fromCodePoint)},
     {"js_string_fromCodePoint_array", FPTR(js_string_fromCodePoint_array)},

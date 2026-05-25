@@ -1206,6 +1206,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     bool init_is_lexical_decl = false;
     char for_var_init_name[128];
     for_var_init_name[0] = 0;
+    char for_lexical_init_name[128];
+    for_lexical_init_name[0] = 0;
     if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
         JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)for_node->init;
         if (vd->kind == JS_VAR_VAR) {
@@ -1219,7 +1221,17 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                 }
             }
         }
-        else init_is_lexical_decl = true;
+        else {
+            init_is_lexical_decl = true;
+            if (vd->declarations && vd->declarations->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)vd->declarations;
+                if (d->id && d->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+                    snprintf(for_lexical_init_name, sizeof(for_lexical_init_name),
+                        "_js_%.*s", (int)id->name->len, id->name->chars);
+                }
+            }
+        }
     }
 
     // Transpile non-lexical init BEFORE pushing scope. `var` declarations and
@@ -1468,6 +1480,19 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Update — use native path for typed increment/assignment
     jm_emit_label(mt, l_update);
     if (for_node->update) {
+        bool saved_last_closure_has_env = mt->last_closure_has_env;
+        MIR_reg_t saved_last_closure_env_reg = mt->last_closure_env_reg;
+        int saved_last_closure_capture_count = mt->last_closure_capture_count;
+        bool saved_preserve_last_closure_env = mt->preserve_last_closure_env_after_readback;
+        char saved_last_closure_capture_names[16][128];
+        for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
+            snprintf(saved_last_closure_capture_names[sci], 128, "%s", mt->last_closure_capture_names[sci]);
+        }
+        mt->last_closure_has_env = false;
+        mt->last_closure_env_reg = 0;
+        mt->last_closure_capture_count = 0;
+        mt->preserve_last_closure_env_after_readback = true;
+
         TypeId upd_type = jm_get_effective_type(mt, for_node->update);
         if (jm_is_native_type(upd_type)) {
             jm_transpile_expression(mt, for_node->update);
@@ -1479,6 +1504,21 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         // Outside try/catch, stale exceptions would cause spurious loop exits.
         if (mt->try_ctx_depth > 0 && !jm_is_native_type(jm_get_effective_type(mt, for_node->update))) {
             jm_emit_exc_propagate_check(mt);
+        }
+        if (init_is_lexical_decl && for_lexical_init_name[0] && mt->last_closure_has_env) {
+            jm_scope_env_reload_vars(mt);
+            JsMirVarEntry* loop_var = jm_find_var(mt, for_lexical_init_name);
+            if (loop_var && loop_var->reg) {
+                jm_write_last_closure_capture_if_matching(mt, for_lexical_init_name,
+                    loop_var->reg, loop_var->type_id);
+            }
+        }
+        mt->last_closure_has_env = saved_last_closure_has_env;
+        mt->last_closure_env_reg = saved_last_closure_env_reg;
+        mt->last_closure_capture_count = saved_last_closure_capture_count;
+        mt->preserve_last_closure_env_after_readback = saved_preserve_last_closure_env;
+        for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
+            snprintf(mt->last_closure_capture_names[sci], 128, "%s", saved_last_closure_capture_names[sci]);
         }
     }
 

@@ -4384,6 +4384,14 @@ static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
     return (Item){.item = s2it(result)};
 }
 
+static inline bool js_string_has_percent(String* s) {
+    if (!s) return false;
+    for (int i = 0; i < (int)s->len; i++) {
+        if (s->chars[i] == '%') return true;
+    }
+    return false;
+}
+
 static int js_from_char_code_to_uint16(Item code_item) {
     TypeId code_type = get_type_id(code_item);
     if (code_type == LMD_TYPE_INT) {
@@ -4410,6 +4418,34 @@ static int js_from_char_code_to_uint16(Item code_item) {
 extern "C" Item js_string_fromCharCode(Item code_item) {
     int code = js_from_char_code_to_uint16(code_item);
     char buf[5]; // max 4 bytes for UTF-8 + null
+    int len = 0;
+    if (code < 128) {
+        buf[0] = (char)code;
+        len = 1;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+        len = 2;
+    } else {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+        len = 3;
+    }
+    buf[len] = '\0';
+
+    Item result = js_make_small_string(buf, len, code < 128);
+    g_last_from_char_code_string = result;
+    g_last_from_char_code_cp = code;
+    g_last_from_char_code_epoch = js_get_heap_epoch();
+    return result;
+}
+
+extern "C" Item js_string_fromCharCode_int(int64_t code_value) {
+    int64_t mod = code_value % 65536;
+    if (mod < 0) mod += 65536;
+    int code = (int)mod;
+    char buf[5];
     int len = 0;
     if (code < 128) {
         buf[0] = (char)code;
@@ -9527,6 +9563,8 @@ extern "C" Item js_map_group_by(Item items, Item callback) {
 // =============================================================================
 
 extern "C" Item js_object_is(Item left, Item right) {
+    if (left.item == right.item) return (Item){.item = b2it(true)};
+
     TypeId left_type = get_type_id(left);
     TypeId right_type = get_type_id(right);
 
@@ -9717,6 +9755,8 @@ static Item assert_build_error_msg(Item actual, Item expected, Item message, boo
 }
 
 extern "C" void js_assert_same_value(Item actual, Item expected, Item message) {
+    if (actual.item == expected.item) return;
+
     // SameValue semantics: NaN === NaN, +0 !== -0
     Item result = js_object_is(actual, expected);
     if (it2b(result)) return;  // fast path: values are the same
@@ -13237,6 +13277,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!js_string_has_percent(s)) return str_val;
     int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
@@ -13283,6 +13324,7 @@ extern "C" Item js_decodeURI(Item str_item) {
     Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!js_string_has_percent(s)) return str_val;
     int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;

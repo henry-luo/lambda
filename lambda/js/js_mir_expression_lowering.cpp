@@ -5647,7 +5647,9 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t), mt->last_closure_env_reg, 0, 1)));
         }
     }
-    mt->last_closure_has_env = false;
+    if (!mt->preserve_last_closure_env_after_readback) {
+        mt->last_closure_has_env = false;
+    }
 }
 
 // P6: Check if a function is eligible for call-site inlining.
@@ -7306,6 +7308,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (argc == 0) {
                     return jm_box_string_literal(mt, "", 0);
                 } else if (argc == 1) {
+                    TypeId code_type = jm_get_effective_type(mt, call->arguments);
+                    if (code_type == LMD_TYPE_INT) {
+                        MIR_reg_t code = jm_transpile_as_native(mt, call->arguments, LMD_TYPE_INT, LMD_TYPE_INT);
+                        return jm_call_1(mt, "js_string_fromCharCode_int", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
+                    }
                     MIR_reg_t code = jm_transpile_box_item(mt, call->arguments);
                     return jm_call_1(mt, "js_string_fromCharCode", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
@@ -8057,7 +8065,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // at compile time, skip the runtime type cascade and call directly.
             TypeId recv_type = jm_get_effective_type(mt, m->object);
 
-            if (recv_type == LMD_TYPE_ARRAY && prop->name->len == 7 &&
+            if ((recv_type == LMD_TYPE_ARRAY || jm_get_js_array_var(mt, m->object)) &&
+                prop->name->len == 7 &&
                 strncmp(prop->name->chars, "indexOf", 7) == 0 &&
                 arg_count == 1 && call->arguments &&
                 jm_get_effective_type(mt, call->arguments) == LMD_TYPE_INT) {
@@ -8068,7 +8077,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, search_fast));
             }
 
+            bool p3_allow_immediate_callback_env = false;
+            if (!m->computed && prop && prop->name &&
+                prop->name->len == 7 && strncmp(prop->name->chars, "replace", 7) == 0 &&
+                arg_count >= 2 && call->arguments && call->arguments->next &&
+                (call->arguments->next->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                 call->arguments->next->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+                p3_allow_immediate_callback_env = true;
+            }
+            bool p3_saved_immediate_callback_env = mt->allow_loop_let_scope_env_for_immediate_call;
+            if (p3_allow_immediate_callback_env) {
+                mt->allow_loop_let_scope_env_for_immediate_call = true;
+            }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+            mt->allow_loop_let_scope_env_for_immediate_call = p3_saved_immediate_callback_env;
             MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
 
             // For receiver 'this' inside a class method, we know it's always a map
@@ -8080,11 +8102,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
 
             if (recv_type == LMD_TYPE_STRING) {
-                return jm_call_4(mt, "js_string_method", MIR_T_I64,
+                MIR_reg_t r = jm_call_4(mt, "js_string_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_readback_closure_env(mt);
+                return r;
             }
             if (recv_type == LMD_TYPE_ARRAY) {
                 MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
@@ -10949,7 +10973,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0) {
+        if (use_scope_env && mt->iteration_depth > 0 &&
+            !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }
@@ -11129,7 +11154,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         }
-        if (use_scope_env && mt->iteration_depth > 0) {
+        if (use_scope_env && mt->iteration_depth > 0 &&
+            !mt->allow_loop_let_scope_env_for_immediate_call) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (cv && cv->is_let_const) { use_scope_env = false; break; }
