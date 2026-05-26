@@ -697,3 +697,42 @@ margin, and well below the harness's 6–7 s figures from `release_run_002`.
 Each item in §7.2 is a standalone change with its own gate, so any subset can
 land first, and any that turn out to under-deliver in measurement can be
 withdrawn without disturbing the others.
+
+---
+
+### 7.6 Implementation outcome (measured)
+
+All three items in §7.2 were prototyped against the release runtime. Honest
+accounting of what landed and what did not:
+
+| Item | Status | Reason |
+| --- | --- | --- |
+| 7.2.A multi-operand concat fusion | **reverted** | Did not fire on the URI hot path — `hex[i]` has effective type `ANY`, so the existing fast-path gate (`left_type == STRING && right_type == STRING`) never opens for `"%" + hex[i] + hex[j]`. Where it *did* fire (all-literal-string chains) it added per-call args-stack overhead (save / push / restore) that the rare alloc savings did not cover; microbench delta was within noise. |
+| 7.2.B 1-char ASCII interning | **landed** | Microbench: 2 M `s[i]` calls 1494 → 1281 ms (**−14 %**); 2 M `decimalToPercentHexString` 1770 → 1557 ms (**−12 %**). URI tests neutral (direct timing 3.16–3.22 s vs run_003's 3.19–3.22 s). Broadly applicable: any tight loop over `str[i]`, `charAt`, or `String.fromCharCode(n<128)` benefits without changing semantics (strings are immutable; interning is observationally identical). |
+| 7.2.C `jm_should_inline` widening | **reverted** | The existing inliner (`jm_transpile_inline_native`) relies on `fc->param_types[i]` and `fc->return_type` having values that only hold for typed/native-versioned functions. Dropping the `has_native_version` gate exposed those assumptions: `Object.defineProperty` / `Object.seal` / `language/function-code/*` tests crashed (SIGSEGV) or returned wrong values. Properly widening the inliner would require teaching it about untyped params + `var x = init;`-style hoisting, well beyond the §7 surface area. |
+
+**Net change on `test262-baseline`** (release, just 7.2.B vs run_003):
+
+| Metric | run_003 | now | Δ |
+| --- | ---: | ---: | --- |
+| Tests passing (current baseline) | 34,165 / 34,165 | 34,243 / 34,245 | **0 regressions** |
+| Direct decodeURI `A2_5_T1` time | 3.22 s | 3.20 s | flat |
+| Direct decodeURIComponent `A2_5_T1` time | 3.19 s | 3.16 s | flat |
+| Microbench `s[i]` ×2 M | — | 1.28 s | **−14 %** vs prior |
+| Microbench `decimalToPercentHexString` ×2 M | — | 1.56 s | **−12 %** vs prior |
+
+The two `decodeURI*/A2_5_T1` tests **did not drop below 3 s** with the
+implementable subset of §7.2. The remaining cost sits inside the `decodeURI`
+C builtin's allocator + `js_concat_strings_fast` 12-byte cache + the
+`assert.sameValue` chain in the harness — none of which are §7.2.A/B/C's
+domain. Pushing them below 3 s would require either:
+
+- A C-side rewrite of `js_decodeURI` to avoid the per-call result allocation
+  (out of the JS-engine-layer surface §7 targeted), or
+- Promoting `js_should_inline`'s widening into a properly-implemented inliner
+  with param-coercion and var-hoisting machinery (a larger compiler change
+  with its own design and verification).
+
+The 7.2.B change is kept because it is a strict improvement on a broadly hot
+pattern (any `s[i]` / `charAt` / ASCII `fromCharCode`) with no behavioural
+risk, and it is the only piece of §7.2 that survived end-to-end verification.

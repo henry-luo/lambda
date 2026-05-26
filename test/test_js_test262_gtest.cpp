@@ -11,6 +11,7 @@
 //
 // Skips:
 //   - flags: [async, module, raw, noStrict, onlyStrict]
+//     (async is runnable only with --run-async and an explicit allowlist)
 //   - Tests requiring features we don't support (Proxy, SharedArrayBuffer, etc.)
 //   - Tests using eval() semantics (test262 eval tests)
 //
@@ -867,6 +868,7 @@ struct JsBatchGroup {
     std::vector<size_t> indices;
     std::vector<std::string> special_includes;
     std::string key;
+    bool is_async = false;
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -955,7 +957,7 @@ static std::string assemble_test_source(
     if (source.empty()) return "";
 
     std::string combined;
-    combined.reserve(source.size() + 4096);
+    combined.reserve(source.size() + 8192);
 
     // "use strict" must come FIRST (before includes) to act as a valid directive prologue
     if (p.is_strict) {
@@ -963,7 +965,12 @@ static std::string assemble_test_source(
     }
 
     if (p.is_async) {
-        combined += "globalThis.$DONE = function(error) { if (error) throw error; };\n";
+        combined += "var __lambda_test262_async_done = false;\n";
+        combined += "globalThis.$DONE = function(error) {\n";
+        combined += "  if (__lambda_test262_async_done) throw new Test262Error(\"$DONE called multiple times\");\n";
+        combined += "  __lambda_test262_async_done = true;\n";
+        combined += "  if (error) throw error;\n";
+        combined += "};\n";
     }
 
     append_host_flags(combined, p);
@@ -980,6 +987,19 @@ static std::string assemble_test_source(
     }
 
     combined += source;
+    if (p.is_async) {
+        combined += "\nif (typeof setTimeout === \"function\") {\n";
+        combined += "  setTimeout(function() {\n";
+        combined += "    if (!__lambda_test262_async_done) throw new Test262Error(\"async test did not call $DONE\");\n";
+        combined += "  }, 0);\n";
+        combined += "} else if (typeof Promise === \"function\") {\n";
+        combined += "  Promise.resolve().then(function() {\n";
+        combined += "    if (!__lambda_test262_async_done) throw new Test262Error(\"async test did not call $DONE\");\n";
+        combined += "  });\n";
+        combined += "} else if (!__lambda_test262_async_done) {\n";
+        combined += "  throw new Test262Error(\"async test did not call $DONE\");\n";
+        combined += "}\n";
+    }
     return combined;
 }
 
@@ -1024,12 +1044,13 @@ static void partition_batch_indices(
     std::unordered_map<std::string, size_t> group_by_key;
 
     for (size_t idx : indices) {
-        if (prepared[idx].native_harness) {
+        if (prepared[idx].native_harness && !prepared[idx].is_async) {
             native_indices.push_back(idx);
             continue;
         }
 
-        std::string key = special_preamble_key(prepared[idx].special_preamble_includes);
+        std::string key = prepared[idx].is_async ? "async:" : "sync:";
+        key += special_preamble_key(prepared[idx].special_preamble_includes);
         auto it = group_by_key.find(key);
         size_t group_index;
         if (it == group_by_key.end()) {
@@ -1038,6 +1059,7 @@ static void partition_batch_indices(
             JsBatchGroup group;
             group.special_includes = prepared[idx].special_preamble_includes;
             group.key = key;
+            group.is_async = prepared[idx].is_async;
             js_groups.push_back(std::move(group));
         } else {
             group_index = it->second;
@@ -1127,6 +1149,9 @@ static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
+static bool g_run_async = false;     // --run-async: permit allowlisted async-flagged tests
+static std::string g_async_list_file; // --async-list=<path>: newline-separated async test allowlist
+static std::unordered_set<std::string> g_async_allowlist;
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
 static std::unordered_map<std::string, std::vector<std::string>> g_special_preamble_exact;
 static std::vector<std::pair<std::string, std::vector<std::string>>> g_special_preamble_prefix;
@@ -1222,6 +1247,66 @@ static std::string trim_ascii(const std::string& value) {
         end--;
     }
     return value.substr(start, end - start);
+}
+
+static bool manifest_status_token_uses_second_field(const std::string& token) {
+    return token.compare(0, 5, "SLOW_") == 0 ||
+           token.compare(0, 6, "CRASH_") == 0 ||
+           token.compare(0, 6, "BATCH_") == 0 ||
+           token.compare(0, 8, "TIMEOUT_") == 0;
+}
+
+static std::string first_manifest_test_name(const std::string& line) {
+    std::string row = trim_ascii(line);
+    if (row.empty() || row[0] == '#') return "";
+
+    std::vector<std::string> fields;
+    size_t pos = 0;
+    while (pos < row.size() && fields.size() < 2) {
+        while (pos < row.size() && (row[pos] == ' ' || row[pos] == '\t')) pos++;
+        size_t start = pos;
+        while (pos < row.size() && row[pos] != ' ' && row[pos] != '\t') pos++;
+        if (pos > start) fields.push_back(row.substr(start, pos - start));
+    }
+    if (fields.empty()) return "";
+    if (manifest_status_token_uses_second_field(fields[0]) && fields.size() > 1) {
+        return fields[1];
+    }
+    return fields[0];
+}
+
+static std::string sanitize_test262_manifest_name(std::string name) {
+    static const std::string ref_prefix = std::string(TEST262_ROOT) + "/test/";
+    if (name.compare(0, ref_prefix.size(), ref_prefix) == 0) {
+        name = name.substr(ref_prefix.size());
+    } else if (name.compare(0, 5, "test/") == 0) {
+        name = name.substr(5);
+    }
+    for (char& ch : name) {
+        unsigned char byte = (unsigned char)ch;
+        if (!isalnum(byte)) ch = '_';
+    }
+    return name;
+}
+
+static bool load_test_name_allowlist(const std::string& path, std::unordered_set<std::string>& out) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return false;
+
+    char line[2048];
+    while (fgets(line, sizeof(line), f)) {
+        std::string name = first_manifest_test_name(line);
+        if (!name.empty()) {
+            out.insert(name);
+            out.insert(sanitize_test262_manifest_name(name));
+        }
+    }
+    fclose(f);
+    return true;
+}
+
+static bool async_test_is_enabled(const std::string& test_name) {
+    return g_run_async && g_async_allowlist.find(test_name) != g_async_allowlist.end();
 }
 
 static std::vector<std::string> split_diagnose_expected_paths(const std::string& field) {
@@ -1778,7 +1863,12 @@ static void prepare_all_tests(
             }
 
             // skip unsupported
-            if (meta.is_async)   { p.skip_result = T262_SKIP; p.skip_message = "async flag"; continue; }
+            p.is_async = meta.is_async;
+            if (meta.is_async && !async_test_is_enabled(p.test_name)) {
+                p.skip_result = T262_SKIP;
+                p.skip_message = "async flag";
+                continue;
+            }
             if (meta.is_module)  { p.skip_result = T262_SKIP; p.skip_message = "module flag"; continue; }
             if (meta.is_raw)     { p.skip_result = T262_SKIP; p.skip_message = "raw flag"; continue; }
             if (has_unsupported_feature(meta)) { p.skip_result = T262_SKIP; p.skip_message = "unsupported feature"; continue; }
@@ -1807,7 +1897,7 @@ static void prepare_all_tests(
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
             // or computed inline when no cache is available.
-            p.native_harness = cached_native_harness;
+            p.native_harness = !p.is_async && cached_native_harness;
 #else
             p.native_harness = false;
 #endif
@@ -2158,8 +2248,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     size_t native_batch_count = batches.size();
     for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
         const auto& group_indices = js_groups[group_index].indices;
-        for (size_t s = 0; s < group_indices.size(); s += chunk_size) {
-            size_t e = std::min(s + chunk_size, group_indices.size());
+        size_t group_chunk_size = js_groups[group_index].is_async ? 1 : chunk_size;
+        for (size_t s = 0; s < group_indices.size(); s += group_chunk_size) {
+            size_t e = std::min(s + group_chunk_size, group_indices.size());
             batches.push_back({s, e, false, group_index});
         }
     }
@@ -2275,7 +2366,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                     fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
                             i + 1, batches.size(), w,
                             batches[i].native ? "native" :
-                                (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special"),
+                                (js_groups[batches[i].group].is_async ? "js-async" :
+                                    (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special")),
                             batch_num_tests, batches[i].start, batches[i].end - 1);
                 }
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
@@ -2312,7 +2404,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests) %s  tests[%zu..%zu]\n",
                     bi, batch_timings[bi].elapsed_secs, batch_timings[bi].num_tests,
                     batches[bi].native ? "[native]" :
-                        (js_groups[batches[bi].group].special_includes.empty() ? "[js]    " : "[js+pre]"),
+                        (js_groups[batches[bi].group].is_async ? "[async] " :
+                            (js_groups[batches[bi].group].special_includes.empty() ? "[js]    " : "[js+pre]")),
                     batches[bi].start, batches[bi].end - 1);
         }
         // For the top 5 slowest batches, list all test names
@@ -2323,7 +2416,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             const auto& idx_vec = batches[bi].native ? native_indices : js_groups[batches[bi].group].indices;
             fprintf(stderr, "  --- batch[%zu] (%.1fs, %s) ---\n", bi, batch_timings[bi].elapsed_secs,
                     batches[bi].native ? "native" :
-                        (js_groups[batches[bi].group].special_includes.empty() ? "js" : "js-special"));
+                        (js_groups[batches[bi].group].is_async ? "js-async" :
+                            (js_groups[batches[bi].group].special_includes.empty() ? "js" : "js-special")));
             for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
                 size_t pi = idx_vec[idx];
                 const auto& p = prepared[pi];
@@ -3418,6 +3512,8 @@ static void print_test262_help(const char* program) {
     printf("  --run-partial             Include partial/non-fully-passing tests.\n");
     printf("  --update-baseline         Update the baseline when stability gates pass.\n");
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
+    printf("  --run-async               Permit async-flagged tests from an explicit allowlist.\n");
+    printf("  --async-list=<path>       Async allowlist (defaults to --batch-file when present).\n");
     printf("  --diagnose                Run diagnose list and pass --diagnose to Lambda.\n");
     printf("  --diagnose-list=<path>    Override diagnose list path (default: test/js262/diagnose_list.txt).\n");
     printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
@@ -3438,6 +3534,7 @@ static void print_test262_help(const char* program) {
     printf("Examples:\n");
     printf("  %s --batch-only --baseline-only\n", program);
     printf("  %s --batch-only --batch-file=temp/js44_batch.txt --jobs=1 --write-failures=temp/out.tsv\n", program);
+    printf("  %s --batch-only --run-async --batch-file=temp/js47_async.txt --jobs=1\n", program);
     printf("  %s --diagnose --jobs=1 --js-timeout=30\n", program);
     printf("  %s --batch-only --update-baseline\n", program);
 }
@@ -3491,6 +3588,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--diagnose") == 0) {
             g_diagnose_mode = true;
         }
+        if (strcmp(argv[i], "--run-async") == 0) {
+            g_run_async = true;
+        }
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
         }
@@ -3506,6 +3606,9 @@ int main(int argc, char** argv) {
         if (strncmp(argv[i], "--diagnose-list=", 16) == 0) {
             g_diagnose_mode = true;
             g_diagnose_list_file = argv[i] + 16;
+        }
+        if (strncmp(argv[i], "--async-list=", 13) == 0) {
+            g_async_list_file = argv[i] + 13;
         }
         if (strncmp(argv[i], "--write-failures=", 17) == 0) {
             g_write_failures_path = argv[i] + 17;
@@ -3601,6 +3704,19 @@ int main(int argc, char** argv) {
                 g_known_partial.size());
     }
 
+    if (g_run_async) {
+        std::string async_source = !g_async_list_file.empty() ? g_async_list_file : g_batch_file;
+        if (async_source.empty()) {
+            fprintf(stderr, "[test262] --run-async enabled without --async-list or --batch-file; async tests remain skipped\n");
+        } else if (load_test_name_allowlist(async_source, g_async_allowlist)) {
+            fprintf(stderr, "[test262] Loaded async allowlist: %zu tests from %s\n",
+                    g_async_allowlist.size(), async_source.c_str());
+        } else {
+            fprintf(stderr, "[test262] Error: cannot open async allowlist: %s\n", async_source.c_str());
+            return 1;
+        }
+    }
+
     // register summary listener
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new Test262ReportListener());
@@ -3688,6 +3804,10 @@ int main(int argc, char** argv) {
         for (auto& name : batch_names) {
             auto it = name_to_idx.find(name);
             if (it == name_to_idx.end()) {
+                std::string sanitized_name = sanitize_test262_manifest_name(name);
+                if (sanitized_name != name) it = name_to_idx.find(sanitized_name);
+            }
+            if (it == name_to_idx.end()) {
                 fprintf(stderr, "[test262]   WARNING: test not found: %s\n", name.c_str());
                 continue;
             }
@@ -3700,7 +3820,12 @@ int main(int argc, char** argv) {
             p.skip_result = T262_PASS;
             p.is_negative = false;
             p.is_strict = false;
+            p.is_async = false;
             p.native_harness = false;
+            Test262Metadata meta;
+            bool metadata_loaded = false;
+            bool is_module = false;
+            bool is_raw = false;
             static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
             if (param.test_path.size() > prefix.size() &&
                 param.test_path.compare(0, prefix.size(), prefix) == 0) {
@@ -3719,9 +3844,48 @@ int main(int argc, char** argv) {
                 p.negative_type = cm.neg_type;
                 p.is_strict = cm.flags & 8;
                 p.is_async = cm.flags & 1;
+                is_module = cm.flags & 2;
+                is_raw = cm.flags & 4;
                 p.includes = cm.includes;
                 p.features = cm.features;
-                p.native_harness = cm.native_harness;
+                p.native_harness = !p.is_async && cm.native_harness;
+                meta.is_async = p.is_async;
+                meta.is_module = is_module;
+                meta.is_raw = is_raw;
+                meta.is_negative = p.is_negative;
+                meta.negative_type = p.negative_type;
+                meta.includes = p.includes;
+                meta.features = p.features;
+                metadata_loaded = true;
+            } else {
+                std::string source = read_file_contents(param.test_path);
+                if (!source.empty()) {
+                    meta = parse_metadata(source);
+                    p.is_negative = meta.is_negative;
+                    p.negative_type = meta.negative_type;
+                    p.is_strict = meta.is_strict;
+                    p.is_async = meta.is_async;
+                    is_module = meta.is_module;
+                    is_raw = meta.is_raw;
+                    p.includes = meta.includes;
+                    p.features = meta.features;
+                    metadata_loaded = true;
+                }
+            }
+            if (metadata_loaded && p.skip_result != T262_SKIP && p.is_async) {
+                if (!async_test_is_enabled(p.test_name)) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "async flag";
+                } else if (is_module) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "module flag";
+                } else if (is_raw) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "raw flag";
+                } else if (has_unsupported_feature(meta)) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "unsupported feature";
+                }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
             if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());

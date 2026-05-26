@@ -9097,6 +9097,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         }
                 }
 
+                // §7.2.C call-site widening was attempted here but caused
+                // regressions in tests that depend on parameter coercion and
+                // shape-changing object semantics (Object.defineProperty,
+                // Object.seal, language/function-code/*). The widened
+                // jm_should_inline (below) and jm_transpile_inline_native make
+                // assumptions about fc->param_types / fc->return_type that
+                // hold for native-versioned functions but not for arbitrary
+                // user JS functions. Reverted to native-only call sites; the
+                // microbenches we did land (concat fusion + 1-char interning)
+                // already capture most of the achievable inner-loop savings.
+
                 // Direct call to local function (only for non-closures;
                 // closures need env from the JsFunction wrapper, so they
                 // go through js_call_function which handles env passing)

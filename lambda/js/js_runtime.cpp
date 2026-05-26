@@ -764,6 +764,7 @@ static Item js_array_numeric_key_to_property_key(Item key);
 static bool js_is_constructor_internal(Item callee);
 static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end);
 static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii);
+extern "C" Item js_intern_ascii_char(int code);  // §7.2.B (defined in js_globals.cpp)
 
 extern "C" Item js_proxy_trap_own_keys(Item proxy) {
     JsProxyData* pd = js_get_proxy_data(proxy);
@@ -6144,6 +6145,13 @@ static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
         if (end > len) end = len;
         if (start >= end) return (Item){.item = s2it(heap_create_name("", 0))};
         int64_t rlen = end - start;
+        // §7.2.B: a single ASCII byte has only 128 possible values; route
+        // 1-char ASCII substrings (the str[i]/charAt hot path) through the
+        // shared intern table instead of heap-allocating a fresh String.
+        if (rlen == 1) {
+            Item interned = js_intern_ascii_char((unsigned char)s->chars[start]);
+            if (interned.item != ItemNull.item) return interned;
+        }
         String* result = (String*)heap_alloc(sizeof(String) + (int)rlen + 1, LMD_TYPE_STRING);
         result->len = (int)rlen;
         result->is_ascii = 1;

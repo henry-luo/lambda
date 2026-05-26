@@ -4375,13 +4375,57 @@ static inline Item js_uri_make_four_byte_string(char* decoded) {
     return (Item){.item = s2it(result)};
 }
 
+// §7.2.B: per-epoch intern table for 1-byte ASCII strings.
+// `heap_create_name` already interns by content via the name pool, but it does
+// a content-keyed lookup on every call. For the only-128-possible-outputs case
+// of 1-byte ASCII (returned by `str[i]`, `charAt`, `String.fromCharCode(n<128)`,
+// and any single-char `js_make_small_string` allocator) we cache the pointer
+// directly. Reset is keyed on the heap epoch so a batch-test heap rebuild
+// invalidates the cache automatically — same idiom used by the four-byte URI
+// and fromCharCode caches above.
+static String* g_ascii_char_pool[128];
+static uint64_t g_ascii_char_pool_epoch = ~0ULL;
+
+static inline String* js_ascii_char_intern(int code) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (epoch != g_ascii_char_pool_epoch) {
+        for (int i = 0; i < 128; i++) g_ascii_char_pool[i] = NULL;
+        g_ascii_char_pool_epoch = epoch;
+    }
+    String* s = g_ascii_char_pool[code];
+    if (!s) {
+        char c = (char)code;
+        s = heap_create_name(&c, 1);
+        g_ascii_char_pool[code] = s;
+    }
+    return s;
+}
+
 static inline Item js_make_small_string(char* chars, int len, bool is_ascii) {
+    // §7.2.B fast path: a single ASCII byte has only 128 possible values, all
+    // immutable; share the interned String* instead of heap-allocating.
+    if (len == 1 && is_ascii) {
+        unsigned char b = (unsigned char)chars[0];
+        if (b < 128) {
+            String* s = js_ascii_char_intern(b);
+            if (s) return (Item){.item = s2it(s)};
+        }
+    }
     String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
     result->len = len;
     result->is_ascii = is_ascii;
     memcpy(result->chars, chars, len);
     result->chars[len] = '\0';
     return (Item){.item = s2it(result)};
+}
+
+// Public entrypoint so callers in other translation units (e.g. the substring
+// path in js_runtime.cpp) can share the same interned 1-byte ASCII strings.
+extern "C" Item js_intern_ascii_char(int code) {
+    if (code < 0 || code > 127) return ItemNull;
+    String* s = js_ascii_char_intern(code);
+    if (!s) return ItemNull;
+    return (Item){.item = s2it(s)};
 }
 
 static inline bool js_string_has_percent(String* s) {
