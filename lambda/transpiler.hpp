@@ -21,6 +21,7 @@ extern "C" void heap_gc_collect(void);                // trigger GC collection f
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
+extern "C" void heap_unregister_gc_root_range(uint64_t* base);  // unregister env array root range by base
 String* heap_create_name(const char* name, size_t len);
 String* heap_create_name(const char* name);
 Symbol* heap_create_symbol(const char* symbol, size_t len);

@@ -775,6 +775,9 @@ void js_reset_transient_call_state() {
     js_pending_args_is_strict = 0;
     js_pending_args_callee = (Item){0};
     js_array_method_real_this = (Item){0};
+    // drop transient call-arg stack frames and its GC registration (heap may be
+    // recreated across batch tests; re-registered lazily on next push)
+    js_args_stack_reset();
 }
 
 void js_reset_heap_bound_runtime_state() {

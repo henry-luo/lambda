@@ -2,6 +2,27 @@
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
 
+// True when this variable declarator was introduced by a `const` lexical
+// declaration. A `const` binding is immutable, so once the initializer has
+// executed the binding is permanently the value produced by that initializer —
+// which is exactly what the direct-dispatch fast path needs.
+static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
+    if (!dn) return false;
+    TSNode dts = dn->base.node;
+    if (ts_node_is_null(dts)) return false;
+    TSNode parent = ts_node_parent(dts);
+    if (ts_node_is_null(parent)) return false;
+    const char* ptype = ts_node_type(parent);
+    if (!ptype || strcmp(ptype, "lexical_declaration") != 0) return false;
+    // The keyword token is the first child of `lexical_declaration`; in
+    // tree-sitter-javascript anonymous keyword leaves have their literal text
+    // as the type, so `ts_node_type(first_child)` returns "const" or "let".
+    TSNode kw = ts_node_child(parent, 0);
+    if (ts_node_is_null(kw)) return false;
+    const char* kt = ts_node_type(kw);
+    return kt && strcmp(kt, "const") == 0;
+}
+
 static bool jm_function_decl_entry_is_direct_binding(JsFunctionNode* fn) {
     if (!fn) return false;
     TSNode fn_node = fn->base.node;
@@ -5940,6 +5961,18 @@ static void jm_transpile_discard_call_args(JsMirTranspiler* mt, JsAstNode* arg) 
     }
 }
 
+// In a generator, a yield anywhere in the argument list breaks every direct
+// dispatch fast path that evaluates args into raw MIR registers, because those
+// registers do not survive a yield's suspend/resume. When this gate trips the
+// caller must fall back to the env-spilling path inside jm_build_args_array.
+static bool jm_call_yield_blocks_direct(JsMirTranspiler* mt, JsAstNode* first_arg) {
+    if (!mt->in_generator) return false;
+    for (JsAstNode* a = first_arg; a; a = a->next) {
+        if (jm_has_yield(a)) return true;
+    }
+    return false;
+}
+
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     int arg_count = jm_count_args(call->arguments);
 
@@ -7779,6 +7812,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, date_method_id));
                 }
                 // v20: setter/extra getter dispatch with up to 4 args
+                // Skip if a yield in args would corrupt earlier evaluated regs in a generator.
+                if (date_setter_id >= 0 && jm_call_yield_blocks_direct(mt, call->arguments)) date_setter_id = -1;
                 if (date_setter_id >= 0) {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
                     JsAstNode* a0 = call->arguments;
@@ -7803,6 +7838,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // boxing + runtime dispatch when receiver type and method are known.
             if (!m->computed && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsFuncCollected* p7_fc = jm_resolve_native_call(mt, (JsCallNode*)call);
+                // Yield in args inside a generator breaks P7 (raw regs across yield)
+                if (p7_fc && jm_call_yield_blocks_direct(mt, call->arguments)) p7_fc = NULL;
                 if (p7_fc) {
                     // P6: also try inlining the native method
                     if (jm_should_inline(p7_fc)) {
@@ -8052,6 +8089,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             }
                         }
                     }
+                    // Yield in args inside a generator breaks P3 (args evaluated into raw regs across yield)
+                    if (p3_method && jm_call_yield_blocks_direct(mt, call->arguments)) p3_method = NULL;
                     if (p3_method && p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
                         log_debug("P3: direct method call %.*s.%.*s() in %s",
                             (int)(p3_ce->name ? p3_ce->name->len : 0),
@@ -8159,8 +8198,22 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (p3_allow_immediate_callback_env) {
                 mt->allow_loop_let_scope_env_for_immediate_call = true;
             }
+            // If any argument contains a yield (generator path), jm_build_args_array
+            // emits the yield's suspend/resume internally — that destroys raw MIR
+            // regs computed earlier (recv, method_name). Spill recv to an env slot
+            // and re-box method_name from its compile-time String* afterwards so
+            // the downstream dispatch reads valid values on resume.
+            int recv_yield_spill = -1;
+            bool recv_needs_yield_spill = jm_call_yield_blocks_direct(mt, call->arguments);
+            if (recv_needs_yield_spill) {
+                recv_yield_spill = jm_gen_spill_save(mt, recv);
+            }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             mt->allow_loop_let_scope_env_for_immediate_call = p3_saved_immediate_callback_env;
+            if (recv_needs_yield_spill) {
+                jm_gen_spill_load(mt, recv, recv_yield_spill);
+                method_name = jm_box_string_literal(mt, method_key_name->chars, method_key_name->len);
+            }
             MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
 
             // For receiver 'this' inside a class method, we know it's always a map
@@ -8781,9 +8834,16 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         // Fallback: use pre-resolved entry from AST building if scope lookup fails
         if (!entry && id->entry) entry = id->entry;
 
-        // Resolve to a JsFunctionNode for direct call.  Only function
-        // declarations are safe here: a `var x = function(){}` binding is
-        // hoisted as undefined until its initializer executes.
+        // Resolve to a JsFunctionNode for direct call.  Two cases are safe:
+        //   1. A `function foo(){}` declaration (hoisted, always callable).
+        //   2. A `const f = function(){}` or `const f = () => {}` binding —
+        //      const is immutable, so once the initializer has run, the
+        //      binding is permanently that function. We additionally require
+        //      the call site to be textually after the initializer end so we
+        //      never devirtualise a call that is still inside the TDZ window.
+        // A `var x = function(){}` binding is hoisted as undefined until its
+        // initializer executes; calls before that point must keep the dynamic
+        // dispatch so they surface the right runtime error.
         JsFunctionNode* resolved_fn = NULL;
         if (entry && entry->node) {
             JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
@@ -8791,6 +8851,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 JsFunctionNode* fn = (JsFunctionNode*)entry->node;
                 if (jm_function_decl_entry_is_direct_binding(fn)) {
                     resolved_fn = fn;
+                }
+            } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                JsVariableDeclaratorNode* dn = (JsVariableDeclaratorNode*)entry->node;
+                if (dn->init &&
+                    (dn->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                     dn->init->node_type == JS_AST_NODE_ARROW_FUNCTION) &&
+                    jm_declarator_is_const(dn)) {
+                    TSNode init_ts = dn->init->node;
+                    TSNode call_ts = ((JsAstNode*)call)->node;
+                    if (!ts_node_is_null(init_ts) && !ts_node_is_null(call_ts) &&
+                        ts_node_end_byte(init_ts) <= ts_node_start_byte(call_ts)) {
+                        resolved_fn = (JsFunctionNode*)dn->init;
+                    }
                 }
             }
 
@@ -8875,6 +8948,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                      jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node)))) {
                 fc = NULL;
             }
+            // Yield in args inside a generator: the direct paths below evaluate
+            // args into raw MIR regs that don't survive yield/resume, corrupting
+            // earlier args. Force the env-spilling fallback (jm_build_args_array).
+            if (fc && jm_call_yield_blocks_direct(mt, call->arguments)) fc = NULL;
 
             if (fc && (fc->func_item || fc->native_func_item) && fc->capture_count == 0) {
                 // Phase 4: Check if we can call the native version
@@ -10604,17 +10681,18 @@ MIR_reg_t jm_transpile_array(JsMirTranspiler* mt, JsArrayNode* arr) {
                 index++;
                 continue;
             }
-            MIR_reg_t idx = jm_box_int_const(mt, index);
-            MIR_reg_t val;
-            // Generator spill: restore array reg before each yield-containing element
-            if (arr_spill_slot >= 0 && jm_has_yield(elem)) {
-                // val compilation may yield — array reg will be stale after resume
-            }
-            val = jm_transpile_box_item(mt, elem);
+            // NOTE: the boxed index register MUST be created AFTER the element's
+            // post-yield restore. If `elem` contains a yield and we created `idx`
+            // here, the MIR reg would be uninitialised on resume (state-machine
+            // dispatch jumps over its initialising MOV) and the array_set would
+            // store to garbage offset 0, clobbering earlier elements. So build
+            // `idx` lazily just before the store, where any yield is already done.
+            MIR_reg_t val = jm_transpile_box_item(mt, elem);
             if (arr_spill_slot >= 0 && jm_has_yield(elem)) {
                 // Restore array ref after yield
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
+            MIR_reg_t idx = jm_box_int_const(mt, index);
             jm_call_3(mt, "js_array_set", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, array),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
@@ -11818,7 +11896,13 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_UNARY_EXPRESSION:
         return jm_transpile_unary(mt, (JsUnaryNode*)expr);
     case JS_AST_NODE_CALL_EXPRESSION: {
+        // Pop the transient call-argument stack back to its pre-call mark once
+        // the call returns. Save before lowering (which pushes arg frames), and
+        // restore before the exception-propagation check so the stack is reset
+        // on both the normal and the callee-threw paths.
+        MIR_reg_t args_mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
         MIR_reg_t r = jm_transpile_call(mt, (JsCallNode*)expr);
+        jm_call_void_1(mt, "js_args_restore", MIR_T_I64, MIR_new_reg_op(mt->ctx, args_mark));
         // reload scope-env variables after any function call — the callee
         // (or something it calls transitively) may have modified captured
         // variables via the shared scope env
@@ -11860,7 +11944,11 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
         return jm_transpile_assignment(mt, (JsAssignmentNode*)expr);
     case JS_AST_NODE_NEW_EXPRESSION: {
+        // Pop the transient call-argument stack after the constructor returns
+        // (mirrors the CALL_EXPRESSION handling above).
+        MIR_reg_t args_mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
         MIR_reg_t r = jm_transpile_new_expr(mt, (JsCallNode*)expr);
+        jm_call_void_1(mt, "js_args_restore", MIR_T_I64, MIR_new_reg_op(mt->ctx, args_mark));
         jm_scope_env_reload_vars(mt);
         // check for pending exception after constructor call
         jm_emit_exc_propagate_check(mt);

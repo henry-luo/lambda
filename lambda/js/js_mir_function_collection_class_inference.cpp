@@ -2637,10 +2637,14 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
-    // Use js_alloc_env instead of MIR_ALLOCA to avoid MIR inlining ALLOCA bug on ARM64,
-    // where MIR's top-alloca consolidation assigns wrong offsets when the top alloca
-    // appears after the inline call site.
-    MIR_reg_t args_ptr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+    // Args live on the transient call-argument stack (js_args_push), which is
+    // registered with the GC once and popped after the call returns (the
+    // save/restore is emitted at the call-expression chokepoint in
+    // jm_transpile_box_item). This avoids the per-call permanent GC root range
+    // that made js_alloc_env-based calls O(n^2) in call-heavy loops. We use a
+    // runtime stack (not MIR_ALLOCA) to avoid the MIR inlining ALLOCA bug on
+    // ARM64 where top-alloca consolidation assigns wrong offsets.
+    MIR_reg_t args_ptr = jm_call_1(mt, "js_args_push", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 
     // Evaluate and store each argument

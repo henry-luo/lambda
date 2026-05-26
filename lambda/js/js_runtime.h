@@ -142,6 +142,11 @@ Item js_new_function(void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
+// transient JIT call-argument stack (see js_runtime_function.cpp)
+Item* js_args_push(int count);
+int64_t js_args_save(void);
+void js_args_restore(int64_t mark);
+void js_args_stack_reset(void);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
 void js_mark_generator_func(Item fn_item);

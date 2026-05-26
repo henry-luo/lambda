@@ -32,6 +32,81 @@ void js_func_cache_reset() {
     js_func_cache_count = 0;
 }
 
+// =============================================================================
+// Transient JIT call-argument stack
+// =============================================================================
+//
+// Every JS call with >=1 argument needs a contiguous Item[] buffer for its
+// arguments. Allocating that per call from the pool and registering it as a
+// fresh permanent GC root range (the old js_alloc_env path) made call-heavy
+// loops O(n^2) — gc_register_root_range linearly scans all ranges per call and
+// the ranges were never released. Instead, args live on a single bump stack
+// that is registered with the GC exactly once (re-registered only on growth or
+// after a batch heap reset). A call expression pushes its frame, the callee
+// reads it, and the caller pops back to the saved mark after the call returns.
+//
+// Invariant: slots in [len, cap) are always kept zeroed, so the GC (which marks
+// the whole registered [0, cap) range) never sees a stale pointer above the
+// live region. Zero is a GC-safe Item value (item_to_ptr(0) is null).
+//
+// The base never moves. A frame's pointer must stay valid while later arguments
+// (which may nest calls and push more frames) are evaluated, and partially
+// filled args must remain GC-rooted in place — so we cannot realloc the buffer.
+// We reserve a fixed region (covers call depths far beyond the C stack limit)
+// and fall back to a per-frame pool allocation only on the pathological overflow
+// (which would C-stack-overflow first); the fallback is correct, just not pooled
+// back, and is registered as its own GC root.
+#define JS_ARGS_STACK_CAP (256 * 1024)   // Items (2 MB)
+static Item*  js_args_stack = NULL;
+static size_t js_args_len = 0;            // live Items (the bump "top")
+static bool   js_args_registered = false; // registered with the current GC heap?
+
+// Reserve `count` zeroed argument slots and return a pointer to them.
+extern "C" Item* js_args_push(int count) {
+    if (count <= 0) return NULL;
+    if (!js_args_stack) {
+        js_args_stack = (Item*)calloc(JS_ARGS_STACK_CAP, sizeof(Item));
+        if (!js_args_stack) { log_error("js_args_push: stack alloc failed"); return NULL; }
+    }
+    if (!js_args_registered) {
+        heap_register_gc_root_range((uint64_t*)js_args_stack, JS_ARGS_STACK_CAP);
+        js_args_registered = true;
+    }
+    if (js_args_len + (size_t)count > JS_ARGS_STACK_CAP) {
+        // pathological depth — fall back to a standalone GC-rooted buffer
+        return js_alloc_env(count);
+    }
+    Item* p = js_args_stack + js_args_len;
+    // slots are already zeroed (invariant); fill happens in the JIT caller
+    js_args_len += (size_t)count;
+    return p;
+}
+
+// Current bump top — saved before a call expression is lowered.
+extern "C" int64_t js_args_save(void) {
+    return (int64_t)js_args_len;
+}
+
+// Pop back to a saved mark, re-zeroing the popped slots to preserve the
+// [len, cap) zeroed invariant.
+extern "C" void js_args_restore(int64_t mark) {
+    size_t m = (size_t)mark;
+    if (m >= js_args_len) return;  // nothing to pop (or stale mark)
+    memset(js_args_stack + m, 0, (js_args_len - m) * sizeof(Item));
+    js_args_len = m;
+}
+
+// Called from the per-test/batch reset: the GC heap may be torn down and
+// recreated, so drop our registration (re-registered lazily on next push) and
+// clear any frames left behind by an unwound test.
+extern "C" void js_args_stack_reset(void) {
+    if (js_args_len && js_args_stack) {
+        memset(js_args_stack, 0, js_args_len * sizeof(Item));
+    }
+    js_args_len = 0;
+    js_args_registered = false;
+}
+
 extern "C" int64_t js_with_depth_active(void);
 extern "C" Item* js_with_capture_stack(int* out_depth);
 

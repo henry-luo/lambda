@@ -198,6 +198,12 @@ extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
     gc_register_root_range(context->heap->gc, base, count);
 }
 
+// unregister a previously-registered root range by base pointer
+extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
+    if (!context || !context->heap || !context->heap->gc || !base) return;
+    gc_unregister_root_range(context->heap->gc, base);
+}
+
 static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_t index, bool create) {
     if (!frame || index < 0) return NULL;
     int64_t block_index = index / JIT_GC_ROOT_BLOCK_SLOTS;
