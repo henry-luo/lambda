@@ -113,6 +113,7 @@ enum JsClass : uint8_t {
     JS_CLASS_ARGUMENTS,
     JS_CLASS_CLIPBOARD_ITEM,
     JS_CLASS_RAW_JSON,
+    JS_CLASS_FINALIZATION_REGISTRY,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -252,6 +253,9 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
         case 24:
             if (!strncmp(nm, "CanvasRenderingContext2D", 24)) return JS_CLASS_CANVAS_RENDERING_CONTEXT_2D;
             break;
+        case 20:
+            if (!strncmp(nm, "FinalizationRegistry", 20)) return JS_CLASS_FINALIZATION_REGISTRY;
+            break;
     }
     return JS_CLASS_NONE;
 }
@@ -329,6 +333,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_ASYNC_FUNCTION: return "AsyncFunction";
         case JS_CLASS_ARGUMENTS: return "Arguments";
         case JS_CLASS_CLIPBOARD_ITEM: return "ClipboardItem";
+        case JS_CLASS_FINALIZATION_REGISTRY: return "FinalizationRegistry";
         default: return NULL;
     }
 }

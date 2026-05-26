@@ -1727,6 +1727,28 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 return js_weakset_new();
             }
 
+            // WeakRef
+            if (nl == 7 && strncmp(n, "WeakRef", 7) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                Item target = (argc > 0 && args) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                Item result = js_weakref_new(target);
+                if (get_type_id(result) == LMD_TYPE_MAP)
+                    result = js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return result;
+            }
+
+            // FinalizationRegistry
+            if (nl == 20 && strncmp(n, "FinalizationRegistry", 20) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                Item cleanup = (argc > 0 && args) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                Item result = js_finalization_registry_new(cleanup);
+                if (get_type_id(result) == LMD_TYPE_MAP)
+                    result = js_apply_constructed_builtin_prototype(result, callee, effective_new_target);
+                return result;
+            }
+
             // Promise
             if (nl == 7 && strncmp(n, "Promise", 7) == 0) {
                 js_pending_new_target = ItemNull;
@@ -3995,7 +4017,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 9 && strncmp(nm, "EvalError", 9) == 0) ||
                             (nl == 14 && strncmp(nm, "AggregateError", 14) == 0) ||
                             (nl == 6 && strncmp(nm, "Symbol", 6) == 0) ||
-                            (nl == 7 && strncmp(nm, "Promise", 7) == 0);
+                            (nl == 7 && strncmp(nm, "Promise", 7) == 0) ||
+                            (nl == 7 && strncmp(nm, "WeakRef", 7) == 0) ||
+                            (nl == 20 && strncmp(nm, "FinalizationRegistry", 20) == 0);
                         if (needs_class_name) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
                             Item cnv = (Item){.item = s2it(heap_create_name(nm, nl))};
@@ -4148,7 +4172,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 3 && strncmp(nm, "Map", 3) == 0) ||
                             (nl == 3 && strncmp(nm, "Set", 3) == 0) ||
                             (nl == 7 && strncmp(nm, "WeakMap", 7) == 0) ||
-                            (nl == 7 && strncmp(nm, "WeakSet", 7) == 0);
+                            (nl == 7 && strncmp(nm, "WeakSet", 7) == 0) ||
+                            (nl == 7 && strncmp(nm, "WeakRef", 7) == 0) ||
+                            (nl == 20 && strncmp(nm, "FinalizationRegistry", 20) == 0);
                         if (needs_tostring_tag) {
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name(nm, nl))};
@@ -4193,6 +4219,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // Populate WeakSet.prototype methods
                         if (nl == 7 && strncmp(nm, "WeakSet", 7) == 0) {
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                        }
+                        if (nl == 7 && strncmp(nm, "WeakRef", 7) == 0) {
+                            js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
+                        }
+                        if (nl == 20 && strncmp(nm, "FinalizationRegistry", 20) == 0) {
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                         }
                         // v82: Populate Date.prototype methods for test262 compliance
@@ -7653,6 +7685,9 @@ extern "C" Item js_json_is_raw_json_builtin(Item value);
 extern "C" Item js_bigint_as_int_n(Item bits_item, Item bigint_item);
 extern "C" Item js_bigint_as_uint_n(Item bits_item, Item bigint_item);
 extern "C" Item js_get_prototype(Item object);
+extern "C" Item js_weakref_deref(Item this_val);
+extern "C" Item js_finalization_registry_register(Item this_val, Item target, Item holdings, Item unregister_token, int argc);
+extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token);
 
 // Resolve typed array type ID from constructor function name
 static int js_resolve_ta_type_from_ctor(Item ctor) {
@@ -9314,7 +9349,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             {"ReferenceError", 14}, {"SyntaxError", 11}, {"URIError", 8},
             {"EvalError", 9}, {"AggregateError", 14}, {"RegExp", 6},
             {"Date", 4}, {"Promise", 7}, {"Map", 3}, {"Set", 3},
-            {"WeakMap", 7}, {"WeakSet", 7}, {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
+            {"WeakMap", 7}, {"WeakSet", 7}, {"WeakRef", 7}, {"FinalizationRegistry", 20},
+            {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
             {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
             {"Int16Array", 10}, {"Uint16Array", 11}, {"Int32Array", 10},
             {"Uint32Array", 11}, {"Float32Array", 12}, {"Float64Array", 12},
@@ -10651,6 +10687,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         }
         Item a1 = arg0;
         return js_collection_method(this_val, mid, a1, ItemNull);
+    }
+    case JS_BUILTIN_WEAKREF_DEREF: {
+        return js_weakref_deref(this_val);
+    }
+    case JS_BUILTIN_FINALIZATION_REGISTER: {
+        Item unregister_token = (arg_count >= 3) ? args[2] : (Item){.item = ITEM_JS_UNDEFINED};
+        return js_finalization_registry_register(this_val, arg0, arg1, unregister_token, arg_count);
+    }
+    case JS_BUILTIN_FINALIZATION_UNREGISTER: {
+        return js_finalization_registry_unregister(this_val, arg0);
     }
     case JS_BUILTIN_COLL_SIZE_GETTER: {
         JsCollectionData* cd = js_get_collection_data(this_val);
@@ -16267,6 +16313,10 @@ static bool js_can_be_held_weakly(Item key) {
         return get_type_id(registered_key) == LMD_TYPE_UNDEFINED;
     }
     return false;
+}
+
+extern "C" bool js_can_be_held_weakly_pub(Item key) {
+    return js_can_be_held_weakly(key);
 }
 
 static JsCollectionData* js_get_collection_data(Item obj) {
@@ -30438,6 +30488,115 @@ extern "C" Item js_weakset_new(void) {
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) cd->is_weak = true;
     return obj;
+}
+
+extern "C" Item js_weakref_new(Item target) {
+    if (!js_can_be_held_weakly(target)) {
+        return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
+    }
+    Item obj = js_new_object();
+    js_collection_link_prototype(obj, "WeakRef", 7);
+    js_class_stamp(obj, JS_CLASS_WEAK_REF);
+    Item target_key = (Item){.item = s2it(heap_create_name("__weakref_target__", 18))};
+    js_property_set(obj, target_key, target);
+    return obj;
+}
+
+extern "C" Item js_weakref_deref(Item this_val) {
+    if (get_type_id(this_val) != LMD_TYPE_MAP || js_class_id(this_val) != JS_CLASS_WEAK_REF) {
+        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
+    }
+    bool found = false;
+    Item target = js_map_get_fast(this_val.map, "__weakref_target__", 18, &found);
+    if (!found) {
+        return js_throw_type_error("WeakRef.prototype.deref called on incompatible receiver");
+    }
+    return target;
+}
+
+extern "C" Item js_finalization_registry_new(Item cleanup_callback) {
+    if (get_type_id(cleanup_callback) != LMD_TYPE_FUNC) {
+        return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
+    }
+    Item obj = js_new_object();
+    js_collection_link_prototype(obj, "FinalizationRegistry", 20);
+    js_class_stamp(obj, JS_CLASS_FINALIZATION_REGISTRY);
+    Item cb_key = (Item){.item = s2it(heap_create_name("__fr_cleanup__", 14))};
+    js_property_set(obj, cb_key, cleanup_callback);
+    Item cells_key = (Item){.item = s2it(heap_create_name("__fr_cells__", 12))};
+    js_property_set(obj, cells_key, js_array_new(0));
+    return obj;
+}
+
+static Item js_finalization_registry_cells(Item registry) {
+    if (get_type_id(registry) != LMD_TYPE_MAP ||
+        js_class_id(registry) != JS_CLASS_FINALIZATION_REGISTRY) {
+        return ItemNull;
+    }
+    bool found = false;
+    Item cells = js_map_get_fast(registry.map, "__fr_cells__", 12, &found);
+    if (!found || get_type_id(cells) != LMD_TYPE_ARRAY) return ItemNull;
+    return cells;
+}
+
+extern "C" Item js_finalization_registry_register(Item this_val, Item target,
+        Item holdings, Item unregister_token, int argc) {
+    Item cells = js_finalization_registry_cells(this_val);
+    if (cells.item == ItemNull.item) {
+        return js_throw_type_error("FinalizationRegistry.prototype.register called on incompatible receiver");
+    }
+    if (!js_can_be_held_weakly(target)) {
+        return js_throw_type_error("FinalizationRegistry target must be an object or unregistered symbol");
+    }
+    if (argc >= 2 && it2b(js_strict_equal(target, holdings))) {
+        return js_throw_type_error("FinalizationRegistry holdings must not be the target");
+    }
+    bool has_token = argc >= 3 && get_type_id(unregister_token) != LMD_TYPE_UNDEFINED;
+    if (has_token && !js_can_be_held_weakly(unregister_token)) {
+        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
+    }
+    Item cell = js_new_object();
+    js_property_set(cell, (Item){.item = s2it(heap_create_name("__target__", 10))}, target);
+    js_property_set(cell, (Item){.item = s2it(heap_create_name("__holdings__", 12))},
+                    argc >= 2 ? holdings : (Item){.item = ITEM_JS_UNDEFINED});
+    js_property_set(cell, (Item){.item = s2it(heap_create_name("__active__", 10))}, (Item){.item = ITEM_TRUE});
+    js_property_set(cell, (Item){.item = s2it(heap_create_name("__has_token__", 13))}, (Item){.item = b2it(has_token)});
+    if (has_token) {
+        js_property_set(cell, (Item){.item = s2it(heap_create_name("__token__", 9))}, unregister_token);
+    }
+    js_array_push(cells, cell);
+    return make_js_undefined();
+}
+
+extern "C" Item js_finalization_registry_unregister(Item this_val, Item unregister_token) {
+    Item cells = js_finalization_registry_cells(this_val);
+    if (cells.item == ItemNull.item) {
+        return js_throw_type_error("FinalizationRegistry.prototype.unregister called on incompatible receiver");
+    }
+    if (!js_can_be_held_weakly(unregister_token)) {
+        return js_throw_type_error("FinalizationRegistry unregister token must be an object or unregistered symbol");
+    }
+    bool removed = false;
+    int64_t len = js_array_length(cells);
+    for (int64_t i = 0; i < len; i++) {
+        Item cell = js_array_get_int(cells, i);
+        if (get_type_id(cell) != LMD_TYPE_MAP) continue;
+        bool active_found = false;
+        Item active = js_map_get_fast(cell.map, "__active__", 10, &active_found);
+        if (active_found && !js_is_truthy(active)) continue;
+        bool has_token_found = false;
+        Item has_token = js_map_get_fast(cell.map, "__has_token__", 13, &has_token_found);
+        if (!has_token_found || !js_is_truthy(has_token)) continue;
+        bool token_found = false;
+        Item token = js_map_get_fast(cell.map, "__token__", 9, &token_found);
+        if (!token_found) continue;
+        if (it2b(js_strict_equal(token, unregister_token))) {
+            js_property_set(cell, (Item){.item = s2it(heap_create_name("__active__", 10))},
+                            (Item){.item = ITEM_FALSE});
+            removed = true;
+        }
+    }
+    return (Item){.item = b2it(removed)};
 }
 
 // new WeakMap(iterable) / new WeakSet(iterable) — validate adder is callable

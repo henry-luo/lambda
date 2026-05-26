@@ -482,3 +482,218 @@ the correct values. `test262-baseline` returns
 better than the pre-fix baseline run, which had 4 tests on the slow-retry path.
 Performance is unchanged in the non-generator hot path (the gate only trips
 inside a generator with `yield` in argument expressions, which is rare).
+
+---
+
+## 7. Pushing the `decodeURI*` SLOW pair below 3 s — proposal
+
+After §3.1 + §3.3 + the generator-spill fix, the only entries left in
+`t262_partial_at_run.txt` are the same two URI tests across both phases:
+
+- `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` — **SLOW_3218** (≈3.22 s)
+- `built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js` — **SLOW_3191** (≈3.19 s)
+
+Both are ≈ 50 % faster than in `release_run_002` (where they were 6.92 s and
+6.44 s) but they sit just above the harness's 3 s flag and still get rerouted
+through Phase 4 retry. The goal of this section is a path to drive them
+*substantially* below 3 s — target ≤ 2 s — through changes that are general
+JS-engine wins, not per-test special-casing.
+
+### 7.1 Where the remaining time actually goes
+
+Both tests run the same 4-deep nested loop over UTF-8 byte ranges
+`0xF0..0xF4 × 0x80..0xBF × 0x80..0xBF × 0x80..0xBF`. Excluding the trimmed
+sub-ranges in the test source, the body executes **≈ 1.05 × 10⁶ inner
+iterations**. Each inner iteration is:
+
+```js
+var hexB1_B2_B3_B4 = hexB1_B2_B3 + decimalToPercentHexString(indexB4);
+// ... a few inline int ops ...
+if (decodeURI(hexB1_B2_B3_B4) === String.fromCharCode(H, L)) continue;
+```
+
+`decimalToPercentHexString` (from the test262 harness `decimalToHexString.js`)
+is:
+
+```js
+function decimalToPercentHexString(n) {
+  var hex = "0123456789ABCDEF";
+  return "%" + hex[(n >> 4) & 0xf] + hex[n & 0xf];
+}
+```
+
+Per inner iteration, the JS-level work is roughly:
+
+| Site | Cost components |
+| --- | --- |
+| `decimalToPercentHexString(indexB4)` | 1 direct user-fn call (§3.1, ~31 ns) + 2 single-char `str[i]` accesses + a 3-way `"%"+ch1+ch2` concat chain → **3 small-string allocations** in the function body |
+| outer `hexB1_B2_B3 + …` | 1 more `js_string_concat` call → **1 allocation** of the 12-byte URI |
+| `decodeURI(hex…)` | builtin call → `js_uri_try_decode_four_byte_escape` fast path → `heap_create_name` allocates the 2-codepoint surrogate-pair result → **1 allocation** |
+| `String.fromCharCode(H, L)` | builtin call → **1 allocation** of a 2-codepoint string |
+| `===` and arithmetic | small constant work |
+
+So ≈ **6 ephemeral small-string allocations × 1.05 M iterations ≈ 6.3 M
+allocations** for the whole test. With deeper loops we also pay 4× `hex` chain
+ops at the outer levels. The call-dispatch share is now small (§3.1/§3.3 cut it
+in half); **the remaining cost is dominated by string allocation, intermediate
+buffer copies, and the URI builtin's own allocator/error-bookkeeping**, not by
+call overhead.
+
+The C side of `js_decodeURI` (`lambda/js/js_globals.cpp:13323`) already has
+two targeted fast paths — `js_string_last_four_byte_uri_escape_cp` (per-string
+code-point cache) and `js_uri_try_decode_four_byte_escape` (whole-string fast
+decoder). Both hit on this workload; what remains *inside* the builtin is the
+final `heap_create_name(decoded, decoded_len)` allocation and the `mem_free`
+of the C-side `url_decode_*` buffer.
+
+### 7.2 Proposed general optimizations
+
+Each item below is described as a JS-engine-wide improvement; none is keyed on
+"this test". They are independently landable and each is gated so it cannot
+regress paths it doesn't apply to.
+
+#### 7.2.A Multi-operand string-concat fusion (transpiler + small runtime)
+
+Today `a + b + c + d` (when all operands are strings) lowers to three nested
+two-argument `js_string_concat` calls
+(`js_mir_expression_lowering.cpp:1482`). Each intermediate concat allocates a
+fresh `String`, computes its length, copies the prefix, then is immediately
+thrown away by the next concat — O(n²) bytes copied across an n-piece chain.
+
+**Change.** In the `+` binary-op lowering, when the operator chain is
+left-associative `+` and *every* leaf is known-string (the existing
+`left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING` check, applied
+recursively), collapse the chain into a flat list of operand registers and
+emit a single `js_string_concat_n(int n, Item* parts)` call. The runtime
+helper does one length-summing pass, one allocation, one copy pass.
+
+- **Scope.** Triggered only when *all* leaves are statically typed as string.
+  Mixed-type chains (`"x" + n`) keep the current pairwise lowering, which is
+  required to get `ToString` coercion right.
+- **Per-iteration win on this workload.** Inside
+  `decimalToPercentHexString`, `"%" + hex[i] + hex[j]` collapses three
+  allocations to one — saves 2 allocs/call × 4 calls/iter ≈ 8 allocs/iter
+  ≈ 8 M allocs over the test. At a rough ~50 ns/small-string-alloc that's
+  ≈ 0.4 s saved per test.
+- **Risk.** Low. The fused call is a strict refinement of the pairwise chain
+  for the typed-string case. Mixed-type chains are untouched.
+- **General benefit.** Every `"prefix=" + a + " ; " + b + " ; " + c`-style
+  string-builder pattern in any JS program gets the same speedup.
+
+#### 7.2.B Intern 1-character ASCII results of `str[i]` and small literal substrings
+
+`hex[(n >> 4) & 0xf]` and `hex[n & 0xf]` each currently produce a *fresh*
+1-character `String` per call. There are at most 128 distinct ASCII 1-char
+strings — they are immutable and can be interned in a 128-entry table.
+
+**Change.** In the `js_string_index` / `js_string_charAt` / `String.prototype.charAt`
+fast path, when the result is a single ASCII byte (and the source is not a
+binary-encoded string), return a pointer into a process-wide
+`static const String* js_ascii_char_strings[128]` table instead of allocating.
+Equivalently, `String.fromCharCode(n)` with `n < 128` returns the interned
+entry. Initialization is one-time at runtime startup.
+
+- **Scope.** 1-char ASCII results only. Multi-char substrings and non-ASCII
+  bytes keep current behaviour.
+- **Per-iteration win.** Removes 2 small-string allocs per
+  `decimalToPercentHexString` call → 8/iter → ≈ 8 M allocs eliminated. ≈ 0.4 s
+  saved.
+- **Risk.** Very low — strings are immutable, identity is observable only for
+  reference-equality `===`, which is already defined to be value-equality for
+  strings; interning makes no observable difference.
+- **General benefit.** Any tight loop that does `s[i]`, `s.charAt(i)`, or
+  `String.fromCharCode(c)` on ASCII (parsers, hex/base64 encoders, CSV
+  splitters, lexers) shrinks its per-iteration alloc count.
+
+#### 7.2.C Widen `jm_should_inline` to small pure JS helpers
+
+`jm_should_inline` (`js_mir_expression_lowering.cpp:5692`) currently requires
+`fc->has_native_version`, which excludes any user function that doesn't have a
+typed/native specialization — including string-heavy helpers like
+`decimalToPercentHexString` even though their body is a single `return` and
+they are already direct-dispatched via §3.1.
+
+**Change.** Drop the `has_native_version` gate when the body is a single
+return whose RHS contains no calls except (a) statically-resolvable
+direct-dispatch calls, (b) intrinsic operations the inliner already lowers,
+and (c) builtin calls. Keep all other guards (`capture_count == 0`,
+`param_count ≤ 4`, single-statement single-return). Add a hard AST-node-count
+cap (~24 nodes) to bound code-size growth at call sites.
+
+- **Scope.** Single-return pure-ish helpers with bounded body size.
+- **Per-iteration win.** `decimalToPercentHexString` becomes 4 inline body
+  expansions per inner iter — removes 4 direct calls × (param marshalling +
+  stack-frame setup + return) ≈ 30–40 ns each ≈ 130 ns/iter ≈ 0.14 s saved.
+- **Risk.** Medium. Inlining grows MIR text and JIT compile time. Mitigations:
+  (1) the AST-node cap; (2) only inline at most K times per source function
+  per caller; (3) keep the existing native-version gate as a *strong*
+  preference — fall back to inlining without it only when the function has no
+  alternative.
+- **General benefit.** Small pure JS helpers (accessors, predicate functions,
+  format helpers) all benefit. Standard practice in modern JS engines.
+
+#### 7.2.D Optional: small-string `===` short-circuit
+
+The inner loop's `decodeURI(uri) === String.fromCharCode(H, L)` is two
+2-codepoint strings. Make sure `===` between strings of equal-length-≤-8 takes
+a single `memcmp`-or-inline-compare path (no boxing, no general-equality
+dispatch). This is most likely already in place but worth verifying with a
+microbenchmark; if it is going through the generic equality function the win
+is meaningful. *Investigation rather than a designed change.*
+
+### 7.3 Expected combined impact
+
+Per inner iteration we expect roughly:
+
+| Source | Savings |
+| --- | ---: |
+| 7.2.A concat fusion (2 allocs eliminated × 4 calls) | ≈ 400 ns |
+| 7.2.B 1-char interning (2 allocs × 4 calls) | ≈ 400 ns |
+| 7.2.C inlining `decimalToPercentHexString` (× 4 calls) | ≈ 130 ns |
+| 7.2.D `===` fast path (if needed) | tens of ns |
+
+Total ≈ **0.9 µs/iter** at the current scale. Applied to ≈ 1.05 M
+iterations that is **≈ 0.9 s saved** per test, taking 3.22 s → ≈ 2.3 s
+and 3.19 s → ≈ 2.3 s — comfortably below the 3 s SLOW threshold with
+margin, and well below the harness's 6–7 s figures from `release_run_002`.
+
+### 7.4 Verification plan
+
+1. **Microbenchmarks** (release):
+   - Concat-chain `s = "%" + c1 + c2 + c3` × 1 M — confirm linear-time
+     allocation count (§7.2.A).
+   - Loop `hex[(n>>4)&0xf]` × 1 M — confirm zero allocations after §7.2.B.
+   - Tight loop calling a const-bound 1-return helper — confirm body inlines
+     after §7.2.C (check generated MIR has no `MIR_CALL` to the helper at the
+     call site).
+2. **Targeted timing** (release):
+   - `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` and
+     `built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js` directly with the
+     standard preamble — target < 2.5 s each, ideally ≤ 2.0 s.
+3. **Regression guard**: `test262-baseline` must stay at
+   **34,165 / 34,165, 0 regressions, 0 non-fully-passing**. Capture into a
+   new `release_run_004/` to compare against run_003 (especially aggregate
+   `sum` of per-test elapsed and `top_slow_tests.tsv`).
+4. **No new allocs** smoke test: the 1-char interning and concat fusion must
+   not increase the *baseline* heap, only reduce churn. Use the existing
+   memtrack/leak reporting and the run-002/003 memory tsvs as references.
+
+### 7.5 What we are explicitly *not* proposing
+
+- A 256-entry lookup table for `decimalToPercentHexString(byte)` outputs:
+  test-specific and would not survive a harness rewrite.
+- Interning the four-byte UTF-8 surrogate-pair result inside `decodeURI`
+  (a code-point→`String*` LRU around `js_uri_make_four_byte_string_from_cp`):
+  the hit-rate that makes this attractive is specific to BMP-sweep workloads
+  like these two tests; in general-purpose URL decoding the input distribution
+  is wide and an LRU would mostly miss while adding a per-call lookup. Better
+  to keep the existing per-string code-point cache that already pays for
+  itself on this workload, and not bake test-shaped state into the runtime.
+- Inlining the `decodeURI` C decoder into JIT code: would force JS-engine
+  knowledge of URI parsing rules; brittle and far out of scope.
+- Lowering the harness's `SLOW` threshold from 3 s: would hide rather than
+  fix the slowness.
+
+Each item in §7.2 is a standalone change with its own gate, so any subset can
+land first, and any that turn out to under-deliver in measurement can be
+withdrawn without disturbing the others.

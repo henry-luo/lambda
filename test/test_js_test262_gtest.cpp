@@ -124,16 +124,13 @@ static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
 static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
-// Features above ES2020 — skip tests requiring these.
-// Target: ES2020 compliance. All features ≤ES2020 are in scope.
+// Features above ES2021 — skip tests requiring these.
+// Target: ES2021 compliance. All features ≤ES2021 are in scope.
 // Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // === ES2015 features (not implemented) ===
     "tail-call-optimization",                     // Proper tail calls (100K+ recursion, hangs without TCO)
 
-    // === ES2021 features ===
-    "WeakRef",                                    // Weak references
-    "FinalizationRegistry",                       // GC callback hooks
     // "AggregateError",                          // SUPPORTED
     // "logical-assignment-operators",             // &&=, ||=, ??= — SUPPORTED
     // "numeric-separator-literal",               // 1_000_000 — SUPPORTED
@@ -721,6 +718,8 @@ static std::vector<Test262Param> discover_all_tests() {
         {"GeneratorPrototype", "GeneratorPrototype"},
         {"WeakMap", "WeakMap"},
         {"WeakSet", "WeakSet"},
+        {"WeakRef", "WeakRef"},
+        {"FinalizationRegistry", "FinalizationRegistry"},
         {"Symbol", "Symbol"},
         {"DataView", "DataView"},
         {"Proxy", "Proxy"},
@@ -1586,7 +1585,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
     fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
             get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
-    fprintf(f, "# Scope: ES2020 (skip ES2021+ features)\n");
+    fprintf(f, "# Scope: ES2021 (skip ES2022+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
     fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",
             total_tests, skipped, batched, passing.size(), failed);

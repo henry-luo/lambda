@@ -748,6 +748,8 @@ Item js_text_decoder_decode(Item decoder, Item input);
 
 Item js_weakmap_new(void);
 Item js_weakset_new(void);
+Item js_weakref_new(Item target);
+Item js_finalization_registry_new(Item cleanup_callback);
 Item js_weakmap_new_with_iter(Item iterable);
 Item js_weakset_new_with_iter(Item iterable);
 

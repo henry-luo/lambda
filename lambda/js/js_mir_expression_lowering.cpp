@@ -1994,7 +1994,7 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                     (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) ||
                     (nl == 8 && strncmp(n, "DataView", 8) == 0) ||
                     (nl == 7 && strncmp(n, "WeakRef", 7) == 0) ||
-                    (nl == 19 && strncmp(n, "FinalizationRegistry", 19) == 0) ||
+                    (nl == 20 && strncmp(n, "FinalizationRegistry", 20) == 0) ||
                     (nl == 14 && strncmp(n, "AggregateError", 14) == 0) ||
                     (nl == 6 && strncmp(n, "escape", 6) == 0) ||
                     (nl == 8 && strncmp(n, "unescape", 8) == 0);

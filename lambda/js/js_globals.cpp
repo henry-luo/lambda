@@ -6232,6 +6232,9 @@ extern Item js_set_collection_new();
 extern Item js_set_collection_new_from(Item iterable);
 extern Item js_weakmap_new();
 extern Item js_weakset_new();
+extern Item js_weakref_new(Item target);
+extern Item js_finalization_registry_new(Item cleanup_callback);
+extern "C" bool js_can_be_held_weakly_pub(Item key);
 extern Item js_promise_create(Item executor);
 extern Item js_arraybuffer_construct(Item length);
 extern Item js_dataview_new(Item buffer, Item offset, Item length);
@@ -6405,6 +6408,18 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
         if (fn->name) {
             const char* n = fn->name->chars;
             int nl = (int)fn->name->len;
+            if (nl == 7 && strncmp(n, "WeakRef", 7) == 0) {
+                Item target_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                if (!js_can_be_held_weakly_pub(target_arg)) {
+                    return js_throw_type_error("WeakRef: target must be an object or unregistered symbol");
+                }
+            }
+            if (nl == 20 && strncmp(n, "FinalizationRegistry", 20) == 0) {
+                Item cb_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                if (get_type_id(cb_arg) != LMD_TYPE_FUNC) {
+                    return js_throw_type_error("FinalizationRegistry cleanup callback must be callable");
+                }
+            }
             // Promise(executor): IsCallable(executor) check before prototype access
             if (nl == 7 && strncmp(n, "Promise", 7) == 0) {
                 Item executor = (argc > 0) ? args[0] : ItemNull;
@@ -6623,6 +6638,18 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
             // WeakSet
             if (nl == 7 && strncmp(n, "WeakSet", 7) == 0) {
                 return fixup_proto(js_weakset_new());
+            }
+
+            // WeakRef
+            if (nl == 7 && strncmp(n, "WeakRef", 7) == 0) {
+                Item target_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                return fixup_proto(js_weakref_new(target_arg));
+            }
+
+            // FinalizationRegistry
+            if (nl == 20 && strncmp(n, "FinalizationRegistry", 20) == 0) {
+                Item cb_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                return fixup_proto(js_finalization_registry_new(cb_arg));
             }
 
             // Promise
@@ -7291,6 +7318,8 @@ extern "C" bool js_func_is_builtin_ctor(Item fn) {
         (el == 3 && strncmp(en, "Set", 3) == 0) ||
         (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
         (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
+        (el == 7 && strncmp(en, "WeakRef", 7) == 0) ||
+        (el == 20 && strncmp(en, "FinalizationRegistry", 20) == 0) ||
         (el == 7 && strncmp(en, "Promise", 7) == 0) ||
         (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
         (el == 17 && strncmp(en, "SharedArrayBuffer", 17) == 0) ||
@@ -13953,6 +13982,7 @@ extern "C" Item js_get_global_this() {
             {"URIError", 8}, {"EvalError", 9}, {"AggregateError", 14},
             {"RegExp", 6}, {"Date", 4}, {"Promise", 7},
             {"Map", 3}, {"Set", 3}, {"WeakMap", 7}, {"WeakSet", 7},
+            {"WeakRef", 7}, {"FinalizationRegistry", 20},
             {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
             {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
             {"Int16Array", 10}, {"Uint16Array", 11},
@@ -13971,6 +14001,10 @@ extern "C" Item js_get_global_this() {
             Item ctor = js_get_constructor(name_item);
             if (get_type_id(ctor) == LMD_TYPE_FUNC) {
                 js_property_set(js_global_this_obj, name_item, ctor);
+                if ((ctor_names[i].len == 7 && strncmp(ctor_names[i].name, "WeakRef", 7) == 0) ||
+                    (ctor_names[i].len == 20 && strncmp(ctor_names[i].name, "FinalizationRegistry", 20) == 0)) {
+                    js_mark_non_enumerable(js_global_this_obj, name_item);
+                }
             }
         }
         // globalThis self-reference
@@ -15275,6 +15309,8 @@ enum JsConstructorId {
     JS_CTOR_SET,
     JS_CTOR_WEAKMAP,
     JS_CTOR_WEAKSET,
+    JS_CTOR_WEAKREF,
+    JS_CTOR_FINALIZATION_REGISTRY,
     JS_CTOR_ARRAY_BUFFER,
     JS_CTOR_SHARED_ARRAY_BUFFER,
     JS_CTOR_DATAVIEW,
@@ -15966,6 +16002,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
+             ctor_id == JS_CTOR_WEAKREF || ctor_id == JS_CTOR_FINALIZATION_REGISTRY ||
              ctor_id == JS_CTOR_ARRAY_BUFFER || ctor_id == JS_CTOR_SHARED_ARRAY_BUFFER ||
              ctor_id == JS_CTOR_DATAVIEW ||
              ctor_id == JS_CTOR_PROXY ||
@@ -16069,6 +16106,8 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"Set", 3, JS_CTOR_SET, 0},
         {"WeakMap", 7, JS_CTOR_WEAKMAP, 0},
         {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
+        {"WeakRef", 7, JS_CTOR_WEAKREF, 1},
+        {"FinalizationRegistry", 20, JS_CTOR_FINALIZATION_REGISTRY, 1},
         {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
         {"SharedArrayBuffer", 17, JS_CTOR_SHARED_ARRAY_BUFFER, 1},
         {"DataView", 8, JS_CTOR_DATAVIEW, 1},

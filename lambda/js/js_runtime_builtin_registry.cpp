@@ -341,6 +341,17 @@ const JsBuiltinMethodSpec JS_WEAKSET_PROTOTYPE_METHOD_SPECS[] = {
     {NULL, 0, 0, 0}
 };
 
+const JsBuiltinMethodSpec JS_WEAKREF_PROTOTYPE_METHOD_SPECS[] = {
+    {"deref", 5, JS_BUILTIN_WEAKREF_DEREF, 0},
+    {NULL, 0, 0, 0}
+};
+
+const JsBuiltinMethodSpec JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS[] = {
+    {"register", 8, JS_BUILTIN_FINALIZATION_REGISTER, 2},
+    {"unregister", 10, JS_BUILTIN_FINALIZATION_UNREGISTER, 1},
+    {NULL, 0, 0, 0}
+};
+
 const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
     {"slice", 5, JS_BUILTIN_ARRAYBUFFER_SLICE, 2},
     {"resize", 6, JS_BUILTIN_ARRAYBUFFER_RESIZE, 1},
@@ -684,6 +695,8 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const c
     if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) return JS_SET_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 7 && strncmp(ctor_name, "WeakRef", 7) == 0) return JS_WEAKREF_PROTOTYPE_METHOD_SPECS;
+    if (ctor_len == 20 && strncmp(ctor_name, "FinalizationRegistry", 20) == 0) return JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 17 && strncmp(ctor_name, "SharedArrayBuffer", 17) == 0) return JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) return JS_DATE_PROTOTYPE_METHOD_SPECS;
@@ -721,6 +734,8 @@ static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_class_or_typ
     case JS_CLASS_SET: return JS_SET_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_WEAK_MAP: return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_WEAK_SET: return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_WEAK_REF: return JS_WEAKREF_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_FINALIZATION_REGISTRY: return JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_ARRAY_BUFFER: return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
     case JS_CLASS_DATA_VIEW:
         if (out_use_cache) *out_use_cache = false;

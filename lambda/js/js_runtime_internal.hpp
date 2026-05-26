@@ -426,6 +426,9 @@ enum JsBuiltinId {
     JS_BUILTIN_WEAKSET_ADD,      // WeakSet.prototype.add(value)
     JS_BUILTIN_WEAKSET_HAS,      // WeakSet.prototype.has(value)
     JS_BUILTIN_WEAKSET_DELETE,   // WeakSet.prototype.delete(value)
+    JS_BUILTIN_WEAKREF_DEREF,    // WeakRef.prototype.deref()
+    JS_BUILTIN_FINALIZATION_REGISTER,   // FinalizationRegistry.prototype.register(target, holdings, token)
+    JS_BUILTIN_FINALIZATION_UNREGISTER, // FinalizationRegistry.prototype.unregister(token)
     // RegExp Symbol methods (v83: @@match, @@replace, @@search, @@split)
     JS_BUILTIN_REGEXP_SYMBOL_MATCH,
     JS_BUILTIN_REGEXP_SYMBOL_REPLACE,
