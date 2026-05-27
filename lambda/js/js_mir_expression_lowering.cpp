@@ -1914,7 +1914,8 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     }
 
     int left_spill_slot = -1;
-    if (mt->in_generator && jm_has_yield(bin->right)) {
+    if (mt->in_generator &&
+        (jm_has_yield(bin->right) || (mt->in_async && jm_count_awaits(bin->right) > 0))) {
         left_spill_slot = jm_gen_spill_save(mt, left);
     }
 

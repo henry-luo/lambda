@@ -36,7 +36,7 @@
 //
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into two groups:
-//       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
+//       (a) CLEAN    — safe to batch (50 tests per process, CPU count - 1 parallel workers)
 //       (b) PARTIAL  — known non-fully-passing tests from previous run (crash,
 //                       OOM, slow >= 3s, timeout). SKIPPED by default.
 //                       With --run-partial they are merged into CLEAN so they
@@ -1101,8 +1101,7 @@ struct BatchResult {
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
-static const size_t T262_MAX_PARALLEL_BATCHES = 4;
-static const size_t RETRY_BATCH_SIZE = 5;
+static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
 
 struct SubBatch { size_t start; size_t end; bool native; size_t group; };
 
@@ -1119,6 +1118,22 @@ static const char* batch_worker_status_label(int worker_status, size_t produced,
     if (worker_status != 0) return "worker-error";
     if (produced < expected) return "lost";
     return "finished";
+}
+
+static size_t t262_target_worker_count() {
+    size_t workers = g_t262_jobs;
+    if (workers == 0) {
+        unsigned int cpu_count = std::thread::hardware_concurrency();
+        if (cpu_count == 0) cpu_count = 5;  // preserve a conservative fallback when CPU count is unavailable
+        workers = cpu_count > 1 ? cpu_count - 1 : 1;
+    }
+    if (workers < 1) workers = 1;
+    return workers;
+}
+
+static size_t t262_worker_count(size_t batch_count) {
+    if (batch_count == 0) return 0;
+    return std::min(t262_target_worker_count(), batch_count);
 }
 
 // Forward declarations for globals used in prepare phase
@@ -2301,13 +2316,17 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     }
 
     // Run sub-batches with limited parallelism.
-    // Each worker reuses ONE temp manifest file (6 workers = 6 files total).
+    // Each worker reuses ONE temp manifest file.
     // For each sub-batch: truncate → write source data → fork/exec → read stdout.
     // This avoids per-batch file create/unlink overhead while keeping fast file-based stdin.
     std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
     std::vector<BatchTiming> batch_timings(batches.size());
     std::atomic<size_t> next_batch{0};
-    size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, batches.size());
+    size_t target_workers = t262_target_worker_count();
+    size_t num_workers = std::min(target_workers, batches.size());
+    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, %s)\n",
+            num_workers, target_workers, batches.size(),
+            g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs");
     std::vector<std::thread> threads;
     for (size_t w = 0; w < num_workers; w++) {
         threads.emplace_back([&, w]() {
@@ -2670,7 +2689,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
             std::atomic<size_t> next_batch{0};
-            size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, retry_batches.size());
+            size_t num_workers = t262_worker_count(retry_batches.size());
             std::vector<std::thread> threads;
             for (size_t w = 0; w < num_workers; w++) {
                 threads.emplace_back([&, w]() {
@@ -3619,6 +3638,11 @@ int main(int argc, char** argv) {
             if (timeout_secs < 1) timeout_secs = 10;
             if (timeout_secs > 120) timeout_secs = 120;
             snprintf(g_js_timeout_arg, sizeof(g_js_timeout_arg), "--timeout=%d", timeout_secs);
+        }
+        if (strncmp(argv[i], "--jobs=", 7) == 0) {
+            int jobs = atoi(argv[i] + 7);
+            if (jobs < 1) jobs = 1;
+            g_t262_jobs = (size_t)jobs;
         }
     }
 
