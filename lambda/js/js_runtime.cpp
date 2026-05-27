@@ -27004,7 +27004,7 @@ static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item resul
 static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
-static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn);
+static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error);
 static bool js_promise_materialize_iterable(Item iterable, Item* out_array, Item* out_rejection);
 static Item js_promise_make_aggregate_error(Item errors);
 static Item js_promise_all_iterable(Item iterable);
@@ -27288,20 +27288,20 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
 // so these work even when called asynchronously (e.g. in setTimeout).
 static Item js_resolve_callback(Item promise_idx_item, Item value) {
     int64_t idx = -1;
-    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return ItemNull;
+    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return make_js_undefined();
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_resolve_with_value(&js_promises[idx], value);
     }
-    return ItemNull;
+    return make_js_undefined();
 }
 
 static Item js_reject_callback(Item promise_idx_item, Item reason) {
     int64_t idx = -1;
-    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return ItemNull;
+    if (!js_promise_resolving_state_claim(promise_idx_item, &idx)) return make_js_undefined();
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
     }
-    return ItemNull;
+    return make_js_undefined();
 }
 
 extern "C" Item js_promise_create(Item executor) {
@@ -27704,9 +27704,11 @@ static Item js_promise_combinator_iterable_with_constructor(
         }
 
         if (kind == 3) {
-            if (!js_invoke_promise_then(next_promise, native_resolve_fn, native_reject_fn)) {
+            Item error = ItemNull;
+            if (!js_invoke_promise_then(next_promise, native_resolve_fn, native_reject_fn, &error)) {
                 js_iterator_close(iterator);
                 if (js_check_exception()) js_clear_exception();
+                js_promise_call_capability_reject(reject, error);
                 return promise;
             }
             continue;
@@ -27745,9 +27747,11 @@ static Item js_promise_combinator_iterable_with_constructor(
             reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
         }
 
-        if (!js_invoke_promise_then(next_promise, fulfill_fn, reject_fn)) {
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(next_promise, fulfill_fn, reject_fn, &error)) {
             js_iterator_close(iterator);
             if (js_check_exception()) js_clear_exception();
+            js_promise_call_capability_reject(reject, error);
             return promise;
         }
         index++;
@@ -27810,11 +27814,22 @@ static Item js_promise_combinator_with_constructor(Item constructor, Item iterab
         return promise;
     }
 
+    if (kind == 3) {
+        Array* resolved = resolved_arr.array;
+        for (int i = 0; i < resolved->length; i++) {
+            Item error = ItemNull;
+            if (!js_invoke_promise_then(resolved->items[i], resolve, reject, &error)) {
+                js_promise_call_capability_reject(reject, error);
+                return promise;
+            }
+        }
+        return promise;
+    }
+
     Item native = ItemNull;
     if (kind == 0) native = js_promise_all(resolved_arr);
     else if (kind == 1) native = js_promise_all_settled(resolved_arr);
     else if (kind == 2) native = js_promise_any(resolved_arr);
-    else native = js_promise_race(resolved_arr);
 
     if (js_check_exception()) {
         Item error = js_clear_exception();
@@ -28294,24 +28309,20 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
 // Helper: invoke the user-visible .then method on a promise element.
 // Per ES spec, Promise.all/race/any/allSettled must call Invoke(nextPromise, "then", ...)
 // so that user-overridden .then methods are respected.
-static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn) {
+static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error) {
     Item then_key = (Item){.item = s2it(heap_create_name("then", 4))};
     Item then_fn = js_property_get(elem, then_key);
     if (js_check_exception()) {
-        Item error = js_clear_exception();
-        Item args[1] = {error};
-        js_call_function(reject_fn, ItemNull, args, 1);
-        if (js_check_exception()) js_clear_exception();
+        if (out_error) *out_error = js_clear_exception();
+        else js_clear_exception();
         return false;
     }
     if (get_type_id(then_fn) == LMD_TYPE_FUNC) {
         Item call_args[2] = {resolve_fn, reject_fn};
         js_call_function(then_fn, elem, call_args, 2);
         if (js_check_exception()) {
-            Item error = js_clear_exception();
-            Item args[1] = {error};
-            js_call_function(reject_fn, ItemNull, args, 1);
-            if (js_check_exception()) js_clear_exception();
+            if (out_error) *out_error = js_clear_exception();
+            else js_clear_exception();
             return false;
         }
     } else {
@@ -28400,7 +28411,11 @@ extern "C" Item js_promise_all(Item iterable) {
         Item reject_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        js_invoke_promise_then(elem, resolve_fn, reject_fn);
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
     }
 
     return result_item;
@@ -28452,9 +28467,11 @@ static Item js_promise_all_iterable(Item iterable) {
         Item reject_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
             js_iterator_close(iterator);
             if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
             return result_item;
         }
         index++;
@@ -28497,7 +28514,11 @@ extern "C" Item js_promise_race(Item iterable) {
             js_promise_settle(result, JS_PROMISE_REJECTED, error);
             return result_item;
         }
-        js_invoke_promise_then(elem, resolve_fn, reject_fn);
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
     }
 
     return result_item;
@@ -28532,9 +28553,11 @@ static Item js_promise_race_iterable(Item iterable) {
             js_promise_settle(result, JS_PROMISE_REJECTED, error);
             return result_item;
         }
-        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
             js_iterator_close(iterator);
             if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
             return result_item;
         }
     }
@@ -28589,7 +28612,11 @@ extern "C" Item js_promise_any(Item iterable) {
         Item reject_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        js_invoke_promise_then(elem, resolve_fn, reject_fn);
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
+            js_promise_settle(result_p, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
     }
 
     return result_item;
@@ -28641,9 +28668,11 @@ static Item js_promise_any_iterable(Item iterable) {
         Item reject_args[3] = {counter, (Item){.item = i2it(index)}, result_item};
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn)) {
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, resolve_fn, reject_fn, &error)) {
             js_iterator_close(iterator);
             if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result_p, JS_PROMISE_REJECTED, error);
             return result_item;
         }
         index++;
@@ -28705,7 +28734,11 @@ extern "C" Item js_promise_all_settled(Item iterable) {
         Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        js_invoke_promise_then(elem, fulfill_fn, reject_fn);
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, fulfill_fn, reject_fn, &error)) {
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
+            return result_item;
+        }
     }
 
     return result_item;
@@ -28757,9 +28790,11 @@ static Item js_promise_all_settled_iterable(Item iterable) {
         Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
         Item reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
 
-        if (!js_invoke_promise_then(elem, fulfill_fn, reject_fn)) {
+        Item error = ItemNull;
+        if (!js_invoke_promise_then(elem, fulfill_fn, reject_fn, &error)) {
             js_iterator_close(iterator);
             if (js_check_exception()) js_clear_exception();
+            js_promise_settle(result, JS_PROMISE_REJECTED, error);
             return result_item;
         }
         index++;
