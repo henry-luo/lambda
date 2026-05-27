@@ -191,18 +191,12 @@ void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
 }
 
 void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform) {
-    if (rc_paint_active(rdcon)) {
-        paint_push_clip(rdcon->paint_list, clip_path, transform);
-        rc_lower_pending(rdcon);
-    } else if (rc_dl_active(rdcon)) dl_push_clip(rdcon->dl, clip_path, transform);
+    if (rc_dl_active(rdcon)) dl_push_clip(rdcon->dl, clip_path, transform);
     else rc_missing_dl("rc_push_clip");
 }
 
 void rc_pop_clip(RenderContext* rdcon) {
-    if (rc_paint_active(rdcon)) {
-        paint_pop_clip(rdcon->paint_list);
-        rc_lower_pending(rdcon);
-    } else if (rc_dl_active(rdcon)) dl_pop_clip(rdcon->dl);
+    if (rc_dl_active(rdcon)) dl_pop_clip(rdcon->dl);
     else rc_missing_dl("rc_pop_clip");
 }
 
