@@ -264,6 +264,7 @@ protected:
     DomElement* createMockElement(MockElement* mock) {
         memset(mock, 0, sizeof(*mock));
         DomElement* element = (DomElement*)mock->buf;
+        element->node_type = DOM_NODE_ELEMENT;
         element->doc = &doc;
         ((ViewSpan*)element)->in_line = &mock->in_line;
         return element;
