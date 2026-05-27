@@ -598,10 +598,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int gen_active_iterator_slot = -1;  // env slot for iterator cleanup on generator.return()
 
     if (fn->is_generator) {
-        // Count yield points to determine number of states
+        // Count suspension points to determine number of states. Async
+        // generators share the generator state machine, so hidden awaits from
+        // `for await` need resume labels alongside source `yield` expressions.
         // +1 for implicit "param binding" yield that separates param destructuring
         // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
-        int yield_count = jm_count_yields(fn->body) + 1;
+        int yield_count = jm_count_yields(fn->body) + (fn->is_async ? jm_count_awaits(fn->body) : 0) + 1;
         if (yield_count > 63) yield_count = 63;  // safety cap matching gen_state_labels size
 
         // Collect local variable names for env slot assignment
@@ -652,7 +654,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
         gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
         int gen_spill_start = gen_env_total_slots;  // spill slots start here
-        gen_env_total_slots += 16;  // padding for generator yield spill slots (temporaries across yields)
+        gen_env_total_slots += 128;  // padding for generator yield spill slots (temporaries across yields)
         gen_active_iterator_slot = gen_env_total_slots++;
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
@@ -1267,7 +1269,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
             gen_env_total_slots += 32;  // padding for dynamically allocated for-of/for-in loop vars
             int gen_spill_start = gen_env_total_slots;  // spill slots start here
-            gen_env_total_slots += 16;  // padding for async yield spill slots
+            gen_env_total_slots += 128;  // padding for async yield spill slots
             gen_active_iterator_slot = gen_env_total_slots++;
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item

@@ -65,6 +65,12 @@
 #include "network/network_resource_manager.h"
 #include "network/network_thread_pool.h"
 
+static bool js_test262_global_flag_is_true(const char* name) {
+    Item key = (Item){.item = s2it(heap_create_name(name))};
+    Item value = js_get_global_property(key);
+    return value.item == (ITEM_TRUE);
+}
+
 #ifdef _WIN32
 // Windows compatibility shim for __intrinsic_setjmpex
 // In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
@@ -3620,6 +3626,13 @@ int main(int argc, char *argv[]) {
 #endif
             mem_free(js_source);
             fflush(stdout);
+
+            if (result == 0 &&
+                js_test262_global_flag_is_true("__lambda_test262_async_required") &&
+                !js_test262_global_flag_is_true("__lambda_test262_async_done")) {
+                js_throw_type_error("async test did not call $DONE");
+                result = 1;
+            }
 
             // Print uncaught exception to stdout for batch capture
             if (result == 1 && js_check_exception()) {

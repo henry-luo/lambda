@@ -965,10 +965,11 @@ static std::string assemble_test_source(
     }
 
     if (p.is_async) {
-        combined += "var __lambda_test262_async_done = false;\n";
+        combined += "globalThis.__lambda_test262_async_required = true;\n";
+        combined += "globalThis.__lambda_test262_async_done = false;\n";
         combined += "globalThis.$DONE = function(error) {\n";
-        combined += "  if (__lambda_test262_async_done) throw new Test262Error(\"$DONE called multiple times\");\n";
-        combined += "  __lambda_test262_async_done = true;\n";
+        combined += "  if (globalThis.__lambda_test262_async_done) throw new Test262Error(\"$DONE called multiple times\");\n";
+        combined += "  globalThis.__lambda_test262_async_done = true;\n";
         combined += "  if (error) throw error;\n";
         combined += "};\n";
     }
@@ -988,15 +989,7 @@ static std::string assemble_test_source(
 
     combined += source;
     if (p.is_async) {
-        combined += "\nif (typeof setTimeout === \"function\") {\n";
-        combined += "  setTimeout(function() {\n";
-        combined += "    if (!__lambda_test262_async_done) throw new Test262Error(\"async test did not call $DONE\");\n";
-        combined += "  }, 0);\n";
-        combined += "} else if (typeof Promise === \"function\") {\n";
-        combined += "  Promise.resolve().then(function() {\n";
-        combined += "    if (!__lambda_test262_async_done) throw new Test262Error(\"async test did not call $DONE\");\n";
-        combined += "  });\n";
-        combined += "} else if (!__lambda_test262_async_done) {\n";
+        combined += "\nif (typeof setTimeout !== \"function\" && !globalThis.__lambda_test262_async_done) {\n";
         combined += "  throw new Test262Error(\"async test did not call $DONE\");\n";
         combined += "}\n";
     }

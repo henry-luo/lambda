@@ -25437,6 +25437,20 @@ static Item js_make_iter_result(Item value, bool done) {
     return result;
 }
 
+static Item js_async_generator_wrap_yield_value(Item value) {
+    return js_make_iter_result(value, false);
+}
+
+static Item js_async_generator_yield_result(Item value) {
+    Item promise = js_promise_resolve(value);
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        return js_promise_reject(error);
+    }
+    Item wrap_fn = js_new_function((void*)js_async_generator_wrap_yield_value, 1);
+    return js_promise_then(promise, wrap_fn, make_js_undefined());
+}
+
 // v15: Create a 2-element array [value, next_state] for state machine returns
 extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
     Item arr = js_array_new(2);
@@ -25703,6 +25717,13 @@ extern "C" Item js_async_iterator_step_result(Item iterator) {
         return js_generator_next(iterator, make_js_undefined());
     }
 
+    if (get_type_id(iterator) == LMD_TYPE_MAP && iterator.map->map_kind == MAP_KIND_ITERATOR) {
+        Item value = js_iterator_step(iterator);
+        if (js_check_exception()) return ItemNull;
+        if (value.item == JS_ITER_DONE_SENTINEL) return js_make_iter_result(make_js_undefined(), true);
+        return js_make_iter_result(value, false);
+    }
+
     TypeId tid = get_type_id(iterator);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT && tid != LMD_TYPE_ARRAY) {
         js_throw_type_error("iterator next is not a function");
@@ -25834,7 +25855,15 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             // Fall through to call state machine at resumed state
         } else {
             gen->executing = false;
-            return is_async ? js_promise_resolve(del_result) : del_result;
+            if (is_async) {
+                Item del_value = js_iter_result_value(del_result);
+                if (js_check_exception()) {
+                    Item error = js_clear_exception();
+                    return js_promise_reject(error);
+                }
+                return js_async_generator_yield_result(del_value);
+            }
+            return del_result;
         }
     }
 
@@ -25884,8 +25913,8 @@ run_state_machine:
         } else {
             gen->state = next_state;
             gen->executing = false;
-            Item iter_result = js_make_iter_result(value, false);
-            return is_async ? js_promise_resolve(iter_result) : iter_result;
+            if (is_async) return js_async_generator_yield_result(value);
+            return js_make_iter_result(value, false);
         }
     }
 
@@ -25946,7 +25975,15 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                     return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 if (!done) {
-                    return is_async ? js_promise_resolve(inner) : inner;
+                    if (is_async) {
+                        Item inner_yield_value = js_iter_result_value(inner);
+                        if (js_check_exception()) {
+                            Item error = js_clear_exception();
+                            return js_promise_reject(error);
+                        }
+                        return js_async_generator_yield_result(inner_yield_value);
+                    }
+                    return inner;
                 }
                 Item inner_value = js_iter_result_value(inner);
                 if (js_check_exception()) {
@@ -25988,8 +26025,8 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                             return is_async ? js_promise_resolve(done_result) : done_result;
                         }
                         gen->state = next_state;
-                        Item yield_result = js_make_iter_result(out_value, false);
-                        return is_async ? js_promise_resolve(yield_result) : yield_result;
+                        if (is_async) return js_async_generator_yield_result(out_value);
+                        return js_make_iter_result(out_value, false);
                     }
                     gen->done = true;
                     gen->state = -1;
@@ -26042,8 +26079,8 @@ extern "C" Item js_generator_return(Item generator, Item value) {
                     return is_async ? js_promise_resolve(done_result) : done_result;
                 }
                 gen->state = next_state;
-                Item yield_result = js_make_iter_result(out_value, false);
-                return is_async ? js_promise_resolve(yield_result) : yield_result;
+                if (is_async) return js_async_generator_yield_result(out_value);
+                return js_make_iter_result(out_value, false);
             }
             gen->done = true;
             gen->state = -1;
@@ -26088,7 +26125,15 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
                     return js_generator_resume_after_delegate_abrupt(generator, gen);
                 }
                 if (!done) {
-                    return is_async ? js_promise_resolve(inner) : inner;
+                    if (is_async) {
+                        Item inner_yield_value = js_iter_result_value(inner);
+                        if (js_check_exception()) {
+                            Item thrown = js_clear_exception();
+                            return js_promise_reject(thrown);
+                        }
+                        return js_async_generator_yield_result(inner_yield_value);
+                    }
+                    return inner;
                 }
                 Item inner_value = js_iter_result_value(inner);
                 if (js_check_exception()) {
