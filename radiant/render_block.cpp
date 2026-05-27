@@ -9,6 +9,7 @@
 #include "render_list.hpp"
 #include "render_vector_path.hpp"
 #include "render_geometry.hpp"
+#include "render_form.hpp"
 #include "retained_display_list.hpp"
 #include "scroller.hpp"
 #include "layout.hpp"
@@ -405,6 +406,11 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
 
     if (block->vpath && block->vpath->segments) {
         render_vector_path(rdcon, block);
+    }
+
+    if (!phase->self_hidden &&
+        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+        render_form_control(rdcon, block);
     }
 
     float s = rdcon->scale;
