@@ -25690,6 +25690,35 @@ static Item js_iter_result_value(Item result) {
     return js_check_exception() ? ItemNull : value;
 }
 
+extern "C" int64_t js_iterator_result_done(Item result) {
+    return js_iter_result_is_done(result) ? 1 : 0;
+}
+
+extern "C" Item js_iterator_result_value(Item result) {
+    return js_iter_result_value(result);
+}
+
+extern "C" Item js_async_iterator_step_result(Item iterator) {
+    if (js_is_generator(iterator)) {
+        return js_generator_next(iterator, make_js_undefined());
+    }
+
+    TypeId tid = get_type_id(iterator);
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT && tid != LMD_TYPE_ARRAY) {
+        js_throw_type_error("iterator next is not a function");
+        return ItemNull;
+    }
+
+    Item next_fn = js_property_get_str(iterator, "next", 4);
+    if (js_check_exception()) return ItemNull;
+    if (get_type_id(next_fn) != LMD_TYPE_FUNC) {
+        js_throw_type_error("iterator next is not a function");
+        return ItemNull;
+    }
+    Item result = js_call_function(next_fn, iterator, NULL, 0);
+    return js_check_exception() ? ItemNull : result;
+}
+
 static Item js_yield_delegate_next_result(Item iterator, Item input) {
     if (js_is_generator(iterator)) {
         return js_generator_next(iterator, input);
@@ -26949,7 +26978,9 @@ struct JsPromise {
     Item on_fulfilled[8];          // then() callbacks (max chain depth)
     Item on_rejected[8];
     Item next_promise[8];          // chained promise for each then() handler
+    Item wrapper;                  // stable Promise object wrapper for this record
     bool is_finally[8];            // true if handler[i] is a finally handler
+    bool wrapper_created;
     int  then_count;
 };
 
@@ -26957,7 +26988,23 @@ struct JsPromise {
 static JsPromise js_promises[JS_MAX_PROMISES];
 static int js_promise_count = 0;
 
+static void js_promise_register_roots_once() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+
+    extern void heap_register_gc_root_range(uint64_t* base, int count);
+    for (int i = 0; i < JS_MAX_PROMISES; i++) {
+        heap_register_gc_root_range((uint64_t*)&js_promises[i].result, 1);
+        heap_register_gc_root_range((uint64_t*)js_promises[i].on_fulfilled, 8);
+        heap_register_gc_root_range((uint64_t*)js_promises[i].on_rejected, 8);
+        heap_register_gc_root_range((uint64_t*)js_promises[i].next_promise, 8);
+        heap_register_gc_root_range((uint64_t*)&js_promises[i].wrapper, 1);
+    }
+}
+
 static JsPromise* js_alloc_promise() {
+    js_promise_register_roots_once();
     if (js_promise_count >= JS_MAX_PROMISES) {
         log_error("promise: exceeded max promises (%d)", JS_MAX_PROMISES);
         return NULL;
@@ -26974,6 +27021,8 @@ static JsPromise* js_alloc_promise() {
     memset(p->on_rejected, 0, sizeof(p->on_rejected));
     memset(p->next_promise, 0, sizeof(p->next_promise));
     memset(p->is_finally, 0, sizeof(p->is_finally));
+    p->wrapper = ItemNull;
+    p->wrapper_created = false;
     return p;
 }
 
@@ -26990,6 +27039,8 @@ static Item js_promise_finally_bound(Item promise, Item on_finally) {
 }
 
 static Item js_promise_to_item(JsPromise* p) {
+    if (p->wrapper_created) return p->wrapper;
+
     // Create a map object that holds a reference to the promise by index
     int idx = (int)(p - js_promises);
     Item obj = js_new_object();
@@ -27000,7 +27051,9 @@ static Item js_promise_to_item(JsPromise* p) {
     js_property_set(obj, (Item){.item = s2it(cn_key)}, (Item){.item = s2it(heap_create_name("Promise", 7))});
     // Set __proto__ to Promise.prototype so methods are inherited
     js_wrapper_set_proto(obj, "Promise", 7);
-    return obj;
+    p->wrapper = obj;
+    p->wrapper_created = true;
+    return p->wrapper;
 }
 
 static JsPromise* js_get_promise(Item promise_obj) {

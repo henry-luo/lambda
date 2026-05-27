@@ -42,6 +42,9 @@ extern Item js_super_property_set(Item receiver, Item key, Item value);
 extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
+extern Item js_async_iterator_step_result(Item iterator);
+extern int64_t js_iterator_result_done(Item result);
+extern Item js_iterator_result_value(Item result);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1813,6 +1816,9 @@ JitImport jit_runtime_imports[] = {
     {"js_get_iterator", FPTR(js_get_iterator)},
     {"js_get_iterator_lazy", FPTR(js_get_iterator_lazy)},
     {"js_iterator_step", FPTR(js_iterator_step)},
+    {"js_async_iterator_step_result", FPTR(js_async_iterator_step_result)},
+    {"js_iterator_result_done", FPTR(js_iterator_result_done)},
+    {"js_iterator_result_value", FPTR(js_iterator_result_value)},
     {"js_iterator_close", FPTR(js_iterator_close)},
     {"js_iterator_collect_rest", FPTR(js_iterator_collect_rest)},
     // v14: Promise runtime

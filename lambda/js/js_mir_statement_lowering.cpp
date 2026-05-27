@@ -3873,17 +3873,37 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         pushed_try = true;
     }
 
-    // Test: call js_iterator_step(iterator) → value or JS_ITER_DONE_SENTINEL (done)
+    // Test: call iterator step.  for-await needs the raw iterator result so
+    // it can await async-generator .next() promises before checking `done`.
     jm_emit_label(mt, l_test);
-    MIR_reg_t step_result = jm_emit_iterator_step(mt, iterator);
+    MIR_reg_t step_result = 0;
+    MIR_reg_t step_iter_result = 0;
+    if (is_for_await) {
+        step_iter_result = jm_call_1(mt, "js_async_iterator_step_result", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+        MIR_reg_t step_call_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
+            MIR_new_reg_op(mt->ctx, step_call_exc)));
+        step_iter_result = jm_emit_await_value_reg(mt, step_iter_result);
+        MIR_reg_t step_await_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, step_await_exc)));
+    } else {
+        step_result = jm_emit_iterator_step(mt, iterator);
+    }
     MIR_reg_t step_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_err),
         MIR_new_reg_op(mt->ctx, step_exc)));
     // Check if done (JS_ITER_DONE_SENTINEL — unique sentinel that won't collide with null/undefined/false)
-    MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
+    MIR_reg_t is_done = is_for_await
+        ? jm_call_1(mt, "js_iterator_result_done", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, step_iter_result))
+        : jm_emit_iterator_done_test(mt, step_result, "forofdone");
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, is_done)));
     if (is_for_await) {
+        step_result = jm_call_1(mt, "js_iterator_result_value", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, step_iter_result));
         step_result = jm_emit_await_value_reg(mt, step_result);
         MIR_reg_t await_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),

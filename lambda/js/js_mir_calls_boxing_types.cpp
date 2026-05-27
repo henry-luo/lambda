@@ -908,7 +908,7 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         {
             JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
             if (any_fc && any_fc->return_type != LMD_TYPE_ANY
-                && any_fc->node && !any_fc->node->is_generator)
+                && any_fc->node && !any_fc->node->is_generator && !any_fc->node->is_async)
                 return any_fc->return_type;
         }
         return LMD_TYPE_ANY;

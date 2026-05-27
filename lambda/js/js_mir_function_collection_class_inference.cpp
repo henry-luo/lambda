@@ -207,6 +207,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
     if (!fn) return NULL;
+    if (fn->is_async) return NULL;
 
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
     if (!fc || !fc->has_native_version || !fc->native_func_item) return NULL;
@@ -2594,13 +2595,19 @@ bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname) {
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count) {
     if (arg_count == 0) return 0;
 
-    // Generator mode: if any argument contains yield, we cannot use stack ALLOCA
-    // because the stack frame is destroyed/recreated across yield suspend/resume.
+    // Generator/async mode: if any argument contains a suspend point, we cannot
+    // keep the call argument buffer in raw registers across suspend/resume.
     // Instead, spill each evaluated arg to an env slot, then copy to ALLOCA after all done.
     bool has_yield_in_args = false;
     if (mt->in_generator) {
         JsAstNode* chk = first_arg;
-        while (chk) { if (jm_has_yield(chk)) { has_yield_in_args = true; break; } chk = chk->next; }
+        while (chk) {
+            if (jm_has_yield(chk) || (mt->in_async && jm_count_awaits(chk) > 0)) {
+                has_yield_in_args = true;
+                break;
+            }
+            chk = chk->next;
+        }
     }
 
     if (has_yield_in_args) {

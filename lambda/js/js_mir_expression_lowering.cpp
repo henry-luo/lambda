@@ -5961,14 +5961,15 @@ static void jm_transpile_discard_call_args(JsMirTranspiler* mt, JsAstNode* arg) 
     }
 }
 
-// In a generator, a yield anywhere in the argument list breaks every direct
+// In a generator/async state machine, a suspend point anywhere in the argument list breaks every direct
 // dispatch fast path that evaluates args into raw MIR registers, because those
-// registers do not survive a yield's suspend/resume. When this gate trips the
+// registers do not survive suspend/resume. When this gate trips the
 // caller must fall back to the env-spilling path inside jm_build_args_array.
 static bool jm_call_yield_blocks_direct(JsMirTranspiler* mt, JsAstNode* first_arg) {
     if (!mt->in_generator) return false;
     for (JsAstNode* a = first_arg; a; a = a->next) {
         if (jm_has_yield(a)) return true;
+        if (mt->in_async && jm_count_awaits(a) > 0) return true;
     }
     return false;
 }
@@ -8940,6 +8941,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
             if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
             if (fc && fc->is_reassigned) fc = NULL;
+            if (fc && fc->node && fc->node->is_async) fc = NULL;
             if (fc && fc->node && fc->node->is_generator && jm_count_params(fc->node) == 0) fc = NULL;
             if (fc && (mt->with_depth > 0 ||
                     jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
