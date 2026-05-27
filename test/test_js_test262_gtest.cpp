@@ -3968,7 +3968,10 @@ int main(int argc, char** argv) {
         std::vector<std::string> current_passing;  // only fully passed tests
         std::vector<std::string> regressions;
         std::vector<std::string> improvements;
-        {
+        auto refresh_summary_from_cache = [&]() {
+            passed = 0; failed = 0; skipped = 0; partial = 0;
+            current_passing.clear();
+            improvements.clear();
             std::lock_guard<std::mutex> lock(g_results_mutex);
             for (auto& kv : g_cached_results) {
                 switch (kv.second.result) {
@@ -3978,15 +3981,20 @@ int main(int argc, char** argv) {
                     default: failed++; break;
                 }
             }
-        }
+            if (!g_baseline_passing.empty()) {
+                for (auto& name : current_passing) {
+                    if (g_baseline_passing.find(name) == g_baseline_passing.end()) {
+                        improvements.push_back(name);
+                    }
+                }
+            }
+        };
+        refresh_summary_from_cache();
         // Compute regressions/improvements vs baseline
         if (!g_baseline_passing.empty()) {
             std::set<std::string> pass_set(current_passing.begin(), current_passing.end());
             for (auto& name : g_baseline_passing) {
                 if (pass_set.find(name) == pass_set.end()) regressions.push_back(name);
-            }
-            for (auto& name : current_passing) {
-                if (g_baseline_passing.find(name) == g_baseline_passing.end()) improvements.push_back(name);
             }
         }
 
@@ -4063,18 +4071,13 @@ int main(int argc, char** argv) {
                         bool is_collateral = ba_it != g_batch_assignment.end() &&
                                              g_crashed_batches.count(ba_it->second);
                         if (is_collateral) {
-                            // Promote to full pass — add to current_passing
-                            passed++;
-                            failed--;
-                            current_passing.push_back(reg_name);
+                            // Promote to full pass; summary counters refresh from cache after Phase 4.
                             {
                                 std::lock_guard<std::mutex> lock(g_results_mutex);
                                 g_cached_results[reg_name] = {T262_PASS, "recovered in Phase 4 retry (crash-collateral)"};
                             }
                         } else {
-                            // Genuine batch-instability — keep as partial
-                            partial++;
-                            failed--;
+                            // Genuine batch-instability — keep as partial.
                             {
                                 std::lock_guard<std::mutex> lock(g_results_mutex);
                                 g_cached_results[reg_name] = {T262_PARTIAL_PASS, "non-fully-passing: passed in Phase 4 retry only"};
@@ -4148,6 +4151,7 @@ int main(int argc, char** argv) {
         }
         auto phase4_done = std::chrono::steady_clock::now();
         g_phase4_secs = std::chrono::duration<double>(phase4_done - phase4_start).count();
+        refresh_summary_from_cache();
 
         int total = passed + failed + partial;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
