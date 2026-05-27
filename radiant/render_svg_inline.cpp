@@ -158,7 +158,7 @@ static inline bool svg_paint_active(SvgRenderContext* ctx) {
 }
 
 static inline void svg_lower_pending(SvgRenderContext* ctx) {
-    paint_ir_lower_raster(ctx->paint_list, ctx->dl);
+    paint_ir_lower_raster_fragment(ctx->paint_list, ctx->dl);
     paint_list_clear(ctx->paint_list);
 }
 
