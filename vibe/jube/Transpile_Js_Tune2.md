@@ -168,7 +168,7 @@ stay; the test-private symbols go away.
 - **Risk.** Medium — the test-private symbol set needs careful
   characterisation; touching MIR's linker tables is non-trivial.
 
-#### 2.4.E — Flat-bitmap ID_Start / ID_Continue classification (external scanner + runtime init)
+#### 2.4.E — Spec-faithful ID_Start / ID_Continue classification via a three-stage compressed trie (~2 KiB `.rodata`)
 
 **Mechanism today.** The auto-generated parser
 (`lambda/tree-sitter-javascript/src/parser.c:4445-4453`) classifies each
@@ -180,135 +180,203 @@ several branchy `lookahead >= range->start && lookahead <= range->end`
 compares — roughly 8–12 conditionally-predicted operations per codepoint
 on a hot path that runs on every identifier character of every parse.
 
-**Change.** Replace that classifier with a flat BMP bitmap (1 bit per
-codepoint in U+0000–U+FFFF) for the JS identifier rule, accessed in three
-instructions (shift + mask + bit test). Do this *without* touching the
-auto-generated `parser.c` — instead:
+The current ranges are *also* a coarse super-set of the Unicode spec
+(e.g. they accept all of `[0xa1..0x167f]` wholesale). The engine's regex
+side already ships the precise spec values
+(`js_regex_generated_ranges_69_id_continue`,
+`js_regex_generated_ranges_70_id_start` in
+`lambda/js/js_regex_generated_property_tables.inc:3090, :3252` — 1414
+and 1416 sorted ranges respectively). We want the *scanner* to use the
+same precise values, but without inflating either the binary or the
+hot-path code.
 
-1. Declare `identifier` as an **external token** by adding one line to
-   `grammar.js`'s `externals` array. Tree-sitter will then call our
-   hand-written scanner first whenever an identifier might be valid.
-2. Implement the classifier and an `IDENTIFIER` case in
-   `scanner.c` (a file we already own and edit by hand).
-3. **Generate the two 8 KiB bitmaps in BSS at runtime**, on the first
-   call to `tree_sitter_javascript_external_scanner_create`. The data
-   source is a small self-contained sorted `int32_t ranges[][2]` table
-   (~3 KiB of `.rodata`, hand-maintained on Unicode version bumps; mirrors
-   the precise tables already shipped at
-   `lambda/js/js_runtime.cpp:13729` and used by the regex engine).
+**Change.** Replace the parser-level classifier with a **three-stage
+compressed trie** built from the spec ID_Start / ID_Continue tables,
+shipped as ~2 KiB of `.rodata`. Three lookups per codepoint, all L1
+hits, branch-free in the hot path. Architecture:
 
-```c
-// scanner.c
+1. Declare `identifier` as an **external token** in `grammar.js`'s
+   `externals` array (one line).
+2. Implement an `IDENTIFIER` case in the hand-written `scanner.c` —
+   never touching the auto-generated `parser.c`.
+3. Pre-compute the three-stage trie offline (small Python generator,
+   ~80 lines, run on Unicode-version bumps) and commit the result as
+   `id_class_trie.inc`. No runtime init; lookups go straight through
+   `.rodata`.
 
-static const int32_t id_start_ranges[][2]    = { /* … ~330 pairs … */ };
-static const int32_t id_continue_ranges[][2] = { /* … ~480 pairs … */ };
+**Why three-stage.** A flat 16 KiB bitmap or even a two-stage 32-byte-
+block layout (~3.2 KiB) wastes space because BMP ID_Continue has
+massive structural repetition — the entire CJK Unified Ideographs block
+U+4E00..U+9FFF (16,384 codepoints) is one solid run of "set", Private
+Use and unassigned areas are solid runs of "unset", and Latin / Cyrillic
+/ Greek / Hangul each form long contiguous strides. The first stage
+deduplicates *blocks-of-blocks*; the second stage deduplicates blocks
+of 64-codepoint chunks; the third stage holds the actual bit data.
+Standard ICU/V8/SpiderMonkey pattern.
 
-// BSS — 16 KiB of zero at link time, no disk bytes.
-static uint8_t id_start_bmp[8192];
-static uint8_t id_continue_bmp[8192];
-static bool    id_bmp_inited = false;
+**Layout.**
 
-static void fill_bmp(uint8_t bmp[8192], const int32_t r[][2], size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        int32_t lo = r[i][0], hi = r[i][1];
-        if (lo >= 0x10000) continue;            // astral handled separately
-        if (hi >= 0x10000) hi = 0xFFFF;
-        for (int32_t cp = lo; cp <= hi; cp++)
-            bmp[cp >> 3] |= (uint8_t)(1u << (cp & 7));
-    }
-}
-
-static void init_id_bmps_once(void) {           // ~3 µs, once per process
-    if (id_bmp_inited) return;                  // see "Concurrency" below
-    fill_bmp(id_start_bmp,    id_start_ranges,    N_ID_START);
-    fill_bmp(id_continue_bmp, id_continue_ranges, N_ID_CONT);
-    id_bmp_inited = true;
-}
-
-void *tree_sitter_javascript_external_scanner_create(void) {
-    init_id_bmps_once();
-    return NULL;
-}
-
-static inline bool is_id_start(int32_t cp) {
-    if ((uint32_t)cp < 0x10000)
-        return (id_start_bmp[(uint32_t)cp >> 3] >> ((uint32_t)cp & 7)) & 1;
-    return astral_lookup(id_start_astral_ranges, N_ID_START_AST, cp);
-}
-static inline bool is_id_continue(int32_t cp) { /* … */ }
+```
+BMP codepoint cp (16 bits):
+  ┌──────────┬──────────┬──────────────┐
+  │ cp[15:11]│ cp[10: 6]│   cp[5:0]    │
+  │  5 bits  │  5 bits  │    6 bits    │
+  │  ↓       │  ↓       │  ↓           │
+  │ stage1   │ stage2   │  bit         │
+  │ index    │ index    │  position    │
+  │ (32)     │ (32 per  │  (64 per     │
+  │          │  group)  │   leaf)      │
+  └──────────┴──────────┴──────────────┘
 ```
 
-The `IDENTIFIER` case in
+```c
+// id_class_trie.inc (generated; committed alongside parser.c)
+
+// Stage 1: 32 entries, each a base offset into stage2.
+// (uint16_t suffices because the max stage2 size is ≤ 1024.)
+static const uint16_t id_class_stage1[32];                   // 64 B
+
+// Stage 2: groups of 32 entries pointed to by stage1.
+// After dedup over groups, ~12 distinct groups × 32 entries × 1 byte
+// = ~384 B. Each entry indexes into stage3 (≤ 255 unique leaves).
+static const uint8_t  id_class_stage2[ID_S2_LEN];            // ~384 B
+
+// Stage 3: deduplicated 64-codepoint leaves. Each leaf packs both
+// classifications (8 bytes for ID_Start, 8 bytes for ID_Continue).
+// Empirically ~55 unique leaves over the BMP.
+static const uint8_t  id_class_stage3[ID_S3_LEN * 16];       // ~880 B
+
+// Astral plane (U+10000..U+10FFFF) kept as raw range fallback —
+// rarely consulted on real workloads.
+static const int32_t  id_start_astral[][2];                  // ~340 B
+static const int32_t  id_continue_astral[][2];               // ~470 B
+```
+
+Totals across both classifications: **~64 + 384 + 880 + 340 + 470 ≈
+2.1 KiB** of `.rodata`. The "+200 B" wiggle covers a tiny header with
+the lengths (`ID_S2_LEN`, `ID_S3_LEN`, astral counts) so the C side
+doesn't need preprocessor magic.
+
+**Lookup.**
+
+```c
+static inline bool is_id_classified(int32_t cp, int byte_offset) {
+    // byte_offset = 0 → ID_Start; byte_offset = 8 → ID_Continue.
+    if ((uint32_t)cp >= 0x10000) {
+        const int32_t (*ast)[2] = (byte_offset == 0) ? id_start_astral : id_continue_astral;
+        size_t n = (byte_offset == 0) ? ID_START_AST_N : ID_CONT_AST_N;
+        return astral_range_contains(ast, n, cp);
+    }
+    uint32_t c   = (uint32_t)cp;
+    uint16_t g   = id_class_stage1[c >> 11];                       // load 1
+    uint8_t  leaf= id_class_stage2[g + ((c >> 6) & 31)];           // load 2
+    const uint8_t *p = &id_class_stage3[(unsigned)leaf * 16 + byte_offset];
+    uint32_t bit = c & 63;
+    return (p[bit >> 3] >> (bit & 7)) & 1;                         // load 3
+}
+
+static inline bool is_id_start   (int32_t cp) { return is_id_classified(cp, 0); }
+static inline bool is_id_continue(int32_t cp) { return is_id_classified(cp, 8); }
+```
+
+Three L1 loads + a few shifts and masks. No branches in the hot path
+(the BMP guard branch is taken on virtually every codepoint of real
+JS). The two classifications share stage 1 and stage 2 — looking up
+ID_Continue right after ID_Start reuses the same stage-1 and stage-2
+cache lines.
+
+**Cost vs the earlier flat-bitmap and two-stage proposals.**
+
+| | Flat 16 KiB bitmap | Two-stage 32-cp blocks | **Three-stage (this)** |
+| --- | ---: | ---: | ---: |
+| `.rodata` total | 16 KiB | ~3.2 KiB | **~2.1 KiB** |
+| `.bss` total | 0 | 0 | 0 |
+| Memory loads per lookup | 1 | 2 | 3 |
+| Shifts / masks per lookup | 2 | 4 | 6 |
+| Branches in hot path | 0 | 0 | 0 |
+| Spec-faithful | only if generated from spec data | yes | **yes** |
+| Cache footprint of a single identifier scan | ~64 B of bmp | ~32 B + ~16 B | ~64 B + ~32 B + ~64 B (still ≤ 2 cache lines hot) |
+
+The extra load and the two extra shifts are sub-nanosecond on modern
+hardware. For a 70-codepoint identifier the three-stage path adds maybe
+~70 ns over the flat bitmap — utterly invisible against any real test
+or program. In exchange you save ~14 KiB of binary size and gain spec
+conformance.
+
+**The `IDENTIFIER` case** in
 `tree_sitter_javascript_external_scanner_scan` then drives the lexer
-straight-line: classify lookahead, advance, repeat — including a small
-inline decoder for `\uXXXX` / `\u{XXXXXX}` escapes that calls the same
-classifier on the decoded codepoint. The original `identifier:` grammar
-rule stays in `grammar.js` as the formal definition (used by static-
-analysis tooling that doesn't link scanner.c); when scanner.c IS linked
-the external scanner wins.
+straight-line: classify lookahead via `is_id_start`/`is_id_continue`,
+advance, repeat. The case also handles JavaScript's `\uXXXX` and
+`\u{XXXXXX}` identifier escapes inline (decode → classify the resulting
+codepoint → advance past the escape on success). The `identifier:` rule
+in `grammar.js` stays as the formal definition (used by static-analysis
+tooling that doesn't link `scanner.c`); when `scanner.c` is linked the
+external scanner wins.
 
-**Why not a committed `.inc` file?** An earlier draft proposed generating
-the bitmaps at build time via a Python script and committing a ~16 KiB
-`.inc` file. Compared to runtime initialisation, that approach:
+**Generator.** A small offline Python script
+(`utils/gen_id_class_trie.py`, ~80 lines) does the heavy lifting:
 
-- adds ~16 KiB to `lambda.exe` on disk (the bitmaps land in `.rodata`),
-- introduces a build-time Python generator and a `make generate-grammar`
-  hookup,
-- commits a generated data file that must be regenerated whenever the
-  source ranges change.
+```
+1. Read DerivedCoreProperties.txt for the target Unicode version
+   (or extract ID_Start / ID_Continue from
+   lambda/js/js_regex_generated_property_tables.inc — same data).
+2. Materialise the raw 16 KiB BMP bitmap (one bit per cp × 2 properties).
+3. Slice into 32 groups of 32 leaves of 64 codepoints each.
+4. Deduplicate leaves (across both classifications, packed as 16-byte
+   blocks). Build the stage-3 array + a leaf-index map.
+5. Deduplicate groups. Build the stage-2 array + a group-index map.
+6. Build stage-1 from the stage-2 group indices.
+7. Emit id_class_trie.inc with the four arrays + the two astral lists.
+8. As a self-check, walk every codepoint 0..0x10FFFF and assert
+   is_id_classified(cp) matches the source ranges byte-for-byte.
+```
 
-The runtime-init design above pays a one-time ~3 µs startup cost
-(unobservable in any real workload) in exchange for zero of those costs.
-The 16 KiB BSS bitmaps still cost the same resident memory either way —
-the only real difference is that compile-time `.rodata` would let the OS
-share pages between concurrent `lambda.exe` processes, which at this
-size (16 KiB × ~32 max workers = ~512 KiB private vs 16 KiB shared) is
-academically interesting but not measurable.
+The output is regenerated only when the target Unicode version changes
+(rare — every few years). Committing it keeps the build hermetic.
 
-**Concurrency.** `tree_sitter_javascript_external_scanner_create` runs
-once per parser instance and may run concurrently in different threads.
-The simplest safe option for this exact data is the "racy-read,
-idempotent-fill" pattern shown above: concurrent fills write the same
-bits in any order and the trailing `id_bmp_inited = true` store is the
-only ordering edge that matters. If that bothers TSAN, swap the guard
-for `pthread_once_t` (POSIX) or `std::call_once` (C++) — five extra
-lines, no algorithmic change.
+**No runtime init, no `.bss`.** Because the trie is precomputed and
+sits in `.rodata`, there is nothing to initialise at scanner-create
+time and no concurrency to worry about. `tree_sitter_javascript_
+external_scanner_create` stays as the existing one-liner that returns
+NULL. The cross-process `.rodata` sharing the OS already does for
+`lambda.exe`'s code segments now also covers the trie.
 
 **Implementation surface.**
 
 | File | Change | Lines |
 | --- | --- | ---: |
 | `lambda/tree-sitter-javascript/grammar.js` | Add `$.identifier` to the `externals: $ => [...]` array | +1 |
-| `lambda/tree-sitter-javascript/src/scanner.c` | New `IDENTIFIER` token, `init_id_bmps_once`, `is_id_start`/`is_id_continue`, `scan_identifier`, escape decoder, dispatch in `external_scanner_scan` | ~120 |
-| same — embedded range data | Sorted `int32_t id_start_ranges[][2]` and `id_continue_ranges[][2]` (BMP + astral) | ~3 KiB of `.rodata` literals |
-| `Makefile` / build glue | None | 0 |
+| `lambda/tree-sitter-javascript/src/scanner.c` | New `IDENTIFIER` token, `is_id_start` / `is_id_continue`, `scan_identifier`, `\uXXXX` decoder, dispatch in `external_scanner_scan`, `#include "id_class_trie.inc"` | ~120 |
+| `lambda/tree-sitter-javascript/src/id_class_trie.inc` | Generated trie data (4 arrays + 2 astral range lists) | **~2.1 KiB** `.rodata` |
+| `utils/gen_id_class_trie.py` | Offline generator script | ~80 |
+| `Makefile` / build glue | Optional: a `make generate-id-trie` target. Not required for normal builds (the `.inc` is committed). | 0–5 |
 
 **Tests.** A standalone correctness test that, for every codepoint
-0..0x10FFFF, asserts `is_id_start(cp)` and `is_id_continue(cp)` match
-the existing classifier (`set_contains` on the parser's range tables
-*or* `js_regex_cp_is_id_*` in `js_runtime.cpp`). Mechanical equivalence
-check — no false negatives possible at build time.
+`0..0x10FFFF`, asserts `is_id_start(cp)` and `is_id_continue(cp)` match
+the engine's existing spec-faithful classifier (`js_regex_cp_is_id_*`
+in `lambda/js/js_runtime.cpp:13729-13744`). Mechanical equivalence
+check — no false negatives possible at build time. Run automatically
+under the `make build-test` target.
 
-**Honest sizing.** This is a *small general* win. The slow unicode
-cluster's 40× batch slowdown is dominated by name-pool / linker-state
-growth (§2.4.A/B/D), not by the classifier — even eliminating the
-classifier entirely would save only a few milliseconds per test. What
-this item buys is: a constant per-codepoint speedup on every JS parse
-forever after, with the right architecture (external scanner, no
-generated-code patching, no committed data file, no extra build target).
-Land it when convenient.
+**Honest sizing.** This is still a *small general* win. The slow
+unicode cluster's 40× batch slowdown is dominated by name-pool /
+linker-state growth (§2.4.A/B/D), not by the classifier — even
+eliminating the classifier entirely would save only a few milliseconds
+per test. What this item buys is:
 
-- **Per-test win.** Tens of µs per long-identifier test, ms-scale per
+- **Per-test win.** Tens of µs per long-identifier test; ms-scale per
   parse for production codebases with non-ASCII identifiers (minified
   bundles with Unicode mangling, internationalised codebases).
-- **General benefit.** Every JS parse on the system gets faster. The
-  external-scanner shape also makes future tweaks (e.g. accepting newer
-  Unicode versions) a one-file edit, not a regex-grammar refactor.
+- **General benefit.** Every JS parse on the system gets faster, *and*
+  becomes spec-faithful (today's parser is coarsely permissive). The
+  external-scanner shape also makes future tweaks (Unicode version
+  bumps, identifier-rule refinements) a one-file regenerate, not a
+  regex-grammar refactor.
 - **Risk.** Very low. The `identifier` rule's formal definition in
   `grammar.js` is unchanged; external scanners are tree-sitter's
-  prescribed extension point; the byte-comparison test rules out
-  classifier drift. CLAUDE.md rule #5 (no manual `parser.c` edits) is
-  respected.
+  prescribed extension point; the codepoint-equivalence test rules
+  out classifier drift. CLAUDE.md rule #5 (no manual `parser.c` edits)
+  is respected.
 
 ### 2.5 What I would land first
 
@@ -397,10 +465,11 @@ In suggested order; each step is independently revertible.
    investigative spike (timers in the batch compile path), then pursue
    §2.4.D (per-batch JIT linker symbol-set reset) if hypothesis #2 is
    confirmed.
-4. §2.4.E (external-scanner BMP bitmap, runtime-initialised) — small,
-   mechanical, do it whenever convenient even if the unicode cluster is
-   already fast. Helps every JS parse on the system; no build-time
-   generator, no committed data file, `parser.c` untouched.
+4. §2.4.E (external-scanner three-stage compressed trie, ~2 KiB
+   `.rodata`) — small, mechanical, do it whenever convenient even if the
+   unicode cluster is already fast. Helps every JS parse on the system
+   *and* upgrades the parser from coarsely-permissive to spec-faithful
+   ID_Start / ID_Continue; `parser.c` untouched.
 
 ## 5. Verification plan
 
