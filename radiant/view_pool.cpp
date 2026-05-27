@@ -207,6 +207,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->text_transform = (CssEnum)0;  // 0 = not set, will be inherited if needed
     prop->word_break = (CssEnum)0;      // 0 = not set, treat as CSS_VALUE_NORMAL
     prop->overflow_wrap = (CssEnum)0;    // 0 = not set, treat as CSS_VALUE_NORMAL
+    prop->text_spacing_trim = CSS_VALUE_NORMAL;
     prop->break_before = CSS_VALUE_AUTO;
     prop->break_after = CSS_VALUE_AUTO;
     prop->tab_size = 8;                  // CSS default tab-size is 8

@@ -452,6 +452,9 @@ static const CssEnumInfo css_value_definitions[] = {
     {"trim-start", 10, CSS_VALUE_TRIM_START, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
     {"trim-end", 8, CSS_VALUE_TRIM_END, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
     {"trim-both", 9, CSS_VALUE_TRIM_BOTH, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
+    {"space-all", 9, CSS_VALUE_SPACE_ALL, CSS_VALUE_GROUP_MISC},
+    {"space-first", 11, CSS_VALUE_SPACE_FIRST, CSS_VALUE_GROUP_MISC},
+    {"trim-all", 8, CSS_VALUE_TRIM_ALL, CSS_VALUE_GROUP_MISC},
     // text-box-edge values (auto, text, alphabetic, ideographic reuse existing enums)
     {"cap", 3, CSS_VALUE_CAP, CSS_VALUE_GROUP_TEXT_BOX_EDGE},
     {"ex", 2, CSS_VALUE_EX, CSS_VALUE_GROUP_TEXT_BOX_EDGE},

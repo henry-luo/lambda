@@ -446,6 +446,27 @@ float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_
     return 0;
 }
 
+float font_get_halt_adjustment(FontHandle* handle, uint32_t codepoint) {
+    if (!handle || !handle->tables) return 0.0f;
+
+    GposTable* gpos = font_tables_get_gpos(handle->tables);
+    if (!gpos || !gpos_has_halt_adjustment(gpos)) return 0.0f;
+
+    CmapTable* cmap = font_tables_get_cmap(handle->tables);
+    if (!cmap) return 0.0f;
+
+    uint16_t glyph_id = cmap_lookup(cmap, codepoint);
+    if (glyph_id == 0) return 0.0f;
+
+    int16_t val = gpos_get_halt_adjustment(gpos, glyph_id);
+    if (val == 0) return 0.0f;
+
+    HeadTable* head = font_tables_get_head(handle->tables);
+    if (!head || head->units_per_em <= 0) return 0.0f;
+
+    return val * handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
+}
+
 // ============================================================================
 // Codepoint presence check
 // ============================================================================

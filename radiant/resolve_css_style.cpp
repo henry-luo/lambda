@@ -3322,6 +3322,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_TEXT_DECORATION,
         CSS_PROPERTY_TEXT_TRANSFORM,
         CSS_PROPERTY_TEXT_INDENT,
+        CSS_PROPERTY_TEXT_SPACING_TRIM,
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
         CSS_PROPERTY_WHITE_SPACE,
@@ -5403,6 +5404,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 } else if (val == CSS_VALUE_TRIM_BOTH || val == CSS_VALUE_BOTH) {
                     block->blk->text_box_trim = TEXT_BOX_TRIM_START | TEXT_BOX_TRIM_END;
                 }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_SPACING_TRIM: {
+            if (!block) break;
+            if (!block->blk) block->blk = alloc_block_prop(lycon);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                block->blk->text_spacing_trim = value->data.keyword;
             }
             break;
         }

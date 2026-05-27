@@ -1036,6 +1036,7 @@ typedef struct BlockProp {
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
+    CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
     int tab_size;           // CSS tab-size (number of spaces, default 8)

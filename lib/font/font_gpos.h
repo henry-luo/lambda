@@ -22,7 +22,7 @@ extern "C" {
 // forward declaration
 typedef struct FontTables FontTables;
 
-// opaque handle — parsed GPOS pair adjustment data
+// opaque handle — parsed GPOS pair and spacing adjustment data
 typedef struct GposTable GposTable;
 
 // parse the GPOS table from FontTables. Returns NULL if no GPOS table
@@ -33,8 +33,15 @@ GposTable* font_gpos_parse(FontTables* tables, void* pool);
 // returns the x-advance adjustment in font design units, or 0 if not found.
 int16_t gpos_get_kern(GposTable* gpos, uint16_t left_glyph, uint16_t right_glyph);
 
+// look up horizontal half-width adjustment from the 'halt' feature.
+// returns the x-advance adjustment in font design units, or 0 if not found.
+int16_t gpos_get_halt_adjustment(GposTable* gpos, uint16_t glyph_id);
+
 // check if the GPOS table has any pair adjustment data
 bool gpos_has_kerning(GposTable* gpos);
+
+// check if the GPOS table has any 'halt' SinglePos data
+bool gpos_has_halt_adjustment(GposTable* gpos);
 
 #ifdef __cplusplus
 }

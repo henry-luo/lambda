@@ -104,6 +104,9 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 // Stored document.title value (same reason as defaultView)
 static Item js_document_title_value = {.item = ITEM_NULL};
 
+// Cached document.fonts object for the FontFaceSet ready shim.
+static Item js_document_fonts_value = {.item = ITEM_NULL};
+
 // ============================================================================
 // Thread-local DOM document context
 // ============================================================================
@@ -116,6 +119,22 @@ static __thread DomDocument* _js_current_document = nullptr;
 // as _js_current_document.
 static __thread DomDocument* _js_main_document = nullptr;
 static void js_dom_install_window_location_history_globals(void);
+
+static Item js_font_face_set_ready_then(Item callback) {
+    if (get_type_id(callback) == LMD_TYPE_FUNC) {
+        js_call_function(callback, make_js_undefined(), NULL, 0);
+    }
+    return js_document_fonts_value.item != ITEM_NULL ? js_document_fonts_value : make_js_undefined();
+}
+
+static Item js_create_document_fonts_object(void) {
+    Item fonts = js_new_object();
+    Item ready = js_new_object();
+    Item then_fn = js_new_function((void*)js_font_face_set_ready_then, 1);
+    js_property_set(ready, js_string_key("then"), then_fn);
+    js_property_set(fonts, js_string_key("ready"), ready);
+    return fonts;
+}
 
 extern "C" bool js_dom_current_is_main_document(void) {
     return _js_current_document != nullptr && _js_current_document == _js_main_document;
@@ -213,6 +232,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
+    js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     js_dom_events_reset();
     js_xhr_reset();
@@ -706,6 +726,10 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
         // Allow setting defaultView (used by preamble: document.defaultView = window)
         if (s && s->len == 11 && strncmp(s->chars, "defaultView", 11) == 0) {
             js_document_default_view = value;
+            return value;
+        }
+        if (s && s->len == 5 && strncmp(s->chars, "fonts", 5) == 0) {
+            js_document_fonts_value = value;
             return value;
         }
     }
@@ -2822,6 +2846,13 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // readyState — always "complete" since scripts run after parse
     if (strcmp(prop, "readyState") == 0) {
         return (Item){.item = s2it(heap_create_name("complete"))};
+    }
+
+    if (strcmp(prop, "fonts") == 0) {
+        if (js_document_fonts_value.item == ITEM_NULL) {
+            js_document_fonts_value = js_create_document_fonts_object();
+        }
+        return js_document_fonts_value;
     }
 
     // compatMode

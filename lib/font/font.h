@@ -161,6 +161,10 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
 // use this when you already have glyph indices from font_get_glyph_index().
 float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_t right_index);
 
+// get the x-advance adjustment from the OpenType 'halt' feature for a codepoint.
+// returns CSS pixels, or 0 if the font has no matching adjustment.
+float font_get_halt_adjustment(FontHandle* handle, uint32_t codepoint);
+
 // ============================================================================
 // Glyph Rasterization — bitmap rendering for display
 // ============================================================================

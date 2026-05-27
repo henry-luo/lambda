@@ -1,12 +1,13 @@
 /**
  * Lambda Unified Font Module — GPOS Table Parser
  *
- * Parses OpenType GPOS PairAdjustment (type 2) lookups for kerning.
+ * Parses OpenType GPOS PairAdjustment (type 2) lookups for kerning and
+ * SingleAdjustment (type 1) lookups from the 'halt' feature for CJK spacing.
  * Supports PairPos Format 1 (individual pair sets), Format 2 (class-based),
  * and Extension lookups (type 9) wrapping PairPos.
  *
- * Only extracts XAdvance from value records (the kern adjustment).
- * Other GPOS lookup types (SingleAdj, MarkBase, etc.) are skipped.
+ * Only extracts XAdvance from value records. Other GPOS lookup types
+ * (MarkBase, ContextPos, etc.) are skipped.
  *
  * Reference: OpenType spec §7.2 — GPOS Table
  *
@@ -152,11 +153,20 @@ typedef struct {
     uint32_t data_len;                  // available bytes from subtable start
 } GposPairSub;
 
+typedef struct {
+    uint16_t format;                    // 1 or 2
+    const uint8_t* data;                // start of SinglePos subtable
+    uint32_t data_len;                  // available bytes from subtable start
+} GposSingleSub;
+
 #define GPOS_MAX_PAIR_SUBS 64
+#define GPOS_MAX_SINGLE_SUBS 64
 
 struct GposTable {
     GposPairSub subs[GPOS_MAX_PAIR_SUBS];
     int         num_subs;
+    GposSingleSub halt_subs[GPOS_MAX_SINGLE_SUBS];
+    int         num_halt_subs;
     const uint8_t* gpos_data;           // raw GPOS table base
     uint32_t    gpos_len;               // raw GPOS table length
 };
@@ -204,6 +214,50 @@ static void collect_pairpos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_
     }
 }
 
+// collect SinglePos subtables from a single lookup
+static void collect_singlepos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_len,
+                                          uint32_t lookup_abs, GposTable* out) {
+    if (lookup_abs + 6 > gpos_len) return;
+    uint16_t lookup_type = rd16(gpos_data + lookup_abs);
+    uint16_t lookup_flag = rd16(gpos_data + lookup_abs + 2);
+    (void)lookup_flag;
+    uint16_t subtable_count = rd16(gpos_data + lookup_abs + 4);
+
+    for (int si = 0; si < subtable_count && out->num_halt_subs < GPOS_MAX_SINGLE_SUBS; si++) {
+        if (lookup_abs + 6 + (uint32_t)(si + 1) * 2 > gpos_len) break;
+        uint16_t st_off = rd16(gpos_data + lookup_abs + 6 + si * 2);
+        uint32_t abs_st = lookup_abs + st_off;
+        uint16_t actual_type = lookup_type;
+
+        if (actual_type == 9) {
+            // Extension lookup — resolve to actual subtable
+            if (abs_st + 8 > gpos_len) continue;
+            uint16_t ext_format = rd16(gpos_data + abs_st);
+            uint16_t ext_type   = rd16(gpos_data + abs_st + 2);
+            uint32_t ext_off    = rd32(gpos_data + abs_st + 4);
+            if (ext_format != 1 || ext_type != 1) continue;
+            abs_st = abs_st + ext_off;
+            if (abs_st + 2 > gpos_len) continue;
+            actual_type = 1;
+        }
+
+        if (actual_type != 1) continue;
+        if (abs_st + 2 > gpos_len) continue;
+
+        uint16_t format = rd16(gpos_data + abs_st);
+        if (format != 1 && format != 2) continue;
+
+        GposSingleSub* sub = &out->halt_subs[out->num_halt_subs++];
+        sub->format   = format;
+        sub->data     = gpos_data + abs_st;
+        sub->data_len = gpos_len - abs_st;
+    }
+}
+
+static bool feature_tag_is_halt(const uint8_t* tag) {
+    return tag[0] == 'h' && tag[1] == 'a' && tag[2] == 'l' && tag[3] == 't';
+}
+
 GposTable* font_gpos_parse(FontTables* tables, void* pool) {
     if (!tables || !pool) return NULL;
 
@@ -219,7 +273,7 @@ GposTable* font_gpos_parse(FontTables* tables, void* pool) {
     uint16_t script_off = rd16(gpos_data + 4);
     uint16_t feat_off   = rd16(gpos_data + 6);
     uint16_t lookup_off = rd16(gpos_data + 8);
-    (void)script_off; (void)feat_off;
+    (void)script_off;
 
     if ((uint32_t)lookup_off + 2 > gpos_len) return NULL;
 
@@ -246,12 +300,41 @@ GposTable* font_gpos_parse(FontTables* tables, void* pool) {
         }
     }
 
-    if (gpos->num_subs == 0) {
-        // no PairPos data found
+    // collect SinglePos lookups for the 'halt' feature. CSS text-spacing-trim
+    // relies on this half-width punctuation adjustment in the WPT CJK fonts.
+    if ((uint32_t)feat_off + 2 <= gpos_len) {
+        uint16_t feature_count = rd16(gpos_data + feat_off);
+        if ((uint32_t)feat_off + 2 + (uint32_t)feature_count * 6 <= gpos_len) {
+            for (int fi = 0; fi < feature_count && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS; fi++) {
+                uint32_t feature_rec = (uint32_t)feat_off + 2 + (uint32_t)fi * 6;
+                if (!feature_tag_is_halt(gpos_data + feature_rec)) continue;
+                uint16_t feature_table_off = rd16(gpos_data + feature_rec + 4);
+                uint32_t feature_abs = (uint32_t)feat_off + feature_table_off;
+                if (feature_abs + 4 > gpos_len) continue;
+                uint16_t lookup_index_count = rd16(gpos_data + feature_abs + 2);
+                if (feature_abs + 4 + (uint32_t)lookup_index_count * 2 > gpos_len) continue;
+                for (int li = 0; li < lookup_index_count && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS; li++) {
+                    uint16_t lookup_index = rd16(gpos_data + feature_abs + 4 + (uint32_t)li * 2);
+                    if (lookup_index >= lookup_count) continue;
+                    uint16_t lo = rd16(gpos_data + lookup_off + 2 + (uint32_t)lookup_index * 2);
+                    uint32_t abs_lo = (uint32_t)lookup_off + lo;
+                    if (abs_lo + 6 > gpos_len) continue;
+                    uint16_t ltype = rd16(gpos_data + abs_lo);
+                    if (ltype == 1 || ltype == 9) {
+                        collect_singlepos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
+                    }
+                }
+            }
+        }
+    }
+
+    if (gpos->num_subs == 0 && gpos->num_halt_subs == 0) {
+        // no supported GPOS data found
         return NULL;
     }
 
-    log_debug("GPOS parsed: %d PairPos subtables", gpos->num_subs);
+    log_debug("GPOS parsed: %d PairPos subtables, %d halt SinglePos subtables",
+              gpos->num_subs, gpos->num_halt_subs);
     return gpos;
 }
 
@@ -359,6 +442,47 @@ int16_t gpos_get_kern(GposTable* gpos, uint16_t left_glyph, uint16_t right_glyph
     return 0;
 }
 
+static int16_t singlepos_lookup(const GposSingleSub* sub, uint16_t glyph_id) {
+    const uint8_t* d = sub->data;
+    uint32_t len = sub->data_len;
+    if (len < 6) return 0;
+
+    uint16_t cov_off = rd16(d + 2);
+    uint16_t vf = rd16(d + 4);
+    int vr_size = value_record_size(vf);
+
+    if ((uint32_t)cov_off >= len) return 0;
+    int cov_idx = coverage_lookup(d + cov_off, len - cov_off, glyph_id);
+    if (cov_idx < 0) return 0;
+
+    if (sub->format == 1) {
+        if (6 + (uint32_t)vr_size > len) return 0;
+        return value_record_get_x_advance(d + 6, vf);
+    } else if (sub->format == 2) {
+        if (len < 8) return 0;
+        uint16_t value_count = rd16(d + 6);
+        if (cov_idx >= value_count) return 0;
+        uint32_t value_off = 8 + (uint32_t)cov_idx * (uint32_t)vr_size;
+        if (value_off + (uint32_t)vr_size > len) return 0;
+        return value_record_get_x_advance(d + value_off, vf);
+    }
+    return 0;
+}
+
+int16_t gpos_get_halt_adjustment(GposTable* gpos, uint16_t glyph_id) {
+    if (!gpos) return 0;
+
+    for (int i = 0; i < gpos->num_halt_subs; i++) {
+        int16_t val = singlepos_lookup(&gpos->halt_subs[i], glyph_id);
+        if (val != 0) return val;
+    }
+    return 0;
+}
+
 bool gpos_has_kerning(GposTable* gpos) {
     return gpos && gpos->num_subs > 0;
+}
+
+bool gpos_has_halt_adjustment(GposTable* gpos) {
+    return gpos && gpos->num_halt_subs > 0;
 }
