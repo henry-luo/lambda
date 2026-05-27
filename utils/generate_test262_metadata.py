@@ -2,7 +2,7 @@
 """Generate test262 metadata cache for the GTest runner.
 
 Scans all .js test files under ref/test262/test/, extracts YAML frontmatter
-metadata, and writes a TSV cache to temp/test262_metadata.tsv.
+metadata, and writes a TSV cache to test/js262/test262_metadata.tsv.
 
 The GTest runner (test_js_test262_gtest.cpp) loads this cache to skip
 per-file I/O during Phase 1 (metadata parsing).
@@ -15,7 +15,7 @@ import re
 import sys
 
 TEST262_ROOT = "ref/test262"
-OUTPUT_FILE = "temp/test262_metadata.tsv"
+OUTPUT_FILE = "test/js262/test262_metadata.tsv"
 
 
 def parse_metadata(source):

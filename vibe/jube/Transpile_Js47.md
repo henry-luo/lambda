@@ -42,7 +42,7 @@ before source assembly.
 
 Local evidence:
 
-- `temp/test262_metadata.tsv`
+- `test/js262/test262_metadata.tsv`
 - `test/js262/test262_baseline.txt`
 - `test/js262/t262_partial.txt`
 - `test/test_js_test262_gtest.cpp`
