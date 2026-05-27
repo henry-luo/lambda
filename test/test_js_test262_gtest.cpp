@@ -373,7 +373,6 @@ static Test262Metadata parse_metadata(const std::string& source) {
                         meta.includes.push_back(val.substr(vs, ve - vs + 1));
                     scan = nl + 1;
                 }
-                bool gate_ok = true;
             }
         }
     }
@@ -1101,7 +1100,9 @@ struct BatchResult {
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
+static const size_t T262_ASYNC_BATCH_CHUNK_SIZE = 50;
 static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
+static size_t g_t262_async_chunk_size = T262_ASYNC_BATCH_CHUNK_SIZE;
 
 struct SubBatch { size_t start; size_t end; bool native; size_t group; };
 
@@ -1771,6 +1772,8 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
             total_tests, skipped, batched, passing.size(), failed);
     fprintf(f, "# Runtime: %.1fs total (prep %.1fs + exec %.1fs)\n",
             g_total_secs, g_prep_secs, g_exec_secs);
+    fprintf(f, "# Batch size: batched %zu tests/process; async %zu test/process\n",
+            T262_BATCH_CHUNK_SIZE, g_t262_async_chunk_size);
     fprintf(f, "# Phase timing: prepare %.1fs\n", g_prep_secs);
     fprintf(f, "# Phase timing: batch-execute-batched %.1fs\n", g_phase_batch_batched_secs);
     fprintf(f, "# Phase timing: batch-execute-non-batched %.1fs\n", g_phase_batch_non_batched_secs);
@@ -2346,7 +2349,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     size_t native_batch_count = batches.size();
     for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
         const auto& group_indices = js_groups[group_index].indices;
-        size_t group_chunk_size = js_groups[group_index].is_async ? 1 : chunk_size;
+        size_t group_chunk_size = js_groups[group_index].is_async ? g_t262_async_chunk_size : chunk_size;
         for (size_t s = 0; s < group_indices.size(); s += group_chunk_size) {
             size_t e = std::min(s + group_chunk_size, group_indices.size());
             batches.push_back({s, e, false, group_index});
@@ -2414,8 +2417,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     std::atomic<size_t> next_batch{0};
     size_t target_workers = t262_target_worker_count();
     size_t num_workers = std::min(target_workers, batches.size());
-    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, %s)\n",
+    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, async_chunk=%zu, %s)\n",
             num_workers, target_workers, batches.size(),
+            g_t262_async_chunk_size,
             g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs");
     std::vector<std::thread> threads;
     for (size_t w = 0; w < num_workers; w++) {
@@ -2463,8 +2467,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 // Execute: fork/exec with stdin from manifest, read stdout via pipe
                 auto t0 = std::chrono::steady_clock::now();
                 size_t batch_num_tests = batches[i].end - batches[i].start;
-                bool is_non_batched = batch_num_tests == 1 ||
-                    (!batches[i].native && js_groups[batches[i].group].is_async);
+                bool is_non_batched = batch_num_tests == 1;
                 {
                     std::lock_guard<std::mutex> lock(g_progress_mutex);
                     fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
@@ -3522,7 +3525,6 @@ public:
 
     void OnTestProgramEnd(const testing::UnitTest& unit_test) override {
         int total = passed + failed + partial;
-        int real_failed = failed - batch_lost;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
         printf("\n");
         printf("╔══════════════════════════════════════════════════╗\n");
@@ -3641,6 +3643,7 @@ static void print_test262_help(const char* program) {
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
     printf("  --run-async               Permit async-flagged tests from an explicit allowlist.\n");
     printf("  --async-list=<path>       Async allowlist (defaults to --batch-file when present).\n");
+    printf("  --async-chunk-size=<n>    Async tests per process, clamped to 1..50 (default: 50).\n");
     printf("  --diagnose                Run diagnose list and pass --diagnose to Lambda.\n");
     printf("  --diagnose-list=<path>    Override diagnose list path (default: test/js262/diagnose_list.txt).\n");
     printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
@@ -3736,6 +3739,16 @@ int main(int argc, char** argv) {
         }
         if (strncmp(argv[i], "--async-list=", 13) == 0) {
             g_async_list_file = argv[i] + 13;
+        }
+        if (strncmp(argv[i], "--async-chunk-size=", 19) == 0) {
+            int requested_chunk = atoi(argv[i] + 19);
+            if (requested_chunk < 1) {
+                requested_chunk = 1;
+            }
+            if ((size_t)requested_chunk > T262_BATCH_CHUNK_SIZE) {
+                requested_chunk = (int)T262_BATCH_CHUNK_SIZE;
+            }
+            g_t262_async_chunk_size = (size_t)requested_chunk;
         }
         if (strncmp(argv[i], "--write-failures=", 17) == 0) {
             g_write_failures_path = argv[i] + 17;
