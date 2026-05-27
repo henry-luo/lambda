@@ -2932,6 +2932,16 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     JsForOfNode* for_of = (JsForOfNode*)alloc_js_ast_node(
         tp, is_for_of ? JS_AST_NODE_FOR_OF_STATEMENT : JS_AST_NODE_FOR_IN_STATEMENT,
         for_node, sizeof(JsForOfNode));
+    if (is_for_of) {
+        uint32_t child_count = ts_node_child_count(for_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(for_node, i);
+            if (strcmp(ts_node_type(child), "await") == 0) {
+                for_of->is_await = true;
+                break;
+            }
+        }
+    }
 
     // Get the variable declaration (left side)
     // Tree-sitter structure: for (const x of arr) → "left" field contains the variable

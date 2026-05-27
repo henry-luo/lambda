@@ -555,6 +555,7 @@ typedef struct JsForOfNode {
     JsAstNode* right;               // Iterable expression
     JsAstNode* body;                // Loop body
     int kind;                       // Variable kind (var/let/const)
+    bool is_await;                  // true for `for await (... of ...)`
 } JsForOfNode;
 
 // Reuse same struct for for...in

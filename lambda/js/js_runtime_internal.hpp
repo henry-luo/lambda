@@ -455,6 +455,9 @@ enum JsBuiltinId {
     JS_BUILTIN_GENERATOR_NEXT,
     JS_BUILTIN_GENERATOR_RETURN,
     JS_BUILTIN_GENERATOR_THROW,
+    JS_BUILTIN_ASYNC_GENERATOR_NEXT,
+    JS_BUILTIN_ASYNC_GENERATOR_RETURN,
+    JS_BUILTIN_ASYNC_GENERATOR_THROW,
     // Iterator protocol: [Symbol.iterator]() { return this; }
     JS_BUILTIN_ITER_IDENTITY, // returns this_val (for iterators that are their own iterable)
     // Proxy static methods

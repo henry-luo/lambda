@@ -7177,6 +7177,7 @@ static Item js_get_map_iterator_proto();
 static Item js_get_set_iterator_proto();
 static Item js_get_regexp_string_iterator_proto();
 extern "C" bool js_is_generator(Item obj);
+extern "C" bool js_is_async_generator(Item obj);
 extern "C" Item js_generator_next(Item generator, Item input);
 extern "C" Item js_generator_return(Item generator, Item value);
 extern "C" Item js_generator_throw(Item generator, Item error);
@@ -10833,18 +10834,39 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_reflect_set_prototype_of(arg0, arg1);
     }
     case JS_BUILTIN_GENERATOR_NEXT:
-        if (!js_is_generator(this_val)) {
+        if (!js_is_generator(this_val) || js_is_async_generator(this_val)) {
             return js_throw_type_error("Generator.prototype.next called on incompatible receiver");
         }
         return js_generator_next(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_GENERATOR_RETURN:
-        if (!js_is_generator(this_val)) {
+        if (!js_is_generator(this_val) || js_is_async_generator(this_val)) {
             return js_throw_type_error("Generator.prototype.return called on incompatible receiver");
         }
         return js_generator_return(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_GENERATOR_THROW:
-        if (!js_is_generator(this_val)) {
+        if (!js_is_generator(this_val) || js_is_async_generator(this_val)) {
             return js_throw_type_error("Generator.prototype.throw called on incompatible receiver");
+        }
+        return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
+    case JS_BUILTIN_ASYNC_GENERATOR_NEXT:
+        if (!js_is_async_generator(this_val)) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.next called on incompatible receiver"))};
+            return js_promise_reject(js_new_error_with_name(tn, msg));
+        }
+        return js_generator_next(this_val, arg_count > 0 ? arg0 : make_js_undefined());
+    case JS_BUILTIN_ASYNC_GENERATOR_RETURN:
+        if (!js_is_async_generator(this_val)) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.return called on incompatible receiver"))};
+            return js_promise_reject(js_new_error_with_name(tn, msg));
+        }
+        return js_generator_return(this_val, arg_count > 0 ? arg0 : make_js_undefined());
+    case JS_BUILTIN_ASYNC_GENERATOR_THROW:
+        if (!js_is_async_generator(this_val)) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("AsyncGenerator.prototype.throw called on incompatible receiver"))};
+            return js_promise_reject(js_new_error_with_name(tn, msg));
         }
         return js_generator_throw(this_val, arg_count > 0 ? arg0 : make_js_undefined());
     case JS_BUILTIN_ATOMICS_ADD:
@@ -25486,9 +25508,9 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
     Item proto = js_new_object();
     js_set_prototype(proto, is_async ? js_get_async_iterator_proto() : js_get_iterator_proto());
     struct { const char* name; int len; int bid; } methods[] = {
-        {"next", 4, JS_BUILTIN_GENERATOR_NEXT},
-        {"return", 6, JS_BUILTIN_GENERATOR_RETURN},
-        {"throw", 5, JS_BUILTIN_GENERATOR_THROW},
+        {"next", 4, is_async ? JS_BUILTIN_ASYNC_GENERATOR_NEXT : JS_BUILTIN_GENERATOR_NEXT},
+        {"return", 6, is_async ? JS_BUILTIN_ASYNC_GENERATOR_RETURN : JS_BUILTIN_GENERATOR_RETURN},
+        {"throw", 5, is_async ? JS_BUILTIN_ASYNC_GENERATOR_THROW : JS_BUILTIN_GENERATOR_THROW},
         {NULL, 0, 0}
     };
     for (int i = 0; methods[i].name; i++) {
@@ -26091,6 +26113,11 @@ extern "C" bool js_is_generator(Item obj) {
     String* gen_key = heap_create_name("__gen_idx", 9);
     Item idx_item = js_property_get(obj, (Item){.item = s2it(gen_key)});
     return get_type_id(idx_item) == LMD_TYPE_INT;
+}
+
+extern "C" bool js_is_async_generator(Item obj) {
+    JsGenerator* gen = js_get_generator(obj);
+    return gen && gen->is_async;
 }
 
 // =============================================================================

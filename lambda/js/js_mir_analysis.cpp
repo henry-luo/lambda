@@ -388,7 +388,8 @@ int jm_count_awaits(JsAstNode* node) {
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT: {
         JsForOfNode* fo = (JsForOfNode*)node;
-        return jm_count_awaits(fo->left) + jm_count_awaits(fo->right) + jm_count_awaits(fo->body);
+        int implicit_await = (node->node_type == JS_AST_NODE_FOR_OF_STATEMENT && fo->is_await) ? 1 : 0;
+        return implicit_await + jm_count_awaits(fo->left) + jm_count_awaits(fo->right) + jm_count_awaits(fo->body);
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* sw = (JsSwitchNode*)node;

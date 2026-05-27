@@ -3228,6 +3228,127 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
 
+static MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val) {
+    if (mt->in_generator && mt->in_async) {
+        int next_state = ++mt->gen_yield_index;
+        if (next_state > mt->gen_yield_count || next_state >= 64) {
+            log_error("js-mir: implicit await index %d exceeds allocated state labels (%d)",
+                next_state, mt->gen_yield_count);
+            return promise_val;
+        }
+
+        MIR_label_t suspend_label = jm_new_label(mt);
+        MIR_label_t after_await_label = jm_new_label(mt);
+
+        MIR_reg_t must_suspend = jm_call_1(mt, "js_async_must_suspend", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+
+        {
+            int d = mt->try_ctx_depth - 1;
+            while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
+            if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
+                MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
+                    MIR_new_reg_op(mt->ctx, exc)));
+            }
+        }
+
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, suspend_label),
+            MIR_new_reg_op(mt->ctx, must_suspend)));
+
+        MIR_reg_t await_result = jm_new_reg(mt, "await_res", MIR_T_I64);
+        MIR_reg_t fast_val = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, await_result),
+            MIR_new_reg_op(mt->ctx, fast_val)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, after_await_label)));
+
+        jm_emit_label(mt, suspend_label);
+        for (int sd = 1; sd <= mt->scope_depth; sd++) {
+            if (!mt->var_scopes[sd]) continue;
+            size_t iter = 0; void* item;
+            while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                if (e->var.env_slot >= 0 && e->var.from_env) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, e->var.reg)));
+                }
+            }
+        }
+        MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
+        MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, await_target),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, suspend_result)));
+
+        jm_emit_label(mt, mt->gen_state_labels[next_state]);
+        for (int sd = 1; sd <= mt->scope_depth; sd++) {
+            if (!mt->var_scopes[sd]) continue;
+            size_t iter = 0; void* item;
+            while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                if (e->var.env_slot >= 0 && e->var.from_env) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, e->var.reg),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                }
+            }
+        }
+        for (int td = 0; td < mt->try_ctx_depth; td++) {
+            JsTryContext* tc = &mt->try_ctx_stack[td];
+            if (tc->has_return_reg) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+            if (tc->return_val_reg) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+            if (tc->saved_exc_flag_reg) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->saved_exc_flag_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+            if (tc->saved_exc_val_reg) {
+                MIR_reg_t null_val = jm_emit_null(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->saved_exc_val_reg),
+                    MIR_new_reg_op(mt->ctx, null_val)));
+            }
+        }
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, await_result),
+            MIR_new_reg_op(mt->ctx, mt->gen_input_reg)));
+        jm_scope_env_reload_vars(mt);
+        jm_env_reload_shared_captures(mt);
+
+        {
+            int d = mt->try_ctx_depth - 1;
+            while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
+            if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
+                MIR_reg_t resume_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
+                    MIR_new_reg_op(mt->ctx, resume_exc)));
+            }
+        }
+
+        jm_emit_label(mt, after_await_label);
+        return await_result;
+    }
+
+    return jm_call_1(mt, "js_await_sync", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+}
+
 // for-of / for-in statement
 // Uses fn_len + js_property_access for arrays, or js_object_keys for objects
 void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
@@ -3285,6 +3406,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Create loop variable (for simple case) or temp var (for destructuring)
     MIR_reg_t loop_var;
     bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
+    bool is_for_await = !is_for_in && fo->is_await;
     bool is_let_const_loop = false;
     bool is_const_loop = false;
     if (fo->kind == 1 || fo->kind == 2) {  // 1=let, 2=const (from fo->kind, not fo->left type)
@@ -3761,6 +3883,12 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_reg_t is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, is_done)));
+    if (is_for_await) {
+        step_result = jm_emit_await_value_reg(mt, step_result);
+        MIR_reg_t await_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
+            MIR_new_reg_op(mt->ctx, await_exc)));
+    }
 
     // Assign current value to loop variable
     if (lhs_call_target) {
