@@ -3069,7 +3069,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // uninserted label, causing a NULL label crash during MIR inlining.
                 if (mt->func_except_label != 0) {
                     jm_emit_label(mt, mt->func_except_label);
-                    MIR_reg_t exc_ret = jm_emit_null(mt);
+                    MIR_reg_t exc_ret;
+                    if (fn->is_async) {
+                        MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                        exc_ret = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                    } else {
+                        exc_ret = jm_emit_null(mt);
+                    }
                     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
                 }
                 // Emit async catch/end labels for arrow-body async functions.
@@ -3152,7 +3159,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // return null so the caller's exception check picks it up.
     if (mt->func_except_label != 0) {
         jm_emit_label(mt, mt->func_except_label);
-        MIR_reg_t exc_ret = jm_emit_null(mt);
+        MIR_reg_t exc_ret;
+        if (fn->is_async) {
+            MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+            exc_ret = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+        } else {
+            exc_ret = jm_emit_null(mt);
+        }
         jm_emit_eval_local_pop_if_needed(mt);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
     }

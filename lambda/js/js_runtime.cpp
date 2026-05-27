@@ -27148,6 +27148,9 @@ static void js_promise_resolve_with_value(JsPromise* p, Item value) {
 // Called with 3 bound args: handler, result, next_promise_item.
 // Calls handler(result), then settles next_promise with the return value.
 static Item js_promise_microtask_run(Item handler, Item result, Item next_promise_item) {
+    if (js_check_exception()) {
+        js_clear_exception();
+    }
     Item args[1] = {result};
     Item handler_result = js_call_function(handler, ItemNull, args, 1);
 
@@ -27156,6 +27159,9 @@ static Item js_promise_microtask_run(Item handler, Item result, Item next_promis
         Item error = js_clear_exception();
         if (next) js_promise_settle(next, JS_PROMISE_REJECTED, error);
         return ItemNull;
+    }
+    if (handler_result.item == 0) {
+        handler_result = make_js_undefined();
     }
     if (next) {
         js_promise_resolve_with_value(next, handler_result);
@@ -27994,6 +28000,9 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (next_state == -1) {
         // Done — resolve the async function promise with the shared Promise
         // Resolution Procedure so returned promises/thenables are adopted.
+        if (js_check_exception()) {
+            js_clear_exception();
+        }
         js_promise_resolve_with_value(&js_promises[ctx->promise_idx], value);
     } else if (next_state == -2) {
         // Rejected — reject the async function's promise

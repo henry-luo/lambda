@@ -4011,8 +4011,24 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         val = jm_emit_undefined(mt);
     }
 
-    // v15: In generator state machine, return [value, -1] to signal done
+    // v15: In generator/async state machines, return [value, -1] to signal done.
+    // If the return is inside a try/finally, delay it so the finally body runs
+    // and can override the completion.
     if (mt->in_generator) {
+        int return_d = mt->try_ctx_depth - 1;
+        while (return_d >= 0 && mt->try_ctx_stack[return_d].yield_state_only) return_d--;
+        if (return_d >= 0 && mt->try_ctx_stack[return_d].has_finally) {
+            JsTryContext* tc = &mt->try_ctx_stack[return_d];
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                MIR_new_reg_op(mt->ctx, val)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, tc->finally_label)));
+            return;
+        }
         MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
@@ -5371,8 +5387,16 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
             MIR_new_label_op(mt->ctx, no_ret_label),
             MIR_new_reg_op(mt->ctx, has_return_reg)));
-        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_reg_op(mt->ctx, return_val_reg)));
+        if (mt->in_generator) {
+            MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_reg_op(mt->ctx, done_result)));
+        } else {
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_reg_op(mt->ctx, return_val_reg)));
+        }
         jm_emit_label(mt, no_ret_label);
 
         // If exception is still pending (try/finally without catch, or re-throw),
