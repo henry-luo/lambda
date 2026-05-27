@@ -16,7 +16,9 @@
 //      for transitional/manual contexts. The live render path sets PaintList.
 //
 // rc_paint_active() selects mode 1; rc_lower_pending() flushes the single
-// recorded command and rewinds the reusable PaintList.
+// recorded command and rewinds the reusable PaintList. Fragment lowering skips
+// whole-list stack validation because paired display-list effects can span
+// multiple immediate flushes while preserving paint order.
 // ---------------------------------------------------------------------------
 
 static inline bool rc_paint_active(RenderContext* rdcon) {
@@ -28,7 +30,7 @@ static inline bool rc_dl_active(RenderContext* rdcon) {
 }
 
 static inline void rc_lower_pending(RenderContext* rdcon) {
-    paint_ir_lower_raster(rdcon->paint_list, rdcon->dl);
+    paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
     paint_list_clear(rdcon->paint_list);
 }
 

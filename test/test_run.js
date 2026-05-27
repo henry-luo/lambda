@@ -190,7 +190,7 @@ function getSuiteDisplayName(config, suiteKey) {
         'lambda': '🐑 Lambda Runtime Tests',
         'lambda-std': '🧪 Lambda Standard Tests',
         'validator': '🔍 Validator Tests',
-        'radiant': '🎨 Radiant Layout Engine Tests',
+        'radiant': '🎨 Radiant Tests',
         'unknown': '🧪 Other Tests',
     };
     return fallback[suiteKey] || `🧪 ${suiteKey} Tests`;

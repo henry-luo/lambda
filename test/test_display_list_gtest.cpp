@@ -943,6 +943,18 @@ TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, RasterEffectFragmentsMatchDirect) {
+    paint_save_backdrop(&pl, 2, 3, 20, 30);
+    paint_ir_lower_raster_fragment(&pl, &lowered);
+    paint_list_clear(&pl);
+    paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true);
+    paint_ir_lower_raster_fragment(&pl, &lowered);
+
+    dl_save_backdrop(&direct, 2, 3, 20, 30);
+    dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
+    expect_lists_equal(lowered, direct);
+}
+
 TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
     float clip_params[8] = {1.0f, 2.0f, 30.0f, 40.0f, 4.0f, 5.0f, 6.0f, 7.0f};
     float exclude_params[8] = {8.0f, 9.0f, 50.0f, 60.0f, 10.0f, 11.0f, 12.0f, 13.0f};

@@ -520,6 +520,7 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run);
 // ---------------------------------------------------------------------------
 
 void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl);
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl);
 
 // ---------------------------------------------------------------------------
 // SVG lowering: PaintIR -> SVG fragment

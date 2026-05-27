@@ -836,9 +836,8 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
 // Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------
 
-void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
+static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl) {
     if (!pl || !dl) return;
-    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_raster")) return;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
@@ -1030,6 +1029,16 @@ void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
             break;
         }
     }
+}
+
+void paint_ir_lower_raster(const PaintList* pl, DisplayList* dl) {
+    if (!pl || !dl) return;
+    if (!paint_ir_validate_or_log(pl, "paint_ir_lower_raster")) return;
+    paint_ir_lower_raster_internal(pl, dl);
+}
+
+void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl) {
+    paint_ir_lower_raster_internal(pl, dl);
 }
 
 // ---------------------------------------------------------------------------

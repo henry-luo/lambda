@@ -158,7 +158,7 @@ static inline bool svg_paint_active(SvgRenderContext* ctx) {
 }
 
 static inline void svg_lower_pending(SvgRenderContext* ctx) {
-    paint_ir_lower_raster(ctx->paint_list, ctx->dl);
+    paint_ir_lower_raster_fragment(ctx->paint_list, ctx->dl);
     paint_list_clear(ctx->paint_list);
 }
 
@@ -3033,7 +3033,20 @@ static bool render_svg_text_with_radiant_glyphs(SvgRenderContext* ctx, const cha
         if (!glyph) continue;
         float glyph_advance = glyph->advance_x;
         LoadedGlyph* drawn_glyph = font_load_glyph(draw_handle, &draw_style, codepoint, true);
-        if (!drawn_glyph) continue;
+        if (!drawn_glyph) {
+            pen_x += glyph_advance * advance_scale;
+            local_pen_x += glyph_advance * advance_scale;
+            continue;
+        }
+        bool has_bitmap = drawn_glyph->bitmap.buffer &&
+            drawn_glyph->bitmap.width > 0 &&
+            drawn_glyph->bitmap.height > 0 &&
+            drawn_glyph->bitmap.pitch > 0;
+        if (!has_bitmap) {
+            pen_x += glyph_advance * advance_scale;
+            local_pen_x += glyph_advance * advance_scale;
+            continue;
+        }
         if (rotated_text) {
             float gx = local_pen_x + drawn_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
             float gy = base_y - drawn_glyph->bitmap.bearing_y / oversample;
@@ -3244,11 +3257,17 @@ static void render_svg_text(SvgRenderContext* ctx, Element* elem) {
                               text_content, text_length, measured_width, text_scale_x);
                 }
             }
-                bool rendered_with_radiant = false;
-                if (anchor_x == 0.0f) {
+            bool rendered_with_radiant = false;
+            if (anchor_x >= 0.0f) {
+                float anchor_adjust = 0.0f;
+                if (anchor_x > 0.0f) {
+                    float anchor_width = text_length > 0.0f ? text_length :
+                        measure_svg_text_width(text_content, font_size, ctx->font_ctx, metrics_family, font_weight);
+                    anchor_adjust = anchor_width * anchor_x;
+                }
                 rendered_with_radiant = render_svg_text_with_radiant_glyphs(ctx, text_content,
                     metrics_family, font_size, font_weight, font_slant, default_fill, &m,
-                    base_x, base_y, text_length, spacing_and_glyphs && !allow_embedded_font);
+                    base_x - anchor_adjust, base_y, text_length, spacing_and_glyphs && !allow_embedded_font);
             }
             Tvg_Paint text = nullptr;
             if (!rendered_with_radiant) {
