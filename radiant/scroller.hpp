@@ -6,7 +6,7 @@ struct EventContext;
 
 void scroll_config_init(int pixel_ratio);
 
-void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     DocState* state, View* view,
     bool show_hz_scroll = true, bool show_vt_scroll = true);

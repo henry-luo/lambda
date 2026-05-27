@@ -1492,6 +1492,40 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
+        CssDeclaration* letter_spacing_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_LETTER_SPACING);
+        if (letter_spacing_decl && letter_spacing_decl->value) {
+            const CssValue* ls_val = letter_spacing_decl->value;
+            if (ls_val->type == CSS_VALUE_TYPE_LENGTH) {
+                temp_font_prop->letter_spacing =
+                    resolve_length_value(lycon, CSS_PROPERTY_LETTER_SPACING, ls_val);
+                need_font_setup = true;
+            } else if (ls_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                       ls_val->data.keyword == CSS_VALUE_NORMAL) {
+                temp_font_prop->letter_spacing = 0.0f;
+                need_font_setup = true;
+            }
+        } else if (lycon->font.style) {
+            temp_font_prop->letter_spacing = lycon->font.style->letter_spacing;
+        }
+
+        CssDeclaration* word_spacing_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_WORD_SPACING);
+        if (word_spacing_decl && word_spacing_decl->value) {
+            const CssValue* ws_val = word_spacing_decl->value;
+            if (ws_val->type == CSS_VALUE_TYPE_LENGTH) {
+                temp_font_prop->word_spacing =
+                    resolve_length_value(lycon, CSS_PROPERTY_WORD_SPACING, ws_val);
+                need_font_setup = true;
+            } else if (ws_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                       ws_val->data.keyword == CSS_VALUE_NORMAL) {
+                temp_font_prop->word_spacing = 0.0f;
+                need_font_setup = true;
+            }
+        } else if (lycon->font.style) {
+            temp_font_prop->word_spacing = lycon->font.style->word_spacing;
+        }
+
         if (need_font_setup) {
             // Ensure font-family is set (use parent's if not changed)
             if (!temp_font_prop->family && lycon->font.style) {

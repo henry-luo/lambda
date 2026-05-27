@@ -3861,7 +3861,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     (!block->blk || block->blk->given_width < 0)) {
                     float max_right = 0;
                     for (View* child = block->first_child; child; child = child->next_sibling) {
-                        if (child->view_type == RDT_VIEW_BLOCK ||
+                        if (child->view_type == RDT_VIEW_TEXT) {
+                            float right = child->x + child->width;
+                            if (right > max_right) max_right = right;
+                        }
+                        else if (child->view_type == RDT_VIEW_BLOCK ||
                             child->view_type == RDT_VIEW_INLINE_BLOCK ||
                             child->view_type == RDT_VIEW_LIST_ITEM) {
                             ViewElement* item = lam::view_as_element(child);

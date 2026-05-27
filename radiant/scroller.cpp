@@ -31,7 +31,7 @@ void ScrollPane::reset() {
     state_ref = state;
 }
 
-void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     DocState* state, View* view,
     bool show_hz_scroll, bool show_vt_scroll) {
@@ -48,13 +48,13 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     // clip to visible bounds
     RdtPath* clip_path = rdt_path_new();
     rdt_path_add_rect(clip_path, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
-    rdt_push_clip(vec, clip_path, nullptr);
+    rc_push_clip(rdcon, clip_path, nullptr);
     rdt_path_free(clip_path);
 
     // vertical scrollbar — only render if vertical overflow exists
     if (show_vt_scroll) {
         Color bar_color = {0}; bar_color.r = (uint8_t)sc.BAR_COLOR; bar_color.g = (uint8_t)sc.BAR_COLOR; bar_color.b = (uint8_t)sc.BAR_COLOR; bar_color.a = 255;
-        rdt_fill_rect(vec, view_x + view_width - sc.SCROLLBAR_SIZE,
+        rc_fill_rect(rdcon, view_x + view_width - sc.SCROLLBAR_SIZE,
             view_y, sc.SCROLLBAR_SIZE, view_height, bar_color);
         log_debug("v_scrollbar rect: x %f, y %f, wd %f, hg %f",
             view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
@@ -71,7 +71,7 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
             sp->v_handle_height = v_handle_height_phys / scale;
             sp->v_handle_y = v_handle_y_phys / scale;
             float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-            rdt_fill_rounded_rect(vec, v_scroll_x, view_y + v_handle_y_phys,
+            rc_fill_rounded_rect(rdcon, v_scroll_x, view_y + v_handle_y_phys,
                 sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, handle_color);
             log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
                 v_scroll_x, view_y + v_handle_y_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys);
@@ -81,7 +81,7 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
     // horizontal scrollbar — only render if horizontal overflow exists
     if (show_hz_scroll) {
         Color bar_color = {0}; bar_color.r = (uint8_t)sc.BAR_COLOR; bar_color.g = (uint8_t)sc.BAR_COLOR; bar_color.b = (uint8_t)sc.BAR_COLOR; bar_color.a = 255;
-        rdt_fill_rect(vec, view_x,
+        rc_fill_rect(rdcon, view_x,
             view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, bar_color);
         log_debug("h_scrollbar rect: %f, %f, %f, %f",
             view_x, view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE);
@@ -99,12 +99,12 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
             sp->h_handle_width = h_handle_width_phys / scale;
             sp->h_handle_x = h_handle_x_phys / scale;
             float h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-            rdt_fill_rounded_rect(vec, view_x + h_handle_x_phys, h_scroll_y,
+            rc_fill_rounded_rect(rdcon, view_x + h_handle_x_phys, h_scroll_y,
                 h_handle_width_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, handle_color);
         }
     }
 
-    rdt_pop_clip(vec);
+    rc_pop_clip(rdcon);
     log_debug("finished rendering scroller");
 }
 
@@ -177,7 +177,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
         }
         if (block->scroller->pane) {
             DocState* state = block->doc ? block->doc->state : NULL;
-            scrollpane_render(&rdcon->vec, block->scroller->pane, &rect,
+            scrollpane_render(rdcon, block->scroller->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
                 state, static_cast<View*>(block),
                 block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
@@ -357,6 +357,12 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     log_debug("update scroller for block:%s, content_width:%.1f, content_height:%.1f, block_width:%.1f, block_height:%.1f",
         block->node_name(), content_width, content_height, block->width, block->height);
 
+    block->scroller->has_hz_overflow = false;
+    block->scroller->has_vt_overflow = false;
+    block->scroller->has_hz_scroll = false;
+    block->scroller->has_vt_scroll = false;
+    block->scroller->has_clip = false;
+
     // Update scroll pane max values through centralized API.
     if (block->scroller->pane) {
         DocState* state = block->doc ? (DocState*)block->doc->state : nullptr;
@@ -392,7 +398,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
             block->scroller->has_vt_scroll = true;
         }
-        if (block->scroller->has_hz_scroll ||
+        if (block->scroller->has_vt_scroll ||
             block->scroller->overflow_y == CSS_VALUE_CLIP ||
             block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
