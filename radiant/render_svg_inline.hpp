@@ -54,8 +54,8 @@ struct SvgRenderContext {
     Pool* pool;                  // memory pool
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     RdtVector* vec;              // target vector renderer for direct drawing
-    DisplayList* dl;             // display list for deferred rendering (Phase 1, may be nullptr)
-    PaintList* paint_list;       // semantic PaintIR gateway when recording to dl
+    DisplayList* dl;             // required display list target for deferred rendering
+    PaintList* paint_list;       // required PaintIR gateway used before lowering to dl
     const char* source_path;      // source SVG path for resolving nested resources
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
@@ -142,22 +142,24 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
  * @param pixel_ratio Device pixel ratio (for text size adjustment)
  * @param font_ctx Font context for SVG text rendering (may be nullptr)
  * @param base_transform Optional transform to apply to the entire SVG
+ * @param dl Required display-list target
+ * @param paint_list Required PaintIR scratch list used before raster lowering
  */
 void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio = 1.0f,
-                      FontContext* font_ctx = nullptr,
-                      const RdtMatrix* base_transform = nullptr,
-                      DisplayList* dl = nullptr,
-                      const Color* initial_current_color = nullptr,
-                      const Color* initial_fill_color = nullptr,
-                      const char* source_path = nullptr,
-                      float initial_opacity = 1.0f,
-                      bool initial_fill_none = false,
-                      const Color* initial_stroke_color = nullptr,
-                      bool initial_stroke_none = true,
-                      float initial_stroke_width = -1.0f,
-                      PaintList* paint_list = nullptr);
+                      Pool* pool, float pixel_ratio,
+                      FontContext* font_ctx,
+                      const RdtMatrix* base_transform,
+                      DisplayList* dl,
+                      const Color* initial_current_color,
+                      const Color* initial_fill_color,
+                      const char* source_path,
+                      float initial_opacity,
+                      bool initial_fill_none,
+                      const Color* initial_stroke_color,
+                      bool initial_stroke_none,
+                      float initial_stroke_width,
+                      PaintList* paint_list);
 
 /**
  * Render an SVG element tree through DisplayList record/replay into an existing

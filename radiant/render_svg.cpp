@@ -90,6 +90,41 @@ static void svg_color_to_string(Color color, char* result) {
     }
 }
 
+static void svg_append_inline_svg_inherited_attrs(SvgRenderContext* ctx, ViewBlock* block) {
+    if (!block) return;
+
+    InlineProp* in_line = block->in_line;
+    char color[32];
+
+    if (in_line && in_line->has_color) {
+        svg_color_to_string(in_line->color, color);
+        strbuf_append_format(ctx->svg_content, " color=\"%s\"", color);
+    } else {
+        svg_color_to_string(ctx->color, color);
+        strbuf_append_format(ctx->svg_content, " color=\"%s\"", color);
+    }
+    if (in_line && in_line->has_svg_fill) {
+        if (in_line->svg_fill_none) {
+            strbuf_append_str(ctx->svg_content, " fill=\"none\"");
+        } else {
+            svg_color_to_string(in_line->svg_fill_color, color);
+            strbuf_append_format(ctx->svg_content, " fill=\"%s\"", color);
+        }
+    }
+    if (in_line && in_line->has_svg_stroke) {
+        if (in_line->svg_stroke_none) {
+            strbuf_append_str(ctx->svg_content, " stroke=\"none\"");
+        } else {
+            svg_color_to_string(in_line->svg_stroke_color, color);
+            strbuf_append_format(ctx->svg_content, " stroke=\"%s\"", color);
+        }
+    }
+    if (in_line && in_line->has_svg_stroke_width) {
+        strbuf_append_format(ctx->svg_content, " stroke-width=\"%.2f\"",
+                             in_line->svg_stroke_width);
+    }
+}
+
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     // Extract the text content
@@ -732,68 +767,41 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     // Render background gradient (linear or radial)
     if (view->bound->background && view->bound->background->gradient_type != GRADIENT_NONE) {
         BackgroundProp* bg = view->bound->background;
-        Rect gradient_rect = {x, y, width, height};
-        RdtPath* gradient_path = render_path_create_rounded_rect(gradient_rect, nullptr);
-
-        if (gradient_path && bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient && bg->linear_gradient->stop_count >= 2) {
-            LinearGradient* lg = bg->linear_gradient;
-            // CSS angle: 0 = to top, 90 = to right. Convert to direction vector.
-            float angle_rad = lg->angle * (float)M_PI / 180.0f;
-            float dx =  sinf(angle_rad);
-            float dy = -cosf(angle_rad);
-            // Extend from center to bounding-box edges (matches CSS gradient geometry)
-            float half_w = width * 0.5f, half_h = height * 0.5f;
-            float bcx = x + half_w, bcy = y + half_h;
-            float abs_dx = fabsf(dx), abs_dy = fabsf(dy);
-            float dist = (abs_dx * height < abs_dy * width)
-                ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
-                : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
-            float gx1 = bcx - dx * dist, gy1 = bcy - dy * dist;
-            float gx2 = bcx + dx * dist, gy2 = bcy + dy * dist;
-
+        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient &&
+            bg->linear_gradient->stop_count >= 2) {
+            int stop_count = bg->linear_gradient->stop_count;
             RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-                (size_t)lg->stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
-            if (stops) {
-                for (int stop_i = 0; stop_i < lg->stop_count; stop_i++) {
-                    GradientStop* stop = &lg->stops[stop_i];
-                    float pos = stop->position >= 0 ? stop->position
-                                                    : (lg->stop_count > 1 ? (float)stop_i / (lg->stop_count - 1) : 0.0f);
-                    stops[stop_i] = {pos, stop->color.r, stop->color.g,
-                                     stop->color.b, stop->color.a};
-                }
-                paint_fill_linear_gradient(&ctx->paint_list, gradient_path,
-                                           gx1, gy1, gx2, gy2, stops, lg->stop_count,
+                (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            BoundaryLinearGradientPaint gradient = {};
+            if (stops &&
+                render_paint_boundary_build_linear_gradient(view, x, y, stops,
+                                                            stop_count, &gradient)) {
+                paint_fill_linear_gradient(&ctx->paint_list, gradient.path,
+                                           gradient.x1, gradient.y1,
+                                           gradient.x2, gradient.y2,
+                                           gradient.stops, gradient.stop_count,
                                            RDT_FILL_WINDING, nullptr);
                 svg_lower_paint_list(ctx);
-                mem_free(stops);
+                rdt_path_free(gradient.path);
             }
-
-        } else if (gradient_path && bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient && bg->radial_gradient->stop_count >= 2) {
-            RadialGradient* rg = bg->radial_gradient;
-            float gcx = x + (rg->cx_set ? rg->cx * width  : width  * 0.5f);
-            float gcy = y + (rg->cy_set ? rg->cy * height : height * 0.5f);
-            float r   = (width < height ? width : height) * 0.5f; // farthest-corner simplification
-
+            if (stops) mem_free(stops);
+        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient &&
+                   bg->radial_gradient->stop_count >= 2) {
+            int stop_count = bg->radial_gradient->stop_count;
             RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-                (size_t)rg->stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
-            if (stops) {
-                for (int stop_i = 0; stop_i < rg->stop_count; stop_i++) {
-                    GradientStop* stop = &rg->stops[stop_i];
-                    float pos = stop->position >= 0 ? stop->position
-                                                    : (rg->stop_count > 1 ? (float)stop_i / (rg->stop_count - 1) : 0.0f);
-                    stops[stop_i] = {pos, stop->color.r, stop->color.g,
-                                     stop->color.b, stop->color.a};
-                }
-                paint_fill_radial_gradient(&ctx->paint_list, gradient_path,
-                                           gcx, gcy, r, stops, rg->stop_count,
+                (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            BoundaryRadialGradientPaint gradient = {};
+            if (stops &&
+                render_paint_boundary_build_radial_gradient(view, x, y, stops,
+                                                            stop_count, &gradient)) {
+                paint_fill_radial_gradient(&ctx->paint_list, gradient.path,
+                                           gradient.cx, gradient.cy, gradient.r,
+                                           gradient.stops, gradient.stop_count,
                                            RDT_FILL_WINDING, nullptr);
                 svg_lower_paint_list(ctx);
-                mem_free(stops);
+                rdt_path_free(gradient.path);
             }
-        }
-
-        if (gradient_path) {
-            rdt_path_free(gradient_path);
+            if (stops) mem_free(stops);
         }
     }
 
@@ -1305,7 +1313,9 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
 
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content,
-        "<g transform=\"translate(%.2f,%.2f)\">\n", svg_x, svg_y);
+        "<g transform=\"translate(%.2f,%.2f)\"", svg_x, svg_y);
+    svg_append_inline_svg_inherited_attrs(ctx, block);
+    strbuf_append_str(ctx->svg_content, ">\n");
 
     ElementReader reader(dom_elem->native_element);
     serialize_svg_element(ctx->svg_content, reader, nullptr);
@@ -1452,11 +1462,14 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     }
 }
 
-static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+                                     FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     // render_inline_svg_passthrough reads ctx->block.{x,y} + block->{x,y}
     ctx->block.x = abs_x - block->x;
     ctx->block.y = abs_y - block->y;
+    ctx->font = *font;
+    ctx->color = color;
     render_inline_svg_passthrough(ctx, block);
 }
 

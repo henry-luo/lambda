@@ -232,8 +232,10 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
         return;
     }
 
-    log_info("[RENDER_PATH] target=%s dl=%d paint_ir=%d selective=%d tiled=%d large_tiled=%d items=%d tiles=%d threads=%d surface=%dx%d",
+    log_info("[RENDER_PATH] target=%s replay=%s backend=%s dl=%d paint_ir=%d selective=%d tiled=%d large_tiled=%d items=%d tiles=%d threads=%d surface=%dx%d retained={candidates:%d captured:%d skipped:%d copy_failed:%d hits:%d misses:%d stale:%d dirty:%d} caps={paths:%d gradients:%d clips:%d svg:%d opacity:%d blend:%d blur:%d color_matrix:%d text:%d batch:%d tile_offsets:%d}",
              trace->target ? trace->target : "unknown",
+             trace->replay_mode ? trace->replay_mode : "unknown",
+             trace->backend_name ? trace->backend_name : "unknown",
              trace->display_list_recorded ? 1 : 0,
              trace->paint_ir_enabled ? 1 : 0,
              trace->selective ? 1 : 0,
@@ -243,7 +245,26 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
              trace->tile_count,
              trace->thread_count,
              trace->surface_width,
-             trace->surface_height);
+             trace->surface_height,
+             trace->retained_capture_candidates,
+             trace->retained_captured,
+             trace->retained_skipped_non_retainable,
+             trace->retained_copy_failed,
+             trace->retained_reuse_hits,
+             trace->retained_reuse_misses,
+             trace->retained_reuse_rejected_resources,
+             trace->retained_reuse_rejected_dirty,
+             trace->backend_vector_paths ? 1 : 0,
+             trace->backend_gradients ? 1 : 0,
+             trace->backend_nested_clips ? 1 : 0,
+             trace->backend_picture_svg ? 1 : 0,
+             trace->backend_opacity_group ? 1 : 0,
+             trace->backend_blend_modes ? 1 : 0,
+             trace->backend_gaussian_blur ? 1 : 0,
+             trace->backend_color_matrix_filters ? 1 : 0,
+             trace->backend_native_text_runs ? 1 : 0,
+             trace->backend_vector_batching ? 1 : 0,
+             trace->backend_tile_offsets ? 1 : 0);
 
     EventStateLog* log = state && state->active_event_log ? state->active_event_log :
         (uicon ? uicon->event_log : NULL);
@@ -258,6 +279,8 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "target", trace->target ? trace->target : "unknown");
+        jw_kv_str(&w, "replay_mode", trace->replay_mode ? trace->replay_mode : "unknown");
+        jw_kv_str(&w, "backend_name", trace->backend_name ? trace->backend_name : "unknown");
         jw_kv_bool(&w, "display_list_recorded", trace->display_list_recorded);
         jw_kv_bool(&w, "paint_ir_enabled", trace->paint_ir_enabled);
         jw_kv_bool(&w, "selective", trace->selective);
@@ -268,6 +291,31 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
         jw_kv_int(&w, "thread_count", trace->thread_count);
         jw_kv_int(&w, "surface_width", trace->surface_width);
         jw_kv_int(&w, "surface_height", trace->surface_height);
+        jw_key(&w, "backend_caps");
+        jw_obj_begin(&w);
+            jw_kv_bool(&w, "vector_paths", trace->backend_vector_paths);
+            jw_kv_bool(&w, "gradients", trace->backend_gradients);
+            jw_kv_bool(&w, "nested_clips", trace->backend_nested_clips);
+            jw_kv_bool(&w, "picture_svg", trace->backend_picture_svg);
+            jw_kv_bool(&w, "opacity_group", trace->backend_opacity_group);
+            jw_kv_bool(&w, "blend_modes", trace->backend_blend_modes);
+            jw_kv_bool(&w, "gaussian_blur", trace->backend_gaussian_blur);
+            jw_kv_bool(&w, "color_matrix_filters", trace->backend_color_matrix_filters);
+            jw_kv_bool(&w, "native_text_runs", trace->backend_native_text_runs);
+            jw_kv_bool(&w, "vector_batching", trace->backend_vector_batching);
+            jw_kv_bool(&w, "tile_offsets", trace->backend_tile_offsets);
+        jw_obj_end(&w);
+        jw_key(&w, "retained");
+        jw_obj_begin(&w);
+            jw_kv_int(&w, "capture_candidates", trace->retained_capture_candidates);
+            jw_kv_int(&w, "captured", trace->retained_captured);
+            jw_kv_int(&w, "skipped_non_retainable", trace->retained_skipped_non_retainable);
+            jw_kv_int(&w, "copy_failed", trace->retained_copy_failed);
+            jw_kv_int(&w, "reuse_hits", trace->retained_reuse_hits);
+            jw_kv_int(&w, "reuse_misses", trace->retained_reuse_misses);
+            jw_kv_int(&w, "reuse_rejected_resources", trace->retained_reuse_rejected_resources);
+            jw_kv_int(&w, "reuse_rejected_dirty", trace->retained_reuse_rejected_dirty);
+        jw_obj_end(&w);
     jw_obj_end(&w);
     event_state_log_finish_record(log, &w);
 }

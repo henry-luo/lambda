@@ -473,6 +473,7 @@ int dl_item_count(const DisplayList* dl);
 bool dl_contains_glyphs(const DisplayList* dl);
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result);
 bool dl_validate_or_log(const DisplayList* dl, const char* context);
+bool dl_item_is_retainable_for_fragment(const DisplayItem* item);
 
 #ifdef __cplusplus
 }

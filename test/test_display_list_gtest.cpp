@@ -7,6 +7,8 @@
 #include "../radiant/display_list_storage.hpp"
 #include "../radiant/paint_ir.h"
 #include "../radiant/render_paint_boundary.hpp"
+#include "../radiant/render_paint_block.hpp"
+#include "../radiant/render_paint_gateway.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include <string.h>
@@ -1167,6 +1169,96 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
 }
 
+TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    LinearGradient gradient = {};
+    GradientStop css_stops[2] = {};
+    RdtGradientStop stops[2] = {};
+    BoundaryLinearGradientPaint paint = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bg.gradient_type = GRADIENT_LINEAR;
+    bg.linear_gradient = &gradient;
+    gradient.angle = 90.0f;
+    gradient.stop_count = 2;
+    gradient.stops = css_stops;
+    css_stops[0].position = 0.0f;
+    css_stops[0].color.r = 0x10;
+    css_stops[0].color.g = 0x20;
+    css_stops[0].color.b = 0x30;
+    css_stops[0].color.a = 0xff;
+    css_stops[1].position = 1.0f;
+    css_stops[1].color.r = 0x40;
+    css_stops[1].color.g = 0x50;
+    css_stops[1].color.b = 0x60;
+    css_stops[1].color.a = 0xff;
+
+    ASSERT_TRUE(render_paint_boundary_build_linear_gradient(&view, 10.0f, 20.0f,
+                                                            stops, 2, &paint));
+    ASSERT_NE(paint.path, nullptr);
+    EXPECT_FLOAT_EQ(paint.x1, 10.0f);
+    EXPECT_FLOAT_EQ(paint.y1, 45.0f);
+    EXPECT_FLOAT_EQ(paint.x2, 110.0f);
+    EXPECT_FLOAT_EQ(paint.y2, 45.0f);
+    ASSERT_EQ(paint.stop_count, 2);
+    EXPECT_FLOAT_EQ(paint.stops[0].offset, 0.0f);
+    EXPECT_FLOAT_EQ(paint.stops[1].offset, 1.0f);
+    EXPECT_EQ(paint.stops[0].r, 0x10);
+    EXPECT_EQ(paint.stops[1].r, 0x40);
+    rdt_path_free(paint.path);
+}
+
+TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    RadialGradient gradient = {};
+    GradientStop css_stops[2] = {};
+    RdtGradientStop stops[2] = {};
+    BoundaryRadialGradientPaint paint = {};
+
+    view.bound = &bound;
+    view.width = 120.0f;
+    view.height = 80.0f;
+    bound.background = &bg;
+    bg.gradient_type = GRADIENT_RADIAL;
+    bg.radial_gradient = &gradient;
+    gradient.cx_set = true;
+    gradient.cy_set = true;
+    gradient.cx = 0.25f;
+    gradient.cy = 0.75f;
+    gradient.stop_count = 2;
+    gradient.stops = css_stops;
+    css_stops[0].position = -1.0f;
+    css_stops[0].color.r = 0x01;
+    css_stops[0].color.g = 0x02;
+    css_stops[0].color.b = 0x03;
+    css_stops[0].color.a = 0xff;
+    css_stops[1].position = -1.0f;
+    css_stops[1].color.r = 0x04;
+    css_stops[1].color.g = 0x05;
+    css_stops[1].color.b = 0x06;
+    css_stops[1].color.a = 0xff;
+
+    ASSERT_TRUE(render_paint_boundary_build_radial_gradient(&view, 5.0f, 7.0f,
+                                                            stops, 2, &paint));
+    ASSERT_NE(paint.path, nullptr);
+    EXPECT_FLOAT_EQ(paint.cx, 35.0f);
+    EXPECT_FLOAT_EQ(paint.cy, 67.0f);
+    EXPECT_FLOAT_EQ(paint.r, 40.0f);
+    ASSERT_EQ(paint.stop_count, 2);
+    EXPECT_FLOAT_EQ(paint.stops[0].offset, 0.0f);
+    EXPECT_FLOAT_EQ(paint.stops[1].offset, 1.0f);
+    EXPECT_EQ(paint.stops[0].b, 0x03);
+    EXPECT_EQ(paint.stops[1].b, 0x06);
+    rdt_path_free(paint.path);
+}
+
 TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
     char tok = 0;
     RdtPath* path = (RdtPath*)&tok;
@@ -1188,6 +1280,111 @@ TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
 
     EXPECT_EQ(paint_list_count(&pl), 5);
     expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, GatewayRequiresPaintIrAndDisplayListTargets) {
+    PaintRecordTarget missing_paint = {nullptr, &lowered, "TEST_GATEWAY"};
+    paint_record_fill_rect(&missing_paint, "gateway_missing_paint",
+                           1.0f, 2.0f, 3.0f, 4.0f,
+                           test_color(0xff010203));
+    EXPECT_EQ(lowered.count, 0);
+
+    PaintRecordTarget missing_dl = {&pl, nullptr, "TEST_GATEWAY"};
+    paint_record_fill_rect(&missing_dl, "gateway_missing_dl",
+                           1.0f, 2.0f, 3.0f, 4.0f,
+                           test_color(0xff010203));
+    EXPECT_EQ(paint_list_count(&pl), 0);
+
+    PaintRecordTarget ready = {&pl, &lowered, "TEST_GATEWAY"};
+    paint_record_fill_rect(&ready, "gateway_ready",
+                           1.0f, 2.0f, 3.0f, 4.0f,
+                           test_color(0xff010203));
+    dl_fill_rect(&direct, 1.0f, 2.0f, 3.0f, 4.0f,
+                 test_color(0xff010203));
+
+    EXPECT_EQ(paint_list_count(&pl), 0);
+    expect_lists_equal(lowered, direct);
+}
+
+typedef struct PaintBlockDriverProbe {
+    int begin_count;
+    int self_count;
+    int children_count;
+    int finish_count;
+    bool continue_children;
+} PaintBlockDriverProbe;
+
+static bool probe_block_begin(void* ctx, ViewBlock* block, void** phase) {
+    (void)block;
+    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    probe->begin_count++;
+    *phase = probe;
+    return true;
+}
+
+static bool probe_block_self(void* ctx, ViewBlock* block, void* phase) {
+    (void)block;
+    (void)phase;
+    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    probe->self_count++;
+    return probe->continue_children;
+}
+
+static double probe_block_children(void* ctx, ViewBlock* block, void* phase) {
+    (void)block;
+    (void)phase;
+    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    probe->children_count++;
+    return 7.0;
+}
+
+static void probe_block_finish(void* ctx, ViewBlock* block, void* phase) {
+    (void)block;
+    (void)phase;
+    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    probe->finish_count++;
+}
+
+TEST_F(PaintIrParityTest, SharedBlockPaintDriverSkipsChildrenButFinishes) {
+    PaintBlockDriverProbe probe = {};
+    probe.continue_children = false;
+    RenderPaintBlockOps ops = {};
+    ops.ctx = &probe;
+    ops.begin = probe_block_begin;
+    ops.paint_self = probe_block_self;
+    ops.paint_children = probe_block_children;
+    ops.finish = probe_block_finish;
+    ViewBlock block = {};
+
+    RenderPaintBlockResult result = render_paint_block_run(&ops, &block);
+
+    EXPECT_TRUE(result.painted);
+    EXPECT_EQ(result.children_time, 0.0);
+    EXPECT_EQ(probe.begin_count, 1);
+    EXPECT_EQ(probe.self_count, 1);
+    EXPECT_EQ(probe.children_count, 0);
+    EXPECT_EQ(probe.finish_count, 1);
+}
+
+TEST_F(PaintIrParityTest, SharedBlockPaintDriverRecordsChildrenTime) {
+    PaintBlockDriverProbe probe = {};
+    probe.continue_children = true;
+    RenderPaintBlockOps ops = {};
+    ops.ctx = &probe;
+    ops.begin = probe_block_begin;
+    ops.paint_self = probe_block_self;
+    ops.paint_children = probe_block_children;
+    ops.finish = probe_block_finish;
+    ViewBlock block = {};
+
+    RenderPaintBlockResult result = render_paint_block_run(&ops, &block);
+
+    EXPECT_TRUE(result.painted);
+    EXPECT_EQ(result.children_time, 7.0);
+    EXPECT_EQ(probe.begin_count, 1);
+    EXPECT_EQ(probe.self_count, 1);
+    EXPECT_EQ(probe.children_count, 1);
+    EXPECT_EQ(probe.finish_count, 1);
 }
 
 TEST_F(PaintIrParityTest, ClearRewindsCountForReuse) {
@@ -1250,7 +1447,7 @@ TEST_F(PaintIrParityTest, ValidateRejectsCompositeWithoutBackdrop) {
     EXPECT_EQ(result.first_error_index, 0);
 }
 
-TEST_F(PaintIrParityTest, SemanticBuildersValidateAndRemainUnsupported) {
+TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) {
     PaintEffectGroup group = {};
     group.bounds = {1.0f, 2.0f, 30.0f, 40.0f};
     group.opacity = 0.75f;
@@ -1283,7 +1480,17 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndRemainUnsupported) {
     EXPECT_EQ(paint_list_count(&pl), 4);
 
     lower();
-    EXPECT_EQ(lowered.count, 0);
+    ASSERT_EQ(lowered.count, 4);
+    EXPECT_EQ(lowered.items[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.items[1].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.items[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.items[3].op, DL_APPLY_BLEND_MODE);
+    EXPECT_EQ(lowered.items[0].save_backdrop.x0, 1);
+    EXPECT_EQ(lowered.items[0].save_backdrop.y0, 2);
+    EXPECT_EQ(lowered.items[0].save_backdrop.w, 29);
+    EXPECT_EQ(lowered.items[0].save_backdrop.h, 38);
+    EXPECT_FLOAT_EQ(lowered.items[2].composite_opacity.opacity, 0.75f);
+    EXPECT_EQ(lowered.items[3].apply_blend_mode.blend_mode, 1);
 
     StrBuf* out = strbuf_new();
     ASSERT_NE(out, nullptr);
@@ -1314,6 +1521,33 @@ TEST_F(PaintIrParityTest, ValidateRejectsInvalidSemanticPayload) {
     EXPECT_FALSE(paint_ir_validate(&pl, &result));
     EXPECT_FALSE(result.valid);
     EXPECT_EQ(result.first_error_index, 0);
+}
+
+TEST_F(PaintIrParityTest, SemanticEffectGroupLowersFilterAndBackdrop) {
+    char filter_token = 0;
+    PaintEffectGroup group = {};
+    group.bounds = {4.0f, 5.0f, 24.0f, 35.0f};
+    group.opacity = 1.0f;
+    group.filter = &filter_token;
+    group.backdrop = true;
+    group.has_clip = true;
+
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 6.0f, 7.0f, 8.0f, 9.0f, test_color(0xff102030));
+    paint_end_effect_group(&pl);
+
+    lower();
+    ASSERT_EQ(lowered.count, 4);
+    EXPECT_EQ(lowered.items[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.items[1].op, DL_FILL_RECT);
+    EXPECT_EQ(lowered.items[2].op, DL_APPLY_FILTER);
+    EXPECT_EQ(lowered.items[3].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.items[2].apply_filter.filter, &filter_token);
+    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.x, 4.0f);
+    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.y, 5.0f);
+    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.w, 20.0f);
+    EXPECT_FLOAT_EQ(lowered.items[2].apply_filter.h, 30.0f);
+    EXPECT_FLOAT_EQ(lowered.items[3].composite_opacity.opacity, 1.0f);
 }
 
 TEST_F(PaintIrParityTest, ValidateRejectsUnbalancedTransformStack) {
@@ -1656,6 +1890,41 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsOpacityEffectGroup) {
     strbuf_free(out);
 }
 
+TEST_F(PaintIrParityTest, SvgLoweringEmitsTransformedOpacityEffectGroup) {
+    PaintEffectGroup group = {};
+    group.opacity = 0.5f;
+    group.has_transform = true;
+    group.transform = rdt_matrix_translate(10.0f, 12.0f);
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_end_effect_group(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<g opacity=\"0.5000\" transform=\"matrix(1 0 0 1 10 12)\">\n"),
+        nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
 TEST_F(PaintIrParityTest, SvgStreamingLoweringKeepsOpacityOpenAcrossFragments) {
     PaintEffectGroup group = {};
     group.opacity = 0.5f;
@@ -1776,8 +2045,8 @@ TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
     paint_ir_lower_svg(&pl, out, &options, &stats);
 
     EXPECT_EQ(stats.command_count, 5);
-    EXPECT_EQ(stats.emitted_count, 4);
-    EXPECT_EQ(stats.unsupported_count, 1);
+    EXPECT_EQ(stats.emitted_count, 5);
+    EXPECT_EQ(stats.unsupported_count, 0);
     EXPECT_NE(strstr(out->str,
         "<rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(1,2,3)\" />"),
         nullptr);
@@ -1789,7 +2058,7 @@ TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
     EXPECT_NE(strstr(out->str,
         "<path d=\"M0.00,0.00 L10.00,0.00 Z \" fill=\"none\" stroke=\"rgb(1,2,3)\" stroke-width=\"1.25\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" />"),
         nullptr);
-    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_FILL_LINEAR_GRADIENT -->"), nullptr);
+    EXPECT_NE(strstr(out->str, "<linearGradient"), nullptr);
 
     strbuf_free(out);
     rdt_path_free(path);

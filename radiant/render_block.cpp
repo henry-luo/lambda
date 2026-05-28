@@ -13,6 +13,7 @@
 #include "retained_display_list.hpp"
 #include "scroller.hpp"
 #include "layout.hpp"
+#include "render_paint_block.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -94,7 +95,10 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     uint32_t view_id = static_cast<View*>(block)->id;
     const RetainedDisplayListFragment* fragment =
         retained_dl_cache_get(rdcon->retained_dl_cache, view_id);
-    if (!fragment) return false;
+    if (!fragment) {
+        retained_dl_cache_note_reuse_miss(rdcon->retained_dl_cache);
+        return false;
+    }
     uint64_t current_video_generation = 0;
     uint64_t current_glyph_generation = 0;
     if (rdcon->ui_context && rdcon->ui_context->document &&
@@ -107,6 +111,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     }
     if (!retained_dl_fragment_resources_valid(fragment, current_video_generation,
                                              current_glyph_generation)) {
+        retained_dl_cache_note_reuse_rejected_resources(rdcon->retained_dl_cache);
         return false;
     }
 
@@ -124,8 +129,10 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     if (!retained_dl_append_fragment_for_dirty(
             rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->scale,
             render_retained_dirty_source_inside, static_cast<View*>(block))) {
+        retained_dl_cache_note_reuse_rejected_dirty(rdcon->retained_dl_cache);
         return false;
     }
+    retained_dl_cache_note_reuse_hit(rdcon->retained_dl_cache);
     log_debug("[RETAINED_DL] reused view %u (%d items)",
               view_id, retained_dl_fragment_item_count(fragment));
     return true;
@@ -548,18 +555,55 @@ static void render_block_finish_phase(RenderContext* rdcon, ViewBlock* block,
     render_element_marker_end(rdcon, &phase->marker_scope);
 }
 
+typedef struct RasterBlockPaintDriver {
+    RenderContext* rdcon;
+    RenderBlockPhase phase;
+} RasterBlockPaintDriver;
+
+static bool raster_block_paint_begin(void* ctx, ViewBlock* block, void** phase) {
+    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+    if (!driver || !driver->rdcon || !block || !phase) return false;
+    render_block_log_begin(driver->rdcon, block);
+    driver->phase = render_block_begin_phase(driver->rdcon, block);
+    *phase = &driver->phase;
+    return true;
+}
+
+static bool raster_block_paint_self(void* ctx, ViewBlock* block, void* phase) {
+    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+    if (!driver || !driver->rdcon || !block || !phase) return false;
+    render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
+    return true;
+}
+
+static double raster_block_paint_children(void* ctx, ViewBlock* block, void* phase) {
+    (void)phase;
+    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+    if (!driver || !driver->rdcon || !block) return 0.0;
+    return render_block_paint_children_phase(driver->rdcon, block);
+}
+
+static void raster_block_paint_finish(void* ctx, ViewBlock* block, void* phase) {
+    RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
+    if (!driver || !driver->rdcon || !block || !phase) return;
+    render_block_finish_phase(driver->rdcon, block, (RenderBlockPhase*)phase);
+    render_block_log_end();
+}
+
 static RenderBlockPaintResult render_block_run_paint_pipeline(RenderContext* rdcon,
                                                               ViewBlock* block) {
     RenderBlockPaintResult result = {};
-    render_block_log_begin(rdcon, block);
-
-    RenderBlockPhase phase = render_block_begin_phase(rdcon, block);
-    render_block_paint_self(rdcon, block, &phase);
-    result.children_time = render_block_paint_children_phase(rdcon, block);
-    render_block_finish_phase(rdcon, block, &phase);
-
-    render_block_log_end();
-    result.painted = true;
+    RasterBlockPaintDriver driver = {};
+    driver.rdcon = rdcon;
+    RenderPaintBlockOps ops = {};
+    ops.ctx = &driver;
+    ops.begin = raster_block_paint_begin;
+    ops.paint_self = raster_block_paint_self;
+    ops.paint_children = raster_block_paint_children;
+    ops.finish = raster_block_paint_finish;
+    RenderPaintBlockResult shared_result = render_paint_block_run(&ops, block);
+    result.children_time = shared_result.children_time;
+    result.painted = shared_result.painted;
     return result;
 }
 

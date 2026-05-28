@@ -47,7 +47,8 @@ struct RenderBackend {
 
     // ── Inline SVG passthrough ─────────────────────────────────────────
     // Called for HTM_TAG_SVG blocks. If NULL, skipped.
-    void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
+                              FontBox* font, Color color);
 
     // ── Children group wrappers ────────────────────────────────────────
     // Emits container markup around a block's children (e.g. <g class="block"> in SVG).

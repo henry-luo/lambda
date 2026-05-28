@@ -1,4 +1,5 @@
 #include "render_backend.h"
+#include "render_paint_block.hpp"
 #include "view.hpp"
 #include "webview.h"
 #include "../lib/tagged.hpp"
@@ -15,16 +16,35 @@ extern "C" {
 // avoid duplicating the walk/dispatch/context-propagation logic.
 // ============================================================================
 
-void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
-    if (!block) return;
+typedef struct RenderWalkBlockPhase {
+    float pa_x;
+    float pa_y;
+    FontBox pa_font;
+    Color pa_color;
+    bool opened_transform;
+    bool opened_opacity;
+    bool stop_after_self;
+} RenderWalkBlockPhase;
 
-    // save parent state
-    float pa_x = state->x;
-    float pa_y = state->y;
-    FontBox pa_font = state->font;
-    Color pa_color = state->color;
+typedef struct RenderWalkBlockDriver {
+    RenderBackend* backend;
+    RenderWalkState* state;
+    RenderWalkBlockPhase phase;
+} RenderWalkBlockDriver;
 
-    // update font
+static bool render_walk_block_begin(void* ctx, ViewBlock* block, void** phase) {
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+    if (!driver || !driver->backend || !driver->state || !block || !phase) return false;
+
+    RenderBackend* backend = driver->backend;
+    RenderWalkState* state = driver->state;
+    RenderWalkBlockPhase* p = &driver->phase;
+    *p = {};
+    p->pa_x = state->x;
+    p->pa_y = state->y;
+    p->pa_font = state->font;
+    p->pa_color = state->color;
+
     if (block->font) {
         setup_font(state->ui_context, &state->font, block->font);
         if (backend->on_font_change) {
@@ -32,46 +52,56 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
         }
     }
 
-    // propagate position
-    state->x = pa_x + block->x;
-    state->y = pa_y + block->y;
+    state->x = p->pa_x + block->x;
+    state->y = p->pa_y + block->y;
 
     bool has_transform = block->transform && block->transform->functions;
-    bool opened_transform = has_transform && backend->begin_transform && backend->end_transform;
-    if (opened_transform) {
+    p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
+    if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);
     }
 
-    // render boundary (background, borders, shadow, outline)
+    float elem_opacity = (block->in_line && block->in_line->opacity > 0)
+                          ? block->in_line->opacity : 1.0f;
+    p->opened_opacity = elem_opacity < 0.9995f &&
+                        backend->begin_opacity && backend->end_opacity;
+    if (p->opened_opacity) {
+        backend->begin_opacity(backend->ctx, elem_opacity);
+    }
+
+    *phase = p;
+    return true;
+}
+
+static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phase) {
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+    RenderWalkBlockPhase* p = (RenderWalkBlockPhase*)phase;
+    if (!driver || !driver->backend || !driver->state || !block || !p) return false;
+
+    RenderBackend* backend = driver->backend;
+    RenderWalkState* state = driver->state;
+
     if (block->bound && backend->render_bound) {
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
 
-    // update inherited color
     if (block->in_line && block->in_line->has_color) {
         state->color = block->in_line->color;
     }
 
-    // inline SVG passthrough (HTM_TAG_SVG)
     if (block->tag_id == HTM_TAG_SVG) {
         if (backend->render_inline_svg) {
-            backend->render_inline_svg(backend->ctx, block, state->x, state->y);
+            backend->render_inline_svg(backend->ctx, block, state->x, state->y,
+                                       &state->font, state->color);
         }
-        if (opened_transform) {
-            backend->end_transform(backend->ctx);
-        }
-        // restore and return — SVG children are not HTML views
-        state->x = pa_x; state->y = pa_y;
-        state->font = pa_font; state->color = pa_color;
-        return;
+        p->stop_after_self = true;
+        return false;
     }
 
-    // render embedded image
     if (block->embed && block->embed->img && backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
 
-    // render webview layer mode snapshot (composite as image)
     if (block->embed && block->embed->webview &&
         block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
         block->embed->webview->surface && block->embed->webview->surface->pixels &&
@@ -79,16 +109,17 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
 
-    // render children
+    return true;
+}
+
+static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void* phase) {
+    (void)phase;
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+    if (!driver || !driver->backend || !driver->state || !block) return 0.0;
+
+    RenderBackend* backend = driver->backend;
+    RenderWalkState* state = driver->state;
     if (block->first_child) {
-        float elem_opacity = (block->in_line && block->in_line->opacity > 0)
-                              ? block->in_line->opacity : 1.0f;
-        bool has_opacity = elem_opacity < 0.9995f;
-
-        if (has_opacity && backend->begin_opacity) {
-            backend->begin_opacity(backend->ctx, elem_opacity);
-        }
-
         if (backend->begin_block_children) {
             backend->begin_block_children(backend->ctx, block);
         }
@@ -98,26 +129,53 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
         if (backend->end_block_children) {
             backend->end_block_children(backend->ctx, block);
         }
-
-        if (has_opacity && backend->end_opacity) {
-            backend->end_opacity(backend->ctx);
-        }
     }
+    return 0.0;
+}
 
-    // column rules
-    if (block->multicol && block->multicol->computed_column_count > 1) {
+static void render_walk_block_finish(void* ctx, ViewBlock* block, void* phase) {
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+    RenderWalkBlockPhase* p = (RenderWalkBlockPhase*)phase;
+    if (!driver || !driver->backend || !driver->state || !block || !p) return;
+
+    RenderBackend* backend = driver->backend;
+    RenderWalkState* state = driver->state;
+
+    if (!p->stop_after_self &&
+        block->multicol && block->multicol->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
         }
     }
 
-    if (opened_transform) {
+    if (p->opened_opacity) {
+        backend->end_opacity(backend->ctx);
+    }
+
+    if (p->opened_transform) {
         backend->end_transform(backend->ctx);
     }
 
-    // restore
-    state->x = pa_x; state->y = pa_y;
-    state->font = pa_font; state->color = pa_color;
+    state->x = p->pa_x;
+    state->y = p->pa_y;
+    state->font = p->pa_font;
+    state->color = p->pa_color;
+}
+
+void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
+    if (!backend || !state || !block) return;
+
+    RenderWalkBlockDriver driver = {};
+    driver.backend = backend;
+    driver.state = state;
+
+    RenderPaintBlockOps ops = {};
+    ops.ctx = &driver;
+    ops.begin = render_walk_block_begin;
+    ops.paint_self = render_walk_block_paint_self;
+    ops.paint_children = render_walk_block_paint_children;
+    ops.finish = render_walk_block_finish;
+    render_paint_block_run(&ops, block);
 }
 
 void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan* span) {

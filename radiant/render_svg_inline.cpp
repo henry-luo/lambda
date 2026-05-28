@@ -10,8 +10,8 @@
 #include "display_list_replay.hpp"
 #include "render_geometry.hpp"
 #include "render_glyph.hpp"
+#include "render_paint_gateway.hpp"
 #include "render_painter.hpp"
-#include "paint_ir.h"
 #include "tile_pool.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -153,109 +153,69 @@ static void svg_resource_stack_pop(const char* path) {
 // ---------------------------------------------------------------------------
 // SVG PaintIR/display-list dispatch helpers
 // ---------------------------------------------------------------------------
-static inline bool svg_paint_active(SvgRenderContext* ctx) {
-    return ctx && ctx->paint_list && ctx->dl;
-}
-
-static inline void svg_lower_pending(SvgRenderContext* ctx) {
-    paint_ir_lower_raster_fragment(ctx->paint_list, ctx->dl);
-    paint_list_clear(ctx->paint_list);
-}
-
-static inline bool svg_dl_active(SvgRenderContext* ctx) {
-    return ctx && ctx->dl;
-}
-
-static inline void svg_missing_dl(const char* op) {
-    log_error("[SVG] %s called without display list", op ? op : "paint op");
+static inline PaintRecordTarget svg_record_target(SvgRenderContext* ctx) {
+    PaintRecordTarget target = {
+        ctx ? ctx->paint_list : nullptr,
+        ctx ? ctx->dl : nullptr,
+        "SVG"
+    };
+    return target;
 }
 
 static inline void svg_fill_path(SvgRenderContext* ctx, RdtPath* path, Color color,
                                  RdtFillRule rule, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_fill_path(ctx->paint_list, path, color, rule, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_fill_path(ctx->dl, path, color, rule, xform);
-    else svg_missing_dl("svg_fill_path");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_fill_path(&target, "svg_fill_path", path, color, rule, xform);
 }
 
 static inline void svg_stroke_path(SvgRenderContext* ctx, RdtPath* path, Color color, float width,
                                    RdtStrokeCap cap, RdtStrokeJoin join,
                                    const float* dash, int dash_count, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_stroke_path(ctx->paint_list, path, color, width, cap, join,
-                          dash, dash_count, 0, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_stroke_path(ctx->dl, path, color, width, cap, join, dash, dash_count, 0, xform);
-    else svg_missing_dl("svg_stroke_path");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_stroke_path(&target, "svg_stroke_path", path, color, width,
+                             cap, join, dash, dash_count, 0, xform);
 }
 static inline void svg_fill_linear_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float x1, float y1, float x2, float y2,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_fill_linear_gradient(ctx->paint_list, path, x1, y1, x2, y2,
-                                   stops, count, rule, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_fill_linear_gradient(ctx->dl, path, x1, y1, x2, y2, stops, count, rule, xform);
-    else svg_missing_dl("svg_fill_linear_gradient");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_fill_linear_gradient(&target, "svg_fill_linear_gradient",
+                                      path, x1, y1, x2, y2,
+                                      stops, count, rule, xform);
 }
 static inline void svg_fill_radial_gradient(SvgRenderContext* ctx, RdtPath* path,
                                             float cx, float cy, float r,
                                             const RdtGradientStop* stops, int count,
                                             RdtFillRule rule, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_fill_radial_gradient(ctx->paint_list, path, cx, cy, r,
-                                   stops, count, rule, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_fill_radial_gradient(ctx->dl, path, cx, cy, r, stops, count, rule, xform);
-    else svg_missing_dl("svg_fill_radial_gradient");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_fill_radial_gradient(&target, "svg_fill_radial_gradient",
+                                      path, cx, cy, r, stops, count, rule, xform);
 }
 static inline void svg_draw_picture(SvgRenderContext* ctx, RdtPicture* pic,
                                     uint8_t opacity, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_draw_picture(ctx->paint_list, pic, opacity, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_draw_picture(ctx->dl, pic, opacity, xform);
-    else svg_missing_dl("svg_draw_picture");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_draw_picture(&target, "svg_draw_picture", pic, opacity, xform);
 }
 static inline void svg_push_clip(SvgRenderContext* ctx, RdtPath* path, const RdtMatrix* xform) {
-    if (svg_paint_active(ctx)) {
-        paint_push_clip(ctx->paint_list, path, xform);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_push_clip(ctx->dl, path, xform);
-    else svg_missing_dl("svg_push_clip");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_push_clip(&target, "svg_push_clip", path, xform);
 }
 static inline void svg_pop_clip(SvgRenderContext* ctx) {
-    if (svg_paint_active(ctx)) {
-        paint_pop_clip(ctx->paint_list);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) dl_pop_clip(ctx->dl);
-    else svg_missing_dl("svg_pop_clip");
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_pop_clip(&target, "svg_pop_clip");
 }
 
 static inline void svg_save_backdrop(SvgRenderContext* ctx, int x0, int y0, int w, int h) {
-    if (svg_paint_active(ctx)) {
-        paint_save_backdrop(ctx->paint_list, x0, y0, w, h);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) {
-        dl_save_backdrop(ctx->dl, x0, y0, w, h);
-    } else {
-        svg_missing_dl("svg_save_backdrop");
-    }
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_save_backdrop(&target, "svg_save_backdrop", x0, y0, w, h);
 }
 
 static inline void svg_composite_opacity(SvgRenderContext* ctx, int x0, int y0, int w, int h,
                                          float opacity, bool premultiplied_source = false) {
-    if (svg_paint_active(ctx)) {
-        paint_composite_opacity(ctx->paint_list, x0, y0, w, h,
-                                opacity, premultiplied_source);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) {
-        dl_composite_opacity(ctx->dl, x0, y0, w, h, opacity, premultiplied_source);
-    } else {
-        svg_missing_dl("svg_composite_opacity");
-    }
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_composite_opacity(&target, "svg_composite_opacity",
+                                   x0, y0, w, h, opacity, premultiplied_source);
 }
 
 static inline void svg_box_blur_region(SvgRenderContext* ctx, int rx, int ry, int rw, int rh,
@@ -263,18 +223,11 @@ static inline void svg_box_blur_region(SvgRenderContext* ctx, int rx, int ry, in
                                        int exclude_type, const float* exclude_params,
                                        bool premultiply_source,
                                        bool tint_source, Color tint_color) {
-    if (svg_paint_active(ctx)) {
-        paint_box_blur_region(ctx->paint_list, rx, ry, rw, rh, blur_radius,
-                              clip_type, clip_params, exclude_type, exclude_params,
-                              premultiply_source, tint_source, tint_color);
-        svg_lower_pending(ctx);
-    } else if (svg_dl_active(ctx)) {
-        dl_box_blur_region(ctx->dl, rx, ry, rw, rh, blur_radius,
-                           clip_type, clip_params, exclude_type, exclude_params,
-                           premultiply_source, tint_source, tint_color);
-    } else {
-        svg_missing_dl("svg_box_blur_region");
-    }
+    PaintRecordTarget target = svg_record_target(ctx);
+    paint_record_box_blur_region(&target, "svg_box_blur_region",
+                                 rx, ry, rw, rh, blur_radius,
+                                 clip_type, clip_params, exclude_type, exclude_params,
+                                 premultiply_source, tint_source, tint_color);
 }
 
 static void render_svg_element(SvgRenderContext* ctx, Element* elem);
@@ -4364,6 +4317,10 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list) {
     if (!svg_element || !vec) return;
+    if (!dl || !paint_list) {
+        log_error("[SVG] render_svg_to_vec requires display-list and PaintIR targets");
+        return;
+    }
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
         return;

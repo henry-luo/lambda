@@ -30,6 +30,7 @@ struct RetainedDisplayListCache {
     Arena* arena;
     HashMap* map;
     uint32_t epoch;
+    RetainedDisplayListStats stats;
 };
 
 HASHMAP_DEFINE_INTKEY(retained_dl_entry, RetainedDisplayListEntry, view_id)
@@ -247,6 +248,33 @@ void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache) {
     if (!cache) return;
     cache->epoch++;
     if (cache->epoch == 0) cache->epoch = 1;
+    memset(&cache->stats, 0, sizeof(cache->stats));
+}
+
+RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache) {
+    RetainedDisplayListStats stats = {};
+    if (!cache) return stats;
+    return cache->stats;
+}
+
+void retained_dl_cache_note_reuse_miss(RetainedDisplayListCache* cache) {
+    if (!cache) return;
+    cache->stats.reuse_misses++;
+}
+
+void retained_dl_cache_note_reuse_rejected_resources(RetainedDisplayListCache* cache) {
+    if (!cache) return;
+    cache->stats.reuse_rejected_resources++;
+}
+
+void retained_dl_cache_note_reuse_rejected_dirty(RetainedDisplayListCache* cache) {
+    if (!cache) return;
+    cache->stats.reuse_rejected_dirty++;
+}
+
+void retained_dl_cache_note_reuse_hit(RetainedDisplayListCache* cache) {
+    if (!cache) return;
+    cache->stats.reuse_hits++;
 }
 
 static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
@@ -276,56 +304,11 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     return fragment;
 }
 
-static bool retained_dl_item_retainable(const DisplayItem* item) {
-    if (!item) return false;
-    switch (item->op) {
-        case DL_DRAW_IMAGE:
-            if (item->draw_image.pixels &&
-                (!item->draw_image.resource_owner ||
-                 item->draw_image.resource_generation == 0)) {
-                return false;
-            }
-            break;
-        case DL_DRAW_GLYPH:
-            if (item->draw_glyph.bitmap.buffer &&
-                item->draw_glyph.resource_generation == 0) {
-                return false;
-            }
-            break;
-        case DL_BLIT_SURFACE_SCALED:
-            if (item->blit_surface_scaled.src_surface &&
-                item->blit_surface_scaled.src_generation == 0) {
-                return false;
-            }
-            break;
-        case DL_VIDEO_PLACEHOLDER:
-            if (item->video_placeholder.video &&
-                item->video_placeholder.video_generation == 0) {
-                return false;
-            }
-            break;
-        case DL_WEBVIEW_LAYER_PLACEHOLDER:
-            if (item->webview_layer_placeholder.surface &&
-                item->webview_layer_placeholder.surface_generation == 0) {
-                return false;
-            }
-            break;
-        case DL_APPLY_FILTER:
-            if (item->apply_filter.filter) {
-                return false;
-            }
-            break;
-        default:
-            break;
-    }
-    return true;
-}
-
 static bool retained_dl_range_retainable(const DisplayList* source,
                                          int start, int end) {
     if (!source || start < 0 || end < start || end >= source->count) return false;
     for (int i = start; i <= end; i++) {
-        if (!retained_dl_item_retainable(&source->items[i])) {
+        if (!dl_item_is_retainable_for_fragment(&source->items[i])) {
             return false;
         }
     }
@@ -344,6 +327,7 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
 
     uint32_t view_id = begin->element_marker.view_id;
     if (view_id == 0) return;
+    cache->stats.capture_candidates++;
 
     RetainedDisplayListFragment* fragment =
         retained_dl_fragment_get_or_create(cache, view_id);
@@ -351,10 +335,12 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
 
     dl_clear(&fragment->list);
     if (!retained_dl_range_retainable(source, begin_index, end_index)) {
+        cache->stats.skipped_non_retainable++;
         log_debug("[RETAINED_DL] skipped non-retainable view %u", view_id);
         return;
     }
     if (!retained_dl_copy_range(&fragment->list, source, begin_index, end_index)) {
+        cache->stats.copy_failed++;
         dl_clear(&fragment->list);
         return;
     }
@@ -367,6 +353,7 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
         begin->element_marker.marker_y + begin->element_marker.marker_h
     };
     fragment->last_stored_epoch = cache->epoch;
+    cache->stats.captured++;
 }
 
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source) {

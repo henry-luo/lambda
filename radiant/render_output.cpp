@@ -108,6 +108,36 @@ static const char* render_output_path_trace_target(RenderOutputKind kind) {
     return "unknown";
 }
 
+static void render_output_trace_backend_caps(RenderPathTrace* trace, const RenderBackendCaps* caps) {
+    if (!trace || !caps) return;
+    trace->backend_name = caps->backend_name;
+    trace->backend_vector_paths = caps->vector_paths;
+    trace->backend_gradients = caps->gradients;
+    trace->backend_nested_clips = caps->nested_clips;
+    trace->backend_picture_svg = caps->picture_svg;
+    trace->backend_opacity_group = caps->opacity_group;
+    trace->backend_blend_modes = caps->blend_modes;
+    trace->backend_gaussian_blur = caps->gaussian_blur;
+    trace->backend_color_matrix_filters = caps->color_matrix_filters;
+    trace->backend_native_text_runs = caps->native_text_runs;
+    trace->backend_vector_batching = caps->vector_batching;
+    trace->backend_tile_offsets = caps->tile_offsets;
+}
+
+static void render_output_trace_retained_stats(RenderPathTrace* trace,
+                                               RetainedDisplayListCache* cache) {
+    if (!trace || !cache) return;
+    RetainedDisplayListStats stats = retained_dl_cache_stats(cache);
+    trace->retained_capture_candidates = stats.capture_candidates;
+    trace->retained_captured = stats.captured;
+    trace->retained_skipped_non_retainable = stats.skipped_non_retainable;
+    trace->retained_copy_failed = stats.copy_failed;
+    trace->retained_reuse_hits = stats.reuse_hits;
+    trace->retained_reuse_misses = stats.reuse_misses;
+    trace->retained_reuse_rejected_resources = stats.reuse_rejected_resources;
+    trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
+}
+
 void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                 RenderProfiler* profiler) {
     memset(rdcon, 0, sizeof(RenderContext));
@@ -393,6 +423,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
     RenderPathTrace trace = {};
     trace.target = render_output_path_trace_target(target->kind);
+    trace.replay_mode = replay_result.tiled ? "display_list_tiled" : "display_list_single";
     trace.display_list_recorded = true;
     trace.paint_ir_enabled = rdcon.paint_list != nullptr;
     trace.selective = selective;
@@ -403,6 +434,8 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     trace.thread_count = replay_result.thread_count;
     trace.surface_width = uicon->surface ? uicon->surface->width : 0;
     trace.surface_height = uicon->surface ? uicon->surface->height : 0;
+    render_output_trace_backend_caps(&trace, render_backend_get_caps(&rdcon.vec));
+    render_output_trace_retained_stats(&trace, rdcon.retained_dl_cache);
     render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
     if (target->kind == RENDER_OUTPUT_JPEG && target->output_file) {
@@ -468,6 +501,19 @@ int render_output_render_html_file_to_target(const char* html_file,
     float pixel_ratio = target->pixel_ratio > 0 ? target->pixel_ratio : 1.0f;
     int viewport_width = target->viewport_width;
     int viewport_height = target->viewport_height;
+    if (target->kind == RENDER_OUTPUT_PDF || target->kind == RENDER_OUTPUT_SVG) {
+        RenderProfiler profiler;
+        render_profiler_reset(&profiler);
+        RenderPathTrace trace = {};
+        trace.target = render_output_path_trace_target(target->kind);
+        trace.replay_mode = "file_export";
+        trace.backend_name = trace.target;
+        trace.display_list_recorded = false;
+        trace.paint_ir_enabled = false;
+        trace.surface_width = viewport_width;
+        trace.surface_height = viewport_height;
+        render_profiler_emit_path_trace(&profiler, nullptr, nullptr, &trace);
+    }
 
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
@@ -662,6 +708,7 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     RenderPathTrace trace = {};
     trace.target = "tiled_png";
+    trace.replay_mode = "display_list_strip";
     trace.display_list_recorded = true;
     trace.paint_ir_enabled = rdcon.paint_list != nullptr;
     trace.selective = false;
@@ -672,6 +719,8 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     trace.thread_count = 1;
     trace.surface_width = total_width;
     trace.surface_height = total_height;
+    render_output_trace_backend_caps(&trace, render_backend_get_caps(&rdcon.vec));
+    render_output_trace_retained_stats(&trace, rdcon.retained_dl_cache);
     render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
     dl_destroy(&display_list);

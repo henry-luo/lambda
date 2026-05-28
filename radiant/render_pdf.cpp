@@ -5,6 +5,7 @@
 #include "render_geometry.hpp"
 #include "paint_ir.h"
 #include "render_paint_boundary.hpp"
+#include "render_svg_inline.hpp"
 #include "render_border.hpp"
 #include "render_path.hpp"
 #include "view.hpp"
@@ -27,12 +28,19 @@ extern "C" {
 
 #define PDF_PATH_KAPPA 0.5522847498f
 #define PDF_PAINT_TRANSFORM_STACK_MAX 64
+#define PDF_PAINT_EFFECT_STACK_MAX 64
 
 typedef struct PdfPaintLoweringState {
     int active_transform_depth;
     int skipped_transform_depth;
+    int active_effect_depth;
+    int passthrough_effect_depth;
     RdtMatrix current_transform;
     RdtMatrix transform_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
+    float current_opacity;
+    float opacity_stack[PDF_PAINT_EFFECT_STACK_MAX];
+    bool logged_opacity_fallback;
+    bool logged_unsupported_effect;
 } PdfPaintLoweringState;
 
 typedef struct PdfRenderContext {
@@ -72,6 +80,8 @@ static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
     memset(state, 0, sizeof(PdfPaintLoweringState));
     state->current_transform = rdt_matrix_identity();
     state->transform_stack[0] = state->current_transform;
+    state->current_opacity = 1.0f;
+    state->opacity_stack[0] = 1.0f;
 }
 
 // Helper function to get PDF font name from system font
@@ -91,6 +101,14 @@ static const char* get_pdf_font_name(const char* font_family) {
 
 // Set PDF color from Color struct
 static void pdf_set_color(PdfRenderContext* ctx, Color color) {
+    float opacity = ctx ? ctx->paint_state.current_opacity : 1.0f;
+    opacity *= color.a / 255.0f;
+    if (opacity < 0.9995f) {
+        color.r = (uint8_t)(color.r * opacity + 255.0f * (1.0f - opacity));
+        color.g = (uint8_t)(color.g * opacity + 255.0f * (1.0f - opacity));
+        color.b = (uint8_t)(color.b * opacity + 255.0f * (1.0f - opacity));
+        color.a = 255;
+    }
     float r = color.r / 255.0f;
     float g = color.g / 255.0f;
     float b = color.b / 255.0f;
@@ -524,13 +542,177 @@ static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run
     }
 }
 
+static Color pdf_gradient_composite_opaque(Color src) {
+    if (src.a == 255) return src;
+    Color out = {};
+    uint32_t a = src.a;
+    out.r = (uint8_t)((src.r * a + 255u * (255u - a)) / 255u);
+    out.g = (uint8_t)((src.g * a + 255u * (255u - a)) / 255u);
+    out.b = (uint8_t)((src.b * a + 255u * (255u - a)) / 255u);
+    out.a = 255;
+    return out;
+}
+
+static Color pdf_gradient_sample_stops(const RdtGradientStop* stops, int stop_count,
+                                       float t) {
+    Color out = {};
+    out.a = 255;
+    if (!stops || stop_count <= 0) return out;
+    if (t <= stops[0].offset || stop_count == 1) {
+        out.r = stops[0].r;
+        out.g = stops[0].g;
+        out.b = stops[0].b;
+        out.a = stops[0].a;
+        return pdf_gradient_composite_opaque(out);
+    }
+    for (int i = 1; i < stop_count; i++) {
+        const RdtGradientStop* prev = &stops[i - 1];
+        const RdtGradientStop* next = &stops[i];
+        if (t > next->offset) continue;
+        float span = next->offset - prev->offset;
+        float local_t = span > 1e-6f ? (t - prev->offset) / span : 0.0f;
+        if (local_t < 0.0f) local_t = 0.0f;
+        if (local_t > 1.0f) local_t = 1.0f;
+        out.r = (uint8_t)(prev->r + (next->r - prev->r) * local_t);
+        out.g = (uint8_t)(prev->g + (next->g - prev->g) * local_t);
+        out.b = (uint8_t)(prev->b + (next->b - prev->b) * local_t);
+        out.a = (uint8_t)(prev->a + (next->a - prev->a) * local_t);
+        return pdf_gradient_composite_opaque(out);
+    }
+    out.r = stops[stop_count - 1].r;
+    out.g = stops[stop_count - 1].g;
+    out.b = stops[stop_count - 1].b;
+    out.a = stops[stop_count - 1].a;
+    return pdf_gradient_composite_opaque(out);
+}
+
+static bool pdf_gradient_path_bounds(RdtPath* path, float* left, float* top,
+                                     float* width, float* height) {
+    if (!path || !left || !top || !width || !height) return false;
+    float l = 0.0f;
+    float t = 0.0f;
+    float r = 0.0f;
+    float b = 0.0f;
+    if (!rdt_path_get_bounds(path, &l, &t, &r, &b)) return false;
+    float w = r - l;
+    float h = b - t;
+    if (w <= 0.0f || h <= 0.0f) return false;
+    *left = l;
+    *top = t;
+    *width = w;
+    *height = h;
+    return true;
+}
+
+static bool pdf_draw_gradient_surface(PdfRenderContext* ctx, RdtPath* path,
+                                      const RdtMatrix* transform,
+                                      ImageSurface* surface,
+                                      float left, float top,
+                                      float width, float height) {
+    if (!ctx || !path || !surface || !surface->pixels) return false;
+    bool clipped = pdf_push_clip_path(ctx, path, transform);
+    if (!clipped) return false;
+    bool ok = pdf_draw_abgr_image(ctx, (const uint32_t*)surface->pixels,
+                                  surface->width, surface->height,
+                                  surface->width,
+                                  left, top, width, height,
+                                  255, transform);
+    HPDF_Page_GRestore(ctx->current_page);
+    return ok;
+}
+
+static bool pdf_raster_fallback_linear_gradient(PdfRenderContext* ctx,
+                                                const PaintFillLinearGradient* p,
+                                                const RdtMatrix* transform) {
+    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0) return false;
+    float left = 0.0f;
+    float top = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    if (!pdf_gradient_path_bounds(p->path, &left, &top, &width, &height)) return false;
+
+    int surface_w = (int)ceilf(width); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
+    int surface_h = (int)ceilf(height); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
+    if (surface_w <= 0 || surface_h <= 0) return false;
+    ImageSurface* surface = image_surface_create(surface_w, surface_h);
+    if (!surface) return false;
+
+    float dx = p->x2 - p->x1;
+    float dy = p->y2 - p->y1;
+    float denom = dx * dx + dy * dy;
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    for (int py = 0; py < surface_h; py++) {
+        float y = top + ((float)py + 0.5f) * height / (float)surface_h;
+        for (int px = 0; px < surface_w; px++) {
+            float x = left + ((float)px + 0.5f) * width / (float)surface_w;
+            float t = denom > 1e-6f
+                ? ((x - p->x1) * dx + (y - p->y1) * dy) / denom
+                : 0.0f;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            Color color = pdf_gradient_sample_stops(p->stops, p->stop_count, t);
+            pixels[py * surface_w + px] = color.c;
+        }
+    }
+
+    log_info("[PDF_PAINT_IR] raster fallback linear gradient %.1fx%.1f to %dx%d",
+             width, height, surface_w, surface_h);
+    bool ok = pdf_draw_gradient_surface(ctx, p->path, transform, surface,
+                                        left, top, width, height);
+    image_surface_destroy(surface);
+    return ok;
+}
+
+static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
+                                                const PaintFillRadialGradient* p,
+                                                const RdtMatrix* transform) {
+    if (!ctx || !p || !p->path || !p->stops || p->stop_count <= 0 ||
+        p->r <= 0.0f) {
+        return false;
+    }
+    float left = 0.0f;
+    float top = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    if (!pdf_gradient_path_bounds(p->path, &left, &top, &width, &height)) return false;
+
+    int surface_w = (int)ceilf(width); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
+    int surface_h = (int)ceilf(height); // INT_CAST_OK: PDF gradient fallback surface dimensions are integer pixels.
+    if (surface_w <= 0 || surface_h <= 0) return false;
+    ImageSurface* surface = image_surface_create(surface_w, surface_h);
+    if (!surface) return false;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    for (int py = 0; py < surface_h; py++) {
+        float y = top + ((float)py + 0.5f) * height / (float)surface_h;
+        for (int px = 0; px < surface_w; px++) {
+            float x = left + ((float)px + 0.5f) * width / (float)surface_w;
+            float dist = hypotf(x - p->cx, y - p->cy);
+            float t = dist / p->r;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            Color color = pdf_gradient_sample_stops(p->stops, p->stop_count, t);
+            pixels[py * surface_w + px] = color.c;
+        }
+    }
+
+    log_info("[PDF_PAINT_IR] raster fallback radial gradient %.1fx%.1f to %dx%d",
+             width, height, surface_w, surface_h);
+    bool ok = pdf_draw_gradient_surface(ctx, p->path, transform, surface,
+                                        left, top, width, height);
+    image_surface_destroy(surface);
+    return ok;
+}
+
 static void pdf_lower_paint_list(PdfRenderContext* ctx) {
     bool has_transform_command = false;
+    bool has_effect_command = false;
     for (int i = 0; i < ctx->paint_list.count; i++) {
         PaintOp op = ctx->paint_list.cmds[i].op;
         if (op == PAINT_PUSH_TRANSFORM || op == PAINT_POP_TRANSFORM) {
             has_transform_command = true;
-            break;
+        } else if (op == PAINT_BEGIN_EFFECT_GROUP || op == PAINT_END_EFFECT_GROUP) {
+            has_effect_command = true;
         }
     }
 
@@ -539,7 +721,11 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         has_transform_command ||
         state->active_transform_depth > 0 ||
         state->skipped_transform_depth > 0;
-    if (!streaming_transform &&
+    bool streaming_effect =
+        has_effect_command ||
+        state->active_effect_depth > 0 ||
+        state->passthrough_effect_depth > 0;
+    if (!streaming_transform && !streaming_effect &&
         !paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
         paint_list_clear(&ctx->paint_list);
         return;
@@ -552,6 +738,49 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
     for (int i = 0; i < ctx->paint_list.count; i++) {
         PaintCmd* cmd = &ctx->paint_list.cmds[i];
         switch (cmd->op) {
+        case PAINT_BEGIN_EFFECT_GROUP: {
+            PaintEffectGroup* p = &cmd->effect_group;
+            bool opacity_only = caps && caps->opacity_groups &&
+                !p->has_clip &&
+                !p->has_transform &&
+                p->blend_mode == 0 &&
+                p->filter == nullptr &&
+                !p->backdrop &&
+                !p->isolation;
+            if (!opacity_only) {
+                state->passthrough_effect_depth++;
+                if (!state->logged_unsupported_effect) {
+                    log_error("[PDF_PAINT_IR] unsupported effect group rendered without effect fallback");
+                    state->logged_unsupported_effect = true;
+                }
+                break;
+            }
+            if (state->active_effect_depth >= PDF_PAINT_EFFECT_STACK_MAX) {
+                state->passthrough_effect_depth++;
+                log_error("[PDF_PAINT_IR] opacity effect stack overflow; rendering group without opacity");
+                break;
+            }
+            state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
+            state->current_opacity *= p->opacity;
+            if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
+            if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
+            if (p->opacity < 0.9995f && !state->logged_opacity_fallback) {
+                log_error("[PDF_PAINT_IR] opacity group flattened by compositing colors over white");
+                state->logged_opacity_fallback = true;
+            }
+            break;
+        }
+        case PAINT_END_EFFECT_GROUP:
+            if (state->passthrough_effect_depth > 0) {
+                state->passthrough_effect_depth--;
+                break;
+            }
+            if (state->active_effect_depth <= 0) {
+                log_error("[PDF_PAINT_IR] opacity effect stack underflow");
+                break;
+            }
+            state->current_opacity = state->opacity_stack[--state->active_effect_depth];
+            break;
         case PAINT_PUSH_TRANSFORM: {
             if (state->skipped_transform_depth > 0) {
                 state->skipped_transform_depth++;
@@ -659,6 +888,34 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Stroke(ctx->current_page);
+            }
+            break;
+        }
+        case PAINT_FILL_LINEAR_GRADIENT: {
+            if (!caps || !caps->gradients) break;
+            PaintFillLinearGradient* p = &cmd->fill_linear_gradient;
+            if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
+            if (!pdf_raster_fallback_linear_gradient(ctx, p, effective_transform)) {
+                log_error("[PDF_PAINT_IR] failed linear gradient raster fallback");
+            }
+            break;
+        }
+        case PAINT_FILL_RADIAL_GRADIENT: {
+            if (!caps || !caps->gradients) break;
+            PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
+            if (p->has_transform && !caps->transforms) break;
+            RdtMatrix composed_transform;
+            const RdtMatrix* effective_transform =
+                pdf_compose_transform(stack_transform,
+                                      p->has_transform ? &p->transform : NULL,
+                                      &composed_transform);
+            if (!pdf_raster_fallback_radial_gradient(ctx, p, effective_transform)) {
+                log_error("[PDF_PAINT_IR] failed radial gradient raster fallback");
             }
             break;
         }
@@ -1088,6 +1345,49 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
         }
     }
 
+    if (view->bound->background &&
+        view->bound->background->gradient_type == GRADIENT_LINEAR &&
+        view->bound->background->linear_gradient &&
+        view->bound->background->linear_gradient->stop_count >= 2) {
+        int stop_count = view->bound->background->linear_gradient->stop_count;
+        RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
+            (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+        BoundaryLinearGradientPaint gradient = {};
+        if (stops &&
+            render_paint_boundary_build_linear_gradient(view, abs_x, abs_y,
+                                                        stops, stop_count,
+                                                        &gradient)) {
+            paint_fill_linear_gradient(&ctx->paint_list, gradient.path,
+                                       gradient.x1, gradient.y1,
+                                       gradient.x2, gradient.y2,
+                                       gradient.stops, gradient.stop_count,
+                                       RDT_FILL_WINDING, nullptr);
+            pdf_lower_paint_list(ctx);
+            rdt_path_free(gradient.path);
+        }
+        if (stops) mem_free(stops);
+    } else if (view->bound->background &&
+               view->bound->background->gradient_type == GRADIENT_RADIAL &&
+               view->bound->background->radial_gradient &&
+               view->bound->background->radial_gradient->stop_count >= 2) {
+        int stop_count = view->bound->background->radial_gradient->stop_count;
+        RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
+            (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+        BoundaryRadialGradientPaint gradient = {};
+        if (stops &&
+            render_paint_boundary_build_radial_gradient(view, abs_x, abs_y,
+                                                        stops, stop_count,
+                                                        &gradient)) {
+            paint_fill_radial_gradient(&ctx->paint_list, gradient.path,
+                                       gradient.cx, gradient.cy, gradient.r,
+                                       gradient.stops, gradient.stop_count,
+                                       RDT_FILL_WINDING, nullptr);
+            pdf_lower_paint_list(ctx);
+            rdt_path_free(gradient.path);
+        }
+        if (stops) mem_free(stops);
+    }
+
     // Borders
     if (view->bound->border) {
         BorderProp* border = view->bound->border;
@@ -1138,6 +1438,108 @@ static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
     pdf_paint_draw_image(ctx, img, &content_rect);
+}
+
+static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+                                     FontBox* font, Color color) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx || !block) return;
+
+    DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
+    if (!dom_elem || !dom_elem->native_element) {
+        log_debug("[PDF_SVG_FALLBACK] inline SVG missing native element");
+        return;
+    }
+
+    BlockBlot block_context = {};
+    block_context.x = abs_x - block->x;
+    block_context.y = abs_y - block->y;
+    Rect content_rect = render_geometry_block_content_rect(&block_context, block, 1.0f);
+    if (content_rect.width <= 0.0f || content_rect.height <= 0.0f) {
+        log_debug("[PDF_SVG_FALLBACK] skipped empty inline SVG %.1fx%.1f",
+                  content_rect.width, content_rect.height);
+        return;
+    }
+
+    int surface_w = (int)ceilf(content_rect.width); // INT_CAST_OK: PDF raster fallback surface dimensions are integer pixels.
+    int surface_h = (int)ceilf(content_rect.height); // INT_CAST_OK: PDF raster fallback surface dimensions are integer pixels.
+    if (surface_w <= 0 || surface_h <= 0) return;
+
+    ImageSurface* surface = image_surface_create(surface_w, surface_h);
+    if (!surface) {
+        log_error("[PDF_SVG_FALLBACK] failed to allocate inline SVG surface %dx%d",
+                  surface_w, surface_h);
+        return;
+    }
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int pixel_count = surface_w * surface_h;
+    for (int i = 0; i < pixel_count; i++) {
+        pixels[i] = 0xffffffffu;
+    }
+
+    RdtVector vec = {};
+    rdt_vector_init(&vec, pixels, surface_w, surface_h, surface_w);
+
+    FontContext* font_ctx = ctx->ui_context ? ctx->ui_context->font_ctx : nullptr;
+    Pool* pool = (ctx->ui_context && ctx->ui_context->document)
+        ? ctx->ui_context->document->pool
+        : nullptr;
+    Color initial_current_color = color;
+    Color initial_fill_color = {};
+    Color initial_stroke_color = {};
+    Color* current_color_ptr = &initial_current_color;
+    Color* fill_color_ptr = nullptr;
+    Color* stroke_color_ptr = nullptr;
+    bool initial_fill_none = false;
+    bool initial_stroke_none = true;
+    float initial_stroke_width = -1.0f;
+    if (block->in_line && block->in_line->has_color) {
+        initial_current_color = block->in_line->color;
+    }
+    if (block->in_line && block->in_line->has_svg_fill) {
+        if (block->in_line->svg_fill_none) {
+            initial_fill_none = true;
+        } else {
+            initial_fill_color = block->in_line->svg_fill_color;
+            fill_color_ptr = &initial_fill_color;
+        }
+    }
+    if (block->in_line && block->in_line->has_svg_stroke) {
+        if (block->in_line->svg_stroke_none) {
+            initial_stroke_none = true;
+        } else {
+            initial_stroke_color = block->in_line->svg_stroke_color;
+            stroke_color_ptr = &initial_stroke_color;
+            initial_stroke_none = false;
+        }
+    }
+    if (block->in_line && block->in_line->has_svg_stroke_width) {
+        initial_stroke_width = block->in_line->svg_stroke_width;
+    }
+
+    log_info("[PDF_SVG_FALLBACK] rasterizing inline SVG %.1fx%.1f to %dx%d",
+             content_rect.width, content_rect.height, surface_w, surface_h);
+    render_svg_to_vec_via_display_list(&vec, dom_elem->native_element,
+                                       content_rect.width, content_rect.height,
+                                       pool, 1.0f, font_ctx, nullptr,
+                                       current_color_ptr, fill_color_ptr,
+                                       nullptr, 1.0f, initial_fill_none,
+                                       stroke_color_ptr, initial_stroke_none,
+                                       initial_stroke_width);
+    rdt_vector_flush_batch(&vec);
+
+    const RdtMatrix* transform = &ctx->paint_state.current_transform;
+    if (!pdf_draw_abgr_image(ctx, pixels, surface_w, surface_h, surface_w,
+                             content_rect.x, content_rect.y,
+                             content_rect.width, content_rect.height,
+                             255, transform)) {
+        log_error("[PDF_SVG_FALLBACK] failed to draw rasterized inline SVG");
+    }
+
+    rdt_vector_destroy(&vec);
+    image_surface_destroy(surface);
+    (void)font;
 }
 
 static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
@@ -1264,6 +1666,22 @@ static void pdf_cb_end_transform(void* vctx) {
     }
 }
 
+static void pdf_cb_begin_opacity(void* vctx, float opacity) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    PaintEffectGroup group = {};
+    group.opacity = opacity;
+    paint_begin_effect_group(&ctx->paint_list, &group);
+    pdf_lower_paint_list(ctx);
+}
+
+static void pdf_cb_end_opacity(void* vctx) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    paint_end_effect_group(&ctx->paint_list);
+    pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     const char* pdf_font_name = get_pdf_font_name(font_prop->family);
@@ -1280,13 +1698,13 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_bound     = pdf_cb_render_bound;
     b.render_text      = pdf_cb_render_text;
     b.render_image     = pdf_cb_render_image;
-    b.render_inline_svg = NULL;
+    b.render_inline_svg = pdf_cb_render_inline_svg;
     b.begin_block_children  = NULL;
     b.end_block_children    = NULL;
     b.begin_inline_children = NULL;
     b.end_inline_children   = NULL;
-    b.begin_opacity    = NULL;
-    b.end_opacity      = NULL;
+    b.begin_opacity    = pdf_cb_begin_opacity;
+    b.end_opacity      = pdf_cb_end_opacity;
     b.begin_transform  = pdf_cb_begin_transform;
     b.end_transform    = pdf_cb_end_transform;
     b.render_column_rules = pdf_cb_render_column_rules;
