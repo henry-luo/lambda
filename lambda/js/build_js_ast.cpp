@@ -1328,10 +1328,9 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
     func->base.type = &TYPE_FUNC;
 
-    // Add function to scope if it has a name — but NOT for class method definitions,
-    // which should not pollute the enclosing scope with their method names.
-    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
-    if (func->name && !is_method_def) {
+    // Function declarations bind in the enclosing scope. Named function
+    // expressions keep their name private to their own body.
+    if (func->name && ast_type == JS_AST_NODE_FUNCTION_DECLARATION) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 
@@ -4124,8 +4123,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
 
     func->base.type = &TYPE_FUNC;
 
-    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
-    if (func->name && !is_method_def) {
+    if (func->name && ast_type == JS_AST_NODE_FUNCTION_DECLARATION) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 

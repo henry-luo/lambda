@@ -22,7 +22,7 @@ T21 oneOf valid: red
 T22 oneOf fail: ValidationError
 T23 notOneOf: ValidationError
 T24 truncate: 3
-T25 round floor: ValidationError
+T25 round floor: 3
 T26 object valid: Alice 25
 T27 object fail: ValidationError
 T28 array: 1,2,3
