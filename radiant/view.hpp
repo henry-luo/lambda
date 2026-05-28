@@ -592,6 +592,16 @@ typedef struct Corner {
     bool tl_percent_y, tr_percent_y, br_percent_y, bl_percent_y;  // true if vertical radius is a percentage (0-100)
 } Corner;
 
+// Gradient types for CSS background and border-image gradients
+typedef enum {
+    GRADIENT_NONE = 0,
+    GRADIENT_LINEAR,
+    GRADIENT_RADIAL,
+    GRADIENT_CONIC
+} GradientType;
+
+typedef struct LinearGradient LinearGradient;
+
 typedef struct {
     Spacing width;
     CssEnum top_style, right_style, bottom_style, left_style;
@@ -599,15 +609,12 @@ typedef struct {
     Color top_color, right_color, bottom_color, left_color;
     int64_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Corner radius;
+    GradientType border_image_type;
+    LinearGradient* border_image_linear_gradient;
+    float border_image_width;
+    bool has_border_image_width;
+    CssEnum border_image_repeat;
 } BorderProp;
-
-// Gradient types for CSS background gradients
-typedef enum {
-    GRADIENT_NONE = 0,
-    GRADIENT_LINEAR,
-    GRADIENT_RADIAL,
-    GRADIENT_CONIC
-} GradientType;
 
 // Color stop for gradients
 typedef struct {
@@ -616,13 +623,13 @@ typedef struct {
 } GradientStop;
 
 // Linear gradient data
-typedef struct {
+struct LinearGradient {
     float angle;           // in degrees, 0 = to top, 90 = to right
     GradientStop* stops;   // array of color stops
     int stop_count;
     int is_repeating : 1;  // true for repeating-linear-gradient
     int stops_in_px : 1;   // true if stop positions are in px (not fractions)
-} LinearGradient;
+};
 
 // Radial gradient shape
 typedef enum {
@@ -695,6 +702,13 @@ typedef struct {
     int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
+
+typedef struct MaskProp {
+    bool has_radial_gradient;
+    float cx, cy;           // 0.0-1.0 relative to border box
+    float radius;           // CSS px unless radius_is_percent is true
+    bool radius_is_percent;
+} MaskProp;
 
 /**
  * BoxShadow - CSS box-shadow property
@@ -895,6 +909,7 @@ typedef struct BoundaryProp {
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;
+    MaskProp* mask;
     BoxShadow* box_shadow;       // Linked list of box shadows
     OutlineProp* outline;        // CSS outline property (outside border-box)
     float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via

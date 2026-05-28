@@ -24,8 +24,22 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         rdcon,
         rdcon->transform,
         rdcon->has_transform,
+        rdcon->perspective_distance,
+        rdcon->perspective_origin_x,
+        rdcon->perspective_origin_y,
         false
     };
+    if (block->transform && block->transform->perspective > 0.0f) {
+        float elem_x = parent_block->x + block->x;
+        float elem_y = parent_block->y + block->y;
+        rdcon->perspective_distance = block->transform->perspective;
+        rdcon->perspective_origin_x = elem_x + block->transform->perspective_origin_x;
+        rdcon->perspective_origin_y = elem_y + block->transform->perspective_origin_y;
+        scope.active = true;
+        log_debug("[TRANSFORM] Element %s: perspective active, distance=%.1f",
+            block->node_name(), rdcon->perspective_distance);
+    }
+
     if (!block->transform || !block->transform->functions) {
         return scope;
     }
@@ -43,7 +57,8 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
     origin_y += elem_y;
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transform->functions, block->width, block->height, origin_x, origin_y);
+        block->transform->functions, block->width, block->height, origin_x, origin_y,
+        rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
 
     if (scope.previous_has_transform) {
         rdcon->transform = render_state_multiply_matrix(&scope.previous_transform, &next_transform);
@@ -64,6 +79,9 @@ void render_state_pop_transform(RenderTransformScope* scope) {
     }
     scope->context->transform = scope->previous_transform;
     scope->context->has_transform = scope->previous_has_transform;
+    scope->context->perspective_distance = scope->previous_perspective_distance;
+    scope->context->perspective_origin_x = scope->previous_perspective_origin_x;
+    scope->context->perspective_origin_y = scope->previous_perspective_origin_y;
     scope->active = false;
 }
 

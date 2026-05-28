@@ -179,6 +179,23 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         render_box_shadow(rdcon, view, rect);
     }
 
+    RdtPath* mask_clip_path = nullptr;
+    bool mask_clip_active = false;
+    if (view->bound->mask && view->bound->mask->has_radial_gradient) {
+        MaskProp* mask = view->bound->mask;
+        float radius = mask->radius_is_percent
+            ? mask->radius * (rect.width < rect.height ? rect.width : rect.height)
+            : mask->radius * s;
+        if (radius > 0.0f) {
+            float cx = rect.x + mask->cx * rect.width;
+            float cy = rect.y + mask->cy * rect.height;
+            mask_clip_path = rdt_path_new();
+            rdt_path_add_circle(mask_clip_path, cx, cy, radius, radius);
+            rc_push_clip(rdcon, mask_clip_path, nullptr);
+            mask_clip_active = true;
+        }
+    }
+
     // Render background (gradient, solid color, and background-image) using new rendering system
     if (view->bound->background) {
         render_background(rdcon, view, rect);
@@ -253,6 +270,13 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         } else {
             render_border(rdcon, view, rect);
         }
+    }
+
+    if (mask_clip_active) {
+        rc_pop_clip(rdcon);
+    }
+    if (mask_clip_path) {
+        rdt_path_free(mask_clip_path);
     }
 }
 
@@ -436,6 +460,15 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
     }
 }
 
+static bool block_should_paint_children(ViewBlock* block) {
+    if (!block) return false;
+    if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+        block->tag() != HTM_TAG_BUTTON) {
+        return false;
+    }
+    return true;
+}
+
 static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return;
     if (block->in_line && block->in_line->has_color) {
@@ -573,7 +606,7 @@ static bool raster_block_paint_self(void* ctx, ViewBlock* block, void* phase) {
     RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
     if (!driver || !driver->rdcon || !block || !phase) return false;
     render_block_paint_self(driver->rdcon, block, (RenderBlockPhase*)phase);
-    return true;
+    return block_should_paint_children(block);
 }
 
 static double raster_block_paint_children(void* ctx, ViewBlock* block, void* phase) {

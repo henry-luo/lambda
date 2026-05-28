@@ -15,6 +15,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <math.h>
 
 // ============================================================================
 // Internal types
@@ -589,6 +590,26 @@ static void image_paint_cache_clear_all() {
     }
 }
 
+static bool matrix_is_projective(const RdtMatrix* transform) {
+    if (!transform) return false;
+    return fabsf(transform->e31) > 0.000001f ||
+           fabsf(transform->e32) > 0.000001f ||
+           fabsf(transform->e33 - 1.0f) > 0.000001f;
+}
+
+static void matrix_apply_point(const RdtMatrix* transform, float x, float y,
+                               float* out_x, float* out_y) {
+    if (!transform) {
+        *out_x = x;
+        *out_y = y;
+        return;
+    }
+    float w = transform->e31 * x + transform->e32 * y + transform->e33;
+    if (fabsf(w) < 0.000001f) w = 1.0f;
+    *out_x = (transform->e11 * x + transform->e12 * y + transform->e13) / w;
+    *out_y = (transform->e21 * x + transform->e22 * y + transform->e23) / w;
+}
+
 // Replay a path's commands onto a ThorVG shape
 static void path_replay(RdtPath* p, Tvg_Paint shape) {
     for (int i = 0; i < p->count; i++) {
@@ -617,6 +638,66 @@ static void path_replay(RdtPath* p, Tvg_Paint shape) {
                 tvg_shape_append_circle(shape, e->args[0], e->args[1],
                                         e->args[2], e->args[3], true);
                 break;
+        }
+    }
+}
+
+static void path_replay_projective(RdtPath* p, Tvg_Paint shape, const RdtMatrix* transform) {
+    for (int i = 0; i < p->count; i++) {
+        RdtPath::Entry* e = &p->entries[i];
+        float x, y;
+        switch (e->cmd) {
+            case RdtPath::CMD_MOVE:
+                matrix_apply_point(transform, e->args[0], e->args[1], &x, &y);
+                tvg_shape_move_to(shape, x, y);
+                break;
+            case RdtPath::CMD_LINE:
+                matrix_apply_point(transform, e->args[0], e->args[1], &x, &y);
+                tvg_shape_line_to(shape, x, y);
+                break;
+            case RdtPath::CMD_CUBIC: {
+                float x1, y1, x2, y2, x3, y3;
+                matrix_apply_point(transform, e->args[0], e->args[1], &x1, &y1);
+                matrix_apply_point(transform, e->args[2], e->args[3], &x2, &y2);
+                matrix_apply_point(transform, e->args[4], e->args[5], &x3, &y3);
+                tvg_shape_cubic_to(shape, x1, y1, x2, y2, x3, y3);
+                break;
+            }
+            case RdtPath::CMD_CLOSE:
+                tvg_shape_close(shape);
+                break;
+            case RdtPath::CMD_RECT: {
+                float x0 = e->args[0];
+                float y0 = e->args[1];
+                float x1 = x0 + e->args[2];
+                float y1 = y0 + e->args[3];
+                matrix_apply_point(transform, x0, y0, &x, &y);
+                tvg_shape_move_to(shape, x, y);
+                matrix_apply_point(transform, x1, y0, &x, &y);
+                tvg_shape_line_to(shape, x, y);
+                matrix_apply_point(transform, x1, y1, &x, &y);
+                tvg_shape_line_to(shape, x, y);
+                matrix_apply_point(transform, x0, y1, &x, &y);
+                tvg_shape_line_to(shape, x, y);
+                tvg_shape_close(shape);
+                break;
+            }
+            case RdtPath::CMD_CIRCLE: {
+                const int segment_count = 24;
+                for (int j = 0; j < segment_count; j++) {
+                    float angle = ((float)j / (float)segment_count) * 2.0f * (float)M_PI;
+                    float px = e->args[0] + cosf(angle) * e->args[2];
+                    float py = e->args[1] + sinf(angle) * e->args[3];
+                    matrix_apply_point(transform, px, py, &x, &y);
+                    if (j == 0) {
+                        tvg_shape_move_to(shape, x, y);
+                    } else {
+                        tvg_shape_line_to(shape, x, y);
+                    }
+                }
+                tvg_shape_close(shape);
+                break;
+            }
         }
     }
 }
@@ -673,7 +754,12 @@ static void apply_transform(Tvg_Paint shape, const RdtMatrix* transform) {
 // Create a clip mask shape from a path (solid black fill for alpha masking)
 static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform) {
     Tvg_Paint clip = tvg_shape_new();
-    path_replay(clip_path, clip);
+    if (matrix_is_projective(transform)) {
+        path_replay_projective(clip_path, clip, transform);
+        transform = nullptr;
+    } else {
+        path_replay(clip_path, clip);
+    }
     tvg_shape_set_fill_color(clip, 0, 0, 0, 255);
     apply_transform(clip, transform);
     return clip;
@@ -995,6 +1081,17 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* impl = vec->impl;
 
+    if (matrix_is_projective(transform)) {
+        Tvg_Paint shape = tvg_shape_new();
+        path_replay_projective(p, shape, transform);
+        tvg_shape_set_fill_color(shape, color.r, color.g, color.b, color.a);
+        if (rule == RDT_FILL_EVEN_ODD) {
+            tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
+        }
+        tvg_push_draw_remove_clipped(impl, shape);
+        return;
+    }
+
     uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_FILL_PATH, p);
     rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
     rdt_hash_bytes(&hash, &color.g, sizeof(color.g));
@@ -1058,6 +1155,32 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* impl = vec->impl;
+
+    if (matrix_is_projective(transform)) {
+        Tvg_Paint shape = tvg_shape_new();
+        path_replay_projective(p, shape, transform);
+        tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
+        tvg_shape_set_stroke_width(shape, width);
+        Tvg_Stroke_Cap tvg_cap;
+        switch (cap) {
+            case RDT_CAP_ROUND:  tvg_cap = TVG_STROKE_CAP_ROUND; break;
+            case RDT_CAP_SQUARE: tvg_cap = TVG_STROKE_CAP_SQUARE; break;
+            default:             tvg_cap = TVG_STROKE_CAP_BUTT; break;
+        }
+        tvg_shape_set_stroke_cap(shape, tvg_cap);
+        Tvg_Stroke_Join tvg_join;
+        switch (join) {
+            case RDT_JOIN_ROUND: tvg_join = TVG_STROKE_JOIN_ROUND; break;
+            case RDT_JOIN_BEVEL: tvg_join = TVG_STROKE_JOIN_BEVEL; break;
+            default:             tvg_join = TVG_STROKE_JOIN_MITER; break;
+        }
+        tvg_shape_set_stroke_join(shape, tvg_join);
+        if (dash_array && dash_count > 0) {
+            tvg_shape_set_stroke_dash(shape, dash_array, dash_count, dash_phase);
+        }
+        tvg_push_draw_remove_clipped(impl, shape);
+        return;
+    }
 
     uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_STROKE_PATH, p);
     rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
@@ -1133,6 +1256,30 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* impl = vec->impl;
+    if (matrix_is_projective(transform)) {
+        float tx1, ty1, tx2, ty2;
+        matrix_apply_point(transform, x1, y1, &tx1, &ty1);
+        matrix_apply_point(transform, x2, y2, &tx2, &ty2);
+        Tvg_Paint shape = tvg_shape_new();
+        path_replay_projective(p, shape, transform);
+        if (rule == RDT_FILL_EVEN_ODD) {
+            tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
+        }
+        Tvg_Gradient grad = tvg_linear_gradient_new();
+        tvg_linear_gradient_set(grad, tx1, ty1, tx2, ty2);
+        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        for (int i = 0; i < stop_count; i++) {
+            tvg_stops[i].offset = stops[i].offset;
+            tvg_stops[i].r = stops[i].r;
+            tvg_stops[i].g = stops[i].g;
+            tvg_stops[i].b = stops[i].b;
+            tvg_stops[i].a = stops[i].a;
+        }
+        tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+        tvg_shape_set_gradient(shape, grad);
+        tvg_push_draw_remove_clipped(impl, shape);
+        return;
+    }
     float values[4] = {x1, y1, x2, y2};
 
     uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_LINEAR_GRADIENT, p);
@@ -1189,6 +1336,31 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
                               const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p || !stops || stop_count < 2) return;
     RdtVectorImpl* impl = vec->impl;
+    if (matrix_is_projective(transform)) {
+        float tcx, tcy, trx, try_;
+        matrix_apply_point(transform, cx, cy, &tcx, &tcy);
+        matrix_apply_point(transform, cx + r, cy, &trx, &try_);
+        float tr = sqrtf((trx - tcx) * (trx - tcx) + (try_ - tcy) * (try_ - tcy));
+        Tvg_Paint shape = tvg_shape_new();
+        path_replay_projective(p, shape, transform);
+        if (rule == RDT_FILL_EVEN_ODD) {
+            tvg_shape_set_fill_rule(shape, TVG_FILL_RULE_EVEN_ODD);
+        }
+        Tvg_Gradient grad = tvg_radial_gradient_new();
+        tvg_radial_gradient_set(grad, tcx, tcy, tr, tcx, tcy, 0);
+        Tvg_Color_Stop* tvg_stops = (Tvg_Color_Stop*)alloca(stop_count * sizeof(Tvg_Color_Stop));
+        for (int i = 0; i < stop_count; i++) {
+            tvg_stops[i].offset = stops[i].offset;
+            tvg_stops[i].r = stops[i].r;
+            tvg_stops[i].g = stops[i].g;
+            tvg_stops[i].b = stops[i].b;
+            tvg_stops[i].a = stops[i].a;
+        }
+        tvg_gradient_set_color_stops(grad, tvg_stops, stop_count);
+        tvg_shape_set_gradient(shape, grad);
+        tvg_push_draw_remove_clipped(impl, shape);
+        return;
+    }
     float values[3] = {cx, cy, r};
 
     uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_RADIAL_GRADIENT, p);

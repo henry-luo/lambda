@@ -34,6 +34,14 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
                                         float x, float y);
 static void render_text_decorations(RenderContext* rdcon, unsigned char* str,
                                     TextRect* text_rect);
+static bool render_text_background_clip_linear_text(RenderContext* rdcon,
+                                                    DomElement* parent_elem,
+                                                    TextRect* text_rect,
+                                                    float text_x, float text_y,
+                                                    LinearGradient** out_gradient,
+                                                    Rect* out_gradient_rect);
+static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
+                                                float px, float py);
 
 // Check if a codepoint has Emoji_Presentation=Yes (Unicode 15.0, UTS #51).
 // Mirrors is_emoji_presentation_default in layout_text.cpp.
@@ -404,7 +412,23 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                             render_text_paint_glyph_shadows(rdcon, glyph, text_shadow, x, y, ascend);
                         }
 
+                        LinearGradient* text_gradient = nullptr;
+                        Rect text_gradient_rect = {};
+                        bool has_text_gradient = render_text_background_clip_linear_text(
+                            rdcon, parent_elem, text_rect,
+                            rdcon->block.x + text_rect->x * s, y,
+                            &text_gradient, &text_gradient_rect);
+                        Color glyph_saved_color = rdcon->color;
+                        if (has_text_gradient) {
+                            float gx_center = x + glyph->bitmap.bearing_x + glyph->bitmap.width * 0.5f;
+                            float gy_center = y + ascend - glyph->bitmap.bearing_y + glyph->bitmap.height * 0.5f;
+                            rdcon->color = render_text_sample_linear_gradient(
+                                text_gradient, text_gradient_rect, gx_center, gy_center);
+                        }
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
+                        if (has_text_gradient) {
+                            rdcon->color = glyph_saved_color;
+                        }
                         auto t4 = std::chrono::high_resolution_clock::now();
                         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
                             std::chrono::duration<double, std::milli>(t4 - t3).count());
@@ -656,6 +680,129 @@ static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* g
         ts = ts->next;
     }
     rdcon->color = saved_shadow_color;
+}
+
+static bool render_text_background_clip_linear_text(RenderContext* rdcon,
+                                                    DomElement* parent_elem,
+                                                    TextRect* text_rect,
+                                                    float text_x, float text_y,
+                                                    LinearGradient** out_gradient,
+                                                    Rect* out_gradient_rect) {
+    if (out_gradient) *out_gradient = nullptr;
+    if (out_gradient_rect) *out_gradient_rect = {};
+    if (!rdcon || !parent_elem || !parent_elem->bound ||
+        !parent_elem->bound->background || !text_rect ||
+        !out_gradient || !out_gradient_rect) {
+        return false;
+    }
+
+    BackgroundProp* bg = parent_elem->bound->background;
+    if (bg->bg_clip != CSS_VALUE_TEXT ||
+        bg->gradient_type != GRADIENT_LINEAR ||
+        !bg->linear_gradient ||
+        bg->linear_gradient->stop_count < 2) {
+        return false;
+    }
+
+    float s = rdcon->scale;
+    float width = parent_elem->content_width * s;
+    float height = parent_elem->content_height * s;
+    if (width <= 0.0f) {
+        width = text_rect->width * s;
+    }
+    if (height <= 0.0f) {
+        height = text_rect->height * s;
+    }
+    if (width <= 0.0f || height <= 0.0f) {
+        return false;
+    }
+
+    out_gradient_rect->x = text_x;
+    out_gradient_rect->y = text_y;
+    out_gradient_rect->width = width;
+    out_gradient_rect->height = height;
+    *out_gradient = bg->linear_gradient;
+    return true;
+}
+
+static float render_text_gradient_stop_position(LinearGradient* gradient, int index) {
+    if (!gradient || index < 0 || index >= gradient->stop_count) {
+        return 0.0f;
+    }
+    float position = gradient->stops[index].position;
+    if (position >= 0.0f) {
+        return position;
+    }
+    return gradient->stop_count > 1
+        ? (float)index / (float)(gradient->stop_count - 1)
+        : 0.0f;
+}
+
+static unsigned char render_text_lerp_channel(unsigned char a, unsigned char b, float t) {
+    float v = (float)a + ((float)b - (float)a) * t;
+    if (v <= 0.0f) return 0;
+    if (v >= 255.0f) return 255;
+    return (unsigned char)lroundf(v);  // INT_CAST_OK: converting interpolated 8-bit color channel
+}
+
+static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
+                                                float px, float py) {
+    Color fallback = {0};
+    fallback.a = 255;
+    if (!gradient || gradient->stop_count <= 0 || rect.width <= 0.0f || rect.height <= 0.0f) {
+        return fallback;
+    }
+    if (gradient->stop_count == 1) {
+        return gradient->stops[0].color;
+    }
+
+    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
+    float dx = sinf(angle_rad);
+    float dy = -cosf(angle_rad);
+    float half_w = rect.width * 0.5f;
+    float half_h = rect.height * 0.5f;
+    float cx = rect.x + half_w;
+    float cy = rect.y + half_h;
+    float abs_dx = fabsf(dx);
+    float abs_dy = fabsf(dy);
+    float dist = (abs_dx * rect.height < abs_dy * rect.width)
+        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+    float x1 = cx - dx * dist;
+    float y1 = cy - dy * dist;
+    float x2 = cx + dx * dist;
+    float y2 = cy + dy * dist;
+    float vx = x2 - x1;
+    float vy = y2 - y1;
+    float len2 = vx * vx + vy * vy;
+    float pos = len2 > 1e-7f
+        ? ((px - x1) * vx + (py - y1) * vy) / len2
+        : 0.0f;
+    pos = fminf(1.0f, fmaxf(0.0f, pos));
+
+    int right = 0;
+    while (right < gradient->stop_count &&
+           render_text_gradient_stop_position(gradient, right) < pos) {
+        right++;
+    }
+    if (right <= 0) {
+        return gradient->stops[0].color;
+    }
+    if (right >= gradient->stop_count) {
+        return gradient->stops[gradient->stop_count - 1].color;
+    }
+
+    float left_pos = render_text_gradient_stop_position(gradient, right - 1);
+    float right_pos = render_text_gradient_stop_position(gradient, right);
+    float t = right_pos > left_pos ? (pos - left_pos) / (right_pos - left_pos) : 0.0f;
+    Color left = gradient->stops[right - 1].color;
+    Color right_color = gradient->stops[right].color;
+    Color out = {0};
+    out.r = render_text_lerp_channel(left.r, right_color.r, t);
+    out.g = render_text_lerp_channel(left.g, right_color.g, t);
+    out.b = render_text_lerp_channel(left.b, right_color.b, t);
+    out.a = render_text_lerp_channel(left.a, right_color.a, t);
+    return out;
 }
 
 static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,

@@ -414,6 +414,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_IMAGE_ORIENTATION, "image-orientation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "from-image", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_IMAGE_RENDERING, "image-rendering", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_MARKER_OFFSET, "marker-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_MASK_IMAGE, "mask-image", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_MASK_TYPE, "mask-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "luminance", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NESTING, "nesting", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_BLOCK, "overflow-block", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},

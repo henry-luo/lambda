@@ -88,6 +88,11 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
               view->node_name(), bg->color.c, bg->gradient_type,
               (void*)bg->linear_gradient, (void*)bg->radial_gradient);
 
+    if (bg->bg_clip == CSS_VALUE_TEXT) {
+        log_debug("[RENDER BG] background-clip:text defers background paint to glyph fill");
+        return;
+    }
+
     float s = rdcon->scale;
     BorderProp* border  = view->bound->border;
     Spacing*    padding = &view->bound->padding;

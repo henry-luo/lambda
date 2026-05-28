@@ -85,6 +85,10 @@ struct SvgInlineRenderContext {
     void* style_rules;           // SvgStyleRule* (private to render_svg_inline.cpp)
     int style_rule_count;
     int style_rule_capacity;
+
+    // Internal guard used while repainting a source element through a resolved
+    // SVG mask. Prevents recursive mask application on the same element.
+    bool suppress_masks;
 };
 
 extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root);
