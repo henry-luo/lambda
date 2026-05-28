@@ -1551,7 +1551,73 @@ bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
     }
 }
 
+// Emit a folded constant at a binary/unary *value* site, honoring the return
+// convention callers (notably jm_transpile_box_item) expect:
+//   - native (raw reg matching `et`) when `caller_native` is set — the caller
+//     will box it via jm_box_native(result, et);
+//   - a boxed Item otherwise.
+// Returns true and sets *out on success; returns false to mean "fall through to
+// normal codegen" (used when the fold result is inconsistent with `et`, so the
+// non-folded path emits the correct representation).
+static bool jm_emit_folded_at_value_site(JsMirTranspiler* mt, const JsFoldVal* fv,
+                                          bool caller_native, TypeId et, MIR_reg_t* out) {
+    if (caller_native && jm_is_native_type(et)) {
+        if (et == LMD_TYPE_FLOAT && fv->kind == JS_FOLD_NUM) {
+            MIR_reg_t d = jm_new_reg(mt, "fdbl", MIR_T_D);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, fv->num)));
+            *out = d; return true;
+        }
+        if (et == LMD_TYPE_INT && fv->kind == JS_FOLD_NUM && !fv->is_float &&
+            fv->num == (double)(int64_t)fv->num) {
+            MIR_reg_t r = jm_new_reg(mt, "fint", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, (int64_t)fv->num)));
+            *out = r; return true;
+        }
+        if (et == LMD_TYPE_BOOL && fv->kind == JS_FOLD_BOOL) {
+            MIR_reg_t r = jm_new_reg(mt, "fcmp", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, fv->boolean ? 1 : 0)));
+            *out = r; return true;
+        }
+        return false;  // et/fold disagreement: let normal codegen handle it
+    }
+    // caller expects a boxed Item
+    if (fv->kind == JS_FOLD_BOOL) {
+        MIR_reg_t r = jm_new_reg(mt, "fbool", MIR_T_I64);
+        uint64_t bval = fv->boolean ? ITEM_TRUE_VAL : ITEM_FALSE_VAL;
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, (int64_t)bval)));
+        *out = r; return true;
+    }
+    double val = fv->num;
+    if (!fv->is_float && val == (double)(int64_t)val &&
+        val >= -36028797018963968.0 && val <= 36028797018963967.0) {
+        *out = jm_box_int_const(mt, (int64_t)val); return true;
+    }
+    MIR_reg_t d = jm_new_reg(mt, "fdbl", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+        MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, val)));
+    *out = jm_box_float(mt, d); return true;
+}
+
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
+    if (jm_const_fold_enabled()) {
+        JsFoldVal fv;
+        if (jm_try_fold_const((JsAstNode*)bin, &fv)) {
+            // Mirror jm_transpile_box_item's native_binary predicate: a both-numeric
+            // binary (the only kind we fold) returns a raw native value the caller boxes.
+            TypeId lt = jm_get_effective_type(mt, bin->left);
+            TypeId rt = jm_get_effective_type(mt, bin->right);
+            bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                                (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+            TypeId et = jm_get_effective_type(mt, (JsAstNode*)bin);
+            MIR_reg_t out;
+            if (jm_emit_folded_at_value_site(mt, &fv, both_numeric, et, &out)) return out;
+            // else: fall through to normal codegen
+        }
+    }
     if (bin->op == JS_OP_ADD) {
         JsAstNode* n_arg = NULL;
         if (jm_match_decimal_to_percent_hex_call(bin->right, &n_arg)) {
@@ -2083,6 +2149,22 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
 
 // Unary expression
 MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
+    if (jm_const_fold_enabled()) {
+        JsFoldVal fv;
+        if (jm_try_fold_const((JsAstNode*)un, &fv)) {
+            // jm_transpile_box_item treats only numeric MINUS/SUB as native;
+            // PLUS/BIT_NOT/NOT return boxed (matching the non-folded paths below).
+            bool caller_native = false;
+            if (un->op == JS_OP_MINUS || un->op == JS_OP_SUB) {
+                TypeId ot = jm_get_effective_type(mt, un->operand);
+                caller_native = (ot == LMD_TYPE_INT || ot == LMD_TYPE_FLOAT);
+            }
+            TypeId et = jm_get_effective_type(mt, (JsAstNode*)un);
+            MIR_reg_t out;
+            if (jm_emit_folded_at_value_site(mt, &fv, caller_native, et, &out)) return out;
+            // else: fall through to normal codegen
+        }
+    }
     switch (un->op) {
     case JS_OP_NOT:
         return jm_call_1(mt, "js_logical_not", MIR_T_I64,
