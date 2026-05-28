@@ -298,6 +298,8 @@ struct DomElement : DomNode {
     TransformProp* transform;
     // CSS filter properties
     FilterProp* filter;
+    // CSS backdrop-filter properties
+    FilterProp* backdrop_filter;
     // CSS multi-column layout properties
     MultiColumnProp* multicol;
     // CSS fragmentation: generated border-box fragments for a single element.
@@ -329,7 +331,7 @@ struct DomElement : DomNode {
         item_prop_type(ITEM_PROP_NONE), fi(nullptr),
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
-        transform(nullptr), filter(nullptr), multicol(nullptr),
+        transform(nullptr), filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
         layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
         vpath(nullptr), layout_cache(nullptr),
         cached_min_content_width(0), cached_max_content_width(0),

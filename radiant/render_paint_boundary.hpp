@@ -7,6 +7,8 @@
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
+bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
+                                              float x, float y);
 
 typedef struct BoundaryLinearGradientPaint {
     RdtPath* path;

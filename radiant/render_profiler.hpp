@@ -96,6 +96,10 @@ typedef struct RenderPathTrace {
     int retained_reuse_misses;
     int retained_reuse_rejected_resources;
     int retained_reuse_rejected_dirty;
+    int paint_ir_commands;
+    int paint_ir_emitted;
+    int paint_ir_fallbacks;
+    int paint_ir_unsupported;
 } RenderPathTrace;
 
 void render_profiler_reset(RenderProfiler* profiler);

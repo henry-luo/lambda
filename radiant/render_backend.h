@@ -18,6 +18,7 @@
  */
 
 typedef struct RenderBackend RenderBackend;
+typedef struct PaintEffectGroup PaintEffectGroup;
 
 struct RenderBackend {
     void* ctx;   // backend-specific context (SvgRenderContext*, PdfRenderContext*, etc.)
@@ -62,6 +63,13 @@ struct RenderBackend {
     // Called around a block's content when opacity < 1.
     void (*begin_opacity)(void* ctx, float opacity);
     void (*end_opacity)(void* ctx);
+
+    // ── Semantic effect wrapper ────────────────────────────────────────
+    // Called around content affected by CSS stacking effects. New backends
+    // should prefer this over begin_opacity/end_opacity; opacity callbacks are
+    // kept for compatibility with simpler walkers/backends.
+    void (*begin_effect_group)(void* ctx, const PaintEffectGroup* group);
+    void (*end_effect_group)(void* ctx);
 
     // ── Transform wrapper ──────────────────────────────────────────────
     // Called around a block's self-paint and contents when CSS transforms are present.

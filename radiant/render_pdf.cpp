@@ -8,6 +8,9 @@
 #include "render_svg_inline.hpp"
 #include "render_border.hpp"
 #include "render_path.hpp"
+#include "render_effect_raster_fallback.hpp"
+#include "render_glyph_run_raster_lower.hpp"
+#include "render_profiler.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -39,9 +42,19 @@ typedef struct PdfPaintLoweringState {
     RdtMatrix transform_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
     float current_opacity;
     float opacity_stack[PDF_PAINT_EFFECT_STACK_MAX];
-    bool logged_opacity_fallback;
     bool logged_unsupported_effect;
+    int command_count;
+    int emitted_count;
+    int fallback_count;
+    int unsupported_count;
 } PdfPaintLoweringState;
+
+typedef struct PdfEffectRasterFallback {
+    bool active;
+    int nested_depth;
+    PaintEffectGroup group;
+    PaintList paint_list;
+} PdfEffectRasterFallback;
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -58,6 +71,11 @@ typedef struct PdfRenderContext {
     Color color;
     BlockBlot block;  // Current block context for coordinate transformation
     PaintList paint_list;
+    PdfEffectRasterFallback effect_fallback;
+    Pool* page_backdrop_pool;
+    Arena* page_backdrop_arena;
+    DisplayList page_backdrop_dl;
+    bool page_backdrop_ready;
     PdfPaintLoweringState paint_state;
     bool transform_emitted_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
     int transform_emitted_depth;
@@ -84,6 +102,53 @@ static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
     state->opacity_stack[0] = 1.0f;
 }
 
+static PaintList* pdf_active_paint_list(PdfRenderContext* ctx) {
+    if (ctx && ctx->effect_fallback.active) {
+        return &ctx->effect_fallback.paint_list;
+    }
+    return ctx ? &ctx->paint_list : nullptr;
+}
+
+static bool pdf_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {
+    return group &&
+           (group->has_clip || group->blend_mode != 0 || group->filter ||
+            group->backdrop || group->backdrop_filter ||
+            group->shadow || group->isolation);
+}
+
+static bool pdf_effect_group_needs_page_backdrop(const PaintEffectGroup* group) {
+    return group &&
+           (group->blend_mode != 0 || group->backdrop || group->backdrop_filter);
+}
+
+static bool pdf_paint_list_balanced_effect_groups(const PaintList* paint_list) {
+    if (!paint_list) return false;
+    int effect_depth = 0;
+    for (int i = 0; i < paint_list->count; i++) {
+        PaintOp op = paint_list->cmds[i].op;
+        if (op == PAINT_BEGIN_EFFECT_GROUP) {
+            effect_depth++;
+        } else if (op == PAINT_END_EFFECT_GROUP) {
+            effect_depth--;
+            if (effect_depth < 0) return false;
+        }
+    }
+    return effect_depth == 0;
+}
+
+static void pdf_record_page_backdrop_paint_list(PdfRenderContext* ctx,
+                                                const PaintList* paint_list) {
+    if (!ctx || !ctx->page_backdrop_ready || !paint_list || paint_list_count(paint_list) <= 0) {
+        return;
+    }
+    if (!pdf_paint_list_balanced_effect_groups(paint_list)) {
+        return;
+    }
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    paint_ir_lower_raster(paint_list, &ctx->page_backdrop_dl);
+}
+
 // Helper function to get PDF font name from system font
 static const char* get_pdf_font_name(const char* font_family) {
     if (!font_family) return "Helvetica";
@@ -101,14 +166,6 @@ static const char* get_pdf_font_name(const char* font_family) {
 
 // Set PDF color from Color struct
 static void pdf_set_color(PdfRenderContext* ctx, Color color) {
-    float opacity = ctx ? ctx->paint_state.current_opacity : 1.0f;
-    opacity *= color.a / 255.0f;
-    if (opacity < 0.9995f) {
-        color.r = (uint8_t)(color.r * opacity + 255.0f * (1.0f - opacity));
-        color.g = (uint8_t)(color.g * opacity + 255.0f * (1.0f - opacity));
-        color.b = (uint8_t)(color.b * opacity + 255.0f * (1.0f - opacity));
-        color.a = 255;
-    }
     float r = color.r / 255.0f;
     float g = color.g / 255.0f;
     float b = color.b / 255.0f;
@@ -435,6 +492,95 @@ static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
                                    stride_pixels, a, b, c, d, e, f) == HPDF_OK;
 }
 
+static bool pdf_draw_abgr_image_preserve_alpha(PdfRenderContext* ctx, const uint32_t* pixels,
+                                               int src_w, int src_h, int src_stride,
+                                               float dst_x, float dst_y,
+                                               float dst_w, float dst_h,
+                                               uint8_t opacity,
+                                               const RdtMatrix* transform) {
+    if (!ctx || !pixels || src_w <= 0 || src_h <= 0 || dst_w <= 0.0f || dst_h <= 0.0f) {
+        return false;
+    }
+    if (opacity != 255) return false;
+
+    int stride_pixels = pdf_image_stride_pixels(src_w, src_stride);
+
+    float x0 = 0.0f, y0 = 0.0f;
+    float x1 = 0.0f, y1 = 0.0f;
+    float x2 = 0.0f, y2 = 0.0f;
+    pdf_transform_point(transform, dst_x, dst_y + dst_h, &x0, &y0);
+    pdf_transform_point(transform, dst_x + dst_w, dst_y + dst_h, &x1, &y1);
+    pdf_transform_point(transform, dst_x, dst_y, &x2, &y2);
+
+    float a = x1 - x0;
+    float b = pdf_coord_y(ctx, y1) - pdf_coord_y(ctx, y0);
+    float c = x2 - x0;
+    float d = pdf_coord_y(ctx, y2) - pdf_coord_y(ctx, y0);
+    float e = x0;
+    float f = pdf_coord_y(ctx, y0);
+
+    if (pdf_image_pixels_are_opaque(pixels, src_w, src_h, stride_pixels)) {
+        return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
+                                       stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+    }
+    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels, src_w, src_h,
+                                            stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+}
+
+static void pdf_begin_effect_raster_fallback(PdfRenderContext* ctx,
+                                             const PaintEffectGroup* group) {
+    if (!ctx || !group) return;
+    ctx->effect_fallback.active = true;
+    ctx->effect_fallback.nested_depth = 0;
+    ctx->effect_fallback.group = *group;
+    paint_list_clear(&ctx->effect_fallback.paint_list);
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
+    log_error("[PDF_PAINT_IR] raster fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
+              group->opacity, group->blend_mode, group->filter,
+              group->backdrop ? 1 : 0, group->backdrop_filter,
+              group->shadow ? 1 : 0,
+              group->isolation ? 1 : 0);
+}
+
+static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
+    if (!ctx || !ctx->effect_fallback.active) return;
+    paint_end_effect_group(&ctx->effect_fallback.paint_list);
+
+    RenderEffectRasterImage image = {};
+    bool ok = render_effect_rasterize_paint_list(
+        &ctx->effect_fallback.paint_list,
+        pdf_effect_group_needs_page_backdrop(&ctx->effect_fallback.group)
+            ? &ctx->page_backdrop_dl
+            : nullptr,
+        &ctx->effect_fallback.group.bounds,
+        ctx->page_width,
+        ctx->page_height,
+        false,
+        &image,
+        "[PDF_PAINT_IR]");
+    ctx->paint_state.command_count += paint_list_count(&ctx->effect_fallback.paint_list);
+    if (ok && image.surface) {
+        if (pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)image.surface->pixels,
+                                               image.surface->width, image.surface->height,
+                                               image.surface->width,
+                                               image.x, image.y, image.width, image.height,
+                                               255, &ctx->paint_state.current_transform)) {
+            ctx->paint_state.emitted_count++;
+            ctx->paint_state.fallback_count++;
+        } else {
+            ctx->paint_state.unsupported_count++;
+        }
+    } else {
+        ctx->paint_state.unsupported_count++;
+    }
+    pdf_record_page_backdrop_paint_list(ctx, &ctx->effect_fallback.paint_list);
+    if (image.surface) image_surface_destroy(image.surface);
+    paint_list_clear(&ctx->effect_fallback.paint_list);
+    ctx->effect_fallback.active = false;
+    ctx->effect_fallback.nested_depth = 0;
+}
+
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
                                const RdtMatrix* transform) {
     if (!ctx || !path) return false;
@@ -704,7 +850,78 @@ static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
     return ok;
 }
 
+static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
+                                             const PaintSvgSubscene* subscene,
+                                             const RdtMatrix* transform) {
+    if (!ctx || !subscene || !subscene->svg_root ||
+        subscene->viewport_width <= 0.0f ||
+        subscene->viewport_height <= 0.0f) {
+        return false;
+    }
+
+    int surface_w = (int)ceilf(subscene->viewport_width); // INT_CAST_OK: PDF SVG subscene fallback surface width is integer pixels.
+    int surface_h = (int)ceilf(subscene->viewport_height); // INT_CAST_OK: PDF SVG subscene fallback surface height is integer pixels.
+    if (surface_w <= 0 || surface_h <= 0) return false;
+
+    ImageSurface* surface = image_surface_create(surface_w, surface_h);
+    if (!surface) {
+        log_error("[PDF_PAINT_IR] failed to allocate SVG subscene surface %dx%d",
+                  surface_w, surface_h);
+        return false;
+    }
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int pixel_count = surface_w * surface_h;
+    for (int i = 0; i < pixel_count; i++) {
+        pixels[i] = 0xffffffffu;
+    }
+
+    RdtVector vec = {};
+    rdt_vector_init(&vec, pixels, surface_w, surface_h, surface_w);
+
+    Color* current_color = subscene->has_color ? (Color*)&subscene->color : nullptr;
+    Color* fill_color = subscene->has_fill ? (Color*)&subscene->fill : nullptr;
+    Color* stroke_color = subscene->has_stroke ? (Color*)&subscene->stroke : nullptr;
+    render_svg_to_vec_via_display_list(&vec,
+                                       (Element*)subscene->svg_root,
+                                       subscene->viewport_width,
+                                       subscene->viewport_height,
+                                       (Pool*)subscene->pool,
+                                       subscene->pixel_ratio,
+                                       (FontContext*)subscene->font_context,
+                                       nullptr,
+                                       current_color,
+                                       fill_color,
+                                       subscene->source_path,
+                                       subscene->opacity,
+                                       subscene->fill_none,
+                                       stroke_color,
+                                       subscene->stroke_none,
+                                       subscene->stroke_width);
+    rdt_vector_flush_batch(&vec);
+
+    float dst_x = subscene->content_clip.left;
+    float dst_y = subscene->content_clip.top;
+    float dst_w = subscene->content_clip.right - subscene->content_clip.left;
+    float dst_h = subscene->content_clip.bottom - subscene->content_clip.top;
+    if (dst_w <= 0.0f) dst_w = subscene->viewport_width;
+    if (dst_h <= 0.0f) dst_h = subscene->viewport_height;
+
+    log_info("[PDF_PAINT_IR] raster fallback SVG subscene %.1fx%.1f to %dx%d",
+             dst_w, dst_h, surface_w, surface_h);
+    bool ok = pdf_draw_abgr_image(ctx, pixels, surface_w, surface_h, surface_w,
+                                  dst_x, dst_y, dst_w, dst_h,
+                                  255, transform);
+
+    rdt_vector_destroy(&vec);
+    image_surface_destroy(surface);
+    return ok;
+}
+
 static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+    if (!ctx || ctx->effect_fallback.active) return;
+    render_svg_inline_register_paint_ir_lowerers();
+
     bool has_transform_command = false;
     bool has_effect_command = false;
     for (int i = 0; i < ctx->paint_list.count; i++) {
@@ -730,6 +947,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         paint_list_clear(&ctx->paint_list);
         return;
     }
+    pdf_record_page_backdrop_paint_list(ctx, &ctx->paint_list);
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
@@ -737,6 +955,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
 
     for (int i = 0; i < ctx->paint_list.count; i++) {
         PaintCmd* cmd = &ctx->paint_list.cmds[i];
+        state->command_count++;
         switch (cmd->op) {
         case PAINT_BEGIN_EFFECT_GROUP: {
             PaintEffectGroup* p = &cmd->effect_group;
@@ -746,13 +965,17 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                 p->blend_mode == 0 &&
                 p->filter == nullptr &&
                 !p->backdrop &&
+                p->backdrop_filter == nullptr &&
+                !p->shadow &&
                 !p->isolation;
             if (!opacity_only) {
                 state->passthrough_effect_depth++;
                 if (!state->logged_unsupported_effect) {
-                    log_error("[PDF_PAINT_IR] unsupported effect group rendered without effect fallback");
+                    log_error("[PDF_PAINT_IR] fallback effect group rendered as passthrough content");
                     state->logged_unsupported_effect = true;
                 }
+                state->fallback_count++;
+                state->emitted_count++;
                 break;
             }
             if (state->active_effect_depth >= PDF_PAINT_EFFECT_STACK_MAX) {
@@ -764,15 +987,28 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             state->current_opacity *= p->opacity;
             if (state->current_opacity < 0.0f) state->current_opacity = 0.0f;
             if (state->current_opacity > 1.0f) state->current_opacity = 1.0f;
-            if (p->opacity < 0.9995f && !state->logged_opacity_fallback) {
-                log_error("[PDF_PAINT_IR] opacity group flattened by compositing colors over white");
-                state->logged_opacity_fallback = true;
+            if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
+                log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
+                break;
             }
+            HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(ctx->pdf_doc);
+            if (!ext_gstate) {
+                log_error("[PDF_PAINT_IR] failed to create PDF opacity ExtGState");
+                break;
+            }
+            HPDF_ExtGState_SetAlphaFill(ext_gstate, state->current_opacity);
+            HPDF_ExtGState_SetAlphaStroke(ext_gstate, state->current_opacity);
+            if (HPDF_Page_SetExtGState(ctx->current_page, ext_gstate) != HPDF_OK) {
+                log_error("[PDF_PAINT_IR] failed to apply PDF opacity ExtGState");
+                break;
+            }
+            state->emitted_count++;
             break;
         }
         case PAINT_END_EFFECT_GROUP:
             if (state->passthrough_effect_depth > 0) {
                 state->passthrough_effect_depth--;
+                state->emitted_count++;
                 break;
             }
             if (state->active_effect_depth <= 0) {
@@ -780,6 +1016,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                 break;
             }
             state->current_opacity = state->opacity_stack[--state->active_effect_depth];
+            HPDF_Page_GRestore(ctx->current_page);
+            state->emitted_count++;
             break;
         case PAINT_PUSH_TRANSFORM: {
             if (state->skipped_transform_depth > 0) {
@@ -831,6 +1069,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             PaintFillRect* p = &cmd->fill_rect;
             if (!stack_transform) {
                 pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+                state->emitted_count++;
                 break;
             }
             if (p->color.a == 0) break;
@@ -841,6 +1080,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
                                            0.0f, 0.0f)) {
                 HPDF_Page_Fill(ctx->current_page);
+                state->emitted_count++;
             }
             break;
         }
@@ -855,6 +1095,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             if (pdf_path_emit_rounded_rect(&path_ctx, p->x, p->y, p->w, p->h,
                                            p->rx, p->ry)) {
                 HPDF_Page_Fill(ctx->current_page);
+                state->emitted_count++;
             }
             break;
         }
@@ -871,6 +1112,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             pdf_set_color(ctx, p->color);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Fill(ctx->current_page);
+                state->emitted_count++;
             }
             break;
         }
@@ -888,6 +1130,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             HPDF_Page_SetLineWidth(ctx->current_page, p->width);
             if (pdf_render_path(ctx, p->path, effective_transform)) {
                 HPDF_Page_Stroke(ctx->current_page);
+                state->emitted_count++;
             }
             break;
         }
@@ -902,6 +1145,10 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                                       &composed_transform);
             if (!pdf_raster_fallback_linear_gradient(ctx, p, effective_transform)) {
                 log_error("[PDF_PAINT_IR] failed linear gradient raster fallback");
+                state->unsupported_count++;
+            } else {
+                state->fallback_count++;
+                state->emitted_count++;
             }
             break;
         }
@@ -916,6 +1163,10 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                                       &composed_transform);
             if (!pdf_raster_fallback_radial_gradient(ctx, p, effective_transform)) {
                 log_error("[PDF_PAINT_IR] failed radial gradient raster fallback");
+                state->unsupported_count++;
+            } else {
+                state->fallback_count++;
+                state->emitted_count++;
             }
             break;
         }
@@ -931,6 +1182,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             pdf_draw_abgr_image(ctx, p->pixels, p->src_w, p->src_h, p->src_stride,
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                                 p->opacity, effective_transform);
+            state->emitted_count++;
             break;
         }
         case PAINT_DRAW_IMAGE_RESOURCE: {
@@ -957,12 +1209,25 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
                                 p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                                 p->opacity,
                                 effective_transform);
+            state->emitted_count++;
             break;
         }
         case PAINT_GLYPH_RUN: {
             if (!caps || !caps->glyph_runs) break;
             PaintGlyphRun* p = &cmd->glyph_run;
             pdf_render_glyph_run(ctx, p, stack_transform);
+            state->emitted_count++;
+            break;
+        }
+        case PAINT_SVG_SUBSCENE: {
+            PaintSvgSubscene* p = &cmd->svg_subscene;
+            if (!pdf_raster_fallback_svg_subscene(ctx, p, stack_transform)) {
+                log_error("[PDF_PAINT_IR] failed SVG subscene raster fallback");
+                state->unsupported_count++;
+            } else {
+                state->fallback_count++;
+                state->emitted_count++;
+            }
             break;
         }
         case PAINT_PUSH_CLIP: {
@@ -1011,19 +1276,19 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
 static void pdf_paint_fill_rect(PdfRenderContext* ctx,
                                 float x, float y, float width, float height,
                                 Color color) {
-    paint_fill_rect(&ctx->paint_list, x, y, width, height, color);
+    paint_fill_rect(pdf_active_paint_list(ctx), x, y, width, height, color);
     pdf_lower_paint_list(ctx);
 }
 
 static void pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
-    paint_fill_path(&ctx->paint_list, path, color, RDT_FILL_WINDING, nullptr);
+    paint_fill_path(pdf_active_paint_list(ctx), path, color, RDT_FILL_WINDING, nullptr);
     pdf_lower_paint_list(ctx);
 }
 
 static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
                                  Rect* dst_rect) {
     if (!ctx || !img || !dst_rect) return;
-    paint_draw_image_resource(&ctx->paint_list, img,
+    paint_draw_image_resource(pdf_active_paint_list(ctx), img,
                               dst_rect->x, dst_rect->y,
                               dst_rect->width, dst_rect->height,
                               255, nullptr);
@@ -1032,7 +1297,7 @@ static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
 
 static void pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
                                   Color color, float width) {
-    paint_stroke_path(&ctx->paint_list, path, color, width,
+    paint_stroke_path(pdf_active_paint_list(ctx), path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
     pdf_lower_paint_list(ctx);
 }
@@ -1218,7 +1483,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.x = base_x;
     run.baseline_y = baseline_y;
     run.word_spacing = adjusted_space_width - space_width;
-    paint_glyph_run(&ctx->paint_list, &run);
+    paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
     mem_free(text_content);
@@ -1318,13 +1583,17 @@ static bool pdf_build_transform_matrix(const TransformProp* tp, float elem_x, fl
 
 static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (render_paint_boundary_emit_simple(&ctx->paint_list, view, abs_x, abs_y)) {
+    if (render_paint_boundary_emit_simple(pdf_active_paint_list(ctx), view, abs_x, abs_y)) {
         pdf_lower_paint_list(ctx);
         return;
     }
 
     float width = view->width;
     float height = view->height;
+
+    if (ctx->effect_fallback.active && view->bound->box_shadow) {
+        render_paint_boundary_emit_outer_shadows(pdf_active_paint_list(ctx), view, abs_x, abs_y);
+    }
 
     // Background
     if (view->bound->background && view->bound->background->color.a > 0) {
@@ -1357,7 +1626,7 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
             render_paint_boundary_build_linear_gradient(view, abs_x, abs_y,
                                                         stops, stop_count,
                                                         &gradient)) {
-            paint_fill_linear_gradient(&ctx->paint_list, gradient.path,
+            paint_fill_linear_gradient(pdf_active_paint_list(ctx), gradient.path,
                                        gradient.x1, gradient.y1,
                                        gradient.x2, gradient.y2,
                                        gradient.stops, gradient.stop_count,
@@ -1378,7 +1647,7 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
             render_paint_boundary_build_radial_gradient(view, abs_x, abs_y,
                                                         stops, stop_count,
                                                         &gradient)) {
-            paint_fill_radial_gradient(&ctx->paint_list, gradient.path,
+            paint_fill_radial_gradient(pdf_active_paint_list(ctx), gradient.path,
                                        gradient.cx, gradient.cy, gradient.r,
                                        gradient.stops, gradient.stop_count,
                                        RDT_FILL_WINDING, nullptr);
@@ -1461,26 +1730,6 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
         return;
     }
 
-    int surface_w = (int)ceilf(content_rect.width); // INT_CAST_OK: PDF raster fallback surface dimensions are integer pixels.
-    int surface_h = (int)ceilf(content_rect.height); // INT_CAST_OK: PDF raster fallback surface dimensions are integer pixels.
-    if (surface_w <= 0 || surface_h <= 0) return;
-
-    ImageSurface* surface = image_surface_create(surface_w, surface_h);
-    if (!surface) {
-        log_error("[PDF_SVG_FALLBACK] failed to allocate inline SVG surface %dx%d",
-                  surface_w, surface_h);
-        return;
-    }
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pixel_count = surface_w * surface_h;
-    for (int i = 0; i < pixel_count; i++) {
-        pixels[i] = 0xffffffffu;
-    }
-
-    RdtVector vec = {};
-    rdt_vector_init(&vec, pixels, surface_w, surface_h, surface_w);
-
     FontContext* font_ctx = ctx->ui_context ? ctx->ui_context->font_ctx : nullptr;
     Pool* pool = (ctx->ui_context && ctx->ui_context->document)
         ? ctx->ui_context->document->pool
@@ -1518,27 +1767,30 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
         initial_stroke_width = block->in_line->svg_stroke_width;
     }
 
-    log_info("[PDF_SVG_FALLBACK] rasterizing inline SVG %.1fx%.1f to %dx%d",
-             content_rect.width, content_rect.height, surface_w, surface_h);
-    render_svg_to_vec_via_display_list(&vec, dom_elem->native_element,
-                                       content_rect.width, content_rect.height,
-                                       pool, 1.0f, font_ctx, nullptr,
-                                       current_color_ptr, fill_color_ptr,
-                                       nullptr, 1.0f, initial_fill_none,
-                                       stroke_color_ptr, initial_stroke_none,
-                                       initial_stroke_width);
-    rdt_vector_flush_batch(&vec);
-
-    const RdtMatrix* transform = &ctx->paint_state.current_transform;
-    if (!pdf_draw_abgr_image(ctx, pixels, surface_w, surface_h, surface_w,
-                             content_rect.x, content_rect.y,
-                             content_rect.width, content_rect.height,
-                             255, transform)) {
-        log_error("[PDF_SVG_FALLBACK] failed to draw rasterized inline SVG");
-    }
-
-    rdt_vector_destroy(&vec);
-    image_surface_destroy(surface);
+    Bound content_clip = {content_rect.x, content_rect.y,
+                          content_rect.x + content_rect.width,
+                          content_rect.y + content_rect.height};
+    PaintSvgSubscene subscene = {};
+    RdtMatrix identity = rdt_matrix_identity();
+    render_svg_build_subscene(&subscene,
+                              dom_elem->native_element,
+                              content_rect.width,
+                              content_rect.height,
+                              pool,
+                              1.0f,
+                              font_ctx,
+                              &identity,
+                              &content_clip,
+                              current_color_ptr,
+                              fill_color_ptr,
+                              nullptr,
+                              1.0f,
+                              initial_fill_none,
+                              stroke_color_ptr,
+                              initial_stroke_none,
+                              initial_stroke_width);
+    paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
+    pdf_lower_paint_list(ctx);
     (void)font;
 }
 
@@ -1642,7 +1894,7 @@ static void pdf_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, fl
                                           &transform);
     ctx->transform_emitted_stack[ctx->transform_emitted_depth++] = has;
     if (has) {
-        paint_push_transform(&ctx->paint_list, &transform);
+        paint_push_transform(pdf_active_paint_list(ctx), &transform);
         pdf_lower_paint_list(ctx);
     }
 }
@@ -1661,7 +1913,7 @@ static void pdf_cb_end_transform(void* vctx) {
 
     bool emitted = ctx->transform_emitted_stack[--ctx->transform_emitted_depth];
     if (emitted) {
-        paint_pop_transform(&ctx->paint_list);
+        paint_pop_transform(pdf_active_paint_list(ctx));
         pdf_lower_paint_list(ctx);
     }
 }
@@ -1671,13 +1923,45 @@ static void pdf_cb_begin_opacity(void* vctx, float opacity) {
     if (!ctx) return;
     PaintEffectGroup group = {};
     group.opacity = opacity;
-    paint_begin_effect_group(&ctx->paint_list, &group);
+    paint_begin_effect_group(pdf_active_paint_list(ctx), &group);
     pdf_lower_paint_list(ctx);
 }
 
 static void pdf_cb_end_opacity(void* vctx) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
+    paint_end_effect_group(pdf_active_paint_list(ctx));
+    pdf_lower_paint_list(ctx);
+}
+
+static void pdf_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    if (ctx->effect_fallback.active) {
+        paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
+        ctx->effect_fallback.nested_depth++;
+        return;
+    }
+    if (pdf_effect_group_needs_raster_fallback(group)) {
+        pdf_begin_effect_raster_fallback(ctx, group);
+        return;
+    }
+    paint_begin_effect_group(&ctx->paint_list, group);
+    pdf_lower_paint_list(ctx);
+}
+
+static void pdf_cb_end_effect_group(void* vctx) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    if (!ctx) return;
+    if (ctx->effect_fallback.active) {
+        if (ctx->effect_fallback.nested_depth > 0) {
+            paint_end_effect_group(&ctx->effect_fallback.paint_list);
+            ctx->effect_fallback.nested_depth--;
+        } else {
+            pdf_finish_effect_raster_fallback(ctx);
+        }
+        return;
+    }
     paint_end_effect_group(&ctx->paint_list);
     pdf_lower_paint_list(ctx);
 }
@@ -1705,6 +1989,8 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.end_inline_children   = NULL;
     b.begin_opacity    = pdf_cb_begin_opacity;
     b.end_opacity      = pdf_cb_end_opacity;
+    b.begin_effect_group = pdf_cb_begin_effect_group;
+    b.end_effect_group = pdf_cb_end_effect_group;
     b.begin_transform  = pdf_cb_begin_transform;
     b.end_transform    = pdf_cb_end_transform;
     b.render_column_rules = pdf_cb_render_column_rules;
@@ -1756,6 +2042,25 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.current_x = 0;
     ctx.current_y = 0;
     paint_list_init(&ctx.paint_list, nullptr);
+    paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
+    ctx.page_backdrop_pool = pool_create();
+    if (ctx.page_backdrop_pool) {
+        ctx.page_backdrop_arena = arena_create_default(ctx.page_backdrop_pool);
+        if (ctx.page_backdrop_arena) {
+            dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
+            ctx.page_backdrop_ready = true;
+            Color white = {};
+            white.r = 255;
+            white.g = 255;
+            white.b = 255;
+            white.a = 255;
+            dl_fill_rect(&ctx.page_backdrop_dl, 0.0f, 0.0f, width, height, white);
+        } else {
+            log_error("[PDF_PAINT_IR] page backdrop arena allocation failed");
+        }
+    } else {
+        log_error("[PDF_PAINT_IR] page backdrop pool allocation failed");
+    }
 
     // Initialize block context (starting at origin)
     ctx.block.x = 0;
@@ -1785,7 +2090,41 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
         render_walk_children(&backend, &walk_state, root_view);
     }
 
+    RenderPathTrace trace = {};
+    trace.target = "pdf";
+    trace.replay_mode = "paint_ir_pdf";
+    trace.backend_name = "pdf_export";
+    trace.display_list_recorded = false;
+    trace.paint_ir_enabled = true;
+    trace.surface_width = (int)width; // INT_CAST_OK: PDF trace width is logged as whole document units.
+    trace.surface_height = (int)height; // INT_CAST_OK: PDF trace height is logged as whole document units.
+    trace.paint_ir_commands = ctx.paint_state.command_count;
+    trace.paint_ir_emitted = ctx.paint_state.emitted_count;
+    trace.paint_ir_fallbacks = ctx.paint_state.fallback_count;
+    trace.paint_ir_unsupported = ctx.paint_state.unsupported_count;
+    const RenderExportTargetCaps* caps =
+        render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
+    if (caps) {
+        trace.backend_vector_paths = caps->paths;
+        trace.backend_gradients = caps->gradients;
+        trace.backend_nested_clips = caps->clips;
+        trace.backend_picture_svg = true;
+        trace.backend_opacity_group = caps->opacity_groups;
+        trace.backend_blend_modes = caps->blend_modes;
+        trace.backend_gaussian_blur = caps->filters;
+        trace.backend_color_matrix_filters = caps->filters;
+        trace.backend_native_text_runs = caps->glyph_runs;
+    }
+    render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
+
     paint_list_destroy(&ctx.paint_list);
+    paint_list_destroy(&ctx.effect_fallback.paint_list);
+    if (ctx.page_backdrop_ready) {
+        dl_destroy(&ctx.page_backdrop_dl);
+    }
+    if (ctx.page_backdrop_pool) {
+        pool_destroy(ctx.page_backdrop_pool);
+    }
     return ctx.pdf_doc;
 }
 

@@ -1464,20 +1464,13 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     glyph_run.ys = ys;
     glyph_run.count = 2;
 
-    char svg_root = 0;
-    PaintSvgSubscene subscene = {};
-    subscene.svg_root = &svg_root;
-    subscene.color = test_color(0xff405060);
-    subscene.transform = rdt_matrix_identity();
-
     paint_begin_effect_group(&pl, &group);
     paint_glyph_run(&pl, &glyph_run);
-    paint_svg_subscene(&pl, &subscene);
     paint_end_effect_group(&pl);
 
     PaintIrValidationResult result = {};
     EXPECT_TRUE(paint_ir_validate(&pl, &result));
-    EXPECT_EQ(paint_list_count(&pl), 4);
+    EXPECT_EQ(paint_list_count(&pl), 3);
 
     lower();
     ASSERT_EQ(lowered.count, 4);
@@ -1499,13 +1492,47 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     PaintSvgLoweringStats stats = {};
     paint_ir_lower_svg(&pl, out, &options, &stats);
 
-    EXPECT_EQ(stats.command_count, 4);
-    EXPECT_EQ(stats.emitted_count, 0);
-    EXPECT_EQ(stats.unsupported_count, 4);
-    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_BEGIN_EFFECT_GROUP -->"), nullptr);
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 2);
+    EXPECT_EQ(stats.fallback_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 1);
+    EXPECT_NE(strstr(out->str, "data-radiant-fallback=\"effect\""), nullptr);
     EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_GLYPH_RUN -->"), nullptr);
-    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_SVG_SUBSCENE -->"), nullptr);
-    EXPECT_NE(strstr(out->str, "<!-- unsupported PAINT_END_EFFECT_GROUP -->"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringFallbackEffectGroupPreservesSupportedChildren) {
+    PaintEffectGroup group = {};
+    group.bounds = {0.0f, 0.0f, 20.0f, 20.0f};
+    group.opacity = 0.5f;
+    group.blend_mode = 1;
+
+    Color fill_color = {};
+    fill_color.r = 12;
+    fill_color.g = 34;
+    fill_color.b = 56;
+    fill_color.a = 255;
+
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 2.0f, 3.0f, 4.0f, 5.0f, fill_color);
+    paint_end_effect_group(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.fallback_count, 1);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str, "<g data-radiant-fallback=\"effect\" opacity=\"0.5000\">\n"), nullptr);
+    EXPECT_NE(strstr(out->str,
+        "<rect x=\"2.00\" y=\"3.00\" width=\"4.00\" height=\"5.00\" fill=\"rgb(12,34,56)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
 
     strbuf_free(out);
 }

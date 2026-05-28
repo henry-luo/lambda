@@ -13,14 +13,13 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
 #include "display_list.h"
+#include "paint_ir.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/strbuf.h"
 
 struct FontContext;  // forward declaration from lib/font/font.h
 typedef struct RenderContext RenderContext;
-struct PaintList;
-typedef struct PaintList PaintList;
-
 typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
 
 // ============================================================================
@@ -49,7 +48,7 @@ struct SvgIntrinsicSize {
 // SVG Render Context (internal state during rendering)
 // ============================================================================
 
-struct SvgRenderContext {
+struct SvgInlineRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
@@ -160,6 +159,30 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element,
                       bool initial_stroke_none,
                       float initial_stroke_width,
                       PaintList* paint_list);
+
+void render_svg_build_subscene(PaintSvgSubscene* subscene,
+                      Element* svg_element,
+                      float viewport_width, float viewport_height,
+                      Pool* pool, float pixel_ratio,
+                      FontContext* font_ctx,
+                      const RdtMatrix* base_transform,
+                      const Bound* content_clip,
+                      const Color* initial_current_color,
+                      const Color* initial_fill_color,
+                      const char* source_path,
+                      float initial_opacity,
+                      bool initial_fill_none,
+                      const Color* initial_stroke_color,
+                      bool initial_stroke_none,
+                      float initial_stroke_width);
+
+void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
+                      DisplayList* dl);
+
+bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
+                      StrBuf* out, int indent_level);
+
+void render_svg_inline_register_paint_ir_lowerers(void);
 
 /**
  * Render an SVG element tree through DisplayList record/replay into an existing

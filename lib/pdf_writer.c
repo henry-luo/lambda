@@ -28,6 +28,8 @@ typedef enum {
     PDF_OBJ_PAGES,
     PDF_OBJ_PAGE,
     PDF_OBJ_FONT,
+    PDF_OBJ_EXT_GSTATE,
+    PDF_OBJ_IMAGE,
     PDF_OBJ_CONTENT,
     PDF_OBJ_RESOURCES,
     PDF_OBJ_INFO
@@ -73,6 +75,32 @@ struct HPDF_Font_Rec {
     int resource_index;         // font index in document
 };
 
+struct HPDF_ExtGState_Rec {
+    struct HPDF_Doc_Rec* doc;
+    int obj_id;
+    char resource_name[16];
+    int resource_index;
+    float fill_alpha;
+    float stroke_alpha;
+};
+
+typedef struct HPDF_Image_Rec {
+    struct HPDF_Doc_Rec* doc;
+    int obj_id;
+    int smask_obj_id;
+    char resource_name[16];
+    int resource_index;
+    int width;
+    int height;
+    uint8_t* rgb;
+    uint8_t* alpha;
+    size_t rgb_len;
+    size_t alpha_len;
+    bool has_alpha;
+} HPDF_Image_Rec;
+
+typedef struct HPDF_Image_Rec* HPDF_Image;
+
 // Page structure
 struct HPDF_Page_Rec {
     struct HPDF_Doc_Rec* doc;
@@ -98,6 +126,8 @@ struct HPDF_Page_Rec {
     
     // Fonts used on this page
     ArrayList* used_fonts;      // list of HPDF_Font_Rec*
+    ArrayList* used_ext_gstates; // list of HPDF_ExtGState_Rec*
+    ArrayList* used_images;     // list of HPDF_Image_Rec*
 };
 
 // Document structure
@@ -121,6 +151,14 @@ struct HPDF_Doc_Rec {
     // Fonts
     ArrayList* fonts;           // list of HPDF_Font_Rec*
     int next_font_index;
+
+    // Extended graphics states
+    ArrayList* ext_gstates;     // list of HPDF_ExtGState_Rec*
+    int next_ext_gstate_index;
+
+    // Image XObjects
+    ArrayList* images;          // list of HPDF_Image_Rec*
+    int next_image_index;
     
     // Metadata
     char* creator;
@@ -218,6 +256,24 @@ static bool page_has_font(HPDF_Page page, HPDF_Font font) {
     return false;
 }
 
+static bool page_has_ext_gstate(HPDF_Page page, HPDF_ExtGState ext_gstate) {
+    for (int i = 0; i < page->used_ext_gstates->length; i++) {
+        if (page->used_ext_gstates->data[i] == ext_gstate) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool page_has_image(HPDF_Page page, HPDF_Image image) {
+    for (int i = 0; i < page->used_images->length; i++) {
+        if (page->used_images->data[i] == image) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // find or create base14 font
 static const char* find_base14_font(const char* name) {
     for (int i = 0; base14_fonts[i].name != NULL; i++) {
@@ -256,16 +312,23 @@ HPDF_Doc HPDF_New(HPDF_ErrorHandler error_fn, void* user_data) {
     doc->error_user_data = user_data;
     doc->next_obj_id = 1;  // pdf objects start at 1
     doc->next_font_index = 1;
+    doc->next_ext_gstate_index = 1;
+    doc->next_image_index = 1;
     
     doc->objects = arraylist_new(32);
     doc->pages = arraylist_new(8);
     doc->fonts = arraylist_new(8);
+    doc->ext_gstates = arraylist_new(8);
+    doc->images = arraylist_new(8);
     
-    if (!doc->objects || !doc->pages || !doc->fonts) {
+    if (!doc->objects || !doc->pages || !doc->fonts ||
+        !doc->ext_gstates || !doc->images) {
         // arraylist uses malloc, so we need to free them
         if (doc->objects) arraylist_free(doc->objects);
         if (doc->pages) arraylist_free(doc->pages);
         if (doc->fonts) arraylist_free(doc->fonts);
+        if (doc->ext_gstates) arraylist_free(doc->ext_gstates);
+        if (doc->images) arraylist_free(doc->images);
         arena_destroy(arena);
         pool_destroy(pool);
         return NULL;
@@ -295,11 +358,19 @@ void HPDF_Free(HPDF_Doc doc) {
         if (page && page->used_fonts) {
             arraylist_free(page->used_fonts);
         }
+        if (page && page->used_ext_gstates) {
+            arraylist_free(page->used_ext_gstates);
+        }
+        if (page && page->used_images) {
+            arraylist_free(page->used_images);
+        }
     }
     
     // free arraylists (they use malloc internally)
     arraylist_free(doc->pages);
     arraylist_free(doc->fonts);
+    arraylist_free(doc->ext_gstates);
+    arraylist_free(doc->images);
     arraylist_free(doc->objects);
     
     // arena and pool cleanup - this frees all arena-allocated memory
@@ -368,6 +439,19 @@ HPDF_Page HPDF_AddPage(HPDF_Doc doc) {
     // initialize fonts list (uses malloc internally)
     page->used_fonts = arraylist_new(4);
     if (!page->used_fonts) {
+        strbuf_free(page->content);
+        return NULL;
+    }
+    page->used_ext_gstates = arraylist_new(4);
+    if (!page->used_ext_gstates) {
+        arraylist_free(page->used_fonts);
+        strbuf_free(page->content);
+        return NULL;
+    }
+    page->used_images = arraylist_new(4);
+    if (!page->used_images) {
+        arraylist_free(page->used_ext_gstates);
+        arraylist_free(page->used_fonts);
         strbuf_free(page->content);
         return NULL;
     }
@@ -508,6 +592,58 @@ HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
     pdf_format_float(page->content, width);
     strbuf_append_str(page->content, " w\n");
     
+    return HPDF_OK;
+}
+
+HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
+    if (!doc) return NULL;
+
+    HPDF_ExtGState ext_gstate =
+        (HPDF_ExtGState)arena_calloc(doc->arena, sizeof(struct HPDF_ExtGState_Rec));
+    if (!ext_gstate) return NULL;
+
+    ext_gstate->doc = doc;
+    ext_gstate->obj_id = alloc_obj_id(doc);
+    ext_gstate->resource_index = doc->next_ext_gstate_index++;
+    ext_gstate->fill_alpha = 1.0f;
+    ext_gstate->stroke_alpha = 1.0f;
+    snprintf(ext_gstate->resource_name, sizeof(ext_gstate->resource_name),
+             "GS%d", ext_gstate->resource_index);
+
+    arraylist_append(doc->ext_gstates, ext_gstate);
+    log_debug("hpdf: created ExtGState %s (obj %d)",
+              ext_gstate->resource_name, ext_gstate->obj_id);
+    return ext_gstate;
+}
+
+static float pdf_clamp_alpha(float alpha) {
+    if (alpha < 0.0f) return 0.0f;
+    if (alpha > 1.0f) return 1.0f;
+    return alpha;
+}
+
+HPDF_STATUS HPDF_ExtGState_SetAlphaFill(HPDF_ExtGState ext_gstate, float alpha) {
+    if (!ext_gstate) return HPDF_ERROR_INVALID_PARAM;
+    ext_gstate->fill_alpha = pdf_clamp_alpha(alpha);
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_ExtGState_SetAlphaStroke(HPDF_ExtGState ext_gstate, float alpha) {
+    if (!ext_gstate) return HPDF_ERROR_INVALID_PARAM;
+    ext_gstate->stroke_alpha = pdf_clamp_alpha(alpha);
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_SetExtGState(HPDF_Page page, HPDF_ExtGState ext_gstate) {
+    if (!page || !ext_gstate) return HPDF_ERROR_INVALID_PARAM;
+
+    if (!page_has_ext_gstate(page, ext_gstate)) {
+        arraylist_append(page->used_ext_gstates, ext_gstate);
+    }
+
+    strbuf_append_char(page->content, '/');
+    strbuf_append_str(page->content, ext_gstate->resource_name);
+    strbuf_append_str(page->content, " gs\n");
     return HPDF_OK;
 }
 
@@ -662,6 +798,80 @@ HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
         strbuf_append_char(page->content, '\n');
     }
     strbuf_append_str(page->content, ">\nEI\nQ\n");
+
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_DrawABGRImageWithAlpha(HPDF_Page page, const uint32_t* pixels,
+                                             int width, int height, int stride,
+                                             float a, float b, float c,
+                                             float d, float e, float f) {
+    if (!page || !pixels || width <= 0 || height <= 0 || stride < width) {
+        return HPDF_ERROR_INVALID_PARAM;
+    }
+    HPDF_Doc doc = page->doc;
+    if (!doc) return HPDF_ERROR_INVALID_PARAM;
+
+    HPDF_Image image = (HPDF_Image)arena_calloc(doc->arena, sizeof(HPDF_Image_Rec));
+    if (!image) return HPDF_ERROR_OUT_OF_MEMORY;
+
+    size_t pixel_count = (size_t)width * (size_t)height;
+    size_t rgb_len = pixel_count * 3u;
+    size_t alpha_len = pixel_count;
+    uint8_t* rgb = (uint8_t*)arena_alloc(doc->arena, rgb_len);
+    uint8_t* alpha = (uint8_t*)arena_alloc(doc->arena, alpha_len);
+    if (!rgb || !alpha) return HPDF_ERROR_OUT_OF_MEMORY;
+
+    bool has_alpha = false;
+    size_t rgb_pos = 0;
+    size_t alpha_pos = 0;
+    for (int y = 0; y < height; y++) {
+        const uint32_t* row = pixels + y * stride;
+        for (int x = 0; x < width; x++) {
+            uint32_t px = row[x];
+            uint8_t a8 = (uint8_t)((px >> 24) & 0xff);
+            rgb[rgb_pos++] = (uint8_t)(px & 0xff);
+            rgb[rgb_pos++] = (uint8_t)((px >> 8) & 0xff);
+            rgb[rgb_pos++] = (uint8_t)((px >> 16) & 0xff);
+            alpha[alpha_pos++] = a8;
+            if (a8 != 255) has_alpha = true;
+        }
+    }
+
+    image->doc = doc;
+    image->obj_id = alloc_obj_id(doc);
+    image->smask_obj_id = has_alpha ? alloc_obj_id(doc) : 0;
+    image->resource_index = doc->next_image_index++;
+    image->width = width;
+    image->height = height;
+    image->rgb = rgb;
+    image->alpha = has_alpha ? alpha : NULL;
+    image->rgb_len = rgb_len;
+    image->alpha_len = has_alpha ? alpha_len : 0;
+    image->has_alpha = has_alpha;
+    snprintf(image->resource_name, sizeof(image->resource_name),
+             "Im%d", image->resource_index);
+
+    arraylist_append(doc->images, image);
+    if (!page_has_image(page, image)) {
+        arraylist_append(page->used_images, image);
+    }
+
+    strbuf_append_str(page->content, "q\n");
+    pdf_format_float(page->content, a);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, b);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, c);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, d);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, e);
+    strbuf_append_char(page->content, ' ');
+    pdf_format_float(page->content, f);
+    strbuf_append_str(page->content, " cm\n/");
+    strbuf_append_str(page->content, image->resource_name);
+    strbuf_append_str(page->content, " Do\nQ\n");
 
     return HPDF_OK;
 }
@@ -867,6 +1077,60 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "/BaseFont /%s\n", font->name);
         fprintf(file, ">>\nendobj\n\n");
     }
+
+    // --- Extended Graphics State Objects ---
+    for (int i = 0; i < doc->ext_gstates->length; i++) {
+        HPDF_ExtGState ext_gstate = (HPDF_ExtGState)doc->ext_gstates->data[i];
+
+        offset = ftell(file);
+        record_obj_offset(doc, ext_gstate->obj_id, offset, PDF_OBJ_EXT_GSTATE);
+
+        fprintf(file, "%d 0 obj\n<<\n", ext_gstate->obj_id);
+        fprintf(file, "/Type /ExtGState\n");
+        fprintf(file, "/ca ");
+        StrBuf* alpha = strbuf_new();
+        pdf_format_float(alpha, ext_gstate->fill_alpha);
+        fprintf(file, "%s\n", alpha->str);
+        strbuf_free(alpha);
+        fprintf(file, "/CA ");
+        alpha = strbuf_new();
+        pdf_format_float(alpha, ext_gstate->stroke_alpha);
+        fprintf(file, "%s\n", alpha->str);
+        strbuf_free(alpha);
+        fprintf(file, ">>\nendobj\n\n");
+    }
+
+    // --- Image XObjects ---
+    for (int i = 0; i < doc->images->length; i++) {
+        HPDF_Image image = (HPDF_Image)doc->images->data[i];
+
+        if (image->has_alpha) {
+            offset = ftell(file);
+            record_obj_offset(doc, image->smask_obj_id, offset, PDF_OBJ_IMAGE);
+            fprintf(file, "%d 0 obj\n<<\n", image->smask_obj_id);
+            fprintf(file, "/Type /XObject\n/Subtype /Image\n");
+            fprintf(file, "/Width %d\n/Height %d\n", image->width, image->height);
+            fprintf(file, "/ColorSpace /DeviceGray\n/BitsPerComponent 8\n");
+            fprintf(file, "/Length %zu\n", image->alpha_len);
+            fprintf(file, ">>\nstream\n");
+            fwrite(image->alpha, 1, image->alpha_len, file);
+            fprintf(file, "\nendstream\nendobj\n\n");
+        }
+
+        offset = ftell(file);
+        record_obj_offset(doc, image->obj_id, offset, PDF_OBJ_IMAGE);
+        fprintf(file, "%d 0 obj\n<<\n", image->obj_id);
+        fprintf(file, "/Type /XObject\n/Subtype /Image\n");
+        fprintf(file, "/Width %d\n/Height %d\n", image->width, image->height);
+        fprintf(file, "/ColorSpace /DeviceRGB\n/BitsPerComponent 8\n");
+        if (image->has_alpha) {
+            fprintf(file, "/SMask %d 0 R\n", image->smask_obj_id);
+        }
+        fprintf(file, "/Length %zu\n", image->rgb_len);
+        fprintf(file, ">>\nstream\n");
+        fwrite(image->rgb, 1, image->rgb_len, file);
+        fprintf(file, "\nendstream\nendobj\n\n");
+    }
     
     // --- Page Content Streams ---
     for (int i = 0; i < doc->pages->length; i++) {
@@ -896,14 +1160,38 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "/MediaBox [0 0 %.2f %.2f]\n", page->width, page->height);
         fprintf(file, "/Contents %d 0 R\n", page->contents_id);
         
-        // resources - fonts
-        if (page->used_fonts->length > 0) {
-            fprintf(file, "/Resources <<\n/Font <<\n");
-            for (int j = 0; j < page->used_fonts->length; j++) {
-                HPDF_Font font = (HPDF_Font)page->used_fonts->data[j];
-                fprintf(file, "/%s %d 0 R\n", font->resource_name, font->obj_id);
+        if (page->used_fonts->length > 0 ||
+            page->used_ext_gstates->length > 0 ||
+            page->used_images->length > 0) {
+            fprintf(file, "/Resources <<\n");
+            if (page->used_fonts->length > 0) {
+                fprintf(file, "/Font <<\n");
+                for (int j = 0; j < page->used_fonts->length; j++) {
+                    HPDF_Font font = (HPDF_Font)page->used_fonts->data[j];
+                    fprintf(file, "/%s %d 0 R\n", font->resource_name, font->obj_id);
+                }
+                fprintf(file, ">>\n");
             }
-            fprintf(file, ">>\n>>\n");
+            if (page->used_ext_gstates->length > 0) {
+                fprintf(file, "/ExtGState <<\n");
+                for (int j = 0; j < page->used_ext_gstates->length; j++) {
+                    HPDF_ExtGState ext_gstate =
+                        (HPDF_ExtGState)page->used_ext_gstates->data[j];
+                    fprintf(file, "/%s %d 0 R\n",
+                            ext_gstate->resource_name, ext_gstate->obj_id);
+                }
+                fprintf(file, ">>\n");
+            }
+            if (page->used_images->length > 0) {
+                fprintf(file, "/XObject <<\n");
+                for (int j = 0; j < page->used_images->length; j++) {
+                    HPDF_Image image = (HPDF_Image)page->used_images->data[j];
+                    fprintf(file, "/%s %d 0 R\n",
+                            image->resource_name, image->obj_id);
+                }
+                fprintf(file, ">>\n");
+            }
+            fprintf(file, ">>\n");
         }
         
         fprintf(file, ">>\nendobj\n\n");
