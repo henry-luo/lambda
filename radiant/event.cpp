@@ -1865,6 +1865,7 @@ static void clear_dom_view_pool_pointers(DomNode* node) {
             elem->position = nullptr;
             elem->transform = nullptr;
             elem->filter = nullptr;
+            elem->backdrop_filter = nullptr;
             elem->multicol = nullptr;
             elem->pseudo = nullptr;
             elem->vpath = nullptr;

@@ -303,7 +303,7 @@ typedef struct {
 
 // Effect group descriptor. Mirrors the CSS stacking effect inputs so every
 // backend can decide native-vs-fallback (see design doc §6).
-typedef struct {
+typedef struct PaintEffectGroup {
     Bound bounds;            // visual bounds of the grouped subtree
     bool has_clip;
     bool has_transform;
@@ -312,25 +312,43 @@ typedef struct {
     int blend_mode;          // CssEnum; 0 = normal
     void* filter;            // FilterProp*; null = none
     bool backdrop;           // backdrop-filter present
+    void* backdrop_filter;   // FilterProp* for backdrop-filter; null = none
+    bool shadow;             // box-shadow present
     bool isolation;          // forced isolation
 } PaintEffectGroup;
 
 // A nested SVG subscene (Phase F). Carries the inheritance + geometry that
 // must survive lowering so inline SVG renders identically on every target.
-typedef struct {
+typedef struct PaintSvgSubscene {
     void* svg_root;          // Element* SVG DOM root (inline native or picture)
+    void* pool;              // Pool* used by the owning document when available
+    void* font_context;      // FontContext* for SVG text resolution
+    float viewport_width;
+    float viewport_height;
+    float pixel_ratio;
+    float opacity;
     bool has_color;          // inherited currentColor present
     Color color;             // inherited currentColor
     bool has_fill;           // cascaded fill present
     Color fill;
+    bool fill_none;
     bool has_stroke;
     Color stroke;
+    bool stroke_none;
     float stroke_width;
-    RdtMatrix transform;     // viewBox / preserveAspectRatio composed transform
+    RdtMatrix transform;     // base transform; SVG lowering composes viewBox/PAR
     Bound content_clip;      // clip established for the SVG box
     const char* source_path; // for resolving nested refs + recursion guard
     uint64_t resource_generation; // immutable parsed DOM generation (retain-safe)
 } PaintSvgSubscene;
+
+typedef void (*PaintSvgSubsceneRasterLowerFn)(const PaintSvgSubscene* subscene,
+                                              DisplayList* dl);
+typedef bool (*PaintSvgSubsceneSvgLowerFn)(const PaintSvgSubscene* subscene,
+                                           StrBuf* out, int indent_level);
+
+void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raster_lower,
+                                             PaintSvgSubsceneSvgLowerFn svg_lower);
 
 // A semantic glyph run. Positions/text/font, not rasterised bitmaps.
 typedef struct {
@@ -352,6 +370,10 @@ typedef struct {
     RdtMatrix transform;
     Bound clip;
 } PaintGlyphRun;
+
+typedef void (*PaintGlyphRunRasterLowerFn)(const PaintGlyphRun* run,
+                                           DisplayList* dl);
+void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lowerer);
 
 // ---------------------------------------------------------------------------
 // PaintCmd — tagged union of all paint commands
@@ -541,6 +563,7 @@ typedef struct {
 typedef struct {
     int command_count;
     int emitted_count;
+    int fallback_count;
     int unsupported_count;
 } PaintSvgLoweringStats;
 

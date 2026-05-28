@@ -152,6 +152,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
         block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f;
     group.opacity = group.has_opacity_group ? block->in_line->opacity : 1.0f;
     group.has_filter = block->filter && block->filter->functions;
+    group.has_backdrop_filter = block->backdrop_filter && block->backdrop_filter->functions;
 
     float scale = rdcon->scale;
     float x0 = parent_block->x + block->x * scale;
@@ -206,6 +207,24 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
                           block->node_name());
             }
         }
+    }
+
+    if (group.has_backdrop_filter) {
+        Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
+        group.backdrop_filter_rect = border_rect;
+        rc_apply_filter(rdcon,
+                        border_rect.x,
+                        border_rect.y,
+                        border_rect.width,
+                        border_rect.height,
+                        block->backdrop_filter,
+                        &rdcon->block.clip);
+        log_debug("[BACKDROP-FILTER] Applied backdrop-filter to <%s> at (%.0f,%.0f) size %.0fx%.0f",
+                  block->node_name(),
+                  border_rect.x,
+                  border_rect.y,
+                  border_rect.width,
+                  border_rect.height);
     }
 
     return group;

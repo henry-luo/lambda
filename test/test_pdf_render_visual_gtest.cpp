@@ -194,14 +194,21 @@ static bool file_contains_text(const char* path, const char* needle) {
     if (!fp) return false;
     char buf[8192];
     size_t needle_len = strlen(needle);
+    if (needle_len == 0) {
+        fclose(fp);
+        return true;
+    }
     size_t carry = 0;
     while (!feof(fp)) {
-        size_t n = fread(buf + carry, 1, sizeof(buf) - carry - 1, fp);
+        size_t n = fread(buf + carry, 1, sizeof(buf) - carry, fp);
         size_t total = carry + n;
-        buf[total] = '\0';
-        if (strstr(buf, needle)) {
-            fclose(fp);
-            return true;
+        if (total >= needle_len) {
+            for (size_t i = 0; i <= total - needle_len; i++) {
+                if (memcmp(buf + i, needle, needle_len) == 0) {
+                    fclose(fp);
+                    return true;
+                }
+            }
         }
         if (needle_len > 1 && total >= needle_len - 1) {
             carry = needle_len - 1;
@@ -823,6 +830,326 @@ TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
         << "PDF inline SVG fallback should emit an inline image";
 }
 
+TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/svg_inline_subscene.html";
+    const char* svg_path = "temp/render_output_parity/svg_inline_subscene.svg";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;color:#16a34a;}"
+        "svg{display:block;width:40px;height:30px;fill:currentColor;}</style></head>"
+        "<body><svg viewBox=\"0 0 40 30\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<circle cx=\"20\" cy=\"15\" r=\"10\"/>"
+        "</svg></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsvg[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(svg_path, qsvg, sizeof(qsvg));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/svg_inline_subscene.out 2> temp/render_output_parity/svg_inline_subscene.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(svg_path));
+    EXPECT_TRUE(file_contains_text(svg_path, "<circle"))
+        << "SVG export should serialize the inline SVG subscene";
+    EXPECT_TRUE(file_contains_text(svg_path, "color=\"rgb(22,163,74)\""))
+        << "SVG subscene should carry inherited currentColor";
+}
+
+TEST(RenderOutputParity, SvgExportCssFilterUsesRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/svg_filter_effect.html";
+    const char* svg_path = "temp/render_output_parity/svg_filter_effect.svg";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{width:40px;height:30px;background:#ef4444;"
+        "filter:grayscale(1);}</style></head>"
+        "<body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsvg[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(svg_path, qsvg, sizeof(qsvg));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/svg_filter_effect.out 2> temp/render_output_parity/svg_filter_effect.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(svg_path));
+    EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
+        << "SVG export should mark unsupported CSS filter groups as raster fallbacks";
+    EXPECT_TRUE(file_contains_text(svg_path, "href=\"data:image/png;base64,"))
+        << "SVG raster fallback should embed the captured filtered paint";
+}
+
+TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/pdf_filter_effect.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_filter_effect.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{width:40px;height:30px;background:#ef4444;"
+        "filter:grayscale(1);}</style></head>"
+        "<body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_filter_effect.out 2> temp/render_output_parity/pdf_filter_effect.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
+        << "PDF export should embed a raster fallback image for unsupported CSS filters";
+}
+
+TEST(RenderOutputParity, PdfExportAlphaFilterUsesSoftMaskFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/pdf_alpha_filter_effect.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_alpha_filter_effect.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{width:64px;height:36px;color:#111827;font:700 24px Arial;"
+        "filter:opacity(.45);}</style></head>"
+        "<body><div class=\"box\">Hi</div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_alpha_filter_effect.out 2> temp/render_output_parity/pdf_alpha_filter_effect.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/SMask"))
+        << "PDF raster fallback images with alpha should use a soft mask";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/XObject"))
+        << "PDF alpha fallbacks should be emitted as reusable image XObjects";
+}
+
+TEST(RenderOutputParity, SvgAndPdfExportBoxShadowUseRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/export_box_shadow_effect.html";
+    const char* svg_path = "temp/render_output_parity/export_box_shadow_effect.svg";
+    const char* pdf_path = "temp/render_output_parity/export_box_shadow_effect.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{margin:16px;width:36px;height:28px;background:#22c55e;"
+        "border-radius:8px;box-shadow:8px 6px 10px rgba(15,23,42,.55);}"
+        "</style></head><body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsvg[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char svg_cmd[PATH_MAX * 3 + 256];
+    char pdf_cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(svg_path, qsvg, sizeof(qsvg));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(svg_cmd, sizeof(svg_cmd),
+             "%s render %s%s -o %s -vw 90 > temp/render_output_parity/export_box_shadow_svg.out 2> temp/render_output_parity/export_box_shadow_svg.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
+    snprintf(pdf_cmd, sizeof(pdf_cmd),
+             "%s render %s%s -o %s -vw 90 > temp/render_output_parity/export_box_shadow_pdf.out 2> temp/render_output_parity/export_box_shadow_pdf.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int svg_status = system(svg_cmd);
+    ASSERT_TRUE(WIFEXITED(svg_status));
+    ASSERT_EQ(WEXITSTATUS(svg_status), 0);
+    int pdf_status = system(pdf_cmd);
+    ASSERT_TRUE(WIFEXITED(pdf_status));
+    ASSERT_EQ(WEXITSTATUS(pdf_status), 0);
+
+    ASSERT_TRUE(file_exists(svg_path));
+    EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
+        << "SVG export should route box-shadow groups through raster fallback";
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/XObject"))
+        << "PDF export should route box-shadow groups through raster fallback images";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/SMask"))
+        << "PDF shadow fallback should preserve translucent shadow edges with a soft mask";
+}
+
+TEST(RenderOutputParity, SvgAndPdfExportBackdropFilterUseRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/export_backdrop_filter_effect.html";
+    const char* svg_path = "temp/render_output_parity/export_backdrop_filter_effect.svg";
+    const char* pdf_path = "temp/render_output_parity/export_backdrop_filter_effect.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:linear-gradient(90deg,#ef4444,#3b82f6);}"
+        ".box{margin:12px;width:42px;height:30px;background:rgba(255,255,255,.35);"
+        "backdrop-filter:blur(4px);}</style></head>"
+        "<body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsvg[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char svg_cmd[PATH_MAX * 3 + 256];
+    char pdf_cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(svg_path, qsvg, sizeof(qsvg));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(svg_cmd, sizeof(svg_cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/export_backdrop_filter_svg.out 2> temp/render_output_parity/export_backdrop_filter_svg.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
+    snprintf(pdf_cmd, sizeof(pdf_cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/export_backdrop_filter_pdf.out 2> temp/render_output_parity/export_backdrop_filter_pdf.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int svg_status = system(svg_cmd);
+    ASSERT_TRUE(WIFEXITED(svg_status));
+    ASSERT_EQ(WEXITSTATUS(svg_status), 0);
+    int pdf_status = system(pdf_cmd);
+    ASSERT_TRUE(WIFEXITED(pdf_status));
+    ASSERT_EQ(WEXITSTATUS(pdf_status), 0);
+
+    ASSERT_TRUE(file_exists(svg_path));
+    EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
+        << "SVG export should route backdrop-filter through raster fallback";
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 42\n/H 30"))
+        << "PDF export should route backdrop-filter through an opaque raster fallback image";
+    EXPECT_FALSE(file_contains_text(pdf_path, "/SMask"))
+        << "PDF backdrop-filter fallback should capture the prior page backdrop and flatten to an opaque image";
+}
+
+TEST(RenderOutputParity, SvgAndPdfExportBlendModeUseRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/export_blend_effect.html";
+    const char* svg_path = "temp/render_output_parity/export_blend_effect.svg";
+    const char* pdf_path = "temp/render_output_parity/export_blend_effect.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".back{width:48px;height:32px;background:#fde047;}"
+        ".box{width:32px;height:24px;margin-top:-28px;background:#2563eb;"
+        "mix-blend-mode:multiply;}</style></head>"
+        "<body><div class=\"back\"></div><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qsvg[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(svg_path, qsvg, sizeof(qsvg));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/export_blend_svg.out 2> temp/render_output_parity/export_blend_svg.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(svg_path));
+    EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
+        << "SVG export should rasterize unsupported blend-mode groups";
+
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/export_blend_pdf.out 2> temp/render_output_parity/export_blend_pdf.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 32\n/H 24"))
+        << "PDF export should rasterize unsupported blend-mode groups";
+}
+
 TEST(RenderOutputParity, PdfGradientBackgroundUsesRasterFallbackImage) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
@@ -861,7 +1188,7 @@ TEST(RenderOutputParity, PdfGradientBackgroundUsesRasterFallbackImage) {
         << "PDF gradient fallback should emit an inline image";
 }
 
-TEST(RenderOutputParity, PdfOpacityGroupFlattensThroughPaintIr) {
+TEST(RenderOutputParity, PdfOpacityGroupUsesPaintIrExtGState) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
     }
@@ -894,8 +1221,12 @@ TEST(RenderOutputParity, PdfOpacityGroupFlattensThroughPaintIr) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "1 0.498 0.498 rg"))
-        << "PDF opacity fallback should flatten colors through the PaintIR effect group";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Type /ExtGState"))
+        << "PDF opacity group should allocate an ExtGState";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/ca 0.5"))
+        << "PDF opacity group should set non-stroking alpha";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/GS1 gs"))
+        << "PDF opacity group should apply the ExtGState through PaintIR";
 }
 
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {

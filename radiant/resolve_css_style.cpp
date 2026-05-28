@@ -6526,8 +6526,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
-        case CSS_PROPERTY_FILTER: {
-            log_debug("[CSS] Processing filter property");
+        case CSS_PROPERTY_FILTER:
+        case CSS_PROPERTY_BACKDROP_FILTER: {
+            bool is_backdrop_filter = prop_id == CSS_PROPERTY_BACKDROP_FILTER;
+            const char* filter_label = is_backdrop_filter ? "backdrop-filter" : "filter";
+            FilterProp** target_filter = is_backdrop_filter
+                ? &span->backdrop_filter
+                : &span->filter;
+            log_debug("[CSS] Processing %s property", filter_label);
 
             // Helper lambda to parse a single filter function
             auto parse_filter_func = [&](CssFunction* func) -> FilterFunction* {
@@ -6546,7 +6552,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else {
                         filter->params.blur_radius = 0;
                     }
-                    log_debug("[CSS] filter: blur(%.2fpx)", filter->params.blur_radius);
+                    log_debug("[CSS] %s: blur(%.2fpx)", filter_label, filter->params.blur_radius);
                 }
                 else if (strcmp(name, "brightness") == 0) {
                     filter->type = FILTER_BRIGHTNESS;
@@ -6561,7 +6567,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else {
                         filter->params.amount = 1.0f;
                     }
-                    log_debug("[CSS] filter: brightness(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: brightness(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "contrast") == 0) {
                     filter->type = FILTER_CONTRAST;
@@ -6576,7 +6582,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else {
                         filter->params.amount = 1.0f;
                     }
-                    log_debug("[CSS] filter: contrast(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: contrast(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "grayscale") == 0) {
                     filter->type = FILTER_GRAYSCALE;
@@ -6594,7 +6600,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Clamp to [0, 1]
                     if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
                     if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] filter: grayscale(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: grayscale(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "invert") == 0) {
                     filter->type = FILTER_INVERT;
@@ -6612,7 +6618,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Clamp to [0, 1]
                     if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
                     if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] filter: invert(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: invert(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "opacity") == 0) {
                     filter->type = FILTER_OPACITY;
@@ -6630,7 +6636,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Clamp to [0, 1]
                     if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
                     if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] filter: opacity(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: opacity(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "saturate") == 0) {
                     filter->type = FILTER_SATURATE;
@@ -6645,7 +6651,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else {
                         filter->params.amount = 1.0f;
                     }
-                    log_debug("[CSS] filter: saturate(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: saturate(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "sepia") == 0) {
                     filter->type = FILTER_SEPIA;
@@ -6663,7 +6669,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Clamp to [0, 1]
                     if (filter->params.amount > 1.0f) filter->params.amount = 1.0f;
                     if (filter->params.amount < 0.0f) filter->params.amount = 0.0f;
-                    log_debug("[CSS] filter: sepia(%.2f)", filter->params.amount);
+                    log_debug("[CSS] %s: sepia(%.2f)", filter_label, filter->params.amount);
                 }
                 else if (strcmp(name, "hue-rotate") == 0) {
                     filter->type = FILTER_HUE_ROTATE;
@@ -6677,7 +6683,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else {
                         filter->params.angle = 0;
                     }
-                    log_debug("[CSS] filter: hue-rotate(%.2frad)", filter->params.angle);
+                    log_debug("[CSS] %s: hue-rotate(%.2frad)", filter_label, filter->params.angle);
                 }
                 else if (strcmp(name, "drop-shadow") == 0) {
                     filter->type = FILTER_DROP_SHADOW;
@@ -6719,14 +6725,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             filter->params.drop_shadow.color = c;
                         }
                     }
-                    log_debug("[CSS] filter: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
+                    log_debug("[CSS] %s: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
+                        filter_label,
                         filter->params.drop_shadow.offset_x, filter->params.drop_shadow.offset_y,
                         filter->params.drop_shadow.blur_radius,
                         filter->params.drop_shadow.color.r, filter->params.drop_shadow.color.g,
                         filter->params.drop_shadow.color.b, filter->params.drop_shadow.color.a / 255.0f);
                 }
                 else {
-                    log_debug("[CSS] filter: unknown function '%s'", name);
+                    log_debug("[CSS] %s: unknown function '%s'", filter_label, name);
                     return nullptr;
                 }
 
@@ -6735,22 +6742,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle "none" keyword
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                span->filter = nullptr;
-                log_debug("[CSS] filter: none");
+                *target_filter = nullptr;
+                log_debug("[CSS] %s: none", filter_label);
                 break;
             }
 
             // Handle single filter function
             if (value->type == CSS_VALUE_TYPE_FUNCTION) {
-                span->filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
-                span->filter->functions = parse_filter_func(value->data.function);
+                *target_filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
+                (*target_filter)->functions = parse_filter_func(value->data.function);
                 break;
             }
 
             // Handle list of filter functions
             if (value->type == CSS_VALUE_TYPE_LIST) {
-                span->filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
-                span->filter->functions = nullptr;
+                *target_filter = (FilterProp*)alloc_prop(lycon, sizeof(FilterProp));
+                (*target_filter)->functions = nullptr;
                 FilterFunction* tail = nullptr;
 
                 for (int i = 0; i < value->data.list.count; i++) {
@@ -6758,8 +6765,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     if (item && item->type == CSS_VALUE_TYPE_FUNCTION) {
                         FilterFunction* f = parse_filter_func(item->data.function);
                         if (f) {
-                            if (!span->filter->functions) {
-                                span->filter->functions = f;
+                            if (!(*target_filter)->functions) {
+                                (*target_filter)->functions = f;
                             } else {
                                 tail->next = f;
                             }

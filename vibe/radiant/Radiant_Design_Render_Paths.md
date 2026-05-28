@@ -169,26 +169,22 @@ PaintIR/display-list gateway. The SVG *paint semantics* are shared between
 inline and file SVG, and the primitive painter dispatch is no longer a private
 SVG clone.
 
-#### Export: inline SVG diverges three ways
+#### Export: inline SVG now uses the semantic subscene path
 
-Across output targets the same inline `<svg>` has three different fates:
+Across output targets the same inline `<svg>` now enters PaintIR as a semantic
+`PAINT_SVG_SUBSCENE` command:
 
 - **Raster** (`render_svg_to_vec`): full Radiant SVG paint/style/filter resolution.
-- **SVG export** (`render_inline_svg_passthrough`): re-serialises the SVG DOM as
-  text into a `<g transform>`; Radiant's SVG painter never runs. This is also a
-  *correctness* gap, not just duplication — passthrough does not reflect the HTML
-  cascade (`color`/`currentColor`, `fill`, `stroke`) that the painted path
-  applies from `view->in_line`.
-- **PDF export** (`pdf_cb_render_inline_svg`): rasterises the inline SVG through
-  `render_svg_to_vec_via_display_list()` and embeds the result as an image. This
-  closes the silent-drop bug, but it is still a target-specific raster fallback,
-  not the final semantic `SvgSubscene` lowering proposed below.
+- **SVG export**: lowers the subscene through `paint_ir_lower_svg_stream()` and
+  the shared subscene serializer, carrying inherited `currentColor`, `fill`,
+  `stroke`, `stroke-width`, opacity, clip, transform, and source path.
+- **PDF export**: records the same subscene command; the PDF PaintIR lowerer owns
+  the explicit `[PDF_PAINT_IR]` raster fallback image.
 
-So a fix to SVG rendering still only lands natively in the raster path; SVG
-export passes the buck to the consumer renderer, and PDF now depends on an
-explicit raster fallback. This remains the clearest single example of "fixed in
-one path, handled differently in another," and the unified inline-SVG design below
-(Proposal §5) targets it directly.
+This removes the old `render_inline_svg_passthrough` split and the
+callback-owned PDF inline-SVG fallback. Native PDF vector lowering for nested SVG
+can still improve inspectability and file size, but the ownership boundary is now
+shared.
 
 ## Display-List Design
 
@@ -789,15 +785,11 @@ Phase 3 / Phase C is now implemented for block paint ownership:
 
 Phase 4 / Phase D is now implemented for the simple export command families:
 
-- PDF export now implements `pdf_cb_render_inline_svg()` instead of a NULL
-  callback. It rasterises inline SVG through the same
-  `render_svg_to_vec_via_display_list()` bridge used by file-SVG pictures,
-  carries inherited `currentColor`/`fill`/`stroke` state into that render, and
-  embeds the raster result as a PDF image.
-- The fallback logs `[PDF_SVG_FALLBACK]`, so unsupported vector lowering is
-  visible rather than silent.
+- Inline SVG is no longer owned as a Phase D callback fallback; Phase F records it
+  as a semantic `PAINT_SVG_SUBSCENE` and the PDF lowerer owns its explicit
+  `[PDF_PAINT_IR]` raster fallback.
 - `RenderOutputParity.PdfInlineSvgUsesRasterFallbackImage` verifies that PDF
-  export emits an inline image for an inline SVG.
+  export emits an inline image for an inline SVG subscene.
 - SVG/PDF export have target capability tables for rects, rounded rects, paths,
   strokes, gradients, images, glyph runs, clips, transforms, and
   target-specific opacity support.
@@ -807,9 +799,7 @@ Phase 4 / Phase D is now implemented for the simple export command families:
   path. PDF gradients use an explicit `[PDF_PAINT_IR]` raster fallback image.
 - `RenderOutputParity.PdfGradientBackgroundUsesRasterFallbackImage` verifies that
   PDF gradient backgrounds are no longer silently omitted.
-- Inline SVG is intentionally still a migration fallback. Phase F is not complete
-  until inline SVG becomes a semantic `SvgSubscene` command with shared
-  SVG/PDF/raster lowering.
+- Inline SVG subscene ownership is complete in Phase F.
 
 ### Phase A: Guard Existing Paths
 
@@ -876,7 +866,7 @@ Moved out of Phase C:
 - Consolidating opacity/filter/blend semantics into effect-group lowering is now
   handled by Phase E.
 - Replacing inline-SVG passthrough/fallback with a true `SvgSubscene` command
-  remains Phase F.
+  is handled by Phase F.
 
 ### Phase D: Route SVG/PDF Export Through Paint-IR Lowering
 
@@ -895,17 +885,17 @@ Status: **Complete for simple SVG/PDF PaintIR export lowering as of 2026-05-28.*
   opacity groups.
 - Done: PDF export lowers supported PaintIR directly to PDF drawing commands and
   uses explicit raster fallback images for command families PDF cannot represent
-  natively, currently inline SVG and CSS gradient backgrounds.
-- Done: fallback paths log `[PDF_SVG_FALLBACK]` or `[PDF_PAINT_IR]` and are
-  covered by `RenderOutputParity.PdfInlineSvgUsesRasterFallbackImage` and
+  natively, currently CSS gradient backgrounds and SVG subscenes.
+- Done: fallback paths log `[PDF_PAINT_IR]` and are covered by
+  `RenderOutputParity.PdfInlineSvgUsesRasterFallbackImage` and
   `RenderOutputParity.PdfGradientBackgroundUsesRasterFallbackImage`.
 
 Not part of Phase D anymore:
 
 - Effect-group ownership for opacity/filter/blend/shadow is handled by Phase E;
   deeper native vector quality remains optional follow-up work.
-- Replacing SVG export inline-SVG passthrough and PDF inline-SVG raster fallback
-  with a semantic `SvgSubscene` command remains Phase F.
+- Replacing SVG export inline-SVG passthrough and PDF inline-SVG callback-owned
+  raster fallback with a semantic `SvgSubscene` command is handled by Phase F.
 - Further native PDF support for gradients/effects can improve output quality,
   but explicit raster fallback satisfies Phase D's no-silent-drop contract.
 
@@ -922,41 +912,130 @@ Status: **Complete for the Phase E effect-group ownership milestone as of
   `<g opacity="...">` groups, and unsupported effect groups now log
   `[SVG_PAINT_IR]` instead of failing silently.
 - Done: PDF export now receives block opacity through the shared PaintIR
-  effect-group callbacks. Because the current lightweight PDF writer has no
-  native alpha graphics state, PDF opacity groups are explicitly flattened by
-  compositing colors over white and logging `[PDF_PAINT_IR]`.
+  effect-group callbacks and lowers opacity groups to native PDF ExtGState
+  resources (`/ca` and `/CA`) applied through the content stream.
 - Done: block-level export opacity now wraps the whole block lifecycle rather
   than only child traversal, so backgrounds/borders participate in SVG/PDF
   effect groups.
 - Done: focused tests cover semantic effect-group raster lowering, filter /
-  backdrop expansion, SVG opacity-group streaming, and PDF opacity fallback.
+  backdrop expansion, SVG opacity-group streaming, PDF ExtGState serialization,
+  and PDF opacity effect groups.
 
 Verification completed:
 
 - `make build-test`
+- `test_pdf_writer_gtest`
 - `test_display_list_gtest --gtest_filter='PaintIrParityTest.*:DisplayListTest.*'`
 - `test_pdf_render_visual_gtest --gtest_filter='RenderOutputParity.*'`
 - `test_retained_display_list_gtest`
 - `make check-int-cast`
 - `git diff --check`
 
-Remaining quality work, not ownership blockers:
+Future quality work, not Phase E blockers:
 
-- PDF opacity fallback is a color-flattening approximation for the current PDF
-  writer, not a true isolated raster group over arbitrary page backdrop.
-- Native SVG/PDF filters, blend modes, and shadows can improve output quality,
-  but the shared semantic effect-group command and raster lowering are now in
-  place.
+- Native SVG/PDF filters, blend modes, and shadows can improve output quality.
+  The shared semantic effect-group command, raster lowering, SVG native opacity,
+  PDF native opacity, and unsupported-effect logging are now in place.
 
 ### Phase F: Inline SVG As A Nested Paint-IR Subscene
 
-- Make `render_svg_to_vec` emit one `SvgSubscene` IR command instead of driving
-  `RdtVector`/`DisplayList` directly.
-- Carry inherited `currentColor`/`fill`/`stroke`, the viewBox/`preserveAspectRatio`
-  transform, the content clip, `source_path`, and a resource generation (§5).
-- Lower the subscene consistently for raster, SVG export (replacing passthrough),
-  and PDF export (replacing the target-specific raster fallback).
-- Use the same resource-generation and bounds rules as normal IR fragments.
+Status: **Complete for the Phase F semantic SVG subscene ownership milestone as
+of 2026-05-28.**
+
+- Done: `PaintSvgSubscene` carries the inline SVG DOM root, owning pool,
+  font context, viewport size, pixel ratio, inherited `currentColor`,
+  `fill`/`stroke`/`stroke-width`, `fill:none` / `stroke:none`, opacity, base
+  transform, content clip, `source_path`, and a resource generation.
+- Done: `render_svg_to_vec()` now records one `PAINT_SVG_SUBSCENE` command and
+  lowers it through PaintIR for raster output instead of directly driving both
+  `RdtVector` and `DisplayList`.
+- Done: raster lowering expands the subscene through the existing inline SVG
+  primitive renderer, preserving the trusted current pixel path while making
+  the ownership boundary semantic.
+- Done: SVG export lowers `PAINT_SVG_SUBSCENE` through
+  `paint_ir_lower_svg_stream()` and the shared subscene serializer; the old
+  inline-SVG passthrough serializer in `render_svg.cpp` is removed.
+- Done: PDF export records inline SVG as `PAINT_SVG_SUBSCENE`; the PDF PaintIR
+  lowerer owns the explicit raster fallback image and logs it as
+  `[PDF_PAINT_IR]`.
+- Done: PaintIR registers the inline-SVG lowerers as optional handlers, so small
+  PaintIR-only test binaries do not link the full inline SVG renderer but full
+  raster/SVG/PDF render paths still lower subscenes consistently.
+
+Verification completed:
+
+- `make build-test`
+- `test_display_list_gtest --gtest_filter='PaintIrParityTest.*:DisplayListTest.*'`
+- `test_pdf_render_visual_gtest --gtest_filter='RenderOutputParity.*'`
+- `test_pdf_writer_gtest`
+- `test_retained_display_list_gtest`
+- `make check-int-cast`
+- `git diff --check`
+
+Future quality work, not Phase F blockers:
+
+- Native PDF vector lowering for nested SVG can improve PDF inspectability and
+  file size later. Phase F's ownership target is complete because inline SVG is
+  now represented as a semantic PaintIR subscene with shared raster, SVG export,
+  and PDF export lowering.
+
+### Phase G: Quality And Observability Hardening
+
+Status: **Quality hardening slices in progress as of 2026-05-28.**
+
+- Goal: keep Phase A-F ownership intact while making lowerer decisions more
+  inspectable and avoiding silent or content-dropping behavior for unsupported
+  vector effects.
+- Done: structured PaintIR lowering counters for commands, emitted
+  commands, explicit fallbacks, and unsupported commands in render path traces.
+- Done: unsupported SVG effect groups can now be captured as cropped raster
+  fallback images. SVG embeds the captured pixels as a PNG data URI marked with
+  `data-radiant-fallback="effect-raster"` and records fallback counters.
+- Done: unsupported PDF effect groups can now be captured as cropped raster
+  fallback images. Opaque captures still use compact inline PDF images; captures
+  with transparency are emitted as PDF image XObjects with grayscale soft masks
+  so fallback alpha is preserved.
+- Done: SVG/PDF export walker now surfaces CSS effect groups through a semantic
+  `begin_effect_group` / `end_effect_group` backend callback. CSS filters and
+  mix-blend modes reach PaintIR lowerers, so unsupported export effects are
+  counted and marked by the shared fallback path.
+- Done: text inside rasterized export effect groups now lowers through a
+  registered glyph-run raster lowerer, preserving text content in exact
+  fallback images without coupling core PaintIR to the font stack.
+- Done: outer `box-shadow` is routed into semantic effect groups for SVG/PDF
+  export, recorded as PaintIR shadow commands, and captured by the shared
+  raster fallback image path.
+- Done: `backdrop-filter` is now parsed into the resolved style/view model as a
+  `backdrop_filter` payload, routed through block/inline semantic effect groups,
+  counted by the shared fallback path, and covered by SVG/PDF export fallback
+  parity.
+- Done: SVG/PDF effect fallback capture now carries a page-backdrop display-list
+  mirror. Backdrop-sensitive fallbacks replay prior page pixels into the cropped
+  fallback surface before applying blend/backdrop-filter semantics, so PDF can
+  emit opaque fallback images for backdrop-filter over opaque page content
+  instead of transparent images with soft masks.
+- Done: stale Phase D/F prose was updated so the document no longer describes
+  the removed SVG passthrough and callback-owned PDF inline-SVG fallback as
+  current behavior.
+
+Verification completed:
+
+- `make build-test`
+- `test_display_list_gtest --gtest_filter='PaintIrParityTest.*:DisplayListTest.*'`
+- `test_pdf_render_visual_gtest --gtest_filter='RenderOutputParity.*'`
+- `test_pdf_writer_gtest`
+- `test_retained_display_list_gtest`
+- `make check-int-cast`
+- `git diff --check`
+
+Future quality work:
+
+- Native vector `backdrop-filter` remains target-limited: PDF has no direct CSS
+  backdrop-filter operator, and SVG viewer support is not yet used as a trusted
+  export path. The current contract is exact cropped raster fallback over the
+  tracked prior page backdrop for backdrop-sensitive groups.
+- More visual fixtures can be added for mixed text, shadow, blend, and filter
+  combinations once the fallback matrix stabilizes.
 
 ## Target Rule
 

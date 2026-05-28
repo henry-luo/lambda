@@ -232,7 +232,7 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
         return;
     }
 
-    log_info("[RENDER_PATH] target=%s replay=%s backend=%s dl=%d paint_ir=%d selective=%d tiled=%d large_tiled=%d items=%d tiles=%d threads=%d surface=%dx%d retained={candidates:%d captured:%d skipped:%d copy_failed:%d hits:%d misses:%d stale:%d dirty:%d} caps={paths:%d gradients:%d clips:%d svg:%d opacity:%d blend:%d blur:%d color_matrix:%d text:%d batch:%d tile_offsets:%d}",
+    log_info("[RENDER_PATH] target=%s replay=%s backend=%s dl=%d paint_ir=%d selective=%d tiled=%d large_tiled=%d items=%d tiles=%d threads=%d surface=%dx%d retained={candidates:%d captured:%d skipped:%d copy_failed:%d hits:%d misses:%d stale:%d dirty:%d} lowering={commands:%d emitted:%d fallback:%d unsupported:%d} caps={paths:%d gradients:%d clips:%d svg:%d opacity:%d blend:%d blur:%d color_matrix:%d text:%d batch:%d tile_offsets:%d}",
              trace->target ? trace->target : "unknown",
              trace->replay_mode ? trace->replay_mode : "unknown",
              trace->backend_name ? trace->backend_name : "unknown",
@@ -254,6 +254,10 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
              trace->retained_reuse_misses,
              trace->retained_reuse_rejected_resources,
              trace->retained_reuse_rejected_dirty,
+             trace->paint_ir_commands,
+             trace->paint_ir_emitted,
+             trace->paint_ir_fallbacks,
+             trace->paint_ir_unsupported,
              trace->backend_vector_paths ? 1 : 0,
              trace->backend_gradients ? 1 : 0,
              trace->backend_nested_clips ? 1 : 0,
@@ -272,7 +276,7 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
         return;
     }
 
-    char buf[1024];
+    char buf[1536];
     JsonWriter w;
     uint64_t cascade_id = state ? state->active_cascade_id : 0;
     event_state_log_begin_record(log, &w, buf, sizeof(buf), "render.path", cascade_id);
@@ -315,6 +319,13 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, UiContext* uicon,
             jw_kv_int(&w, "reuse_misses", trace->retained_reuse_misses);
             jw_kv_int(&w, "reuse_rejected_resources", trace->retained_reuse_rejected_resources);
             jw_kv_int(&w, "reuse_rejected_dirty", trace->retained_reuse_rejected_dirty);
+        jw_obj_end(&w);
+        jw_key(&w, "paint_ir_lowering");
+        jw_obj_begin(&w);
+            jw_kv_int(&w, "commands", trace->paint_ir_commands);
+            jw_kv_int(&w, "emitted", trace->paint_ir_emitted);
+            jw_kv_int(&w, "fallbacks", trace->paint_ir_fallbacks);
+            jw_kv_int(&w, "unsupported", trace->paint_ir_unsupported);
         jw_obj_end(&w);
     jw_obj_end(&w);
     event_state_log_finish_record(log, &w);

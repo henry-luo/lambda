@@ -30,6 +30,7 @@ typedef unsigned long HPDF_STATUS;
 typedef struct HPDF_Doc_Rec*  HPDF_Doc;
 typedef struct HPDF_Page_Rec* HPDF_Page;
 typedef struct HPDF_Font_Rec* HPDF_Font;
+typedef struct HPDF_ExtGState_Rec* HPDF_ExtGState;
 
 // Error handler callback type
 typedef void (*HPDF_ErrorHandler)(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data);
@@ -211,6 +212,41 @@ HPDF_STATUS HPDF_Page_SetRGBStroke(HPDF_Page page, float r, float g, float b);
  */
 HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width);
 
+/**
+ * Create an extended graphics state resource.
+ *
+ * @param doc   Document handle
+ * @return      ExtGState handle, or NULL on failure
+ */
+HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc);
+
+/**
+ * Set non-stroking alpha (/ca) on an extended graphics state.
+ *
+ * @param ext_gstate ExtGState handle
+ * @param alpha      Alpha value from 0.0 to 1.0
+ * @return           HPDF_OK on success
+ */
+HPDF_STATUS HPDF_ExtGState_SetAlphaFill(HPDF_ExtGState ext_gstate, float alpha);
+
+/**
+ * Set stroking alpha (/CA) on an extended graphics state.
+ *
+ * @param ext_gstate ExtGState handle
+ * @param alpha      Alpha value from 0.0 to 1.0
+ * @return           HPDF_OK on success
+ */
+HPDF_STATUS HPDF_ExtGState_SetAlphaStroke(HPDF_ExtGState ext_gstate, float alpha);
+
+/**
+ * Apply an extended graphics state to the page content stream.
+ *
+ * @param page       Page handle
+ * @param ext_gstate ExtGState handle
+ * @return           HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_SetExtGState(HPDF_Page page, HPDF_ExtGState ext_gstate);
+
 /*---------------------------------------------------------------------------*/
 /*  Path Construction Functions                                              */
 /*---------------------------------------------------------------------------*/
@@ -323,6 +359,23 @@ HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
                                     int width, int height, int stride,
                                     float a, float b, float c,
                                     float d, float e, float f);
+
+/**
+ * Draw an ABGR8888 image as a PDF image XObject, preserving alpha with a
+ * grayscale soft mask when any source pixel is translucent.
+ *
+ * @param page    Page handle
+ * @param pixels  Source pixels in ABGR8888 layout
+ * @param width   Source image width in pixels
+ * @param height  Source image height in pixels
+ * @param stride  Source row stride in pixels
+ * @param a,b,c,d,e,f  PDF matrix operands for the image unit square
+ * @return        HPDF_OK on success
+ */
+HPDF_STATUS HPDF_Page_DrawABGRImageWithAlpha(HPDF_Page page, const uint32_t* pixels,
+                                             int width, int height, int stride,
+                                             float a, float b, float c,
+                                             float d, float e, float f);
 
 /*---------------------------------------------------------------------------*/
 /*  Text Functions                                                           */

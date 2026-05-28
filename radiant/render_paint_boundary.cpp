@@ -219,6 +219,74 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
     return true;
 }
 
+bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
+                                              float x, float y) {
+    if (!paint_list || !view || !view->bound || !view->bound->box_shadow) {
+        return false;
+    }
+
+    float width = view->width;
+    float height = view->height;
+    if (width <= 0.0f || height <= 0.0f) return false;
+
+    float r_tl = 0.0f;
+    float r_tr = 0.0f;
+    float r_br = 0.0f;
+    float r_bl = 0.0f;
+    if (view->bound->border) {
+        BorderProp* border = view->bound->border;
+        r_tl = border->radius.top_left;
+        r_tr = border->radius.top_right;
+        r_br = border->radius.bottom_right;
+        r_bl = border->radius.bottom_left;
+    }
+
+    int shadow_count = 0;
+    for (BoxShadow* shadow = view->bound->box_shadow; shadow; shadow = shadow->next) {
+        shadow_count++;
+    }
+
+    bool emitted = false;
+    for (int shadow_index = shadow_count - 1; shadow_index >= 0; shadow_index--) {
+        BoxShadow* shadow = view->bound->box_shadow;
+        for (int i = 0; i < shadow_index && shadow; i++) {
+            shadow = shadow->next;
+        }
+        if (!shadow || shadow->inset || shadow->color.a == 0) {
+            continue;
+        }
+
+        float spread = shadow->spread_radius;
+        float shadow_x = x + shadow->offset_x - spread;
+        float shadow_y = y + shadow->offset_y - spread;
+        float shadow_w = width + 2.0f * spread;
+        float shadow_h = height + 2.0f * spread;
+        if (shadow_w <= 0.0f || shadow_h <= 0.0f) {
+            continue;
+        }
+
+        float sr_tl = fmaxf(0.0f, r_tl + spread);
+        float sr_tr = fmaxf(0.0f, r_tr + spread);
+        float sr_br = fmaxf(0.0f, r_br + spread);
+        float sr_bl = fmaxf(0.0f, r_bl + spread);
+
+        float exclude_params[8] = {
+            x, y, width, height,
+            r_tl, r_tr, r_br, r_bl
+        };
+
+        paint_outer_shadow(paint_list,
+                           shadow_x, shadow_y, shadow_w, shadow_h,
+                           sr_tl, sr_tr, sr_br, sr_bl,
+                           shadow->color,
+                           shadow->blur_radius,
+                           CLIP_SHAPE_ROUNDED_RECT, exclude_params,
+                           0, nullptr);
+        emitted = true;
+    }
+    return emitted;
+}
+
 static bool boundary_copy_gradient_stops(GradientStop* src, int src_count,
                                          RdtGradientStop* stops, int stop_capacity,
                                          int* out_count) {

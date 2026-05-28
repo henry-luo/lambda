@@ -18,11 +18,13 @@ typedef struct RenderEffectGroup {
     RenderEffectBackdrop opacity_backdrop;
     RenderEffectBackdrop filter_backdrop;
     Rect filter_rect;
+    Rect backdrop_filter_rect;
     CssEnum mix_blend_mode;
     float opacity;
     bool has_opacity_group;
     bool has_filter_backdrop;
     bool has_filter;
+    bool has_backdrop_filter;
 } RenderEffectGroup;
 
 RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,

@@ -296,6 +296,33 @@ TEST_F(PdfWriterTest, GSaveGRestore) {
     HPDF_Free(doc);
 }
 
+TEST_F(PdfWriterTest, ExtGStateAlphaResourceAndOperator) {
+    const char* filename = "./temp/test_pdf_extgstate_alpha.pdf";
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+
+    HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(doc);
+    ASSERT_NE(ext_gstate, nullptr);
+    EXPECT_EQ(HPDF_ExtGState_SetAlphaFill(ext_gstate, 0.5f), HPDF_OK);
+    EXPECT_EQ(HPDF_ExtGState_SetAlphaStroke(ext_gstate, 0.25f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_GSave(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetExtGState(page, ext_gstate), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_Rectangle(page, 10.0f, 20.0f, 30.0f, 40.0f), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_Fill(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_GRestore(page), HPDF_OK);
+    EXPECT_EQ(HPDF_SaveToFile(doc, filename), HPDF_OK);
+
+    EXPECT_TRUE(file_contains(filename, "/Type /ExtGState"));
+    EXPECT_TRUE(file_contains(filename, "/ca 0.5"));
+    EXPECT_TRUE(file_contains(filename, "/CA 0.25"));
+    EXPECT_TRUE(file_contains(filename, "/ExtGState <<"));
+    EXPECT_TRUE(file_contains(filename, "/GS1 gs"));
+
+    HPDF_Free(doc);
+}
+
 /*---------------------------------------------------------------------------*/
 /*  Path Construction and Painting Tests                                     */
 /*---------------------------------------------------------------------------*/
@@ -379,6 +406,32 @@ TEST_F(PdfWriterTest, DrawABGRImage) {
     EXPECT_TRUE(file_contains(filename, "BI"));
     EXPECT_TRUE(file_contains(filename, "/F /AHx"));
     EXPECT_TRUE(file_contains(filename, "FF000000FF00"));
+
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, DrawABGRImageWithAlphaSoftMask) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    HPDF_Page page = HPDF_AddPage(doc);
+    HPDF_Page_SetWidth(page, 100.0f);
+    HPDF_Page_SetHeight(page, 100.0f);
+
+    uint32_t pixels[4] = {
+        0x800000ff, 0xff00ff00,
+        0x40ff0000, 0x00ffffff
+    };
+    HPDF_STATUS status = HPDF_Page_DrawABGRImageWithAlpha(page, pixels, 2, 2, 2,
+                                                          20.0f, 0.0f, 0.0f,
+                                                          20.0f, 10.0f, 10.0f);
+    EXPECT_EQ(status, HPDF_OK);
+
+    const char* filename = "test_output/test_image_alpha.pdf";
+    status = HPDF_SaveToFile(doc, filename);
+    EXPECT_EQ(status, HPDF_OK);
+    EXPECT_TRUE(file_contains(filename, "/Subtype /Image"));
+    EXPECT_TRUE(file_contains(filename, "/XObject"));
+    EXPECT_TRUE(file_contains(filename, "/SMask"));
+    EXPECT_TRUE(file_contains(filename, "/Im1 Do"));
 
     HPDF_Free(doc);
 }

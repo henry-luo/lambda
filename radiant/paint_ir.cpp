@@ -14,6 +14,20 @@
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
 
+static PaintSvgSubsceneRasterLowerFn g_svg_subscene_raster_lowerer = nullptr;
+static PaintSvgSubsceneSvgLowerFn g_svg_subscene_svg_lowerer = nullptr;
+static PaintGlyphRunRasterLowerFn g_glyph_run_raster_lowerer = nullptr;
+
+void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raster_lower,
+                                             PaintSvgSubsceneSvgLowerFn svg_lower) {
+    g_svg_subscene_raster_lowerer = raster_lower;
+    g_svg_subscene_svg_lowerer = svg_lower;
+}
+
+void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lowerer) {
+    g_glyph_run_raster_lowerer = lowerer;
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
@@ -387,7 +401,9 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             }
             break;
         case PAINT_SVG_SUBSCENE:
-            if (!cmd->svg_subscene.svg_root) {
+            if (!cmd->svg_subscene.svg_root ||
+                cmd->svg_subscene.viewport_width <= 0.0f ||
+                cmd->svg_subscene.viewport_height <= 0.0f) {
                 return paint_ir_validation_fail(result, i, "svg subscene root is null",
                                                 clip_depth, backdrop_depth,
                                                 shadow_clip_depth, effect_depth);
@@ -866,6 +882,16 @@ static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
     if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
         return;
     }
+    if (group->backdrop_filter) {
+        Bound clip = group->has_clip ? group->bounds : Bound{};
+        dl_apply_filter(dl,
+                        group->bounds.left,
+                        group->bounds.top,
+                        group->bounds.right - group->bounds.left,
+                        group->bounds.bottom - group->bounds.top,
+                        group->backdrop_filter,
+                        group->has_clip ? &clip : nullptr);
+    }
     if (group->blend_mode) {
         dl_save_backdrop(dl, x0, y0, w, h);
     }
@@ -1111,13 +1137,25 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             }
             break;
         }
+        case PAINT_SVG_SUBSCENE: {
+            const PaintSvgSubscene* p = &cmd->svg_subscene;
+            if (g_svg_subscene_raster_lowerer) {
+                g_svg_subscene_raster_lowerer(p, dl);
+            } else {
+                log_error("[PAINT_IR_SVG_SUBSCENE] raster lowerer is not registered");
+            }
+            break;
+        }
 
         // Other higher-level semantic ops are target-neutral; the raster lowering
         // only consumes their pixel-domain expansions during this migration.
         case PAINT_PUSH_TRANSFORM:
         case PAINT_POP_TRANSFORM:
+            break;
         case PAINT_GLYPH_RUN:
-        case PAINT_SVG_SUBSCENE:
+            if (g_glyph_run_raster_lowerer) {
+                g_glyph_run_raster_lowerer(&cmd->glyph_run, dl);
+            }
             break;
         }
     }
@@ -1402,6 +1440,8 @@ static bool paint_svg_caps_allow_opacity_group(const RenderExportTargetCaps* cap
            group->blend_mode == 0 &&
            group->filter == nullptr &&
            !group->backdrop &&
+           group->backdrop_filter == nullptr &&
+           !group->shadow &&
            !group->isolation;
 }
 
@@ -1806,6 +1846,17 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             active_stats->emitted_count++;
             break;
         }
+        case PAINT_SVG_SUBSCENE: {
+            const PaintSvgSubscene* p = &cmd->svg_subscene;
+            if (!g_svg_subscene_svg_lowerer ||
+                !g_svg_subscene_svg_lowerer(p, out, indent_level)) {
+                paint_svg_note_unsupported(out, indent_level, cmd->op,
+                                           emit_unsupported_comments, active_stats);
+                break;
+            }
+            active_stats->emitted_count++;
+            break;
+        }
         case PAINT_BEGIN_EFFECT_GROUP: {
             if (skipped_effect_depth > 0) {
                 skipped_effect_depth++;
@@ -1815,15 +1866,28 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             }
             const PaintEffectGroup* p = &cmd->effect_group;
             if (!paint_svg_caps_allow_opacity_group(caps, p)) {
-                skipped_effect_depth++;
-                log_error("[SVG_PAINT_IR] unsupported effect group opacity=%.3f blend=%d filter=%p backdrop=%d isolation=%d",
+                log_error("[SVG_PAINT_IR] fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
                           p ? p->opacity : 1.0f,
                           p ? p->blend_mode : 0,
                           p ? p->filter : nullptr,
                           p && p->backdrop ? 1 : 0,
+                          p ? p->backdrop_filter : nullptr,
+                          p && p->shadow ? 1 : 0,
                           p && p->isolation ? 1 : 0);
-                paint_svg_note_unsupported(out, indent_level, cmd->op,
-                                           emit_unsupported_comments, active_stats);
+
+                paint_svg_indent(out, indent_level);
+                strbuf_append_str(out, "<g data-radiant-fallback=\"effect\"");
+                if (p && p->opacity < 0.9995f) {
+                    strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity);
+                }
+                if (p && p->has_transform && caps && caps->transforms) {
+                    paint_svg_append_matrix_attr(out, &p->transform);
+                }
+                strbuf_append_str(out, ">\n");
+                open_effect_depth++;
+                indent_level++;
+                active_stats->emitted_count++;
+                active_stats->fallback_count++;
                 break;
             }
             paint_svg_indent(out, indent_level);
