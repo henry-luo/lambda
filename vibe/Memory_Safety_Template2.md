@@ -587,16 +587,76 @@ Results:
 - `test_mark_reader_gtest`: 38 / 38 passed
 - `test_mark_builder_deepcopy_gtest`: 32 / 32 passed
 
+## 12. Progress / Status Update (2026-05-28)
+
+### Landed Since 2026-05-15
+
+1. **MarkBuilder deep-copy typed dispatch**
+   - Converted `MarkBuilder::deep_copy()` / `deep_copy_internal()` from raw
+     `switch (get_type_id(item))` dispatch to `lam::visit()`.
+   - Kept tag-specific behavior in small typed branches so each path carries
+     its `ItemOf<Tag>` witness locally.
+
+2. **MarkBuilder typed outputs**
+   - Added typed builder result APIs for array, map, element, and final output
+     construction.
+   - Downstream callers can now keep the tag proof instead of immediately
+     re-checking freshly constructed values.
+
+3. **MarkBuilder GC borrow parameters**
+   - Migrated `putToMap()` and `putToElement()` to accept typed GC borrows
+     (`lam::GcPtr<Map>` / `lam::GcPtr<Element>`) instead of raw container
+     pointers.
+   - Updated input parser call sites to pass `lam::gc_borrow(...)` at the
+     boundary.
+
+4. **Raw item-cast lint**
+   - Added `make check-item-cast`.
+   - The check now guards migrated Lambda files against direct raw `Item`
+     payload/container casts outside the typed bridge layer.
+
+5. **HoleSentinel typed wrapper**
+   - Added a distinct `HoleSentinel` wrapper and helpers in
+     `lib/lambda_typed.hpp`.
+   - JSON formatting now uses the typed predicate for hole-sentinel detection.
+   - JS deleted-slot production and consumption now route through JS helper
+     functions backed by `lam::HoleSentinel`; direct raw
+     `JS_DELETED_SENTINEL_VAL` use has been removed from `js_runtime.cpp`.
+
+6. **First JS runtime `GcPtr<Array>` helper migration**
+   - Migrated internal JS array helper parameters from raw `Array*` to
+     `lam::GcPtr<Array>` where there is no C ABI boundary:
+     `js_array_delete_sparse_indices_from`, `js_array_has_element`,
+     `js_array_find_next_own_element`, `js_array_find_prev_own_element`, and
+     `js_array_has_numeric_own_accessors`.
+   - Updated call sites to borrow raw local array pointers with
+     `lam::gc_borrow(...)`.
+
+### Latest Verification
+
+```bash
+make -C build/premake config=debug_native lambda -j1 CC=gcc CXX=g++ AR=ar RANLIB=ranlib
+./test/test_js_props_gtest.exe
+./test/test_lambda_typed.exe
+make check-item-cast
+```
+
+Results:
+
+- `lambda` debug target: built successfully
+- `test_js_props_gtest`: 24 / 24 passed
+- `test_lambda_typed`: 8 / 8 passed
+- `make check-item-cast`: passed
+
 ### Next Recommended Phase
 
-1. Convert `MarkBuilder::deep_copy()` / `deep_copy_internal()` from raw
-   `switch (get_type_id(item))` to `lam::visit()` with small typed helper
-   functions per tag family.
-2. Add typed builder outputs for low-risk constructors:
-   `createArrayTyped()`, `createMapTyped()`, `createElementTyped()`, or a
-   naming pattern that fits the existing API.
-3. Start replacing internal C++ helper parameters from raw `Array*` / `Map*`
-   with `GcPtr<T>` / `PoolPtr<T>` where no ABI boundary is involved.
-4. Add a `check-item-cast` lint pass after enough call sites have migrated, so
-   raw item-to-container casts can be restricted to the typed layer and legacy
-   bridge code.
+1. Continue replacing internal C++ helper parameters from raw `Array*` /
+   `Map*` / `Element*` with `GcPtr<T>` / `PoolPtr<T>` where no ABI boundary is
+   involved. Next good candidates are the remaining static JS map helpers and
+   MarkEditor helpers.
+2. Expand `ShapeRef` use beyond the typed-layer tests into shape-chain walker
+   helpers that are internal to Lambda C++ code.
+3. Add the first `ItemOrError` wrapper around an existing `RetMap` /
+   `RetArray`-style path and make the wrapper `[[nodiscard]]`.
+4. Start auditing retained string fields for `PersistentField<char,
+   GcHeapDomain>` or an equivalent domain-aware retained-string wrapper.

@@ -7,7 +7,6 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
-#include "../../lib/lambda_typed.hpp"
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -1415,7 +1414,7 @@ static bool js_private_storage_has_own(Item object, Item private_key) {
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
     bool found = false;
     Item existing = js_map_get_fast(lookup_object.map, key_str->chars, (int)key_str->len, &found);
-    return found && existing.item != JS_DELETED_SENTINEL_VAL;
+    return found && !js_is_deleted_sentinel(existing);
 }
 
 static bool js_private_brand_storage_has_own(Item object, String* field_key_str) {
@@ -3076,7 +3075,7 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
             *out_result = js_throw_type_error("Cannot convert a Symbol value to a string");
             return true;
         }
-        if (get_type_id(*value) != LMD_TYPE_STRING && value->item != JS_DELETED_SENTINEL_VAL) {
+        if (get_type_id(*value) != LMD_TYPE_STRING && !js_is_deleted_sentinel(*value)) {
             *value = js_to_string(*value);
         }
         if (get_type_id(key) == LMD_TYPE_STRING && get_type_id(*value) == LMD_TYPE_STRING) {
@@ -3777,7 +3776,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (_se_idx && jspd_is_accessor(_se_idx)) {
                 bool slot_found = false;
                 Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                     JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                     if (pair && pair->getter.item != ItemNull.item) {
                         return js_accessor_call_result(pair->getter, object);
@@ -3792,15 +3791,15 @@ extern "C" Item js_property_get(Item object, Item key) {
             // IS_ACCESSOR shape flag, which the probe above already finds.
             bool sparse_found = false;
             Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (sparse_found && !js_is_deleted_sentinel(sparse_val)) {
                 bool dense_present = idx < object.array->length && idx < object.array->capacity &&
-                    object.array->items[idx].item != JS_DELETED_SENTINEL_VAL;
+                    !js_is_deleted_sentinel(object.array->items[idx]);
                 if (!dense_present) return sparse_val;
             }
         }
         if (idx_d == idx_d && idx >= 0 && idx < object.array->length && idx < object.array->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
-            if (object.array->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+            if (!js_is_deleted_sentinel(object.array->items[idx])) {
                 return object.array->items[idx];
             }
             // hole — fall through to prototype chain lookup below
@@ -4520,7 +4519,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                         if (_se_m && jspd_is_accessor(_se_m)) {
                             bool sf = false;
                             Item slot = js_map_get_fast_ext(proto.map, str_key->chars, (int)str_key->len, &sf);
-                            if (sf && slot.item != JS_DELETED_SENTINEL_VAL) {
+                            if (sf && !js_is_deleted_sentinel(slot)) {
                                 JsAccessorPair* pair = js_item_to_accessor_pair(slot);
                                 if (pair && pair->getter.item != ItemNull.item) {
                                     return js_accessor_call_result(pair->getter, object);
@@ -4764,13 +4763,13 @@ static Item js_array_numeric_key_to_property_key(Item key) {
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
 }
 
-static void js_array_delete_sparse_indices_from(Array* arr, int64_t new_len) {
+static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t new_len) {
     if (!arr || arr->extra == 0) return;
     Map* pm = (Map*)(uintptr_t)arr->extra;
     if (!pm || !pm->type) return;
     TypeMap* tm = (TypeMap*)pm->type;
     Item map_item = (Item){.map = pm};
-    Item deleted = lam::hole_sentinel_item();
+    Item deleted = make_js_deleted_sentinel();
     for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
         if (!entry->name) continue;
         int name_len = (int)entry->name->length;
@@ -4815,7 +4814,7 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
     if (!se) return false;
     bool found = false;
     Item val = js_map_get_fast_ext(fn->properties_map.map, name, name_len, &found);
-    return found && val.item != JS_DELETED_SENTINEL_VAL;
+    return found && !js_is_deleted_sentinel(val);
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
@@ -4917,7 +4916,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     Map* pm_chk = (Map*)(uintptr_t)arr_chk->extra;
                     bool nw_found = false;
                     Item nwv = js_map_get_fast_ext(pm_chk, "__nw_length", 11, &nw_found);
-                    if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) {
+                    if (nw_found && !js_is_deleted_sentinel(nwv) && js_is_truthy(nwv)) {
                         if (js_strict_mode) {
                             return js_throw_type_error("Cannot assign to read only property 'length' of array");
                         }
@@ -4948,14 +4947,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             arr->capacity = new_cap;
                         }
                         // Fill new slots with holes (deleted sentinel)
-                        Item hole = lam::hole_sentinel_item();
+                        Item hole = make_js_deleted_sentinel();
                         for (int64_t i = arr->length; i < new_len; i++) {
                             arr->items[i] = hole;
                         }
                         arr->length = new_len;
                     } else if (new_len < arr->length) {
                         // Truncate
-                        js_array_delete_sparse_indices_from(arr, new_len);
+                        js_array_delete_sparse_indices_from(lam::gc_borrow(arr), new_len);
                         arr->length = new_len;
                     }
                 }
@@ -5044,7 +5043,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if (_se_idx && jspd_is_accessor(_se_idx)) {
                     bool slot_found = false;
                     Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                    if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                         JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                         if (pair && pair->setter.item != ItemNull.item) {
                             Item args[1] = { value };
@@ -5066,7 +5065,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 bool nw_found = false;
                 Item nw_val = js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
                 // Tombstoned marker (cleared by delete) is treated as absent.
-                if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
+                if (nw_found && js_is_deleted_sentinel(nw_val)) nw_found = false;
                 if (nw_found && js_is_truthy(nw_val)) {
                     return value; // silently ignore assignment to non-writable
                 }
@@ -5308,7 +5307,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     bool nw_found = false;
                     Item nw_val = js_map_get_fast(m, nw_key, (int)strlen(nw_key), &nw_found);
                     // Tombstoned marker (cleared by delete) is treated as absent.
-                    if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
+                    if (nw_found && js_is_deleted_sentinel(nw_val)) nw_found = false;
                     if (nw_found && js_is_truthy(nw_val)) {
                         js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                         return value; // silently reject write to non-writable property
@@ -5577,7 +5576,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             } else {
                 // MAP prototype: clear properties_map entry if previously set to non-MAP
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    Item del = lam::hole_sentinel_item();
+                    Item del = make_js_deleted_sentinel();
                     js_property_set(fn->properties_map, key, del);
                     // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry
                     // so readers can detect tombstones via shape (independent
@@ -6510,7 +6509,7 @@ static Item js_array_new_sparse_length(int64_t length) {
         // new Array(n) creates a sparse array — slots are holes, not undefined.
         // js_array_get_int returns undefined when reading a hole.
         // forEach/map/filter etc. skip holes (deleted sentinels).
-        Item hole = lam::hole_sentinel_item();
+        Item hole = make_js_deleted_sentinel();
         for (int64_t i = 0; i < length; i++) {
             arr->items[i] = hole;
         }
@@ -6524,7 +6523,7 @@ extern "C" Item js_array_new(int length) {
 
 // Return a hole sentinel value for array elisions
 extern "C" Item js_array_hole() {
-    return lam::hole_sentinel_item();
+    return make_js_deleted_sentinel();
 }
 
 // v18q: Create arguments array (stub — kept for sys_func_registry compatibility)
@@ -6537,7 +6536,7 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
         return current_value;
     }
     if (index >= 0 && index < arguments.array->length && index < arguments.array->capacity &&
-        arguments.array->items[index].item == JS_DELETED_SENTINEL_VAL) {
+        js_is_deleted_sentinel(arguments.array->items[index])) {
         return current_value;
     }
     Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
@@ -6658,7 +6657,7 @@ extern "C" Item js_array_get(Item array, Item index) {
         if (_se_idx && jspd_is_accessor(_se_idx)) {
             bool slot_found = false;
             Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->getter.item != ItemNull.item) {
                     return js_accessor_call_result(pair->getter, array);
@@ -6668,16 +6667,16 @@ extern "C" Item js_array_get(Item array, Item index) {
         }
         bool sparse_found = false;
         Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-        if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+        if (sparse_found && !js_is_deleted_sentinel(sparse_val)) {
             bool dense_present = idx < arr->length && idx < arr->capacity &&
-                arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
+                !js_is_deleted_sentinel(arr->items[idx]);
             if (!dense_present) return sparse_val;
         }
     }
 
     if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
         // return undefined for holes (deleted sentinel)
-        if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL)
+        if (js_is_deleted_sentinel(arr->items[idx]))
             return make_js_undefined();
         return arr->items[idx];
     }
@@ -6716,7 +6715,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             if (_se_idx && jspd_is_accessor(_se_idx)) {
                 bool slot_found = false;
                 Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                     JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                     if (pair && pair->getter.item != ItemNull.item) {
                         return js_accessor_call_result(pair->getter, array);
@@ -6732,15 +6731,15 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             Map* props = (Map*)(uintptr_t)arr->extra;
             bool sparse_found = false;
             Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
-            if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (sparse_found && !js_is_deleted_sentinel(sparse_val)) {
                 bool dense_present = index < arr->length && index < arr->capacity &&
-                    arr->items[index].item != JS_DELETED_SENTINEL_VAL;
+                    !js_is_deleted_sentinel(arr->items[index]);
                 if (!dense_present) return sparse_val;
             }
         }
         if (index >= 0 && index < arr->length && index < arr->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
-            if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
+            if (!js_is_deleted_sentinel(arr->items[index])) {
                 return arr->items[index];
             }
             // hole — fall through to prototype chain lookup below
@@ -6808,7 +6807,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         if (_se_idx && jspd_is_accessor(_se_idx)) {
             bool slot_found = false;
             Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->setter.item != ItemNull.item) {
                     js_call_function(pair->setter, array, &value, 1);
@@ -6831,7 +6830,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
         bool nw_found = false;
         Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
-        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
+        if (nw_found && js_is_deleted_sentinel(nw_val)) nw_found = false;
         if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
@@ -6860,13 +6859,13 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         int idx_len2 = snprintf(idx_buf2, sizeof(idx_buf2), "%lld", (long long)index);
         bool own_index_present = false;
         if (index < arr->length && index < arr->capacity &&
-            arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
+            !js_is_deleted_sentinel(arr->items[index])) {
             own_index_present = true;
         } else if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
             bool pm_found = false;
             Item pm_val = js_map_get_fast_ext(pm, idx_buf2, idx_len2, &pm_found);
-            own_index_present = pm_found && pm_val.item != JS_DELETED_SENTINEL_VAL;
+            own_index_present = pm_found && !js_is_deleted_sentinel(pm_val);
         }
         if (!own_index_present) {
             Item prop_key = (Item){.item = s2it(heap_create_name(idx_buf2, idx_len2))};
@@ -6919,7 +6918,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = lam::hole_sentinel_item();
+        Item hole = make_js_deleted_sentinel();
         while (arr->length < index) {
             js_array_push_item_direct(arr, hole);
         }
@@ -6997,7 +6996,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         bool nw_found = false;
         Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
         // Tombstoned marker (cleared by delete) is treated as absent.
-        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
+        if (nw_found && js_is_deleted_sentinel(nw_val)) nw_found = false;
         if (nw_found && js_is_truthy(nw_val)) {
             return value; // silently fail for non-writable properties (sloppy mode)
         }
@@ -7044,7 +7043,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = lam::hole_sentinel_item();
+        Item hole = make_js_deleted_sentinel();
         while (arr->length < idx) {
             js_array_push_item_direct(arr, hole);
         }
@@ -7625,7 +7624,7 @@ static Item js_array_like_to_array(Item obj) {
     if (len > 100000) len = 100000; // safety cap
     Item result = js_array_new(len);
     Array* arr = result.array;
-    Item hole = lam::hole_sentinel_item();
+    Item hole = make_js_deleted_sentinel();
     for (int i = 0; i < len; i++) {
         char buf[16];
         int blen = snprintf(buf, sizeof(buf), "%d", i);
@@ -7805,7 +7804,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                         if (e->name && e->name->length == (size_t)ks->len &&
                             strncmp(e->name->str, ks->chars, ks->len) == 0) {
                             Item val = _map_read_field(e, m->data);
-                            if (val.item != JS_DELETED_SENTINEL_VAL)
+                            if (!js_is_deleted_sentinel(val))
                                 found_in_shape = true;
                             break;
                         }
@@ -10392,7 +10391,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (!last_index_non_writable) {
             bool nw_found = false;
             Item nw_val = js_map_get_fast(this_val.map, "__nw_lastIndex", 14, &nw_found);
-            last_index_non_writable = nw_found && nw_val.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw_val);
+            last_index_non_writable = nw_found && !js_is_deleted_sentinel(nw_val) && js_is_truthy(nw_val);
         }
         if (last_index_non_writable) {
             js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
@@ -20931,7 +20930,7 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
         if (_se_idx && jspd_is_accessor(_se_idx)) {
             bool slot_found = false;
             Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (slot_found && !js_is_deleted_sentinel(slot_val)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->getter.item != ItemNull.item) {
                     return js_accessor_call_result(pair->getter, arr_item);
@@ -20948,7 +20947,7 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
         return make_js_undefined();
     }
     // v25: check for deleted sentinel (array hole) — return undefined
-    if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+    if (js_is_deleted_sentinel(arr->items[idx])) {
         return make_js_undefined();
     }
     return arr->items[idx];
@@ -21147,9 +21146,9 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
 // If the array slot is a sentinel (hole), checks own accessors first,
 // then walks the prototype chain only if check_proto is true.
 // When present=true, *out receives the value (from prototype if needed).
-static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, bool check_proto) {
+static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Item* out, bool check_proto) {
     if (idx >= 0 && idx < a->length && idx < a->capacity &&
-        a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+        !js_is_deleted_sentinel(a->items[idx])) {
         // Own element — fast path
         *out = js_array_element(arr, idx);
         return true;
@@ -21164,7 +21163,7 @@ static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, boo
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
         bool slot_found = false;
         Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-        if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+        if (slot_found && !js_is_deleted_sentinel(slot_val)) {
             if (_se_idx && jspd_is_accessor(_se_idx)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->getter.item != ItemNull.item) {
@@ -21208,7 +21207,7 @@ static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, boo
 // true holes by finding the next own dense or companion-map index. The caller
 // still refreshes the prototype check after each callback; if user code installs
 // numeric prototype keys, iteration falls back to the sequential HasProperty path.
-static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, int64_t len,
+static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_t start, int64_t len,
         int64_t* out_index, Item* out_elem) {
     if (!a) return false;
     if (start < 0) start = 0;
@@ -21219,7 +21218,7 @@ static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, in
     if (dense_limit > a->length) dense_limit = a->length;
     int64_t best_dense = -1;
     for (int64_t i = start; i < dense_limit; i++) {
-        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+        if (!js_is_deleted_sentinel(a->items[i])) {
             best_dense = i;
             break;
         }
@@ -21236,7 +21235,7 @@ static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, in
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
                 if (idx < start || idx >= len) continue;
                 Item val = _map_read_field(se, props->data);
-                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (js_is_deleted_sentinel(val)) continue;
                 if (best_extra < 0 || idx < best_extra) best_extra = idx;
             }
         }
@@ -21249,7 +21248,7 @@ static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, in
     return true;
 }
 
-static bool js_array_has_numeric_own_accessors(Array* a) {
+static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
     if (!a || a->extra == 0) return false;
     Map* props = (Map*)(uintptr_t)a->extra;
     if (!props || !props->type) return false;
@@ -21263,7 +21262,7 @@ static bool js_array_has_numeric_own_accessors(Array* a) {
     return false;
 }
 
-static bool js_array_find_prev_own_element(Item arr, Array* a, int64_t start,
+static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_t start,
         int64_t* out_index, Item* out_elem) {
     if (!a) return false;
     if (start >= a->length) start = a->length - 1;
@@ -21274,7 +21273,7 @@ static bool js_array_find_prev_own_element(Item arr, Array* a, int64_t start,
     if (dense_start >= a->length) dense_start = a->length - 1;
     int64_t best_dense = -1;
     for (int64_t i = dense_start; i >= 0; i--) {
-        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+        if (!js_is_deleted_sentinel(a->items[i])) {
             best_dense = i;
             break;
         }
@@ -21291,7 +21290,7 @@ static bool js_array_find_prev_own_element(Item arr, Array* a, int64_t start,
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
                 if (idx > start || idx < 0) continue;
                 Item val = _map_read_field(se, props->data);
-                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (js_is_deleted_sentinel(val)) continue;
                 if (best_extra < 0 || idx > best_extra) best_extra = idx;
             }
         }
@@ -21313,10 +21312,10 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     Item search_val = (Item){.item = i2it((int)search)};
     bool check_proto = false;
     bool checked_proto = false;
-    if (array->extra != 0 && !js_array_has_numeric_own_accessors(array) && !js_proto_chain_has_numeric_keys(arr)) {
+    if (array->extra != 0 && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_proto_chain_has_numeric_keys(arr)) {
         int64_t idx = 0;
         Item elem = ItemNull;
-        while (js_array_find_next_own_element(arr, array, idx, array->length, &idx, &elem)) {
+        while (js_array_find_next_own_element(arr, lam::gc_borrow(array), idx, array->length, &idx, &elem)) {
             if (elem.item == search_val.item) return (Item){.item = i2it((int)idx)};
             if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
                 return (Item){.item = i2it((int)idx)};
@@ -21329,7 +21328,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
         bool all_dense_int = true;
         for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
             Item elem = array->items[int_idx];
-            if (elem.item == JS_DELETED_SENTINEL_VAL || get_type_id(elem) != LMD_TYPE_INT) {
+            if (js_is_deleted_sentinel(elem) || get_type_id(elem) != LMD_TYPE_INT) {
                 all_dense_int = false;
                 break;
             }
@@ -21338,13 +21337,13 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
         if (all_dense_int) return (Item){.item = i2it(-1)};
         for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
             Item elem = array->items[int_idx];
-            if (elem.item == JS_DELETED_SENTINEL_VAL) {
+            if (js_is_deleted_sentinel(elem)) {
                 if (!checked_proto) {
                     check_proto = js_proto_chain_has_numeric_keys(arr);
                     checked_proto = true;
                 }
                 if (!check_proto) continue;
-                if (!js_array_has_element(arr, array, (int)int_idx, &elem, true)) continue;
+                if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, true)) continue;
             }
             if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
             if (get_type_id(elem) == LMD_TYPE_INT) continue;
@@ -21355,7 +21354,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     check_proto = js_proto_chain_has_numeric_keys(arr);
     for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
         Item elem;
-        if (!js_array_has_element(arr, array, (int)int_idx, &elem, check_proto)) continue;
+        if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, check_proto)) continue;
         if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
         if (get_type_id(elem) == LMD_TYPE_INT) continue;
         if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
@@ -21399,7 +21398,7 @@ static bool js_array_length_is_non_writable(Item arr) {
     Map* pm = (Map*)(uintptr_t)arr.array->extra;
     bool found = false;
     Item v = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
-    return found && v.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(v);
+    return found && !js_is_deleted_sentinel(v) && js_is_truthy(v);
 }
 
 static double js_array_to_integer_or_infinity(Item value) {
@@ -22064,7 +22063,7 @@ static Item js_array_generic_includes(Item object, Item* args, int argc) {
         while (k < len) {
             Item elem = make_js_undefined();
             if (k >= 0 && k < a->length && k < a->capacity &&
-                    a->items[k].item != JS_DELETED_SENTINEL_VAL) {
+                    !js_is_deleted_sentinel(a->items[k])) {
                 elem = a->items[k];
             } else if (!search_is_undefined) {
                 k++;
@@ -22131,7 +22130,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             }
         }
         if (get_type_id(object) == LMD_TYPE_ARRAY &&
-                !js_array_has_numeric_own_accessors(object.array) &&
+                !js_array_has_numeric_own_accessors(lam::gc_borrow(object.array)) &&
                 !js_proto_chain_has_numeric_keys(object)) {
             Array* a = object.array;
             int64_t own_idx = k;
@@ -22141,7 +22140,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                 // tables.  Avoid routing every integer slot through generic
                 // strict equality; non-integer slots still need the full path
                 // for ES semantics such as Number-vs-BigInt/object mismatch.
-                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
                     if (elem.item == search_val.item) {
                         return (Item){.item = i2it(own_idx)};
                     }
@@ -22151,7 +22150,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                     own_idx++;
                 }
             } else {
-                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
                     if (it2b(js_strict_equal(elem, search_val))) {
                         return (Item){.item = i2it(own_idx)};
                     }
@@ -22192,7 +22191,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
         k = len - 1;
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY &&
-            !js_array_has_numeric_own_accessors(object.array) &&
+            !js_array_has_numeric_own_accessors(lam::gc_borrow(object.array)) &&
             !js_proto_chain_has_numeric_keys(object)) {
         Array* a = object.array;
         int64_t own_idx = k;
@@ -22201,7 +22200,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             // Mirror the forward indexOf fast path for lastIndexOf(int): keep
             // the common dense-int scan branch-free while preserving generic
             // strict equality for non-integer elements.
-            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
                 if (elem.item == search_val.item) {
                     return (Item){.item = i2it(own_idx)};
                 }
@@ -22211,7 +22210,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                 own_idx--;
             }
         } else {
-            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
                 if (it2b(js_strict_equal(elem, search_val))) {
                     return (Item){.item = i2it(own_idx)};
                 }
@@ -22418,11 +22417,11 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         bool present = false;
         if (object_is_array) {
             if (!check_proto) {
-                present = js_array_find_next_own_element(object, object_array, k, len, &idx, &elem);
+                present = js_array_find_next_own_element(object, lam::gc_borrow(object_array), k, len, &idx, &elem);
                 if (!present) break;
             } else {
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(object, object_array, idx, &elem, true)) {
+                    if (js_array_has_element(object, lam::gc_borrow(object_array), idx, &elem, true)) {
                         present = true;
                         break;
                     }
@@ -22583,7 +22582,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 Map* pm = (Map*)(uintptr_t)arr.array->extra;
                 bool nw_found = false;
                 Item nwv = js_map_get_fast_ext(pm, "__nw_length", 11, &nw_found);
-                if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) {
+                if (nw_found && !js_is_deleted_sentinel(nwv) && js_is_truthy(nwv)) {
                     return js_throw_type_error("Cannot assign to read only property 'length' of array");
                 }
             }
@@ -22846,7 +22845,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 bool all_dense_int = true;
                 for (int64_t int_idx = start; int_idx < dense_limit; int_idx++) {
                     Item elem = a->items[int_idx];
-                    if (elem.item == JS_DELETED_SENTINEL_VAL || get_type_id(elem) != LMD_TYPE_INT) {
+                    if (js_is_deleted_sentinel(elem) || get_type_id(elem) != LMD_TYPE_INT) {
                         all_dense_int = false;
                         break;
                     }
@@ -22856,14 +22855,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             }
             for (int64_t i64 = start; i64 < dense_limit; i64++) {
                 Item elem = a->items[i64];
-                if (elem.item == JS_DELETED_SENTINEL_VAL) {
+                if (js_is_deleted_sentinel(elem)) {
                     if (!checked_proto) {
                         check_proto = js_proto_chain_has_numeric_keys(arr);
                         checked_proto = true;
                     }
                     if (!check_proto) continue;
                     int i = (int)i64;
-                    if (!js_array_has_element(arr, a, i, &elem, true)) continue;
+                    if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, true)) continue;
                 }
                 if (elem.item == search_val.item) {
                     return (Item){.item = i2it((int)i64)};
@@ -22878,7 +22877,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // v37: ES spec — use HasProperty (checks prototype chain for holes)
             Item elem;
             int i = (int)i64;
-            if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, check_proto)) continue;
             if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -22920,7 +22919,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (identity_search && a->extra == 0 && a->capacity >= a->length) {
             for (int i = from; i < a->length; i++) {
                 Item elem = a->items[i];
-                if (elem.item == JS_DELETED_SENTINEL_VAL) goto includes_slow_path;
+                if (js_is_deleted_sentinel(elem)) goto includes_slow_path;
                 if (elem.item == search_val.item) return (Item){.item = b2it(true)};
             }
             return (Item){.item = b2it(false)};
@@ -23015,11 +23014,11 @@ includes_slow_path:
             Array* dst = result.array;
             for (int i = 0; i < count; i++) {
                 Item elem = src->items[start + i];
-                if (elem.item == JS_DELETED_SENTINEL_VAL) {
+                if (js_is_deleted_sentinel(elem)) {
                     // hole: check prototype chain to find value (Array.prototype or Object.prototype)
                     if (src_has_proto) {
                         Item proto_elem = ItemNull;
-                        bool found = js_array_has_element(arr, src, start + i, &proto_elem, true);
+                        bool found = js_array_has_element(arr, lam::gc_borrow(src), start + i, &proto_elem, true);
                         if (found && proto_elem.item != ItemNull.item) elem = proto_elem;
                     } else {
                         // still check Array.prototype directly (may have numeric properties
@@ -23146,8 +23145,8 @@ includes_slow_path:
         for (int i = 0; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes) — preserve holes in result
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) {
-                if (dst) dst->items[i] = lam::hole_sentinel_item();
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) {
+                if (dst) dst->items[i] = make_js_deleted_sentinel();
                 continue;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
@@ -23186,7 +23185,7 @@ includes_slow_path:
         for (int i = 0; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
@@ -23224,7 +23223,7 @@ includes_slow_path:
             bool found = false;
             for (; k < src->length; k++) {
                 Item elem;
-                if (js_array_has_element(arr, src, k, &elem, check_proto)) {
+                if (js_array_has_element(arr, lam::gc_borrow(src), k, &elem, check_proto)) {
                     accumulator = elem;
                     found = true;
                     break;
@@ -23244,7 +23243,7 @@ includes_slow_path:
         for (int i = start_idx; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;
@@ -23271,11 +23270,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23391,11 +23390,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23431,11 +23430,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23667,7 +23666,7 @@ includes_slow_path:
                     if (sparse_idx > from || sparse_idx < a->capacity) continue;
                     bool found = false;
                     Item elem = js_map_get_fast_ext(pm, se->name->str, (int)se->name->length, &found);
-                    if (!found || elem.item == JS_DELETED_SENTINEL_VAL) continue;
+                    if (!found || js_is_deleted_sentinel(elem)) continue;
                     if (it2b(js_strict_equal(elem, search_val)) && sparse_idx > best_sparse) {
                         best_sparse = sparse_idx;
                     }
@@ -23681,7 +23680,7 @@ includes_slow_path:
         for (int64_t i = dense_from; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, check_proto)) continue;
             if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -23709,7 +23708,7 @@ includes_slow_path:
             bool found = false;
             for (; k >= 0; k--) {
                 Item elem;
-                if (js_array_has_element(arr, src, k, &elem, check_proto)) {
+                if (js_array_has_element(arr, lam::gc_borrow(src), k, &elem, check_proto)) {
                     accumulator = elem;
                     found = true;
                     break;
@@ -23728,7 +23727,7 @@ includes_slow_path:
         for (int i = start_idx; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;
@@ -23756,7 +23755,7 @@ includes_slow_path:
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
         Item val = a->items[idx];
-        if (val.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();
+        if (js_is_deleted_sentinel(val)) return make_js_undefined();
         return val;
     }
     // item(index) — DOM NodeList/HTMLCollection compatibility. Unlike
@@ -23778,7 +23777,7 @@ includes_slow_path:
         }
         if (idx < 0 || idx >= a->length) return ItemNull;
         Item val = a->items[idx];
-        if (val.item == JS_DELETED_SENTINEL_VAL) return ItemNull;
+        if (js_is_deleted_sentinel(val)) return ItemNull;
         return val;
     }
     // toString — join elements with comma
@@ -24870,7 +24869,7 @@ extern "C" void js_mark_own_proto_property(Item object) {
     Item marker_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &marker_found);
     bool raw_found = false;
     Item raw_proto = js_map_get_fast_ext(m, PROTO_KEY, PROTO_KEY_LEN, &raw_found);
-    if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && raw_proto.item != JS_DELETED_SENTINEL_VAL) {
+    if ((!marker_found || !js_is_truthy(marker_val)) && raw_found && !js_is_deleted_sentinel(raw_proto)) {
         ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(object, (Item){.item = s2it(heap_create_name(INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN))},
             raw_proto);
@@ -25097,7 +25096,7 @@ extern "C" Item js_get_prototype(Item object) {
     if (m && m->map_kind == MAP_KIND_ITERATOR) return ItemNull;
     bool internal_found = false;
     Item internal_proto = js_map_get_fast_ext(m, INTERNAL_PROTO_KEY, INTERNAL_PROTO_KEY_LEN, &internal_found);
-    if (internal_found && internal_proto.item != JS_DELETED_SENTINEL_VAL) return internal_proto;
+    if (internal_found && !js_is_deleted_sentinel(internal_proto)) return internal_proto;
     bool json_own_proto = false;
     Item json_own_proto_val = js_map_get_fast_ext(m, "__json_own_proto__", 18, &json_own_proto);
     if (json_own_proto && js_is_truthy(json_own_proto_val)) return ItemNull;
@@ -26465,7 +26464,7 @@ Item js_check_array_sym_iterator() {
     bool found = false;
     Item sym_iter = js_map_get_fast(afn->prototype.map, "__sym_1", 7, &found);
     if (!found) return ItemNull;  // not present on Array.prototype — use default
-    if (sym_iter.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();  // deleted
+    if (js_is_deleted_sentinel(sym_iter)) return make_js_undefined();  // deleted
     if (get_type_id(sym_iter) == LMD_TYPE_FUNC) {
         JsFunction* sfn = (JsFunction*)sym_iter.function;
         if (sfn->builtin_id == 0) return sym_iter;  // user-defined function
