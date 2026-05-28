@@ -1,6 +1,7 @@
 #include "view.hpp"
 #include "rdt_vector.hpp"
 #include "render.hpp"
+#include "render_export_support.hpp"
 #include "scroller.hpp"
 #include "animation.h"
 #include "rdt_video.h"
@@ -18,9 +19,7 @@
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
 
-void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
-void image_cache_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
 
 // F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).

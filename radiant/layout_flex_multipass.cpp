@@ -9,6 +9,7 @@
 #include "layout_abs_children.hpp"
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
+#include "render_export_support.hpp"
 
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
@@ -117,10 +118,6 @@ extern void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool 
 
 // External function for iframe layout (from layout_block.cpp)
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
-
-// External functions for iframe document loading (from cmd_layout.cpp/layout.cpp)
-DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height, float pixel_ratio);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 
 // External function for @font-face processing (from font_face.cpp) - C linkage
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);

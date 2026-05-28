@@ -1,6 +1,5 @@
 #include "render.hpp"
 #include "render_profiler.hpp"
-#include "render_output.hpp"
 #include "render_media.hpp"
 #include "render_svg_inline.hpp"
 #include "render_clip.hpp"
@@ -203,14 +202,4 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         log_debug("view has no child");
     }
     rdcon->font = pa_font;  rdcon->color = pa_color;
-}
-
-void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
-    render_output_render_html_doc(uicon, view_tree, output_file);
-}
-
-void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
-                           const char* output_file,
-                           int total_width, int total_height) {
-    render_output_render_tiled_png(uicon, view_tree, output_file, total_width, total_height);
 }

@@ -1716,7 +1716,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
     if (!dom_elem || !dom_elem->native_element) {
-        log_debug("[PDF_SVG_FALLBACK] inline SVG missing native element");
+        log_debug("[PDF_SVG_SUBSCENE] inline SVG missing native element");
         return;
     }
 
@@ -1725,7 +1725,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     block_context.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&block_context, block, 1.0f);
     if (content_rect.width <= 0.0f || content_rect.height <= 0.0f) {
-        log_debug("[PDF_SVG_FALLBACK] skipped empty inline SVG %.1fx%.1f",
+        log_debug("[PDF_SVG_SUBSCENE] skipped empty inline SVG %.1fx%.1f",
                   content_rect.width, content_rect.height);
         return;
     }
@@ -1918,22 +1918,6 @@ static void pdf_cb_end_transform(void* vctx) {
     }
 }
 
-static void pdf_cb_begin_opacity(void* vctx, float opacity) {
-    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx) return;
-    PaintEffectGroup group = {};
-    group.opacity = opacity;
-    paint_begin_effect_group(pdf_active_paint_list(ctx), &group);
-    pdf_lower_paint_list(ctx);
-}
-
-static void pdf_cb_end_opacity(void* vctx) {
-    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx) return;
-    paint_end_effect_group(pdf_active_paint_list(ctx));
-    pdf_lower_paint_list(ctx);
-}
-
 static void pdf_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
@@ -1987,8 +1971,6 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.end_block_children    = NULL;
     b.begin_inline_children = NULL;
     b.end_inline_children   = NULL;
-    b.begin_opacity    = pdf_cb_begin_opacity;
-    b.end_opacity      = pdf_cb_end_opacity;
     b.begin_effect_group = pdf_cb_begin_effect_group;
     b.end_effect_group = pdf_cb_end_effect_group;
     b.begin_transform  = pdf_cb_begin_transform;
@@ -2240,7 +2222,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
                                                    pdf_width, pdf_height);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
-                printf("Successfully rendered HTML to PDF: %s\\n", pdf_file);
+                log_info("Successfully rendered HTML to PDF: %s", pdf_file);
                 HPDF_Free(pdf_doc);
                 url_destroy(cwd);
                 ui_context_cleanup(&ui_context);

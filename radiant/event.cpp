@@ -1,5 +1,6 @@
 #include "handler.hpp"
 #include "render.hpp"
+#include "render_export_support.hpp"
 #include "state_store.hpp"
 #include "state_machine.hpp"
 #include "scroller.hpp"
@@ -49,8 +50,6 @@ extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
-View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void view_pool_destroy(ViewTree* tree);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 extern "C" int js_check_exception(void);
 extern "C" Item js_clear_exception(void);
@@ -68,7 +67,6 @@ void apply_inline_styles_to_tree(DomElement* root, Element* html_root, Pool* poo
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
-void render_html_doc(UiContext* uicon, ViewTree* view_tree, void* render_ctx);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);

@@ -70,8 +70,8 @@ static float render_media_object_position_offset(float box_size, float rendered_
     return position * scale;
 }
 
-static bool render_media_rasterize_svg_image(ImageSurface* surface, int target_width,
-                                             int target_height) {
+bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
+                                        int target_height) {
     if (!surface || !surface->pic || target_width <= 0 || target_height <= 0) {
         return false;
     }
@@ -115,57 +115,7 @@ static bool render_media_rasterize_svg_image(ImageSurface* surface, int target_w
     return true;
 }
 
-void render_svg(ImageSurface* surface) {
-    if (!surface->pic) {
-        log_debug("no picture to render");  return;
-    }
-    // Rasterize the SVG picture into a pixel buffer using a temporary vector context
-    if (surface->width <= 0 || surface->height <= 0) {
-        log_debug("invalid svg image size: %dx%d", surface->width, surface->height);
-        return;
-    }
-    int target_width = surface->max_render_width > 0 ? surface->max_render_width : surface->width;
-    if (target_width <= 0) {
-        log_debug("invalid svg render width: %d", target_width);
-        return;
-    }
-    uint32_t width = (uint32_t)target_width; // INT_CAST_OK: ThorVG raster target dimensions are integer pixels
-    uint32_t height = (uint32_t)ceilf((float)target_width * (float)surface->height / (float)surface->width); // INT_CAST_OK: raster target height rounded to pixels
-    if (height == 0) {
-        log_debug("invalid svg render height for width: %d", target_width);
-        return;
-    }
-    surface->pixels = (uint32_t*)mem_alloc(width * height * sizeof(uint32_t), MEM_CAT_RENDER);
-    if (!surface->pixels) return;
-    image_surface_bump_generation(surface);
-
-    // CRITICAL: Clear the buffer to transparent before rendering SVG
-    memset(surface->pixels, 0, width * height * sizeof(uint32_t));
-
-    // Create a temporary vector context targeting the pixel buffer
-    RdtVector tmp_vec = {};
-    rdt_vector_init(&tmp_vec, (uint32_t*)surface->pixels, width, height, width);
-
-    // Save and clear the global clip stack so parent clips don't leak into this
-    // isolated off-screen SVG rasterization
-    int saved_clip_depth = rdt_clip_save_depth();
-
-    // Intentional local/offscreen draw: this consumes the decoded SVG picture
-    // into a pixel cache before normal image painting routes through rc_*.
-    RdtPicture* pic = surface->pic;
-    surface->pic = NULL;  // ownership transferred
-    if (pic) {
-        rdt_picture_set_size(pic, (float)width, (float)height);
-        rdt_picture_draw(&tmp_vec, pic, 255, nullptr);
-        rdt_picture_free(pic);
-    }
-
-    rdt_clip_restore_depth(saved_clip_depth);
-    rdt_vector_destroy(&tmp_vec);
-    surface->width = width;  surface->height = height;  surface->pitch = width * sizeof(uint32_t);
-}
-
-void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->img) return;
 
     log_debug("render image content");
@@ -251,7 +201,7 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         int svg_target_h = (int)ceilf(img_rect.height); // INT_CAST_OK: rasterized SVG image target height in pixels.
         if (!drew_svg && svg_target_w < 1) svg_target_w = 1;
         if (!drew_svg && svg_target_h < 1) svg_target_h = 1;
-        bool rasterized = !drew_svg && render_media_rasterize_svg_image(img, svg_target_w, svg_target_h);
+        bool rasterized = !drew_svg && render_media_rasterize_svg_picture(img, svg_target_w, svg_target_h);
         if (!drew_svg && rasterized && img->pixels) {
             log_debug("render svg image as local raster at x:%f, y:%f, wd:%f, hg:%f, src=%dx%d",
                       img_rect.x, img_rect.y, img_rect.width, img_rect.height,
@@ -260,16 +210,6 @@ void render_image_content(RenderContext* rdcon, ViewBlock* view) {
                                             svg_target_w, &img_rect, &image_clip,
                                             content_opacity, img);
             drew_svg = true;
-        }
-        if (!drew_svg && img->pic) {
-            log_debug("render svg image vector fallback at x:%f, y:%f, wd:%f, hg:%f",
-                      img_rect.x, img_rect.y, img_rect.width, img_rect.height);
-            RdtPicture* pic = rdt_picture_dup(img->pic);
-            if (pic) {
-                render_painter_draw_picture_rect(rdcon, pic, &img_rect, &image_clip,
-                                                 content_opacity);
-                drew_svg = true;
-            }
         }
         if (!drew_svg) {
             log_debug("failed to render svg image: no vector picture or raster pixels");

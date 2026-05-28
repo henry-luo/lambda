@@ -16,6 +16,7 @@
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
+#include "render_export_support.hpp"
 #include "webview.h"
 
 #include "../lib/log.h"
@@ -750,7 +751,6 @@ extern double g_grid_layout_time;
 extern double g_block_layout_time;
 extern int64_t g_block_layout_count;
 
-View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 // void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);

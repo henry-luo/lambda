@@ -18,7 +18,6 @@ typedef struct RenderEffectGroup {
     RenderEffectBackdrop opacity_backdrop;
     RenderEffectBackdrop filter_backdrop;
     Rect filter_rect;
-    Rect backdrop_filter_rect;
     CssEnum mix_blend_mode;
     float opacity;
     bool has_opacity_group;

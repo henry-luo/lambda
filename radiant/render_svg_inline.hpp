@@ -6,7 +6,7 @@
  * element trees into the shared painter recording path.
  *
  * Key functions:
- * - render_svg_to_vec(): Convert SVG Element tree to painter commands
+ * - render_svg_build_subscene(): Capture an SVG Element tree for export lowering
  * - render_inline_svg(): Render SVG block in document context
  */
 
@@ -16,21 +16,10 @@
 #include "paint_ir.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
-#include "../lib/strbuf.h"
 
 struct FontContext;  // forward declaration from lib/font/font.h
 typedef struct RenderContext RenderContext;
 typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
-
-// ============================================================================
-// SVG ViewBox Structure
-// ============================================================================
-
-struct SvgViewBox {
-    float min_x, min_y;
-    float width, height;
-    bool has_viewbox;
-};
 
 // ============================================================================
 // SVG Intrinsic Size
@@ -52,7 +41,6 @@ struct SvgInlineRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
-    RdtVector* vec;              // target vector renderer for direct drawing
     DisplayList* dl;             // required display list target for deferred rendering
     PaintList* paint_list;       // required PaintIR gateway used before lowering to dl
     const char* source_path;      // source SVG path for resolving nested resources
@@ -110,13 +98,6 @@ extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
 // ============================================================================
 
 /**
- * Parse SVG viewBox attribute
- * @param viewbox_attr The viewBox attribute string (e.g., "0 0 100 50")
- * @return Parsed viewBox structure
- */
-SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
-
-/**
  * Calculate SVG intrinsic size from element attributes
  * Per CSS Images Level 3, SVG intrinsic size is determined by:
  * 1. Explicit width/height attributes
@@ -128,37 +109,6 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
  * @return Intrinsic size with aspect ratio
  */
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
-
-/**
- * Render SVG element tree into painter commands targeting a display list.
- * No ThorVG scene tree is constructed for native shapes.
- *
- * @param vec Target vector renderer
- * @param svg_element The <svg> Element from HTML5 parser
- * @param viewport_width Target rendering width (CSS pixels)
- * @param viewport_height Target rendering height (CSS pixels)
- * @param pool Memory pool for allocations
- * @param pixel_ratio Device pixel ratio (for text size adjustment)
- * @param font_ctx Font context for SVG text rendering (may be nullptr)
- * @param base_transform Optional transform to apply to the entire SVG
- * @param dl Required display-list target
- * @param paint_list Required PaintIR scratch list used before raster lowering
- */
-void render_svg_to_vec(RdtVector* vec, Element* svg_element,
-                      float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio,
-                      FontContext* font_ctx,
-                      const RdtMatrix* base_transform,
-                      DisplayList* dl,
-                      const Color* initial_current_color,
-                      const Color* initial_fill_color,
-                      const char* source_path,
-                      float initial_opacity,
-                      bool initial_fill_none,
-                      const Color* initial_stroke_color,
-                      bool initial_stroke_none,
-                      float initial_stroke_width,
-                      PaintList* paint_list);
 
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
@@ -175,12 +125,6 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       const Color* initial_stroke_color,
                       bool initial_stroke_none,
                       float initial_stroke_width);
-
-void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
-                      DisplayList* dl);
-
-bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
-                      StrBuf* out, int indent_level);
 
 void render_svg_inline_register_paint_ir_lowerers(void);
 
@@ -211,36 +155,3 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
  * @param view ViewBlock for the SVG element
  */
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
-
-// ============================================================================
-// SVG Parsing Utilities
-// ============================================================================
-
-/**
- * Parse SVG length value (number with optional unit)
- * Supports: px, em, ex, pt, pc, cm, mm, in, % (percentage returned as-is)
- *
- * @param value Length string (e.g., "100", "50px", "10%")
- * @param default_value Value to return if parsing fails
- * @return Parsed length in user units (pixels for most cases)
- */
-float parse_svg_length(const char* value, float default_value);
-
-/**
- * Parse SVG color value
- * Supports: named colors, #rgb, #rrggbb, #rgba, #rrggbbaa, rgb(), rgba()
- *
- * @param value Color string
- * @return Parsed color (black with alpha=255 if parsing fails)
- */
-Color parse_svg_color(const char* value);
-
-/**
- * Parse SVG transform attribute
- * Supports: translate, scale, rotate, skewX, skewY, matrix
- *
- * @param transform_str Transform attribute string
- * @param matrix Output 3x3 matrix (row-major)
- * @return true if parsing succeeded
- */
-bool parse_svg_transform(const char* transform_str, float matrix[6]);

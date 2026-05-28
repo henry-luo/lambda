@@ -211,7 +211,6 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
 
     if (group.has_backdrop_filter) {
         Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
-        group.backdrop_filter_rect = border_rect;
         rc_apply_filter(rdcon,
                         border_rect.x,
                         border_rect.y,

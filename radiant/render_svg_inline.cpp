@@ -150,6 +150,19 @@ static void svg_resource_stack_pop(const char* path) {
 // Forward Declarations
 // ============================================================================
 
+typedef struct SvgViewBox {
+    float min_x;
+    float min_y;
+    float width;
+    float height;
+    bool has_viewbox;
+} SvgViewBox;
+
+static SvgViewBox parse_svg_viewbox(const char* viewbox_attr);
+static float parse_svg_length(const char* value, float default_value);
+static Color parse_svg_color(const char* value);
+static bool parse_svg_transform(const char* transform_str, float matrix[6]);
+
 // ---------------------------------------------------------------------------
 // SVG PaintIR/display-list dispatch helpers
 // ---------------------------------------------------------------------------
@@ -482,7 +495,7 @@ static Element* get_child_element_at(Element* parent, int index) {
 // SVG ViewBox Parsing
 // ============================================================================
 
-SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
+static SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
     SvgViewBox vb = {0, 0, 0, 0, false};
     if (!viewbox_attr || !*viewbox_attr) return vb;
 
@@ -519,7 +532,7 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
 // SVG Length Parsing
 // ============================================================================
 
-float parse_svg_length(const char* value, float default_value) {
+static float parse_svg_length(const char* value, float default_value) {
     if (!value || !*value) return default_value;
 
     char* end;
@@ -633,7 +646,7 @@ static int hex_digit(char c) {
     return -1;
 }
 
-Color parse_svg_color(const char* value) {
+static Color parse_svg_color(const char* value) {
     Color c;
     c.r = 0; c.g = 0; c.b = 0; c.a = 255;  // default black
     if (!value || !*value) return c;
@@ -777,7 +790,7 @@ static void svg_apply_inherited_paint_attrs(SvgInlineRenderContext* ctx, Element
 // SVG Transform Parsing
 // ============================================================================
 
-bool parse_svg_transform(const char* transform_str, float matrix[6]) {
+static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
     if (!transform_str || !matrix) return false;
 
     // initialize to identity matrix: [a, b, c, d, e, f] = [1, 0, 0, 1, 0, 0]
@@ -4310,15 +4323,15 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
 // Build SVG Scene
 // ============================================================================
 
-static void render_svg_to_vec_primitives(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
+static void render_svg_to_display_list_primitives(Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list) {
-    if (!svg_element || !vec) return;
+    if (!svg_element) return;
     if (!dl || !paint_list) {
-        log_error("[SVG] render_svg_to_vec requires display-list and PaintIR targets");
+        log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
         return;
     }
     if (source_path && svg_resource_stack_contains(source_path)) {
@@ -4327,14 +4340,13 @@ static void render_svg_to_vec_primitives(RdtVector* vec, Element* svg_element, f
     }
     bool pushed_source = svg_resource_stack_push(source_path);
 
-    log_debug("[SVG] render_svg_to_vec: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
+    log_debug("[SVG] render_svg_to_display_list: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
 
     // initialize render context
     SvgInlineRenderContext ctx = {};
     ctx.svg_root = svg_element;
     ctx.pool = pool;
     ctx.font_ctx = font_ctx;
-    ctx.vec = vec;
     ctx.dl = dl;
     ctx.paint_list = paint_list;
     ctx.source_path = source_path;
@@ -4451,7 +4463,7 @@ static void render_svg_to_vec_primitives(RdtVector* vec, Element* svg_element, f
         render_svg_element(&ctx, child);
     }
 
-    log_debug("[SVG] render_svg_to_vec complete");
+    log_debug("[SVG] render_svg_to_display_list complete");
     if (ctx.style_rules) mem_free(ctx.style_rules);
     if (ctx.defs) mem_free(ctx.defs);
     if (pushed_source) svg_resource_stack_pop(source_path);
@@ -4686,8 +4698,8 @@ static void svg_subscene_append_color_attr(StrBuf* out, const char* name, Color 
     strbuf_append_char(out, '"');
 }
 
-bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
-                      StrBuf* out, int indent_level) {
+static bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
+                                       StrBuf* out, int indent_level) {
     if (!subscene || !subscene->svg_root || !out) return false;
 
     svg_subscene_indent(out, indent_level);
@@ -4731,8 +4743,8 @@ bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
     return true;
 }
 
-void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
-                      DisplayList* dl) {
+static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
+                                                DisplayList* dl) {
     if (!subscene || !subscene->svg_root || !dl) return;
 
     Pool* temp_pool = pool_create();
@@ -4754,8 +4766,7 @@ void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
     log_debug("[SVG_SUBSCENE] raster lowering %.1fx%.1f generation=%" PRIu64,
               subscene->viewport_width, subscene->viewport_height,
               subscene->resource_generation);
-    render_svg_to_vec_primitives(nullptr,
-                      (Element*)subscene->svg_root,
+    render_svg_to_display_list_primitives((Element*)subscene->svg_root,
                       subscene->viewport_width,
                       subscene->viewport_height,
                       render_pool,
@@ -4783,33 +4794,36 @@ void render_svg_inline_register_paint_ir_lowerers(void) {
                                             render_svg_subscene_to_svg);
 }
 
-void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_width, float viewport_height,
+static void render_svg_to_display_list(Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list) {
-    if (!svg_element || !vec) return;
+    if (!svg_element) return;
     if (!dl || !paint_list) {
-        log_error("[SVG_SUBSCENE] render_svg_to_vec requires display-list and PaintIR targets");
+        log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
         return;
     }
 
     render_svg_inline_register_paint_ir_lowerers();
-
-    PaintSvgSubscene subscene = {};
-    Bound clip = {0.0f, 0.0f, viewport_width, viewport_height};
-    render_svg_build_subscene(&subscene, svg_element,
-                              viewport_width, viewport_height,
-                              pool, pixel_ratio, font_ctx, base_transform,
-                              &clip,
-                              initial_current_color, initial_fill_color,
-                              source_path, initial_opacity, initial_fill_none,
-                              initial_stroke_color, initial_stroke_none,
-                              initial_stroke_width);
-    paint_svg_subscene(paint_list, &subscene);
-    paint_ir_lower_raster_fragment(paint_list, dl);
-    paint_list_clear(paint_list);
+    render_svg_to_display_list_primitives(svg_element,
+                                          viewport_width,
+                                          viewport_height,
+                                          pool,
+                                          pixel_ratio,
+                                          font_ctx,
+                                          base_transform,
+                                          dl,
+                                          initial_current_color,
+                                          initial_fill_color,
+                                          source_path,
+                                          initial_opacity,
+                                          initial_fill_none,
+                                          initial_stroke_color,
+                                          initial_stroke_none,
+                                          initial_stroke_width,
+                                          paint_list);
 }
 
 void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
@@ -4846,12 +4860,12 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     paint_list_init(&paint_list, temp_arena);
     scratch_init(&scratch, temp_arena);
 
-    render_svg_to_vec(vec, svg_element, viewport_width, viewport_height,
-                      pool, pixel_ratio, font_ctx, base_transform, &dl,
-                      initial_current_color, initial_fill_color, source_path,
-                      initial_opacity, initial_fill_none,
-                      initial_stroke_color, initial_stroke_none,
-                      initial_stroke_width, &paint_list);
+    render_svg_to_display_list(svg_element, viewport_width, viewport_height,
+                               pool, pixel_ratio, font_ctx, base_transform, &dl,
+                               initial_current_color, initial_fill_color, source_path,
+                               initial_opacity, initial_fill_none,
+                               initial_stroke_color, initial_stroke_none,
+                               initial_stroke_width, &paint_list);
 
     if (dl_validate_or_log(&dl, "render_svg_picture_display_list")) {
         ImageSurface surface = {};
@@ -4982,11 +4996,13 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     }
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
-    render_svg_to_vec(&rdcon->vec, svg_elem, viewport_width, viewport_height,
-                      rdcon->ui_context->document->pool, scale, font_ctx, &base_transform,
-                      rdcon->dl, current_color_ptr, fill_color_ptr, nullptr, 1.0f,
-                      initial_fill_none, stroke_color_ptr, initial_stroke_none,
-                      initial_stroke_width, rdcon->paint_list);
+    render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
+                               rdcon->ui_context->document->pool, scale,
+                               font_ctx, &base_transform, rdcon->dl,
+                               current_color_ptr, fill_color_ptr, nullptr, 1.0f,
+                               initial_fill_none, stroke_color_ptr,
+                               initial_stroke_none, initial_stroke_width,
+                               rdcon->paint_list);
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_content_clip) {

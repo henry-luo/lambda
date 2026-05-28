@@ -15,6 +15,26 @@
 #include <math.h>
 #include <string.h>
 
+static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
+                                          TextRect* text_rect, DomElement* parent_elem,
+                                          float x, float y);
+static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
+                                              TextRect* text_rect, TextShadow* text_shadow,
+                                              CssEnum text_transform, bool preserve_spaces,
+                                              float space_width, float scaled_space_width,
+                                              float x, float y);
+static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon,
+                                                     uint32_t codepoint,
+                                                     unsigned char* cursor,
+                                                     unsigned char* end);
+static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
+                                            TextShadow* text_shadow, float x, float y,
+                                            float ascend);
+static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,
+                                        float x, float y);
+static void render_text_decorations(RenderContext* rdcon, unsigned char* str,
+                                    TextRect* text_rect);
+
 // Check if a codepoint has Emoji_Presentation=Yes (Unicode 15.0, UTS #51).
 // Mirrors is_emoji_presentation_default in layout_text.cpp.
 static inline bool render_text_is_emoji_presentation_default(uint32_t cp) {
@@ -404,9 +424,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     rdcon->color = saved_color;
 }
 
-void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
-                                   TextRect* text_rect, DomElement* parent_elem,
-                                   float x, float y) {
+static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
+                                          TextRect* text_rect, DomElement* parent_elem,
+                                          float x, float y) {
     if (!rdcon || !text_view || !text_rect || !parent_elem ||
         parent_elem->view_type != RDT_VIEW_INLINE ||
         !parent_elem->bound || !parent_elem->bound->background ||
@@ -468,11 +488,11 @@ typedef struct SkipInkGap {
     float x1;
 } SkipInkGap;
 
-bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
-                                       TextRect* text_rect, TextShadow* text_shadow,
-                                       CssEnum text_transform, bool preserve_spaces,
-                                       float space_width, float scaled_space_width,
-                                       float x, float y) {
+static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
+                                              TextRect* text_rect, TextShadow* text_shadow,
+                                              CssEnum text_transform, bool preserve_spaces,
+                                              float space_width, float scaled_space_width,
+                                              float x, float y) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
         !rdcon->font.font_handle || !rdcon->font.style) {
         return false;
@@ -589,8 +609,8 @@ bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
     return true;
 }
 
-LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint32_t codepoint,
-                                              unsigned char* cursor, unsigned char* end) {
+static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint32_t codepoint,
+                                                     unsigned char* cursor, unsigned char* end) {
     if (!rdcon || !rdcon->font.font_handle || !rdcon->font.style) {
         return nullptr;
     }
@@ -619,9 +639,9 @@ LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint32_t cod
     return glyph;
 }
 
-void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
-                                     TextShadow* text_shadow, float x, float y,
-                                     float ascend) {
+static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
+                                            TextShadow* text_shadow, float x, float y,
+                                            float ascend) {
     if (!rdcon || !glyph || !text_shadow) {
         return;
     }
@@ -638,8 +658,8 @@ void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
     rdcon->color = saved_shadow_color;
 }
 
-float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,
-                                 float x, float y) {
+static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,
+                                        float x, float y) {
     if (!rdcon || !rdcon->font.font_handle || !rdcon->font.style || !text_rect) {
         return x;
     }
@@ -771,7 +791,7 @@ static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
     }
 }
 
-void render_text_decorations(RenderContext* rdcon, unsigned char* str, TextRect* text_rect) {
+static void render_text_decorations(RenderContext* rdcon, unsigned char* str, TextRect* text_rect) {
     if (!rdcon || !rdcon->font.style || !text_rect) {
         return;
     }

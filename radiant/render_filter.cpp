@@ -43,7 +43,7 @@ static inline float clamp_01(float v) { return clamp_unit(v); }
  * Converts to grayscale. amount=0 is no effect, amount=1 is full grayscale.
  * Uses luminance formula: 0.2126*R + 0.7152*G + 0.0722*B
  */
-void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     amount = clamp_01(amount);
     if (amount == 0) return;
 
@@ -60,7 +60,7 @@ void filter_grayscale(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Adjusts brightness. amount=1 is no effect, <1 is darker, >1 is brighter.
  * Linear multiplication of RGB values.
  */
-void filter_brightness(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_brightness(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;  // Clamp negative to 0
 
     *r = clamp_byte(*r * amount);
@@ -73,7 +73,7 @@ void filter_brightness(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Adjusts contrast. amount=1 is no effect, <1 is less contrast, >1 is more contrast.
  * Formula: (value - 0.5) * amount + 0.5
  */
-void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;
 
     float rf = (*r / 255.0f - 0.5f) * amount + 0.5f;
@@ -90,7 +90,7 @@ void filter_contrast(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Applies sepia tone. amount=0 is no effect, amount=1 is full sepia.
  * Uses standard sepia transformation matrix.
  */
-void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     amount = clamp_01(amount);
     if (amount == 0) return;
 
@@ -112,7 +112,7 @@ void filter_sepia(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * Rotates hue by the specified angle (in radians).
  * Uses rotation in the RGB color space.
  */
-void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
+static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
     // Normalize angle to [0, 2π)
     while (angle < 0) angle += 2.0f * M_PI;
     while (angle >= 2.0f * M_PI) angle -= 2.0f * M_PI;
@@ -149,7 +149,7 @@ void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
  * invert(amount)
  * Inverts colors. amount=0 is no effect, amount=1 is full inversion.
  */
-void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     amount = clamp_01(amount);
     if (amount == 0) return;
 
@@ -163,7 +163,7 @@ void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * saturate(amount)
  * Adjusts saturation. amount=1 is no effect, 0 is desaturated, >1 is oversaturated.
  */
-void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
     if (amount < 0) amount = 0;
     if (amount == 1) return;
 
@@ -190,7 +190,7 @@ void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * opacity(amount)
  * Adjusts opacity. amount=1 is no effect, 0 is transparent.
  */
-void filter_opacity(uint8_t* a, float amount) {
+static void filter_opacity(uint8_t* a, float amount) {
     amount = clamp_01(amount);
     *a = clamp_byte(*a * amount);
 }
