@@ -207,7 +207,7 @@ static void parse_kv_section(InputContext& ctx, const char** pos,
                                           : ini_parse_raw_value(ctx, pos);
         Item value = raw ? parse_typed_value(ctx, raw->chars, raw->len)
                          : (Item){.item = ITEM_NULL};
-        ctx.builder.putToMap(target_map, key, value);
+        ctx.builder.putToMap(lam::gc_borrow(target_map), key, value);
         skip_to_newline(pos);
     }
 }
@@ -238,7 +238,7 @@ static void parse_kv_document(InputContext& ctx, const char* src, const KvConfig
             if (!section_map) continue;
             parse_kv_section(ctx, &current, section_map, cfg);
             if (section_map->type && ((TypeMap*)section_map->type)->length > 0)
-                ctx.builder.putToMap(root_map, section_name, {.item = (uint64_t)section_map});
+                ctx.builder.putToMap(lam::gc_borrow(root_map), section_name, {.item = (uint64_t)section_map});
         } else if (cfg->support_sections && !global_added) {
             // key-value before any section → "global" section
             global_added = true;
@@ -252,7 +252,7 @@ static void parse_kv_document(InputContext& ctx, const char* src, const KvConfig
             if (global_map) {
                 parse_kv_section(ctx, &current, global_map, cfg);
                 if (global_map->type && ((TypeMap*)global_map->type)->length > 0)
-                    ctx.builder.putToMap(root_map, global_name, {.item = (uint64_t)global_map});
+                    ctx.builder.putToMap(lam::gc_borrow(root_map), global_name, {.item = (uint64_t)global_map});
             }
         } else if (!cfg->support_sections) {
             // flat key-value — parse directly into root_map

@@ -438,7 +438,7 @@ Item parse_autolink(MarkupParser* parser, const char** text) {
     } else {
         href_val = parser->builder.createString(url_buf);
     }
-    parser->builder.putToElement(link, href_key, Item{.item = s2it(href_val)});
+    parser->builder.putToElement(lam::gc_borrow(link), href_key, Item{.item = s2it(href_val)});
 
     // Add link text (same as URL/email, no mailto)
     String* link_text = parser->builder.createString(url_buf);

@@ -314,12 +314,12 @@ Item MarkBuilder::createMetaType(TypeId type_id) {
 // Internal Helpers
 //------------------------------------------------------------------------------
 
-void MarkBuilder::putToElement(Element* elmt, String* key, Item value) {
-    elmt_put(elmt, key, value, pool_);
+void MarkBuilder::putToElement(lam::GcPtr<Element> elmt, String* key, Item value) {
+    elmt_put(elmt.get(), key, value, pool_);
 }
 
-void MarkBuilder::putToMap(Map* map, String* key, Item value) {
-    map_put(map, key, value, input_);
+void MarkBuilder::putToMap(lam::GcPtr<Map> map, String* key, Item value) {
+    map_put(map.get(), key, value, input_);
 }
 
 //==============================================================================
@@ -378,7 +378,7 @@ ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     if (!key) return *this;
     // use elmt_put to add the attribute to the element
     String* key_str = builder_->createName(key);  // attribute names are structural identifiers - always pooled
-    elmt_put(elmt_, key_str, value, builder_->pool());
+    builder_->putToElement(lam::gc_borrow(elmt_), key_str, value);
     return *this;
 }
 
@@ -400,7 +400,7 @@ ElementBuilder& ElementBuilder::attr(const char* key, bool value) {
 
 // String* key overloads
 ElementBuilder& ElementBuilder::attr(String* key, Item value) {
-    builder_->putToElement(elmt_, key, value);
+    builder_->putToElement(lam::gc_borrow(elmt_), key, value);
     return *this;
 }
 
@@ -507,7 +507,7 @@ MapBuilder::~MapBuilder() {
 MapBuilder& MapBuilder::put(const char* key, Item value) {
     // key could be null for nested map
     String* key_str = key ? builder_->createName(key) : nullptr;  // map keys are structural identifiers - always pooled
-    map_put(map_, key_str, value, builder_->input());
+    builder_->putToMap(lam::gc_borrow(map_), key_str, value);
 
     // cache the type for convenience
     if (!map_type_) { map_type_ = (TypeMap*)map_->type; }
@@ -518,7 +518,7 @@ MapBuilder& MapBuilder::put(String* key, Item value) {
     if (!key) return *this;
 
     // use the existing string directly (caller responsible for pooling decision)
-    map_put(map_, key, value, builder_->input());
+    builder_->putToMap(lam::gc_borrow(map_), key, value);
 
     // cache the type for convenience
     if (!map_type_) {
@@ -722,14 +722,14 @@ bool MarkBuilder::is_in_arena(Item item) const {
         if (!map_type->shape) return true;  // No fields
 
         MapReader reader(map);
-        ShapeEntry* field = map_type->shape;
+        lam::ShapeRef field = lam::shape_borrow(map_type->shape);
         while (field) {
             if (field->name && field->name->str) {
                 ItemReader field_reader = reader.get(field->name->str);
                 Item field_item = field_reader.item();
                 if (!is_in_arena(field_item)) return false;  // External value found
             }
-            field = field->next;
+            field = lam::shape_next(field);
         }
 
         // All fields are in arena - now check if Map struct itself is in arena
@@ -745,14 +745,14 @@ bool MarkBuilder::is_in_arena(Item item) const {
 
         // Check all attributes
         if (elem_type->length > 0) {
-            ShapeEntry* attr = elem_type->shape;
+            lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
                 if (attr->name) {
                     void* attr_data = (char*)elem->data + attr->byte_offset;
                     Item attr_item = _map_field_to_item(attr_data, attr->type->type_id);
                     if (!is_in_arena(attr_item)) return false;  // External attribute found
                 }
-                attr = attr->next;
+                attr = lam::shape_next(attr);
             }
         }
 
@@ -903,7 +903,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         }
 
         // deep copy referenced types (strings, containers, etc.)
-        ShapeEntry* field = obj_type->shape;
+        lam::ShapeRef field = lam::shape_borrow(obj_type->shape);
         while (field) {
             void* dst_ptr = (char*)new_obj->data + field->byte_offset;
             TypeId ftype = field->type->type_id;
@@ -937,7 +937,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
                 // primitive types (bool, int, int64, float, datetime, decimal) are already copied via memcpy
                 break;
             }
-            field = field->next;
+            field = lam::shape_next(field);
         }
 
         return {.object = new_obj};
@@ -954,7 +954,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         // ElementReader.get_attr() handles proper Item reconstruction from stored data
         TypeElmt* elem_type = (TypeElmt*)elem->type;
         if (elem_type->length > 0) {
-            ShapeEntry* attr = elem_type->shape;
+            lam::ShapeRef attr = lam::shape_borrow(elem_type->shape);
             while (attr) {
                 void* field_ptr = (char*)elem->data + attr->byte_offset;
                 Item attr_item = _map_field_to_item(field_ptr, attr->type->type_id);
@@ -967,7 +967,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
                     // attr->name is null for nested map
                     elem_builder.attr((String*)nullptr, copied_item);
                 }
-                attr = attr->next;
+                attr = lam::shape_next(attr);
             }
         }
 

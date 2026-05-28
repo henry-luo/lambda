@@ -350,7 +350,7 @@ static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
         skip_comments(mark);
 
         Item value = parse_value(ctx, mark, depth + 1);
-        ctx.builder.putToMap(mp, key, value);
+        ctx.builder.putToMap(lam::gc_borrow(mp), key, value);
 
         skip_comments(mark);
         if (**mark == '}') {
@@ -442,7 +442,7 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
         MarkBuilder builder(input);
         String* key = builder.createString(attr_name->chars);
         if (key) {
-            builder.putToElement(element, key, attr_value);
+            builder.putToElement(lam::gc_borrow(element), key, attr_value);
         }
 
         skip_comments(mark);

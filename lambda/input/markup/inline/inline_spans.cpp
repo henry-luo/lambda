@@ -150,7 +150,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                             String* class_key = parser->builder.createString("class");
                             String* class_val = parser->builder.createString(role_start, role_len);
                             if (class_key && class_val) {
-                                parser->builder.putToElement(role_elem, class_key, Item{.item = s2it(class_val)});
+                                parser->builder.putToElement(lam::gc_borrow(role_elem), class_key, Item{.item = s2it(class_val)});
                             }
                         }
 
@@ -245,14 +245,14 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                                 String* href_key = parser->builder.createString("href");
                                 String* href_val = parser->builder.createString(url);
                                 if (href_key && href_val) {
-                                    parser->builder.putToElement(link_elem, href_key, Item{.item = s2it(href_val)});
+                                    parser->builder.putToElement(lam::gc_borrow(link_elem), href_key, Item{.item = s2it(href_val)});
                                 }
 
                                 // Add class attribute
                                 String* class_key = parser->builder.createString("class");
                                 String* class_val = parser->builder.createString("reference");
                                 if (class_key && class_val) {
-                                    parser->builder.putToElement(link_elem, class_key, Item{.item = s2it(class_val)});
+                                    parser->builder.putToElement(lam::gc_borrow(link_elem), class_key, Item{.item = s2it(class_val)});
                                 }
 
                                 // Add link text

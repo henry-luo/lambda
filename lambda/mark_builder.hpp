@@ -310,13 +310,13 @@ public:
      * Internal helper to add attribute to existing element
      * Wraps the static elmt_put() function
      */
-    void putToElement(Element* elmt, String* key, Item value);
+    void putToElement(lam::GcPtr<Element> elmt, String* key, Item value);
 
     /**
      * Internal helper to add key-value to existing map
      * Wraps the static map_put() function
      */
-    void putToMap(Map* map, String* key, Item value);
+    void putToMap(lam::GcPtr<Map> map, String* key, Item value);
 };
 
 /**

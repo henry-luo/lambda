@@ -7,6 +7,7 @@
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
 #include "js_state_guards.h"
+#include "../../lib/lambda_typed.hpp"
 
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_reflect_own_keys(Item obj);
@@ -4768,7 +4769,7 @@ static void js_array_delete_sparse_indices_from(Array* arr, int64_t new_len) {
     if (!pm || !pm->type) return;
     TypeMap* tm = (TypeMap*)pm->type;
     Item map_item = (Item){.map = pm};
-    Item deleted = (Item){.item = JS_DELETED_SENTINEL_VAL};
+    Item deleted = lam::hole_sentinel_item();
     for (ShapeEntry* entry = tm->shape; entry; entry = entry->next) {
         if (!entry->name) continue;
         int name_len = (int)entry->name->length;
@@ -4946,7 +4947,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             arr->capacity = new_cap;
                         }
                         // Fill new slots with holes (deleted sentinel)
-                        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                        Item hole = lam::hole_sentinel_item();
                         for (int64_t i = arr->length; i < new_len; i++) {
                             arr->items[i] = hole;
                         }
@@ -5575,7 +5576,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             } else {
                 // MAP prototype: clear properties_map entry if previously set to non-MAP
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-                    Item del = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                    Item del = lam::hole_sentinel_item();
                     js_property_set(fn->properties_map, key, del);
                     // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry
                     // so readers can detect tombstones via shape (independent
@@ -6508,7 +6509,7 @@ static Item js_array_new_sparse_length(int64_t length) {
         // new Array(n) creates a sparse array — slots are holes, not undefined.
         // js_array_get_int returns undefined when reading a hole.
         // forEach/map/filter etc. skip holes (deleted sentinels).
-        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+        Item hole = lam::hole_sentinel_item();
         for (int64_t i = 0; i < length; i++) {
             arr->items[i] = hole;
         }
@@ -6522,7 +6523,7 @@ extern "C" Item js_array_new(int length) {
 
 // Return a hole sentinel value for array elisions
 extern "C" Item js_array_hole() {
-    return (Item){.item = JS_DELETED_SENTINEL_VAL};
+    return lam::hole_sentinel_item();
 }
 
 // v18q: Create arguments array (stub — kept for sys_func_registry compatibility)
@@ -6917,7 +6918,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+        Item hole = lam::hole_sentinel_item();
         while (arr->length < index) {
             js_array_push_item_direct(arr, hole);
         }
@@ -7042,7 +7043,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
             return value;
         }
         // Expand array: fill gaps with holes (deleted sentinel), then set the value
-        Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+        Item hole = lam::hole_sentinel_item();
         while (arr->length < idx) {
             js_array_push_item_direct(arr, hole);
         }
@@ -7623,7 +7624,7 @@ static Item js_array_like_to_array(Item obj) {
     if (len > 100000) len = 100000; // safety cap
     Item result = js_array_new(len);
     Array* arr = result.array;
-    Item hole = (Item){.item = JS_DELETED_SENTINEL_VAL};
+    Item hole = lam::hole_sentinel_item();
     for (int i = 0; i < len; i++) {
         char buf[16];
         int blen = snprintf(buf, sizeof(buf), "%d", i);
@@ -23145,7 +23146,7 @@ includes_slow_path:
             // v37: use HasProperty (checks prototype chain for holes) — preserve holes in result
             Item elem;
             if (!js_array_has_element(arr, src, i, &elem, check_proto)) {
-                if (dst) dst->items[i] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+                if (dst) dst->items[i] = lam::hole_sentinel_item();
                 continue;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };

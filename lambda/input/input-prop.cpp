@@ -197,7 +197,7 @@ void parse_properties(Input* input, const char* prop_string) {
         String* raw_value = parse_raw_value(ctx, &current);
         if (raw_value) {
             Item typed_value = parse_typed_value(ctx, raw_value->chars, raw_value->len);
-            ctx.builder.putToMap(root_map, key, typed_value);
+            ctx.builder.putToMap(lam::gc_borrow(root_map), key, typed_value);
         } else {
             ctx.addWarning(ctx.tracker.location(), "Failed to parse value for key '%.*s'",
                           (int)key->len, key->chars);

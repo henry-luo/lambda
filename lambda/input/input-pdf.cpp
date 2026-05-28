@@ -481,7 +481,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         // parse value
         Item value = parse_pdf_object(ctx, pdf, 1);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
-            ctx.builder.putToMap(dict, key, value);
+            ctx.builder.putToMap(lam::gc_borrow(dict), key, value);
         }
 
         skip_pdf_whitespace_and_comments(pdf);
@@ -799,7 +799,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
         String* type_value = ctx.builder.createString("indirect_ref");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder.putToMap(ref_map, type_key, type_item);
+            ctx.builder.putToMap(lam::gc_borrow(ref_map), type_key, type_item);
         }
     }
 
@@ -810,7 +810,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            ctx.builder.putToMap(ref_map, obj_key, obj_item);
+            ctx.builder.putToMap(lam::gc_borrow(ref_map), obj_key, obj_item);
         }
     }
 
@@ -821,7 +821,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            ctx.builder.putToMap(ref_map, gen_key, gen_item);
+            ctx.builder.putToMap(lam::gc_borrow(ref_map), gen_key, gen_item);
         }
     }
     return {.item = (uint64_t)ref_map};
@@ -879,7 +879,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         String* type_value = ctx.builder.createString("indirect_object");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder.putToMap(obj_map, type_key, type_item);
+            ctx.builder.putToMap(lam::gc_borrow(obj_map), type_key, type_item);
         }
     }
 
@@ -891,7 +891,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            ctx.builder.putToMap(obj_map, obj_key, obj_item);
+            ctx.builder.putToMap(lam::gc_borrow(obj_map), obj_key, obj_item);
         }
     }
 
@@ -903,7 +903,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            ctx.builder.putToMap(obj_map, gen_key, gen_item);
+            ctx.builder.putToMap(lam::gc_borrow(obj_map), gen_key, gen_item);
         }
     }
 
@@ -912,7 +912,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
         String* content_key = ctx.builder.createString("content");
         if (content_key) {
             Item content_item = {.item = content.item};
-            ctx.builder.putToMap(obj_map, content_key, content_item);
+            ctx.builder.putToMap(lam::gc_borrow(obj_map), content_key, content_item);
         }
     }
     return {.item = (uint64_t)obj_map};
@@ -971,7 +971,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
         String* type_value = ctx.builder.createString("stream");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder.putToMap(stream_map, type_key, type_item);
+            ctx.builder.putToMap(lam::gc_borrow(stream_map), type_key, type_item);
         }
     }
 
@@ -980,7 +980,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
         String* dict_key = ctx.builder.createString("dictionary");
         if (dict_key) {
             Item dict_item = {.item = (uint64_t)dict};
-            ctx.builder.putToMap(stream_map, dict_key, dict_item);
+            ctx.builder.putToMap(lam::gc_borrow(stream_map), dict_key, dict_item);
         }
     }
 
@@ -992,7 +992,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
         if (length_val) {
             *length_val = (double)data_length;
             Item length_item = {.item = d2it(length_val)};
-            ctx.builder.putToMap(stream_map, length_key, length_item);
+            ctx.builder.putToMap(lam::gc_borrow(stream_map), length_key, length_item);
         }
     }
 
@@ -1007,7 +1007,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
             stream_data->len = data_length;
 
             Item data_item = {.item = s2it(stream_data)};
-            ctx.builder.putToMap(stream_map, data_key, data_item);
+            ctx.builder.putToMap(lam::gc_borrow(stream_map), data_key, data_item);
 
             // Add content analysis for potential content streams
             if (data_length > 10 && data_length < 100000) { // Only analyze reasonably sized streams
@@ -1016,7 +1016,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
                     String* analysis_key = ctx.builder.createString("analysis");
                     if (analysis_key) {
                         Item analysis_item = {.item = content_analysis.item};
-                        ctx.builder.putToMap(stream_map, analysis_key, analysis_item);
+                        ctx.builder.putToMap(lam::gc_borrow(stream_map), analysis_key, analysis_item);
                     }
                 }
             }
@@ -1044,7 +1044,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         String* type_value = ctx.builder.createString("xref_table");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder.putToMap(xref_map, type_key, type_item);
+            ctx.builder.putToMap(lam::gc_borrow(xref_map), type_key, type_item);
         }
     }
 
@@ -1101,7 +1101,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     if (obj_val) {
                                                         *obj_val = (double)(start_num + i);
                                                         Item obj_item = {.item = d2it(obj_val)};
-                                                        ctx.builder.putToMap(entry_map, obj_key, obj_item);
+                                                        ctx.builder.putToMap(lam::gc_borrow(entry_map), obj_key, obj_item);
                                                     }
                                                 }
 
@@ -1113,7 +1113,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     if (offset_val) {
                                                         *offset_val = (double)offset;
                                                         Item offset_item = {.item = d2it(offset_val)};
-                                                        ctx.builder.putToMap(entry_map, offset_key, offset_item);
+                                                        ctx.builder.putToMap(lam::gc_borrow(entry_map), offset_key, offset_item);
                                                     }
                                                 }
 
@@ -1127,7 +1127,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                         flag_val->chars[1] = '\0';
                                                         flag_val->len = 1;
                                                         Item flag_item = {.item = s2it(flag_val)};
-                                                        ctx.builder.putToMap(entry_map, flag_key, flag_item);
+                                                        ctx.builder.putToMap(lam::gc_borrow(entry_map), flag_key, flag_item);
                                                     }
                                                 }
 
@@ -1153,7 +1153,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         String* entries_key = ctx.builder.createString("entries");
         if (entries_key) {
             Item entries_item = {.item = (uint64_t)entries};
-            ctx.builder.putToMap(xref_map, entries_key, entries_item);
+            ctx.builder.putToMap(lam::gc_borrow(xref_map), entries_key, entries_item);
         }
     }
     return {.item = (uint64_t)xref_map};
@@ -1180,7 +1180,7 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
         String* type_value = ctx.builder.createString("trailer");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder.putToMap(trailer_map, type_key, type_item);
+            ctx.builder.putToMap(lam::gc_borrow(trailer_map), type_key, type_item);
         }
     }
 
@@ -1188,7 +1188,7 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
     String* dict_key = ctx.builder.createString("dictionary");
     if (dict_key) {
         Item dict_item = {.item = (uint64_t)trailer_dict};
-        ctx.builder.putToMap(trailer_map, dict_key, dict_item);
+        ctx.builder.putToMap(lam::gc_borrow(trailer_map), dict_key, dict_item);
     }
     return {.item = (uint64_t)trailer_map};
 }
@@ -1235,7 +1235,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         String* type_value = builder.createString("content_analysis");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            builder.putToMap(analysis_map, type_key, type_item);
+            builder.putToMap(lam::gc_borrow(analysis_map), type_key, type_item);
         }
     }
 
@@ -1247,7 +1247,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         if (text_count) {
             *text_count = (double)text_objects;
             Item text_item = {.item = d2it(text_count)};
-            builder.putToMap(analysis_map, text_key, text_item);
+            builder.putToMap(lam::gc_borrow(analysis_map), text_key, text_item);
         }
     }
 
@@ -1259,7 +1259,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         if (draw_count) {
             *draw_count = (double)drawing_ops;
             Item draw_item = {.item = d2it(draw_count)};
-            builder.putToMap(analysis_map, draw_key, draw_item);
+            builder.putToMap(lam::gc_borrow(analysis_map), draw_key, draw_item);
         }
     }
     return {.item = (uint64_t)analysis_map};
@@ -1280,7 +1280,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
         String* type_value = builder.createString("font_analysis");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            builder.putToMap(font_analysis, type_key, type_item);
+            builder.putToMap(lam::gc_borrow(font_analysis), type_key, type_item);
         }
     }
 
@@ -1288,7 +1288,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
     String* original_key = builder.createString("original");
     if (original_key) {
         Item original_item = {.item = (uint64_t)font_dict};
-        builder.putToMap(font_analysis, original_key, original_item);
+        builder.putToMap(lam::gc_borrow(font_analysis), original_key, original_item);
     }
     return {.item = (uint64_t)font_analysis};
 }
@@ -1308,7 +1308,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
         String* type_value = builder.createString("page_analysis");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            builder.putToMap(page_analysis, type_key, type_item);
+            builder.putToMap(lam::gc_borrow(page_analysis), type_key, type_item);
         }
     }
 
@@ -1316,7 +1316,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
     String* original_key = builder.createString("original");
     if (original_key) {
         Item original_item = {.item = (uint64_t)page_dict};
-        builder.putToMap(page_analysis, original_key, original_item);
+        builder.putToMap(lam::gc_borrow(page_analysis), original_key, original_item);
     }
     return {.item = (uint64_t)page_analysis};
 }
@@ -1379,7 +1379,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     String* version_key = builder.createString("version");
     if (version_key) {
         Item version_item = {.item = s2it(version)};
-        builder.putToMap(pdf_info, version_key, version_item);
+        builder.putToMap(lam::gc_borrow(pdf_info), version_key, version_item);
     }
 
     skip_pdf_whitespace_and_comments(&pdf);
@@ -1522,7 +1522,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
         String* objects_key = builder.createString("objects");
         if (objects_key) {
             Item objects_item = {.item = (uint64_t)objects};
-            builder.putToMap(pdf_info, objects_key, objects_item);
+            builder.putToMap(lam::gc_borrow(pdf_info), objects_key, objects_item);
         }
     }
 
@@ -1530,7 +1530,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     if (xref_table .item != ITEM_NULL) {
         String* xref_key = builder.createString("xref_table");
         if (xref_key) {
-            builder.putToMap(pdf_info, xref_key, xref_table);
+            builder.putToMap(lam::gc_borrow(pdf_info), xref_key, xref_table);
         }
     }
 
@@ -1538,7 +1538,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     if (trailer .item != ITEM_NULL) {
         String* trailer_key = builder.createString("trailer");
         if (trailer_key) {
-            builder.putToMap(pdf_info, trailer_key, trailer);
+            builder.putToMap(lam::gc_borrow(pdf_info), trailer_key, trailer);
         }
     }
 
@@ -1557,7 +1557,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                     if (obj_count_val) {
                         *obj_count_val = objects ? (double)objects->length : 0.0;
                         Item obj_count_item = {.item = d2it(obj_count_val)};
-                        builder.putToMap(stats_map, obj_count_key, obj_count_item);
+                        builder.putToMap(lam::gc_borrow(stats_map), obj_count_key, obj_count_item);
                     }
                 }
 
@@ -1565,14 +1565,14 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                 String* has_xref_key = builder.createString("has_xref");
                 if (has_xref_key) {
                     Item has_xref_item = {.item = b2it(xref_table .item != ITEM_NULL)};
-                    builder.putToMap(stats_map, has_xref_key, has_xref_item);
+                    builder.putToMap(lam::gc_borrow(stats_map), has_xref_key, has_xref_item);
                 }
 
                 // Has trailer
                 String* has_trailer_key = builder.createString("has_trailer");
                 if (has_trailer_key) {
                     Item has_trailer_item = {.item = b2it(trailer .item != ITEM_NULL)};
-                    builder.putToMap(stats_map, has_trailer_key, has_trailer_item);
+                    builder.putToMap(lam::gc_borrow(stats_map), has_trailer_key, has_trailer_item);
                 }
 
                 // Count stream objects
@@ -1598,7 +1598,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                     if (stream_count_val) {
                         *stream_count_val = (double)stream_count;
                         Item stream_count_item = {.item = d2it(stream_count_val)};
-                        builder.putToMap(stats_map, stream_count_key, stream_count_item);
+                        builder.putToMap(lam::gc_borrow(stats_map), stream_count_key, stream_count_item);
                     }
                 }
 
@@ -1632,13 +1632,13 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                         }
 
                         Item features_item = {.item = (uint64_t)features_array};
-                        builder.putToMap(stats_map, features_key, features_item);
+                        builder.putToMap(lam::gc_borrow(stats_map), features_key, features_item);
                     }
                 }
             }
 
             Item stats_item = {.item = (uint64_t)stats_map};
-            builder.putToMap(pdf_info, stats_key, stats_item);
+            builder.putToMap(lam::gc_borrow(pdf_info), stats_key, stats_item);
         }
     }
 

@@ -228,6 +228,45 @@ inline Element* as_element(ItemOf<LMD_TYPE_ELEMENT> v) {
     return v.ptr();
 }
 
+class HoleSentinel {
+    Item raw_;
+
+    explicit HoleSentinel(Item raw) : raw_(raw) {
+        assert(is(raw));
+    }
+
+public:
+    static uint64_t raw_value() {
+        return ((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL;
+    }
+
+    static HoleSentinel make() {
+        Item raw;
+        raw.item = raw_value();
+        return HoleSentinel(raw);
+    }
+
+    static HoleSentinel from_raw(Item raw) {
+        return HoleSentinel(raw);
+    }
+
+    static bool is(Item raw) {
+        return raw.item == raw_value();
+    }
+
+    Item raw() const {
+        return raw_;
+    }
+};
+
+inline Item hole_sentinel_item() {
+    return HoleSentinel::make().raw();
+}
+
+inline bool is_hole_sentinel(Item raw) {
+    return HoleSentinel::is(raw);
+}
+
 typedef GcPtr<ShapeEntry> ShapeRef;
 typedef GcPtr<const ShapeEntry> ConstShapeRef;
 

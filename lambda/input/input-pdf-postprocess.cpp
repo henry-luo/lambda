@@ -258,7 +258,7 @@ static Map* find_catalog(MarkBuilder& builder, Map* pdf_info, ObjTable* table) {
         if (catalog) log_info("pdf_postprocess: found catalog by object scan");
     }
     if (catalog) {
-        builder.putToMap(pdf_info, builder.createString("catalog"),
+        builder.putToMap(lam::gc_borrow(pdf_info), builder.createString("catalog"),
                          {.item = (uint64_t)catalog});
     } else if (!trailer_wrap) {
         log_info("pdf_postprocess: no trailer or catalog found");
@@ -321,22 +321,22 @@ static void flatten_page_node(Input* input, MarkBuilder& builder, Map* node,
     // original page dict and the resolved inheritable attrs.
     Map* flat = map_pooled(input->pool);
     if (!flat) return;
-    builder.putToMap(flat, builder.createString("type"),
+    builder.putToMap(lam::gc_borrow(flat), builder.createString("type"),
                      {.item = s2it(builder.createString("page"))});
-    builder.putToMap(flat, builder.createString("dict"),
+    builder.putToMap(lam::gc_borrow(flat), builder.createString("dict"),
                      {.item = (uint64_t)node});
     if (resources.item != ITEM_NULL) {
         Item r = resolve_ref_deep(resources, table);
-        builder.putToMap(flat, builder.createString("resources"), r);
+        builder.putToMap(lam::gc_borrow(flat), builder.createString("resources"), r);
     }
     if (mediabox.item != ITEM_NULL) {
-        builder.putToMap(flat, builder.createString("media_box"), mediabox);
+        builder.putToMap(lam::gc_borrow(flat), builder.createString("media_box"), mediabox);
     }
     if (cropbox.item != ITEM_NULL) {
-        builder.putToMap(flat, builder.createString("crop_box"), cropbox);
+        builder.putToMap(lam::gc_borrow(flat), builder.createString("crop_box"), cropbox);
     }
     if (rotate.item != ITEM_NULL) {
-        builder.putToMap(flat, builder.createString("rotate"), rotate);
+        builder.putToMap(lam::gc_borrow(flat), builder.createString("rotate"), rotate);
     }
     // Page index assigned by caller via array position.
     array_append(out_pages, {.item = (uint64_t)flat}, input->pool, input->arena);
@@ -378,7 +378,7 @@ static void flatten_page_tree(Input* input, MarkBuilder& builder,
         flatten_page_objects(input, builder, table, out);
     }
 
-    builder.putToMap(pdf_info, builder.createString("pages"),
+    builder.putToMap(lam::gc_borrow(pdf_info), builder.createString("pages"),
                      {.item = (uint64_t)out});
     log_info("pdf_postprocess: flattened page tree into %d pages", out->length);
 }
@@ -484,7 +484,7 @@ static void add_unicode_mapping(Input* input, MarkBuilder& builder, Map* out,
     }
     String* val = builder.createString(utf8, (size_t)len);
     if (!val) return;
-    builder.putToMap(out, key, {.item = s2it(val)});
+    builder.putToMap(lam::gc_borrow(out), key, {.item = s2it(val)});
 }
 
 // Parse a single bfchar entry's destination — either a hex string (one or
@@ -732,7 +732,7 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
     if (needs_free) mem_free((void*)dbuf);
 
     if (sections > 0) {
-        builder.putToMap(font, builder.createString("to_unicode"),
+        builder.putToMap(lam::gc_borrow(font), builder.createString("to_unicode"),
                          {.item = (uint64_t)tu_map});
         log_info("pdf_postprocess: attached ToUnicode map to font "
                  "(%d CMap sections parsed)", sections);
@@ -906,7 +906,7 @@ static void add_text_data_to_stream(Input* input, MarkBuilder& builder, Map* sm)
     if (!data || data->len == 0) return;
     String* text_data = content_bytes_to_token_text(input, data);
     if (!text_data) return;
-    builder.putToMap(sm, builder.createString("text_data"), {.item = s2it(text_data)});
+    builder.putToMap(lam::gc_borrow(sm), builder.createString("text_data"), {.item = s2it(text_data)});
 }
 
 static void decompress_streams(Input* input, MarkBuilder& builder, Array* objects) {    if (!objects) return;
@@ -1095,15 +1095,15 @@ static Item osp_parse_object(ObjStreamParser* p, int depth);
 static Item osp_make_ref(ObjStreamParser* p, int obj_num, int gen_num) {
     Map* ref = map_pooled(p->input->pool);
     if (!ref) return {.item = ITEM_ERROR};
-    p->builder->putToMap(ref, p->builder->createString("type"),
+    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("type"),
                          {.item = s2it(p->builder->createString("indirect_ref"))});
     double* obj_val = (double*)pool_calloc(p->input->pool, sizeof(double));
     double* gen_val = (double*)pool_calloc(p->input->pool, sizeof(double));
     if (!obj_val || !gen_val) return {.item = ITEM_ERROR};
     *obj_val = (double)obj_num;
     *gen_val = (double)gen_num;
-    p->builder->putToMap(ref, p->builder->createString("object_num"), {.item = d2it(obj_val)});
-    p->builder->putToMap(ref, p->builder->createString("gen_num"), {.item = d2it(gen_val)});
+    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("object_num"), {.item = d2it(obj_val)});
+    p->builder->putToMap(lam::gc_borrow(ref), p->builder->createString("gen_num"), {.item = d2it(gen_val)});
     return {.item = (uint64_t)ref};
 }
 
@@ -1180,7 +1180,7 @@ static Map* osp_parse_dictionary(ObjStreamParser* p, int depth) {
         osp_skip_ws(p);
         Item val = osp_parse_object(p, depth + 1);
         if (val.item != ITEM_ERROR && val.item != ITEM_NULL) {
-            p->builder->putToMap(dict, key, val);
+            p->builder->putToMap(lam::gc_borrow(dict), key, val);
             pairs++;
         }
     }
@@ -1237,17 +1237,17 @@ static Item osp_parse_object(ObjStreamParser* p, int depth) {
 static Map* make_indirect_object(Input* input, MarkBuilder& builder, int obj_num, Item content) {
     Map* obj = map_pooled(input->pool);
     if (!obj) return nullptr;
-    builder.putToMap(obj, builder.createString("type"),
+    builder.putToMap(lam::gc_borrow(obj), builder.createString("type"),
                      {.item = s2it(builder.createString("indirect_object"))});
     double* obj_val = (double*)pool_calloc(input->pool, sizeof(double));
     double* gen_val = (double*)pool_calloc(input->pool, sizeof(double));
     if (!obj_val || !gen_val) return nullptr;
     *obj_val = (double)obj_num;
     *gen_val = 0.0;
-    builder.putToMap(obj, builder.createString("object_num"), {.item = d2it(obj_val)});
-    builder.putToMap(obj, builder.createString("gen_num"), {.item = d2it(gen_val)});
+    builder.putToMap(lam::gc_borrow(obj), builder.createString("object_num"), {.item = d2it(obj_val)});
+    builder.putToMap(lam::gc_borrow(obj), builder.createString("gen_num"), {.item = d2it(gen_val)});
     if (content.item != ITEM_ERROR && content.item != ITEM_NULL) {
-        builder.putToMap(obj, builder.createString("content"), content);
+        builder.putToMap(lam::gc_borrow(obj), builder.createString("content"), content);
     }
     return obj;
 }
@@ -1676,7 +1676,7 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
 
         String* uri = image_to_data_uri(input, sm, table);
         if (!uri) continue;
-        builder.putToMap(sm, builder.createString("data_uri"),
+        builder.putToMap(lam::gc_borrow(sm), builder.createString("data_uri"),
                          {.item = s2it(uri)});
         encoded++;
     }
@@ -1762,9 +1762,9 @@ static void encode_embedded_fonts(Input* input, MarkBuilder& builder,
 
         String* uri = font_stream_to_data_uri(input, sm, mime, fmt);
         if (!uri) continue;
-        builder.putToMap(fd, builder.createString("font_data_uri"),
+        builder.putToMap(lam::gc_borrow(fd), builder.createString("font_data_uri"),
                          {.item = s2it(uri)});
-        builder.putToMap(fd, builder.createString("font_format"),
+        builder.putToMap(lam::gc_borrow(fd), builder.createString("font_format"),
                          {.item = s2it(builder.createString(fmt))});
         encoded++;
     }
