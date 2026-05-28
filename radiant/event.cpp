@@ -189,6 +189,59 @@ static void event_log_focused_target(EventStateLog* log, uint64_t cascade_id,
     event_state_log_finish_record(log, &w);
 }
 
+static uint32_t event_log_text_len(const char* text) {
+    return text ? (uint32_t)strlen(text) : 0;
+}
+
+static bool event_log_editing_redact(const EditingSurface* surface) {
+    return surface && surface->mode == EDIT_MODE_PASSWORD_TEXT;
+}
+
+static void event_log_editing_surface(JsonWriter* w,
+                                      const EditingSurface* surface) {
+    jw_key(w, "surface");
+    jw_obj_begin(w);
+        jw_kv_str(w, "kind", editing_surface_kind_name(
+            surface ? surface->kind : EDIT_SURFACE_NONE));
+        jw_kv_str(w, "mode", editing_mode_name(
+            surface ? surface->mode : EDIT_MODE_RICH));
+        event_state_log_write_node_ref(w, "owner",
+            surface ? (const DomNode*)surface->owner : nullptr);
+        event_state_log_write_node_ref(w, "target",
+            surface ? (const DomNode*)surface->view : nullptr);
+    jw_obj_end(w);
+}
+
+static void event_log_editing_mutation(DocState* state,
+                                       const EditingSurface* surface,
+                                       const InputIntent* intent,
+                                       const char* operation,
+                                       uint32_t old_len,
+                                       uint32_t new_len,
+                                       uint32_t selection_start,
+                                       uint32_t selection_end) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    bool redacted = event_log_editing_redact(surface);
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.mutation", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "operation", operation ? operation : "replace");
+        event_log_editing_surface(&w, surface);
+        jw_kv_str(&w, "input_type",
+                  intent ? input_intent_type_name(intent->type) : "");
+        jw_kv_uint(&w, "old_len", redacted ? 0 : old_len);
+        jw_kv_uint(&w, "new_len", redacted ? 0 : new_len);
+        jw_kv_uint(&w, "selection_start", redacted ? 0 : selection_start);
+        jw_kv_uint(&w, "selection_end", redacted ? 0 : selection_end);
+        jw_kv_bool(&w, "redacted", redacted);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void sync_viewport_scroll_state(EventContext* evcon) {
     if (!evcon || !evcon->ui_context || !evcon->ui_context->document) return;
 
@@ -1519,9 +1572,17 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
         return true;
     }
 
+    uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
     bool ok = te_replace_byte_range_no_events(elem, state, target, start, end,
                                               repl, repl_len);
     if (ok) {
+        FormControlProp* form = elem->form;
+        uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
+        uint32_t selection_start = form ? form->selection_start : 0;
+        uint32_t selection_end = form ? form->selection_end : 0;
+        event_log_editing_mutation(state, &surface, &intent, "replace",
+                                   old_len, new_len,
+                                   selection_start, selection_end);
         editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
     }
     return ok;
@@ -1574,6 +1635,61 @@ static bool dispatch_context_menu_paste(void* user, DomElement* elem,
     if (!evcon || !elem || !state) return false;
     return dispatch_form_text_paste(evcon, elem, state, static_cast<View*>(elem),
                                     text, len) > 0;
+}
+
+static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
+                                  DocState* state, View* target,
+                                  InputIntentType input_type) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+    if (input_type != INPUT_INTENT_HISTORY_UNDO &&
+        input_type != INPUT_INTENT_HISTORY_REDO) {
+        return false;
+    }
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return input_type == INPUT_INTENT_HISTORY_UNDO
+            ? te_history_undo(elem)
+            : te_history_redo(elem);
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = input_type;
+    intent.data = "";
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+
+    bool prevented = false;
+    editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
+                                      &prevented);
+    if (prevented) {
+        log_debug("dispatch_form_history: beforeinput prevented inputType=%s",
+                  input_intent_type_name(input_type));
+        return true;
+    }
+
+    uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
+    bool did = input_type == INPUT_INTENT_HISTORY_UNDO
+        ? te_history_undo(elem)
+        : te_history_redo(elem);
+    if (did) {
+        FormControlProp* form = elem->form;
+        uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
+        uint32_t selection_start = form ? form->selection_start : 0;
+        uint32_t selection_end = form ? form->selection_end : 0;
+        event_log_editing_mutation(state, &surface, &intent, "history",
+                                   old_len, new_len,
+                                   selection_start, selection_end);
+        editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+    }
+    return did;
 }
 
 extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
@@ -5529,9 +5645,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo. Bypass
                 // the rest of the input-branch dispatch on consume.
                 if (cmd && key_event->key == RDT_KEY_Z) {
-                    bool did = (key_event->mods & RDT_MOD_SHIFT)
-                        ? te_history_redo(focus_elem)
-                        : te_history_undo(focus_elem);
+                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
+                        ? INPUT_INTENT_HISTORY_REDO
+                        : INPUT_INTENT_HISTORY_UNDO;
+                    bool did = dispatch_form_history(&evcon, focus_elem, state,
+                                                     focused, history_type);
                     if (did) {
                         // Restore caret to the snapshot's selection end.
                         int vlen = focus_elem->form->value
@@ -5546,7 +5664,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
                 if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
                     key_event->key == RDT_KEY_Y) {
-                    if (te_history_redo(focus_elem)) {
+                    if (dispatch_form_history(&evcon, focus_elem, state, focused,
+                                              INPUT_INTENT_HISTORY_REDO)) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;
@@ -5906,9 +6025,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo.
                 if (cmd && key_event->key == RDT_KEY_Z) {
-                    bool did = (key_event->mods & RDT_MOD_SHIFT)
-                        ? te_history_redo(focus_elem)
-                        : te_history_undo(focus_elem);
+                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
+                        ? INPUT_INTENT_HISTORY_REDO
+                        : INPUT_INTENT_HISTORY_UNDO;
+                    bool did = dispatch_form_history(&evcon, focus_elem, state,
+                                                     focused, history_type);
                     if (did) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
@@ -5923,7 +6044,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
                 if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
                     key_event->key == RDT_KEY_Y) {
-                    if (te_history_redo(focus_elem)) {
+                    if (dispatch_form_history(&evcon, focus_elem, state, focused,
+                                              INPUT_INTENT_HISTORY_REDO)) {
                         int vlen = focus_elem->form->value
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;

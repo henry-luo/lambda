@@ -768,6 +768,14 @@ For WPT:
 - Native form context-menu Cut/Delete/Paste now uses edit hooks supplied by
   `event.cpp`, so menu ownership/rendering stays in `context_menu.cpp` while
   mutations enter the same unified form replacement/paste transaction.
+- Form undo/redo now dispatches `historyUndo` / `historyRedo` through
+  `dispatch_form_history()`, preserving `text_edit.cpp` snapshot restore while
+  giving history the same `beforeinput` / mutation / `input` transaction shape.
+- Unified editing dispatch now emits first-class JSONL records:
+  `editing.intent`, `editing.beforeinput`, `editing.mutation`, and
+  `editing.input`. The form mutation records are emitted at the value-store
+  choke points in `event.cpp`, while shared intent/event records live in
+  `editing_dispatch.cpp`; password surfaces redact lengths and offsets.
 
 ---
 
