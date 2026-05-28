@@ -1527,6 +1527,85 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     return ok;
 }
 
+static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
+                                         DocState* state, View* target,
+                                         const char* text, uint32_t len) {
+    if (!evcon || !elem || !state || !target || !text || len == 0) return 0;
+    char* sanitized = nullptr;
+    uint32_t sanitized_len = 0;
+    uint32_t start = 0, end = 0;
+    if (!te_prepare_paste_replacement(elem, state, text, len, &sanitized,
+                                      &sanitized_len, &start, &end)) {
+        return 0;
+    }
+
+    bool ok = dispatch_form_text_replace(evcon, elem, state, target,
+                                         start, end,
+                                         sanitized, sanitized_len,
+                                         INPUT_INTENT_INSERT_FROM_PASTE);
+    mem_free(sanitized);
+    return ok ? sanitized_len : 0;
+}
+
+static bool dispatch_context_menu_cut(void* user, DomElement* elem,
+                                      DocState* state,
+                                      uint32_t start, uint32_t end) {
+    EventContext* evcon = (EventContext*)user;
+    if (!evcon || !elem || !state) return false;
+    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
+                                      start, end, nullptr, 0,
+                                      INPUT_INTENT_DELETE_BY_CUT);
+}
+
+static bool dispatch_context_menu_delete(void* user, DomElement* elem,
+                                         DocState* state,
+                                         uint32_t start, uint32_t end) {
+    EventContext* evcon = (EventContext*)user;
+    if (!evcon || !elem || !state) return false;
+    return dispatch_form_text_replace(evcon, elem, state, static_cast<View*>(elem),
+                                      start, end, nullptr, 0,
+                                      INPUT_INTENT_DELETE_CONTENT_FORWARD);
+}
+
+static bool dispatch_context_menu_paste(void* user, DomElement* elem,
+                                        DocState* state,
+                                        const char* text, uint32_t len) {
+    EventContext* evcon = (EventContext*)user;
+    if (!evcon || !elem || !state) return false;
+    return dispatch_form_text_paste(evcon, elem, state, static_cast<View*>(elem),
+                                    text, len) > 0;
+}
+
+extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target,
+                                                       const char* committed,
+                                                       uint32_t len) {
+    if (!uicon || !uicon->document || !elem) return false;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state) return false;
+
+    uint32_t start = 0, end = 0;
+    bool should_mutate = false;
+    if (!te_ime_commit_prepare(elem, state, committed, len,
+                               &start, &end, &should_mutate)) {
+        return false;
+    }
+
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.ui_context = uicon;
+    evcon.target = target ? target : static_cast<View*>(elem);
+
+    if (should_mutate) {
+        dispatch_form_text_replace(&evcon, elem, state, evcon.target,
+                                   start, end, committed, len,
+                                   INPUT_INTENT_INSERT_FROM_COMPOSITION);
+    }
+    te_ime_commit_finish(elem, committed, len);
+    return true;
+}
+
 static void dispatch_selectstart(EventContext* evcon, View* target) {
     if (!evcon || !target) return;
     if (dispatch_lambda_handler(evcon, target, "selectstart")) {
@@ -4345,7 +4424,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             float myp = (float)btn_event->y;
             if (context_menu_contains(state, mxp, myp)) {
                 if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
-                    context_menu_click(state, mxp, myp);
+                    ContextMenuEditHooks hooks;
+                    hooks.cut_selection = dispatch_context_menu_cut;
+                    hooks.delete_selection = dispatch_context_menu_delete;
+                    hooks.paste_text = dispatch_context_menu_paste;
+                    hooks.user = &evcon;
+                    context_menu_click_with_hooks(state, mxp, myp, &hooks);
                 }
                 break;
             }
@@ -5489,8 +5573,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (focused && focused->is_element()) {
                             DomElement* fe = lam::dom_require_element(focused);
                             if (tc_is_text_control(fe)) {
-                                te_paste(fe, state, focused, clip,
-                                         (uint32_t)strlen(clip));
+                                dispatch_form_text_paste(&evcon, fe, state, focused,
+                                                         clip, (uint32_t)strlen(clip));
                             }
                         }
                     }
@@ -5799,9 +5883,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (focused && focused->is_element()) {
                             DomElement* fe = lam::dom_require_element(focused);
                             if (tc_is_text_control(fe)) {
-                                uint32_t inserted = te_paste(fe, state, focused,
-                                                             clip,
-                                                             (uint32_t)strlen(clip));
+                                uint32_t inserted = dispatch_form_text_paste(
+                                    &evcon, fe, state, focused,
+                                    clip, (uint32_t)strlen(clip));
                                 log_debug("Textarea paste: %u bytes inserted",
                                           inserted);
                             }

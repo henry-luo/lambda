@@ -69,6 +69,11 @@ static void sim_input_turn_yield() {
 
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target,
+                                                       const char* committed,
+                                                       uint32_t len);
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
@@ -2795,7 +2800,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                               (uint32_t)ev->expected_char_offset);
                 log_info("event_sim: ime_compose update '%s'", data);
             } else if (strcmp(phase, "commit") == 0) {
-                te_ime_commit(elem, state, focused, data, dlen);
+                if (!radiant_dispatch_form_text_ime_commit(uicon, elem, focused,
+                                                           data, dlen)) {
+                    te_ime_commit(elem, state, focused, data, dlen);
+                }
                 log_info("event_sim: ime_compose commit '%s'", data);
             } else if (strcmp(phase, "cancel") == 0) {
                 te_ime_cancel(elem);

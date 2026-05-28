@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 struct DocState;
+class DomElement;
 
 // Number of items always 5: Cut, Copy, Paste, Delete, Select All.
 #define CTX_MENU_ITEM_COUNT 5
@@ -40,6 +41,23 @@ bool context_menu_hover(DocState* state, float x, float y);
 // if the click landed inside the menu rect (whether or not it triggered
 // an action).
 bool context_menu_click(DocState* state, float x, float y);
+
+typedef bool (*ContextMenuReplaceFn)(void* user, DomElement* elem,
+                                     DocState* state,
+                                     uint32_t start, uint32_t end);
+typedef bool (*ContextMenuPasteFn)(void* user, DomElement* elem,
+                                   DocState* state,
+                                   const char* text, uint32_t len);
+
+struct ContextMenuEditHooks {
+    ContextMenuReplaceFn cut_selection;
+    ContextMenuReplaceFn delete_selection;
+    ContextMenuPasteFn paste_text;
+    void* user;
+};
+
+bool context_menu_click_with_hooks(DocState* state, float x, float y,
+                                   const ContextMenuEditHooks* hooks);
 
 // True iff (x,y) is inside the popup. Used to keep clicks inside the menu
 // from being routed to the underlying view.

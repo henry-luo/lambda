@@ -141,22 +141,38 @@ static void ctx_menu_exec_copy(DomElement* elem) {
     mem_free(tmp);
 }
 
-static void ctx_menu_exec_cut(DomElement* elem, DocState* state) {
+static void ctx_menu_exec_cut(DomElement* elem, DocState* state,
+                              const ContextMenuEditHooks* hooks) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
     ctx_menu_exec_copy(elem);
+    if (hooks && hooks->cut_selection &&
+        hooks->cut_selection(hooks->user, elem, state, a, b)) {
+        return;
+    }
     te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
 }
 
-static void ctx_menu_exec_delete(DomElement* elem, DocState* state) {
+static void ctx_menu_exec_delete(DomElement* elem, DocState* state,
+                                 const ContextMenuEditHooks* hooks) {
     uint32_t a, b;
     if (!ctx_menu_selection_bytes(elem, &a, &b)) return;
+    if (hooks && hooks->delete_selection &&
+        hooks->delete_selection(hooks->user, elem, state, a, b)) {
+        return;
+    }
     te_replace_byte_range(elem, state, static_cast<View*>(elem), a, b, nullptr, 0);
 }
 
-static void ctx_menu_exec_paste(DomElement* elem, DocState* state) {
+static void ctx_menu_exec_paste(DomElement* elem, DocState* state,
+                                const ContextMenuEditHooks* hooks) {
     const char* clip = clipboard_get_text();
     if (!clip || !*clip) return;
+    if (hooks && hooks->paste_text &&
+        hooks->paste_text(hooks->user, elem, state, clip,
+                          (uint32_t)strlen(clip))) {
+        return;
+    }
     te_paste(elem, state, static_cast<View*>(elem), clip, (uint32_t)strlen(clip));
 }
 
@@ -166,6 +182,11 @@ static void ctx_menu_exec_select_all(DomElement* elem) {
 }
 
 bool context_menu_click(DocState* state, float x, float y) {
+    return context_menu_click_with_hooks(state, x, y, nullptr);
+}
+
+bool context_menu_click_with_hooks(DocState* state, float x, float y,
+                                   const ContextMenuEditHooks* hooks) {
     if (!context_menu_contains(state, x, y)) return false;
     int idx = (int)((y - state->context_menu_y) / CTX_MENU_ITEM_HEIGHT);
     if (idx < 0 || idx >= CTX_MENU_ITEM_COUNT) {
@@ -179,10 +200,10 @@ bool context_menu_click(DocState* state, float x, float y) {
     }
     log_info("context_menu_click: %s", CTX_MENU_LABELS[idx]);
     switch (idx) {
-        case CTX_MENU_CUT:        ctx_menu_exec_cut(elem, state); break;
+        case CTX_MENU_CUT:        ctx_menu_exec_cut(elem, state, hooks); break;
         case CTX_MENU_COPY:       ctx_menu_exec_copy(elem); break;
-        case CTX_MENU_PASTE:      ctx_menu_exec_paste(elem, state); break;
-        case CTX_MENU_DELETE:     ctx_menu_exec_delete(elem, state); break;
+        case CTX_MENU_PASTE:      ctx_menu_exec_paste(elem, state, hooks); break;
+        case CTX_MENU_DELETE:     ctx_menu_exec_delete(elem, state, hooks); break;
         case CTX_MENU_SELECT_ALL: ctx_menu_exec_select_all(elem); break;
     }
     context_menu_close(state);

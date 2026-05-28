@@ -169,6 +169,13 @@ void te_validate(DomElement* elem);
 uint32_t te_paste(DomElement* elem, DocState* state, void* target,
                   const char* text, uint32_t len);
 
+// Build the sanitized replacement that te_paste() would apply. The returned
+// `out_text` is allocated with mem_alloc(MEM_CAT_TEMP); caller owns mem_free().
+bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
+                                  const char* text, uint32_t len,
+                                  char** out_text, uint32_t* out_len,
+                                  uint32_t* out_start, uint32_t* out_end);
+
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 //
 // Composition lifecycle (mirrors the DOM CompositionEvent contract):
@@ -190,6 +197,16 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
 void te_ime_commit(DomElement* elem, DocState* state, void* target,
                    const char* committed, uint32_t len);
 void te_ime_cancel(DomElement* elem);
+
+// Split form IME commit into reusable phases so the unified editing
+// dispatcher can own beforeinput/input while text_edit keeps preedit cleanup
+// and text-control selection math.
+bool te_ime_commit_prepare(DomElement* elem, DocState* state,
+                           const char* committed, uint32_t len,
+                           uint32_t* out_start, uint32_t* out_end,
+                           bool* out_should_mutate);
+void te_ime_commit_finish(DomElement* elem, const char* committed,
+                          uint32_t len);
 
 // True when an IME composition is in progress on `elem`.
 bool te_ime_is_composing(DomElement* elem);

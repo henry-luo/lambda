@@ -757,6 +757,17 @@ For WPT:
   form `input`. This keeps the text-control value store and history logic in
   `text_edit.cpp`, but removes the old direct event/mutation coupling for the
   keyboard/text-input paths.
+- Keyboard paste now uses the same dispatch surface via
+  `dispatch_form_text_paste()`. Paste sanitization and maxlength clamping stay
+  in `text_edit.cpp` through `te_prepare_paste_replacement()`, so behavior is
+  preserved while the event order is unified.
+- Form IME commit now has the same split: `text_edit.cpp` owns preedit cleanup,
+  selection-to-byte-range calculation, and `compositionend`, while
+  `radiant_dispatch_form_text_ime_commit()` in `event.cpp` routes the committed
+  text through the shared `beforeinput`/mutation/`input` transaction.
+- Native form context-menu Cut/Delete/Paste now uses edit hooks supplied by
+  `event.cpp`, so menu ownership/rendering stays in `context_menu.cpp` while
+  mutations enter the same unified form replacement/paste transaction.
 
 ---
 
