@@ -1,6 +1,8 @@
 #pragma once
 
-#include "render.hpp"
+typedef struct ImageSurface ImageSurface;
+typedef struct UiContext UiContext;
+typedef struct ViewTree ViewTree;
 
 typedef enum RenderOutputKind {
     RENDER_OUTPUT_SCREEN,
@@ -28,13 +30,7 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
                                const char* output_file);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
-int render_output_render_html_file_to_target(const char* html_file,
-                                             RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
                                  float scale, float pixel_ratio,
                                  int jpeg_quality);
-void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
-                                    const char* output_file,
-                                    int total_width, int total_height);

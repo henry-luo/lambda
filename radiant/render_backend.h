@@ -23,8 +23,8 @@ typedef struct PaintEffectGroup PaintEffectGroup;
 struct RenderBackend {
     void* ctx;   // backend-specific context (SvgRenderContext*, PdfRenderContext*, etc.)
 
-    // Optional full-node overrides. Raster screen rendering uses these while
-    // legacy block/text helpers are migrated behind this shared walker.
+    // Optional full-node overrides. Raster screen rendering uses these for
+    // specialized block and inline paths behind the shared walker.
     // Backends that leave these null use the generic callbacks below.
     void (*render_block)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
                          FontBox* font, Color color);

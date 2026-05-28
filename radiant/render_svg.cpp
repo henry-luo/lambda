@@ -1969,7 +1969,7 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
                                                    svg_width, svg_height, doc->state);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
-                printf("Successfully rendered HTML to SVG: %s\n", svg_file);
+                log_info("Successfully rendered HTML to SVG: %s", svg_file);
                 mem_free(svg_content);
                 url_destroy(cwd);
                 ui_context_cleanup(&ui_context);

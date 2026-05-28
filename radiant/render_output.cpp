@@ -1,9 +1,11 @@
 #include "render_output.hpp"
 #include "layout.hpp"
+#include "render.hpp"
 #include "render_backend_caps.hpp"
 #include "display_list_replay.hpp"
 #include "render_img.hpp"
 #include "render_overlay.hpp"
+#include "render_pdf.hpp"
 #include "render_profiler.hpp"
 #include "render_raster.hpp"
 #include "render_svg.hpp"
@@ -24,14 +26,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int render_html_to_png(const char* html_file, const char* png_file,
-                       int viewport_width, int viewport_height,
-                       float scale, float pixel_ratio);
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality,
-                        int viewport_width, int viewport_height,
-                        float scale, float pixel_ratio);
-int render_html_to_pdf(const char* html_file, const char* pdf_file,
-                       int viewport_width, int viewport_height, float scale);
 static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
 static int g_render_pool_threads = 0;
@@ -46,6 +40,14 @@ typedef struct RenderOutputReplayResult {
     int tile_count;
     int thread_count;
 } RenderOutputReplayResult;
+
+static int render_output_render_html_file_to_target(const char* html_file,
+                                                    RenderOutputTarget* target);
+static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
+                                          const char* output_file);
+static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+                                           const char* output_file,
+                                           int total_width, int total_height);
 
 static void init_render_pool_once() {
     g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER);
@@ -501,8 +503,8 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
     return 1;
 }
 
-int render_output_render_html_file_to_target(const char* html_file,
-                                             RenderOutputTarget* target) {
+static int render_output_render_html_file_to_target(const char* html_file,
+                                                    RenderOutputTarget* target) {
     if (!html_file || !target || !target->output_file) {
         log_error("render_output_render_html_file_to_target: invalid file render job");
         return 1;
@@ -564,7 +566,7 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
     return render_output_render_html_file_to_target(html_file, &target);
 }
 
-void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.surface = uicon ? uicon->surface : nullptr;
@@ -588,9 +590,9 @@ void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const 
  * Streaming rows into libpng keeps peak pixel memory bounded by the strip
  * height rather than the full page height.
  */
-void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
-                                    const char* output_file,
-                                    int total_width, int total_height) {
+static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
+                                           const char* output_file,
+                                           int total_width, int total_height) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -748,4 +750,15 @@ void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] render_output_render_tiled_png total: %.1fms (%dx%d)",
         duration<double, std::milli>(t_end - t_start).count(), total_width, total_height);
+}
+
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+    render_output_render_html_doc(uicon, view_tree, output_file);
+}
+
+void render_html_doc_tiled(UiContext* uicon, ViewTree* view_tree,
+                           const char* output_file,
+                           int total_width, int total_height) {
+    render_output_render_tiled_png(uicon, view_tree, output_file,
+                                   total_width, total_height);
 }

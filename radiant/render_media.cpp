@@ -115,7 +115,7 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
     return true;
 }
 
-void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embed->img) return;
 
     log_debug("render image content");

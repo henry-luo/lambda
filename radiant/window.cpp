@@ -638,8 +638,6 @@ void repaint_window() {
 }
 
 void render(GLFWwindow* window) {
-    double start = glfwGetTime();
-
     // get window size
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
@@ -772,9 +770,6 @@ void render(GLFWwindow* window) {
 
     // repaint to screen
     repaint_window();
-
-    double end = glfwGetTime();
-    // log_debug("Render time: %.4f ms", (end - start) * 1000);
 
     // Swap front and back buffers
     glfwSwapBuffers(window);

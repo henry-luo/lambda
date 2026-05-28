@@ -2222,7 +2222,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
                                                    pdf_width, pdf_height);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
-                printf("Successfully rendered HTML to PDF: %s\\n", pdf_file);
+                log_info("Successfully rendered HTML to PDF: %s", pdf_file);
                 HPDF_Free(pdf_doc);
                 url_destroy(cwd);
                 ui_context_cleanup(&ui_context);

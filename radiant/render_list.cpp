@@ -1,7 +1,6 @@
 #include "render_list.hpp"
 #include "render.hpp"
 #include "render_glyph.hpp"
-#include "render_img.hpp"
 #include "render_media.hpp"
 
 #include "../lib/tagged.hpp"

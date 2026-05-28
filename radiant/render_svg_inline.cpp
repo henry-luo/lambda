@@ -4698,8 +4698,8 @@ static void svg_subscene_append_color_attr(StrBuf* out, const char* name, Color 
     strbuf_append_char(out, '"');
 }
 
-bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
-                      StrBuf* out, int indent_level) {
+static bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
+                                       StrBuf* out, int indent_level) {
     if (!subscene || !subscene->svg_root || !out) return false;
 
     svg_subscene_indent(out, indent_level);
@@ -4743,8 +4743,8 @@ bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
     return true;
 }
 
-void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
-                      DisplayList* dl) {
+static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
+                                                DisplayList* dl) {
     if (!subscene || !subscene->svg_root || !dl) return;
 
     Pool* temp_pool = pool_create();
@@ -4794,7 +4794,7 @@ void render_svg_inline_register_paint_ir_lowerers(void) {
                                             render_svg_subscene_to_svg);
 }
 
-void render_svg_to_display_list(Element* svg_element, float viewport_width, float viewport_height,
+static void render_svg_to_display_list(Element* svg_element, float viewport_width, float viewport_height,
                        Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,

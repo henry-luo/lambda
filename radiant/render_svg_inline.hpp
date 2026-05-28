@@ -6,7 +6,7 @@
  * element trees into the shared painter recording path.
  *
  * Key functions:
- * - render_svg_to_display_list(): Convert SVG Element tree to painter commands
+ * - render_svg_build_subscene(): Capture an SVG Element tree for export lowering
  * - render_inline_svg(): Render SVG block in document context
  */
 
@@ -16,7 +16,6 @@
 #include "paint_ir.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
-#include "../lib/strbuf.h"
 
 struct FontContext;  // forward declaration from lib/font/font.h
 typedef struct RenderContext RenderContext;
@@ -111,36 +110,6 @@ extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
  */
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
 
-/**
- * Render SVG element tree into painter commands targeting a display list.
- * No ThorVG scene tree is constructed for native shapes.
- *
- * @param svg_element The <svg> Element from HTML5 parser
- * @param viewport_width Target rendering width (CSS pixels)
- * @param viewport_height Target rendering height (CSS pixels)
- * @param pool Memory pool for allocations
- * @param pixel_ratio Device pixel ratio (for text size adjustment)
- * @param font_ctx Font context for SVG text rendering (may be nullptr)
- * @param base_transform Optional transform to apply to the entire SVG
- * @param dl Required display-list target
- * @param paint_list Required PaintIR scratch list used before raster lowering
- */
-void render_svg_to_display_list(Element* svg_element,
-                      float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio,
-                      FontContext* font_ctx,
-                      const RdtMatrix* base_transform,
-                      DisplayList* dl,
-                      const Color* initial_current_color,
-                      const Color* initial_fill_color,
-                      const char* source_path,
-                      float initial_opacity,
-                      bool initial_fill_none,
-                      const Color* initial_stroke_color,
-                      bool initial_stroke_none,
-                      float initial_stroke_width,
-                      PaintList* paint_list);
-
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
                       float viewport_width, float viewport_height,
@@ -156,12 +125,6 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       const Color* initial_stroke_color,
                       bool initial_stroke_none,
                       float initial_stroke_width);
-
-void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
-                      DisplayList* dl);
-
-bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene,
-                      StrBuf* out, int indent_level);
 
 void render_svg_inline_register_paint_ir_lowerers(void);
 
