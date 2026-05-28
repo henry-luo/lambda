@@ -325,6 +325,11 @@ Acceptance:
 Goal: decide whether to implement broader test262 host facilities that are not
 required for ordinary Lambda script execution.
 
+Decision: for Js48, LambdaJS does not claim cross-realm host support or
+browser-specific Annex B host quirks. The js262 runner treats `cross-realm`,
+`IsHTMLDDA`, and `caller` as intentional scope exceptions with dedicated skip
+messages. `host-gc-required` remains a separate generic harness-capability skip.
+
 Current relevant skipped features:
 
 - `cross-realm`: 183 tests.
@@ -342,7 +347,8 @@ Proposal:
 
 Acceptance:
 
-- Explicit scope decision.
+- Explicit scope decision. Done for Js48: cross-realm, `IsHTMLDDA`, and
+  `caller` are intentional host-scope exceptions.
 - No silent conflation with ES2021 core support.
 
 ## 5. Async Performance Investigation

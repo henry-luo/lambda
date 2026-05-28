@@ -134,6 +134,9 @@ static bool g_use_stripped = false;  // use comment-stripped test files from TES
 // Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> INTENTIONAL_ES2021_EXCEPTIONS = {
     "tail-call-optimization",                     // PTC is spec-era ES2015, but not part of LambdaJS Js48 claim
+    "cross-realm",                                // Requires $262.createRealm(); out of Js48 LambdaJS host scope
+    "IsHTMLDDA",                                  // Browser-specific document.all behavior
+    "caller",                                     // Annex B Function.prototype.caller web-compat behavior
 };
 
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
@@ -220,11 +223,8 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "await-dictionary",                           // Await dictionary
     "legacy-regexp",                              // Legacy RegExp features
 
-    // === Test harness / Annex B / host features ===
-    "IsHTMLDDA",                                  // document.all behavior
+    // === Test harness / host features ===
     "host-gc-required",                           // Requires $262.gc()
-    "cross-realm",                                // Requires $262.createRealm()
-    "caller",                                     // Function.prototype.caller (Annex B)
 };
 
 static std::string trim_skip_list_field(const std::string& text) {
@@ -829,6 +829,15 @@ static std::string unsupported_feature_skip_message(const Test262Metadata& meta)
         if (INTENTIONAL_ES2021_EXCEPTIONS.count(f)) {
             if (f == "tail-call-optimization") {
                 return "intentional PTC exception";
+            }
+            if (f == "cross-realm") {
+                return "intentional cross-realm host exception";
+            }
+            if (f == "IsHTMLDDA") {
+                return "intentional browser IsHTMLDDA exception";
+            }
+            if (f == "caller") {
+                return "intentional Annex B caller exception";
             }
             return std::string("intentional ES2021 exception: ") + f;
         }
