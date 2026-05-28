@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 
+int js_dynamic_import_suppress_module_drain = 0;
 
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -583,8 +584,11 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         return (Item){.item = ITEM_ERROR};
     }
 
-    // v14: initialize event loop before execution
-    js_event_loop_init();
+    // v14: initialize event loop before execution. Dynamic import runs inside
+    // an active script, so preserve the caller's pending PromiseJobs.
+    if (js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_init();
+    }
 
     // Set up DOM document context if available
     if (runtime->dom_doc) {
@@ -638,8 +642,13 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     log_mem_stage("js-core: js_main_done");
 
     // v14: drain the event loop while JIT module is still alive
-    // (MIR_finish below destroys compiled code, so timers must fire here)
-    js_event_loop_drain();
+    // (MIR_finish below destroys compiled code, so timers must fire here).
+    // Dynamic import loads modules from inside an already-running script; if the
+    // nested module drains the global microtask queue, outer async-generator
+    // Promise jobs can run with the imported module's temporary context active.
+    if (js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_drain();
+    }
     if (runtime->dom_doc) {
         // Headless Radiant layout has no frame clock; flush a bounded number
         // of requestAnimationFrame ticks before the JS heap/context are
@@ -1008,8 +1017,15 @@ extern "C" Item js_dynamic_import(Item specifier) {
         return js_dynamic_import_reject_type_error("import() requires a non-empty specifier");
     }
 
-    // Reuse require() logic to load the module synchronously
+    // Reuse require() logic to load the module synchronously. Defer microtask
+    // draining to the outer script so import() Promise reactions run in the
+    // caller's active runtime context.
+    js_dynamic_import_suppress_module_drain++;
     Item ns = js_require(specifier_string);
+    js_dynamic_import_suppress_module_drain--;
+    if (js_check_exception()) {
+        return js_promise_reject(js_clear_exception());
+    }
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);

@@ -9663,15 +9663,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-    if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
-    MIR_reg_t args_top = jm_call_0(mt, "js_args_save", MIR_T_I64);
-    MIR_reg_t saved_callee_index = jm_new_reg(mt, "callee_index", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
-        MIR_new_reg_op(mt->ctx, saved_callee_index),
-        MIR_new_reg_op(mt->ctx, args_top),
-        MIR_new_int_op(mt->ctx, (int64_t)arg_count + 1)));
-    MIR_reg_t saved_callee = jm_call_1(mt, "js_args_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_callee_index));
+    MIR_reg_t saved_callee;
+    if (callee_spill_slot >= 0) {
+        jm_gen_spill_load(mt, callee, callee_spill_slot);
+        saved_callee = callee;
+    } else {
+        MIR_reg_t args_top = jm_call_0(mt, "js_args_save", MIR_T_I64);
+        MIR_reg_t saved_callee_index = jm_new_reg(mt, "callee_index", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+            MIR_new_reg_op(mt->ctx, saved_callee_index),
+            MIR_new_reg_op(mt->ctx, args_top),
+            MIR_new_int_op(mt->ctx, (int64_t)arg_count + 1)));
+        saved_callee = jm_call_1(mt, "js_args_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_callee_index));
+    }
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, saved_callee),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),

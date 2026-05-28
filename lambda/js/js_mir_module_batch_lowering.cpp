@@ -2959,6 +2959,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
                         jm_collect_visible_function_scope_names(pfn->body, parent->is_strict, body_locals, true);
+                        jm_collect_enclosing_lexicals_for_target(pfn->body,
+                            (JsAstNode*)child->node, body_locals);
                         size_t bl_iter = 0;
                         void* bl_item;
                         while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
@@ -5618,6 +5620,7 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
+    extern int js_dynamic_import_suppress_module_drain;
     Runtime* prev_source_runtime = js_source_runtime;
     js_source_runtime = runtime;
 
@@ -5705,9 +5708,13 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     Item prev_namespace = js_set_active_module_namespace(namespace_obj);
     Item* module_vars = js_alloc_module_vars();
     js_set_active_module_vars(module_vars);
-    js_event_loop_init();
+    if (js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_init();
+    }
     namespace_obj = js_main((Context*)context);
-    js_event_loop_drain();
+    if (js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_drain();
+    }
     js_set_active_module_vars(prev_module_vars);
     js_set_active_module_namespace(prev_namespace);
 

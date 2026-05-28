@@ -27204,6 +27204,7 @@ static Item js_all_resolve_element(Item counter_obj, Item index_item, Item resul
 static Item js_all_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static Item js_any_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
+static Item js_any_reject_element_capability(Item counter_obj, Item index_item, Item reject, Item reason);
 static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value);
 static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason);
 static bool js_invoke_promise_then(Item elem, Item resolve_fn, Item reject_fn, Item* out_error);
@@ -27599,6 +27600,12 @@ static void js_promise_mark_anonymous_builtin(Item fn_item) {
     js_mark_non_enumerable(fn_item, name_key);
 }
 
+static Item js_promise_bind_element_function(Item handler, Item* bound_args, int bound_argc) {
+    Item fn = js_bind_function(handler, ItemNull, bound_args, bound_argc);
+    js_promise_mark_anonymous_builtin(fn);
+    return fn;
+}
+
 static Item js_promise_default_constructor(void) {
     return js_get_constructor((Item){.item = s2it(heap_create_name("Promise", 7))});
 }
@@ -27861,20 +27868,21 @@ static Item js_promise_combinator_iterable_with_constructor(
         return promise;
     }
 
-    JsPromise* native_result = js_alloc_promise();
-    if (!native_result) return promise;
-    Item native_item = js_promise_to_item(native_result);
-    js_promise_forward_native_to_capability(native_item, resolve, reject);
+    JsPromise* native_result = NULL;
+    Item native_item = ItemNull;
+    if (kind != 2 && kind != 3) {
+        native_result = js_alloc_promise();
+        if (!native_result) return promise;
+        native_item = js_promise_to_item(native_result);
+        js_promise_forward_native_to_capability(native_item, resolve, reject);
+    }
 
     Item resolving_state = ItemNull;
     Item native_resolve_fn = ItemNull;
     Item native_reject_fn = ItemNull;
     if (kind == 3) {
-        resolving_state = js_promise_make_resolving_state(native_result);
-        Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
-        Item reject_base = js_new_function((void*)js_reject_callback, 2);
-        native_resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
-        native_reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
+        native_resolve_fn = resolve;
+        native_reject_fn = reject;
     }
 
     Item counter = ItemNull;
@@ -27932,27 +27940,23 @@ static Item js_promise_combinator_iterable_with_constructor(
         if (kind == 0) {
             Item fulfill_handler = js_new_function((void*)js_all_resolve_element, 4);
             Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            fulfill_fn = js_promise_bind_element_function(fulfill_handler, fulfill_args, 3);
 
-            Item reject_handler = js_new_function((void*)js_all_reject_element, 4);
-            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            reject_fn = reject;
         } else if (kind == 1) {
             Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
             Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            fulfill_fn = js_promise_bind_element_function(fulfill_handler, fulfill_args, 3);
 
             Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
             Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            reject_fn = js_promise_bind_element_function(reject_handler, reject_args, 3);
         } else {
-            Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
-            Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            fulfill_fn = resolve;
 
-            Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
-            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            Item reject_handler = js_new_function((void*)js_any_reject_element_capability, 4);
+            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, reject};
+            reject_fn = js_promise_bind_element_function(reject_handler, reject_args, 3);
         }
 
         Item error = ItemNull;
@@ -27969,7 +27973,7 @@ static Item js_promise_combinator_iterable_with_constructor(
         int remaining = (int)it2i(js_property_get(counter, (Item){.item = s2it(heap_create_name("remaining", 9))})) - 1;
         js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(remaining)});
         if (remaining == 0) {
-            if (kind == 2) js_promise_settle(native_result, JS_PROMISE_REJECTED, js_promise_make_aggregate_error(values_arr));
+            if (kind == 2) js_promise_call_capability_reject(reject, js_promise_make_aggregate_error(values_arr));
             else js_promise_settle(native_result, JS_PROMISE_FULFILLED, values_arr);
         }
     }
@@ -27983,7 +27987,7 @@ static Item js_promise_combinator_with_constructor(Item constructor, Item iterab
     Item promise = js_promise_new_capability(constructor, &resolve, &reject);
     if (js_check_exception()) return ItemNull;
 
-    if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
+    if (!js_promise_is_builtin_promise_constructor(constructor) || get_type_id(iterable) != LMD_TYPE_ARRAY) {
         return js_promise_combinator_iterable_with_constructor(constructor, iterable, kind, promise, resolve, reject);
     }
 
@@ -28453,6 +28457,27 @@ static Item js_any_reject_element(Item counter_obj, Item index_item, Item result
     if (remaining == 0) {
         JsPromise* result = js_get_promise(result_item);
         if (result) js_promise_settle(result, JS_PROMISE_REJECTED, js_promise_make_aggregate_error(errors));
+    }
+    return ItemNull;
+}
+
+static Item js_any_reject_element_capability(Item counter_obj, Item index_item, Item reject, Item reason) {
+    if (!js_promise_element_mark_called(counter_obj, index_item)) return ItemNull;
+
+    String* k_remaining = heap_create_name("remaining", 9);
+    String* k_errors = heap_create_name("errors", 6);
+
+    Item errors = js_property_get(counter_obj, (Item){.item = s2it(k_errors)});
+    int idx = (int)it2i(index_item);
+    if (get_type_id(errors) == LMD_TYPE_ARRAY && idx < errors.array->length) {
+        errors.array->items[idx] = reason;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
+    js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
+
+    if (remaining == 0) {
+        js_promise_call_capability_reject(reject, js_promise_make_aggregate_error(errors));
     }
     return ItemNull;
 }
