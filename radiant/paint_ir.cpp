@@ -1306,7 +1306,7 @@ static bool paint_svg_caps_allow_opacity_group(const RenderExportTargetCaps* cap
                                                const PaintEffectGroup* group) {
     if (!caps || !caps->opacity_groups || !group) return false;
     return !group->has_clip &&
-           !group->has_transform &&
+           (!group->has_transform || caps->transforms) &&
            group->blend_mode == 0 &&
            group->filter == nullptr &&
            !group->backdrop &&
@@ -1729,11 +1729,14 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                 break;
             }
             paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "<g");
             if (p->opacity < 0.9995f) {
-                strbuf_append_format(out, "<g opacity=\"%.4f\">\n", p->opacity);
-            } else {
-                strbuf_append_str(out, "<g>\n");
+                strbuf_append_format(out, " opacity=\"%.4f\"", p->opacity);
             }
+            if (p->has_transform) {
+                paint_svg_append_matrix_attr(out, &p->transform);
+            }
+            strbuf_append_str(out, ">\n");
             open_effect_depth++;
             indent_level++;
             active_stats->emitted_count++;

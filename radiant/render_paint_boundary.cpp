@@ -1,5 +1,6 @@
 #include "render_paint_boundary.hpp"
 #include "../lambda/input/css/css_value.hpp"
+#include <math.h>
 
 static bool boundary_has_radius(const BorderProp* border) {
     if (!border) return false;
@@ -215,5 +216,92 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
         boundary_emit_border_side(paint_list, x, y,
                                   border->width.left, height, border->left_color);
     }
+    return true;
+}
+
+static bool boundary_copy_gradient_stops(GradientStop* src, int src_count,
+                                         RdtGradientStop* stops, int stop_capacity,
+                                         int* out_count) {
+    if (!src || src_count < 2 || !stops || stop_capacity < src_count) return false;
+    for (int i = 0; i < src_count; i++) {
+        GradientStop* stop = &src[i];
+        float pos = stop->position >= 0.0f
+            ? stop->position
+            : (src_count > 1 ? (float)i / (float)(src_count - 1) : 0.0f);
+        stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
+    }
+    if (out_count) *out_count = src_count;
+    return true;
+}
+
+bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float y,
+                                                 RdtGradientStop* stops,
+                                                 int stop_capacity,
+                                                 BoundaryLinearGradientPaint* out) {
+    if (!view || !view->bound || !view->bound->background || !out) return false;
+    BackgroundProp* bg = view->bound->background;
+    LinearGradient* gradient = bg->linear_gradient;
+    if (bg->gradient_type != GRADIENT_LINEAR || !gradient) return false;
+    if (view->width <= 0.0f || view->height <= 0.0f) return false;
+
+    int stop_count = 0;
+    if (!boundary_copy_gradient_stops(gradient->stops, gradient->stop_count,
+                                      stops, stop_capacity, &stop_count)) {
+        return false;
+    }
+
+    RdtPath* path = rdt_path_new();
+    if (!path) return false;
+    rdt_path_add_rect(path, x, y, view->width, view->height, 0.0f, 0.0f);
+
+    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
+    float dx = sinf(angle_rad);
+    float dy = -cosf(angle_rad);
+    float half_w = view->width * 0.5f;
+    float half_h = view->height * 0.5f;
+    float center_x = x + half_w;
+    float center_y = y + half_h;
+    float abs_dx = fabsf(dx);
+    float abs_dy = fabsf(dy);
+    float dist = (abs_dx * view->height < abs_dy * view->width)
+        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+
+    out->path = path;
+    out->x1 = center_x - dx * dist;
+    out->y1 = center_y - dy * dist;
+    out->x2 = center_x + dx * dist;
+    out->y2 = center_y + dy * dist;
+    out->stops = stops;
+    out->stop_count = stop_count;
+    return true;
+}
+
+bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float y,
+                                                 RdtGradientStop* stops,
+                                                 int stop_capacity,
+                                                 BoundaryRadialGradientPaint* out) {
+    if (!view || !view->bound || !view->bound->background || !out) return false;
+    BackgroundProp* bg = view->bound->background;
+    RadialGradient* gradient = bg->radial_gradient;
+    if (bg->gradient_type != GRADIENT_RADIAL || !gradient) return false;
+    if (view->width <= 0.0f || view->height <= 0.0f) return false;
+
+    int stop_count = 0;
+    if (!boundary_copy_gradient_stops(gradient->stops, gradient->stop_count,
+                                      stops, stop_capacity, &stop_count)) {
+        return false;
+    }
+
+    RdtPath* path = rdt_path_new();
+    if (!path) return false;
+    rdt_path_add_rect(path, x, y, view->width, view->height, 0.0f, 0.0f);
+
+    out->path = path;
+    out->cx = x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f);
+    out->cy = y + (gradient->cy_set ? gradient->cy * view->height : view->height * 0.5f);
+    out->r = (view->width < view->height ? view->width : view->height) * 0.5f;
+    out->stops = stops;
+    out->stop_count = stop_count;
     return true;
 }

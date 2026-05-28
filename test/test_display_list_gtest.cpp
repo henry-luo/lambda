@@ -1167,6 +1167,96 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
 }
 
+TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    LinearGradient gradient = {};
+    GradientStop css_stops[2] = {};
+    RdtGradientStop stops[2] = {};
+    BoundaryLinearGradientPaint paint = {};
+
+    view.bound = &bound;
+    view.width = 100.0f;
+    view.height = 50.0f;
+    bound.background = &bg;
+    bg.gradient_type = GRADIENT_LINEAR;
+    bg.linear_gradient = &gradient;
+    gradient.angle = 90.0f;
+    gradient.stop_count = 2;
+    gradient.stops = css_stops;
+    css_stops[0].position = 0.0f;
+    css_stops[0].color.r = 0x10;
+    css_stops[0].color.g = 0x20;
+    css_stops[0].color.b = 0x30;
+    css_stops[0].color.a = 0xff;
+    css_stops[1].position = 1.0f;
+    css_stops[1].color.r = 0x40;
+    css_stops[1].color.g = 0x50;
+    css_stops[1].color.b = 0x60;
+    css_stops[1].color.a = 0xff;
+
+    ASSERT_TRUE(render_paint_boundary_build_linear_gradient(&view, 10.0f, 20.0f,
+                                                            stops, 2, &paint));
+    ASSERT_NE(paint.path, nullptr);
+    EXPECT_FLOAT_EQ(paint.x1, 10.0f);
+    EXPECT_FLOAT_EQ(paint.y1, 45.0f);
+    EXPECT_FLOAT_EQ(paint.x2, 110.0f);
+    EXPECT_FLOAT_EQ(paint.y2, 45.0f);
+    ASSERT_EQ(paint.stop_count, 2);
+    EXPECT_FLOAT_EQ(paint.stops[0].offset, 0.0f);
+    EXPECT_FLOAT_EQ(paint.stops[1].offset, 1.0f);
+    EXPECT_EQ(paint.stops[0].r, 0x10);
+    EXPECT_EQ(paint.stops[1].r, 0x40);
+    rdt_path_free(paint.path);
+}
+
+TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
+    ViewBlock view = {};
+    BoundaryProp bound = {};
+    BackgroundProp bg = {};
+    RadialGradient gradient = {};
+    GradientStop css_stops[2] = {};
+    RdtGradientStop stops[2] = {};
+    BoundaryRadialGradientPaint paint = {};
+
+    view.bound = &bound;
+    view.width = 120.0f;
+    view.height = 80.0f;
+    bound.background = &bg;
+    bg.gradient_type = GRADIENT_RADIAL;
+    bg.radial_gradient = &gradient;
+    gradient.cx_set = true;
+    gradient.cy_set = true;
+    gradient.cx = 0.25f;
+    gradient.cy = 0.75f;
+    gradient.stop_count = 2;
+    gradient.stops = css_stops;
+    css_stops[0].position = -1.0f;
+    css_stops[0].color.r = 0x01;
+    css_stops[0].color.g = 0x02;
+    css_stops[0].color.b = 0x03;
+    css_stops[0].color.a = 0xff;
+    css_stops[1].position = -1.0f;
+    css_stops[1].color.r = 0x04;
+    css_stops[1].color.g = 0x05;
+    css_stops[1].color.b = 0x06;
+    css_stops[1].color.a = 0xff;
+
+    ASSERT_TRUE(render_paint_boundary_build_radial_gradient(&view, 5.0f, 7.0f,
+                                                            stops, 2, &paint));
+    ASSERT_NE(paint.path, nullptr);
+    EXPECT_FLOAT_EQ(paint.cx, 35.0f);
+    EXPECT_FLOAT_EQ(paint.cy, 67.0f);
+    EXPECT_FLOAT_EQ(paint.r, 40.0f);
+    ASSERT_EQ(paint.stop_count, 2);
+    EXPECT_FLOAT_EQ(paint.stops[0].offset, 0.0f);
+    EXPECT_FLOAT_EQ(paint.stops[1].offset, 1.0f);
+    EXPECT_EQ(paint.stops[0].b, 0x03);
+    EXPECT_EQ(paint.stops[1].b, 0x06);
+    rdt_path_free(paint.path);
+}
+
 TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
     char tok = 0;
     RdtPath* path = (RdtPath*)&tok;
@@ -1648,6 +1738,41 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsOpacityEffectGroup) {
     EXPECT_EQ(stats.emitted_count, 3);
     EXPECT_EQ(stats.unsupported_count, 0);
     EXPECT_NE(strstr(out->str, "<g opacity=\"0.6250\">\n"), nullptr);
+    EXPECT_NE(strstr(out->str,
+        "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
+        nullptr);
+    EXPECT_NE(strstr(out->str, "</g>"), nullptr);
+
+    strbuf_free(out);
+}
+
+TEST_F(PaintIrParityTest, SvgLoweringEmitsTransformedOpacityEffectGroup) {
+    PaintEffectGroup group = {};
+    group.opacity = 0.5f;
+    group.has_transform = true;
+    group.transform = rdt_matrix_translate(10.0f, 12.0f);
+    Color fill_color = {};
+    fill_color.r = 7;
+    fill_color.g = 8;
+    fill_color.b = 9;
+    fill_color.a = 255;
+
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 1.0f, 2.0f, 3.0f, 4.0f, fill_color);
+    paint_end_effect_group(&pl);
+
+    StrBuf* out = strbuf_new();
+    ASSERT_NE(out, nullptr);
+
+    PaintSvgLoweringStats stats = {};
+    paint_ir_lower_svg(&pl, out, nullptr, &stats);
+
+    EXPECT_EQ(stats.command_count, 3);
+    EXPECT_EQ(stats.emitted_count, 3);
+    EXPECT_EQ(stats.unsupported_count, 0);
+    EXPECT_NE(strstr(out->str,
+        "<g opacity=\"0.5000\" transform=\"matrix(1 0 0 1 10 12)\">\n"),
+        nullptr);
     EXPECT_NE(strstr(out->str,
         "  <rect x=\"1.00\" y=\"2.00\" width=\"3.00\" height=\"4.00\" fill=\"rgb(7,8,9)\" />"),
         nullptr);
