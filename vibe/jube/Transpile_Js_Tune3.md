@@ -231,6 +231,49 @@ throw body entirely.
   bit-identical results before enabling. Gate behind a flag for the first
   landing.
 
+### 3.3 Measured result (implemented 2026-05-28, vs `release_run_004`) — **KEPT (scoped)**
+
+Implemented the recursive folder `jm_try_fold_const`
+(`js_mir_expression_lowering.cpp`) covering literals, unary `- + ~ !`, binary
+`+ - * / %`, bitwise/shift `& | ^ << >> >>>`, and comparisons
+`=== !== == != < <= > >=`, with exact runtime semantics (ToInt32/ToUint32 via
+the same algorithm as `js_to_int32`; int results required to round-trip through
+double within ±2⁵³ else bail; bails on non-finite results, `-0` from unary
+minus, bigint, and `** && || ??`). Behind env gate `LAMBDA_JS_CONST_FOLD`
+(default on; `=0` disables for A/B).
+
+**Scope decision.** Wired the folder into **`jm_transpile_if` only**, as
+dead-branch elimination: a constant test drops the dead branch entirely
+(guarded by `jm_branch_dead_safe`, a whitelist that admits only
+throw/expression/return/break/continue/block so Annex-B function-declaration
+hoisting can never be lost; `var` hoisting is unaffected since it is a separate
+`jm_collect_body_locals` pre-pass). I **did not** wire folding into
+`jm_transpile_binary`/`jm_transpile_unary` value emission: those functions
+return *raw native* registers (the caller `jm_transpile_box_item` boxes based on
+`jm_get_effective_type`), and matching that native/boxed convention per-op
+proved fragile — an initial attempt produced a `call`-operand type error
+("expected double, got int"). The cluster-E win is entirely in the if-path, so
+general value-folding was dropped for safety and left as a future step.
+
+- **Correctness.** `--baseline-only --batch-only` exited clean; **zero flipped
+  exit codes** across all 34 241 common tests. A differential test (3 780
+  constant `if`-conditions across all ops over a boundary-value operand corpus)
+  reported folded branch-selection == runtime for **all** cases (FAILS=0). Of
+  note: with folding *off* the test surfaced a pre-existing literal-native
+  comparison quirk for values in (2³¹, 2³²) (e.g. `0 < 4294967295` returning
+  false); the folder computes these spec-correctly, and no test flipped.
+- **Performance.** Cluster E (`S11.7.{1,2,3}_A4`, 12 tests) fell
+  **6.14 s → 4.16 s (−1.98 s, −32.2 %)**. The control group (everything else)
+  moved −12.8 % this run (quieter machine + likely some broad dead-branch wins);
+  difference-in-differences (ratio **0.78**) attributes ~**−22 %** to the change
+  on cluster E — beyond the ~15 % noise band. Predicted −2…−3 s; measured
+  ≈ −1.4…−2 s real. The broad-average "general benefit" the proposal hoped for
+  is *not* realised here, since value-folding was scoped out.
+
+Verdict: clears the bar (zero correctness regression, beyond-noise cluster-E
+win). Kept. Follow-up: revisit general binary/unary value-folding by emitting
+results in the native/boxed convention `jm_transpile_box_item` expects.
+
 ---
 
 ## 4. The eval-loop tail (clusters C, J) — deferred to Tune2 §3 follow-up

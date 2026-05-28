@@ -1431,6 +1431,126 @@ static bool jm_match_decimal_to_percent_hex_call(JsAstNode* node, JsAstNode** n_
 }
 
 // Binary expression: native arithmetic fast path + boxed fallback
+// JS ToInt32 — replicates js_to_int32 (js_runtime_value.cpp) for compile-time folding.
+static int32_t jm_fold_to_int32(double d) {
+    if (!isfinite(d) || d == 0.0) return 0;
+    double d2 = fmod(trunc(d), 4294967296.0);
+    if (d2 < 0) d2 += 4294967296.0;
+    return (d2 >= 2147483648.0) ? (int32_t)(d2 - 4294967296.0) : (int32_t)d2;
+}
+// ToUint32 is ToInt32's bit pattern reinterpreted as unsigned.
+static uint32_t jm_fold_to_uint32(double d) { return (uint32_t)jm_fold_to_int32(d); }
+
+bool jm_const_fold_enabled() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* e = getenv("LAMBDA_JS_CONST_FOLD");
+        cached = (e && e[0] == '0') ? 0 : 1;  // on by default; LAMBDA_JS_CONST_FOLD=0 disables
+    }
+    return cached != 0;
+}
+
+bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            if (lit->is_bigint) return false;
+            double v = lit->value.number_value;
+            if (!isfinite(v)) return false;
+            out->kind = JS_FOLD_NUM;
+            out->num = v;
+            // mirror jm_get_effective_type's int/float classification for a number literal
+            out->is_float = lit->has_decimal ||
+                !(v == (double)(int64_t)v && v >= -36028797018963968.0 && v <= 36028797018963967.0);
+            return true;
+        }
+        if (lit->literal_type == JS_LITERAL_BOOLEAN) {
+            out->kind = JS_FOLD_BOOL;
+            out->boolean = lit->value.boolean_value;
+            return true;
+        }
+        return false;  // string / null / undefined: not folded
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        JsFoldVal a;
+        switch (un->op) {
+        case JS_OP_MINUS: case JS_OP_SUB:
+            if (!jm_try_fold_const(un->operand, &a) || a.kind != JS_FOLD_NUM) return false;
+            if (a.num == 0.0) return false;  // -0 must stay float; defer to existing literal path
+            { double r = -a.num; if (!isfinite(r)) return false;
+              out->kind = JS_FOLD_NUM; out->num = r; out->is_float = a.is_float; return true; }
+        case JS_OP_PLUS: case JS_OP_ADD:
+            if (!jm_try_fold_const(un->operand, &a) || a.kind != JS_FOLD_NUM) return false;
+            *out = a; return true;
+        case JS_OP_BIT_NOT:
+            if (!jm_try_fold_const(un->operand, &a) || a.kind != JS_FOLD_NUM) return false;
+            out->kind = JS_FOLD_NUM; out->num = (double)(~jm_fold_to_int32(a.num)); out->is_float = false; return true;
+        case JS_OP_NOT:
+            if (!jm_try_fold_const(un->operand, &a)) return false;
+            { bool t = (a.kind == JS_FOLD_BOOL) ? a.boolean : (a.num != 0.0);  // operand finite, no NaN
+              out->kind = JS_FOLD_BOOL; out->boolean = !t; return true; }
+        default: return false;
+        }
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        JsFoldVal la, ra;
+        if (!jm_try_fold_const(bin->left, &la) || la.kind != JS_FOLD_NUM) return false;
+        if (!jm_try_fold_const(bin->right, &ra) || ra.kind != JS_FOLD_NUM) return false;
+        double a = la.num, b = ra.num;
+        bool both_int = !la.is_float && !ra.is_float;
+        switch (bin->op) {
+        case JS_OP_ADD: case JS_OP_SUB: case JS_OP_MUL: {
+            double r = (bin->op == JS_OP_ADD) ? a + b : (bin->op == JS_OP_SUB) ? a - b : a * b;
+            if (!isfinite(r)) return false;
+            if (both_int) {
+                // int arithmetic must round-trip exactly to match the runtime's int64 path
+                if (r != (double)(int64_t)r || fabs(r) > 9007199254740992.0) return false;
+                out->is_float = false;
+            } else {
+                out->is_float = true;
+            }
+            out->kind = JS_FOLD_NUM; out->num = r; return true;
+        }
+        case JS_OP_DIV: {
+            double r = a / b; if (!isfinite(r)) return false;
+            out->kind = JS_FOLD_NUM; out->num = r; out->is_float = true; return true;
+        }
+        case JS_OP_MOD: {
+            double r = fmod(a, b); if (!isfinite(r)) return false;
+            out->kind = JS_FOLD_NUM; out->num = r; out->is_float = true; return true;
+        }
+        case JS_OP_BIT_AND: out->kind = JS_FOLD_NUM; out->num = (double)(jm_fold_to_int32(a) & jm_fold_to_int32(b)); out->is_float = false; return true;
+        case JS_OP_BIT_OR:  out->kind = JS_FOLD_NUM; out->num = (double)(jm_fold_to_int32(a) | jm_fold_to_int32(b)); out->is_float = false; return true;
+        case JS_OP_BIT_XOR: out->kind = JS_FOLD_NUM; out->num = (double)(jm_fold_to_int32(a) ^ jm_fold_to_int32(b)); out->is_float = false; return true;
+        case JS_OP_BIT_LSHIFT: {
+            uint32_t r = (uint32_t)jm_fold_to_int32(a) << (jm_fold_to_uint32(b) & 31);
+            out->kind = JS_FOLD_NUM; out->num = (double)(int32_t)r; out->is_float = false; return true;
+        }
+        case JS_OP_BIT_RSHIFT: {
+            int32_t r = jm_fold_to_int32(a) >> (jm_fold_to_uint32(b) & 31);
+            out->kind = JS_FOLD_NUM; out->num = (double)r; out->is_float = false; return true;
+        }
+        case JS_OP_BIT_URSHIFT: {
+            uint32_t r = jm_fold_to_uint32(a) >> (jm_fold_to_uint32(b) & 31);
+            out->kind = JS_FOLD_NUM; out->num = (double)r; out->is_float = false; return true;
+        }
+        case JS_OP_LT: out->kind = JS_FOLD_BOOL; out->boolean = (a <  b); return true;
+        case JS_OP_LE: out->kind = JS_FOLD_BOOL; out->boolean = (a <= b); return true;
+        case JS_OP_GT: out->kind = JS_FOLD_BOOL; out->boolean = (a >  b); return true;
+        case JS_OP_GE: out->kind = JS_FOLD_BOOL; out->boolean = (a >= b); return true;
+        case JS_OP_EQ: case JS_OP_STRICT_EQ: out->kind = JS_FOLD_BOOL; out->boolean = (a == b); return true;
+        case JS_OP_NE: case JS_OP_STRICT_NE: out->kind = JS_FOLD_BOOL; out->boolean = (a != b); return true;
+        default: return false;  // **, &&, ||, ??, in, instanceof: not folded
+        }
+    }
+    default: return false;
+    }
+}
+
 MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (bin->op == JS_OP_ADD) {
         JsAstNode* n_arg = NULL;
