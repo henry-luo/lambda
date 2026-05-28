@@ -844,6 +844,13 @@ Item js_module_get(Item specifier);
 Item js_module_namespace_create(Item exports_map);
 
 /**
+ * Current namespace object for the module being evaluated.
+ */
+Item js_get_active_module_namespace();
+Item js_set_active_module_namespace(Item namespace_obj);
+Item js_get_import_meta();
+
+/**
  * CJS require() — load and execute a module, return its exports.
  * Defined in transpile_js_mir.cpp (needs access to transpiler internals).
  */

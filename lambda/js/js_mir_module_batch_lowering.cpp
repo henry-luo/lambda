@@ -3934,7 +3934,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Module mode: create namespace object to hold exports
     if (mt->is_module) {
-        mt->namespace_reg = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        mt->namespace_reg = jm_call_0(mt, "js_get_active_module_namespace", MIR_T_I64);
     }
 
     // Emit variable bindings for named function declarations (so they can be
@@ -5605,16 +5605,20 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
+    Runtime* prev_source_runtime = js_source_runtime;
+    js_source_runtime = runtime;
 
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: module: failed to create transpiler for '%s'", filename);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
     if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
         log_error("js-mir: module: parse failed for '%s'", filename);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -5623,6 +5627,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -5633,6 +5638,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!ctx) {
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -5640,6 +5646,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!mt) {
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
@@ -5652,6 +5659,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -5665,20 +5673,34 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
         return ItemNull;
     }
 
-    // Execute module — js_main returns the namespace object in module mode
-    // Allocate per-module variable storage and switch to it
-    Item* prev_module_vars = js_get_active_module_vars();
-    Item* module_vars = js_alloc_module_vars();
-    js_set_active_module_vars(module_vars);
-    Item namespace_obj = js_main((Context*)context);
-    js_set_active_module_vars(prev_module_vars);
-
-    // Register the module with its resolved path as key
+    // Execute module — js_main returns the namespace object in module mode.
+    // Register the namespace before execution so dynamic import(self) and simple
+    // circular edges observe the same live namespace object.
     String* spec_str = heap_create_name(filename, strlen(filename));
     Item spec_item = (Item){.item = s2it(spec_str)};
+    Item namespace_obj = js_new_object();
+    js_module_register(spec_item, namespace_obj);
+    Input* module_input = Input::create(context->pool);
+    js_runtime_set_input(module_input);
+
+    // Allocate per-module variable storage and switch to it.
+    Item* prev_module_vars = js_get_active_module_vars();
+    Item prev_namespace = js_set_active_module_namespace(namespace_obj);
+    Item* module_vars = js_alloc_module_vars();
+    js_set_active_module_vars(module_vars);
+    js_event_loop_init();
+    namespace_obj = js_main((Context*)context);
+    js_event_loop_drain();
+    js_set_active_module_vars(prev_module_vars);
+    js_set_active_module_namespace(prev_namespace);
+
+    // Register the module with its resolved path as key. In normal execution
+    // this re-registers the pre-created namespace; if compilation returned a
+    // replacement namespace, keep the cache in sync with that result.
     js_module_register(spec_item, namespace_obj);
 
     // Also register in unified module registry for cross-language access
@@ -5700,6 +5722,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     tp->name_pool = NULL;
     tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
+    js_source_runtime = prev_source_runtime;
 
     return namespace_obj;
 }

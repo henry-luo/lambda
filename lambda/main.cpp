@@ -140,6 +140,7 @@ void clear_persistent_last_error();
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
+Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
@@ -3485,21 +3486,40 @@ int main(int argc, char *argv[]) {
             }
 
             char* script_path = line;
+            char* script_exec_path = line;
             if (*script_path == '\0') continue;
 
-            // support inline source protocol: source:<name>:<length>
+            // support inline source protocol:
+            //   source:<name>:<length>
+            //   source:<name>:<real-path>:<length>
+            // The first field is the stable batch result key; the optional
+            // real-path field is passed to the transpiler for relative module
+            // resolution.
             // reads <length> bytes of JS source directly from stdin
             char* js_source = NULL;
             size_t js_source_len = 0;
             bool inline_source = false;
-            if (strncmp(line, "source:", 7) == 0) {
-                // parse source:<name>:<length>
-                char* name_start = line + 7;
-                char* colon = strrchr(name_start, ':');
-                if (!colon) continue;
-                *colon = '\0';
+            bool inline_module_source = false;
+            const char* source_prefix = NULL;
+            if (strncmp(line, "module-source:", 14) == 0) {
+                source_prefix = line + 14;
+                inline_module_source = true;
+            } else if (strncmp(line, "source:", 7) == 0) {
+                source_prefix = line + 7;
+            }
+            if (source_prefix) {
+                char* name_start = (char*)source_prefix;
+                char* len_colon = strrchr(name_start, ':');
+                if (!len_colon) continue;
+                *len_colon = '\0';
                 script_path = name_start;
-                size_t source_len = (size_t)atol(colon + 1);
+                script_exec_path = script_path;
+                char* path_colon = strrchr(name_start, ':');
+                if (path_colon) {
+                    *path_colon = '\0';
+                    script_exec_path = path_colon + 1;
+                }
+                size_t source_len = (size_t)atol(len_colon + 1);
                 if (source_len == 0 || source_len > 10 * 1024 * 1024) continue; // sanity check
                 js_source = (char*)mem_alloc(source_len + 1, MEM_CAT_SYSTEM);
                 if (!js_source) continue;
@@ -3579,9 +3599,11 @@ int main(int argc, char *argv[]) {
                 if (setjmp(mir_error_jmp) == 0) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
-                        Item res = has_preamble
-                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
-                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
+                        Item res = inline_module_source
+                            ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
+                            : has_preamble
+                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
+                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -3604,9 +3626,11 @@ int main(int argc, char *argv[]) {
             } else {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
-                    Item res = has_preamble
-                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
-                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
+                    Item res = inline_module_source
+                        ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
+                        : has_preamble
+                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
+                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
                     mir_error_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
@@ -3617,9 +3641,11 @@ int main(int argc, char *argv[]) {
                 }
             }
 #else
-            Item res = has_preamble
-                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_path, &preamble)
-                : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_path);
+            Item res = inline_module_source
+                ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
+                : has_preamble
+                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
+                : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
             if (res.item == ITEM_ERROR || js_check_exception()) {
                 result = 1;
             }

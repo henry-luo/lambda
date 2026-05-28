@@ -1724,9 +1724,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             nt_node->base.type = &TYPE_ANY;
             return (JsAstNode*)nt_node;
         }
-        // import.meta — return undefined for now
+        // import.meta
         JsIdentifierNode* meta_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
-        meta_node->name = name_pool_create_len(tp->name_pool, "undefined", 9);
+        meta_node->name = name_pool_create_len(tp->name_pool, "import.meta", 11);
         meta_node->base.type = &TYPE_ANY;
         return (JsAstNode*)meta_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||

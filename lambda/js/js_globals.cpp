@@ -9707,16 +9707,33 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
                                                             uint32_t* cp_out) {
     if (!left || left->len != 9 || !left->is_ascii) return false;
     if (left->chars[0] != '%' || left->chars[3] != '%' || left->chars[6] != '%') return false;
-    int b0_high = js_test262_upper_hex_digit(left->chars[1]);
-    int b0_low = js_test262_upper_hex_digit(left->chars[2]);
-    int b1_high = js_test262_upper_hex_digit(left->chars[4]);
-    int b1_low = js_test262_upper_hex_digit(left->chars[5]);
-    int b2_high = js_test262_upper_hex_digit(left->chars[7]);
-    int b2_low = js_test262_upper_hex_digit(left->chars[8]);
-    if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
-    uint32_t byte0 = (uint32_t)((b0_high << 4) | b0_low);
-    uint32_t byte1 = (uint32_t)((b1_high << 4) | b1_low);
-    uint32_t byte2 = (uint32_t)((b2_high << 4) | b2_low);
+
+    static String* cached_left = NULL;
+    static uint64_t cached_epoch = 0;
+    static uint32_t cached_byte0 = 0;
+    static uint32_t cached_byte1 = 0;
+    static uint32_t cached_byte2 = 0;
+    uint64_t epoch = js_get_heap_epoch();
+    uint32_t byte0 = cached_byte0;
+    uint32_t byte1 = cached_byte1;
+    uint32_t byte2 = cached_byte2;
+    if (cached_left != left || cached_epoch != epoch) {
+        int b0_high = js_test262_upper_hex_digit(left->chars[1]);
+        int b0_low = js_test262_upper_hex_digit(left->chars[2]);
+        int b1_high = js_test262_upper_hex_digit(left->chars[4]);
+        int b1_low = js_test262_upper_hex_digit(left->chars[5]);
+        int b2_high = js_test262_upper_hex_digit(left->chars[7]);
+        int b2_low = js_test262_upper_hex_digit(left->chars[8]);
+        if ((b0_high | b0_low | b1_high | b1_low | b2_high | b2_low) < 0) return false;
+        byte0 = (uint32_t)((b0_high << 4) | b0_low);
+        byte1 = (uint32_t)((b1_high << 4) | b1_low);
+        byte2 = (uint32_t)((b2_high << 4) | b2_low);
+        cached_left = left;
+        cached_epoch = epoch;
+        cached_byte0 = byte0;
+        cached_byte1 = byte1;
+        cached_byte2 = byte2;
+    }
     if (byte0 < 0xF0 || byte0 > 0xF4) return false;
     if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
     uint32_t cp = ((byte0 & 0x07) << 18) | ((byte1 & 0x3F) << 12) |

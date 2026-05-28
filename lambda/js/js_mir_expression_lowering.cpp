@@ -858,6 +858,11 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         return jm_emit_current_new_target(mt);
     }
 
+    // Handle import.meta: ES modules expose a host-created null-prototype object.
+    if (id->name->len == 11 && strncmp(id->name->chars, "import.meta", 11) == 0) {
+        return jm_call_0(mt, "js_get_import_meta", MIR_T_I64);
+    }
+
     // Handle 'undefined' keyword: return JS undefined value
     if (id->name->len == 9 && strncmp(id->name->chars, "undefined", 9) == 0) {
         MIR_reg_t r = jm_new_reg(mt, "undef", MIR_T_I64);

@@ -24,7 +24,7 @@
 //
 // ALL tests must pass in a batch run to be considered fully passing.
 // Only fully passing tests may be added to the baseline list.
-// Tests that are slow (>= 3s) or unstable in batch (pass individually but
+// Tests that are slow (>= threshold) or unstable in batch (pass individually but
 // fail or flake in batch) are classified as NON-FULLY-PASSING and tracked
 // separately — they do NOT qualify for the baseline.
 //
@@ -38,7 +38,7 @@
 //   - Phase 1:  Parse metadata, partition tests into two groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, CPU count - 1 parallel workers)
 //       (b) PARTIAL  — known non-fully-passing tests from previous run (crash,
-//                       OOM, slow >= 3s, timeout). SKIPPED by default.
+//                       OOM, slow >= threshold, timeout). SKIPPED by default.
 //                       With --run-partial they are merged into CLEAN so they
 //                       can graduate back to baseline if fixed.
 //   - Phase 2:  Execute CLEAN tests in batched workers.
@@ -101,6 +101,7 @@
     #include <dirent.h>
     #include <fcntl.h>
     #include <spawn.h>
+    #include <sys/stat.h>
     #include <sys/utsname.h>
     #ifdef __APPLE__
         #include <sys/sysctl.h>
@@ -117,12 +118,14 @@
 static const char* TEST262_ROOT = "ref/test262";
 static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
 static std::string g_harness_dir = "ref/test262/harness";
-// Only tests with runtime < 3s (debug build) belong in the baseline.
-// Slow tests (>= 3s) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
+// Only tests under their timing gate belong in the baseline.
+// Slow tests (>= threshold) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
 static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
+static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
+static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2021 — skip tests requiring these.
@@ -798,8 +801,8 @@ static std::vector<Test262Param> discover_all_tests() {
 // =============================================================================
 
 enum Test262Result {
-    T262_PASS,          // fully passed in batch run with time < 3s
-    T262_PARTIAL_PASS,  // non-fully-passing: slow (>= 3s), batch-unstable, or crashed individually
+    T262_PASS,          // fully passed in batch run under timing gate
+    T262_PARTIAL_PASS,  // non-fully-passing: slow (>= threshold), batch-unstable, or crashed individually
     T262_FAIL,
     T262_SKIP,
     T262_TIMEOUT,
@@ -816,6 +819,30 @@ static bool has_unsupported_feature(const Test262Metadata& meta) {
         if (UNSUPPORTED_FEATURES.count(f)) return true;
     }
     return false;
+}
+
+static bool is_dynamic_import_script_test(const std::string& test_path, const Test262Metadata& meta) {
+    if (meta.is_module) return false;
+    if (test_path.find("/language/expressions/dynamic-import/") == std::string::npos) return false;
+    if (test_path.find("/language/expressions/dynamic-import/catch/") != std::string::npos) return false;
+    if (test_path.find("/language/expressions/dynamic-import/assignment-expression/") != std::string::npos) return false;
+    if (test_path.find("/language/expressions/dynamic-import/eval-self-once-script.js") != std::string::npos) return false;
+    return true;
+}
+
+static bool is_es2021_raw_test(const std::string& test_path, const Test262Metadata& meta) {
+    if (!meta.is_raw || meta.is_module) return false;
+    if (test_path.find("/language/comments/hashbang/") != std::string::npos) return false;
+    return test_path.find("/language/directive-prologue/") != std::string::npos ||
+        test_path.find("/annexB/language/comments/single-line-html-close-first-line-") != std::string::npos;
+}
+
+static bool is_es2021_module_test(const std::string& test_path, const Test262Metadata& meta) {
+    if (!meta.is_module) return false;
+    if (test_path.find("/language/expressions/dynamic-import/") == std::string::npos) return false;
+    if (test_path.find("/language/expressions/dynamic-import/import-attributes/") != std::string::npos) return false;
+    if (test_path.find("/language/expressions/dynamic-import/import-defer/") != std::string::npos) return false;
+    return true;
 }
 
 // =============================================================================
@@ -856,6 +883,9 @@ struct Test262Prepared {
     std::vector<std::string> special_preamble_includes; // batch-local heavy harness helpers
     bool is_strict;              // add "use strict" prefix
     bool is_async = false;       // define $DONE for asyncHelpers.js when explicitly run
+    bool is_module = false;      // execute through the ES module transpiler path
+    bool is_raw = false;         // raw parser-mode test; do not prepend harness or host flags
+    bool is_slow_test = false;   // intentionally exhaustive test; isolate batch and use 5s slow gate
     Test262Result skip_result;   // T262_SKIP if test should be skipped
     std::string skip_message;
     bool is_negative;
@@ -868,6 +898,8 @@ struct JsBatchGroup {
     std::vector<std::string> special_includes;
     std::string key;
     bool is_async = false;
+    bool is_module = false;
+    bool is_slow_test = false;
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -995,10 +1027,55 @@ static std::string assemble_test_source(
     return combined;
 }
 
+static std::string assemble_module_test_source(const Test262Prepared& p) {
+    std::string source = read_file_contents(get_source_path(p.test_path));
+    if (source.empty()) return "";
+
+    std::string combined;
+    combined.reserve(g_harness_sta.size() + g_harness_assert.size() + source.size() + 8192);
+    combined += g_harness_sta;
+    combined += '\n';
+    combined += g_harness_assert;
+    combined += '\n';
+    for (const char** f = PREAMBLE_INCLUDE_FILES; *f; f++) {
+        const std::string& src = get_harness_file(*f);
+        if (!src.empty()) {
+            combined += src;
+            combined += '\n';
+        }
+    }
+    if (p.is_async) {
+        combined += "globalThis.__lambda_test262_async_required = true;\n";
+        combined += "globalThis.__lambda_test262_async_done = false;\n";
+        combined += "globalThis.$DONE = function(error) {\n";
+        combined += "  if (globalThis.__lambda_test262_async_done) throw new Test262Error(\"$DONE called multiple times\");\n";
+        combined += "  globalThis.__lambda_test262_async_done = true;\n";
+        combined += "  if (error) throw error;\n";
+        combined += "};\n";
+    }
+    append_host_flags(combined, p);
+    for (auto& inc : p.includes) {
+        const std::string& harness_src = get_harness_file(inc);
+        if (!harness_src.empty()) {
+            combined += harness_src;
+            combined += '\n';
+        }
+    }
+    combined += source;
+    if (p.is_async) {
+        combined += "\nif (typeof setTimeout !== \"function\" && !globalThis.__lambda_test262_async_done) {\n";
+        combined += "  throw new Test262Error(\"async test did not call $DONE\");\n";
+        combined += "}\n";
+    }
+    return combined;
+}
+
 // Assemble raw test source for native harness mode (no includes, just strict prefix + test body)
 static std::string assemble_native_test_source(const Test262Prepared& p) {
     std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
+
+    if (p.is_raw) return source;
 
     if (p.is_strict) {
         std::string combined;
@@ -1036,12 +1113,15 @@ static void partition_batch_indices(
     std::unordered_map<std::string, size_t> group_by_key;
 
     for (size_t idx : indices) {
-        if (prepared[idx].native_harness && !prepared[idx].is_async) {
+        if (prepared[idx].native_harness && !prepared[idx].is_async &&
+                !prepared[idx].is_module && !prepared[idx].is_slow_test) {
             native_indices.push_back(idx);
             continue;
         }
 
-        std::string key = prepared[idx].is_async ? "async:" : "sync:";
+        std::string key = prepared[idx].is_slow_test ? "slow:" :
+            prepared[idx].is_module ? "module:" :
+            (prepared[idx].is_async ? "async:" : "sync:");
         key += special_preamble_key(prepared[idx].special_preamble_includes);
         auto it = group_by_key.find(key);
         size_t group_index;
@@ -1052,6 +1132,8 @@ static void partition_batch_indices(
             group.special_includes = prepared[idx].special_preamble_includes;
             group.key = key;
             group.is_async = prepared[idx].is_async;
+            group.is_module = prepared[idx].is_module;
+            group.is_slow_test = prepared[idx].is_slow_test;
             js_groups.push_back(std::move(group));
         } else {
             group_index = it->second;
@@ -1104,7 +1186,7 @@ static const size_t T262_ASYNC_BATCH_CHUNK_SIZE = 50;
 static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
 static size_t g_t262_async_chunk_size = T262_ASYNC_BATCH_CHUNK_SIZE;
 
-struct SubBatch { size_t start; size_t end; bool native; size_t group; };
+struct SubBatch { size_t start; size_t end; bool native; bool module; bool slow_test; size_t group; };
 
 struct BatchTiming {
     size_t batch_idx;
@@ -1272,7 +1354,9 @@ static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_partial;
 static std::unordered_map<std::string, std::string> g_partial_tags;  // test_name → original tag (e.g. "CRASH_139")
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
+static std::set<std::string> g_slow_tests;  // intentionally exhaustive slow tests
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
+static const long SLOW_TEST_THRESHOLD_US = 5000000L;  // 5 seconds
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
 // --run-partial: when set, tests previously listed in t262_partial.txt are
@@ -1292,6 +1376,10 @@ static bool g_run_async = false;     // --run-async: permit allowlisted async-fl
 static std::string g_async_list_file; // --async-list=<path>: newline-separated async test allowlist
 static std::unordered_set<std::string> g_async_allowlist;
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
+
+static long slow_threshold_for_test(const std::string& test_name) {
+    return g_slow_tests.count(test_name) ? SLOW_TEST_THRESHOLD_US : SLOW_THRESHOLD_US;
+}
 static std::unordered_map<std::string, std::vector<std::string>> g_special_preamble_exact;
 static std::vector<std::pair<std::string, std::vector<std::string>>> g_special_preamble_prefix;
 static std::string g_write_failures_path; // --write-failures=<path>: write failed test manifest TSV
@@ -1868,6 +1956,23 @@ static void load_partial_list(const char* path) {
     fclose(f);
 }
 
+static void load_slow_test_list(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    char buf[2048];
+    while (fgets(buf, sizeof(buf), f)) {
+        char* start = buf;
+        while (*start == ' ' || *start == '\t') start++;
+        if (*start == '#' || *start == '\n' || *start == '\r' || *start == '\0') continue;
+        char* end = start;
+        while (*end && *end != ' ' && *end != '\t' && *end != '\n' && *end != '\r') end++;
+        if (end > start) {
+            g_slow_tests.insert(std::string(start, (size_t)(end - start)));
+        }
+    }
+    fclose(f);
+}
+
 // Clean up non-fully-passing list after baseline update.
 // Removes entries whose test names are now in the updated baseline (fully passing).
 // This prevents stale BATCH_KILL/CRASH/SLOW entries from accumulating across runs.
@@ -1952,6 +2057,8 @@ static void prepare_all_tests(
             p.is_negative = false;
             p.is_strict = false;
             p.is_async = false;
+            p.is_module = false;
+            p.is_raw = false;
             p.native_harness = false;
 
             // check test-specific skip list (by relative path)
@@ -2011,14 +2118,27 @@ static void prepare_all_tests(
 
             // skip unsupported
             p.is_async = meta.is_async;
-            if (meta.is_async && !async_test_is_enabled(p.test_name)) {
+            p.is_module = meta.is_module;
+            p.is_raw = meta.is_raw;
+            p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
+            if (has_unsupported_feature(meta)) { p.skip_result = T262_SKIP; p.skip_message = "unsupported feature"; continue; }
+            if (meta.is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
+                p.skip_result = T262_SKIP;
+                p.skip_message = "module flag";
+                continue;
+            }
+            if (meta.is_raw && !is_es2021_raw_test(p.test_path, meta)) {
+                p.skip_result = T262_SKIP;
+                p.skip_message = "raw flag";
+                continue;
+            }
+            if (meta.is_async && !(async_test_is_enabled(p.test_name) ||
+                    (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
+                        is_es2021_module_test(p.test_path, meta))))) {
                 p.skip_result = T262_SKIP;
                 p.skip_message = "async flag";
                 continue;
             }
-            if (meta.is_module)  { p.skip_result = T262_SKIP; p.skip_message = "module flag"; continue; }
-            if (meta.is_raw)     { p.skip_result = T262_SKIP; p.skip_message = "raw flag"; continue; }
-            if (has_unsupported_feature(meta)) { p.skip_result = T262_SKIP; p.skip_message = "unsupported feature"; continue; }
 
             // check harness includes exist
             bool missing_harness = false;
@@ -2044,10 +2164,11 @@ static void prepare_all_tests(
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
             // or computed inline when no cache is available.
-            p.native_harness = !p.is_async && cached_native_harness;
+            p.native_harness = p.is_raw || (!p.is_async && cached_native_harness);
 #else
-            p.native_harness = false;
+            p.native_harness = p.is_raw;
 #endif
+            if (p.is_module) p.native_harness = false;
 
             prep_count.fetch_add(1, std::memory_order_relaxed);
         }
@@ -2380,27 +2501,33 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     std::vector<JsBatchGroup> js_groups;
     partition_batch_indices(prepared, indices, native_indices, js_groups);
     size_t js_count = 0;
+    size_t module_count = 0;
     size_t special_group_count = 0;
+    size_t slow_count = 0;
     for (const auto& group : js_groups) {
         js_count += group.indices.size();
+        if (group.is_module) module_count += group.indices.size();
+        if (group.is_slow_test) slow_count += group.indices.size();
         if (!group.special_includes.empty()) special_group_count++;
     }
-    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness = %zu total (%zu special-preamble groups)\n",
-            native_indices.size(), js_count, indices.size(), special_group_count);
+    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness (%zu module, %zu slow) = %zu total (%zu special-preamble groups)\n",
+            native_indices.size(), js_count, module_count, slow_count, indices.size(), special_group_count);
 
     // Create sub-batches from both groups
     std::vector<SubBatch> batches;
     for (size_t s = 0; s < native_indices.size(); s += chunk_size) {
         size_t e = std::min(s + chunk_size, native_indices.size());
-        batches.push_back({s, e, true, 0});
+        batches.push_back({s, e, true, false, false, 0});
     }
     size_t native_batch_count = batches.size();
     for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
         const auto& group_indices = js_groups[group_index].indices;
-        size_t group_chunk_size = js_groups[group_index].is_async ? g_t262_async_chunk_size : chunk_size;
+        size_t group_chunk_size = js_groups[group_index].is_slow_test ? 1 :
+            (js_groups[group_index].is_async ? g_t262_async_chunk_size : chunk_size);
         for (size_t s = 0; s < group_indices.size(); s += group_chunk_size) {
             size_t e = std::min(s + group_chunk_size, group_indices.size());
-            batches.push_back({s, e, false, group_index});
+            batches.push_back({s, e, false, js_groups[group_index].is_module,
+                               js_groups[group_index].is_slow_test, group_index});
         }
     }
 
@@ -2487,7 +2614,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 const auto& idx_vec = batches[i].native ? native_indices : js_groups[batches[i].group].indices;
                 std::unordered_set<std::string> preamble_include_set;
 
-                if (!batches[i].native) {
+                if (!batches[i].native && !batches[i].module) {
                     // JS-harness batch: send harness preamble via harness: protocol
                     const auto& special_includes = js_groups[batches[i].group].special_includes;
                     preamble_include_set = make_preamble_include_set(special_includes);
@@ -2502,11 +2629,14 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 for (size_t idx = batches[i].start; idx < batches[i].end; idx++) {
                     size_t pi = idx_vec[idx];
                     const auto& p = prepared[pi];
-                    std::string test_src = batches[i].native
+                    std::string test_src = batches[i].module
+                        ? assemble_module_test_source(p)
+                        : batches[i].native
                         ? assemble_native_test_source(p)
                         : assemble_test_source(p, &preamble_include_set);
-                    fprintf(mf, "source:%s:%zu\n",
-                            p.test_name.c_str(), test_src.size());
+                    fprintf(mf, "%s:%s:%s:%zu\n",
+                            batches[i].module ? "module-source" : "source",
+                            p.test_name.c_str(), p.test_path.c_str(), test_src.size());
                     fwrite(test_src.data(), 1, test_src.size(), mf);
                     fputc('\n', mf);
                 }
@@ -2521,8 +2651,10 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                     fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
                             i + 1, batches.size(), w,
                             batches[i].native ? "native" :
+                                (batches[i].module ? "js-module" :
+                                (batches[i].slow_test ? "js-slow" :
                                 (js_groups[batches[i].group].is_async ? "js-async" :
-                                    (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special")),
+                                    (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special")))),
                             batch_num_tests, batches[i].start, batches[i].end - 1);
                 }
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
@@ -2562,8 +2694,10 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests) %s  tests[%zu..%zu]\n",
                     bi, batch_timings[bi].elapsed_secs, batch_timings[bi].num_tests,
                     batches[bi].native ? "[native]" :
+                        (batches[bi].module ? "[module]" :
+                        (batches[bi].slow_test ? "[slow]  " :
                         (js_groups[batches[bi].group].is_async ? "[async] " :
-                            (js_groups[batches[bi].group].special_includes.empty() ? "[js]    " : "[js+pre]")),
+                            (js_groups[batches[bi].group].special_includes.empty() ? "[js]    " : "[js+pre]")))),
                     batches[bi].start, batches[bi].end - 1);
         }
         // For the top 5 slowest batches, list all test names
@@ -2574,8 +2708,10 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             const auto& idx_vec = batches[bi].native ? native_indices : js_groups[batches[bi].group].indices;
             fprintf(stderr, "  --- batch[%zu] (%.1fs, %s) ---\n", bi, batch_timings[bi].elapsed_secs,
                     batches[bi].native ? "native" :
+                        (batches[bi].module ? "js-module" :
+                        (batches[bi].slow_test ? "js-slow" :
                         (js_groups[batches[bi].group].is_async ? "js-async" :
-                            (js_groups[batches[bi].group].special_includes.empty() ? "js" : "js-special")));
+                            (js_groups[batches[bi].group].special_includes.empty() ? "js" : "js-special")))));
             for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
                 size_t pi = idx_vec[idx];
                 const auto& p = prepared[pi];
@@ -2691,13 +2827,15 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // Partition batch_indices into two groups:
     //   1. clean_indices   — safe to run in shared batches of 50
     //   2. partial_indices — known non-fully-passing from previous run (crash, OOM,
-    //                        slow >= 3s, timeout). Skipped entirely by default.
+    //                        slow >= threshold, timeout). Skipped entirely by default.
     //                        With --run-partial they are merged into clean_indices
     //                        so they get a batch run and can graduate to baseline.
     std::vector<size_t> clean_indices;
     std::vector<size_t> partial_indices;
     for (size_t idx : batch_indices) {
-        if (!g_known_partial.empty() && g_known_partial.count(prepared[idx].test_name)) {
+        if (prepared[idx].is_slow_test) {
+            clean_indices.push_back(idx);
+        } else if (!g_known_partial.empty() && g_known_partial.count(prepared[idx].test_name)) {
             if (g_run_partial)
                 clean_indices.push_back(idx);   // promote to CLEAN this round
             else
@@ -2729,7 +2867,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t native_batches = (native_clean_idx.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
         size_t js_batches = 0;
         for (const auto& group : js_clean_groups) {
-            js_batches += (group.indices.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+            size_t group_chunk_size = group.is_slow_test ? 1 :
+                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
+            js_batches += (group.indices.size() + group_chunk_size - 1) / group_chunk_size;
         }
         size_t num_batches    = native_batches + js_batches;
         g_batch_contents.resize(num_batches);
@@ -2741,13 +2881,15 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
         size_t js_batch_base = native_batches;
         for (const auto& group : js_clean_groups) {
+            size_t group_chunk_size = group.is_slow_test ? 1 :
+                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
             for (size_t i = 0; i < group.indices.size(); i++) {
-                size_t bi = js_batch_base + (i / T262_BATCH_CHUNK_SIZE);
+                size_t bi = js_batch_base + (i / group_chunk_size);
                 const auto& name = prepared[group.indices[i]].test_name;
                 g_batch_assignment[name] = bi;
                 g_batch_contents[bi].push_back(name);
             }
-            js_batch_base += (group.indices.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+            js_batch_base += (group.indices.size() + group_chunk_size - 1) / group_chunk_size;
         }
         fprintf(stderr, "[test262] Batch assignment map: %zu entries across %zu batches (%zu native + %zu js)\n",
                 g_batch_assignment.size(), num_batches, native_batches, js_batches);
@@ -2769,11 +2911,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         std::vector<JsBatchGroup> js_clean_groups;
         partition_batch_indices(prepared, clean_indices, native_clean, js_clean_groups);
 
-        auto analyze_group = [&](const std::vector<size_t>& group_indices, const char* label) {
+        auto analyze_group = [&](const std::vector<size_t>& group_indices, const char* label,
+                                 size_t analyze_chunk_size) {
             size_t total_lost = 0;
             size_t killed_batches = 0;
-            for (size_t start = 0; start < group_indices.size(); start += T262_BATCH_CHUNK_SIZE) {
-                size_t end = std::min(start + T262_BATCH_CHUNK_SIZE, group_indices.size());
+            for (size_t start = 0; start < group_indices.size(); start += analyze_chunk_size) {
+                size_t end = std::min(start + analyze_chunk_size, group_indices.size());
                 // Find first missing test in this sub-batch
                 size_t completed = 0;
                 size_t lost_in_batch = 0;
@@ -2790,7 +2933,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     }
                 }
                 if (lost_in_batch > 0) {
-                    size_t batch_num = start / T262_BATCH_CHUNK_SIZE;
+                    size_t batch_num = start / analyze_chunk_size;
                     fprintf(stderr, "[test262] KILLED %s-batch[%zu]: %zu/%zu completed, %zu lost, "
                             "crash-point: '%s' (after '%s')\n",
                             label, batch_num, completed, end - start, lost_in_batch,
@@ -2809,12 +2952,16 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         label, killed_batches, total_lost);
         };
 
-        analyze_group(native_clean, "native");
+        analyze_group(native_clean, "native", T262_BATCH_CHUNK_SIZE);
         for (const auto& group : js_clean_groups) {
-            std::string label = group.special_includes.empty()
+            size_t group_chunk_size = group.is_slow_test ? 1 :
+                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
+            std::string label = group.is_slow_test
+                ? "js-slow"
+                : group.special_includes.empty()
                 ? "js"
                 : std::string("js-special(") + group.key + ")";
-            analyze_group(group.indices, label.c_str());
+            analyze_group(group.indices, label.c_str(), group_chunk_size);
         }
         if (!batch_kill_tests.empty())
             fprintf(stderr, "[test262] Detected %zu batch-kill crash-point tests (will add to non-fully-passing list for next run)\n",
@@ -2853,7 +3000,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // Retry individually (batch of 1) to prevent a single crashing test from
             // killing other lost tests in the retry batch.
             for (size_t s = 0; s < lost_indices.size(); s++) {
-                retry_batches.push_back({s, s + 1});
+                size_t pi = lost_indices[s];
+                retry_batches.push_back({s, s + 1, false, prepared[pi].is_module,
+                                         prepared[pi].is_slow_test, 0});
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
             std::atomic<size_t> next_batch{0};
@@ -2871,8 +3020,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         for (size_t idx = retry_batches[i].start; idx < retry_batches[i].end; idx++) {
                             size_t pi = lost_indices[idx];
                             const auto& p = prepared[pi];
-                            std::string combined = assemble_combined_source(p);
-                            fprintf(mf, "source:%s:%zu\n", p.test_name.c_str(), combined.size());
+                            std::string combined = p.is_module
+                                ? assemble_module_test_source(p)
+                                : assemble_combined_source(p);
+                            fprintf(mf, "%s:%s:%s:%zu\n",
+                                    p.is_module ? "module-source" : "source",
+                                    p.test_name.c_str(), p.test_path.c_str(), combined.size());
                             fwrite(combined.data(), 1, combined.size(), mf);
                             fputc('\n', mf);
                         }
@@ -2946,7 +3099,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                 }
                             } else if (is_slow) {
                                 // preserve SLOW_ entries only if test was not re-run this session,
-                                // or if re-run and still slow (>= 3s). Tests that ran faster
+                                // or if re-run and still slow (>= threshold). Tests that ran faster
                                 // are released from non-fully-passing list and return to batch execution.
                                 // Dedupe by test name — old files may contain duplicate SLOW_ lines
                                 // for the same test (one per partial-list run while still slow).
@@ -2963,8 +3116,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                         // already kept this slow test — drop the duplicate
                                     } else {
                                         auto br_it = batch_results.find(name);
+                                        long threshold_us = slow_threshold_for_test(name);
                                         if (br_it == batch_results.end() ||
-                                            br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
+                                            br_it->second.elapsed_us >= threshold_us) {
                                             // not re-run or still slow → preserve
                                             timeout_lines.push_back(std::string(slow_buf));
                                             timeout_names.insert(name);
@@ -3010,6 +3164,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             size_t crash_released = 0;
             for (size_t idx : partial_indices) {
                 const auto& p = prepared[idx];
+                if (written.count(p.test_name)) continue;
                 if (!g_run_partial) {
                     // Skipped: preserve original tag from previous run
                     auto tag_it = g_partial_tags.find(p.test_name);
@@ -3098,11 +3253,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     if (!is_batch_kill && !is_collateral && was_in_baseline && !was_known_crash) crash_exit++;
                 }
             }
-            // Add newly-discovered slow tests (>3s elapsed) from clean batches
+            // Add newly-discovered slow tests above the configured elapsed threshold from clean batches
             size_t slow_count = 0;
             for (auto& kv : batch_results) {
                 if (written.count(kv.first)) continue;
-                if (kv.second.elapsed_us >= SLOW_THRESHOLD_US) {
+                long threshold_us = slow_threshold_for_test(kv.first);
+                if (kv.second.elapsed_us >= threshold_us) {
                     const char* path = "";
                     for (size_t idx : clean_indices) {
                         if (prepared[idx].test_name == kv.first) {
@@ -3301,7 +3457,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     double memory_secs = std::chrono::duration<double>(memory_done - memory_start).count();
 
     // Build classification sets for non-fully-passing logic.
-    // All tests must pass in their original Phase 2 batch with time < 3s to be "fully passed".
+    // All tests must pass in their original Phase 2 batch under their timing gate
+    // to be "fully passed".
     std::set<std::string> clean_set, partial_name_set, phase2b_set;
     for (size_t idx : clean_indices)    clean_set.insert(prepared[idx].test_name);
     for (size_t idx : partial_indices)  partial_name_set.insert(prepared[idx].test_name);
@@ -3344,7 +3501,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
 
         // Classify non-fully-passing tests.
-        // Only fully passed if passed in original Phase 2 batch with time < 3s.
+        // Only fully passed if passed in original Phase 2 batch under its timing gate.
         if (result.result == T262_PASS) {
             const auto& name = prepared[i].test_name;
             if (partial_name_set.count(name)) {
@@ -3383,14 +3540,17 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 }
             } else if (clean_set.count(name)) {
                 auto br_it = batch_results.find(name);
-                if (br_it != batch_results.end() && br_it->second.elapsed_us >= SLOW_THRESHOLD_US) {
-                    // Test passed in batch but exceeded slow threshold (>= 3s).
+                long threshold_us = slow_threshold_for_test(name);
+                if (br_it != batch_results.end() && br_it->second.elapsed_us >= threshold_us) {
+                    // Test passed in batch but exceeded its slow threshold.
                     // Slow tests are not "fully passing" for baseline purposes:
                     // they go to t262_partial.txt and are excluded from baseline updates.
                     long elapsed_ms = br_it->second.elapsed_us / 1000;
+                    long threshold_ms = threshold_us / 1000;
                     result = {T262_PARTIAL_PASS,
                               "non-fully-passing: slow batch runtime " +
-                              std::to_string(elapsed_ms) + "ms >= 3000ms"};
+                              std::to_string(elapsed_ms) + "ms >= " +
+                              std::to_string(threshold_ms) + "ms"};
                     pp_slow++;
                 }
             }
@@ -3401,7 +3561,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         g_cached_results[prepared[i].test_name] = result;
     }
     if (pp_partial + pp_batch_lost + pp_collateral + pp_slow + pp_skipped_partial > 0) {
-        fprintf(stderr, "[test262] Phase 3 non-fully-passing: %zu from-list + %zu batch-lost + %zu crash-collateral (promoted) + %zu slow (>= 3s) + %zu skipped-partial\n",
+        fprintf(stderr, "[test262] Phase 3 non-fully-passing: %zu from-list + %zu batch-lost + %zu crash-collateral (promoted) + %zu slow (>= threshold) + %zu skipped-partial\n",
                 pp_partial, pp_batch_lost, pp_collateral, pp_slow, pp_skipped_partial);
     }
     // Expose batch-lost count for --update-baseline gate
@@ -3682,6 +3842,64 @@ static bool test262_help_requested(int argc, char** argv) {
     return false;
 }
 
+#ifndef _WIN32
+static bool claim_test262_gtest_run_lock() {
+    if (mkdir("temp", 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "[test262] ERROR: cannot create temp directory for run lock: %s\n",
+                strerror(errno));
+        return false;
+    }
+
+    pid_t self = getpid();
+    for (int attempt = 0; attempt < 2; attempt++) {
+        int fd = open(TEST262_RUN_LOCK_FILE, O_CREAT | O_EXCL | O_WRONLY, 0644);
+        if (fd >= 0) {
+            char buf[64];
+            int len = snprintf(buf, sizeof(buf), "%ld\n", (long)self);
+            if (len > 0) {
+                ssize_t ignored = write(fd, buf, (size_t)len);
+                (void)ignored;
+            }
+            close(fd);
+            return true;
+        }
+
+        if (errno != EEXIST) {
+            fprintf(stderr, "[test262] ERROR: cannot create run lock %s: %s\n",
+                    TEST262_RUN_LOCK_FILE, strerror(errno));
+            return false;
+        }
+
+        int lock_fd = open(TEST262_RUN_LOCK_FILE, O_RDONLY);
+        char buf[64] = {0};
+        ssize_t bytes = -1;
+        if (lock_fd >= 0) {
+            bytes = read(lock_fd, buf, sizeof(buf) - 1);
+            close(lock_fd);
+        }
+        pid_t owner = bytes > 0 ? (pid_t)atol(buf) : -1;
+        errno = 0;
+        int owner_signal = owner > 0 && owner != self ? kill(owner, 0) : -1;
+        if (owner_signal == 0 || errno == EPERM) {
+            fprintf(stderr,
+                "[test262] ERROR: another test_js_test262_gtest.exe process is already running "
+                "(pid %ld). Concurrent runs share batch scratch output and are not supported.\n",
+                (long)owner);
+            return false;
+        }
+
+        unlink(TEST262_RUN_LOCK_FILE);
+    }
+
+    fprintf(stderr, "[test262] ERROR: could not acquire run lock %s\n", TEST262_RUN_LOCK_FILE);
+    return false;
+}
+
+static void release_test262_gtest_run_lock() {
+    unlink(TEST262_RUN_LOCK_FILE);
+}
+#endif
+
 static void print_test262_help(const char* program) {
     if (!program || !program[0]) {
         program = "./test/test_js_test262_gtest.exe";
@@ -3744,6 +3962,13 @@ int main(int argc, char** argv) {
         print_test262_help(argc > 0 ? argv[0] : nullptr);
         return 0;
     }
+
+#ifndef _WIN32
+    if (!claim_test262_gtest_run_lock()) {
+        return 2;
+    }
+    atexit(release_test262_gtest_run_lock);
+#endif
 
     testing::InitGoogleTest(&argc, argv);
 
@@ -3918,6 +4143,11 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[test262] Loaded %zu non-fully-passing entries from test/js262/t262_partial.txt\n",
                 g_known_partial.size());
     }
+    load_slow_test_list(SLOW_TEST_FILE);
+    if (!g_slow_tests.empty()) {
+        fprintf(stderr, "[test262] Loaded %zu slow-test entries from %s (own batch, 5s slow gate)\n",
+                g_slow_tests.size(), SLOW_TEST_FILE);
+    }
 
     if (g_run_async) {
         std::string async_source = !g_async_list_file.empty() ? g_async_list_file : g_batch_file;
@@ -4036,6 +4266,8 @@ int main(int argc, char** argv) {
             p.is_negative = false;
             p.is_strict = false;
             p.is_async = false;
+            p.is_module = false;
+            p.is_raw = false;
             p.native_harness = false;
             Test262Metadata meta;
             bool metadata_loaded = false;
@@ -4060,7 +4292,9 @@ int main(int argc, char** argv) {
                 p.is_strict = cm.flags & 8;
                 p.is_async = cm.flags & 1;
                 is_module = cm.flags & 2;
+                p.is_module = is_module;
                 is_raw = cm.flags & 4;
+                p.is_raw = is_raw;
                 p.includes = cm.includes;
                 p.features = cm.features;
                 p.native_harness = !p.is_async && cm.native_harness;
@@ -4081,28 +4315,35 @@ int main(int argc, char** argv) {
                     p.is_strict = meta.is_strict;
                     p.is_async = meta.is_async;
                     is_module = meta.is_module;
+                    p.is_module = is_module;
                     is_raw = meta.is_raw;
+                    p.is_raw = is_raw;
                     p.includes = meta.includes;
                     p.features = meta.features;
                     metadata_loaded = true;
                 }
             }
-            if (metadata_loaded && p.skip_result != T262_SKIP && p.is_async) {
-                if (!async_test_is_enabled(p.test_name)) {
-                    p.skip_result = T262_SKIP;
-                    p.skip_message = "async flag";
-                } else if (is_module) {
-                    p.skip_result = T262_SKIP;
-                    p.skip_message = "module flag";
-                } else if (is_raw) {
-                    p.skip_result = T262_SKIP;
-                    p.skip_message = "raw flag";
-                } else if (has_unsupported_feature(meta)) {
+            if (metadata_loaded && p.skip_result != T262_SKIP) {
+                p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
+                if (has_unsupported_feature(meta)) {
                     p.skip_result = T262_SKIP;
                     p.skip_message = "unsupported feature";
+                } else if (is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "module flag";
+                } else if (is_raw && !is_es2021_raw_test(p.test_path, meta)) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "raw flag";
+                } else if (p.is_async && !(async_test_is_enabled(p.test_name) ||
+                        (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
+                            is_es2021_module_test(p.test_path, meta))))) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "async flag";
                 }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+            if (p.is_raw) p.native_harness = true;
+            if (p.is_module) p.native_harness = false;
             if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }

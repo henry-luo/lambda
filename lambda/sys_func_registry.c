@@ -1859,6 +1859,9 @@ JitImport jit_runtime_imports[] = {
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
+    {"js_get_active_module_namespace", FPTR(js_get_active_module_namespace)},
+    {"js_set_active_module_namespace", FPTR(js_set_active_module_namespace)},
+    {"js_get_import_meta", FPTR(js_get_import_meta)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support

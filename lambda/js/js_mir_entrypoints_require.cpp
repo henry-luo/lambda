@@ -999,16 +999,17 @@ static Item js_dynamic_import_reject_type_error(const char* message) {
 
 // dynamic import() — synchronous load, wrapped in a resolved Promise
 extern "C" Item js_dynamic_import(Item specifier) {
-    if (get_type_id(specifier) != LMD_TYPE_STRING) {
-        return js_dynamic_import_reject_type_error("import() requires a string specifier");
+    Item specifier_string = js_to_string(specifier);
+    if (js_check_exception() || get_type_id(specifier_string) != LMD_TYPE_STRING) {
+        return js_promise_reject(js_clear_exception());
     }
-    String* spec = it2s(specifier);
+    String* spec = it2s(specifier_string);
     if (!spec || spec->len == 0) {
         return js_dynamic_import_reject_type_error("import() requires a non-empty specifier");
     }
 
     // Reuse require() logic to load the module synchronously
-    Item ns = js_require(specifier);
+    Item ns = js_require(specifier_string);
     if (get_type_id(ns) == LMD_TYPE_NULL) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);

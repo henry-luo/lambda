@@ -9,6 +9,7 @@
 #include "js_state_guards.h"
 
 extern "C" Item js_to_property_key(Item key);
+extern __thread EvalContext* context;
 extern "C" Item js_reflect_own_keys(Item obj);
 extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver);
 extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_target);
@@ -29012,10 +29013,42 @@ struct JsModule {
 
 static JsModule js_modules[JS_MAX_MODULES];
 static int js_module_count_v14 = 0;
+static Item js_active_module_namespace = {0};
+static void* js_active_module_namespace_root_gc = NULL;
+
+static void js_ensure_active_module_namespace_rooted() {
+    if (!context || !context->heap || !context->heap->gc) return;
+    if (js_active_module_namespace_root_gc == context->heap->gc) return;
+    heap_register_gc_root(&js_active_module_namespace.item);
+    js_active_module_namespace_root_gc = context->heap->gc;
+}
 
 // called by js_batch_reset() to clear module cache between batch scripts
 static void js_module_cache_reset() {
     js_module_count_v14 = 0;
+    js_ensure_active_module_namespace_rooted();
+    js_active_module_namespace = ItemNull;
+}
+
+extern "C" Item js_get_active_module_namespace() {
+    js_ensure_active_module_namespace_rooted();
+    if (get_type_id(js_active_module_namespace) != LMD_TYPE_NULL) {
+        return js_active_module_namespace;
+    }
+    return js_new_object();
+}
+
+extern "C" Item js_set_active_module_namespace(Item namespace_obj) {
+    js_ensure_active_module_namespace_rooted();
+    Item previous = js_active_module_namespace;
+    js_active_module_namespace = namespace_obj;
+    return previous;
+}
+
+extern "C" Item js_get_import_meta() {
+    Item meta = js_new_object();
+    js_set_prototype(meta, ItemNull);
+    return meta;
 }
 
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
