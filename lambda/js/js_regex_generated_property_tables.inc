@@ -7841,3 +7841,11 @@ static bool js_regex_generated_property_contains(int kind, int cp) {
     const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
     return js_regex_sorted_range_contains(table->ranges, table->count, cp);
 }
+
+static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor) {
+    int index = kind - JS_REGEX_PROP_GENERATED_BASE;
+    int count = (int)(sizeof(js_regex_generated_property_tables) / sizeof(js_regex_generated_property_tables[0]));
+    if (index < 0 || index >= count) return false;
+    const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
+    return js_regex_sorted_range_contains_cursor(table->ranges, table->count, cp, cursor);
+}
