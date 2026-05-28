@@ -58,3 +58,35 @@ console.log("max1:", Math.max(42));
 const filled = new Array(5);
 filled.fill(0);
 console.log("filled:", filled[0], filled[1], filled[2], filled.length);
+
+// Destructured bindings captured by closures must share the same outer env.
+function destructuredClosureEnv(prepared) {
+    const { amount } = prepared;
+    let hasContent = false;
+    let lineW = 0;
+    let count = 0;
+
+    function emit() {
+        count++;
+        lineW = 0;
+        hasContent = false;
+    }
+
+    function start(width) {
+        hasContent = true;
+        lineW = width;
+    }
+
+    function append() {
+        start(amount);
+        if (hasContent && lineW === amount) {
+            emit();
+            start(amount);
+        }
+    }
+
+    append();
+    if (hasContent) emit();
+    return count;
+}
+console.log("closure env:", destructuredClosureEnv({ amount: 9 }));

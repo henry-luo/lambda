@@ -761,27 +761,20 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     }
                     hashmap_free(dstr_names);
                 }
-                // v28: Write destructured bindings to scope_env for closure capture (no reload marking)
+                // v28: Write destructured bindings to scope_env for closure capture.
+                // Use the normal helper so the variable entry is marked as sharing
+                // this env; otherwise closures that also capture a destructured const
+                // fall back to a copied env and stop observing sibling mutations.
                 if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
-                    JsFuncCollected* se_fc = mt->current_fc;
                     struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
                     jm_collect_pattern_names(d->id, se_names);
                     size_t si = 0; void* sitem;
                     while (hashmap_iter(se_names, &si, &sitem)) {
                         JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
-                        int se_limit = se_fc->scope_env_normal_count;
-                        for (int se_s = 0; se_s < se_limit; se_s++) {
-                            if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
-                                JsMirVarEntry* ve = jm_find_var(mt, ne->name);
-                                if (ve) {
-                                    MIR_reg_t val = ve->reg;
-                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
-                                        MIR_new_reg_op(mt->ctx, val)));
-                                }
-                                break;
-                            }
+                        JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                        if (ve) {
+                            jm_scope_env_mark_and_writeback(mt, ne->name, ve->reg);
                         }
                     }
                     hashmap_free(se_names);
@@ -836,30 +829,19 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     hashmap_free(dstr_names);
                 }
                 // v28: Write destructured bindings to scope_env for closure capture.
-                // Unlike jm_scope_env_mark_and_writeback, we do NOT set in_scope_env=true
-                // on the variable because that would cause jm_scope_env_reload_vars to
-                // reload the variable from scope_env after calls — but inner blocks may
-                // shadow the variable name and overwrite the scope_env slot.
+                // Use the normal helper so the variable entry is marked as sharing
+                // this env; otherwise closures that also capture a destructured const
+                // fall back to a copied env and stop observing sibling mutations.
                 if (mt->scope_env_reg != 0 && mt->current_fc && mt->current_fc->has_scope_env) {
-                    JsFuncCollected* se_fc = mt->current_fc;
                     struct hashmap* se_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
                     jm_collect_pattern_names(d->id, se_names);
                     size_t si = 0; void* sitem;
                     while (hashmap_iter(se_names, &si, &sitem)) {
                         JsNameSetEntry* ne = (JsNameSetEntry*)sitem;
-                        int se_limit = se_fc->scope_env_normal_count;
-                        for (int se_s = 0; se_s < se_limit; se_s++) {
-                            if (strcmp(ne->name, se_fc->scope_env_names[se_s]) == 0) {
-                                JsMirVarEntry* ve = jm_find_var(mt, ne->name);
-                                if (ve) {
-                                    MIR_reg_t val = ve->reg;
-                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, se_s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
-                                        MIR_new_reg_op(mt->ctx, val)));
-                                }
-                                break;
-                            }
+                        JsMirVarEntry* ve = jm_find_var(mt, ne->name);
+                        if (ve) {
+                            jm_scope_env_mark_and_writeback(mt, ne->name, ve->reg);
                         }
                     }
                     hashmap_free(se_names);
