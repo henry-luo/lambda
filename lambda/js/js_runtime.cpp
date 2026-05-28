@@ -7432,7 +7432,6 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
 
 // Call a JavaScript function stored as an Item
 
-// Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
         log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d)",

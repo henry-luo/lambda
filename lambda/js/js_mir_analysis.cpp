@@ -63,6 +63,7 @@ bool jm_name_set_has(struct hashmap* set, const char* name) {
 void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
+static void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind);
 // v15: Count yield points in a generator function body (not recursing into nested functions)
 int jm_count_yields(JsAstNode* node) {
     if (!node) return 0;
@@ -1387,8 +1388,12 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     size_t iter = 0; void* item;
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
-        // Skip variables that are module vars (TDZ handled at module level)
-        if (mt->current_fc && mt->module_consts) {
+        // Skip variables that are module vars only while initializing the
+        // module/IIFE body itself. Ordinary function-local let/const
+        // declarations with the same name shadow the module binding and need
+        // their own TDZ slot.
+        bool ordinary_function_scope = mt->current_fc && !mt->current_fc->is_iife_body;
+        if (!ordinary_function_scope && mt->current_fc && mt->module_consts) {
             JsModuleConstEntry mclookup;
             memset(&mclookup, 0, sizeof(mclookup));
             snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
