@@ -3,6 +3,7 @@
 
 #include "lambda-data.hpp"
 #include "name_pool.hpp"
+#include "../lib/lambda_typed.hpp"
 #include "../lib/mempool.h"
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
@@ -173,16 +174,19 @@ public:
      * Create an empty element with given tag name
      */
     Item createElement(const char* tag_name);
+    lam::ItemOf<LMD_TYPE_ELEMENT> createElementTyped(const char* tag_name);
 
     /**
      * Create an empty map
      */
     Item createMap();
+    lam::ItemOf<LMD_TYPE_MAP> createMapTyped();
 
     /**
      * Create an empty array
      */
     Item createArray();
+    lam::ItemOf<LMD_TYPE_ARRAY> createArrayTyped();
 
     /**
      * Create primitive Items
@@ -278,6 +282,24 @@ private:
      * Called by public deep_copy() after ownership check
      */
     Item deep_copy_internal(Item item);
+
+    template<TypeId Tag>
+    Item deep_copy_typed(lam::ItemOf<Tag> item);
+
+    Item deep_copy_unknown(Item item);
+
+    struct DeepCopyVisitor {
+        MarkBuilder* builder;
+
+        template<TypeId Tag>
+        Item operator()(lam::ItemOf<Tag> item) const {
+            return builder->deep_copy_typed(item);
+        }
+
+        Item operator()(Item item) const {
+            return builder->deep_copy_unknown(item);
+        }
+    };
 
 public:
     // ============================================================================

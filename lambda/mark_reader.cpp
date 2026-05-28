@@ -210,6 +210,10 @@ MapReader::MapReader(Map* map)
     }
 }
 
+MapReader::MapReader(lam::GcPtr<Map> map)
+    : MapReader(map.get()) {
+}
+
 MapReader::MapReader(lam::ItemOf<LMD_TYPE_MAP> map)
     : MapReader(map.ptr()) {
 }
@@ -354,6 +358,10 @@ ArrayReader::ArrayReader(Array* array)
     : array_(array) {
 }
 
+ArrayReader::ArrayReader(lam::GcPtr<Array> array)
+    : ArrayReader(array.get()) {
+}
+
 ArrayReader::ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array)
     : ArrayReader(array.ptr()) {
 }
@@ -409,6 +417,10 @@ ElementReader::ElementReader()
 ElementReader::ElementReader(const Element* element)
     : element_(element)
     , element_type_(element ? (const TypeElmt*)element->type : nullptr) {
+}
+
+ElementReader::ElementReader(lam::GcPtr<Element> element)
+    : ElementReader(element.get()) {
 }
 
 ElementReader::ElementReader(lam::ItemOf<LMD_TYPE_ELEMENT> element)

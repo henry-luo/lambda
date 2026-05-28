@@ -224,12 +224,24 @@ Item MarkBuilder::createElement(const char* tag_name) {
     return element(tag_name).final();
 }
 
+lam::ItemOf<LMD_TYPE_ELEMENT> MarkBuilder::createElementTyped(const char* tag_name) {
+    return lam::require<LMD_TYPE_ELEMENT>(createElement(tag_name));
+}
+
 Item MarkBuilder::createMap() {
     return map().final();
 }
 
+lam::ItemOf<LMD_TYPE_MAP> MarkBuilder::createMapTyped() {
+    return lam::require<LMD_TYPE_MAP>(createMap());
+}
+
 Item MarkBuilder::createArray() {
     return array().final();
+}
+
+lam::ItemOf<LMD_TYPE_ARRAY> MarkBuilder::createArrayTyped() {
+    return lam::require<LMD_TYPE_ARRAY>(createArray());
 }
 
 Item MarkBuilder::createInt(int64_t value) {
@@ -767,68 +779,51 @@ Item MarkBuilder::deep_copy(Item item) {
     return deep_copy_internal(item);
 }
 
-Item MarkBuilder::deep_copy_internal(Item item) {
-    TypeId type_id = get_type_id(item);
+template<TypeId Tag>
+Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
+    Item item = typed.raw();
 
-    switch (type_id) {
-    case LMD_TYPE_NULL:  case LMD_TYPE_BOOL:  case LMD_TYPE_INT:
+    if constexpr (Tag == LMD_TYPE_NULL || Tag == LMD_TYPE_BOOL || Tag == LMD_TYPE_INT) {
         return item;
-
-    case LMD_TYPE_INT64:
-        return createLong(item.get_int64());
-
-    case LMD_TYPE_FLOAT:
-        return createFloat(item.get_double());
-
-    case LMD_TYPE_SYMBOL: {
-        Symbol* sym = item.get_safe_symbol();
+    } else if constexpr (Tag == LMD_TYPE_INT64) {
+        return createLong(*typed.ptr());
+    } else if constexpr (Tag == LMD_TYPE_FLOAT) {
+        return createFloat(*typed.ptr());
+    } else if constexpr (Tag == LMD_TYPE_SYMBOL) {
+        Symbol* sym = typed.ptr();
         if (!sym) return createNull();
         Symbol* copied_sym = createSymbol(sym->chars, sym->len);
         return {.item = y2it(copied_sym)};
-    }
-
-    case LMD_TYPE_STRING: {
-        String* str = item.get_safe_string();
+    } else if constexpr (Tag == LMD_TYPE_STRING) {
+        String* str = typed.ptr();
         if (!str) return createNull();
         return createStringItem(str->chars, str->len);
-    }
-
-    case LMD_TYPE_BINARY: {
-        String* bin = item.get_safe_binary();
+    } else if constexpr (Tag == LMD_TYPE_BINARY) {
+        String* bin = typed.ptr();
         if (!bin) return createNull();
         // Binary data is stored like String but with different type_id
         String* copied = createString(bin->chars, bin->len);
         if (!copied) return createNull();
         return {.item = x2it(copied)};
-    }
-
-    case LMD_TYPE_DTIME: {
-        DateTime* dt = (DateTime*)item.datetime_ptr;
+    } else if constexpr (Tag == LMD_TYPE_DTIME) {
+        DateTime* dt = typed.ptr();
         // DateTime is uint64_t bitfield, allocate from arena
         DateTime* dt_ptr = (DateTime*)arena_alloc(arena_, sizeof(DateTime));
         if (!dt_ptr) return ItemNull;
         *dt_ptr = *dt;
         return {.item = k2it(dt_ptr)};
-    }
-
-    case LMD_TYPE_DECIMAL: {
+    } else if constexpr (Tag == LMD_TYPE_DECIMAL) {
         // Use centralized decimal_deep_copy function
         return decimal_deep_copy(item, arena_, false);
-    }
-
-    case LMD_TYPE_NUMBER: {
+    } else if constexpr (Tag == LMD_TYPE_NUMBER) {
         // NUMBER type is stored as double
         double val = item.get_double();
         return createFloat(val);
-    }
-
-    case LMD_TYPE_RANGE: {
-        Range* src_range = item.range;
+    } else if constexpr (Tag == LMD_TYPE_RANGE) {
+        Range* src_range = typed.ptr();
         return createRange(src_range->start, src_range->end);
-    }
-
-    case LMD_TYPE_ARRAY_NUM: {
-        ArrayNum* arr = item.array_num;
+    } else if constexpr (Tag == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = typed.ptr();
         size_t elem_size = sizeof(int64_t);  // 8 bytes for all elem types
         size_t size = sizeof(ArrayNum) + arr->length * elem_size;
         ArrayNum* new_arr = (ArrayNum*)arena_alloc(arena_, size);
@@ -840,15 +835,14 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayNum));
         memcpy(new_arr->items, arr->items, arr->length * elem_size);
         return {.array_num = new_arr};
-    }
-
-    case LMD_TYPE_ARRAY: {
-        Array* arr = item.array;
+    } else if constexpr (Tag == LMD_TYPE_ARRAY) {
+        Array* arr = typed.ptr();
         int length = arr->length;
         int capacity = arr->capacity;
+        (void)capacity;
         uint8_t src_flags = arr->flags;
         ArrayBuilder arr_builder = array();
-        ArrayReader reader(arr);
+        ArrayReader reader(lam::gc_borrow(arr));
         for (int i = 0; i < length; i++) {
             Item child = reader.get(i).item();
             Item copied_child = deep_copy_internal(child);
@@ -860,13 +854,12 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             result.array->flags |= (src_flags & 0x01); // is_content bit
         }
         return result;
-    }
-
-    case LMD_TYPE_MAP: {
-        Map* src_map = item.map;
+    } else if constexpr (Tag == LMD_TYPE_MAP) {
+        Map* src_map = typed.ptr();
         TypeMap* map_type = (TypeMap*)src_map->type;
+        (void)map_type;
         MapBuilder map_builder = map();
-        MapReader reader(src_map);
+        MapReader reader(lam::gc_borrow(src_map));
         MapReader::EntryIterator iter = reader.entries();
         const char* key;  ItemReader value;
         while (iter.next(&key, &value)) {
@@ -880,10 +873,8 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             }
         }
         return map_builder.final();
-    }
-
-    case LMD_TYPE_OBJECT: {
-        Object* src_obj = item.object;
+    } else if constexpr (Tag == LMD_TYPE_OBJECT) {
+        Object* src_obj = typed.ptr();
         TypeObject* obj_type = (TypeObject*)src_obj->type;
 
         // allocate new object with same data layout using arena
@@ -938,12 +929,10 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         }
 
         return {.object = new_obj};
-    }
-
-    case LMD_TYPE_ELEMENT: {
+    } else if constexpr (Tag == LMD_TYPE_ELEMENT) {
         log_enter();
-        Element* elem = item.element;
-        ElementReader reader(elem);
+        Element* elem = typed.ptr();
+        ElementReader reader(lam::gc_borrow(elem));
 
         // Get tag name via reader (returns const char*)
         const char* tag_name = reader.tagName();
@@ -979,15 +968,11 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         }
         log_leave();
         return elem_builder.final();
-    }
-
-    case LMD_TYPE_TYPE: {
-        return createMetaType(((TypeType*)item.type)->type->type_id);
-    }
-
-    case LMD_TYPE_PATH: {
+    } else if constexpr (Tag == LMD_TYPE_TYPE) {
+        return createMetaType(((TypeType*)typed.ptr())->type->type_id);
+    } else if constexpr (Tag == LMD_TYPE_PATH) {
         // For sys:// paths, resolve and deep-copy the result
-        Path* path = item.path;
+        Path* path = typed.ptr();
         if (path && path_get_scheme(path) == PATH_SCHEME_SYS) {
             // If already resolved, deep-copy the result
             if (path->result != 0) {
@@ -1000,17 +985,21 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         // For non-sys paths, we need to deep-copy the path structure
         // For now, just return as-is (caller should be aware paths may reference external memory)
         return item;
-    }
-
-    case LMD_TYPE_ANY:
-        return deep_copy_internal(item);
-
-    case LMD_TYPE_ERROR:
+    } else if constexpr (Tag == LMD_TYPE_ANY || Tag == LMD_TYPE_ERROR || Tag == LMD_TYPE_UNDEFINED) {
         return item;
-
-    default:
-        // unsupported types, return null
-        log_debug("deep_copy_internal: unsupported type_id=%d, returning null", type_id);
+    } else {
+        log_debug("deep_copy_typed: unsupported type_id=%d, returning null", Tag);
         return ItemNull;
     }
+}
+
+Item MarkBuilder::deep_copy_unknown(Item item) {
+    TypeId type_id = get_type_id(item);
+    log_debug("deep_copy_unknown: unsupported type_id=%d, returning null", type_id);
+    return ItemNull;
+}
+
+Item MarkBuilder::deep_copy_internal(Item item) {
+    DeepCopyVisitor visitor = {this};
+    return lam::visit(item, visitor);
 }

@@ -80,6 +80,21 @@ TEST_F(MarkBuilderDeepCopyTest, CopyInt) {
     EXPECT_EQ(it2i(copied), 42);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, TypedBuilderOutputsCarryTagWitnesses) {
+    MarkBuilder builder(input1);
+
+    auto array = builder.createArrayTyped();
+    auto map = builder.createMapTyped();
+    auto element = builder.createElementTyped("div");
+
+    EXPECT_EQ(get_type_id(array.raw()), LMD_TYPE_ARRAY);
+    EXPECT_EQ(get_type_id(map.raw()), LMD_TYPE_MAP);
+    EXPECT_EQ(get_type_id(element.raw()), LMD_TYPE_ELEMENT);
+    EXPECT_NE(array.ptr(), nullptr);
+    EXPECT_NE(map.ptr(), nullptr);
+    EXPECT_NE(element.ptr(), nullptr);
+}
+
 TEST_F(MarkBuilderDeepCopyTest, CopyLong) {
     MarkBuilder builder(input1);
     Item long_item = builder.createLong(9223372036854775807LL);

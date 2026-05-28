@@ -185,9 +185,9 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
     } else if (item.isMap()) {
         MapReader mp = item.asMap();
         format_map_reader_with_indent(ctx, mp, indent);
-    } else if (item.getType() == LMD_TYPE_OBJECT) {
+    } else if (auto object = item.asItem<LMD_TYPE_OBJECT>()) {
         // Object: format as map with "@" type discriminator key
-        Object* obj = (Object*)(uintptr_t)item.item().item;
+        Object* obj = object.ptr();
         TypeObject* obj_type = (TypeObject*)obj->type;
         ctx.emit("{%n%i\"@\": \"", indent + 1);
         if (obj_type->type_name.str) {
