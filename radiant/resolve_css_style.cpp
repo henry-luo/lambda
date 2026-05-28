@@ -18,6 +18,8 @@
 
 // Forward declaration for CSS variable lookup
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
+static bool css_value_is_background_color_candidate(const CssValue* value);
 
 static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
@@ -94,6 +96,147 @@ static bool resolve_nonnegative_css_length(LayoutContext* lycon, uintptr_t prope
         return true;
     }
     return false;
+}
+
+static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* value,
+                                          LinearGradient** out_gradient) {
+    if (out_gradient) *out_gradient = nullptr;
+    if (!lycon || !value || !out_gradient ||
+        value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
+        !value->data.function->name) {
+        return false;
+    }
+
+    CssFunction* func = value->data.function;
+    bool repeating = strcmp(func->name, "repeating-linear-gradient") == 0;
+    if (strcmp(func->name, "linear-gradient") != 0 && !repeating) {
+        return false;
+    }
+
+    LinearGradient* lg = (LinearGradient*)alloc_prop(lycon, sizeof(LinearGradient));
+    if (!lg) return false;
+    lg->is_repeating = repeating;
+
+    int arg_idx = 0;
+    float angle = 180.0f;
+    if (func->arg_count > 0 && func->args[0]) {
+        CssValue* first_arg = func->args[0];
+        if (first_arg->type == CSS_VALUE_TYPE_ANGLE ||
+            first_arg->type == CSS_VALUE_TYPE_NUMBER ||
+            first_arg->type == CSS_VALUE_TYPE_LENGTH) {
+            angle = first_arg->type == CSS_VALUE_TYPE_NUMBER
+                ? first_arg->data.number.value
+                : first_arg->data.length.value;
+            arg_idx = 1;
+        } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum kw = first_arg->data.keyword;
+            if (kw == CSS_VALUE_TOP) angle = 0.0f;
+            else if (kw == CSS_VALUE_RIGHT) angle = 90.0f;
+            else if (kw == CSS_VALUE_BOTTOM) angle = 180.0f;
+            else if (kw == CSS_VALUE_LEFT) angle = 270.0f;
+            arg_idx = 1;
+        } else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
+            bool has_top = false, has_bottom = false;
+            bool has_left = false, has_right = false;
+            for (int li = 0; li < first_arg->data.list.count; li++) {
+                CssValue* lv = first_arg->data.list.values[li];
+                if (!lv || lv->type != CSS_VALUE_TYPE_KEYWORD) continue;
+                CssEnum kw = lv->data.keyword;
+                if (kw == CSS_VALUE_TOP) has_top = true;
+                else if (kw == CSS_VALUE_BOTTOM) has_bottom = true;
+                else if (kw == CSS_VALUE_LEFT) has_left = true;
+                else if (kw == CSS_VALUE_RIGHT) has_right = true;
+            }
+            if (has_top && has_right) angle = 45.0f;
+            else if (has_top && has_left) angle = 315.0f;
+            else if (has_bottom && has_right) angle = 135.0f;
+            else if (has_bottom && has_left) angle = 225.0f;
+            else if (has_top) angle = 0.0f;
+            else if (has_right) angle = 90.0f;
+            else if (has_bottom) angle = 180.0f;
+            else if (has_left) angle = 270.0f;
+            arg_idx = 1;
+        }
+    }
+    lg->angle = angle;
+
+    int color_count = func->arg_count - arg_idx;
+    if (color_count < 2) return false;
+    lg->stop_count = color_count * 2;
+    lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
+    if (!lg->stops) return false;
+
+    int stop_idx = 0;
+    for (int i = arg_idx; i < func->arg_count && stop_idx < lg->stop_count; i++) {
+        CssValue* arg = func->args[i];
+        if (!arg) continue;
+        CssValue* color_value = arg;
+        CssValue* first_pos = nullptr;
+        CssValue* second_pos = nullptr;
+        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count >= 1) {
+            color_value = arg->data.list.values[0];
+            if (arg->data.list.count >= 2) first_pos = arg->data.list.values[1];
+            if (arg->data.list.count >= 3) second_pos = arg->data.list.values[2];
+        }
+
+        if (!css_value_is_background_color_candidate(color_value)) continue;
+        lg->stops[stop_idx].color = resolve_color_value(lycon, color_value);
+        lg->stops[stop_idx].position = -1.0f;
+        if (first_pos) {
+            if (first_pos->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                lg->stops[stop_idx].position = first_pos->data.percentage.value / 100.0f;
+            } else if (first_pos->type == CSS_VALUE_TYPE_NUMBER) {
+                lg->stops[stop_idx].position = first_pos->data.number.value / 100.0f;
+            } else if (first_pos->type == CSS_VALUE_TYPE_LENGTH) {
+                lg->stops[stop_idx].position = first_pos->data.length.value;
+                lg->stops_in_px = true;
+            }
+        }
+        stop_idx++;
+
+        if (second_pos && stop_idx < lg->stop_count) {
+            lg->stops[stop_idx].color = resolve_color_value(lycon, color_value);
+            lg->stops[stop_idx].position = -1.0f;
+            if (second_pos->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                lg->stops[stop_idx].position = second_pos->data.percentage.value / 100.0f;
+            } else if (second_pos->type == CSS_VALUE_TYPE_NUMBER) {
+                lg->stops[stop_idx].position = second_pos->data.number.value / 100.0f;
+            } else if (second_pos->type == CSS_VALUE_TYPE_LENGTH) {
+                lg->stops[stop_idx].position = second_pos->data.length.value;
+                lg->stops_in_px = true;
+            }
+            stop_idx++;
+        }
+    }
+    lg->stop_count = stop_idx;
+    if (lg->stop_count < 2) return false;
+
+    if (!lg->stops_in_px) {
+        for (int i = 0; i < lg->stop_count; i++) {
+            if (lg->stops[i].position < 0.0f) {
+                lg->stops[i].position = lg->stop_count > 1
+                    ? (float)i / (float)(lg->stop_count - 1)
+                    : 0.0f;
+            }
+        }
+    }
+
+    for (int i = 0; i < lg->stop_count; i++) {
+        GradientStop* s = &lg->stops[i];
+        if (s->color.a == 0 && s->color.r == 0 && s->color.g == 0 && s->color.b == 0) {
+            GradientStop* neighbor = nullptr;
+            if (i > 0 && lg->stops[i - 1].color.a > 0) neighbor = &lg->stops[i - 1];
+            else if (i + 1 < lg->stop_count && lg->stops[i + 1].color.a > 0) neighbor = &lg->stops[i + 1];
+            if (neighbor) {
+                s->color.r = neighbor->color.r;
+                s->color.g = neighbor->color.g;
+                s->color.b = neighbor->color.b;
+            }
+        }
+    }
+
+    *out_gradient = lg;
+    return true;
 }
 
 static bool resolve_contain_intrinsic_length(LayoutContext* lycon, uintptr_t property,
@@ -250,6 +393,141 @@ static const CssValue* css_find_background_radial_gradient_layer(const CssValue*
 static const CssValue* css_find_background_conic_gradient_layer(const CssValue* value) {
     static const char* const names[] = {"conic-gradient", "repeating-conic-gradient"};
     return css_find_background_function(value, names, 2);
+}
+
+static bool css_mask_value_length(const CssValue* value, float* out, bool* is_percent) {
+    if (!value || !out || !is_percent) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        *out = (float)value->data.length.value;
+        *is_percent = false;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        *out = (float)(value->data.percentage.value / 100.0);
+        *is_percent = true;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        *out = (float)value->data.number.value;
+        *is_percent = false;
+        return true;
+    }
+    return false;
+}
+
+static bool css_mask_stop_radius(const CssValue* value, float* out, bool* is_percent) {
+    if (!value || !out || !is_percent) return false;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = value->data.list.count - 1; i >= 1; i--) {
+            if (css_mask_value_length(value->data.list.values[i], out, is_percent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return css_mask_value_length(value, out, is_percent);
+}
+
+static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
+                                   const CssValue* value) {
+    if (!lycon || !span || !value) return;
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+    }
+    if (!span->bound->mask) {
+        span->bound->mask = (MaskProp*)alloc_prop(lycon, sizeof(MaskProp));
+    }
+    MaskProp* mask = span->bound->mask;
+    memset(mask, 0, sizeof(MaskProp));
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+        return;
+    }
+    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
+        !value->data.function->name ||
+        strcmp(value->data.function->name, "radial-gradient") != 0) {
+        return;
+    }
+
+    CssFunction* func = value->data.function;
+    mask->has_radial_gradient = true;
+    mask->cx = 0.5f;
+    mask->cy = 0.5f;
+    mask->radius = 0.5f;
+    mask->radius_is_percent = true;
+
+    int arg_idx = 0;
+    if (func->arg_count > 0 && func->args[0] &&
+        func->args[0]->type == CSS_VALUE_TYPE_LIST) {
+        CssValue* first = func->args[0];
+        int at_idx = -1;
+        for (int i = 0; i < first->data.list.count; i++) {
+            CssValue* item = first->data.list.values[i];
+            if (!item) continue;
+            if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (item->data.keyword == CSS_VALUE_LEFT) mask->cx = 0.0f;
+                else if (item->data.keyword == CSS_VALUE_RIGHT) mask->cx = 1.0f;
+                else if (item->data.keyword == CSS_VALUE_TOP) mask->cy = 0.0f;
+                else if (item->data.keyword == CSS_VALUE_BOTTOM) mask->cy = 1.0f;
+                else if (item->data.keyword == CSS_VALUE_CENTER) {
+                    // center is the default for both axes.
+                }
+
+                const CssEnumInfo* info = css_enum_info(item->data.keyword);
+                if (info && info->name && strcmp(info->name, "at") == 0) {
+                    at_idx = i;
+                }
+            } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                if (i == at_idx + 1) mask->cx = (float)(item->data.percentage.value / 100.0);
+                else if (i == at_idx + 2) mask->cy = (float)(item->data.percentage.value / 100.0);
+            } else if (at_idx >= 0 && item->type == CSS_VALUE_TYPE_LENGTH) {
+                // length positions need layout dimensions; keep center for now.
+            }
+        }
+        arg_idx = 1;
+    }
+
+    float last_opaque = -1.0f;
+    float first_transparent = -1.0f;
+    bool last_opaque_pct = false;
+    bool first_transparent_pct = false;
+    for (int i = arg_idx; i < func->arg_count; i++) {
+        CssValue* arg = func->args[i];
+        if (!arg) continue;
+        Color c = Color{};
+        bool has_color = false;
+        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.count > 0) {
+            c = resolve_color_value(lycon, arg->data.list.values[0]);
+            has_color = true;
+        } else if (arg->type == CSS_VALUE_TYPE_COLOR || arg->type == CSS_VALUE_TYPE_KEYWORD ||
+                   arg->type == CSS_VALUE_TYPE_FUNCTION) {
+            c = resolve_color_value(lycon, arg);
+            has_color = true;
+        }
+        if (!has_color) continue;
+
+        float pos = 0.0f;
+        bool pos_pct = false;
+        if (!css_mask_stop_radius(arg, &pos, &pos_pct)) continue;
+        if (c.a > 0) {
+            last_opaque = pos;
+            last_opaque_pct = pos_pct;
+        } else if (first_transparent < 0.0f) {
+            first_transparent = pos;
+            first_transparent_pct = pos_pct;
+        }
+    }
+
+    if (last_opaque >= 0.0f && first_transparent >= 0.0f &&
+        last_opaque_pct == first_transparent_pct) {
+        mask->radius = (last_opaque + first_transparent) * 0.5f;
+        mask->radius_is_percent = last_opaque_pct;
+    } else if (last_opaque >= 0.0f) {
+        mask->radius = last_opaque;
+        mask->radius_is_percent = last_opaque_pct;
+    }
+    log_debug("[CSS-MASK] radial mask center=(%.2f,%.2f) radius=%.2f percent=%d",
+              mask->cx, mask->cy, mask->radius, mask->radius_is_percent ? 1 : 0);
 }
 
 static bool css_value_is_background_color_candidate(const CssValue* value) {
@@ -5646,6 +5924,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_MASK_IMAGE: {
+            resolve_css_mask_image(lycon, span, value);
+            break;
+        }
+
         // ===== GROUP 16: Background Advanced Properties =====
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
             log_debug("[CSS] Processing background-attachment property");
@@ -6122,6 +6405,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->transform->origin_y = 50.0f;
                 span->transform->origin_x_percent = true;
                 span->transform->origin_y_percent = true;
+                span->transform->perspective_origin_x = 50.0f;
+                span->transform->perspective_origin_y = 50.0f;
             }
 
             TransformFunction* func_list_head = nullptr;
@@ -6441,6 +6726,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->transform->origin_y = 50.0f;
                 span->transform->origin_x_percent = true;
                 span->transform->origin_y_percent = true;
+                span->transform->perspective_origin_x = 50.0f;
+                span->transform->perspective_origin_y = 50.0f;
             }
 
             // Parse transform-origin: can be keywords (left, center, right, top, bottom)
@@ -6525,6 +6812,82 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->transform->origin_y, span->transform->origin_y_percent ? "%" : "px");
             break;
         }
+
+        case CSS_PROPERTY_PERSPECTIVE: {
+            log_debug("[CSS] Processing perspective property (value type=%d)", value->type);
+            if (!span->transform) {
+                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
+                memset(span->transform, 0, sizeof(TransformProp));
+                span->transform->origin_x = 50.0f;
+                span->transform->origin_y = 50.0f;
+                span->transform->origin_x_percent = true;
+                span->transform->origin_y_percent = true;
+                span->transform->perspective_origin_x = 50.0f;
+                span->transform->perspective_origin_y = 50.0f;
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->transform->perspective = 0.0f;
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
+                       value->type == CSS_VALUE_TYPE_NUMBER) {
+                float perspective = value->type == CSS_VALUE_TYPE_NUMBER
+                    ? value->data.number.value
+                    : resolve_length_value(lycon, CSS_PROPERTY_PERSPECTIVE, value);
+                span->transform->perspective = max(0.0f, perspective);
+            }
+            log_debug("[CSS] perspective: %.2f", span->transform->perspective);
+            break;
+        }
+
+        case CSS_PROPERTY_PERSPECTIVE_ORIGIN: {
+            log_debug("[CSS] Processing perspective-origin property (value type=%d)", value->type);
+            if (!span->transform) {
+                span->transform = (TransformProp*)alloc_prop(lycon, sizeof(TransformProp));
+                memset(span->transform, 0, sizeof(TransformProp));
+                span->transform->origin_x = 50.0f;
+                span->transform->origin_y = 50.0f;
+                span->transform->origin_x_percent = true;
+                span->transform->origin_y_percent = true;
+                span->transform->perspective_origin_x = 50.0f;
+                span->transform->perspective_origin_y = 50.0f;
+            }
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (int i = 0; i < value->data.list.count && i < 2; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+                    if (item->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        float pct = (float)item->data.percentage.value;
+                        if (i == 0) span->transform->perspective_origin_x = pct;
+                        else span->transform->perspective_origin_y = pct;
+                    } else if (item->type == CSS_VALUE_TYPE_LENGTH ||
+                               item->type == CSS_VALUE_TYPE_NUMBER) {
+                        float len = item->type == CSS_VALUE_TYPE_NUMBER
+                            ? item->data.number.value
+                            : resolve_length_value(lycon, CSS_PROPERTY_PERSPECTIVE_ORIGIN, item);
+                        if (i == 0) span->transform->perspective_origin_x = len;
+                        else span->transform->perspective_origin_y = len;
+                    } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = item->data.keyword;
+                        if (kw == CSS_VALUE_LEFT) span->transform->perspective_origin_x = 0.0f;
+                        else if (kw == CSS_VALUE_RIGHT) span->transform->perspective_origin_x = 100.0f;
+                        else if (kw == CSS_VALUE_TOP) span->transform->perspective_origin_y = 0.0f;
+                        else if (kw == CSS_VALUE_BOTTOM) span->transform->perspective_origin_y = 100.0f;
+                        else if (kw == CSS_VALUE_CENTER) {
+                            if (i == 0) span->transform->perspective_origin_x = 50.0f;
+                            else span->transform->perspective_origin_y = 50.0f;
+                        }
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                span->transform->perspective_origin_x = (float)value->data.percentage.value;
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_CENTER) {
+                span->transform->perspective_origin_x = 50.0f;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TRANSFORM_STYLE:
+        case CSS_PROPERTY_BACKFACE_VISIBILITY:
+            break;
 
         case CSS_PROPERTY_FILTER:
         case CSS_PROPERTY_BACKDROP_FILTER: {
@@ -7554,6 +7917,70 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border->left_color = resolve_color_value(lycon, value);
                 span->bound->border->left_color_specificity = specificity;
             }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_IMAGE_SOURCE: {
+            log_debug("[CSS] Processing border-image-source property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            LinearGradient* gradient = nullptr;
+            if (resolve_linear_gradient_value(lycon, value, &gradient)) {
+                span->bound->border->border_image_type = GRADIENT_LINEAR;
+                span->bound->border->border_image_linear_gradient = gradient;
+                log_debug("[CSS] border-image-source: linear-gradient with %d stops", gradient->stop_count);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                span->bound->border->border_image_type = GRADIENT_NONE;
+                span->bound->border->border_image_linear_gradient = nullptr;
+                log_debug("[CSS] border-image-source: none");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_IMAGE_WIDTH: {
+            log_debug("[CSS] Processing border-image-width property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+                float width = value->type == CSS_VALUE_TYPE_NUMBER
+                    ? value->data.number.value
+                    : resolve_length_value(lycon, CSS_PROPERTY_BORDER_IMAGE_WIDTH, value);
+                if (!isnan(width) && width >= 0.0f) {
+                    span->bound->border->border_image_width = width;
+                    span->bound->border->has_border_image_width = true;
+                    log_debug("[CSS] border-image-width: %.2f", width);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_IMAGE_REPEAT: {
+            log_debug("[CSS] Processing border-image-repeat property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                span->bound->border->border_image_repeat = value->data.keyword;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_IMAGE_SLICE:
+        case CSS_PROPERTY_BORDER_IMAGE_OUTSET:
+        case CSS_PROPERTY_BORDER_IMAGE: {
+            log_debug("[CSS] border-image property parsed but not needed for current gradient border-image render");
             break;
         }
 

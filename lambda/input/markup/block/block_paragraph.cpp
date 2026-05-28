@@ -535,7 +535,7 @@ Item parse_rst_line_block(MarkupParser* parser, const char* line) {
     String* class_key = parser->builder.createString("class");
     String* class_val = parser->builder.createString("line-block");
     if (class_key && class_val) {
-        parser->builder.putToElement(div, class_key, Item{.item = s2it(class_val)});
+        parser->builder.putToElement(lam::gc_borrow(div), class_key, Item{.item = s2it(class_val)});
     }
 
     // Collect all | prefix lines
@@ -629,7 +629,7 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
         String* src_key = parser->builder.createString("src");
         String* src_val = parser->builder.createString(url_start, url_len);
         if (src_key && src_val) {
-            parser->builder.putToElement(img, src_key, Item{.item = s2it(src_val)});
+            parser->builder.putToElement(lam::gc_borrow(img), src_key, Item{.item = s2it(src_val)});
         }
     }
 
@@ -708,7 +708,7 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
             String* key = parser->builder.createString(attr_name);
             String* val = parser->builder.createString(opt_val_start, opt_val_len);
             if (key && val) {
-                parser->builder.putToElement(img, key, Item{.item = s2it(val)});
+                parser->builder.putToElement(lam::gc_borrow(img), key, Item{.item = s2it(val)});
             }
         }
 

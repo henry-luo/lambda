@@ -122,7 +122,7 @@ static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
         }
         if (param_value) {
             Item value = {.item = s2it(param_value)};
-            builder.putToMap(params_map, param_name, value);
+            builder.putToMap(lam::gc_borrow(params_map), param_name, value);
         }
     }
 }

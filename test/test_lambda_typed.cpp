@@ -50,6 +50,10 @@ TEST(LambdaTypedItem, PreservesAbiSize) {
                   "tagged scalar witnesses must remain raw Item sized");
     static_assert(sizeof(lam::GcPtr<Array>) == sizeof(Array*),
                   "borrowed GC pointers must remain pointer sized");
+    static_assert(sizeof(lam::ShapeRef) == sizeof(ShapeEntry*),
+                  "shape references must remain raw pointer sized");
+    static_assert(sizeof(lam::HoleSentinel) == sizeof(Item),
+                  "hole sentinels must remain raw Item sized");
 
     SUCCEED();
 }
@@ -156,4 +160,35 @@ TEST(LambdaTypedItem, VisitDispatchesTypedWitnesses) {
     EXPECT_EQ(lam::visit(arr_item, LambdaVisitKind()), 1);
     EXPECT_EQ(lam::visit(map_item, LambdaVisitKind()), 2);
     EXPECT_EQ(lam::visit(bool_item, LambdaVisitKind()), 3);
+}
+
+TEST(LambdaTypedItem, ShapeRefBorrowsAndAdvancesShapeEntries) {
+    ShapeEntry first = {};
+    ShapeEntry second = {};
+    first.next = &second;
+
+    lam::ShapeRef shape = lam::shape_borrow(&first);
+    ASSERT_TRUE((bool)shape);
+    EXPECT_EQ(shape.get(), &first);
+
+    shape = lam::shape_next(shape);
+    ASSERT_TRUE((bool)shape);
+    EXPECT_EQ(shape.get(), &second);
+
+    shape = lam::shape_next(shape);
+    EXPECT_FALSE((bool)shape);
+}
+
+TEST(LambdaTypedItem, HoleSentinelWrapsDeletedSlotPayload) {
+    Item hole = lam::hole_sentinel_item();
+
+    EXPECT_EQ(hole.item, lam::HoleSentinel::raw_value());
+    EXPECT_TRUE(lam::is_hole_sentinel(hole));
+
+    Item ordinary_int;
+    ordinary_int.item = i2it(42);
+    EXPECT_FALSE(lam::is_hole_sentinel(ordinary_int));
+
+    lam::HoleSentinel witness = lam::HoleSentinel::from_raw(hole);
+    EXPECT_EQ(witness.raw().item, hole.item);
 }

@@ -1,5 +1,6 @@
 #include "render_border.hpp"
 #include "render_path.hpp"
+#include "render_painter.hpp"
 #include "render_state.hpp"
 #include "../lib/log.h"
 #include <math.h>
@@ -14,6 +15,7 @@ static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
 static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
 static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
+static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* border, Rect rect);
 
 static inline Color color_darken(Color c, float factor) {
     Color out;
@@ -556,6 +558,12 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     border->width.bottom *= s;
     border->width.left *= s;
 
+    if (render_border_image_gradient(rdcon, border, rect)) {
+        border->width = orig_width;
+        border->radius = orig_radius;
+        return;
+    }
+
     // Force vector path when CSS clip-path is active — the direct-pixel path
     // (render_straight_border) bypasses the ThorVG clip stack, so clip-path
     // shapes would not be applied to the borders.
@@ -567,6 +575,73 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     
     border->width = orig_width;
     border->radius = orig_radius;
+}
+
+static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* border, Rect rect) {
+    if (!rdcon || !border ||
+        border->border_image_type != GRADIENT_LINEAR ||
+        !border->border_image_linear_gradient ||
+        border->border_image_linear_gradient->stop_count < 2) {
+        return false;
+    }
+
+    LinearGradient* gradient = border->border_image_linear_gradient;
+    float top = border->has_border_image_width ? border->border_image_width * rdcon->scale : border->width.top;
+    float right = border->has_border_image_width ? border->border_image_width * rdcon->scale : border->width.right;
+    float bottom = border->has_border_image_width ? border->border_image_width * rdcon->scale : border->width.bottom;
+    float left = border->has_border_image_width ? border->border_image_width * rdcon->scale : border->width.left;
+    top = min(top, rect.height * 0.5f);
+    bottom = min(bottom, rect.height * 0.5f);
+    left = min(left, rect.width * 0.5f);
+    right = min(right, rect.width * 0.5f);
+    if (top <= 0.0f && right <= 0.0f && bottom <= 0.0f && left <= 0.0f) {
+        return true;
+    }
+
+    RdtPath* ring = rdt_path_new();
+    if (!ring) return false;
+    rdt_path_add_rect(ring, rect.x, rect.y, rect.width, rect.height, 0.0f, 0.0f);
+    rdt_path_add_rect(ring,
+        rect.x + left, rect.y + top,
+        max(0.0f, rect.width - left - right),
+        max(0.0f, rect.height - top - bottom),
+        0.0f, 0.0f);
+
+    int stop_count = gradient->stop_count;
+    RdtGradientStop* stops = (RdtGradientStop*)alloca(stop_count * sizeof(RdtGradientStop));
+    for (int i = 0; i < stop_count; i++) {
+        GradientStop* stop = &gradient->stops[i];
+        float pos = stop->position >= 0.0f
+            ? stop->position
+            : (stop_count > 1 ? (float)i / (float)(stop_count - 1) : 0.0f);
+        stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
+    }
+
+    float angle_rad = gradient->angle * (float)M_PI / 180.0f;
+    float dx = sinf(angle_rad);
+    float dy = -cosf(angle_rad);
+    float half_w = rect.width * 0.5f;
+    float half_h = rect.height * 0.5f;
+    float cx = rect.x + half_w;
+    float cy = rect.y + half_h;
+    float abs_dx = fabsf(dx);
+    float abs_dy = fabsf(dy);
+    float dist = (abs_dx * rect.height < abs_dy * rect.width)
+        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+
+    RdtPath* clip = render_path_create_clip_path(rdcon);
+    rc_push_clip(rdcon, clip, NULL);
+    rc_fill_linear_gradient(rdcon, ring,
+        cx - dx * dist, cy - dy * dist,
+        cx + dx * dist, cy + dy * dist,
+        stops, stop_count, RDT_FILL_EVEN_ODD,
+        render_state_current_transform(rdcon));
+    rc_pop_clip(rdcon);
+    rdt_path_free(clip);
+    rdt_path_free(ring);
+    log_debug("[BORDER IMAGE] rendered linear-gradient border-image with %d stops", stop_count);
+    return true;
 }
 
 /**

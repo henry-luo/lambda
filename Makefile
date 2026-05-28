@@ -2021,6 +2021,29 @@ check-int-cast:
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
 
+# Check for raw Lambda Item payload casts in migrated files.
+# New migrated Lambda runtime code should use lib/lambda_typed.hpp helpers such as
+# lam::as<>(), lam::require<>(), lam::visit(), ItemReader, and typed reader
+# constructors instead of masking tagged pointers by hand.
+check-item-cast:
+	@echo "Checking migrated Lambda files for raw Item payload casts..."
+	@VIOLATIONS=$$(grep -En '0x00FFFFFFFFFFFFFF|\([[:space:]]*(Array|ArrayNum|Map|VMap|Element|Object|String|Symbol|Binary|Decimal|DateTime|Range|Type|TypeType|Function|Container)[[:space:]]*\*[[:space:]]*\)[[:space:]]*[^;]*item\.item' \
+		lambda/mark_builder.cpp lambda/mark_reader.cpp lambda/print.cpp \
+		lambda/format/format-json.cpp \
+		| grep -v 'ITEM_CAST_OK' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found raw Item payload casts in migrated Lambda files:"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT cast(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No raw Item payload casts in migrated Lambda files"; \
+	fi
+
 # Check for unsafe pointer casts in migrated Radiant files.
 # Downcasts should go through lib/tagged.hpp helpers such as lam::view_as_*(),
 # lam::view_require_*(), lam::dom_as<>(), or lam::dom_require<>().

@@ -280,7 +280,7 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
                 } else {
                     value = {.item = b2it(true)};
                 }
-                ctx.builder.putToMap(props, cw.keyword, value);
+                ctx.builder.putToMap(lam::gc_borrow(props), cw.keyword, value);
             }
         } else {
             (*rtf)++;
@@ -323,14 +323,14 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
                     if (colors) {
                         Item color_table = {.item = (uint64_t)colors};
                         String* key = ctx.builder.createString("color_table");
-                        ctx.builder.putToMap(group, key, color_table);
+                        ctx.builder.putToMap(lam::gc_borrow(group), key, color_table);
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
                     Array* fonts = parse_font_table(ctx, rtf);
                     if (fonts) {
                         Item font_table = {.item = (uint64_t)fonts};
                         String* key = ctx.builder.createString("font_table");
-                        ctx.builder.putToMap(group, key, font_table);
+                        ctx.builder.putToMap(lam::gc_borrow(group), key, font_table);
                     }
                 } else {
                     // Store formatting information
@@ -340,7 +340,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
                     } else {
                         value = {.item = b2it(true)};
                     }
-                    ctx.builder.putToMap(formatting, cw.keyword, value);
+                    ctx.builder.putToMap(lam::gc_borrow(formatting), cw.keyword, value);
                 }
             }
         } else if (**rtf == '{') {
@@ -369,13 +369,13 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
     if (content->length > 0) {
         Item content_item = {.item = (uint64_t)content};
         String* content_key = ctx.builder.createString("content");
-        ctx.builder.putToMap(group, content_key, content_item);
+        ctx.builder.putToMap(lam::gc_borrow(group), content_key, content_item);
     }
 
     if (((TypeMap*)formatting->type)->length > 0) {
         Item format_item = {.item = (uint64_t)formatting};
         String* format_key = ctx.builder.createString("formatting");
-        ctx.builder.putToMap(group, format_key, format_item);
+        ctx.builder.putToMap(lam::gc_borrow(group), format_key, format_item);
     }
     return {.item = (uint64_t)group};
 }

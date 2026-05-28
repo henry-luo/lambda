@@ -40,6 +40,9 @@ typedef struct RenderContext {
     // Transform state
     RdtMatrix transform;           // Current combined transform matrix
     bool has_transform;            // True if non-identity transform is active
+    float perspective_distance;    // Active CSS perspective from ancestor, 0 = none
+    float perspective_origin_x;
+    float perspective_origin_y;
 
     // HiDPI scaling: CSS logical pixels -> physical surface pixels
     float scale;                   // pixel_ratio (1.0 for standard, 2.0 for Retina, etc.)

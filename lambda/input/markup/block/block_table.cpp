@@ -267,7 +267,7 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
                 }
                 if (align_val_str) {
                     String* align_val = parser->builder.createString(align_val_str);
-                    parser->builder.putToElement(cell, align_key, Item{.item = s2it(align_val)});
+                    parser->builder.putToElement(lam::gc_borrow(cell), align_key, Item{.item = s2it(align_val)});
                 }
             }
             
@@ -310,7 +310,7 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
                 }
                 if (align_val_str) {
                     String* align_val = parser->builder.createString(align_val_str);
-                    parser->builder.putToElement(empty_cell, align_key, Item{.item = s2it(align_val)});
+                    parser->builder.putToElement(lam::gc_borrow(empty_cell), align_key, Item{.item = s2it(align_val)});
                 }
             }
             list_push((List*)row, Item{.item = (uint64_t)empty_cell});

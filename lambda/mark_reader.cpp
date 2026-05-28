@@ -210,6 +210,10 @@ MapReader::MapReader(Map* map)
     }
 }
 
+MapReader::MapReader(lam::GcPtr<Map> map)
+    : MapReader(map.get()) {
+}
+
 MapReader::MapReader(lam::ItemOf<LMD_TYPE_MAP> map)
     : MapReader(map.ptr()) {
 }
@@ -236,12 +240,12 @@ ItemReader MapReader::get(const char* key) const {
 bool MapReader::has(const char* key) const {
     if (!map_ || !map_type_) { return false; }
 
-    ShapeEntry* field = map_type_->shape;
+    lam::ShapeRef field = lam::shape_borrow(map_type_->shape);
     while (field) {
         if (field->name && field->name->str && strcmp(field->name->str, key) == 0) {
             return true;
         }
-        field = field->next;
+        field = lam::shape_next(field);
     }
 
     return false;
@@ -266,9 +270,9 @@ MapReader::EntryIterator MapReader::entries() const {
 
 // MapReader::KeyIterator implementation
 MapReader::KeyIterator::KeyIterator(const MapReader* reader)
-    : reader_(reader), current_field_(nullptr) {
+    : reader_(reader), current_field_() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
@@ -278,21 +282,21 @@ bool MapReader::KeyIterator::next(const char** key) {
     }
 
     *key = current_field_->name->str;
-    current_field_ = current_field_->next;
+    current_field_ = lam::shape_next(current_field_);
     return true;
 }
 
 void MapReader::KeyIterator::reset() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
 // MapReader::ValueIterator implementation
 MapReader::ValueIterator::ValueIterator(const MapReader* reader)
-    : reader_(reader), current_field_(nullptr) {
+    : reader_(reader), current_field_() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
@@ -305,21 +309,21 @@ bool MapReader::ValueIterator::next(ItemReader* value) {
     const char* key = current_field_->name->str;
     *value = reader_->get(key);
 
-    current_field_ = current_field_->next;
+    current_field_ = lam::shape_next(current_field_);
     return true;
 }
 
 void MapReader::ValueIterator::reset() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
 // MapReader::EntryIterator implementation
 MapReader::EntryIterator::EntryIterator(const MapReader* reader)
-    : reader_(reader), current_field_(nullptr) {
+    : reader_(reader), current_field_() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
@@ -332,13 +336,13 @@ bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
     void* field_ptr = (char*)reader_->map_->data + current_field_->byte_offset;
     Item result = _map_field_to_item(field_ptr, current_field_->type->type_id);
     *value = ItemReader(result.to_const());
-    current_field_ = current_field_->next;
+    current_field_ = lam::shape_next(current_field_);
     return true;
 }
 
 void MapReader::EntryIterator::reset() {
     if (reader_->map_type_) {
-        current_field_ = reader_->map_type_->shape;
+        current_field_ = lam::shape_borrow(reader_->map_type_->shape);
     }
 }
 
@@ -352,6 +356,10 @@ ArrayReader::ArrayReader()
 
 ArrayReader::ArrayReader(Array* array)
     : array_(array) {
+}
+
+ArrayReader::ArrayReader(lam::GcPtr<Array> array)
+    : ArrayReader(array.get()) {
 }
 
 ArrayReader::ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array)
@@ -409,6 +417,10 @@ ElementReader::ElementReader()
 ElementReader::ElementReader(const Element* element)
     : element_(element)
     , element_type_(element ? (const TypeElmt*)element->type : nullptr) {
+}
+
+ElementReader::ElementReader(lam::GcPtr<Element> element)
+    : ElementReader(element.get()) {
 }
 
 ElementReader::ElementReader(lam::ItemOf<LMD_TYPE_ELEMENT> element)
@@ -551,10 +563,9 @@ bool ElementReader::has_attr(const char* key) const {
     if (!element_ || !element_type_ || !key) return false;
 
     const TypeMap* map_type = (const TypeMap*)element_type_;
-    const ShapeEntry* shape = map_type->shape;
-    if (!shape) return false;
+    lam::ConstShapeRef field = lam::shape_borrow((const ShapeEntry*)map_type->shape);
+    if (!field) return false;
 
-    const ShapeEntry* field = shape;
     size_t key_len = strlen(key);
 
     while (field) {
@@ -562,7 +573,7 @@ bool ElementReader::has_attr(const char* key) const {
             strncmp(field->name->str, key, key_len) == 0) {
             return true;
         }
-        field = field->next;
+        field = lam::shape_next(field);
     }
 
     return false;
@@ -572,14 +583,13 @@ const char* ElementReader::get_attr_string(const char* key) const {
     if (!element_ || !element_type_ || !key) return nullptr;
 
     const TypeMap* map_type = (const TypeMap*)element_type_;
-    const ShapeEntry* shape = map_type->shape;
+    lam::ConstShapeRef field = lam::shape_borrow((const ShapeEntry*)map_type->shape);
     const void* attr_data = element_->data;
 
-    if (!shape || !attr_data) {
+    if (!field || !attr_data) {
         return nullptr;
     }
 
-    const ShapeEntry* field = shape;
     size_t key_len = strlen(key);
 
     while (field) {
@@ -593,7 +603,7 @@ const char* ElementReader::get_attr_string(const char* key) const {
             }
             break;
         }
-        field = field->next;
+        field = lam::shape_next(field);
     }
 
     return nullptr;

@@ -144,7 +144,7 @@ void add_graph_attribute(Input* input, Element* element, const char* name, const
     String* val = builder.createString(value);
     if (key && val) {
         Item lambda_value = {.item = s2it(val)};
-        builder.putToElement(element, key, lambda_value);
+        builder.putToElement(lam::gc_borrow(element), key, lambda_value);
     }
 }
 

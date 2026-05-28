@@ -2261,6 +2261,268 @@ static RdtPath* parse_svg_path_d(const char* d) {
     return path;
 }
 
+typedef struct SvgPathEndInfo {
+    float x;
+    float y;
+    float tangent_x;
+    float tangent_y;
+    bool has_tangent;
+} SvgPathEndInfo;
+
+static bool svg_parse_path_end_info(const char* d, SvgPathEndInfo* info) {
+    if (!d || !*d || !info) return false;
+    memset(info, 0, sizeof(SvgPathEndInfo));
+
+    float cur_x = 0.0f, cur_y = 0.0f;
+    float start_x = 0.0f, start_y = 0.0f;
+    float last_ctrl_x = 0.0f, last_ctrl_y = 0.0f;
+    char last_cmd = 0;
+    const char* p = d;
+
+    while (*p) {
+        skip_wsp_comma(&p);
+        if (!*p) break;
+
+        char cmd = *p;
+        bool is_cmd = isalpha((unsigned char)cmd);
+        if (is_cmd) {
+            p++;
+            last_cmd = cmd;
+        } else {
+            if (!last_cmd || !peek_number(p)) return false;
+            cmd = last_cmd;
+            if (cmd == 'M') cmd = 'L';
+            if (cmd == 'm') cmd = 'l';
+        }
+
+        bool relative = islower((unsigned char)cmd);
+        cmd = (char)toupper((unsigned char)cmd);
+
+        switch (cmd) {
+            case 'M': {
+                float x = parse_number(&p);
+                float y = parse_number(&p);
+                if (relative) { x += cur_x; y += cur_y; }
+                cur_x = start_x = x;
+                cur_y = start_y = y;
+                while (peek_number(p)) {
+                    float px = cur_x, py = cur_y;
+                    x = parse_number(&p);
+                    y = parse_number(&p);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - px;
+                    info->tangent_y = cur_y - py;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
+                }
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            case 'L': {
+                while (peek_number(p)) {
+                    float px = cur_x, py = cur_y;
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - px;
+                    info->tangent_y = cur_y - py;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
+                }
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            case 'H': {
+                while (peek_number(p)) {
+                    float px = cur_x;
+                    float x = parse_number(&p);
+                    if (relative) x += cur_x;
+                    cur_x = x;
+                    info->tangent_x = cur_x - px;
+                    info->tangent_y = 0.0f;
+                    info->has_tangent = fabsf(info->tangent_x) > 0.0001f;
+                }
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            case 'V': {
+                while (peek_number(p)) {
+                    float py = cur_y;
+                    float y = parse_number(&p);
+                    if (relative) y += cur_y;
+                    cur_y = y;
+                    info->tangent_x = 0.0f;
+                    info->tangent_y = cur_y - py;
+                    info->has_tangent = fabsf(info->tangent_y) > 0.0001f;
+                }
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            case 'C': {
+                while (peek_number(p)) {
+                    parse_number(&p); parse_number(&p);
+                    float x2 = parse_number(&p);
+                    float y2 = parse_number(&p);
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { x2 += cur_x; y2 += cur_y; x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - x2;
+                    info->tangent_y = cur_y - y2;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
+                    last_ctrl_x = x2; last_ctrl_y = y2;
+                }
+                break;
+            }
+            case 'S': {
+                while (peek_number(p)) {
+                    float x2 = parse_number(&p);
+                    float y2 = parse_number(&p);
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { x2 += cur_x; y2 += cur_y; x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - x2;
+                    info->tangent_y = cur_y - y2;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
+                    last_ctrl_x = x2; last_ctrl_y = y2;
+                }
+                break;
+            }
+            case 'Q': {
+                while (peek_number(p)) {
+                    float qx = parse_number(&p);
+                    float qy = parse_number(&p);
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { qx += cur_x; qy += cur_y; x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - qx;
+                    info->tangent_y = cur_y - qy;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
+                    last_ctrl_x = qx; last_ctrl_y = qy;
+                }
+                break;
+            }
+            case 'T': {
+                while (peek_number(p)) {
+                    float qx = 2.0f * cur_x - last_ctrl_x;
+                    float qy = 2.0f * cur_y - last_ctrl_y;
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - qx;
+                    info->tangent_y = cur_y - qy;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
+                    last_ctrl_x = qx; last_ctrl_y = qy;
+                }
+                break;
+            }
+            case 'A': {
+                while (peek_number(p)) {
+                    parse_number(&p); parse_number(&p); parse_number(&p);
+                    parse_flag(&p); parse_flag(&p);
+                    float px = cur_x, py = cur_y;
+                    float x = parse_number(&p);
+                    float y = parse_number(&p);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    info->tangent_x = cur_x - px;
+                    info->tangent_y = cur_y - py;
+                    info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
+                }
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            case 'Z': {
+                float px = cur_x, py = cur_y;
+                cur_x = start_x; cur_y = start_y;
+                info->tangent_x = cur_x - px;
+                info->tangent_y = cur_y - py;
+                info->has_tangent = !svg_same_point(cur_x, cur_y, px, py);
+                last_ctrl_x = cur_x; last_ctrl_y = cur_y;
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+
+    info->x = cur_x;
+    info->y = cur_y;
+    return true;
+}
+
+static RdtMatrix svg_matrix_scale(float sx, float sy) {
+    RdtMatrix m = { sx, 0, 0,  0, sy, 0,  0, 0, 1 };
+    return m;
+}
+
+static RdtMatrix svg_matrix_rotate(float radians) {
+    float c = cosf(radians);
+    float s = sinf(radians);
+    RdtMatrix m = { c, -s, 0,  s, c, 0,  0, 0, 1 };
+    return m;
+}
+
+static void render_svg_path_marker_end(SvgInlineRenderContext* ctx, Element* elem,
+                                       const RdtMatrix* path_transform,
+                                       float stroke_width) {
+    if (!ctx || !elem || !path_transform || !ctx->defs) return;
+
+    char marker_buf[256];
+    const char* marker_ref = get_svg_attr_or_style(ctx, elem, "marker-end",
+                                                   marker_buf, sizeof(marker_buf));
+    if (!marker_ref) return;
+
+    char id_buf[128];
+    if (!parse_svg_url_id(marker_ref, id_buf, sizeof(id_buf))) return;
+    Element* marker_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);
+    if (!marker_elem) return;
+
+    const char* d = get_svg_attr(elem, "d");
+    SvgPathEndInfo end = {};
+    if (!svg_parse_path_end_info(d, &end) || !end.has_tangent) return;
+
+    float marker_scale = stroke_width;
+    const char* units = get_svg_attr(marker_elem, "markerUnits");
+    if (units && strcmp(units, "userSpaceOnUse") == 0) marker_scale = 1.0f;
+
+    float ref_x = parse_svg_length(get_svg_attr(marker_elem, "refX"), 0.0f);
+    float ref_y = parse_svg_length(get_svg_attr(marker_elem, "refY"), 0.0f);
+    float angle = atan2f(end.tangent_y, end.tangent_x);
+    const char* orient = get_svg_attr(marker_elem, "orient");
+    if (orient && strcmp(orient, "auto") != 0 && strcmp(orient, "auto-start-reverse") != 0) {
+        angle = parse_svg_length(orient, 0.0f) * (float)M_PI / 180.0f;
+    }
+
+    RdtMatrix translate = rdt_matrix_translate(end.x, end.y);
+    RdtMatrix rotate = svg_matrix_rotate(angle);
+    RdtMatrix scale = svg_matrix_scale(marker_scale, marker_scale);
+    RdtMatrix ref = rdt_matrix_translate(-ref_x, -ref_y);
+    RdtMatrix local = rdt_matrix_multiply(&translate, &rotate);
+    local = rdt_matrix_multiply(&local, &scale);
+    local = rdt_matrix_multiply(&local, &ref);
+    RdtMatrix marker_transform = rdt_matrix_multiply(path_transform, &local);
+
+    RdtMatrix saved_transform = ctx->transform;
+    float saved_vw = ctx->current_viewport_w;
+    float saved_vh = ctx->current_viewport_h;
+    ctx->transform = marker_transform;
+    ctx->current_viewport_w = parse_svg_length(get_svg_attr(marker_elem, "markerWidth"), 3.0f);
+    ctx->current_viewport_h = parse_svg_length(get_svg_attr(marker_elem, "markerHeight"), 3.0f);
+
+    for (int64_t i = 0; i < marker_elem->length; i++) {
+        Element* child = get_child_element_at(marker_elem, i);
+        if (child) render_svg_element(ctx, child);
+    }
+
+    ctx->current_viewport_w = saved_vw;
+    ctx->current_viewport_h = saved_vh;
+    ctx->transform = saved_transform;
+}
+
 static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
     const char* d = get_svg_attr(elem, "d");
     RdtPath* path = parse_svg_path_d(d);
@@ -2276,6 +2538,13 @@ static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
     }
 
     draw_svg_fill_stroke(ctx, draw_path, elem, &m, 0, 0, 0, 0);
+    char marker_stroke_width_buf[64];
+    const char* marker_stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width",
+                                                            marker_stroke_width_buf,
+                                                            sizeof(marker_stroke_width_buf));
+    float stroke_width = marker_stroke_width ? parse_svg_length(marker_stroke_width, 1.0f)
+                                             : ctx->stroke_width;
+    render_svg_path_marker_end(ctx, elem, &m, stroke_width);
     if (stable_path) rdt_path_free(stable_path);
     rdt_path_free(path);
 
@@ -3757,6 +4026,217 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
 // SVG ClipPath Support
 // ============================================================================
 
+static RdtPath* build_path_from_svg_shape(Element* elem) {
+    if (!elem) return nullptr;
+    const char* tag = get_element_tag_name(elem);
+    if (!tag) return nullptr;
+
+    RdtPath* path = rdt_path_new();
+    bool has_geometry = false;
+
+    if (strcmp(tag, "rect") == 0) {
+        float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
+        float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
+        float w = parse_svg_length(get_svg_attr(elem, "width"), 0);
+        float h = parse_svg_length(get_svg_attr(elem, "height"), 0);
+        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
+        float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);
+        if (w > 0 && h > 0) {
+            rdt_path_add_rect(path, x, y, w, h, rx, ry);
+            has_geometry = true;
+        }
+    } else if (strcmp(tag, "circle") == 0) {
+        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
+        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
+        float r = parse_svg_length(get_svg_attr(elem, "r"), 0);
+        if (r > 0) {
+            rdt_path_add_circle(path, cx, cy, r, r);
+            has_geometry = true;
+        }
+    } else if (strcmp(tag, "ellipse") == 0) {
+        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
+        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
+        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
+        float ry = parse_svg_length(get_svg_attr(elem, "ry"), 0);
+        if (rx > 0 && ry > 0) {
+            rdt_path_add_circle(path, cx, cy, rx, ry);
+            has_geometry = true;
+        }
+    } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
+        const char* points = get_svg_attr(elem, "points");
+        if (points) {
+            has_geometry = parse_points_to_path(points, path, (strcmp(tag, "polygon") == 0));
+        }
+    } else if (strcmp(tag, "path") == 0) {
+        const char* d = get_svg_attr(elem, "d");
+        if (d) {
+            rdt_path_free(path);
+            return parse_svg_path_d(d);
+        }
+    }
+
+    if (!has_geometry) {
+        rdt_path_free(path);
+        return nullptr;
+    }
+    return path;
+}
+
+static bool svg_mask_rect_bounds(Element* elem, float* x, float* y, float* w, float* h,
+                                 float* rx, float* ry) {
+    if (!elem || !x || !y || !w || !h || !rx || !ry) return false;
+    const char* tag = get_element_tag_name(elem);
+    if (!tag || strcmp(tag, "rect") != 0) return false;
+    *x = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
+    *y = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
+    *w = parse_svg_length(get_svg_attr(elem, "width"), 0.0f);
+    *h = parse_svg_length(get_svg_attr(elem, "height"), 0.0f);
+    *rx = parse_svg_length(get_svg_attr(elem, "rx"), 0.0f);
+    *ry = parse_svg_length(get_svg_attr(elem, "ry"), *rx);
+    if (*rx < 0.0f) *rx = 0.0f;
+    if (*ry < 0.0f) *ry = 0.0f;
+    if (*rx > *w * 0.5f) *rx = *w * 0.5f;
+    if (*ry > *h * 0.5f) *ry = *h * 0.5f;
+    return *w > 0.0f && *h > 0.0f;
+}
+
+static float svg_mask_source_alpha_for_child(SvgInlineRenderContext* ctx, Element* child);
+
+static bool svg_mask_next_opaque_rect(SvgInlineRenderContext* ctx, Element* mask_elem,
+                                      int64_t start_index, float* x, float* y,
+                                      float* w, float* h, float* rx, float* ry) {
+    if (!ctx || !mask_elem) return false;
+    for (int64_t j = start_index; j < mask_elem->length; j++) {
+        Element* later = get_child_element_at(mask_elem, j);
+        if (svg_mask_source_alpha_for_child(ctx, later) >= 0.999f &&
+            svg_mask_rect_bounds(later, x, y, w, h, rx, ry)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void render_svg_masked_source_clip(SvgInlineRenderContext* ctx, Element* elem,
+                                          RdtPath* mask_path,
+                                          const RdtMatrix* mask_transform,
+                                          float opacity) {
+    if (!ctx || !elem || !mask_path) return;
+    float saved_opacity = ctx->opacity;
+    svg_push_clip(ctx, mask_path, mask_transform);
+    ctx->opacity = opacity;
+    render_svg_element(ctx, elem);
+    svg_pop_clip(ctx);
+    ctx->opacity = saved_opacity;
+}
+
+static bool render_svg_masked_source_extra_clip(SvgInlineRenderContext* ctx, Element* elem,
+                                                RdtPath* mask_path,
+                                                const RdtMatrix* mask_transform,
+                                                RdtPath* extra_path,
+                                                float opacity) {
+    if (!ctx || !elem || !mask_path || !extra_path) return false;
+    svg_push_clip(ctx, mask_path, mask_transform);
+    svg_push_clip(ctx, extra_path, &ctx->transform);
+    float saved_opacity = ctx->opacity;
+    ctx->opacity = opacity;
+    render_svg_element(ctx, elem);
+    ctx->opacity = saved_opacity;
+    svg_pop_clip(ctx);
+    svg_pop_clip(ctx);
+    return true;
+}
+
+static RdtPath* svg_mask_corner_outside_round_rect(float x, float y, float w, float h,
+                                                  float rx, float ry, int corner) {
+    if (rx <= 0.0f || ry <= 0.0f) return nullptr;
+    const float k = 0.5522847498f;
+    RdtPath* path = rdt_path_new();
+    if (corner == 0) {
+        rdt_path_move_to(path, x, y);
+        rdt_path_line_to(path, x + rx, y);
+        rdt_path_cubic_to(path, x + rx - rx * k, y, x, y + ry - ry * k, x, y + ry);
+        rdt_path_line_to(path, x, y);
+    } else if (corner == 1) {
+        rdt_path_move_to(path, x + w - rx, y);
+        rdt_path_line_to(path, x + w, y);
+        rdt_path_line_to(path, x + w, y + ry);
+        rdt_path_cubic_to(path, x + w, y + ry - ry * k, x + w - rx + rx * k, y, x + w - rx, y);
+    } else if (corner == 2) {
+        rdt_path_move_to(path, x, y + h - ry);
+        rdt_path_cubic_to(path, x, y + h - ry + ry * k, x + rx - rx * k, y + h, x + rx, y + h);
+        rdt_path_line_to(path, x, y + h);
+        rdt_path_line_to(path, x, y + h - ry);
+    } else {
+        rdt_path_move_to(path, x + w, y + h - ry);
+        rdt_path_line_to(path, x + w, y + h);
+        rdt_path_line_to(path, x + w - rx, y + h);
+        rdt_path_cubic_to(path, x + w - rx + rx * k, y + h, x + w, y + h - ry + ry * k,
+                          x + w, y + h - ry);
+    }
+    rdt_path_close(path);
+    return path;
+}
+
+static bool render_svg_masked_source_excluding_rect(SvgInlineRenderContext* ctx, Element* elem,
+                                                    RdtPath* mask_path,
+                                                    const RdtMatrix* mask_transform,
+                                                    float opacity,
+                                                    float mask_x, float mask_y,
+                                                    float mask_w, float mask_h,
+                                                    float ex_x, float ex_y,
+                                                    float ex_w, float ex_h,
+                                                    float ex_rx, float ex_ry) {
+    if (!ctx || !elem || !mask_path || mask_w <= 0.0f || mask_h <= 0.0f ||
+        ex_w <= 0.0f || ex_h <= 0.0f) {
+        return false;
+    }
+
+    float mask_r = mask_x + mask_w;
+    float mask_b = mask_y + mask_h;
+    float ex_r = ex_x + ex_w;
+    float ex_b = ex_y + ex_h;
+    if (ex_x < mask_x) ex_x = mask_x;
+    if (ex_y < mask_y) ex_y = mask_y;
+    if (ex_r > mask_r) ex_r = mask_r;
+    if (ex_b > mask_b) ex_b = mask_b;
+    if (ex_x >= ex_r || ex_y >= ex_b) return false;
+
+    float rects[4][4] = {
+        {mask_x, mask_y, ex_x - mask_x, mask_h},
+        {ex_r, mask_y, mask_r - ex_r, mask_h},
+        {ex_x, mask_y, ex_r - ex_x, ex_y - mask_y},
+        {ex_x, ex_b, ex_r - ex_x, mask_b - ex_b}
+    };
+
+    bool painted = false;
+    for (int i = 0; i < 4; i++) {
+        if (rects[i][2] <= 0.0f || rects[i][3] <= 0.0f) continue;
+        RdtPath* slice = rdt_path_new();
+        rdt_path_add_rect(slice, rects[i][0], rects[i][1], rects[i][2], rects[i][3],
+                          0.0f, 0.0f);
+        if (render_svg_masked_source_extra_clip(ctx, elem, mask_path, mask_transform,
+                                                slice, opacity)) {
+            painted = true;
+        }
+        rdt_path_free(slice);
+    }
+
+    if (ex_rx > 0.0f && ex_ry > 0.0f) {
+        for (int i = 0; i < 4; i++) {
+            RdtPath* corner_path = svg_mask_corner_outside_round_rect(ex_x, ex_y,
+                                                                      ex_w, ex_h,
+                                                                      ex_rx, ex_ry, i);
+            if (!corner_path) continue;
+            if (render_svg_masked_source_extra_clip(ctx, elem, mask_path, mask_transform,
+                                                    corner_path, opacity)) {
+                painted = true;
+            }
+            rdt_path_free(corner_path);
+        }
+    }
+    return painted;
+}
+
 // Build a composite RdtPath from the children of a <clipPath> element.
 // Returns new path (caller must free), or nullptr if no geometry found.
 static RdtPath* build_clip_path_from_def(Element* clip_elem) {
@@ -4039,7 +4519,8 @@ static void process_svg_def_resources(SvgInlineRenderContext* ctx, Element* elem
                    strcmp(child_tag, "clipPath") == 0 ||
                    strcmp(child_tag, "mask") == 0 ||
                    strcmp(child_tag, "symbol") == 0 ||
-                   strcmp(child_tag, "pattern") == 0) {
+                   strcmp(child_tag, "pattern") == 0 ||
+                   strcmp(child_tag, "marker") == 0) {
             register_svg_def_element(ctx, child);
         }
         process_svg_def_resources(ctx, child);
@@ -4177,6 +4658,120 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
 }
 
 // ============================================================================
+// SVG Mask Support
+// ============================================================================
+
+static float svg_mask_luminance_for_child(SvgInlineRenderContext* ctx, Element* child) {
+    char fill_buf[256];
+    char opacity_buf[64];
+    char fill_opacity_buf[64];
+    const char* fill = get_svg_attr_or_style(ctx, child, "fill", fill_buf, sizeof(fill_buf));
+    if (fill && strcmp(fill, "none") == 0) return 0.0f;
+
+    Color c;
+    if (fill) {
+        c = svg_resolve_color_keyword(ctx, fill);
+    } else {
+        c.r = 0; c.g = 0; c.b = 0; c.a = 255;
+    }
+    float alpha = (float)c.a / 255.0f;
+
+    const char* opacity = get_svg_attr_or_style(ctx, child, "opacity", opacity_buf, sizeof(opacity_buf));
+    if (opacity) alpha *= strtof(opacity, nullptr);
+    const char* fill_opacity = get_svg_attr_or_style(ctx, child, "fill-opacity",
+                                                     fill_opacity_buf, sizeof(fill_opacity_buf));
+    if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
+
+    float lum = (0.2126f * (float)c.r + 0.7152f * (float)c.g + 0.0722f * (float)c.b) / 255.0f;
+    float amount = lum * alpha;
+    if (amount < 0.0f) amount = 0.0f;
+    if (amount > 1.0f) amount = 1.0f;
+    return amount;
+}
+
+static float svg_mask_source_alpha_for_child(SvgInlineRenderContext* ctx, Element* child) {
+    char opacity_buf[64];
+    char fill_opacity_buf[64];
+    char fill_buf[256];
+    const char* fill = get_svg_attr_or_style(ctx, child, "fill", fill_buf, sizeof(fill_buf));
+    if (fill && strcmp(fill, "none") == 0) return 0.0f;
+
+    Color c;
+    if (fill) {
+        c = svg_resolve_color_keyword(ctx, fill);
+    } else {
+        c.r = 0; c.g = 0; c.b = 0; c.a = 255;
+    }
+    float alpha = (float)c.a / 255.0f;
+    const char* opacity = get_svg_attr_or_style(ctx, child, "opacity", opacity_buf, sizeof(opacity_buf));
+    if (opacity) alpha *= strtof(opacity, nullptr);
+    const char* fill_opacity = get_svg_attr_or_style(ctx, child, "fill-opacity",
+                                                     fill_opacity_buf, sizeof(fill_opacity_buf));
+    if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
+    if (alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    return alpha;
+}
+
+static bool render_svg_element_with_simple_mask(SvgInlineRenderContext* ctx, Element* elem) {
+    if (!ctx || !elem || ctx->suppress_masks) return false;
+
+    char mask_buf[256];
+    const char* mask_ref = get_svg_attr_or_style(ctx, elem, "mask", mask_buf, sizeof(mask_buf));
+    if (!mask_ref) return false;
+
+    char id_buf[128];
+    if (!parse_svg_url_id(mask_ref, id_buf, sizeof(id_buf)) || !ctx->defs) return false;
+    Element* mask_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);
+    if (!mask_elem) {
+        log_debug("[SVG-MASK] mask ref '%s' not found", id_buf);
+        return false;
+    }
+
+    bool painted = false;
+    bool saved_suppress = ctx->suppress_masks;
+    float saved_opacity = ctx->opacity;
+    float mask_x = parse_svg_length(get_svg_attr(mask_elem, "x"), 0.0f);
+    float mask_y = parse_svg_length(get_svg_attr(mask_elem, "y"), 0.0f);
+    float mask_w = parse_svg_length(get_svg_attr(mask_elem, "width"), ctx->current_viewport_w);
+    float mask_h = parse_svg_length(get_svg_attr(mask_elem, "height"), ctx->current_viewport_h);
+    ctx->suppress_masks = true;
+
+    for (int64_t i = 0; i < mask_elem->length; i++) {
+        Element* child = get_child_element_at(mask_elem, i);
+        if (!child) continue;
+        RdtPath* mask_path = build_path_from_svg_shape(child);
+        if (!mask_path) continue;
+
+        float mask_alpha = svg_mask_luminance_for_child(ctx, child);
+        if (mask_alpha > 0.0f) {
+            RdtMatrix mask_transform = compose_element_transform(ctx, child);
+            float ex_x, ex_y, ex_w, ex_h, ex_rx, ex_ry;
+            if (!svg_mask_next_opaque_rect(ctx, mask_elem, i + 1,
+                                           &ex_x, &ex_y, &ex_w, &ex_h,
+                                           &ex_rx, &ex_ry) ||
+                !render_svg_masked_source_excluding_rect(ctx, elem, mask_path, &mask_transform,
+                                                         saved_opacity * mask_alpha,
+                                                         mask_x, mask_y, mask_w, mask_h,
+                                                         ex_x, ex_y, ex_w, ex_h,
+                                                         ex_rx, ex_ry)) {
+                render_svg_masked_source_clip(ctx, elem, mask_path, &mask_transform,
+                                              saved_opacity * mask_alpha);
+            }
+            painted = true;
+        }
+        rdt_path_free(mask_path);
+    }
+
+    ctx->opacity = saved_opacity;
+    ctx->suppress_masks = saved_suppress;
+    if (painted) {
+        log_debug("[SVG-MASK] applied simple luminance mask '%s'", id_buf);
+    }
+    return painted;
+}
+
+// ============================================================================
 // Main SVG Element Dispatcher
 // ============================================================================
 
@@ -4194,6 +4789,10 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
     }
 
     log_debug("[SVG] rendering element: %s", tag);
+
+    if (render_svg_element_with_simple_mask(ctx, elem)) {
+        return;
+    }
 
     // check for clip-path="url(#id)" attribute and push clip if found
     RdtPath* clip_path = resolve_svg_clip_path(ctx, elem);
@@ -4224,7 +4823,8 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
                strcmp(tag, "clipPath") == 0 ||
                strcmp(tag, "mask") == 0 ||
                strcmp(tag, "symbol") == 0 ||
-               strcmp(tag, "pattern") == 0) {
+               strcmp(tag, "pattern") == 0 ||
+               strcmp(tag, "marker") == 0) {
         // these are definitions, don't render directly; PDFs may emit them
         // inline inside transformed groups immediately before their users.
         register_svg_def_element(ctx, elem);

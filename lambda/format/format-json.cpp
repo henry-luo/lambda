@@ -22,8 +22,8 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
     while (iter.next(&key, &value)) {
         // Skip function-valued properties (like JSON.stringify)
         if (value.getType() == LMD_TYPE_FUNC) continue;
-        // Skip deleted properties (JS delete operator sentinel: tagged INT with 0x00DEAD00DEAD00)
-        if (value.item().item == ((3ULL << 56) | 0x00DEAD00DEAD00ULL)) continue;
+        // Skip deleted properties (JS delete operator sentinel).
+        if (lam::is_hole_sentinel(value.item())) continue;
 
         if (!first) {
             ctx.write_text(",\n");
@@ -185,9 +185,9 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
     } else if (item.isMap()) {
         MapReader mp = item.asMap();
         format_map_reader_with_indent(ctx, mp, indent);
-    } else if (item.getType() == LMD_TYPE_OBJECT) {
+    } else if (auto object = item.asItem<LMD_TYPE_OBJECT>()) {
         // Object: format as map with "@" type discriminator key
-        Object* obj = (Object*)(uintptr_t)item.item().item;
+        Object* obj = object.ptr();
         TypeObject* obj_type = (TypeObject*)obj->type;
         ctx.emit("{%n%i\"@\": \"", indent + 1);
         if (obj_type->type_name.str) {

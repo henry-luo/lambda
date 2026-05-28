@@ -373,7 +373,7 @@ inline void add_inline_attribute(MarkupParser* parser, Element* elem,
     String* k = parser->builder.createString(key);
     String* v = parser->builder.createString(val);
     if (k && v) {
-        parser->builder.putToElement(elem, k, Item{.item = s2it(v)});
+        parser->builder.putToElement(lam::gc_borrow(elem), k, Item{.item = s2it(v)});
     }
 }
 

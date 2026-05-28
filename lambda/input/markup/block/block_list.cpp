@@ -580,7 +580,7 @@ static Item build_nested_list_from_content(MarkupParser* parser, const char* con
             snprintf(start_str, sizeof(start_str), "%d", start_num);
             String* key = parser->builder.createName("start");
             String* value = parser->builder.createString(start_str, strlen(start_str));
-            parser->builder.putToElement(list, key, Item{.item = s2it(value)});
+            parser->builder.putToElement(lam::gc_borrow(list), key, Item{.item = s2it(value)});
         }
     }
 
@@ -851,7 +851,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             snprintf(start_str, sizeof(start_str), "%d", start_num);
             String* key = parser->builder.createName("start");
             String* value = parser->builder.createString(start_str, strlen(start_str));
-            parser->builder.putToElement(list, key, Item{.item = s2it(value)});
+            parser->builder.putToElement(lam::gc_borrow(list), key, Item{.item = s2it(value)});
         }
     }
 
@@ -951,12 +951,12 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 // Add class="task-list-item" for styling
                 String* class_key = parser->builder.createName("class");
                 String* class_val = parser->builder.createString("task-list-item");
-                parser->builder.putToElement(item, class_key, Item{.item = s2it(class_val)});
+                parser->builder.putToElement(lam::gc_borrow(item), class_key, Item{.item = s2it(class_val)});
 
                 // Add data-checked attribute to indicate checkbox state
                 String* checked_key = parser->builder.createName("data-checked");
                 String* checked_val = parser->builder.createString(item_info.task_checked ? "true" : "false");
-                parser->builder.putToElement(item, checked_key, Item{.item = s2it(checked_val)});
+                parser->builder.putToElement(lam::gc_borrow(item), checked_key, Item{.item = s2it(checked_val)});
             }
 
             // Calculate content column first - needed for proper stripping
@@ -1172,18 +1172,18 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             // Set type="checkbox"
                             String* type_key = parser->builder.createName("type");
                             String* type_val = parser->builder.createString("checkbox");
-                            parser->builder.putToElement(checkbox, type_key, Item{.item = s2it(type_val)});
+                            parser->builder.putToElement(lam::gc_borrow(checkbox), type_key, Item{.item = s2it(type_val)});
 
                             // Set disabled attribute (GFM spec: checkboxes are typically disabled)
                             String* disabled_key = parser->builder.createName("disabled");
                             String* disabled_val = parser->builder.createString("disabled");
-                            parser->builder.putToElement(checkbox, disabled_key, Item{.item = s2it(disabled_val)});
+                            parser->builder.putToElement(lam::gc_borrow(checkbox), disabled_key, Item{.item = s2it(disabled_val)});
 
                             // Set checked attribute if task is checked
                             if (item_info.task_checked) {
                                 String* checked_key = parser->builder.createName("checked");
                                 String* checked_val = parser->builder.createString("checked");
-                                parser->builder.putToElement(checkbox, checked_key, Item{.item = s2it(checked_val)});
+                                parser->builder.putToElement(lam::gc_borrow(checkbox), checked_key, Item{.item = s2it(checked_val)});
                             }
 
                             list_push((List*)item, Item{.item = (uint64_t)checkbox});
@@ -1509,7 +1509,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
     if (has_task_items) {
         String* class_key = parser->builder.createName("class");
         String* class_val = parser->builder.createString("contains-task-list");
-        parser->builder.putToElement(list, class_key, Item{.item = s2it(class_val)});
+        parser->builder.putToElement(lam::gc_borrow(list), class_key, Item{.item = s2it(class_val)});
     }
 
     return Item{.item = (uint64_t)list};

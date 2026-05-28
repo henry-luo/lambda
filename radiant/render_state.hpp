@@ -9,6 +9,9 @@ typedef struct RenderTransformScope {
     RenderContext* context;
     RdtMatrix previous_transform;
     bool previous_has_transform;
+    float previous_perspective_distance;
+    float previous_perspective_origin_x;
+    float previous_perspective_origin_y;
     bool active;
 } RenderTransformScope;
 

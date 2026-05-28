@@ -4,10 +4,10 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/string.h"
 #include "../lib/url.h"
-#include "../lambda/input/input.hpp"
 #include "../lib/log.h"
 }
 
+#include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/mark_reader.hpp"

@@ -3,6 +3,7 @@
 
 #include "lambda-data.hpp"
 #include "name_pool.hpp"
+#include "../lib/lambda_typed.hpp"
 #include "../lib/mempool.h"
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
@@ -173,16 +174,19 @@ public:
      * Create an empty element with given tag name
      */
     Item createElement(const char* tag_name);
+    lam::ItemOf<LMD_TYPE_ELEMENT> createElementTyped(const char* tag_name);
 
     /**
      * Create an empty map
      */
     Item createMap();
+    lam::ItemOf<LMD_TYPE_MAP> createMapTyped();
 
     /**
      * Create an empty array
      */
     Item createArray();
+    lam::ItemOf<LMD_TYPE_ARRAY> createArrayTyped();
 
     /**
      * Create primitive Items
@@ -279,6 +283,24 @@ private:
      */
     Item deep_copy_internal(Item item);
 
+    template<TypeId Tag>
+    Item deep_copy_typed(lam::ItemOf<Tag> item);
+
+    Item deep_copy_unknown(Item item);
+
+    struct DeepCopyVisitor {
+        MarkBuilder* builder;
+
+        template<TypeId Tag>
+        Item operator()(lam::ItemOf<Tag> item) const {
+            return builder->deep_copy_typed(item);
+        }
+
+        Item operator()(Item item) const {
+            return builder->deep_copy_unknown(item);
+        }
+    };
+
 public:
     // ============================================================================
     // Internal Helpers (for ElementBuilder/MapBuilder to call legacy functions)
@@ -288,13 +310,13 @@ public:
      * Internal helper to add attribute to existing element
      * Wraps the static elmt_put() function
      */
-    void putToElement(Element* elmt, String* key, Item value);
+    void putToElement(lam::GcPtr<Element> elmt, String* key, Item value);
 
     /**
      * Internal helper to add key-value to existing map
      * Wraps the static map_put() function
      */
-    void putToMap(Map* map, String* key, Item value);
+    void putToMap(lam::GcPtr<Map> map, String* key, Item value);
 };
 
 /**
@@ -418,6 +440,7 @@ public:
      * Element structure was arena-allocated during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_ELEMENT> finalTyped();
 };
 
 /**
@@ -521,6 +544,7 @@ public:
      * Map structure was arena-allocated during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_MAP> finalTyped();
 };
 
 /**
@@ -597,6 +621,7 @@ public:
      * Array was pool-allocated via array_pooled during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_ARRAY> finalTyped();
 };
 
 #endif // LAMBDA_MARK_BUILDER_HPP

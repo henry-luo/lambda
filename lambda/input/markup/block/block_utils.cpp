@@ -27,7 +27,7 @@ void add_attribute_to_element(MarkupParser* parser, Element* elem,
 
     // Add attribute using putToElement
     Item lambda_value = {.item = s2it(val)};
-    parser->builder.putToElement(elem, key, lambda_value);
+    parser->builder.putToElement(lam::gc_borrow(elem), key, lambda_value);
 }
 
 /**

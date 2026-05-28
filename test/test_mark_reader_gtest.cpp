@@ -166,6 +166,17 @@ TEST_F(MarkReaderTest, ArrayReaderAcceptsTypedWitness) {
     EXPECT_EQ(arr.get(1).asInt(), 8);
 }
 
+TEST_F(MarkReaderTest, ArrayReaderAcceptsGcBorrow) {
+    Item array_item = builder->array()
+        .append((int64_t)9)
+        .final();
+
+    ArrayReader arr(lam::gc_borrow(array_item.array));
+    EXPECT_TRUE(arr.isValid());
+    EXPECT_EQ(arr.length(), 1);
+    EXPECT_EQ(arr.get(0).asInt(), 9);
+}
+
 TEST_F(MarkReaderTest, ArrayReaderEmpty) {
     Item array_item = builder->array().final();
 
@@ -292,6 +303,17 @@ TEST_F(MarkReaderTest, MapReaderAcceptsTypedWitness) {
     EXPECT_TRUE(reader.isValid());
     EXPECT_TRUE(reader.has("kind"));
     EXPECT_STREQ(reader.get("kind").cstring(), "typed");
+}
+
+TEST_F(MarkReaderTest, MapReaderAcceptsGcBorrow) {
+    Item map_item = builder->map()
+        .put("kind", "borrowed")
+        .final();
+
+    MapReader reader(lam::gc_borrow(map_item.map));
+    EXPECT_TRUE(reader.isValid());
+    EXPECT_TRUE(reader.has("kind"));
+    EXPECT_STREQ(reader.get("kind").cstring(), "borrowed");
 }
 
 TEST_F(MarkReaderTest, MapReaderEmpty) {
@@ -445,6 +467,19 @@ TEST_F(MarkReaderTest, ElementReaderAcceptsTypedWitness) {
     EXPECT_TRUE(reader.isValid());
     EXPECT_TRUE(reader.hasTag("section"));
     EXPECT_STREQ(reader.get_attr_string("id"), "typed");
+    EXPECT_EQ(reader.childCount(), 1);
+}
+
+TEST_F(MarkReaderTest, ElementReaderAcceptsGcBorrow) {
+    Item elem_item = builder->element("section")
+        .attr("id", "borrowed")
+        .text("body")
+        .final();
+
+    ElementReader reader(lam::gc_borrow(elem_item.element));
+    EXPECT_TRUE(reader.isValid());
+    EXPECT_TRUE(reader.hasTag("section"));
+    EXPECT_STREQ(reader.get_attr_string("id"), "borrowed");
     EXPECT_EQ(reader.childCount(), 1);
 }
 

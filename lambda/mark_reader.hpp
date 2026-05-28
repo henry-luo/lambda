@@ -179,6 +179,7 @@ public:
     // Lifecycle (value type semantics)
     MapReader();  // Default constructor for null map
     explicit MapReader(Map* map);
+    explicit MapReader(lam::GcPtr<Map> map);
     explicit MapReader(lam::ItemOf<LMD_TYPE_MAP> map);
     explicit MapReader(lam::ItemOf<LMD_TYPE_OBJECT> object);
 
@@ -203,7 +204,7 @@ public:
     class KeyIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         KeyIterator(const MapReader* reader);
@@ -214,7 +215,7 @@ public:
     class ValueIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         ValueIterator(const MapReader* reader);
@@ -225,7 +226,7 @@ public:
     class EntryIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         EntryIterator(const MapReader* reader);
@@ -254,6 +255,7 @@ public:
     // Lifecycle (value type semantics)
     ArrayReader();  // Default constructor for null array
     explicit ArrayReader(Array* array);
+    explicit ArrayReader(lam::GcPtr<Array> array);
     explicit ArrayReader(lam::ItemOf<LMD_TYPE_ARRAY> array);
 
     // Create from Item with type validation
@@ -305,6 +307,7 @@ public:
     // Lifecycle
     ElementReader();  // Default constructor for invalid element
     explicit ElementReader(const Element* element);
+    explicit ElementReader(lam::GcPtr<Element> element);
     explicit ElementReader(lam::ItemOf<LMD_TYPE_ELEMENT> element);
     explicit ElementReader(Item item);
 

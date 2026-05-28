@@ -11,6 +11,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 static RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, float h,
                                                      float r_tl, float r_tr,
@@ -86,6 +87,151 @@ static float render_clip_parse_len(const char*& s, float ref) {
     if (*s == '%') { s++; return val / 100.0f * ref; }
     if (s[0] == 'p' && s[1] == 'x') s += 2;
     return val;
+}
+
+static void render_clip_skip_wsp_comma(const char** s) {
+    while (**s && (isspace((unsigned char)**s) || **s == ',')) (*s)++;
+}
+
+static bool render_clip_peek_number(const char* s) {
+    render_clip_skip_wsp_comma(&s);
+    return *s == '-' || *s == '+' || *s == '.' || isdigit((unsigned char)*s);
+}
+
+static float render_clip_parse_number(const char** s) {
+    render_clip_skip_wsp_comma(s);
+    char* end = nullptr;
+    float value = strtof(*s, &end);
+    if (end == *s) {
+        if (**s) (*s)++;
+        return 0.0f;
+    }
+    *s = end;
+    return value;
+}
+
+static RdtPath* render_clip_parse_path_function(const char* value,
+                                                float abs_x, float abs_y) {
+    if (!value || strncmp(value, "path(", 5) != 0) return nullptr;
+    const char* s = value + 5;
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (*s != '"' && *s != '\'') return nullptr;
+    char quote = *s++;
+
+    RdtPath* path = rdt_path_new();
+    float cur_x = 0.0f, cur_y = 0.0f;
+    float start_x = 0.0f, start_y = 0.0f;
+    char last_cmd = 0;
+    bool any_draw = false;
+
+    while (*s && *s != quote) {
+        render_clip_skip_wsp_comma(&s);
+        if (!*s || *s == quote) break;
+
+        char cmd = *s;
+        if (isalpha((unsigned char)cmd)) {
+            s++;
+            last_cmd = cmd;
+        } else {
+            if (!last_cmd || !render_clip_peek_number(s)) {
+                rdt_path_free(path);
+                return nullptr;
+            }
+            cmd = last_cmd;
+            if (cmd == 'M') cmd = 'L';
+            if (cmd == 'm') cmd = 'l';
+        }
+
+        bool relative = islower((unsigned char)cmd);
+        cmd = (char)toupper((unsigned char)cmd);
+
+        switch (cmd) {
+            case 'M': {
+                float x = render_clip_parse_number(&s);
+                float y = render_clip_parse_number(&s);
+                if (relative) { x += cur_x; y += cur_y; }
+                cur_x = start_x = x;
+                cur_y = start_y = y;
+                rdt_path_move_to(path, abs_x + x, abs_y + y);
+                while (render_clip_peek_number(s)) {
+                    x = render_clip_parse_number(&s);
+                    y = render_clip_parse_number(&s);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    rdt_path_line_to(path, abs_x + x, abs_y + y);
+                    any_draw = true;
+                }
+                break;
+            }
+            case 'L': {
+                while (render_clip_peek_number(s)) {
+                    float x = render_clip_parse_number(&s);
+                    float y = render_clip_parse_number(&s);
+                    if (relative) { x += cur_x; y += cur_y; }
+                    cur_x = x; cur_y = y;
+                    rdt_path_line_to(path, abs_x + x, abs_y + y);
+                    any_draw = true;
+                }
+                break;
+            }
+            case 'H': {
+                while (render_clip_peek_number(s)) {
+                    float x = render_clip_parse_number(&s);
+                    if (relative) x += cur_x;
+                    cur_x = x;
+                    rdt_path_line_to(path, abs_x + cur_x, abs_y + cur_y);
+                    any_draw = true;
+                }
+                break;
+            }
+            case 'V': {
+                while (render_clip_peek_number(s)) {
+                    float y = render_clip_parse_number(&s);
+                    if (relative) y += cur_y;
+                    cur_y = y;
+                    rdt_path_line_to(path, abs_x + cur_x, abs_y + cur_y);
+                    any_draw = true;
+                }
+                break;
+            }
+            case 'C': {
+                while (render_clip_peek_number(s)) {
+                    float x1 = render_clip_parse_number(&s);
+                    float y1 = render_clip_parse_number(&s);
+                    float x2 = render_clip_parse_number(&s);
+                    float y2 = render_clip_parse_number(&s);
+                    float x = render_clip_parse_number(&s);
+                    float y = render_clip_parse_number(&s);
+                    if (relative) {
+                        x1 += cur_x; y1 += cur_y;
+                        x2 += cur_x; y2 += cur_y;
+                        x += cur_x; y += cur_y;
+                    }
+                    rdt_path_cubic_to(path, abs_x + x1, abs_y + y1,
+                                      abs_x + x2, abs_y + y2,
+                                      abs_x + x, abs_y + y);
+                    cur_x = x; cur_y = y;
+                    any_draw = true;
+                }
+                break;
+            }
+            case 'Z':
+                rdt_path_close(path);
+                cur_x = start_x;
+                cur_y = start_y;
+                any_draw = true;
+                break;
+            default:
+                rdt_path_free(path);
+                return nullptr;
+        }
+    }
+
+    if (!any_draw) {
+        rdt_path_free(path);
+        return nullptr;
+    }
+    return path;
 }
 
 static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
@@ -239,6 +385,15 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
     float elem_h = block->height * scale;
     float abs_x = parent_x + block->x * scale;
     float abs_y = parent_y + block->y * scale;
+    RdtPath* css_path = render_clip_parse_path_function(clip_str, abs_x, abs_y);
+    if (css_path) {
+        rc_push_clip(rdcon, css_path, nullptr);
+        rdt_path_free(css_path);
+        scope.active = true;
+        log_debug("[CLIP] CSS clip-path path(): %s on element %s", clip_str, block->node_name());
+        return scope;
+    }
+
     ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
     if (!css_shape) {
         return scope;
