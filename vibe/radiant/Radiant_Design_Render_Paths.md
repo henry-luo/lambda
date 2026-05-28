@@ -713,6 +713,57 @@ everything before it should de-risk that without changing pixels. In particular,
 re-consumes it at parity — otherwise the raster bias in today's `DisplayList`
 (§1) leaks into the vector backends.
 
+### Execution Update: 2026-05-28
+
+The remaining work is now grouped into four larger implementation phases:
+
+1. **Guardrails and observability**: make path selection, backend capability,
+   display-list validation, retained-fragment decisions, and export fallbacks
+   visible in logs/events before changing semantics.
+2. **Record-once raster convergence**: keep normal PNG/JPEG/screen and large
+   tiled PNG on the same display-list record/replay model, then remove immediate
+   raster painter branches once offscreen SVG-picture rendering no longer needs
+   them.
+3. **Semantic PaintIR ownership**: move the per-element paint algorithm into one
+   PaintBuilder that emits semantic commands, with raster lowering preserving
+   today's display-list behavior.
+4. **Vector export lowering**: route SVG/PDF export through PaintIR lowerers with
+   capability-driven native/fallback decisions, including nested inline/file SVG
+   subscenes.
+
+Phase 1 is now implemented in code:
+
+- `RenderPathTrace` records target, replay mode, backend name/capabilities,
+  display-list state, tiled/strip mode, surface size, and retained-cache counters.
+- Raster screen/PNG/JPEG, large tiled PNG, and file-level SVG/PDF exports all emit
+  an observable `[RENDER_PATH]` line; event logs also receive the expanded
+  `render.path` payload when enabled.
+- Retained display-list capture/reuse now reports per-frame candidates, captures,
+  non-retainable skips, copy failures, reuse hits, misses, stale-resource
+  rejections, and dirty-source rejections.
+- Borrowed-resource retainability is centralized in the display-list layer via
+  `dl_item_is_retainable_for_fragment()`, so retained-fragment capture no longer
+  owns a private duplicate of that rule.
+- Focused retained-display-list tests cover stats reset, non-retainable borrowed
+  image rejection, and reuse outcome counters.
+
+Phase 2 has started with the shared recording gateway:
+
+- Added `render_paint_gateway.hpp`, a common PaintIR/display-list recording
+  boundary used by both the raster `rc_*` painter API and the inline/file SVG
+  painter helpers.
+- `render_painter.cpp` no longer owns its own PaintIR-vs-display-list branching
+  logic per primitive; it builds a `PaintRecordTarget` and delegates to the
+  shared gateway.
+- `render_svg_inline.cpp` no longer owns a private duplicate of that primitive
+  recording logic for paths, gradients, pictures, clips, opacity/backdrop, and
+  SVG blur effects.
+- This keeps the current record-then-lower behavior intact while removing one of
+  the cloned painter dispatch layers called out in this document. The remaining
+  work in this phase is to audit any offscreen/direct render paths and then
+  remove compatibility-only display-list branches once all callers provide a
+  `PaintList`.
+
 ### Phase A: Guard Existing Paths
 
 - Add a render-path trace struct emitted per frame (extend `render_profiler.cpp`).

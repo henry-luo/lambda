@@ -489,6 +489,52 @@ bool dl_validate_or_log(const DisplayList* dl, const char* context) {
     return false;
 }
 
+bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
+    if (!item) return false;
+
+    switch (item->op) {
+        case DL_DRAW_IMAGE:
+            if (item->draw_image.pixels &&
+                (!item->draw_image.resource_owner ||
+                 item->draw_image.resource_generation == 0)) {
+                return false;
+            }
+            break;
+        case DL_DRAW_GLYPH:
+            if (item->draw_glyph.bitmap.buffer &&
+                item->draw_glyph.resource_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_BLIT_SURFACE_SCALED:
+            if (item->blit_surface_scaled.src_surface &&
+                item->blit_surface_scaled.src_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_VIDEO_PLACEHOLDER:
+            if (item->video_placeholder.video &&
+                item->video_placeholder.video_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_WEBVIEW_LAYER_PLACEHOLDER:
+            if (item->webview_layer_placeholder.surface &&
+                item->webview_layer_placeholder.surface_generation == 0) {
+                return false;
+            }
+            break;
+        case DL_APPLY_FILTER:
+            if (item->apply_filter.filter) {
+                return false;
+            }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
 static void dl_set_item_rect_bounds(DisplayItem* item,
                                     float x, float y, float w, float h) {
     if (!item) return;

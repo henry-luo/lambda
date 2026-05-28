@@ -6,11 +6,27 @@
 typedef struct RetainedDisplayListCache RetainedDisplayListCache;
 typedef struct RetainedDisplayListFragment RetainedDisplayListFragment;
 
+typedef struct RetainedDisplayListStats {
+    int capture_candidates;
+    int captured;
+    int skipped_non_retainable;
+    int copy_failed;
+    int reuse_hits;
+    int reuse_misses;
+    int reuse_rejected_resources;
+    int reuse_rejected_dirty;
+} RetainedDisplayListStats;
+
 RetainedDisplayListCache* retained_dl_cache_create(Pool* pool);
 void retained_dl_cache_destroy(RetainedDisplayListCache* cache);
 
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache);
 void retained_dl_cache_capture(RetainedDisplayListCache* cache, const DisplayList* source);
+RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache);
+void retained_dl_cache_note_reuse_miss(RetainedDisplayListCache* cache);
+void retained_dl_cache_note_reuse_rejected_resources(RetainedDisplayListCache* cache);
+void retained_dl_cache_note_reuse_rejected_dirty(RetainedDisplayListCache* cache);
+void retained_dl_cache_note_reuse_hit(RetainedDisplayListCache* cache);
 
 const RetainedDisplayListFragment* retained_dl_cache_get(RetainedDisplayListCache* cache,
                                                          uint32_t view_id);

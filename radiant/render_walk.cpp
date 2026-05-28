@@ -55,7 +55,8 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
     // inline SVG passthrough (HTM_TAG_SVG)
     if (block->tag_id == HTM_TAG_SVG) {
         if (backend->render_inline_svg) {
-            backend->render_inline_svg(backend->ctx, block, state->x, state->y);
+            backend->render_inline_svg(backend->ctx, block, state->x, state->y,
+                                       &state->font, state->color);
         }
         if (opened_transform) {
             backend->end_transform(backend->ctx);

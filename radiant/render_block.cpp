@@ -94,7 +94,10 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     uint32_t view_id = static_cast<View*>(block)->id;
     const RetainedDisplayListFragment* fragment =
         retained_dl_cache_get(rdcon->retained_dl_cache, view_id);
-    if (!fragment) return false;
+    if (!fragment) {
+        retained_dl_cache_note_reuse_miss(rdcon->retained_dl_cache);
+        return false;
+    }
     uint64_t current_video_generation = 0;
     uint64_t current_glyph_generation = 0;
     if (rdcon->ui_context && rdcon->ui_context->document &&
@@ -107,6 +110,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     }
     if (!retained_dl_fragment_resources_valid(fragment, current_video_generation,
                                              current_glyph_generation)) {
+        retained_dl_cache_note_reuse_rejected_resources(rdcon->retained_dl_cache);
         return false;
     }
 
@@ -124,8 +128,10 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
     if (!retained_dl_append_fragment_for_dirty(
             rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->scale,
             render_retained_dirty_source_inside, static_cast<View*>(block))) {
+        retained_dl_cache_note_reuse_rejected_dirty(rdcon->retained_dl_cache);
         return false;
     }
+    retained_dl_cache_note_reuse_hit(rdcon->retained_dl_cache);
     log_debug("[RETAINED_DL] reused view %u (%d items)",
               view_id, retained_dl_fragment_item_count(fragment));
     return true;

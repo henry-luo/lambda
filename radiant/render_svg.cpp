@@ -90,6 +90,41 @@ static void svg_color_to_string(Color color, char* result) {
     }
 }
 
+static void svg_append_inline_svg_inherited_attrs(SvgRenderContext* ctx, ViewBlock* block) {
+    if (!block) return;
+
+    InlineProp* in_line = block->in_line;
+    char color[32];
+
+    if (in_line && in_line->has_color) {
+        svg_color_to_string(in_line->color, color);
+        strbuf_append_format(ctx->svg_content, " color=\"%s\"", color);
+    } else {
+        svg_color_to_string(ctx->color, color);
+        strbuf_append_format(ctx->svg_content, " color=\"%s\"", color);
+    }
+    if (in_line && in_line->has_svg_fill) {
+        if (in_line->svg_fill_none) {
+            strbuf_append_str(ctx->svg_content, " fill=\"none\"");
+        } else {
+            svg_color_to_string(in_line->svg_fill_color, color);
+            strbuf_append_format(ctx->svg_content, " fill=\"%s\"", color);
+        }
+    }
+    if (in_line && in_line->has_svg_stroke) {
+        if (in_line->svg_stroke_none) {
+            strbuf_append_str(ctx->svg_content, " stroke=\"none\"");
+        } else {
+            svg_color_to_string(in_line->svg_stroke_color, color);
+            strbuf_append_format(ctx->svg_content, " stroke=\"%s\"", color);
+        }
+    }
+    if (in_line && in_line->has_svg_stroke_width) {
+        strbuf_append_format(ctx->svg_content, " stroke-width=\"%.2f\"",
+                             in_line->svg_stroke_width);
+    }
+}
+
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     // Extract the text content
@@ -1278,7 +1313,9 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
 
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content,
-        "<g transform=\"translate(%.2f,%.2f)\">\n", svg_x, svg_y);
+        "<g transform=\"translate(%.2f,%.2f)\"", svg_x, svg_y);
+    svg_append_inline_svg_inherited_attrs(ctx, block);
+    strbuf_append_str(ctx->svg_content, ">\n");
 
     ElementReader reader(dom_elem->native_element);
     serialize_svg_element(ctx->svg_content, reader, nullptr);
@@ -1425,11 +1462,14 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     }
 }
 
-static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+                                     FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     // render_inline_svg_passthrough reads ctx->block.{x,y} + block->{x,y}
     ctx->block.x = abs_x - block->x;
     ctx->block.y = abs_y - block->y;
+    ctx->font = *font;
+    ctx->color = color;
     render_inline_svg_passthrough(ctx, block);
 }
 

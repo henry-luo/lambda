@@ -91,6 +91,11 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 42);
     ASSERT_NE(fragment, nullptr);
     EXPECT_EQ(retained_dl_fragment_item_count(fragment), 3);
+    RetainedDisplayListStats stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.capture_candidates, 1);
+    EXPECT_EQ(stats.captured, 1);
+    EXPECT_EQ(stats.skipped_non_retainable, 0);
+    EXPECT_EQ(stats.copy_failed, 0);
 
     DisplayList replay = {};
     dl_init(&replay, arena);
@@ -106,6 +111,70 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     dl_destroy(&replay);
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, TracksSkippedBorrowedResourceWithoutGeneration) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    uint32_t pixels[4] = {};
+    int begin = dl_begin_element(&source, 51, 0.0f, 0.0f, 2.0f, 2.0f);
+    DisplayItem* image = dl_alloc_item(&source);
+    ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->bounds[2] = 2.0f;
+    image->bounds[3] = 2.0f;
+    image->draw_image.pixels = pixels;
+    image->draw_image.src_w = 2;
+    image->draw_image.src_h = 2;
+    image->draw_image.src_stride = 2;
+    image->draw_image.dst_w = 2.0f;
+    image->draw_image.dst_h = 2.0f;
+    EXPECT_FALSE(dl_item_is_retainable_for_fragment(image));
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_begin_frame(cache);
+    retained_dl_cache_capture(cache, &source);
+
+    EXPECT_EQ(retained_dl_cache_get(cache, 51), nullptr);
+    RetainedDisplayListStats stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.capture_candidates, 1);
+    EXPECT_EQ(stats.captured, 0);
+    EXPECT_EQ(stats.skipped_non_retainable, 1);
+
+    retained_dl_cache_begin_frame(cache);
+    stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.capture_candidates, 0);
+    EXPECT_EQ(stats.skipped_non_retainable, 0);
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, TracksReuseOutcomesForRenderPathTrace) {
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_begin_frame(cache);
+
+    retained_dl_cache_note_reuse_miss(cache);
+    retained_dl_cache_note_reuse_rejected_resources(cache);
+    retained_dl_cache_note_reuse_rejected_dirty(cache);
+    retained_dl_cache_note_reuse_hit(cache);
+
+    RetainedDisplayListStats stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.reuse_misses, 1);
+    EXPECT_EQ(stats.reuse_rejected_resources, 1);
+    EXPECT_EQ(stats.reuse_rejected_dirty, 1);
+    EXPECT_EQ(stats.reuse_hits, 1);
+
+    retained_dl_cache_begin_frame(cache);
+    stats = retained_dl_cache_stats(cache);
+    EXPECT_EQ(stats.reuse_misses, 0);
+    EXPECT_EQ(stats.reuse_hits, 0);
+
+    retained_dl_cache_destroy(cache);
 }
 
 TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentForExternalDirtySource) {

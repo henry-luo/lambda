@@ -65,16 +65,37 @@ typedef struct RenderProfiler {
 
 typedef struct RenderPathTrace {
     const char* target;
+    const char* replay_mode;
+    const char* backend_name;
     bool display_list_recorded;
     bool paint_ir_enabled;
     bool selective;
     bool tiled_replay;
     bool large_tiled_export;
+    bool backend_vector_paths;
+    bool backend_gradients;
+    bool backend_nested_clips;
+    bool backend_picture_svg;
+    bool backend_opacity_group;
+    bool backend_blend_modes;
+    bool backend_gaussian_blur;
+    bool backend_color_matrix_filters;
+    bool backend_native_text_runs;
+    bool backend_vector_batching;
+    bool backend_tile_offsets;
     int display_list_items;
     int tile_count;
     int thread_count;
     int surface_width;
     int surface_height;
+    int retained_capture_candidates;
+    int retained_captured;
+    int retained_skipped_non_retainable;
+    int retained_copy_failed;
+    int retained_reuse_hits;
+    int retained_reuse_misses;
+    int retained_reuse_rejected_resources;
+    int retained_reuse_rejected_dirty;
 } RenderPathTrace;
 
 void render_profiler_reset(RenderProfiler* profiler);
