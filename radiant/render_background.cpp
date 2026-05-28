@@ -23,6 +23,18 @@ static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
 static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, RadialGradient* gradient,
                                          Rect position_rect, Rect paint_rect);
+static void render_background_color(RenderContext* rdcon, ViewBlock* view,
+                                    Color color, Rect rect);
+static void render_background_gradient(RenderContext* rdcon, ViewBlock* view,
+                                       BackgroundProp* bg, Rect rect);
+static void render_background_image(RenderContext* rdcon, ViewBlock* view,
+                                    BackgroundProp* bg, Rect rect);
+static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view,
+                                   LinearGradient* gradient, Rect rect);
+static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view,
+                                   RadialGradient* gradient, Rect rect);
+static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view,
+                                  ConicGradient* gradient, Rect rect);
 
 static Corner background_corner_scaled(const Corner* radius, float scale) {
     Corner out = *radius;
@@ -194,7 +206,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  * Render solid color background
  * Handles border-radius by using ThorVG if needed
  */
-void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
+static void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
     bool has_radius = false;
     BorderProp* border = nullptr;
     if (view->bound && view->bound->border) {
@@ -382,7 +394,7 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
     rdt_path_free(p);
 }
 
-void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
     render_linear_gradient_tile(rdcon, view, gradient, rect, rect);
 }
 
@@ -429,7 +441,7 @@ static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, f
 /**
  * Render radial gradient
  */
-void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
+static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
         log_debug("[GRADIENT] Invalid radial gradient (need at least 2 stops)");
         return;
@@ -524,7 +536,7 @@ static Color get_gradient_color_at(GradientStop* stops, int stop_count, float po
  * Render conic gradient using software rendering
  * ThorVG doesn't support conic gradients directly, so we render pixel-by-pixel
  */
-void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
+static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
         log_debug("[GRADIENT] Invalid conic gradient (need at least 2 stops)");
         return;
@@ -586,7 +598,7 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
 /**
  * Render background gradient (dispatch to type-specific function)
  */
-void render_background_gradient(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+static void render_background_gradient(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
     switch (bg->gradient_type) {
         case GRADIENT_LINEAR:
             if (bg->linear_gradient) {
@@ -1937,7 +1949,7 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurfa
 /**
  * Render background image with background-size, background-position, and background-repeat.
  */
-void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+static void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
     const char* image_url = bg->image;
     log_debug("[BG-IMAGE] Rendering background-image '%s' on <%s> (%.0fx%.0f)",
               image_url, view->node_name(), rect.width, rect.height);

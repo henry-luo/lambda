@@ -5,6 +5,7 @@
 
 #include "webdriver.hpp"
 #include "../layout.hpp"
+#include "../render_export_support.hpp"
 #include "../state_store.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
@@ -14,12 +15,6 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
-
-// External functions from radiant (already in view.hpp as C++)
-extern int ui_context_init(UiContext* uicon, bool headless);
-extern void ui_context_cleanup(UiContext* uicon);
-extern void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-extern View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 
 // ============================================================================
 // UUID Generation

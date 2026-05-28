@@ -65,6 +65,7 @@ typedef struct {
 
 // Forward declarations
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
+static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view);
 static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
 static RenderBackend svg_make_backend(SvgRenderContext* ctx);
 
@@ -800,7 +801,7 @@ static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
+static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (!view->bound) return;
 
     float x = ctx->block.x + view->x;
@@ -815,99 +816,6 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
     if (ctx->effect_fallback.active && view->bound->box_shadow) {
         render_paint_boundary_emit_outer_shadows(svg_active_paint_list(ctx), view, x, y);
-    }
-
-    // Render box-shadow as SVG filter
-    if (!ctx->effect_fallback.active && view->bound->box_shadow) {
-        // Generate unique filter IDs for each shadow
-        BoxShadow* shadow = view->bound->box_shadow;
-        int shadow_idx = 0;
-        // Use pointer value as part of ID for uniqueness
-        uintptr_t view_id = (uintptr_t)view;
-
-        while (shadow) {
-            if (!shadow->inset) {
-                // Outer shadow: use SVG filter with feGaussianBlur + feOffset
-                char filter_id[64];
-                str_fmt(filter_id, sizeof(filter_id), "shadow-%lx-%d", (unsigned long)view_id, shadow_idx);
-
-                // Emit filter definition
-                svg_indent(ctx);
-                float blur_std = shadow->blur_radius * 0.5f;
-                // Filter region must be large enough to contain the blur + offset
-                float filter_margin = shadow->blur_radius + fabsf(shadow->offset_x) + fabsf(shadow->offset_y) + fabsf(shadow->spread_radius);
-                float fx = -filter_margin / width;
-                float fy = -filter_margin / height;
-                float fw = 1.0f + 2.0f * filter_margin / width;
-                float fh = 1.0f + 2.0f * filter_margin / height;
-
-                strbuf_append_format(ctx->svg_content,
-                    "<defs><filter id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\">\n",
-                    filter_id, fx, fy, fw, fh);
-
-                // feGaussianBlur on SourceAlpha
-                ctx->indent_level++;
-                svg_indent(ctx);
-                strbuf_append_format(ctx->svg_content,
-                    "<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"%.1f\" result=\"blur\" />\n",
-                    blur_std > 0 ? blur_std : 0.001f);
-
-                // feOffset
-                svg_indent(ctx);
-                strbuf_append_format(ctx->svg_content,
-                    "<feOffset in=\"blur\" dx=\"%.1f\" dy=\"%.1f\" result=\"offset\" />\n",
-                    shadow->offset_x, shadow->offset_y);
-
-                // feColorMatrix to apply shadow color
-                svg_indent(ctx);
-                strbuf_append_format(ctx->svg_content,
-                    "<feColorMatrix in=\"offset\" type=\"matrix\" "
-                    "values=\"0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 %.4f 0\" result=\"color\" />\n",
-                    shadow->color.r / 255.0f, shadow->color.g / 255.0f,
-                    shadow->color.b / 255.0f, shadow->color.a / 255.0f);
-
-                // feMerge: shadow underneath, source graphic on top
-                svg_indent(ctx);
-                strbuf_append_str(ctx->svg_content,
-                    "<feMerge><feMergeNode in=\"color\" /><feMergeNode in=\"SourceGraphic\" /></feMerge>\n");
-
-                ctx->indent_level--;
-                svg_indent(ctx);
-                strbuf_append_str(ctx->svg_content, "</filter></defs>\n");
-
-                // Render shadow rect with the filter applied
-                char shadow_color[32];
-                svg_color_to_string(shadow->color, shadow_color);
-                float shadow_x = x + shadow->offset_x - shadow->spread_radius;
-                float shadow_y = y + shadow->offset_y - shadow->spread_radius;
-                float shadow_w = width + 2 * shadow->spread_radius;
-                float shadow_h = height + 2 * shadow->spread_radius;
-
-                svg_indent(ctx);
-                if (svg_has_border_radius(view->bound->border)) {
-                    BorderProp* border = view->bound->border;
-                    float spread = shadow->spread_radius;
-                    float r_tl = fmaxf(0, border->radius.top_left + spread);
-                    float r_tr = fmaxf(0, border->radius.top_right + spread);
-                    float r_br = fmaxf(0, border->radius.bottom_right + spread);
-                    float r_bl = fmaxf(0, border->radius.bottom_left + spread);
-                    strbuf_append_format(ctx->svg_content,
-                        "<path d=\"");
-                    svg_append_rounded_rect_path(ctx->svg_content,
-                        shadow_x, shadow_y, shadow_w, shadow_h, r_tl, r_tr, r_br, r_bl);
-                    strbuf_append_format(ctx->svg_content,
-                        "\" fill=\"%s\" filter=\"url(#%s)\" />\n",
-                        shadow_color, filter_id);
-                } else {
-                    strbuf_append_format(ctx->svg_content,
-                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
-                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
-                        shadow_x, shadow_y, shadow_w, shadow_h, shadow_color, filter_id);
-                }
-            }
-            shadow = shadow->next;
-            shadow_idx++;
-        }
     }
 
     // Render background
@@ -1546,20 +1454,6 @@ static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
     strbuf_append_str(ctx->svg_content, "</g>\n");
 }
 
-static void svg_cb_begin_opacity(void* vctx, float opacity) {
-    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    PaintEffectGroup group = {};
-    group.opacity = opacity;
-    paint_begin_effect_group(svg_active_paint_list(ctx), &group);
-    svg_lower_paint_list(ctx);
-}
-
-static void svg_cb_end_opacity(void* vctx) {
-    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    paint_end_effect_group(svg_active_paint_list(ctx));
-    svg_lower_paint_list(ctx);
-}
-
 static void svg_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (ctx->effect_fallback.active) {
@@ -1750,8 +1644,6 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.end_block_children    = svg_cb_end_block_children;
     b.begin_inline_children = svg_cb_begin_inline_children;
     b.end_inline_children   = svg_cb_end_inline_children;
-    b.begin_opacity         = svg_cb_begin_opacity;
-    b.end_opacity           = svg_cb_end_opacity;
     b.begin_effect_group    = svg_cb_begin_effect_group;
     b.end_effect_group      = svg_cb_end_effect_group;
     b.begin_transform       = svg_cb_begin_transform;

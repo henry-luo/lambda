@@ -46,7 +46,7 @@ struct RenderBackend {
     // Called for blocks with embed->img.
     void (*render_image)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
 
-    // ── Inline SVG passthrough ─────────────────────────────────────────
+    // ── Inline SVG subscene ────────────────────────────────────────────
     // Called for HTM_TAG_SVG blocks. If NULL, skipped.
     void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
@@ -59,15 +59,8 @@ struct RenderBackend {
     void (*begin_inline_children)(void* ctx, ViewSpan* span);
     void (*end_inline_children)(void* ctx, ViewSpan* span);
 
-    // ── Opacity wrapper ────────────────────────────────────────────────
-    // Called around a block's content when opacity < 1.
-    void (*begin_opacity)(void* ctx, float opacity);
-    void (*end_opacity)(void* ctx);
-
     // ── Semantic effect wrapper ────────────────────────────────────────
-    // Called around content affected by CSS stacking effects. New backends
-    // should prefer this over begin_opacity/end_opacity; opacity callbacks are
-    // kept for compatibility with simpler walkers/backends.
+    // Called around content affected by CSS stacking effects.
     void (*begin_effect_group)(void* ctx, const PaintEffectGroup* group);
     void (*end_effect_group)(void* ctx);
 

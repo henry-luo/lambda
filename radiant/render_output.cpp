@@ -36,6 +36,17 @@ static RenderPool* g_render_pool = nullptr;
 static pthread_once_t g_render_pool_once = PTHREAD_ONCE_INIT;
 static int g_render_pool_threads = 0;
 
+typedef struct RenderOutputClearResult {
+    bool selective;
+    DirtyTracker* replay_dirty;
+} RenderOutputClearResult;
+
+typedef struct RenderOutputReplayResult {
+    bool tiled;
+    int tile_count;
+    int thread_count;
+} RenderOutputReplayResult;
+
 static void init_render_pool_once() {
     g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER);
     render_pool_init(g_render_pool, g_render_pool_threads);
@@ -62,7 +73,7 @@ static int render_output_thread_count() {
     return cached;
 }
 
-RenderOutputKind render_output_kind_from_file(const char* output_file) {
+static RenderOutputKind render_output_kind_from_file(const char* output_file) {
     if (!output_file) {
         return RENDER_OUTPUT_SCREEN;
     }
@@ -138,8 +149,8 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
     trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
 }
 
-void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
-                                RenderProfiler* profiler) {
+static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
+                                       RenderProfiler* profiler) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     rdcon->profiler = profiler;
@@ -178,7 +189,7 @@ void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree
         rdcon->block.clip.right, rdcon->block.clip.bottom);
 }
 
-void render_output_cleanup_context(RenderContext* rdcon) {
+static void render_output_cleanup_context(RenderContext* rdcon) {
     if (rdcon->paint_list) {
         paint_list_destroy(rdcon->paint_list);
         mem_free(rdcon->paint_list);
@@ -188,7 +199,7 @@ void render_output_cleanup_context(RenderContext* rdcon) {
     rdt_vector_destroy(&rdcon->vec);
 }
 
-uint32_t render_output_canvas_background(View* root_view) {
+static uint32_t render_output_canvas_background(View* root_view) {
     if (!root_view || root_view->view_type != RDT_VIEW_BLOCK) {
         return 0xFFFFFFFF;
     }
@@ -221,8 +232,8 @@ uint32_t render_output_canvas_background(View* root_view) {
     return 0xFFFFFFFF;
 }
 
-RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,
-                                                    DocState* state, uint32_t canvas_bg) {
+static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,
+                                                           DocState* state, uint32_t canvas_bg) {
     RenderOutputClearResult result = {};
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface || !view_tree) {
         return result;
@@ -266,7 +277,7 @@ RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTr
     return result;
 }
 
-void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
+static void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
     if (!rdcon || !view_tree) {
         return;
     }
@@ -274,10 +285,10 @@ void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
     render_raster_view_tree(rdcon, view_tree);
 }
 
-RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
-                                                           DisplayList* display_list,
-                                                           uint32_t canvas_bg,
-                                                           DirtyTracker* replay_dirty) {
+static RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
+                                                                  DisplayList* display_list,
+                                                                  uint32_t canvas_bg,
+                                                                  DirtyTracker* replay_dirty) {
     RenderOutputReplayResult result = {};
     result.thread_count = 1;
     if (!rdcon || !display_list || !rdcon->ui_context || !rdcon->ui_context->surface) {
@@ -326,7 +337,7 @@ RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
     return result;
 }
 
-void render_output_save_surface(ImageSurface* surface, const char* output_file) {
+static void render_output_save_surface(ImageSurface* surface, const char* output_file) {
     if (!surface || !output_file) {
         return;
     }

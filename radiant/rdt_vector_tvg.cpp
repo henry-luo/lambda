@@ -47,7 +47,7 @@ struct RdtPath {
 
 struct RdtPicture {
     // Two kinds of pictures:
-    //  - SVG_DOM: Radiant-parsed SVG DOM (Element*) drawn via render_svg_to_vec.
+    //  - SVG_DOM: Radiant-parsed SVG DOM (Element*) drawn via DisplayList replay.
     //    Used by rdt_picture_load* for file/data SVG.  Goes through the same
     //    code path as inline <svg> in HTML, so font weight/style/family
     //    resolution is uniform with HTML body text.
@@ -76,7 +76,7 @@ struct RdtPicture {
 
 // Process-wide font context for SVG-DOM pictures (set by ui_context).
 // Inline <svg> uses RenderContext->ui_context->font_ctx; standalone pictures
-// rasterized off-screen via render_svg() do not have a render context, so
+// rasterized off-screen by media helpers do not have a render context, so
 // we keep a global pointer set once at startup.
 static FontContext* g_picture_font_ctx = nullptr;
 
@@ -1704,7 +1704,7 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
     if (!vec || !vec->impl || !pic) return;
 
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        // SVG_DOM pictures are immutable during draw — render_svg_to_vec
+        // SVG_DOM pictures are immutable during draw; display-list lowering
         // builds its own SvgRenderContext on the stack.  Safe to call from
         // multiple threads with distinct vecs.
         svg_dom_picture_draw(vec, pic, opacity, transform);

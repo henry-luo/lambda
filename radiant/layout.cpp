@@ -5,6 +5,7 @@
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
 #include "form_control.hpp"
+#include "render_export_support.hpp"
 #include "state_store.hpp"
 #include "font_face.h"
 #include "retained_fields.hpp"
@@ -124,7 +125,6 @@ void log_layout_timing_summary() {
 }
 
 void view_pool_init(ViewTree* tree);
-void view_pool_destroy(ViewTree* tree);
 // Function declaration moved to layout.hpp
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display);

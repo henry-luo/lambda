@@ -12,9 +12,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, float h,
-                                              float r_tl, float r_tr,
-                                              float r_br, float r_bl) {
+static RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, float h,
+                                                     float r_tl, float r_tr,
+                                                     float r_br, float r_bl) {
     float max_rx = w * 0.5f, max_ry = h * 0.5f;
     if (r_tl > max_rx) r_tl = max_rx; if (r_tl > max_ry) r_tl = max_ry;
     if (r_tr > max_rx) r_tr = max_rx; if (r_tr > max_ry) r_tr = max_ry;
@@ -33,7 +33,7 @@ RdtPath* render_clip_create_rounded_rect_path(float x, float y, float w, float h
     return render_path_create_rounded_rect(rect, &radius);
 }
 
-RdtPath* render_clip_create_shape_path(ClipShape* shape) {
+static RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     if (!shape) return nullptr;
     RdtPath* p = rdt_path_new();
     switch (shape->type) {
@@ -70,7 +70,7 @@ RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     return p;
 }
 
-void render_clip_free_shape(ScratchArena* scratch, ClipShape* shape) {
+static void render_clip_free_shape(ScratchArena* scratch, ClipShape* shape) {
     if (!scratch || !shape) return;
     if (shape->type == CLIP_SHAPE_POLYGON) {
         scratch_free(scratch, shape->polygon.vy);
@@ -88,9 +88,9 @@ static float render_clip_parse_len(const char*& s, float ref) {
     return val;
 }
 
-ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
-                                       float elem_w, float elem_h,
-                                       float abs_x, float abs_y) {
+static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
+                                              float elem_w, float elem_h,
+                                              float abs_x, float abs_y) {
     if (!scratch || !value || strncmp(value, "none", 4) == 0) return nullptr;
 
     if (strncmp(value, "inset(", 6) == 0) {

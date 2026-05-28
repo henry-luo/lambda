@@ -2,7 +2,6 @@
 #define RENDER_IMG_HPP
 
 #include "view.hpp"
-#include "render_output.hpp"
 
 // Function declarations for image rendering
 void save_surface_to_png(ImageSurface* surface, const char* filename);

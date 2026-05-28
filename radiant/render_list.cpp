@@ -39,9 +39,14 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                 float iw, ih;
                 rdt_picture_get_size(marker_prop->loaded_image->pic, &iw, &ih);
                 if (iw > 0 && ih > 0) {
-                    marker_prop->loaded_image->max_render_width = (int)(iw + 0.5f); // INT_CAST_OK: pixel rounding
+                    int target_w = (int)(iw + 0.5f); // INT_CAST_OK: SVG marker intrinsic width rounded to pixels.
+                    int target_h = (int)(ih + 0.5f); // INT_CAST_OK: SVG marker intrinsic height rounded to pixels.
+                    if (target_w < 1) target_w = 1;
+                    if (target_h < 1) target_h = 1;
+                    marker_prop->loaded_image->max_render_width = target_w;
+                    render_media_rasterize_svg_picture(marker_prop->loaded_image,
+                                                       target_w, target_h);
                 }
-                render_svg(marker_prop->loaded_image);
             }
         }
         ImageSurface* img = marker_prop->loaded_image;

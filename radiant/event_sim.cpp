@@ -8,6 +8,9 @@
 #include "state_store.hpp"
 #include "dom_range.hpp"
 #include "form_control.hpp"
+#include "render.hpp"
+#include "render_export_support.hpp"
+#include "render_img.hpp"
 #include "text_control.hpp"
 #include "text_edit.hpp"
 #include "view.hpp"
@@ -2119,7 +2122,6 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 
 // Helper: force render the current surface
 static void force_render_surface(UiContext* uicon) {
-    extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
     if (uicon->document && uicon->document->view_tree) {
         DocState* state = (DocState*)uicon->document->state;
         if (state) doc_state_mark_dirty(state);
@@ -2164,7 +2166,6 @@ static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEven
 
     // Step 2: Optionally save actual PNG for debugging
     if (ev->snapshot_actual_path) {
-        extern void save_surface_to_png(ImageSurface* surface, const char* filename);
         save_surface_to_png(actual, ev->snapshot_actual_path);
     }
 
@@ -2224,7 +2225,6 @@ static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEven
 
     // Step 6: Save diff image on mismatch
     if (diff_px && ev->snapshot_diff_path && mismatched > 0) {
-        extern void save_surface_to_png(ImageSurface* surface, const char* filename);
         ImageSurface diff_surf = {};
         diff_surf.width = ref_w;
         diff_surf.height = ref_h;
@@ -2697,7 +2697,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             uicon->window_width = new_phys_w;
             uicon->window_height = new_phys_h;
             // Recreate surface and reflow
-            extern void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
             ui_context_create_surface(uicon, new_phys_w, new_phys_h);
             extern void reflow_html_doc(DomDocument* doc);
             if (uicon->document) {
@@ -3705,9 +3704,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             log_info("event_sim: navigating to '%s'", ev->navigate_url);
-            extern DomDocument* load_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio);
-            extern void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-            extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
             Url* base_url = uicon->document ? uicon->document->url : nullptr;
             if (!base_url) base_url = get_current_dir();
             DomDocument* new_doc = load_html_doc(base_url, ev->navigate_url,
@@ -3739,8 +3735,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            extern void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-            extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
             DomDocument* prev_doc = (DomDocument*)ctx->nav_history[--ctx->nav_history_depth];
             uicon->document = prev_doc;
             layout_html_doc(uicon, prev_doc, false);
@@ -3800,15 +3794,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_RENDER:
             {
                 log_info("event_sim: render to %s", ev->file_path);
-                fprintf(stderr, "[EVENT_SIM] Rendering to: %s\n", ev->file_path);
                 // Determine format from extension
                 const char* ext = strrchr(ev->file_path, '.');
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
-                    extern int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
                     render_uicontext_to_svg(uicon, ev->file_path);
                 } else {
                     // Default to PNG
-                    extern int render_uicontext_to_png(UiContext* uicon, const char* png_file);
                     render_uicontext_to_png(uicon, ev->file_path);
                 }
             }

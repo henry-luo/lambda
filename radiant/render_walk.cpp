@@ -25,7 +25,6 @@ typedef struct RenderWalkBlockPhase {
     Color pa_color;
     bool opened_transform;
     bool opened_effect_group;
-    bool opened_legacy_opacity;
     bool stop_after_self;
 } RenderWalkBlockPhase;
 
@@ -49,13 +48,6 @@ static bool render_walk_blend_mode_effective(CssEnum mode) {
 
 static bool render_walk_filter_effective(const FilterProp* filter) {
     return filter && filter->functions;
-}
-
-static bool render_walk_effect_group_has_non_opacity(const PaintEffectGroup* group) {
-    return group &&
-           (group->blend_mode || group->filter ||
-            group->backdrop || group->backdrop_filter ||
-            group->shadow || group->isolation || group->has_clip);
 }
 
 static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float abs_y,
@@ -144,11 +136,6 @@ static bool render_walk_block_begin(void* ctx, ViewBlock* block, void** phase) {
                              backend->begin_effect_group && backend->end_effect_group;
     if (p->opened_effect_group) {
         backend->begin_effect_group(backend->ctx, &group);
-    } else if (has_effect_group && group.opacity < 0.9995f &&
-               !render_walk_effect_group_has_non_opacity(&group) &&
-               backend->begin_opacity && backend->end_opacity) {
-        p->opened_legacy_opacity = true;
-        backend->begin_opacity(backend->ctx, group.opacity);
     }
 
     *phase = p;
@@ -232,8 +219,6 @@ static void render_walk_block_finish(void* ctx, ViewBlock* block, void* phase) {
 
     if (p->opened_effect_group) {
         backend->end_effect_group(backend->ctx);
-    } else if (p->opened_legacy_opacity) {
-        backend->end_opacity(backend->ctx);
     }
 
     if (p->opened_transform) {
@@ -284,15 +269,9 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         bool has_effect_group = render_walk_inline_effect_group(span, &group);
         bool opened_effect_group = has_effect_group &&
                                    backend->begin_effect_group && backend->end_effect_group;
-        bool opened_legacy_opacity = false;
 
         if (opened_effect_group) {
             backend->begin_effect_group(backend->ctx, &group);
-        } else if (has_effect_group && group.opacity < 0.9995f &&
-                   !render_walk_effect_group_has_non_opacity(&group) &&
-                   backend->begin_opacity && backend->end_opacity) {
-            opened_legacy_opacity = true;
-            backend->begin_opacity(backend->ctx, group.opacity);
         }
 
         if (backend->begin_inline_children) {
@@ -307,8 +286,6 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 
         if (opened_effect_group) {
             backend->end_effect_group(backend->ctx);
-        } else if (opened_legacy_opacity) {
-            backend->end_opacity(backend->ctx);
         }
     }
 

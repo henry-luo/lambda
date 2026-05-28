@@ -369,7 +369,7 @@ static char* build_preedit_display_text(FormControlProp* form,
 /**
  * Render a text input control (text, password, email, etc.)
  */
-void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float s = rdcon->scale;  // scale factor for CSS -> physical pixels
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
@@ -560,7 +560,7 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
 /**
  * Render a checkbox control.
  */
-void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
@@ -624,7 +624,7 @@ void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 /**
  * Render a radio button control.
  */
-void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
@@ -672,7 +672,7 @@ void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form)
  * If the button has CSS-styled background (from author stylesheet),
  * we skip the default gray background. Otherwise, render default button appearance.
  */
-void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
@@ -819,7 +819,7 @@ static const char* get_option_text_at_index(ViewBlock* select, int index) {
 /**
  * Render a select dropdown (closed state).
  */
-void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
@@ -1120,7 +1120,7 @@ static void textarea_offset_to_line_col(const char* text, int byte_offset, int* 
 /**
  * Render a textarea control with multi-line text, caret, and placeholder.
  */
-void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;
     float y = rdcon->block.y + block->y * s;
@@ -1392,7 +1392,7 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
 /**
  * Render a range slider control.
  */
-void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     float s = rdcon->scale;
     float x = rdcon->block.x + block->x * s;

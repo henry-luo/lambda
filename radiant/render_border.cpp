@@ -12,6 +12,9 @@
 static constexpr float BORDER_DARKEN_FACTOR  = 2.0f / 3.0f;
 static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
+static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
+static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
+
 static inline Color color_darken(Color c, float factor) {
     Color out;
     out.r = (uint8_t)(c.r * factor);
@@ -569,7 +572,7 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 /**
  * Render straight borders (optimized path for rectangular borders)
  */
-void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->bound->border;
     ImageSurface* surface = rdcon->ui_context->surface;
 
@@ -607,7 +610,7 @@ void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 /**
  * Render border with vector rendering (supports rounded corners and styled borders)
  */
-void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->bound->border;
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 

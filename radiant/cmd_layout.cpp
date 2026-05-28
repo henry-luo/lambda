@@ -72,6 +72,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/rdt_vector.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
+#include "../radiant/render_export_support.hpp"
 #include "../radiant/state_store.hpp"
 #include "../radiant/form_control.hpp"
 #include "../radiant/script_runner.h"
@@ -81,12 +82,6 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lib/tagged.hpp"
 #include "../lambda/render_map.h"
 #include "../lambda/template_state.h"
-
-// External C++ function declarations from Radiant
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 
 // JS runtime batch reset functions (from lambda/js/)
 extern "C" void js_batch_reset(void);
@@ -197,7 +192,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
-void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
@@ -206,9 +200,6 @@ HashMap* element_dom_map_create(void);
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
-
-// View pool management (from view_pool.cpp)
-void view_pool_destroy(ViewTree* tree);
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
@@ -6147,7 +6138,6 @@ static bool layout_single_file(
     }
 
     // Release decoded image cache to prevent batch accumulation.
-    extern void image_cache_cleanup(UiContext* uicon);
     image_cache_cleanup(ui_context);
 
     // Release the InputManager's global pool which accumulates all Input parse trees.

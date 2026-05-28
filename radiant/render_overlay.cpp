@@ -20,7 +20,7 @@ typedef struct SelectionPaintCtx {
     float          iframe_offset_y;
 } SelectionPaintCtx;
 
-void render_focus_outline(RenderContext* rdcon, DocState* state) {
+static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     View* focused = focus_get_visible(state);
     if (!focused) return;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
@@ -64,7 +64,7 @@ void render_focus_outline(RenderContext* rdcon, DocState* state) {
     log_debug("[FOCUS] Rendered focus outline at (%.0f,%.0f) size %.0fx%.0f", ox, oy, ow, oh);
 }
 
-void render_caret(RenderContext* rdcon, DocState* state) {
+static void render_caret(RenderContext* rdcon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
     float caret_x = 0, caret_y = 0, caret_height = 0;
@@ -241,7 +241,7 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     return scratch;
 }
 
-void render_selection(RenderContext* rdcon, DocState* state) {
+static void render_selection(RenderContext* rdcon, DocState* state) {
     if (!state) return;
 
     DomSelection* ds = state->dom_selection;

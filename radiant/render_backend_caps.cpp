@@ -6,11 +6,11 @@ const RenderBackendCaps* render_backend_get_caps(const RdtVector* vec) {
     return rdt_vector_get_caps(vec);
 }
 
-bool render_backend_has_native_blur(const RenderBackendCaps* caps) {
+static bool render_backend_has_native_blur(const RenderBackendCaps* caps) {
     return caps && caps->gaussian_blur;
 }
 
-bool render_backend_has_native_color_filters(const RenderBackendCaps* caps) {
+static bool render_backend_has_native_color_filters(const RenderBackendCaps* caps) {
     return caps && caps->color_matrix_filters;
 }
 

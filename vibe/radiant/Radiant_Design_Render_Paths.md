@@ -981,7 +981,8 @@ Future quality work, not Phase F blockers:
 
 ### Phase G: Quality And Observability Hardening
 
-Status: **Quality hardening slices in progress as of 2026-05-28.**
+Status: **Complete for the current Phase G fallback quality and observability
+milestone as of 2026-05-28.**
 
 - Goal: keep Phase A-F ownership intact while making lowerer decisions more
   inspectable and avoiding silent or content-dropping behavior for unsupported
@@ -1014,6 +1015,10 @@ Status: **Quality hardening slices in progress as of 2026-05-28.**
   fallback surface before applying blend/backdrop-filter semantics, so PDF can
   emit opaque fallback images for backdrop-filter over opaque page content
   instead of transparent images with soft masks.
+- Done: focused export coverage now verifies alpha-preserving soft masks for
+  transparent PDF fallbacks, opaque PDF fallback output for backdrop-filter over
+  captured opaque page content, and shared raster fallback routing for
+  box-shadow, blend-mode, and backdrop-filter groups.
 - Done: stale Phase D/F prose was updated so the document no longer describes
   the removed SVG passthrough and callback-owned PDF inline-SVG fallback as
   current behavior.
@@ -1022,9 +1027,8 @@ Verification completed:
 
 - `make build-test`
 - `test_display_list_gtest --gtest_filter='PaintIrParityTest.*:DisplayListTest.*'`
-- `test_pdf_render_visual_gtest --gtest_filter='RenderOutputParity.*'`
+- `test_pdf_render_visual_gtest --gtest_filter='RenderOutputParity.SvgAndPdfExportBackdropFilterUseRasterFallbackImage:RenderOutputParity.SvgAndPdfExportBlendModeUseRasterFallbackImage:RenderOutputParity.SvgAndPdfExportBoxShadowUseRasterFallbackImage:RenderOutputParity.PdfExportAlphaFilterUsesSoftMaskFallbackImage'`
 - `test_pdf_writer_gtest`
-- `test_retained_display_list_gtest`
 - `make check-int-cast`
 - `git diff --check`
 

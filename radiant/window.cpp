@@ -21,6 +21,8 @@
 #include "video_frame_wake.h"
 #include "browsing_session.h"
 #include "event_state_log.hpp"
+#include "render.hpp"
+#include "render_export_support.hpp"
 #include "render_video.hpp"
 #include "script_runner.h"
 #include "../lambda/network/network_resource_manager.h"
@@ -61,18 +63,12 @@ extern "C" void log_mem_stage(const char*) {}
 #endif
 
 void render(GLFWwindow* window);
-void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 // load_html_doc is declared in view.hpp (via layout.hpp)
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
                                            int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
-View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
-
-int ui_context_init(UiContext* uicon, bool headless);
-void ui_context_cleanup(UiContext* uicon);
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
 static void view_wake_glfw(void* user_data) {
     (void)user_data;
