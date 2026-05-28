@@ -587,6 +587,7 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
     ref.kind = JS_MIR_REF_INVALID;
     ref.base_reg = 0;
     ref.key_reg = 0;
+    ref.static_field_module_var_index = -1;
     ref.strict = mt->is_global_strict || mt->is_module ||
         (mt->current_fc && mt->current_fc->is_strict);
     ref.uninitialized_this = false;
@@ -622,6 +623,25 @@ JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node) {
             String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop_id->name);
             ref.is_private = jm_is_private_name(key_name);
         }
+        if (!mem->computed && mem->object &&
+            mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
+            JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
+            JsClassEntry* sf_ce = jm_find_class(mt, obj_id->name->chars, (int)obj_id->name->len);
+            while (sf_ce && ref.static_field_module_var_index < 0) {
+                for (int i = sf_ce->static_field_count - 1; i >= 0; i--) {
+                    JsStaticFieldEntry* sf = &sf_ce->static_fields[i];
+                    if (sf->name && prop_id->name &&
+                        sf->name->len == prop_id->name->len &&
+                        strncmp(sf->name->chars, prop_id->name->chars, sf->name->len) == 0) {
+                        ref.static_field_module_var_index = sf->module_var_index;
+                        break;
+                    }
+                }
+                sf_ce = sf_ce->superclass;
+            }
+        }
         if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
             if (obj_id->name && obj_id->name->len == 4 &&
@@ -651,6 +671,10 @@ MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref) {
     if (!ref) return jm_emit_undefined(mt);
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
+        if (ref->static_field_module_var_index >= 0) {
+            return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->static_field_module_var_index));
+        }
         return jm_call_2(mt, "js_property_access", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg));
@@ -673,6 +697,11 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
     MIR_reg_t result = value;
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
+        if (ref->static_field_module_var_index >= 0) {
+            jm_call_void_2(mt, "js_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ref->static_field_module_var_index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        }
         result = jm_call_3(mt, ref->is_private ?
             (ref->strict ? "js_private_property_set_strict" : "js_private_property_set") :
             (ref->strict ? "js_property_set_strict" : "js_property_set"), MIR_T_I64,

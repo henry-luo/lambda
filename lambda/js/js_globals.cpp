@@ -14601,6 +14601,13 @@ static int js_global_lexical_find(Item key) {
     return -1;
 }
 
+static Item js_global_lexical_stable_key(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return key;
+    String* s = it2s(key);
+    if (!s) return key;
+    return (Item){.item = s2it(heap_create_name(s->chars, s->len))};
+}
+
 extern "C" int64_t js_global_lexical_binding_exists(Item key) {
     key = js_to_property_key(key);
     if (js_check_exception()) return 0;
@@ -14643,7 +14650,7 @@ extern "C" void js_global_lexical_declare(Item key, Item value, int64_t immutabl
     // Script global lexical declarations live in the global environment record
     // but not on the global object, so Object.hasOwnProperty must stay false.
     JsGlobalLexicalBinding* binding = &js_global_lexical_bindings[js_global_lexical_binding_count++];
-    binding->key = key;
+    binding->key = js_global_lexical_stable_key(key);
     binding->value = value;
     binding->immutable = immutable != 0;
 }

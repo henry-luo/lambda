@@ -1662,6 +1662,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
 
     if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0 ||
         strcmp(node_type, "shorthand_property_identifier") == 0 ||
+        strcmp(node_type, "shorthand_property_identifier_pattern") == 0 ||
         strcmp(node_type, "type_identifier") == 0) {
         return build_js_identifier(tp, expr_node);
     } else if (strcmp(node_type, "private_property_identifier") == 0) {

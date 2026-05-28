@@ -12932,6 +12932,14 @@ struct Re2PermanentEntry {
 };
 static std::unordered_map<uint64_t, Re2PermanentEntry> g_re2_permanent_cache;
 
+extern "C" void js_regex_permanent_cache_reset(void) {
+    for (auto& kv : g_re2_permanent_cache) {
+        delete kv.second.re2;
+        delete[] kv.second.canonical_flags;
+    }
+    g_re2_permanent_cache.clear();
+}
+
 // Content-based hash for permanent cache — valid across batch resets (uses string content, not pointers)
 static inline uint64_t js_regex_content_hash(const char* pat, int plen, const char* flg, int flen) {
     uint64_t h = 14695981039346656037ULL;
@@ -14323,6 +14331,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 continue;
             }
             if (next == 's') {
+                if (route_to_bt) {
+                    processed_pattern += "\\s";
+                    i++;
+                    continue;
+                }
                 if (bracket_depth > 0) {
                     processed_pattern += S_EXPAND_INNER; // inline within existing []
                 } else {
@@ -14332,6 +14345,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 continue;
             }
             if (next == 'S') {
+                if (route_to_bt) {
+                    processed_pattern += "\\S";
+                    i++;
+                    continue;
+                }
                 if (bracket_depth > 0) {
                     // can't negate inside existing class; keep as \S (best effort)
                     processed_pattern += "\\S";
@@ -27808,7 +27826,7 @@ static void js_promise_forward_native_to_capability(Item native_promise, Item re
 static bool js_promise_resolve_elements_with_constructor(Item constructor, Item resolve_method,
     Item arr_item, Item* out_array, Item reject) {
     Array* arr = arr_item.array;
-    Item resolved = js_array_new(arr->length);
+    Item resolved = js_array_new(0);
     for (int i = 0; i < arr->length; i++) {
         Item args[1] = {arr->items[i]};
         Item next = js_call_function(resolve_method, constructor, args, 1);
@@ -28581,12 +28599,11 @@ extern "C" Item js_promise_all(Item iterable) {
     // shared counter { remaining: N, results: Array(N) }
     Item counter = js_new_object();
     js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
-    Item results_arr = js_array_new(count);
-    results_arr.array->length = count;
+    Item results_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(results_arr, make_js_undefined());
     js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
-    Item called_arr = js_array_new(count);
-    called_arr.array->length = count;
-    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    Item called_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(called_arr, (Item){.item = ITEM_FALSE});
     js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
@@ -28782,12 +28799,11 @@ extern "C" Item js_promise_any(Item iterable) {
     // shared counter for rejection tracking
     Item counter = js_new_object();
     js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
-    Item errors_arr = js_array_new(count);
-    errors_arr.array->length = count;
+    Item errors_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(errors_arr, make_js_undefined());
     js_property_set(counter, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
-    Item called_arr = js_array_new(count);
-    called_arr.array->length = count;
-    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    Item called_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(called_arr, (Item){.item = ITEM_FALSE});
     js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
@@ -28902,12 +28918,11 @@ extern "C" Item js_promise_all_settled(Item iterable) {
 
     Item counter = js_new_object();
     js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
-    Item results_arr = js_array_new(count);
-    results_arr.array->length = count;
+    Item results_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(results_arr, make_js_undefined());
     js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
-    Item called_arr = js_array_new(count);
-    called_arr.array->length = count;
-    for (int i = 0; i < count; i++) called_arr.array->items[i] = (Item){.item = ITEM_FALSE};
+    Item called_arr = js_array_new(0);
+    for (int i = 0; i < count; i++) js_array_push(called_arr, (Item){.item = ITEM_FALSE});
     js_property_set(counter, (Item){.item = s2it(heap_create_name("called", 6))}, called_arr);
 
     for (int i = 0; i < count; i++) {
