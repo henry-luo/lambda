@@ -146,6 +146,36 @@ property tests should drop materially and aggregate `sum` should fall. Keep
 only if correctness is unchanged (the equivalence check is mechanical) and the
 cluster improves beyond noise.
 
+### 2.5 Measured result (implemented 2026-05-28, vs `release_run_004`) — **KEPT**
+
+Implemented exactly as §2.3.A: a resumable cursor
+`js_regex_sorted_range_contains_cursor` (`js_runtime.cpp`) plus a cursor-aware
+`js_regex_generated_property_contains_cursor`
+(`js_regex_generated_property_tables.inc`), threaded into
+`js_regexp_test_property_all` for the generated-property kinds (the gc/script/
+scx/binary bulk). Non-generated kinds keep the flat path. ~70 lines total.
+
+- **Correctness.** `--baseline-only --batch-only` exited clean; **zero flipped
+  exit codes** across all 583 `property_escapes` tests (joined by name vs the
+  `release_run_004` timing TSV). The cursor is a pure lookup hint — every code
+  path reduces to the same binary-search membership result.
+- **Performance.** Measured twice. The first run was contaminated by two
+  concurrent release builds — its control group (33 660 non-property common
+  tests) ran +32.6 % *slower* than baseline, yet the property cluster still
+  fell −13.8 %. A clean re-run on a quiet machine confirmed it: the control
+  group returned to **−10.3 %** (within the ~15 % run-to-run noise band), and
+  the generated-property cluster (439 tests) fell **61.84 s → 37.67 s
+  (−24.17 s, −39.1 %)**. The control moving back to baseline when the load was
+  removed proves the earlier +32.6 % was machine load, not a code regression —
+  the change touches only the generated-property walk path and cannot reach the
+  non-property tests.
+- **Run-time note.** Actual test execution (Phase 2) is ~134 s; the long total
+  wall-time is the harness's Phase 4 "retry regressions individually" step
+  (~676 s re-running ~4 700 tests in isolation), unrelated to this change.
+
+Verdict: clears the "no correctness regression AND beyond-noise perf
+improvement" bar that retired all of Tune2. Change kept.
+
 ---
 
 ## 3. Cluster E — shift-operator A4 loops (~4.5 s) + general constant folding

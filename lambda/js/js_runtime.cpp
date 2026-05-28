@@ -12099,6 +12099,7 @@ struct JsRegexRange {
 static bool js_regexp_is_han_cp(uint32_t cp);
 static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
 static bool js_regex_generated_property_contains(int kind, int cp);
+static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor);
 
 static bool js_regex_match_gc_alias(const char* name, int len, const char* long_name,
                                     const char* short_name, const char* loose_name) {
@@ -12274,6 +12275,58 @@ static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count
             return true;
         }
     }
+    return false;
+}
+
+// resumable variant of js_regex_sorted_range_contains: *cursor holds the range
+// index that contained (or bracketed just below) the previous code point. for
+// monotonically increasing input the cursor advances in O(1); on any miss it
+// falls back to a binary search of the relevant half and re-anchors the cursor.
+// result is identical to js_regex_sorted_range_contains for every code point.
+static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, int count, int cp, int* cursor) {
+    if (count <= 0) return false;
+    int c = *cursor;
+    if (c >= 0 && c < count) {
+        if (cp >= ranges[c].first && cp <= ranges[c].last) return true;
+        if (cp > ranges[c].last) {
+            int next = c + 1;
+            if (next < count) {
+                if (cp < ranges[next].first) { *cursor = c; return false; }
+                if (cp <= ranges[next].last) { *cursor = next; return true; }
+            } else {
+                *cursor = c; return false;  // cp is above the last range
+            }
+            // cp lies beyond range c+1: binary search the upper tail
+            int lo = next + 1, hi = count - 1;
+            while (lo <= hi) {
+                int mid = lo + ((hi - lo) / 2);
+                if (cp < ranges[mid].first) hi = mid - 1;
+                else if (cp > ranges[mid].last) lo = mid + 1;
+                else { *cursor = mid; return true; }
+            }
+            *cursor = hi >= 0 ? hi : 0;  // anchor at range just below cp
+            return false;
+        }
+        // cp < ranges[c].first: backward jump, search the lower half
+        int lo = 0, hi = c - 1;
+        while (lo <= hi) {
+            int mid = lo + ((hi - lo) / 2);
+            if (cp < ranges[mid].first) hi = mid - 1;
+            else if (cp > ranges[mid].last) lo = mid + 1;
+            else { *cursor = mid; return true; }
+        }
+        *cursor = hi >= 0 ? hi : 0;
+        return false;
+    }
+    // cursor out of range: full binary search
+    int lo = 0, hi = count - 1;
+    while (lo <= hi) {
+        int mid = lo + ((hi - lo) / 2);
+        if (cp < ranges[mid].first) hi = mid - 1;
+        else if (cp > ranges[mid].last) lo = mid + 1;
+        else { *cursor = mid; return true; }
+    }
+    *cursor = hi >= 0 ? hi : 0;
     return false;
 }
 
@@ -15167,9 +15220,15 @@ static bool js_regexp_test_property_all(String* input, int mode) {
     bool negate = raw_mode < 0;
     int kind = negate ? -raw_mode : raw_mode;
     size_t pos = 0;
+    // generated properties (gc/script/scx/binary) dominate the cluster and walk a
+    // sorted range table; a resumable cursor exploits the near-monotonic input.
+    bool use_cursor = (kind >= JS_REGEX_PROP_GENERATED_BASE);
+    int range_cursor = 0;
     while (pos < input->len) {
         uint32_t cp = js_decode_utf8(input->chars, input->len, &pos);
-        bool contains = js_regex_special_property_contains(kind, (int)cp);
+        bool contains = use_cursor
+            ? js_regex_generated_property_contains_cursor(kind, (int)cp, &range_cursor)
+            : js_regex_special_property_contains(kind, (int)cp);
         if (search_mode && (negate ? !contains : contains)) {
             g_regex_property_cache_chars = input->chars;
             g_regex_property_cache_len = (int)input->len;
