@@ -138,6 +138,10 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
             proto_type == LMD_TYPE_NULL || proto_type == LMD_TYPE_UNDEFINED;
         Map* object_proto = js_resolve_object_prototype();
         if (raw_proto_found && null_proto && value.map != object_proto) {
+            if (value.map &&
+                js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
+                return (Item){.item = s2it(heap_create_name("[object Object]"))};
+            }
             bool has_vo = false, has_ts = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);

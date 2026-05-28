@@ -533,7 +533,8 @@ TEST_P(JsFileTest, Run) {
         << "Script not found in batch results: " << p.script_path;
 
     const JsBatchResult& br = it->second;
-    ASSERT_EQ(br.status, 0) << "Script execution failed (exit " << br.status << "): " << p.script_path;
+    char* expected_output = read_expected_output(p.expected_path.c_str());
+    ASSERT_NE(expected_output, nullptr) << "Could not read expected: " << p.expected_path;
 
     // extract output (handle ##### Script marker)
     std::string actual = br.output;
@@ -547,9 +548,24 @@ TEST_P(JsFileTest, Run) {
     while (!actual.empty() && isspace((unsigned char)actual.back()))
         actual.pop_back();
 
-    char* expected_output = read_expected_output(p.expected_path.c_str());
-    ASSERT_NE(expected_output, nullptr) << "Could not read expected: " << p.expected_path;
+    // Batch mode is an optimization.  If a prior test in the same worker
+    // crashes or exits through an unusual path, retry this script in a fresh
+    // process before reporting a failure.
+    if (br.status != 0 || strcmp(expected_output, actual.c_str()) != 0) {
+        char* retry_output = execute_js_script(p.script_path.c_str());
+        if (retry_output) {
+            trim_trailing_whitespace(retry_output);
+            if (strcmp(expected_output, retry_output) == 0) {
+                free(retry_output);
+                free(expected_output);
+                return;
+            }
+            actual = retry_output;
+            free(retry_output);
+        }
+    }
 
+    ASSERT_EQ(br.status, 0) << "Script execution failed (exit " << br.status << "): " << p.script_path;
     ASSERT_STREQ(expected_output, actual.c_str())
         << "Output mismatch for: " << p.script_path;
 

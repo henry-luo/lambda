@@ -65,6 +65,8 @@
 #include "network/network_resource_manager.h"
 #include "network/network_thread_pool.h"
 
+extern "C" void js_regex_permanent_cache_reset(void);
+
 static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item value = js_get_global_property(key);
@@ -3693,7 +3695,38 @@ int main(int argc, char *argv[]) {
                 // Restore context (longjmp on timeout/crash may leave it dangling)
                 context = &batch_context;
 
-                if (result == 124 || result >= 128) {
+                if (result == 1) {
+                    // A normal uncaught JS exception can leave partially
+                    // initialized heap-bound runtime objects behind.  Recycle
+                    // the hot heap so the next script starts from the same
+                    // clean state as it would in a standalone process.
+                    js_regex_permanent_cache_reset();
+                    js_batch_reset();
+                    heap_destroy();
+                    jm_cleanup_deferred_mir();
+                    if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+                    memset(&batch_context, 0, sizeof(EvalContext));
+                    context = &batch_context;
+                    batch_context.nursery = gc_nursery_create(0);
+                    heap_init();
+                    batch_context.pool = batch_context.heap->pool;
+                    batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+                    batch_context.type_list = arraylist_new(64);
+
+                    if (has_preamble) {
+                        preamble_state_destroy(&preamble);
+                        has_preamble = false;
+                    }
+                    if (saved_harness_src) {
+                        memset(&preamble, 0, sizeof(preamble));
+                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
+                        if (pres.item != ITEM_ERROR) {
+                            has_preamble = true;
+                            preamble_var_checkpoint = preamble.module_var_count;
+                            js_batch_reset_to(preamble_var_checkpoint);
+                        }
+                    }
+                } else if (result == 124 || result >= 128) {
                     // Crash or timeout recovery: reset heap and continue, but
                     // track crash count to cap memory leaks from longjmp.
                     batch_crash_count++;
@@ -3706,6 +3739,7 @@ int main(int argc, char *argv[]) {
                         fflush(stdout);
                         break;
                     }
+                    js_regex_permanent_cache_reset();
                     js_batch_reset();
                     heap_destroy();
                     // Clean up deferred MIR contexts from previous tests — heap objects
@@ -3750,6 +3784,7 @@ int main(int argc, char *argv[]) {
                     // Successful but memory-heavy test. Recycle the hot heap before
                     // the next test so large temporary strings from generated
                     // Unicode/URI suites do not make later tests hit the alarm.
+                    js_regex_permanent_cache_reset();
                     js_batch_reset();
                     heap_destroy();
                     jm_cleanup_deferred_mir();

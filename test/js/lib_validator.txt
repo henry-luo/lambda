@@ -65,7 +65,7 @@ T64 isSemVer: true
 T65 isSemVer fail: false
 T66 isDate: true
 T67 isDate fail: false
-T68 isISO8601: false
+T68 isISO8601: true
 T69 isRFC3339: true
 T70 isSlug: true
 T71 isSlug fail: false

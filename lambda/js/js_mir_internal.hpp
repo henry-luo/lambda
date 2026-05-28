@@ -49,6 +49,7 @@ typedef struct JsMirReference {
     JsMirReferenceKind kind;
     MIR_reg_t base_reg;
     MIR_reg_t key_reg;
+    int static_field_module_var_index;
     bool strict;
     bool uninitialized_this;
     bool is_private;

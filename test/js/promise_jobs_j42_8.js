@@ -78,6 +78,7 @@ function CustomPromise(executor) {
     log.push("custom-capability");
     return new Promise(executor);
 }
+CustomPromise.resolve = Promise.resolve.bind(Promise);
 Promise.resolve.call(CustomPromise, guardThenable).then(function(value) {
     log.push("custom-resolve:" + value);
 });
