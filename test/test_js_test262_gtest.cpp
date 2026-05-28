@@ -129,12 +129,14 @@ static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2021 — skip tests requiring these.
-// Target: ES2021 compliance. All features ≤ES2021 are in scope.
+// Target: ES2021 compliance. All features ≤ES2021 are in scope, except
+// intentional product-scope exceptions listed separately below.
 // Reference: TC39 finished-proposals.md (publication year field)
-static const std::set<std::string> UNSUPPORTED_FEATURES = {
-    // === ES2015 features (not implemented) ===
-    "tail-call-optimization",                     // Proper tail calls (100K+ recursion, hangs without TCO)
+static const std::set<std::string> INTENTIONAL_ES2021_EXCEPTIONS = {
+    "tail-call-optimization",                     // PTC is spec-era ES2015, but not part of LambdaJS Js48 claim
+};
 
+static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // "AggregateError",                          // SUPPORTED
     // "logical-assignment-operators",             // &&=, ||=, ??= — SUPPORTED
     // "numeric-separator-literal",               // 1_000_000 — SUPPORTED
@@ -816,9 +818,22 @@ struct Test262RunResult {
 
 static bool has_unsupported_feature(const Test262Metadata& meta) {
     for (auto& f : meta.features) {
+        if (INTENTIONAL_ES2021_EXCEPTIONS.count(f)) return true;
         if (UNSUPPORTED_FEATURES.count(f)) return true;
     }
     return false;
+}
+
+static std::string unsupported_feature_skip_message(const Test262Metadata& meta) {
+    for (auto& f : meta.features) {
+        if (INTENTIONAL_ES2021_EXCEPTIONS.count(f)) {
+            if (f == "tail-call-optimization") {
+                return "intentional PTC exception";
+            }
+            return std::string("intentional ES2021 exception: ") + f;
+        }
+    }
+    return "unsupported feature";
 }
 
 static bool is_dynamic_import_script_test(const std::string& test_path, const Test262Metadata& meta) {
@@ -2121,7 +2136,11 @@ static void prepare_all_tests(
             p.is_module = meta.is_module;
             p.is_raw = meta.is_raw;
             p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
-            if (has_unsupported_feature(meta)) { p.skip_result = T262_SKIP; p.skip_message = "unsupported feature"; continue; }
+            if (has_unsupported_feature(meta)) {
+                p.skip_result = T262_SKIP;
+                p.skip_message = unsupported_feature_skip_message(meta);
+                continue;
+            }
             if (meta.is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
                 p.skip_result = T262_SKIP;
                 p.skip_message = "module flag";
@@ -4327,7 +4346,7 @@ int main(int argc, char** argv) {
                 p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
                 if (has_unsupported_feature(meta)) {
                     p.skip_result = T262_SKIP;
-                    p.skip_message = "unsupported feature";
+                    p.skip_message = unsupported_feature_skip_message(meta);
                 } else if (is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
                     p.skip_result = T262_SKIP;
                     p.skip_message = "module flag";

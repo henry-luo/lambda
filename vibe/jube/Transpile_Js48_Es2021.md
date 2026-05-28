@@ -295,6 +295,13 @@ Acceptance:
 
 Goal: decide whether proper tail calls are part of LambdaJS's ES2021 claim.
 
+Decision: for Js48, LambdaJS does not claim general ECMAScript proper tail call
+support. The existing Lambda/JIT self-recursive TCO work is useful, but it is
+not the same as spec-level PTC across arbitrary strict-mode tail-position calls.
+The js262 runner therefore treats `tail-call-optimization` as an intentional
+ES2021 compatibility exception with its own skip reason, not as a future-feature
+or proposal skip.
+
 Current skipped feature:
 
 - `tail-call-optimization`: 35 tests.
@@ -308,7 +315,8 @@ Proposal:
 
 Acceptance:
 
-- Project decision recorded.
+- Project decision recorded. Done for Js48: PTC is an intentional compatibility
+  exception.
 - Skip reason updated to distinguish "intentional PTC exception" from
   "future/proposal unsupported feature".
 
@@ -465,4 +473,3 @@ Js48 can claim "full ES2021 support in current js262 scope" when:
   decisions instead of generic skip labels.
 - The release baseline is updated and remains fully passing with async batch
   size 50.
-
