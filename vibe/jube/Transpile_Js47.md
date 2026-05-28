@@ -2,13 +2,14 @@
 
 Date: 2026-05-26
 
-Status: proposal
+Status: implementation in progress; async baseline admitted and async batching
+optimized through batch size 50
 
 This proposal defines an incremental path to improve async support in the
 Lambda JavaScript runtime and test262 runner without destabilizing the current
 green ES2021 baseline.
 
-The current baseline is strong:
+The starting baseline at proposal time was strong:
 
 - Scope: ES2021, skipping ES2022+ features.
 - Fully passing baseline: 34,245 / 34,245.
@@ -19,6 +20,70 @@ Async is now one of the largest remaining test262 gates. The goal is not to
 remove that gate in one large step. The goal is to admit async tests in small,
 measured groups, prove each group under debug first, and finish with release
 verification.
+
+## Progress Update - 2026-05-28
+
+LambdaJS async support has advanced from a skipped test262 category to an
+accepted part of the js262 baseline. The runner now parses cached test262
+metadata from `test/js262/test262_metadata.tsv`, admits async tests through
+`--run-async` plus an explicit allowlist, and supports `$DONE`-based completion
+for async-flagged tests.
+
+The release baseline has expanded from the original ES2021-only passing set to
+include the accepted async tests:
+
+| Metric | Current result |
+|---|---:|
+| Discovered tests | 42,295 |
+| Skipped tests | 3,356 |
+| Baseline passing tests | 38,939 |
+| Full-suite release failures | 0 |
+| Full-suite release regressions | 0 |
+
+Async batching has also been optimized. Async tests originally ran as
+single-test batches because each test needed an isolated `$DONE` completion
+state. After adding configurable async chunking and validating full-suite
+release runs, async tests now use the same default chunk size as sync JS tests:
+50 tests per process.
+
+Latest release verification with async batch size 50:
+
+```text
+Command:
+./test/test_js_test262_gtest.exe --batch-only --run-async \
+  --async-list=test/js262/test262_baseline.txt \
+  --async-chunk-size=50 \
+  --write-failures=temp/js47_p6_async_chunk_50_release.tsv \
+  --gtest_brief=1
+
+Batch workers: 7
+Batches: 780
+Async chunk size: 50
+Fully passed: 38,939 / 38,939
+Non-fully-passing: 0
+Failed: 0
+Skipped: 3,356
+Regressions: 0
+Total time: 177.1s
+Batch execute split: 175.8s batched, 0.0s non-batched
+Failure manifest: 0 rows
+```
+
+The async batch rollout results were:
+
+| Async chunk | Total time | Failed | Regressions | Non-fully-passing |
+|---:|---:|---:|---:|---:|
+| 5 | 292.2s | 0 | 0 | 0 |
+| 10 | 238.9s | 0 | 0 | 2 retry-only slow tests |
+| 20 | 204.5s | 0 | 0 | 1 retry-only slow test |
+| 50 | 177.1s | 0 | 0 | 0 |
+
+Current decision: keep async and sync JS tests in separate groups even though
+they now use the same batch size. Same chunk size proves async batching is fast;
+it does not yet prove that mixed sync/async batches are worth the extra
+diagnostic ambiguity. Mixed batches should be considered only as a future
+flagged experiment if they can beat the current 177.1s release runtime with 0
+failures, 0 regressions, and 0 non-fully-passing tests.
 
 ## 1. What The `async` Flag Means
 
@@ -42,7 +107,7 @@ before source assembly.
 
 Local evidence:
 
-- `temp/test262_metadata.tsv`
+- `test/js262/test262_metadata.tsv`
 - `test/js262/test262_baseline.txt`
 - `test/js262/t262_partial.txt`
 - `test/test_js_test262_gtest.cpp`
@@ -373,6 +438,87 @@ make release
 
 If `test/js262` is still a symlink to `../lambda-test/js262`, baseline updates
 must be run with permission to write through that symlink.
+
+### P6 - Make Async Multi-Test Batching Safe
+
+After async tests are accepted into the baseline, the next optimization is to
+make async tests safe to run in multi-test batches. This must be treated as a
+correctness project first and a throughput project second.
+
+Current async execution uses one test per async batch because async tests can
+leave work behind after top-level script evaluation returns. Increasing async
+chunk size is only safe if the runner and runtime can prove that each test has
+fully completed and that no async state can leak into the next test.
+
+Required isolation semantics:
+
+- Reset `$DONE` state before each test in the batch.
+- Associate each `$DONE` closure with exactly one active test id.
+- Reject duplicate, missing, or late `$DONE` calls with a clear failure.
+- Drain and check the microtask queue after each test.
+- Drain or explicitly account for timers after each test.
+- Fail the active test on uncaught async rejection or timer callback error.
+- Clear per-test harness state before starting the next test.
+- Ensure promise reactions, async generator queues, and pending callback roots do
+  not retain references to the previous test's completion state.
+- Keep the existing one-test async batch mode as the fallback until all gates
+  pass.
+
+Runner/runtime work likely needed:
+
+- Add an explicit "finish async test" boundary in the JS batch runner.
+- Expose a bounded event-loop drain primitive for test262 execution.
+- Make timer queues report whether pending work belongs to the active test.
+- Clear `$DONE`, `$ERROR`, and any test-local harness callbacks at the boundary.
+- Add diagnostics for leaked microtasks, leaked timers, and late callbacks.
+- Keep async and sync tests in separate groups; do not mix them in one process
+  until async isolation is proven.
+
+Rollout plan:
+
+1. Keep default async chunk size at `1` until full-suite evidence supports
+   promotion.
+2. Add an explicit runner option such as `--async-chunk-size=<n>`.
+3. Run the full async baseline with `--async-chunk-size=5`.
+4. If clean in debug and release, raise to `10`.
+5. If clean in debug and release, raise to `20`.
+6. If clean in debug and release, raise to `50`.
+7. Only after `50` is stable should the runner consider using async batching by
+   default.
+
+Acceptance gates for each chunk size:
+
+```bash
+make build
+./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --async-chunk-size=<n> --write-failures=temp/js47_p6_async_chunk_<n>_debug.tsv
+make release
+./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --async-chunk-size=<n> --write-failures=temp/js47_p6_async_chunk_<n>_release.tsv
+```
+
+Promotion rule:
+
+- A larger async chunk size may be promoted only when the full async baseline has
+  0 regressions, 0 batch-lost tests, 0 leaked microtasks, 0 leaked timers, and 0
+  late `$DONE` calls under both debug and release.
+
+Implementation update:
+
+- Added `--async-chunk-size=<n>` with clamping to `1..50`.
+- Kept async and non-async tests in separate groups while allowing async groups
+  to use the requested chunk size.
+- Counted async chunks greater than 1 as true batched execution in the timing
+  summary.
+- Promoted the default async chunk size to `50` after full-suite release
+  verification showed no regressions and no non-fully-passing tests at `50`.
+
+Release verification:
+
+| Async chunk | Total time | Failed | Regressions | Non-fully-passing |
+| --- | ---: | ---: | ---: | ---: |
+| 5 | 292.2s | 0 | 0 | 0 |
+| 10 | 238.9s | 0 | 0 | 2 retry-only slow tests |
+| 20 | 204.5s | 0 | 0 | 1 retry-only slow test |
+| 50 | 177.1s | 0 | 0 | 0 |
 
 ## 8. Test And Build Discipline
 
