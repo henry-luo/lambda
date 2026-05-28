@@ -228,6 +228,25 @@ inline Element* as_element(ItemOf<LMD_TYPE_ELEMENT> v) {
     return v.ptr();
 }
 
+typedef GcPtr<ShapeEntry> ShapeRef;
+typedef GcPtr<const ShapeEntry> ConstShapeRef;
+
+inline ShapeRef shape_borrow(ShapeEntry* p) {
+    return ShapeRef(p);
+}
+
+inline ConstShapeRef shape_borrow(const ShapeEntry* p) {
+    return ConstShapeRef(p);
+}
+
+inline ShapeRef shape_next(ShapeRef shape) {
+    return shape ? shape_borrow(shape->next) : ShapeRef();
+}
+
+inline ConstShapeRef shape_next(ConstShapeRef shape) {
+    return shape ? shape_borrow((const ShapeEntry*)shape->next) : ConstShapeRef();
+}
+
 template<class T>
 GcPtr<T> gc_borrow(T* p) {
     return GcPtr<T>(p);

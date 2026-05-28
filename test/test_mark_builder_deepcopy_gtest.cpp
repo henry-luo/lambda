@@ -95,6 +95,38 @@ TEST_F(MarkBuilderDeepCopyTest, TypedBuilderOutputsCarryTagWitnesses) {
     EXPECT_NE(element.ptr(), nullptr);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, BuilderFinalTypedOutputsCarryTagWitnesses) {
+    MarkBuilder builder(input1);
+
+    auto array = builder.array()
+        .append((int64_t)3)
+        .finalTyped();
+    auto map = builder.map()
+        .put("kind", "typed")
+        .finalTyped();
+    auto element = builder.element("section")
+        .attr("id", "typed")
+        .text("body")
+        .finalTyped();
+
+    ArrayReader array_reader(array);
+    MapReader map_reader(map);
+    ElementReader element_reader(element);
+
+    EXPECT_EQ(get_type_id(array.raw()), LMD_TYPE_ARRAY);
+    EXPECT_EQ(get_type_id(map.raw()), LMD_TYPE_MAP);
+    EXPECT_EQ(get_type_id(element.raw()), LMD_TYPE_ELEMENT);
+    ASSERT_TRUE(array_reader.isValid());
+    ASSERT_TRUE(map_reader.isValid());
+    ASSERT_TRUE(element_reader.isValid());
+    EXPECT_EQ(array_reader.length(), 1);
+    EXPECT_EQ(array_reader.get(0).asInt(), 3);
+    EXPECT_STREQ(map_reader.get("kind").cstring(), "typed");
+    EXPECT_TRUE(element_reader.hasTag("section"));
+    EXPECT_STREQ(element_reader.get_attr_string("id"), "typed");
+    EXPECT_EQ(element_reader.childCount(), 1);
+}
+
 TEST_F(MarkBuilderDeepCopyTest, CopyLong) {
     MarkBuilder builder(input1);
     Item long_item = builder.createLong(9223372036854775807LL);

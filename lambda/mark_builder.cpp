@@ -478,6 +478,10 @@ Item ElementBuilder::final() {
     return (Item){.element = elmt_};
 }
 
+lam::ItemOf<LMD_TYPE_ELEMENT> ElementBuilder::finalTyped() {
+    return lam::require<LMD_TYPE_ELEMENT>(final());
+}
+
 //==============================================================================
 // MapBuilder Implementation
 //==============================================================================
@@ -573,6 +577,10 @@ Item MapBuilder::final() {
     return (Item){.map = map_};
 }
 
+lam::ItemOf<LMD_TYPE_MAP> MapBuilder::finalTyped() {
+    return lam::require<LMD_TYPE_MAP>(final());
+}
+
 //==============================================================================
 // ArrayBuilder Implementation
 //==============================================================================
@@ -622,6 +630,10 @@ ArrayBuilder& ArrayBuilder::appendItems(std::initializer_list<Item> items) {
 Item ArrayBuilder::final() {
     // Array is already built - just wrap it in an Item
     return (Item){.array = array_};
+}
+
+lam::ItemOf<LMD_TYPE_ARRAY> ArrayBuilder::finalTyped() {
+    return lam::require<LMD_TYPE_ARRAY>(final());
 }
 
 // ============================================================================

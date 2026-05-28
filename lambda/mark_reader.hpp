@@ -204,7 +204,7 @@ public:
     class KeyIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         KeyIterator(const MapReader* reader);
@@ -215,7 +215,7 @@ public:
     class ValueIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         ValueIterator(const MapReader* reader);
@@ -226,7 +226,7 @@ public:
     class EntryIterator {
     private:
         const MapReader* reader_;
-        ShapeEntry* current_field_;
+        lam::ShapeRef current_field_;
 
     public:
         EntryIterator(const MapReader* reader);

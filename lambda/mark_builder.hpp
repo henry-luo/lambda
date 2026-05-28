@@ -440,6 +440,7 @@ public:
      * Element structure was arena-allocated during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_ELEMENT> finalTyped();
 };
 
 /**
@@ -543,6 +544,7 @@ public:
      * Map structure was arena-allocated during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_MAP> finalTyped();
 };
 
 /**
@@ -619,6 +621,7 @@ public:
      * Array was pool-allocated via array_pooled during construction
      */
     Item final();
+    lam::ItemOf<LMD_TYPE_ARRAY> finalTyped();
 };
 
 #endif // LAMBDA_MARK_BUILDER_HPP
