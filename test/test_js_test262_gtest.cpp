@@ -1113,17 +1113,26 @@ struct BatchTiming {
     double end_secs;
     size_t num_tests;
     bool non_batched;
+    bool async_batch;
 };
 
 struct BatchExecuteTimingSummary {
     double batched_wall_secs;
     double non_batched_wall_secs;
+    double sync_batched_wall_secs;
+    double async_batched_wall_secs;
     double batched_worker_secs;
     double non_batched_worker_secs;
+    double sync_batched_worker_secs;
+    double async_batched_worker_secs;
     size_t batched_batches;
     size_t non_batched_batches;
+    size_t sync_batched_batches;
+    size_t async_batched_batches;
     size_t batched_tests;
     size_t non_batched_tests;
+    size_t sync_batched_tests;
+    size_t async_batched_tests;
 };
 
 static BatchExecuteTimingSummary g_last_batch_execute_timing = {};
@@ -1156,12 +1165,20 @@ static size_t t262_worker_count(size_t batch_count) {
 static void reset_batch_execute_timing_summary(BatchExecuteTimingSummary& summary) {
     summary.batched_wall_secs = 0.0;
     summary.non_batched_wall_secs = 0.0;
+    summary.sync_batched_wall_secs = 0.0;
+    summary.async_batched_wall_secs = 0.0;
     summary.batched_worker_secs = 0.0;
     summary.non_batched_worker_secs = 0.0;
+    summary.sync_batched_worker_secs = 0.0;
+    summary.async_batched_worker_secs = 0.0;
     summary.batched_batches = 0;
     summary.non_batched_batches = 0;
+    summary.sync_batched_batches = 0;
+    summary.async_batched_batches = 0;
     summary.batched_tests = 0;
     summary.non_batched_tests = 0;
+    summary.sync_batched_tests = 0;
+    summary.async_batched_tests = 0;
 }
 
 static void finalize_batch_execute_timing_summary(
@@ -1182,6 +1199,15 @@ static void finalize_batch_execute_timing_summary(
             summary.batched_worker_secs += timing.elapsed_secs;
             summary.batched_batches++;
             summary.batched_tests += timing.num_tests;
+            if (timing.async_batch) {
+                summary.async_batched_worker_secs += timing.elapsed_secs;
+                summary.async_batched_batches++;
+                summary.async_batched_tests += timing.num_tests;
+            } else {
+                summary.sync_batched_worker_secs += timing.elapsed_secs;
+                summary.sync_batched_batches++;
+                summary.sync_batched_tests += timing.num_tests;
+            }
         }
         points.push_back(timing.start_secs);
         points.push_back(timing.end_secs);
@@ -1193,33 +1219,51 @@ static void finalize_batch_execute_timing_summary(
         double start = points[i - 1];
         double end = points[i];
         if (end <= start) continue;
-        size_t active_batched = 0;
+        size_t active_sync_batched = 0;
+        size_t active_async_batched = 0;
         size_t active_non_batched = 0;
         for (const auto& timing : timings) {
             if (timing.num_tests == 0) continue;
             if (timing.start_secs < end && timing.end_secs > start) {
                 if (timing.non_batched) active_non_batched++;
-                else active_batched++;
+                else if (timing.async_batch) active_async_batched++;
+                else active_sync_batched++;
             }
         }
+        size_t active_batched = active_sync_batched + active_async_batched;
         size_t active_total = active_batched + active_non_batched;
         if (active_total == 0) continue;
         double secs = end - start;
-        summary.batched_wall_secs += secs * (double)active_batched / (double)active_total;
+        summary.sync_batched_wall_secs += secs * (double)active_sync_batched / (double)active_total;
+        summary.async_batched_wall_secs += secs * (double)active_async_batched / (double)active_total;
         summary.non_batched_wall_secs += secs * (double)active_non_batched / (double)active_total;
     }
+
+    summary.batched_wall_secs =
+        summary.sync_batched_wall_secs + summary.async_batched_wall_secs;
 
     double split_secs = summary.batched_wall_secs + summary.non_batched_wall_secs;
     double overhead_secs = execute_wall_secs - split_secs;
     if (overhead_secs > 0.0) {
         if (split_secs > 0.0) {
-            summary.batched_wall_secs += overhead_secs * summary.batched_wall_secs / split_secs;
+            double batched_overhead = overhead_secs * summary.batched_wall_secs / split_secs;
+            double sync_async_secs = summary.sync_batched_wall_secs + summary.async_batched_wall_secs;
+            if (sync_async_secs > 0.0) {
+                summary.sync_batched_wall_secs +=
+                    batched_overhead * summary.sync_batched_wall_secs / sync_async_secs;
+                summary.async_batched_wall_secs +=
+                    batched_overhead * summary.async_batched_wall_secs / sync_async_secs;
+            }
             summary.non_batched_wall_secs += overhead_secs * summary.non_batched_wall_secs / split_secs;
         } else if (summary.non_batched_batches > 0) {
             summary.non_batched_wall_secs += overhead_secs;
+        } else if (summary.async_batched_batches > 0 && summary.sync_batched_batches == 0) {
+            summary.async_batched_wall_secs += overhead_secs;
         } else {
-            summary.batched_wall_secs += overhead_secs;
+            summary.sync_batched_wall_secs += overhead_secs;
         }
+        summary.batched_wall_secs =
+            summary.sync_batched_wall_secs + summary.async_batched_wall_secs;
     }
 }
 
@@ -1272,6 +1316,8 @@ static double g_exec_secs = 0;  // Phase 2 (execute) runtime
 static double g_total_secs = 0; // total runtime
 static double g_phase_batch_batched_secs = 0;      // Phase 2 true batched wall runtime
 static double g_phase_batch_non_batched_secs = 0;  // Phase 2 singleton/non-batched wall runtime
+static double g_phase_batch_sync_batched_secs = 0;  // Phase 2 sync batched wall runtime
+static double g_phase_batch_async_batched_secs = 0; // Phase 2 async batched wall runtime
 static double g_phase_retry_secs = 0;      // Phase 2b retry runtime
 static double g_phase_partial_secs = 0;    // non-fully-passing list update runtime
 static double g_phase_timing_secs = 0;     // timing TSV write runtime
@@ -1772,10 +1818,12 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
             total_tests, skipped, batched, passing.size(), failed);
     fprintf(f, "# Runtime: %.1fs total (prep %.1fs + exec %.1fs)\n",
             g_total_secs, g_prep_secs, g_exec_secs);
-    fprintf(f, "# Batch size: batched %zu tests/process; async %zu test/process\n",
+    fprintf(f, "# Batch size: batched %zu tests/process; async %zu tests/process\n",
             T262_BATCH_CHUNK_SIZE, g_t262_async_chunk_size);
     fprintf(f, "# Phase timing: prepare %.1fs\n", g_prep_secs);
     fprintf(f, "# Phase timing: batch-execute-batched %.1fs\n", g_phase_batch_batched_secs);
+    fprintf(f, "# Phase timing: batch-execute-sync-batched %.1fs\n", g_phase_batch_sync_batched_secs);
+    fprintf(f, "# Phase timing: batch-execute-async-batched %.1fs\n", g_phase_batch_async_batched_secs);
     fprintf(f, "# Phase timing: batch-execute-non-batched %.1fs\n", g_phase_batch_non_batched_secs);
     fprintf(f, "# Phase timing: retry-lost %.1fs\n", g_phase_retry_secs);
     fprintf(f, "# Phase timing: update-partial-list %.1fs\n", g_phase_partial_secs);
@@ -2479,10 +2527,11 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 }
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
                 auto t1 = std::chrono::steady_clock::now();
+                bool is_async_batch = !batches[i].native && js_groups[batches[i].group].is_async;
                 batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
                                     std::chrono::duration<double>(t0 - execute_wall_start).count(),
                                     std::chrono::duration<double>(t1 - execute_wall_start).count(),
-                                    batch_num_tests, is_non_batched};
+                                    batch_num_tests, is_non_batched, is_async_batch};
                 size_t produced = thread_results[i].size();
                 {
                     std::lock_guard<std::mutex> lock(g_progress_mutex);
@@ -2549,10 +2598,14 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         g_last_batch_execute_timing, batch_timings, execute_wall_secs);
     fprintf(stderr,
             "[test262] Batch execute split: batched %.1fs wall / %.1fs worker "
-            "(%zu batches, %zu tests); non-batched %.1fs wall / %.1fs worker "
-            "(%zu batches, %zu tests)\n",
+            "(sync %.1fs/%.1fs, async %.1fs/%.1fs; %zu batches, %zu tests); "
+            "non-batched %.1fs wall / %.1fs worker (%zu batches, %zu tests)\n",
             g_last_batch_execute_timing.batched_wall_secs,
             g_last_batch_execute_timing.batched_worker_secs,
+            g_last_batch_execute_timing.sync_batched_wall_secs,
+            g_last_batch_execute_timing.sync_batched_worker_secs,
+            g_last_batch_execute_timing.async_batched_wall_secs,
+            g_last_batch_execute_timing.async_batched_worker_secs,
             g_last_batch_execute_timing.batched_batches,
             g_last_batch_execute_timing.batched_tests,
             g_last_batch_execute_timing.non_batched_wall_secs,
@@ -3358,9 +3411,11 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     auto total_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(total_time - start_time).count();
-    fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + batch %.1fs [batched %.1fs + non-batched %.1fs] + retry %.1fs + partial %.1fs + timing %.1fs + memory %.1fs + eval %.1fs)\n",
+    fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + batch %.1fs [batched %.1fs: sync %.1fs + async %.1fs; non-batched %.1fs] + retry %.1fs + partial %.1fs + timing %.1fs + memory %.1fs + eval %.1fs)\n",
             tests.size(), total_secs, prep_secs,
             batch_exec_secs, g_last_batch_execute_timing.batched_wall_secs,
+            g_last_batch_execute_timing.sync_batched_wall_secs,
+            g_last_batch_execute_timing.async_batched_wall_secs,
             g_last_batch_execute_timing.non_batched_wall_secs,
             retry_secs, partial_secs, timing_secs, memory_secs, eval_secs);
     g_prep_secs = prep_secs;
@@ -3368,6 +3423,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     g_total_secs = total_secs;
     g_phase_batch_batched_secs = g_last_batch_execute_timing.batched_wall_secs;
     g_phase_batch_non_batched_secs = g_last_batch_execute_timing.non_batched_wall_secs;
+    g_phase_batch_sync_batched_secs = g_last_batch_execute_timing.sync_batched_wall_secs;
+    g_phase_batch_async_batched_secs = g_last_batch_execute_timing.async_batched_wall_secs;
     g_phase_retry_secs = retry_secs;
     g_phase_partial_secs = partial_secs;
     g_phase_timing_secs = timing_secs;

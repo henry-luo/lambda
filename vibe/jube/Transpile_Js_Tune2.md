@@ -99,9 +99,27 @@ Each item below is gated, generally beneficial, and independently
 landable. None is specific to "unicode identifier tests" — they all target
 mechanisms that the broader engine pays for too.
 
-#### 2.4.A — Length-bypass for very long names in the name pool
+#### 2.4.A — Length-bypass for very long names in the name pool — *Retracted (implemented + measured, regressed)*
 
-**Change.** In `name_pool_create_strview`, short-circuit interning for names
+> **Status.** Implemented as a 64-byte length bypass in
+> `name_pool_create_strview` (threshold set above `NAME_POOL_SYMBOL_LIMIT`
+> so symbol pooling was untouched), built release, and ran the full js262
+> baseline twice against two clean baseline runs of the same HEAD. On the
+> 58 unicode-identifier tests common to all four runs, the bypass version
+> consistently came out **~+18 % slower** (28.4 s and 28.9 s vs 24.4 s and
+> 24.1 s baseline). The pattern was robust across runs and across the
+> aggregate; the proposal's prediction (14.7 s → ~2 s aggregate) didn't
+> materialise.
+>
+> **Why hypothesis #1 doesn't hold against the actual binary.** The
+> name-pool hashmap is O(1)-amortised, and `hashmap_sip` (SipHash-2-4)
+> distributes long UTF-8 byte sequences just fine — there's no collision
+> degradation to win back. Meanwhile the bypass actively *costs* per call:
+> every reference to a long identifier (e.g. across parsing + scope
+> binding + codegen) reallocates and re-copies the full byte range instead
+> of returning the existing `String*`. Reverted in commit-pending state.
+
+**Change (original proposal, retained for context).** In `name_pool_create_strview`, short-circuit interning for names
 longer than a threshold (e.g. 32 bytes): allocate a fresh `String` directly
 without doing the `find_string_by_content` + parent-pool lookup. Long names
 are dominated by *unique* user identifiers; the pool's de-dup value is
@@ -119,9 +137,18 @@ mostly for short fixed strings ("constructor", "length", "toString" etc.).
   preserved for short names. Long-name de-dup was statistically rare
   anyway.
 
-#### 2.4.B — Hash the *length-prefixed* key, not the bytes alone
+#### 2.4.B — Hash the *length-prefixed* key, not the bytes alone — *Retracted (bundled with 2.4.A, same measurement)*
 
-**Change.** The name pool's hash function is content-only. For mixed short
+> **Status.** Implemented in the same PR as §2.4.A — replaced the
+> `HASHMAP_DEFINE_LENSTRKEY` emit with a hand-written hash that folded
+> length into the final mix via a splitmix64-style step. Measured
+> together with §2.4.A (the two share an entry path); the combined change
+> regressed, and there is no reason to suspect this half on its own
+> (SipHash-2-4 already includes the length implicitly in the finalisation
+> step, so adding an explicit `len` mix is a no-op in practice for the
+> distribution argument). Reverted alongside §2.4.A.
+
+**Change (original proposal, retained for context).** The name pool's hash function is content-only. For mixed short
 + very long unicode strings, two long IDs sharing a common UTF-8 prefix
 land in adjacent buckets, increasing collision walks. Adding `len` into the
 hash (`hash = mix(hash, len)`) buys back distribution at zero cost.
@@ -168,7 +195,103 @@ stay; the test-private symbols go away.
 - **Risk.** Medium — the test-private symbol set needs careful
   characterisation; touching MIR's linker tables is non-trivial.
 
-#### 2.4.E — Spec-faithful ID_Start / ID_Continue classification via a three-stage compressed trie (~2 KiB `.rodata`)
+#### 2.4.E — Spec-faithful ID_Start / ID_Continue classification via a three-stage compressed trie (~2 KiB `.rodata`) — *Retracted (implemented + measured, no viable form)*
+
+> **Status: implemented in full, measured, and reverted.** Details below.
+> Measurement context: release `lambda.exe` at current `master` (well past
+> the `release_run_003` commit `b406da25`); baselines and variants compared
+> via `./test/test_js_test262_gtest.exe --baseline-only --batch-only`
+> (34 240 timed tests), two runs each to bound the ~15 % run-to-run noise.
+>
+> **What was built (works end-to-end).**
+> - `utils/gen_id_class_trie.py` — offline generator. Reads the regex
+>   engine's spec-faithful ranges (`js_regex_generated_ranges_70_id_start`,
+>   `…_69_id_continue` in `lambda/js/js_regex_generated_property_tables.inc`),
+>   materialises the BMP bitmap, dedups it into a three-stage trie, and emits
+>   `id_class_trie.inc`. Includes an **exhaustive self-check** that walks every
+>   codepoint `0..0x10FFFF` and asserts the trie matches the source ranges
+>   byte-for-byte. Ran clean.
+> - `id_class_trie.inc` — the generated `.rodata`. Layout exactly as proposed
+>   (stage1 32×u16, stage2, stage3 16-byte leaves packing ID_Start‖ID_Continue,
+>   astral fallback ranges).
+> - `scanner.c` — `is_id_start`/`is_id_continue` trie lookups (with ASCII
+>   short-circuit + astral binary-search fallback), a `scan_identifier` that
+>   drives the lexer and decodes `\uXXXX` / `\u{…}` identifier escapes inline,
+>   and dispatch from `tree_sitter_javascript_external_scanner_scan`.
+> - `grammar.js` — `$.identifier` added to `externals`; `parser.c` regenerated
+>   (`tree-sitter generate`, +1 external token, ~172 k-line table diff).
+>
+> **Actual results — trie size.** ~**8.4 KiB**, not the predicted ~2.1 KiB
+> (159 unique BMP leaves + 664 astral ranges vs the estimated ~55 / ~340).
+> Still small in absolute terms, but 4× the estimate.
+>
+> **Actual results — two integration forms tried, neither viable:**
+>
+> 1. **Both-paths** (external token *and* the internal `identifier` regex
+>    retained — the literal "+1 line in `externals`" the proposal described).
+>    - *Correctness:* builds; **0 js262 exit-code changes across 34 240 tests**
+>      (verified by joining per-test exit codes against baseline — not one
+>      test flipped pass↔fail).
+>    - *Performance:* a small but **consistent ~+4 % regression on the
+>      unicode-identifier cluster** — 24.6 / 25.9 s (two runs) vs 24.1 / 24.4 s
+>      baseline. Every unicode test was slower or equal; the regression is
+>      unidirectional, not noise. (An earlier draft that called `mark_end`
+>      per-codepoint was far worse, +25 %; moving to one `mark_end` per token
+>      recovered most of it, but it never beat the internal lexer.)
+>    - *Conformance:* **not achieved.** Verified directly that
+>      `eval('var \u{1F600}=2')` (emoji, not ID_Start) and a digit-start escape
+>      are **still accepted** — see the blocking issue below.
+>
+> 2. **External-authoritative** (internal `identifier` body replaced with an
+>    unmatchable sentinel token so the external scanner is the *sole* producer
+>    of `sym_identifier`; regenerated `parser.c` confirmed the
+>    `sym_identifier_character_set_*` tables were gone).
+>    - *Conformance:* would be achieved (the coarse fallback is gone).
+>    - *Correctness:* **catastrophic regression** — even `var __filename = …`
+>      fails with a syntax error. See blocking issue below.
+>
+> **Blocking issues.**
+> - *(B1) tree-sitter keeps the internal lexer as a fallback.* When a token is
+>   declared in `externals` *and* still has an internal grammar rule, the
+>   external scanner is **consultative, not authoritative**: if it returns
+>   false the parser falls back to the internal lexer. The internal lexer's
+>   auto-generated `sym_identifier_character_set_*` ranges are a coarse
+>   super-set of the spec (e.g. they accept all of `[0xff00..0x10ffff]`), so
+>   anything my scanner rejected was re-accepted by the fallback → no
+>   conformance gain in the both-paths form.
+> - *(B2) the `word` directive requires an internally-lexable identifier.*
+>   Removing the internal rule (to make the scanner authoritative, fixing B1)
+>   collides with `word: $ => $.identifier`. tree-sitter's keyword extraction
+>   lexes the `word` token with the *internal* lexer and then checks it against
+>   the keyword set; with no internal identifier token, that machinery breaks
+>   and ordinary identifiers after a keyword (`var __filename`) no longer
+>   tokenize. Making the scanner authoritative would therefore also require
+>   dropping `word` and re-expressing every JS keyword as an explicit token — a
+>   large, high-risk grammar rewrite, the opposite of the advertised one-line
+>   change.
+> - *(B3) no performance headroom.* Independent of conformance, the external
+>   scanner does **not** beat tree-sitter's highly-optimised internal
+>   state-machine lexer; the trie lookup is fast but the per-token
+>   external-scanner dispatch + `advance`/`mark_end` boundary costs leave it
+>   neutral-to-slightly-slower. The proposal's predicted speedup did not appear.
+>
+> **Why it was reverted.** Against the keep-bar ("no regression in correctness
+> *and* performance"), the both-paths form fails on performance (~+4 % unicode
+> cluster) while delivering none of its headline value (no conformance, no
+> speedup), and the authoritative form fails on correctness (breaks all
+> parsing) unless paired with a major grammar rewrite that was explicitly out
+> of scope. Neither form is keepable. Reverted in full: `grammar.js`,
+> `scanner.c`, `grammar.json` restored from git; `parser.c` regenerated and
+> verified **byte-identical** to its committed state; `id_class_trie.inc` and
+> `utils/gen_id_class_trie.py` deleted; release rebuilt and JS parsing
+> re-smoke-tested (keywords, identifiers, `\u` escapes) green.
+>
+> **Salvageable.** The generator + trie + `is_id_start`/`is_id_continue` are
+> correct and self-verified. If a *different* consumer ever needs a fast
+> spec-faithful classifier (e.g. replacing the binary-search
+> `js_regex_cp_is_id_*` in `js_runtime.cpp:13729`), the trie can be reused
+> there with none of the tree-sitter coupling above — but that is a runtime
+> optimisation, not the parser-conformance win §2.4.E set out to deliver.
 
 **Mechanism today.** The auto-generated parser
 (`lambda/tree-sitter-javascript/src/parser.c:4445-4453`) classifies each
@@ -415,9 +538,39 @@ for (var cu = 0; cu <= 0xffff; ++cu) {
 overhead**: every iteration goes through tree-sitter parsing, AST build,
 MIR generation, JIT compile, execute.
 
-### 3.2 Proposed general optimization — `eval()` compile cache
+### 3.2 Proposed general optimization — `eval()` compile cache — *Retracted (implemented + measured, no signal)*
 
-**Change.** Add a small LRU keyed on `(source, strict_mode)` (e.g. 256
+> **Status.** Implemented as a direct-mapped 256-slot cache keyed on
+> `(source bytes, source length)` and gated to the "simple" Phase A
+> path (indirect eval, non-strict, source ≤ 256 bytes). The cache was
+> invalidated on `js_heap_epoch` change. Measured across two runs of the
+> baseline and two runs of the cache build; on the targeted S7.8.5
+> cluster the result was 3.05 s + 2.49 s (cache) vs 3.14 s + 2.92 s
+> (baseline) — squarely inside the 15 %+ run-to-run noise band.
+>
+> **Why §3.2 cannot fire on the targeted tests.** Both `eval` calls in
+> `S7.8.5_A2.{1,4}_T2` route around Phase A by design:
+>
+> 1. `eval("/a\\<char>/")` is intercepted by the existing
+>    regex-literal fast path (`lambda/js/js_mir_eval_lowering.cpp:844`),
+>    which calls `js_create_regexp_from_source` and returns *before* the
+>    cache lookup runs.
+> 2. `eval("var _<char>")` carries a `var` keyword, which trips the
+>    `skip_expr_form = true` decision (`lambda/js/js_mir_eval_lowering.cpp:921`)
+>    and routes the call to Phase C (full top-level script compile,
+>    uncached).
+>
+> The proposal's predicted "65 000 compiles → ≤ 256 unique compiles"
+> rests on those evals reaching a Phase A compile, which they don't.
+> Reverted; no demonstrable benefit, only a maintenance surface.
+>
+> Salvageable future work: caching the regex-literal fast path would
+> require sharing mutable RegExp objects across calls (spec-observable
+> identity), so it isn't a drop-in. Phase C caching is correctness-heavy
+> (direct-eval scope effects, `is_eval_direct`, var hoisting into the
+> outer scope) and would need its own design pass.
+
+**Change (original proposal, retained for context).** Add a small LRU keyed on `(source, strict_mode)` (e.g. 256
 entries, ~8 KiB) inside `js_builtin_eval` (`lambda/js/js_runtime.h:165`).
 On hit, dispatch the cached compiled item directly; on miss, compile and
 insert. Reset on heap-epoch change so the cache never holds stale MIR.
