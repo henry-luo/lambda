@@ -231,6 +231,69 @@ throw body entirely.
   bit-identical results before enabling. Gate behind a flag for the first
   landing.
 
+### 3.3 Measured result (implemented 2026-05-28, vs `release_run_004`) — **KEPT (full)**
+
+Implemented the recursive folder `jm_try_fold_const`
+(`js_mir_expression_lowering.cpp`) covering literals, unary `- + ~ !`, binary
+`+ - * / %`, bitwise/shift `& | ^ << >> >>>`, and comparisons
+`=== !== == != < <= > >=`, with exact runtime semantics (ToInt32/ToUint32 via
+the same algorithm as `js_to_int32`; int results required to round-trip through
+double within ±2⁵³ else bail; bails on non-finite results, `-0` from unary
+minus, bigint, and `** && || ??`). Behind env gate `LAMBDA_JS_CONST_FOLD`
+(default on; `=0` disables for A/B).
+
+**Wired into two sites.** (1) `jm_transpile_if` as dead-branch elimination: a
+constant test drops the dead branch entirely (guarded by `jm_branch_dead_safe`,
+a whitelist admitting only throw/expression/return/break/continue/block so
+Annex-B function-declaration hoisting can never be lost; `var` hoisting is
+unaffected since it is a separate `jm_collect_body_locals` pre-pass). (2) the
+**value sites** `jm_transpile_binary`/`jm_transpile_unary` (the general-benefit
+follow-up): these return *raw native* registers and the caller
+`jm_transpile_box_item` boxes based on `jm_get_effective_type`, so the folded
+value is emitted through `jm_emit_folded_at_value_site`, which exactly mirrors
+that native/boxed convention (native matching the node's effective type when the
+caller will box it, boxed otherwise) and **falls through to normal codegen** on
+any et/fold disagreement. An initial attempt that returned an always-boxed value
+hit a `call`-operand type error ("expected double, got int"); the
+convention-matching emitter fixes it.
+
+- **Correctness.** Two differential tests, both gated by the env flag so the
+  same binary is compared with folding on vs off:
+  - *Branch selection* (3 780 constant `if`-conditions): folded == runtime for
+    all cases (FAILS=0). With folding off this surfaced a pre-existing
+    literal-native comparison quirk for values in (2³¹, 2³²) (e.g.
+    `0 < 4294967295` returning false); the folder computes these spec-correctly.
+  - *Value folding* (4 800+ literal expressions vs runtime array-indexed
+    operands): folding on and folding off produce the **identical** single
+    discrepancy — `4294967295 * 4294967295`, a pre-existing both-int MUL `D2I`
+    overflow that the folder correctly *bails* on (product > 2⁵³). So value
+    folding is **bit-identical to the engine**: it either reproduces the runtime
+    value or falls through to it.
+  - *Full suite (async skipped).* A plain `--baseline-only --batch-only` run
+    reported 903 "pass→fail regressions" — but **all 903 are `async`-flagged
+    skipped tests** (zero non-async), and a control run with folding *off* on
+    the same binary under the same load reported the **identical 903**: they are
+    load-induced batch-kill/Phase-4-recovery flakiness when async tests are
+    skipped, unrelated to folding.
+  - *Full suite (async enabled — authoritative).* Re-run per the guide with
+    `--run-async --async-list=test/js262/test262_baseline.txt`: the async tests
+    now execute (allowlist 38 939; Phase 2 ran 38 937) instead of being skipped,
+    the batch-kill storm collapses to 8 (all recovered), and the verdict is
+    **Failed 0 · Improvements 0 · Regressions 0**. The full ES2021 baseline,
+    async included, passes with zero regressions.
+- **Performance.** Controlled A/B (same binary, folding off→on): cluster E
+  (`S11.7.{1,2,3}_A4`, 12 tests) fell **4.55 s → 0.63 s (−3.92 s, −86.2 %)**;
+  all 12 pass (exit 0) at ~40–67 ms each (was ~500 ms). The value-folding does
+  the heavy lifting here — collapsing the per-statement constant shift/compare
+  to a single constant — on top of the dead-branch drop. The whole-suite A/B is
+  load-contaminated (the on-run was on a busier machine: 757 s vs 670 s of
+  harness overhead), so the broad "general benefit" can't be cleanly quantified
+  from it, but the per-node failed-fold check is negligible and the cluster-E
+  win is unambiguous.
+
+Verdict: clears the bar (bit-identical correctness, large beyond-noise
+cluster-E win). Both dead-branch elimination and general value-folding kept.
+
 ---
 
 ## 4. The eval-loop tail (clusters C, J) — deferred to Tune2 §3 follow-up

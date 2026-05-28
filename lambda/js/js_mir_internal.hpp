@@ -211,6 +211,21 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                 MIR_reg_t h_items = 0, MIR_reg_t h_len = 0);;
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node);
 Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
+
+// --- AST constant folding (Tune3 §3) ---
+// Compile-time folding of subtrees that reduce to a numeric or boolean constant
+// (e.g. `-1 << 16`, `(a) !== b` with literal a/b). Results are bit-identical to
+// the runtime arithmetic; folding bails (returns false) on any case that could
+// diverge (non-finite results, bigint, int overflow past 2^53, unsupported ops).
+enum JsFoldKind { JS_FOLD_NUM, JS_FOLD_BOOL };
+struct JsFoldVal {
+    JsFoldKind kind;
+    double num;     // valid when kind == JS_FOLD_NUM
+    bool boolean;   // valid when kind == JS_FOLD_BOOL
+    bool is_float;  // when kind == JS_FOLD_NUM: emit as float (vs int) — matches runtime type
+};
+bool jm_const_fold_enabled();
+bool jm_try_fold_const(JsAstNode* node, JsFoldVal* out);
 bool jm_is_native_type(TypeId tid);
 void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);

@@ -3698,9 +3698,13 @@ static void print_test262_help(const char* program) {
     printf("  --run-partial             Include partial/non-fully-passing tests.\n");
     printf("  --update-baseline         Update the baseline when stability gates pass.\n");
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
-    printf("  --run-async               Permit async-flagged tests from an explicit allowlist.\n");
-    printf("  --async-list=<path>       Async allowlist (defaults to --batch-file when present).\n");
-    printf("  --async-chunk-size=<n>    Async tests per process, clamped to 1..50 (default: 50).\n");
+    printf("  --run-async               Permit async-flagged tests that are also allowlisted.\n");
+    printf("                            Without an allowlist, async tests remain skipped.\n");
+    printf("  --async-list=<path>       Async allowlist, one test name per line.\n");
+    printf("                            Defaults to --batch-file when --batch-file is present.\n");
+    printf("  --async-chunk-size=<n>    Async tests per js-test-batch process, clamped to\n");
+    printf("                            1..%zu (default: %zu, same as sync batches).\n",
+           T262_BATCH_CHUNK_SIZE, T262_ASYNC_BATCH_CHUNK_SIZE);
     printf("  --diagnose                Run diagnose list and pass --diagnose to Lambda.\n");
     printf("  --diagnose-list=<path>    Override diagnose list path (default: test/js262/diagnose_list.txt).\n");
     printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
@@ -3721,9 +3725,18 @@ static void print_test262_help(const char* program) {
     printf("Examples:\n");
     printf("  %s --batch-only --baseline-only\n", program);
     printf("  %s --batch-only --batch-file=temp/js44_batch.txt --jobs=1 --write-failures=temp/out.tsv\n", program);
+    printf("  %s --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline\n", program);
     printf("  %s --batch-only --run-async --batch-file=temp/js47_async.txt --jobs=1\n", program);
+    printf("  %s --batch-only --run-async --batch-file=temp/js47_async.txt --async-chunk-size=1 --jobs=1\n", program);
     printf("  %s --diagnose --jobs=1 --js-timeout=30\n", program);
     printf("  %s --batch-only --update-baseline\n", program);
+    printf("\n");
+    printf("Async flow:\n");
+    printf("  Metadata cache marks tests with the test262 async flag. Those tests are skipped\n");
+    printf("  unless --run-async is set and their sanitized test name appears in the async\n");
+    printf("  allowlist. Enabled async tests run through JS-harness batches with $DONE,\n");
+    printf("  microtask/timer draining, and per-test harness reset. Use --async-chunk-size=1\n");
+    printf("  only for isolation; the default is the normal batch size for full-suite runs.\n");
 }
 
 int main(int argc, char** argv) {
