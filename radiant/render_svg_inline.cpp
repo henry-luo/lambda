@@ -4317,6 +4317,10 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list) {
     if (!svg_element || !vec) return;
+    if (!dl || !paint_list) {
+        log_error("[SVG] render_svg_to_vec requires display-list and PaintIR targets");
+        return;
+    }
     if (source_path && svg_resource_stack_contains(source_path)) {
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
         return;

@@ -189,6 +189,31 @@ static bool write_file_all(const char* path, const char* data, size_t len) {
     return written == len;
 }
 
+static bool file_contains_text(const char* path, const char* needle) {
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return false;
+    char buf[8192];
+    size_t needle_len = strlen(needle);
+    size_t carry = 0;
+    while (!feof(fp)) {
+        size_t n = fread(buf + carry, 1, sizeof(buf) - carry - 1, fp);
+        size_t total = carry + n;
+        buf[total] = '\0';
+        if (strstr(buf, needle)) {
+            fclose(fp);
+            return true;
+        }
+        if (needle_len > 1 && total >= needle_len - 1) {
+            carry = needle_len - 1;
+            memmove(buf, buf + total - carry, carry);
+        } else {
+            carry = total;
+        }
+    }
+    fclose(fp);
+    return false;
+}
+
 
 static bool has_pdf_ext(const char* name) {
     size_t len = strlen(name);
@@ -756,6 +781,121 @@ TEST(RenderOutputParity, SvgPictureReplayMatchesThreadedTiledReplay) {
     ASSERT_TRUE(file_exists(single_png));
     ASSERT_TRUE(file_exists(tiled_png));
     expect_pngs_exactly_equal(single_png, tiled_png);
+}
+
+TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/pdf_inline_svg.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_inline_svg.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        "svg{display:block;width:40px;height:30px;}</style></head>"
+        "<body><svg viewBox=\"0 0 40 30\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<rect x=\"0\" y=\"0\" width=\"40\" height=\"30\" fill=\"#fef3c7\"/>"
+        "<circle cx=\"20\" cy=\"15\" r=\"10\" fill=\"#2563eb\"/>"
+        "</svg></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_inline_svg.out 2> temp/render_output_parity/pdf_inline_svg.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
+        << "PDF inline SVG fallback should emit an inline image";
+}
+
+TEST(RenderOutputParity, PdfGradientBackgroundUsesRasterFallbackImage) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/pdf_gradient.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_gradient.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{width:40px;height:30px;"
+        "background:linear-gradient(90deg,#ef4444 0%,#2563eb 100%);}"
+        "</style></head><body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_gradient.out 2> temp/render_output_parity/pdf_gradient.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
+        << "PDF gradient fallback should emit an inline image";
+}
+
+TEST(RenderOutputParity, PdfOpacityGroupFlattensThroughPaintIr) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    if (access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is not executable";
+    }
+
+    ASSERT_TRUE(ensure_dir("temp"));
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* html_path = "temp/render_output_parity/pdf_opacity.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_opacity.pdf";
+    const char* html =
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<style>html,body{margin:0;padding:0;background:#fff;}"
+        ".box{width:40px;height:30px;background:#ff0000;opacity:.5;}"
+        "</style></head><body><div class=\"box\"></div></body></html>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+
+    char qhtml[PATH_MAX + 8];
+    char qpdf[PATH_MAX + 8];
+    char cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 80 > temp/render_output_parity/pdf_opacity.out 2> temp/render_output_parity/pdf_opacity.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(file_exists(pdf_path));
+    EXPECT_TRUE(file_contains_text(pdf_path, "1 0.498 0.498 rg"))
+        << "PDF opacity fallback should flatten colors through the PaintIR effect group";
 }
 
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {

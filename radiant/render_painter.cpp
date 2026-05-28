@@ -6,13 +6,11 @@
 // Painter gateway (rc_*).
 //
 // Primary recording mode per primitive:
-//   1. Semantic IR (rdcon->paint_list && rdcon->dl): record through the
-//      PaintBuilder, then lower to the display list immediately so command
-//      order is preserved alongside the non-IR display-list ops. This routes
-//      the live raster path through the semantic paint IR (Phase C) and is
-//      byte-identical to direct dl_* recording (proven by PaintIrParityTest).
-//   2. Compatibility only (rdcon->dl without paint_list): direct dl_* recording
-//      for transitional/manual contexts. The live render path sets PaintList.
+//   Semantic IR (rdcon->paint_list && rdcon->dl): record through the
+//   PaintBuilder, then lower to the display list immediately so command order
+//   is preserved. This routes the live raster path through the semantic paint
+//   IR and is byte-identical to direct dl_* recording (proven by
+//   PaintIrParityTest).
 //
 // render_paint_gateway.hpp owns the common PaintIR/display-list gateway used
 // here and by the inline SVG painter. Fragment lowering skips whole-list stack

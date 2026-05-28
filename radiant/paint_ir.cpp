@@ -9,6 +9,7 @@
 #include "paint_ir.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include <math.h>
 #include <string.h>
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
@@ -836,8 +837,81 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
 // Raster lowering: PaintIR -> DisplayList
 // ---------------------------------------------------------------------------
 
+typedef struct PaintIrRasterEffectFrame {
+    PaintEffectGroup group;
+} PaintIrRasterEffectFrame;
+
+#define PAINT_IR_RASTER_EFFECT_STACK_MAX 64
+
+static bool paint_ir_effect_bounds_to_region(const Bound* bounds,
+                                             int* x0, int* y0,
+                                             int* w, int* h) {
+    if (!bounds || !x0 || !y0 || !w || !h) return false;
+    float left = floorf(bounds->left);
+    float top = floorf(bounds->top);
+    float right = ceilf(bounds->right);
+    float bottom = ceilf(bounds->bottom);
+    if (right <= left || bottom <= top) return false;
+    *x0 = (int)left; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
+    *y0 = (int)top; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
+    *w = (int)(right - left); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
+    *h = (int)(bottom - top); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
+    return *w > 0 && *h > 0;
+}
+
+static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
+                                               DisplayList* dl) {
+    if (!group || !dl) return;
+    int x0 = 0, y0 = 0, w = 0, h = 0;
+    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+        return;
+    }
+    if (group->blend_mode) {
+        dl_save_backdrop(dl, x0, y0, w, h);
+    }
+    if (group->opacity < 0.9995f) {
+        dl_save_backdrop(dl, x0, y0, w, h);
+    }
+    if (group->backdrop) {
+        dl_save_backdrop(dl, x0, y0, w, h);
+    }
+}
+
+static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
+                                                DisplayList* dl) {
+    if (!group || !dl) return;
+
+    if (group->filter) {
+        Bound clip = group->has_clip ? group->bounds : Bound{};
+        dl_apply_filter(dl,
+                        group->bounds.left,
+                        group->bounds.top,
+                        group->bounds.right - group->bounds.left,
+                        group->bounds.bottom - group->bounds.top,
+                        group->filter,
+                        group->has_clip ? &clip : nullptr);
+    }
+
+    int x0 = 0, y0 = 0, w = 0, h = 0;
+    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+        return;
+    }
+    if (group->backdrop) {
+        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, false);
+    }
+    if (group->opacity < 0.9995f) {
+        dl_composite_opacity(dl, x0, y0, w, h, group->opacity, false);
+    }
+    if (group->blend_mode) {
+        dl_apply_blend_mode(dl, x0, y0, w, h, group->blend_mode);
+    }
+}
+
 static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl) {
     if (!pl || !dl) return;
+
+    PaintIrRasterEffectFrame effect_stack[PAINT_IR_RASTER_EFFECT_STACK_MAX];
+    int effect_depth = 0;
 
     for (int i = 0; i < pl->count; i++) {
         const PaintCmd* cmd = &pl->cmds[i];
@@ -1018,13 +1092,31 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             break;
         }
 
-        // Higher-level semantic ops are target-neutral; the raster lowering
+        case PAINT_BEGIN_EFFECT_GROUP: {
+            const PaintEffectGroup* p = &cmd->effect_group;
+            if (effect_depth < PAINT_IR_RASTER_EFFECT_STACK_MAX) {
+                effect_stack[effect_depth++].group = *p;
+                paint_ir_lower_raster_effect_begin(p, dl);
+            } else {
+                log_error("[PAINT_IR_EFFECT] raster effect stack overflow at command %d", i);
+            }
+            break;
+        }
+        case PAINT_END_EFFECT_GROUP: {
+            if (effect_depth > 0) {
+                PaintIrRasterEffectFrame* frame = &effect_stack[--effect_depth];
+                paint_ir_lower_raster_effect_finish(&frame->group, dl);
+            } else {
+                log_error("[PAINT_IR_EFFECT] raster effect stack underflow at command %d", i);
+            }
+            break;
+        }
+
+        // Other higher-level semantic ops are target-neutral; the raster lowering
         // only consumes their pixel-domain expansions during this migration.
         case PAINT_PUSH_TRANSFORM:
         case PAINT_POP_TRANSFORM:
         case PAINT_GLYPH_RUN:
-        case PAINT_BEGIN_EFFECT_GROUP:
-        case PAINT_END_EFFECT_GROUP:
         case PAINT_SVG_SUBSCENE:
             break;
         }
@@ -1724,6 +1816,12 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const PaintEffectGroup* p = &cmd->effect_group;
             if (!paint_svg_caps_allow_opacity_group(caps, p)) {
                 skipped_effect_depth++;
+                log_error("[SVG_PAINT_IR] unsupported effect group opacity=%.3f blend=%d filter=%p backdrop=%d isolation=%d",
+                          p ? p->opacity : 1.0f,
+                          p ? p->blend_mode : 0,
+                          p ? p->filter : nullptr,
+                          p && p->backdrop ? 1 : 0,
+                          p && p->isolation ? 1 : 0);
                 paint_svg_note_unsupported(out, indent_level, cmd->op,
                                            emit_unsupported_comments, active_stats);
                 break;

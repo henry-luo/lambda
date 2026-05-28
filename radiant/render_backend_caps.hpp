@@ -60,12 +60,12 @@ static inline const RenderExportTargetCaps* render_export_target_get_caps(Render
         true,   // rounded_rects
         true,   // paths
         true,   // strokes
-        false,  // gradients
+        true,   // gradients (raster fallback in PDF lowering)
         true,   // images
         true,   // glyph_runs
         true,   // clips
         true,   // transforms
-        false,  // opacity_groups
+        true,   // opacity_groups (flattened color fallback in PDF lowering)
         false,  // blend_modes
         false,  // filters
         false,  // shadows
