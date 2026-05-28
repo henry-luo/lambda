@@ -14,6 +14,10 @@
 #include "webview.h"
 #include "dom_range_resolver.hpp"
 #include "editing_host.hpp"
+#include "editing.hpp"
+#include "editing_dispatch.hpp"
+#include "editing_intent.hpp"
+#include "editing_target_range.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 
@@ -312,38 +316,18 @@ typedef struct EditableMarginTextHit {
     float score;
 } EditableMarginTextHit;
 
-// data-editable is a Radiant-specific opt-in (Lambda `edit <…>` templates);
-// contenteditable is the W3C path resolved by editing_host_lookup (§4).
-static bool has_data_editable_ancestor(View* view) {
-    DomNode* node = static_cast<DomNode*>(view);
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = lam::dom_require_element(node);
-            if (elem->has_attribute("data-editable")) return true;
-        }
-        node = node->parent;
-    }
-    return false;
-}
-
 static bool is_in_rich_editable_subtree(View* view) {
-    if (has_data_editable_ancestor(view)) return true;
-    // editing_host_lookup returns true even inside ="false" islands; the
-    // caller uses this to allow caret placement (selection across boundary
-    // is allowed per spec). target_in_false_island is the consumer's
-    // signal for "don't insert here".
-    return editing_host_lookup(static_cast<DomNode*>(view), nullptr);
+    EditingSurface surface;
+    return editing_surface_from_target(view, &surface) &&
+        editing_surface_is_rich(&surface);
 }
 
 static bool is_rich_editable_host(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
-    if (elem->has_attribute("data-editable")) return true;
-    // §4.1: only true|""|plaintext-only mark an element as a host. We ask
-    // the lookup whether THIS element is the (nearest) host of itself —
-    // when ce is set on `elem`, that's exactly this element.
-    EditingHost h;
-    return editing_host_lookup(elem, &h) && h.host == elem;
+    EditingSurface surface;
+    if (!editing_surface_from_target(view, &surface)) return false;
+    return editing_surface_is_rich(&surface) && surface.owner == elem;
 }
 
 static bool text_target_allows_caret(View* target) {
@@ -828,267 +812,10 @@ static const char* key_code_to_name(int key) {
     }
 }
 
-// CE-3 (Radiant_Design_Content_Editable.md §6.2): complete §6.2 inputType
-// coverage. Entries marked "consumer-issued only" are NOT synthesized by
-// Radiant — they exist so consumers (Lambda templates / JS handlers) can
-// emit them through the same dispatcher.
-typedef enum InputIntentType {
-    INPUT_INTENT_NONE = 0,
-    INPUT_INTENT_INSERT_TEXT,
-    INPUT_INTENT_INSERT_REPLACEMENT_TEXT,        // autocorrect (Tier-D future) — consumer-issued
-    INPUT_INTENT_INSERT_PARAGRAPH,
-    INPUT_INTENT_INSERT_LINE_BREAK,
-    INPUT_INTENT_INSERT_HORIZONTAL_RULE,         // consumer-issued (input rules)
-    INPUT_INTENT_INSERT_LINK,                    // consumer-issued
-    INPUT_INTENT_INSERT_FROM_PASTE,
-    INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION, // shift-cmd-v — dispatched, consumer interprets
-    INPUT_INTENT_INSERT_FROM_YANK,               // macOS Cmd-Y
-    INPUT_INTENT_INSERT_FROM_DROP,               // CE-5 (drag/drop into editable)
-    INPUT_INTENT_DELETE_CONTENT_BACKWARD,
-    INPUT_INTENT_DELETE_CONTENT_FORWARD,
-    INPUT_INTENT_DELETE_WORD_BACKWARD,
-    INPUT_INTENT_DELETE_WORD_FORWARD,
-    INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD,      // Cmd-Backspace
-    INPUT_INTENT_DELETE_SOFT_LINE_FORWARD,       // Cmd-Delete
-    INPUT_INTENT_DELETE_HARD_LINE_BACKWARD,      // rare; per platform
-    INPUT_INTENT_DELETE_HARD_LINE_FORWARD,
-    INPUT_INTENT_DELETE_BY_CUT,
-    INPUT_INTENT_DELETE_BY_DRAG,                 // CE-5
-    INPUT_INTENT_COMPOSITION_START,
-    INPUT_INTENT_INSERT_COMPOSITION_TEXT,
-    INPUT_INTENT_INSERT_FROM_COMPOSITION,
-    INPUT_INTENT_DELETE_COMPOSITION_TEXT,
-    // format* entries are kept for legacy keybinding mapping (Cmd-B etc.).
-    // Per §6.2 / §9, Radiant NEVER dispatches these as `beforeinput
-    // { inputType: "formatBold" }` — they exist so consumer keymaps can
-    // intercept the keystroke and issue their own model command.
-    INPUT_INTENT_FORMAT_BOLD,
-    INPUT_INTENT_FORMAT_ITALIC,
-    INPUT_INTENT_FORMAT_UNDERLINE,
-    INPUT_INTENT_FORMAT_INDENT,
-    INPUT_INTENT_FORMAT_OUTDENT,
-    INPUT_INTENT_SELECT_ALL,
-    INPUT_INTENT_HISTORY_UNDO,
-    INPUT_INTENT_HISTORY_REDO,
-} InputIntentType;
-
-typedef struct InputIntent {
-    InputIntentType type;
-    const char* data;
-    const char* html_data;
-    const char* data_mime;
-    char* owned_data;
-    char* owned_html_data;
-    int key;
-    int mods;
-    bool is_composing;
-    uint32_t composition_caret;
-} InputIntent;
-
-static void input_intent_dispose(InputIntent* intent) {
-    if (!intent) return;
-    mem_free(intent->owned_data);
-    mem_free(intent->owned_html_data);
-    intent->owned_data = nullptr;
-    intent->owned_html_data = nullptr;
-    intent->data = nullptr;
-    intent->html_data = nullptr;
-}
-
-static const char* input_intent_type_name(InputIntentType type) {
-    switch (type) {
-        case INPUT_INTENT_INSERT_TEXT:                  return "insertText";
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:      return "insertReplacementText";
-        case INPUT_INTENT_INSERT_PARAGRAPH:             return "insertParagraph";
-        case INPUT_INTENT_INSERT_LINE_BREAK:            return "insertLineBreak";
-        case INPUT_INTENT_INSERT_HORIZONTAL_RULE:       return "insertHorizontalRule";
-        case INPUT_INTENT_INSERT_LINK:                  return "insertLink";
-        case INPUT_INTENT_INSERT_FROM_PASTE:            return "insertFromPaste";
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION: return "insertFromPasteAsQuotation";
-        case INPUT_INTENT_INSERT_FROM_YANK:             return "insertFromYank";
-        case INPUT_INTENT_INSERT_FROM_DROP:             return "insertFromDrop";
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:      return "deleteContentBackward";
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD:       return "deleteContentForward";
-        case INPUT_INTENT_DELETE_WORD_BACKWARD:         return "deleteWordBackward";
-        case INPUT_INTENT_DELETE_WORD_FORWARD:          return "deleteWordForward";
-        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:    return "deleteSoftLineBackward";
-        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:     return "deleteSoftLineForward";
-        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:    return "deleteHardLineBackward";
-        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:     return "deleteHardLineForward";
-        case INPUT_INTENT_DELETE_BY_CUT:                return "deleteByCut";
-        case INPUT_INTENT_DELETE_BY_DRAG:               return "deleteByDrag";
-        case INPUT_INTENT_COMPOSITION_START:            return "compositionStart";
-        case INPUT_INTENT_INSERT_COMPOSITION_TEXT:      return "insertCompositionText";
-        case INPUT_INTENT_INSERT_FROM_COMPOSITION:      return "insertFromComposition";
-        case INPUT_INTENT_DELETE_COMPOSITION_TEXT:      return "deleteCompositionText";
-        // §9: format* are never dispatched by Radiant as inputType strings.
-        // Mapping retained so consumer code that walks the intent->name path
-        // sees a stable label, but no Radiant code path emits these as
-        // `beforeinput { inputType: "formatBold" }` etc.
-        case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
-        case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
-        case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
-        case INPUT_INTENT_FORMAT_INDENT:                return "formatIndent";
-        case INPUT_INTENT_FORMAT_OUTDENT:               return "formatOutdent";
-        case INPUT_INTENT_SELECT_ALL:                   return "selectAll";
-        case INPUT_INTENT_HISTORY_UNDO:                 return "historyUndo";
-        case INPUT_INTENT_HISTORY_REDO:                 return "historyRedo";
-        default:                                        return "";
-    }
-}
-
-// CE-3 (§6.2): is this an inputType that Radiant is allowed to *synthesize*
-// for a JS beforeinput? Per §9, format* and selectAll are never dispatched
-// by Radiant — consumer keymaps may intercept the keystroke and issue
-// their own model command, but no `beforeinput { inputType: "formatBold" }`
-// is ever fired by us.
-static bool input_intent_is_dispatchable(InputIntentType type) {
-    switch (type) {
-        case INPUT_INTENT_FORMAT_BOLD:
-        case INPUT_INTENT_FORMAT_ITALIC:
-        case INPUT_INTENT_FORMAT_UNDERLINE:
-        case INPUT_INTENT_FORMAT_INDENT:
-        case INPUT_INTENT_FORMAT_OUTDENT:
-        case INPUT_INTENT_SELECT_ALL:
-            return false;
-        default:
-            return true;
-    }
-}
-
-static bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
-    if (!key_event || !out) return false;
-    memset(out, 0, sizeof(*out));
-    out->key = key_event->key;
-    out->mods = key_event->mods;
-
-    bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
-    bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
-    bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
-    bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-    bool primary = cmd || ctrl;
-
-    if (primary && key_event->key == RDT_KEY_Z) {
-        out->type = shift ? INPUT_INTENT_HISTORY_REDO : INPUT_INTENT_HISTORY_UNDO;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_Y) {
-        out->type = INPUT_INTENT_HISTORY_REDO;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_B) {
-        out->type = INPUT_INTENT_FORMAT_BOLD;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_I) {
-        out->type = INPUT_INTENT_FORMAT_ITALIC;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_U) {
-        out->type = INPUT_INTENT_FORMAT_UNDERLINE;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_V) {
-        const char* html = clipboard_store_read_mime("text/html");
-        if (html && html[0]) {
-            out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
-            out->html_data = out->owned_html_data;
-        }
-        const char* clip = clipboard_get_text();
-        if ((!clip || !clip[0]) && (!html || !html[0])) return false;
-        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
-        out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
-        out->data = out->owned_data;
-        out->data_mime = (out->html_data && out->html_data[0]) ? "text/html" : "text/plain";
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_X) {
-        out->type = INPUT_INTENT_DELETE_BY_CUT;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_A) {
-        out->type = INPUT_INTENT_SELECT_ALL;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_ENTER) {
-        out->type = shift ? INPUT_INTENT_INSERT_LINE_BREAK : INPUT_INTENT_INSERT_PARAGRAPH;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_TAB) {
-        out->type = shift ? INPUT_INTENT_FORMAT_OUTDENT : INPUT_INTENT_FORMAT_INDENT;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_BACKSPACE) {
-        out->type = (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_BACKWARD
-                                  : INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_DELETE) {
-        out->type = INPUT_INTENT_DELETE_CONTENT_FORWARD;
-        return true;
-    }
-
-    return false;
-}
-
-static bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
-                                         char* utf8_buf, size_t utf8_buf_size) {
-    if (!out || !utf8_buf || utf8_buf_size < 5 || codepoint == 0) return false;
-    memset(out, 0, sizeof(*out));
-    size_t utf8_len = utf8_encode_z(codepoint, utf8_buf);
-    if (utf8_len == 0) return false;
-    out->type = INPUT_INTENT_INSERT_TEXT;
-    out->data = utf8_buf;
-    return true;
-}
-
-static bool input_intent_from_composition_event(const CompositionEvent* comp_event,
-                                                InputIntent* out) {
-    if (!comp_event || !out) return false;
-    memset(out, 0, sizeof(*out));
-    out->data = comp_event->text ? comp_event->text : "";
-    out->composition_caret = comp_event->preedit_caret;
-
-    if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
-        out->type = INPUT_INTENT_COMPOSITION_START;
-        out->is_composing = true;
-        return true;
-    }
-    if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
-        out->type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
-        out->is_composing = true;
-        return true;
-    }
-    if (comp_event->type == RDT_EVENT_COMPOSITION_END) {
-        out->type = comp_event->text && comp_event->text[0]
-            ? INPUT_INTENT_INSERT_FROM_COMPOSITION
-            : INPUT_INTENT_DELETE_COMPOSITION_TEXT;
-        out->is_composing = false;
-        return true;
-    }
-    return false;
-}
-
 static DomElement* rich_editable_from_target(View* target) {
-    if (!target) return nullptr;
-    DomNode* node = static_cast<DomNode*>(target);
-    while (node && node->node_type != DOM_NODE_ELEMENT) node = node->parent;
-    if (node && node->node_type == DOM_NODE_ELEMENT) {
-        DomElement* first = lam::dom_require_element(node);
-        if (tc_is_text_control(first)) return nullptr;
-    }
-    // Walk: data-editable is Radiant-specific and matched per-element;
-    // contenteditable is resolved through the central editing-host lookup
-    // and returns the nearest host element.
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = lam::dom_require_element(node);
-            if (elem->has_attribute("data-editable")) return elem;
-        }
-        node = node->parent;
-    }
-    // No data-editable found; fall back to ce host.
-    return editing_host_of(static_cast<DomNode*>(target));
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return nullptr;
+    return editing_surface_is_rich(&surface) ? surface.owner : nullptr;
 }
 
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
@@ -1719,60 +1446,85 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
                                          const char* type,
                                          const InputIntent* intent);
 
+static bool dispatch_editing_input_event(EventContext* evcon, View* target,
+                                         const char* type,
+                                         const EditingIntent* intent,
+                                         void* user) {
+    (void)user;
+    return radiant_dispatch_input_event(evcon, target, type, intent);
+}
+
+static bool dispatch_editing_lambda_event(EventContext* evcon, View* target,
+                                          const char* type,
+                                          const EditingIntent* intent,
+                                          void* user) {
+    (void)user;
+    return dispatch_lambda_handler(evcon, target, type, intent);
+}
+
+static bool dispatch_editing_copy_selection(DocState* state,
+                                            const char* prefix,
+                                            void* user) {
+    (void)user;
+    return copy_current_selection_to_clipboard(state, prefix);
+}
+
 static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
                                       const InputIntent* intent) {
     if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
-    DomElement* editable = rich_editable_from_target(target);
-    if (!editable) return false;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return false;
+    if (!editing_surface_is_rich(&surface)) return false;
 
-    // §9: format* and selectAll are NEVER fired as `beforeinput
-    // { inputType: "formatBold" }` etc. Keep the InputIntent flowing to
-    // the Lambda template path (consumer keymap may handle Cmd-B), but
-    // do not dispatch a JS InputEvent and do not signal handled to the
-    // input pipeline. The keystroke continues to its default path.
-    bool dispatchable = input_intent_is_dispatchable(intent->type);
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+    return editing_dispatch_beforeinput(evcon, &surface, intent, &hooks);
+}
 
-    if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-        DocState* state = (DocState*)evcon->ui_context->document->state;
-        if (!state || !selection_has(state)) return false;
-        copy_current_selection_to_clipboard(state, "rich cut");
+static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
+                                       DocState* state, View* target,
+                                       uint32_t start, uint32_t end,
+                                       const char* repl, uint32_t repl_len,
+                                       InputIntentType input_type) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return te_replace_byte_range(elem, state, target, start, end,
+                                     repl, repl_len);
     }
 
-    // CE-3 (§6.1, §6.4): JS `beforeinput` first — cancellation here is the
-    // contract surface that addEventListener('beforeinput', e => e.preventDefault())
-    // relies on. The Lambda template path runs regardless (it serves the
-    // Lambda `edit <…>` consumer, which is orthogonal to JS handlers).
-    bool js_prevented = false;
-    if (dispatchable) {
-        js_prevented = radiant_dispatch_input_event(evcon, target,
-                                                   "beforeinput", intent);
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = input_type;
+    intent.data = repl ? repl : "";
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+
+    bool prevented = false;
+    editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
+                                      &prevented);
+    if (prevented) {
+        log_debug("dispatch_form_text_replace: beforeinput prevented inputType=%s",
+                  input_intent_type_name(input_type));
+        return true;
     }
 
-    bool lambda_handled = dispatch_lambda_handler(evcon, target,
-                                                  "beforeinput", intent);
-    if (!lambda_handled && !js_prevented) {
-        log_debug("dispatch_rich_beforeinput: no beforeinput handler on data-editable/contenteditable subtree");
+    bool ok = te_replace_byte_range_no_events(elem, state, target, start, end,
+                                              repl, repl_len);
+    if (ok) {
+        editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
     }
-
-    // CE-3 follow-up (§6.1): fire `input` after `beforeinput` unless it was
-    // canceled. Per Input Events L2, `input` is the post-mutation event;
-    // it's not cancelable. We assume the consumer applied the edit when
-    // beforeinput wasn't prevented — this matches PM/Slate/Lexical, where
-    // the model commits on every non-canceled beforeinput. Consumers that
-    // genuinely do nothing on beforeinput still get the input event, which
-    // is spec-compliant: `input` fires whenever the inputType's effect was
-    // not prevented, regardless of whether the value visibly changed.
-    if (dispatchable && !js_prevented) {
-        radiant_dispatch_input_event(evcon, target, "input", intent);
-    }
-
-    // Spec: `beforeinput`'s default action is the actual mutation. If the
-    // host doesn't mutate (we don't), preventDefault() is purely a signal
-    // to the consumer that the edit should be skipped. We return `true` to
-    // tell the input pipeline the keystroke was consumed by the editing
-    // host so platform default behaviour (e.g. browser-built-in insertion)
-    // is suppressed.
-    return true;
+    return ok;
 }
 
 static void dispatch_selectstart(EventContext* evcon, View* target) {
@@ -2263,132 +2015,10 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     return prevented;
 }
 
-// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1): a target-range
-// snapshot for getTargetRanges(). Up to one range today — the spec allows
-// multiple but every Radiant inputType maps to a single contiguous range.
-struct CeTargetRange {
-    DomBoundary start;
-    DomBoundary end;
-};
-
-// Compute the StaticRange snapshot for the given intent at the current
-// selection. Returns the number of ranges filled in `out` (0 or 1).
-//
-// Mapping (Input Events L2 §3.2):
-//  - insertions / format* / select / history* / compositionStart:
-//      the current selection (or caret when collapsed).
-//  - delete-by-cut / delete-by-drag: the current selection.
-//  - deleteContent{Backward,Forward}: if collapsed, walk one character in
-//      the appropriate direction; otherwise the selection.
-//  - deleteWord{Backward,Forward}: if collapsed, walk one word.
-//  - deleteSoftLine{Backward,Forward}, deleteHardLine{Backward,Forward}:
-//      if collapsed, walk to document-edge along that line (approximate —
-//      Radiant has no "soft line" granularity yet, so we conservatively
-//      collapse to the document boundary, matching what most browsers do
-//      when no soft-line metric exists).
-//  - historyUndo / historyRedo / selectAll / insertReplacementText:
-//      0 ranges (per spec: ranges aren't predictable / not applicable).
-static int compute_target_ranges(DocState* state, const InputIntent* intent,
-                                 CeTargetRange* out, int out_cap)
-{
-    if (!state || !intent || !out || out_cap < 1) return 0;
-    if (!state->dom_selection) return 0;
-
-    // History / selectAll / replacement don't have a predictable target
-    // range. Per WPT, getTargetRanges() returns [] for these.
-    switch (intent->type) {
-        case INPUT_INTENT_HISTORY_UNDO:
-        case INPUT_INTENT_HISTORY_REDO:
-        case INPUT_INTENT_SELECT_ALL:
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:
-            return 0;
-        default: break;
-    }
-
-    DomSelection* sel = state->dom_selection;
-    DomNode* anchor = dom_selection_anchor_node(sel);
-    uint32_t anchor_off = dom_selection_anchor_offset(sel);
-    DomNode* focus = dom_selection_focus_node(sel);
-    uint32_t focus_off = dom_selection_focus_offset(sel);
-    if (!anchor || !focus) return 0;
-
-    DomBoundary start = { anchor, anchor_off };
-    DomBoundary end   = { focus,  focus_off };
-    // Order start <= end (selection is direction-aware; ranges are not).
-    DomBoundaryOrder ord = dom_boundary_compare(&start, &end);
-    if (ord == DOM_BOUNDARY_AFTER) {
-        DomBoundary tmp = start; start = end; end = tmp;
-    }
-
-    bool collapsed = dom_selection_is_collapsed(sel);
-
-    // If the selection is non-collapsed, the StaticRange IS the selection
-    // for both insertions (the inserted content replaces it) and deletions.
-    if (!collapsed) {
-        out[0].start = start;
-        out[0].end   = end;
-        return 1;
-    }
-
-    // Collapsed: for inserts the range is the caret (zero-width); for
-    // delete*, walk one unit in the appropriate direction so consumers
-    // and IMEs can see what will be deleted before the model mutates.
-    switch (intent->type) {
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD: {
-            DomBoundary prev = dom_boundary_move(start, DOM_MOD_CHARACTER, -1);
-            out[0].start = prev;
-            out[0].end   = end;
-            return 1;
-        }
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD: {
-            DomBoundary next = dom_boundary_move(end, DOM_MOD_CHARACTER, +1);
-            out[0].start = start;
-            out[0].end   = next;
-            return 1;
-        }
-        case INPUT_INTENT_DELETE_WORD_BACKWARD: {
-            DomBoundary prev = dom_boundary_move(start, DOM_MOD_WORD, -1);
-            out[0].start = prev;
-            out[0].end   = end;
-            return 1;
-        }
-        case INPUT_INTENT_DELETE_WORD_FORWARD: {
-            DomBoundary next = dom_boundary_move(end, DOM_MOD_WORD, +1);
-            out[0].start = start;
-            out[0].end   = next;
-            return 1;
-        }
-        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD: {
-            // No soft-line metric in dom_range; collapse to document start
-            // along that direction. Consumers (the editor above) refine.
-            DomBoundary prev = dom_boundary_move(start, DOM_MOD_DOCUMENT, -1);
-            out[0].start = prev;
-            out[0].end   = end;
-            return 1;
-        }
-        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
-        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD: {
-            DomBoundary next = dom_boundary_move(end, DOM_MOD_DOCUMENT, +1);
-            out[0].start = start;
-            out[0].end   = next;
-            return 1;
-        }
-        default:
-            // Insertions (text / paragraph / line break / paste / drop /
-            // composition / link / hr / yank), compositionStart, deleteByCut,
-            // deleteByDrag (when source-selection was caught earlier) — the
-            // collapsed caret IS the target range.
-            out[0].start = start;
-            out[0].end   = end;
-            return 1;
-    }
-}
-
-// Build a JS StaticRange-shaped Map for one CeTargetRange. Matches the
+// Build a JS StaticRange-shaped Map for one EditingTargetRange. Matches the
 // shape produced by js_ctor_static_range_fn so that JS code consuming
 // `getTargetRanges()` sees the same property surface as `new StaticRange(...)`.
-static Item ce_build_static_range_item(const CeTargetRange* r) {
+static Item ce_build_static_range_item(const EditingTargetRange* r) {
     Item obj = js_new_object();
     Item start = r->start.node ? js_dom_wrap_element(r->start.node) : ItemNull;
     Item end   = r->end.node   ? js_dom_wrap_element(r->end.node)   : ItemNull;
@@ -2433,11 +2063,15 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     // CE-3 follow-up: compute the StaticRange[] snapshot BEFORE dispatch so
     // a JS handler that calls e.getTargetRanges() sees the pre-mutation
     // ranges (WPT input-events-get-target-ranges* contract).
-    CeTargetRange ranges[1];
+    EditingSurface surface;
+    bool has_surface = editing_surface_from_target(target, &surface);
+    EditingTargetRange ranges[1];
     DocState* state = (DocState*)evcon->ui_context->document->state;
-    int n_ranges = compute_target_ranges(state, intent, ranges, 1);
+    uint32_t n_ranges = has_surface
+        ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
+        : 0;
     Item ranges_arr = js_array_new(0);
-    for (int i = 0; i < n_ranges; i++) {
+    for (uint32_t i = 0; i < n_ranges; i++) {
         js_array_push(ranges_arr, ce_build_static_range_item(&ranges[i]));
     }
 
@@ -5911,9 +5545,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         : te_prev_word_byte(value, (uint32_t)value_len,
                                             (uint32_t)cur);
                     if (new_off < (uint32_t)cur) {
-                        te_replace_byte_range(focus_elem, state, focused,
-                                              new_off, (uint32_t)cur,
-                                              nullptr, 0);
+                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                   new_off, (uint32_t)cur,
+                                                   nullptr, 0,
+                                                   cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
+                                                       : INPUT_INTENT_DELETE_WORD_BACKWARD);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5923,9 +5559,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     uint32_t new_end = te_next_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
                     if (new_end > (uint32_t)cur) {
-                        te_replace_byte_range(focus_elem, state, focused,
-                                              (uint32_t)cur, new_end,
-                                              nullptr, 0);
+                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                   (uint32_t)cur, new_end,
+                                                   nullptr, 0,
+                                                   INPUT_INTENT_DELETE_WORD_FORWARD);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5990,8 +5627,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             a = b = 0;
                         }
                         if (b > a) {
-                            te_replace_byte_range(focus_elem, state, focused,
-                                                  a, b, nullptr, 0);
+                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                       a, b, nullptr, 0,
+                                                       INPUT_INTENT_DELETE_CONTENT_BACKWARD);
                         }
                     }
                     evcon.need_repaint = true;
@@ -6014,8 +5652,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             a = b = (uint32_t)cur;
                         }
                         if (b > a) {
-                            te_replace_byte_range(focus_elem, state, focused,
-                                                  a, b, nullptr, 0);
+                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                       a, b, nullptr, 0,
+                                                       INPUT_INTENT_DELETE_CONTENT_FORWARD);
                         }
                     }
                     evcon.need_repaint = true;
@@ -6246,9 +5885,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                     (uint32_t)cur);
                     }
                     if (new_off < (uint32_t)cur) {
-                        te_replace_byte_range(focus_elem, state, focused,
-                                              new_off, (uint32_t)cur,
-                                              nullptr, 0);
+                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                   new_off, (uint32_t)cur,
+                                                   nullptr, 0,
+                                                   cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
+                                                       : INPUT_INTENT_DELETE_WORD_BACKWARD);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -6259,9 +5900,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     uint32_t new_end = te_next_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
                     if (new_end > (uint32_t)cur) {
-                        te_replace_byte_range(focus_elem, state, focused,
-                                              (uint32_t)cur, new_end,
-                                              nullptr, 0);
+                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                   (uint32_t)cur, new_end,
+                                                   nullptr, 0,
+                                                   INPUT_INTENT_DELETE_WORD_FORWARD);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -6411,8 +6053,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             a = b = 0;
                         }
                         if (b > a) {
-                            te_replace_byte_range(focus_elem, state, focused,
-                                                  a, b, nullptr, 0);
+                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                       a, b, nullptr, 0,
+                                                       INPUT_INTENT_DELETE_CONTENT_BACKWARD);
                         }
                     }
                     evcon.need_repaint = true;
@@ -6434,8 +6077,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             a = b = (uint32_t)cur;
                         }
                         if (b > a) {
-                            te_replace_byte_range(focus_elem, state, focused,
-                                                  a, b, nullptr, 0);
+                            dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                       a, b, nullptr, 0,
+                                                       INPUT_INTENT_DELETE_CONTENT_FORWARD);
                         }
                     }
                     evcon.need_repaint = true;
@@ -6466,8 +6110,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         } else {
                             a = b = (uint32_t)cur;
                         }
-                        te_replace_byte_range(focus_elem, state, focused,
-                                              a, b, "\n", 1);
+                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
+                                                   a, b, "\n", 1,
+                                                   INPUT_INTENT_INSERT_PARAGRAPH);
                     }
                     evcon.need_repaint = true;
                 }
@@ -6802,8 +6447,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     char utf8_buf[5];
                     size_t utf8_len = utf8_encode_z(text_event->codepoint, utf8_buf);
                     if (utf8_len > 0) {
-                        te_replace_byte_range(elem, state, focused,
-                                              a, b, utf8_buf, (uint32_t)utf8_len);
+                        dispatch_form_text_replace(&evcon, elem, state, focused,
+                                                   a, b, utf8_buf, (uint32_t)utf8_len,
+                                                   INPUT_INTENT_INSERT_TEXT);
                     }
                 }
             }

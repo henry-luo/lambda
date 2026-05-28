@@ -220,6 +220,24 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            uint32_t start, uint32_t end,
                            const char* repl, uint32_t repl_len) {
     if (!elem || !state || !target) return false;
+
+    // F5: fire `beforeinput` (informational; cancellation is a JS-bridge
+    // concern) before mutating the value so listeners observe pre-state.
+    te_dispatch_beforeinput(elem);
+
+    bool ok = te_replace_byte_range_no_events(elem, state, target,
+                                              start, end, repl, repl_len);
+    if (!ok) return false;
+
+    // F5: dispatch `input` after the mutation is committed.
+    te_dispatch_input(elem);
+    return true;
+}
+
+bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* target,
+                                     uint32_t start, uint32_t end,
+                                     const char* repl, uint32_t repl_len) {
+    if (!elem || !state || !target) return false;
     if (!tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
     uint32_t old_len = 0;
@@ -228,10 +246,6 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
     if (start > end) { uint32_t t = start; start = end; end = t; }
     if (end > old_len) end = old_len;
     if (start > old_len) start = old_len;
-
-    // F5: fire `beforeinput` (informational; cancellation is a JS-bridge
-    // concern) before mutating the value so listeners observe pre-state.
-    te_dispatch_beforeinput(elem);
 
     // Build new buffer: old[0..start) + repl[0..repl_len) + old[end..old_len)
     uint32_t new_len = (old_len - (end - start)) + repl_len;
@@ -246,9 +260,6 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
 
     tc_set_value(elem, nbuf, new_len);
     mem_free(nbuf);
-
-    // F5: dispatch `input` after the mutation is committed.
-    te_dispatch_input(elem);
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;

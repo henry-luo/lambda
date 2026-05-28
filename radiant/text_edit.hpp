@@ -89,6 +89,12 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            uint32_t start, uint32_t end,
                            const char* repl, uint32_t repl_len);
 
+// Same mutation as te_replace_byte_range, but leaves input-event dispatch to
+// the caller. Used by the unified editing dispatcher path in event.cpp.
+bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* target,
+                                     uint32_t start, uint32_t end,
+                                     const char* repl, uint32_t repl_len);
+
 // ---------- change-event commit (F1 §3.1) ------------------------------
 
 // Snapshot current_value into form->value_at_focus. Idempotent. Call from
