@@ -33,6 +33,11 @@ class View;
 
 extern "C" GLFWwindow*   radiant_ui_get_glfw_window(struct UiContext*);
 extern "C" DocState* radiant_ui_get_state(struct UiContext*);
+extern "C" bool radiant_dispatch_form_text_ime_commit(struct UiContext*,
+                                                       DomElement*,
+                                                       View*,
+                                                       const char*,
+                                                       uint32_t);
 
 View* focus_get(DocState*);
 bool  tc_is_text_control(DomElement*);
@@ -110,7 +115,11 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 uint32_t len = 0;
                 char* u8 = ime_read_string(himc, GCS_RESULTSTR, &len);
                 if (u8 && state) {
-                    te_ime_commit(e, state, (void*)e, u8, len);
+                    if (!radiant_dispatch_form_text_ime_commit(g_ime_uicon, e,
+                                                               (View*)e,
+                                                               u8, len)) {
+                        te_ime_commit(e, state, (void*)e, u8, len);
+                    }
                     log_debug("[IME win] commit '%s'", u8);
                 }
                 mem_free(u8);

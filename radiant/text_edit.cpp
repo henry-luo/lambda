@@ -220,6 +220,24 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            uint32_t start, uint32_t end,
                            const char* repl, uint32_t repl_len) {
     if (!elem || !state || !target) return false;
+
+    // F5: fire `beforeinput` (informational; cancellation is a JS-bridge
+    // concern) before mutating the value so listeners observe pre-state.
+    te_dispatch_beforeinput(elem);
+
+    bool ok = te_replace_byte_range_no_events(elem, state, target,
+                                              start, end, repl, repl_len);
+    if (!ok) return false;
+
+    // F5: dispatch `input` after the mutation is committed.
+    te_dispatch_input(elem);
+    return true;
+}
+
+bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* target,
+                                     uint32_t start, uint32_t end,
+                                     const char* repl, uint32_t repl_len) {
+    if (!elem || !state || !target) return false;
     if (!tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
     uint32_t old_len = 0;
@@ -228,10 +246,6 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
     if (start > end) { uint32_t t = start; start = end; end = t; }
     if (end > old_len) end = old_len;
     if (start > old_len) start = old_len;
-
-    // F5: fire `beforeinput` (informational; cancellation is a JS-bridge
-    // concern) before mutating the value so listeners observe pre-state.
-    te_dispatch_beforeinput(elem);
 
     // Build new buffer: old[0..start) + repl[0..repl_len) + old[end..old_len)
     uint32_t new_len = (old_len - (end - start)) + repl_len;
@@ -246,9 +260,6 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
 
     tc_set_value(elem, nbuf, new_len);
     mem_free(nbuf);
-
-    // F5: dispatch `input` after the mutation is committed.
-    te_dispatch_input(elem);
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;
@@ -570,12 +581,21 @@ void te_validate(DomElement* elem) {
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
-uint32_t te_paste(DomElement* elem, DocState* state, void* target,
-                  const char* text, uint32_t len) {
-    if (!elem || !state || !target || !text || len == 0) return 0;
-    if (!tc_is_text_control(elem)) return 0;
+bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
+                                  const char* text, uint32_t len,
+                                  char** out_text, uint32_t* out_len,
+                                  uint32_t* out_start, uint32_t* out_end) {
+    if (out_text) *out_text = nullptr;
+    if (out_len) *out_len = 0;
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (!elem || !state || !text || len == 0 || !out_text || !out_len ||
+        !out_start || !out_end) {
+        return false;
+    }
+    if (!tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
-    if (!f || form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) return 0;
+    if (!f || form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) return false;
 
     bool is_single_line = (f->control_type == FORM_CONTROL_TEXT);
 
@@ -584,7 +604,7 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
     // bare CR and \r\n -> \n (HTML normalization). Worst case the buffer
     // size equals `len`.
     char* sanitized = (char*)mem_alloc((size_t)len + 1, MEM_CAT_TEMP);
-    if (!sanitized) return 0;
+    if (!sanitized) return false;
     uint32_t s_len = 0;
     for (uint32_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
@@ -619,7 +639,7 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
         if (post_cp >= (uint32_t)f->maxlength) {
             // No room left.
             mem_free(sanitized);
-            return 0;
+            return false;
         }
         uint32_t budget = (uint32_t)f->maxlength - post_cp;
         // Walk sanitized as UTF-8 and stop at `budget` codepoints.
@@ -640,7 +660,25 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
         }
     }
 
-    if (s_len == 0) { mem_free(sanitized); return 0; }
+    if (s_len == 0) { mem_free(sanitized); return false; }
+
+    *out_text = sanitized;
+    *out_len = s_len;
+    *out_start = sel_a;
+    *out_end = sel_b;
+    return true;
+}
+
+uint32_t te_paste(DomElement* elem, DocState* state, void* target,
+                  const char* text, uint32_t len) {
+    if (!target) return 0;
+    char* sanitized = nullptr;
+    uint32_t s_len = 0;
+    uint32_t sel_a = 0, sel_b = 0;
+    if (!te_prepare_paste_replacement(elem, state, text, len, &sanitized,
+                                      &s_len, &sel_a, &sel_b)) {
+        return 0;
+    }
 
     // Step 3: replace [sel_a, sel_b) with sanitized. te_replace_byte_range
     // dispatches beforeinput/input and pushes an undo entry.
@@ -713,9 +751,30 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
 
 void te_ime_commit(DomElement* elem, DocState* state, void* target,
                    const char* committed, uint32_t len) {
-    if (!elem || !tc_is_text_control(elem)) return;
+    uint32_t a = 0, b = 0;
+    bool should_mutate = false;
+    if (!te_ime_commit_prepare(elem, state, committed, len, &a, &b,
+                               &should_mutate)) {
+        return;
+    }
+
+    if (should_mutate && target) {
+        te_replace_byte_range(elem, state, target, a, b, committed, len);
+    }
+
+    te_ime_commit_finish(elem, committed, len);
+}
+
+bool te_ime_commit_prepare(DomElement* elem, DocState* state,
+                           const char* committed, uint32_t len,
+                           uint32_t* out_start, uint32_t* out_end,
+                           bool* out_should_mutate) {
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (out_should_mutate) *out_should_mutate = false;
+    if (!elem || !tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
-    if (!f) return;
+    if (!f || !out_start || !out_end || !out_should_mutate) return false;
 
     // Drop preedit BEFORE inserting so the renderer doesn't briefly show
     // both the preedit and the committed text.
@@ -726,13 +785,10 @@ void te_ime_commit(DomElement* elem, DocState* state, void* target,
     // the underlying value is never mutated.
     if (form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) {
         log_debug("te_ime_commit: rejected on readonly/disabled control");
-        char tmp_null = '\0';
-        js_dom_queue_textcontrol_compositionend(elem,
-            committed ? committed : &tmp_null);
-        return;
+        return true;
     }
 
-    if (committed && len > 0 && state && target) {
+    if (committed && len > 0 && state) {
         // Insert at caret (or replace selection) via the same path as
         // text input — gets undo, beforeinput/input, maxlength clamp.
         uint32_t cur_len = 0;
@@ -742,9 +798,17 @@ void te_ime_commit(DomElement* elem, DocState* state, void* target,
         if (a > b) { uint32_t t = a; a = b; b = t; }
         if (a > cur_len) a = cur_len;
         if (b > cur_len) b = cur_len;
-        te_replace_byte_range(elem, state, target, a, b, committed, len);
+        *out_start = a;
+        *out_end = b;
+        *out_should_mutate = true;
     }
 
+    return true;
+}
+
+void te_ime_commit_finish(DomElement* elem, const char* committed,
+                          uint32_t len) {
+    if (!elem || !tc_is_text_control(elem)) return;
     log_debug("te_ime_commit: committed %u bytes", len);
     char tmp_null = '\0';
     js_dom_queue_textcontrol_compositionend(elem,

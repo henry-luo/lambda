@@ -41,6 +41,11 @@ extern "C" DocState*  radiant_ui_get_state(struct UiContext*);
 extern "C" void           radiant_state_request_repaint(struct DocState*);
 extern "C" bool           radiant_dispatch_rich_composition_event(struct UiContext*, EventType,
                                                                   const char*, uint32_t);
+extern "C" bool           radiant_dispatch_form_text_ime_commit(struct UiContext*,
+                                                                 DomElement*,
+                                                                 View*,
+                                                                 const char*,
+                                                                 uint32_t);
 
 View* focus_get(DocState* state);
 bool  tc_is_text_control(DomElement* elem);
@@ -180,7 +185,10 @@ const char* ns_to_utf8(id obj) {
     }
     const char* utf8 = ns_to_utf8(string);
     uint32_t len = (uint32_t)strlen(utf8);
-    te_ime_commit(e, state, (void*)e, utf8, len);
+    if (!radiant_dispatch_form_text_ime_commit(g_ime_uicon, e, (View*)e,
+                                               utf8, len)) {
+        te_ime_commit(e, state, (void*)e, utf8, len);
+    }
     log_debug("[IME mac] insertText commit '%s'", utf8);
     // Wake the GLFW main loop so the committed text appears without
     // waiting for the next mouse-move / animation tick.

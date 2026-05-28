@@ -585,6 +585,25 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
     if (out_y) *out_y = y;
 }
 
+static void dom_boundary_to_legacy_projection(const DomBoundary& boundary,
+                                              View** out_view, int* out_offset) {
+    DomNode* node = boundary.node;
+    if (!node) {
+        if (out_view) *out_view = NULL;
+        if (out_offset) *out_offset = 0;
+        return;
+    }
+    if (out_view) *out_view = static_cast<View*>(node);
+    if (!out_offset) return;
+    if (node->is_text()) {
+        DomText* text = lam::dom_require_text(node);
+        uint32_t byte_offset = dom_text_utf16_to_utf8(text, boundary.offset);
+        *out_offset = static_cast<int>(byte_offset);
+    } else {
+        *out_offset = static_cast<int>(boundary.offset);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // DomSelection → StateStore projection mirroring.
 //
@@ -623,22 +642,10 @@ extern "C" void legacy_sync_from_dom_selection(DocState* state) {
     state->dom_selection_sync_depth++;  // suppress legacy→DOM re-entry
 
     // Convert DomBoundary (node, utf16-or-child-offset) → (View*, byte_offset).
-    auto to_legacy = [](const DomBoundary& b, View** out_view, int* out_off) {
-        DomNode* n = b.node;
-        if (!n) { *out_view = NULL; *out_off = 0; return; }
-        *out_view = static_cast<View*>(n);
-        if (n->is_text()) {
-            DomText* t = lam::dom_require_text(n);
-            *out_off = (int)dom_text_utf16_to_utf8(t, b.offset);
-        } else {
-            *out_off = (int)b.offset;  // element child-index
-        }
-    };
-
     View* anc_view = NULL; int anc_off = 0;
     View* foc_view = NULL; int foc_off = 0;
-    to_legacy(ds->anchor, &anc_view, &anc_off);
-    to_legacy(ds->focus,  &foc_view, &foc_off);
+    dom_boundary_to_legacy_projection(ds->anchor, &anc_view, &anc_off);
+    dom_boundary_to_legacy_projection(ds->focus,  &foc_view, &foc_off);
 
     // Projection storage is allocated during dom_selection_create via
     // dom_selection_attach_legacy_storage, so state->caret / state->selection
@@ -4610,6 +4617,11 @@ bool caret_prepare_selective_repaint(DocState* state) {
 bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
     if (out_view) *out_view = NULL;
     if (out_offset) *out_offset = 0;
+    if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
+        state->dom_selection->focus.node) {
+        dom_boundary_to_legacy_projection(state->dom_selection->focus, out_view, out_offset);
+        return out_view ? *out_view != NULL : true;
+    }
     if (!state || !state->caret || !state->caret->view) return false;
     if (out_view) *out_view = state->caret->view;
     if (out_offset) *out_offset = state->caret->char_offset;
@@ -4618,12 +4630,23 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
 
 bool caret_get_offset(DocState* state, int* out_offset) {
     if (out_offset) *out_offset = 0;
+    if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
+        state->dom_selection->focus.node) {
+        dom_boundary_to_legacy_projection(state->dom_selection->focus, NULL, out_offset);
+        return true;
+    }
     if (!state || !state->caret) return false;
     if (out_offset) *out_offset = state->caret->char_offset;
     return true;
 }
 
 View* caret_get_view(DocState* state) {
+    if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
+        state->dom_selection->focus.node) {
+        View* view = NULL;
+        dom_boundary_to_legacy_projection(state->dom_selection->focus, &view, NULL);
+        return view;
+    }
     if (!state || !state->caret) return NULL;
     return state->caret->view;
 }
@@ -4694,6 +4717,9 @@ bool caret_get_debug_snapshot(DocState* state, View** out_view,
 }
 
 bool caret_has_projection(DocState* state) {
+    if (state && state->dom_selection) {
+        return state->dom_selection->range_count > 0 && state->dom_selection->focus.node != NULL;
+    }
     return state && state->caret && state->caret->view != NULL;
 }
 
@@ -5144,12 +5170,19 @@ void selection_clear(DocState* state) {
 }
 
 bool selection_has(DocState* state) {
+    if (state && state->dom_selection) {
+        return state->dom_selection->range_count > 0 && !state->dom_selection->is_collapsed;
+    }
     if (!state || !state->selection) return false;
     return !state->selection->is_collapsed;
 }
 
 bool selection_is_pointer_range_active(DocState* state) {
     if (!state || !state->selection) return false;
+    if (state->dom_selection && state->dom_selection->range_count > 0 &&
+        state->dom_selection->is_collapsed) {
+        return false;
+    }
     return state->selection->is_selecting && !state->selection->is_collapsed;
 }
 
@@ -5208,6 +5241,15 @@ bool selection_get_anchor_range(DocState* state, View* anchor_view,
                                 int* out_start, int* out_end) {
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
+    if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
+        !state->dom_selection->is_collapsed && anchor_view) {
+        View* anchor_projection = NULL;
+        dom_boundary_to_legacy_projection(state->dom_selection->anchor,
+                                          &anchor_projection, NULL);
+        if (anchor_projection != anchor_view) return false;
+        selection_get_range(state, out_start, out_end);
+        return true;
+    }
     if (!state || !state->selection || !anchor_view || state->selection->is_collapsed ||
         state->selection->anchor_view != anchor_view) {
         return false;
@@ -5254,6 +5296,15 @@ bool selection_get_extent_views(DocState* state, View** out_anchor_view,
                                 View** out_focus_view) {
     if (out_anchor_view) *out_anchor_view = NULL;
     if (out_focus_view) *out_focus_view = NULL;
+    if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
+        !state->dom_selection->is_collapsed) {
+        dom_boundary_to_legacy_projection(state->dom_selection->anchor,
+                                          out_anchor_view, NULL);
+        dom_boundary_to_legacy_projection(state->dom_selection->focus,
+                                          out_focus_view, NULL);
+        return (!out_anchor_view || *out_anchor_view) &&
+               (!out_focus_view || *out_focus_view);
+    }
     if (!state || !state->selection || state->selection->is_collapsed) return false;
     if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
     if (out_focus_view) *out_focus_view = state->selection->focus_view;
@@ -5266,6 +5317,25 @@ bool selection_has_projection(DocState* state) {
 
 void selection_get_range(DocState* state, int* start, int* end) {
     if (!state || !state->selection || !start || !end) return;
+
+    if (state->dom_selection && state->dom_selection->range_count > 0) {
+        int anchor_offset = 0;
+        int focus_offset = 0;
+        dom_boundary_to_legacy_projection(state->dom_selection->anchor,
+                                          NULL, &anchor_offset);
+        dom_boundary_to_legacy_projection(state->dom_selection->focus,
+                                          NULL, &focus_offset);
+        DomBoundaryOrder order = dom_boundary_compare(&state->dom_selection->anchor,
+                                                      &state->dom_selection->focus);
+        if (order == DOM_BOUNDARY_AFTER) {
+            *start = focus_offset;
+            *end = anchor_offset;
+        } else {
+            *start = anchor_offset;
+            *end = focus_offset;
+        }
+        return;
+    }
 
     SelectionState* sel = state->selection;
     if (sel->anchor_offset <= sel->focus_offset) {
