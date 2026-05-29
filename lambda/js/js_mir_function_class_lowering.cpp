@@ -11,16 +11,6 @@ static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollect
            !jm_has_use_strict_directive(fn);
 }
 
-static JsMirVarEntry* jm_find_current_scope_var(JsMirTranspiler* mt, const char* name) {
-    if (!mt || !name || mt->scope_depth < 0 || !mt->var_scopes[mt->scope_depth]) return NULL;
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
-    JsVarScopeEntry* found =
-        (JsVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
-    return found ? &found->var : NULL;
-}
-
 static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn, MIR_reg_t args_reg) {
     if (jm_function_arguments_are_aliased(mt, fc, fn)) {
         mt->arguments_reg = args_reg;
@@ -456,7 +446,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
-                if (!jm_find_current_scope_var(mt, e->name)) {
+                if (!jm_find_var(mt, e->name)) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     // — these are accessed via js_get/set_module_var, not local registers
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
@@ -487,12 +477,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                JsMirVarEntry* ve = jm_find_current_scope_var(mt, lce->name);
+                JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     // Create register for let/const (no longer hoisted by jm_collect_body_locals)
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
                     jm_set_var(mt, lce->name, vr);
-                    ve = jm_find_current_scope_var(mt, lce->name);
+                    ve = jm_find_var(mt, lce->name);
                 }
                 if (ve) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -525,7 +515,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 MIR_new_reg_op(mt->ctx, hvar),
                                 MIR_new_reg_op(mt->ctx, fn_item)));
                             jm_set_var(mt, hvname, hvar);
-                            jm_scope_env_mark_and_writeback(mt, hvname, hvar);
                         }
                     }
                 }
@@ -2687,7 +2676,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
                     continue;
                 }
-                if (!jm_find_current_scope_var(mt, e->name)) {
+                if (!jm_find_var(mt, e->name)) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
                         JsModuleConstEntry mclookup;
@@ -2717,11 +2706,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                JsMirVarEntry* ve = jm_find_current_scope_var(mt, lce->name);
+                JsMirVarEntry* ve = jm_find_var(mt, lce->name);
                 if (!ve) {
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
                     jm_set_var(mt, lce->name, vr);
-                    ve = jm_find_current_scope_var(mt, lce->name);
+                    ve = jm_find_var(mt, lce->name);
                 }
                 if (ve) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

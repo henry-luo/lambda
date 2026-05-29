@@ -18,7 +18,6 @@
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
-#include "../../lib/lambda_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
@@ -638,11 +637,11 @@ static inline Item make_js_undefined() {
 
 // Sentinel value for deleted properties.
 static inline Item make_js_deleted_sentinel() {
-    return lam::hole_sentinel_item();
+    return (Item){.item = JS_DELETED_SENTINEL_VAL};
 }
 
 static inline bool js_is_deleted_sentinel(Item val) {
-    return lam::is_hole_sentinel(val);
+    return val.item == JS_DELETED_SENTINEL_VAL;
 }
 
 static inline bool js_key_is_symbol(Item key) {

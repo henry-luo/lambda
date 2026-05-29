@@ -1435,7 +1435,6 @@ JitImport jit_runtime_imports[] = {
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_args_push", FPTR(js_args_push)},
     {"js_args_save", FPTR(js_args_save)},
-    {"js_args_get", FPTR(js_args_get)},
     {"js_args_restore", FPTR(js_args_restore)},
     {"js_call_function", FPTR(js_call_function)},
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},

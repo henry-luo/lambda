@@ -916,21 +916,21 @@ test262-baseline:
 	@echo "Running test262 baseline ($(shell wc -l < test/js262/test262_baseline.txt | tr -d ' ') entries)..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --baseline-only --batch-only
+	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt
 
 # test262 full: run all discovered test262 tests (slow, ~5min)
 test262-full: build-test
 	@echo "Running full test262 suite..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --batch-only
+	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt
 
 # test262 update baseline: run all tests and update baseline with current passing set
 test262-update-baseline: build-test
 	@echo "Running full test262 suite and updating baseline..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --batch-only --update-baseline
+	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline
 
 # test262 strip comments: create comment-stripped test files for faster I/O
 test262-strip:

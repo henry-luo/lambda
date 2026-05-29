@@ -405,9 +405,6 @@ struct JsMirTranspiler {
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
     char last_closure_capture_names[512][128];
-    int last_closure_capture_slots[512];
-    int last_closure_capture_depths[512];
-    bool last_closure_capture_is_nfe[512];
     bool last_closure_has_env;
     bool allow_loop_let_scope_env_for_immediate_call;
     bool preserve_last_closure_env_after_readback;

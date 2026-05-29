@@ -1328,9 +1328,10 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
     func->base.type = &TYPE_FUNC;
 
-    // Function declarations bind in the enclosing scope. Named function
-    // expressions keep their name private to their own body.
-    if (func->name && ast_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+    // Add function to scope if it has a name — but NOT for class method definitions,
+    // which should not pollute the enclosing scope with their method names.
+    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
+    if (func->name && !is_method_def) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 
@@ -1661,7 +1662,6 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
 
     if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0 ||
         strcmp(node_type, "shorthand_property_identifier") == 0 ||
-        strcmp(node_type, "shorthand_property_identifier_pattern") == 0 ||
         strcmp(node_type, "type_identifier") == 0) {
         return build_js_identifier(tp, expr_node);
     } else if (strcmp(node_type, "private_property_identifier") == 0) {
@@ -4123,7 +4123,8 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
 
     func->base.type = &TYPE_FUNC;
 
-    if (func->name && ast_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
+    if (func->name && !is_method_def) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 

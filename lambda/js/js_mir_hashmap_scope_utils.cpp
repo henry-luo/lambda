@@ -199,25 +199,8 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     // lookup to the target scope drops that slot and the closure observes a
     // permanent TDZ value (block-scope/shadowing/lookup-from-closure).
     {
-        JsMirVarEntry* existing = NULL;
-        int existing_depth = -1;
-        JsVarScopeEntry key;
-        memset(&key, 0, sizeof(key));
-        snprintf(key.name, sizeof(key.name), "%s", name);
-        for (int i = mt->scope_depth; i >= 0; i--) {
-            if (!mt->var_scopes[i]) continue;
-            JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[i], &key);
-            if (found) {
-                existing = &found->var;
-                existing_depth = i;
-                break;
-            }
-        }
+        JsMirVarEntry* existing = jm_find_var(mt, name);
         if (existing) {
-            bool same_scope_binding = (existing_depth == target_depth);
-            bool enclosing_scope_env_prereg =
-                (existing_depth > 0 && existing_depth < target_depth &&
-                 existing->in_scope_env && existing->is_let_const && existing->tdz_active);
             // v15: In generators, preserve env slot info from hoisted variables
             if (mt->in_generator && existing->from_env) {
                 entry.var.from_env = true;
@@ -225,20 +208,17 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                 entry.var.env_reg = existing->env_reg;
             }
             // Preserve const flag from TDZ init
-            if ((same_scope_binding || enclosing_scope_env_prereg) &&
-                !existing->from_env && existing->is_const) {
+            if (existing->is_const) {
                 entry.var.is_const = true;
             }
             // Preserve let/const flag from TDZ init
-            if ((same_scope_binding || enclosing_scope_env_prereg) &&
-                !existing->from_env && existing->is_let_const) {
+            if (existing->is_let_const) {
                 entry.var.is_let_const = true;
             }
-            if (same_scope_binding && existing->from_catch_param) {
+            if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
-            if ((same_scope_binding || enclosing_scope_env_prereg) &&
-                !existing->from_env && existing->in_scope_env) {
+            if (existing->in_scope_env) {
                 entry.var.in_scope_env = true;
                 entry.var.scope_env_slot = existing->scope_env_slot;
                 entry.var.scope_env_reg = existing->scope_env_reg;
