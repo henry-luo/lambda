@@ -299,16 +299,6 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
     case JS_AST_NODE_BLOCK_STATEMENT: {
         jm_collect_let_const_names(node, names);
         JsBlockNode* block = (JsBlockNode*)node;
-        for (JsAstNode* s = block->statements; s; s = s->next) {
-            if (s->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
-            JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
-            if (v->kind != JS_VAR_LET && v->kind != JS_VAR_CONST) continue;
-            for (JsAstNode* d = v->declarations; d; d = d->next) {
-                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-                JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                jm_collect_pattern_names_kind(decl->id, names, (int)v->kind);
-            }
-        }
         for (JsAstNode* s = block->statements; s; s = s->next)
             jm_collect_enclosing_lexicals_for_target(s, target, names);
         break;
@@ -2959,8 +2949,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
                         jm_collect_visible_function_scope_names(pfn->body, parent->is_strict, body_locals, true);
-                        jm_collect_enclosing_lexicals_for_target(pfn->body,
-                            (JsAstNode*)child->node, body_locals);
                         size_t bl_iter = 0;
                         void* bl_item;
                         while (hashmap_iter(body_locals, &bl_iter, &bl_item)) {
@@ -3257,8 +3245,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     for (int k = 0; k < child->capture_count; k++) {
                         if (strcmp(child->captures[k].name, csn) == 0) {
                             child->captures[k].scope_env_slot = extra_slot;
-                            snprintf(parent_fc->scope_env_names[extra_slot], 64,
-                                "__nfe_%d_%s", extra_slot, csn);
+                            snprintf(parent_fc->scope_env_names[extra_slot], 64, "%s", csn);
                             extra_slot++;
                             break;
                         }
@@ -3490,8 +3477,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (child->capture_count == 0) continue;
 
             for (int k = 0; k < child->capture_count; k++) {
-                if (child->captures[k].is_nfe_binding) continue;
-
                 // Check if this capture name is a LOCAL of the parent — if so, skip
                 JsNameSetEntry ll;
                 snprintf(ll.name, sizeof(ll.name), "%s", child->captures[k].name);

@@ -1061,11 +1061,7 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
     if (fi < 0 || fi >= mt->func_count) return;
     JsFuncCollected* fc = &mt->func_entries[fi];
     if (!fc->has_scope_env) return;
-    int lookup_limit = fc->scope_env_normal_count;
-    if (lookup_limit <= 0 && fc->scope_env_count > 0) {
-        lookup_limit = fc->scope_env_count;
-    }
-    for (int s = 0; s < lookup_limit; s++) {
+    for (int s = 0; s < fc->scope_env_count; s++) {
         if (strcmp(name, fc->scope_env_names[s]) == 0) {
             JsMirVarEntry* var = jm_find_var(mt, name);
             int bind_depth = jm_find_var_scope_depth_for_name(mt, name);

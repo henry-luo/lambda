@@ -145,7 +145,6 @@ Item* js_alloc_env(int count);
 // transient JIT call-argument stack (see js_runtime_function.cpp)
 Item* js_args_push(int count);
 int64_t js_args_save(void);
-Item js_args_get(int64_t index);
 void js_args_restore(int64_t mark);
 void js_args_stack_reset(void);
 void js_set_function_name(Item fn_item, Item name_item);

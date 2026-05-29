@@ -87,13 +87,6 @@ extern "C" int64_t js_args_save(void) {
     return (int64_t)js_args_len;
 }
 
-extern "C" Item js_args_get(int64_t index) {
-    if (!js_args_stack || index < 0 || (size_t)index >= js_args_len) {
-        return make_js_undefined();
-    }
-    return js_args_stack[(size_t)index];
-}
-
 // Pop back to a saved mark, re-zeroing the popped slots to preserve the
 // [len, cap) zeroed invariant.
 extern "C" void js_args_restore(int64_t mark) {

@@ -976,52 +976,28 @@ JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn)
 // Annex B §B.3.3.1: Check if enclosing function has a parameter whose name
 // matches the given identifier.  When it does, the block-scoped function
 // declaration must NOT overwrite the parameter binding.
-static bool jm_pattern_has_binding_name(JsAstNode* node, const char* name, int name_len) {
-    if (!node || !name) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        return id->name && (int)id->name->len == name_len &&
-            memcmp(id->name->chars, name, name_len) == 0;
-    }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
-        return jm_pattern_has_binding_name(ap->left, name, name_len);
-    }
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_SPREAD_ELEMENT: {
-        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
-        return jm_pattern_has_binding_name(sp->argument, name, name_len);
-    }
-    case JS_AST_NODE_ARRAY_PATTERN: {
-        JsArrayPatternNode* ap = (JsArrayPatternNode*)node;
-        for (JsAstNode* elem = ap->elements; elem; elem = elem->next) {
-            if (jm_pattern_has_binding_name(elem, name, name_len)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_OBJECT_PATTERN: {
-        JsObjectPatternNode* op = (JsObjectPatternNode*)node;
-        for (JsAstNode* prop = op->properties; prop; prop = prop->next) {
-            if (prop->node_type == JS_AST_NODE_PROPERTY) {
-                JsPropertyNode* p = (JsPropertyNode*)prop;
-                if (jm_pattern_has_binding_name(p->value ? p->value : p->key, name, name_len)) return true;
-            } else if (jm_pattern_has_binding_name(prop, name, name_len)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    default:
-        return false;
-    }
-}
-
 bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len) {
     if (!fn || !fn->params) return false;
     JsAstNode* p = fn->params;
     while (p) {
-        if (jm_pattern_has_binding_name(p, name, name_len)) return true;
+        JsIdentifierNode* pid = NULL;
+        if (p->node_type == JS_AST_NODE_IDENTIFIER) {
+            pid = (JsIdentifierNode*)p;
+        } else if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            // default parameter: (x = defaultVal) — check left side
+            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)p;
+            if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER)
+                pid = (JsIdentifierNode*)ap->left;
+        } else if (p->node_type == JS_AST_NODE_REST_ELEMENT) {
+            JsSpreadElementNode* rest = (JsSpreadElementNode*)p;
+            if (rest->argument && rest->argument->node_type == JS_AST_NODE_IDENTIFIER)
+                pid = (JsIdentifierNode*)rest->argument;
+        }
+        if (pid && pid->name &&
+            (int)pid->name->len == name_len &&
+            memcmp(pid->name->chars, name, name_len) == 0) {
+            return true;
+        }
         p = p->next;
     }
     return false;

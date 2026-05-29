@@ -654,9 +654,6 @@ extern "C" Item js_to_string(Item value) {
             }
             return name_val;
         }
-        if (value.map && js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
-            return (Item){.item = s2it(heap_create_name("[object Object]"))};
-        }
         if (js_get_prototype(value).item == ITEM_JS_UNDEFINED) {
             js_throw_type_error("Cannot convert object to primitive value");
             return (Item){.item = s2it(heap_create_name(""))};
