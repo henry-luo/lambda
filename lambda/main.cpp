@@ -3686,7 +3686,7 @@ int main(int argc, char *argv[]) {
             // exist in a few batches, so actual peak is much lower.
             static const size_t RSS_LIMIT = 4096UL * 1024 * 1024; // 4 GB
             static const size_t RSS_RESET_LIMIT = 1024UL * 1024 * 1024; // 1 GB
-            static const size_t RSS_GROWTH_RESET_LIMIT = 256UL * 1024 * 1024; // 256 MB
+            static const size_t RSS_GROWTH_RESET_LIMIT = 128UL * 1024 * 1024; // 128 MB
             static const int MAX_CRASH_COUNT = 10;
 
             if (hot_reload) {

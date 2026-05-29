@@ -1189,11 +1189,24 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
                 while (d) {
                     if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
                         JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                        if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
-                            JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                            char name[128];
-                            snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
-                            jm_name_set_add_kind(names, name, (int)v->kind);
+                        if (decl->id) {
+                            if (decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+                                char name[128];
+                                snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
+                                jm_name_set_add_kind(names, name, (int)v->kind);
+                            } else {
+                                struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                                    jm_name_hash, jm_name_cmp, NULL, NULL);
+                                jm_collect_pattern_names(decl->id, pat_names);
+                                size_t piter = 0;
+                                void* pitem = NULL;
+                                while (hashmap_iter(pat_names, &piter, &pitem)) {
+                                    JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
+                                    jm_name_set_add_kind(names, ne->name, (int)v->kind);
+                                }
+                                hashmap_free(pat_names);
+                            }
                         }
                     }
                     d = d->next;
@@ -1379,6 +1392,27 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
 
 // v20 TDZ: Initialize let/const variables in a block to TDZ sentinel.
 // Call at block entry (after jm_push_scope) before transpiling block statements.
+static JsMirVarEntry* jm_set_current_scope_var_fresh(JsMirTranspiler* mt, const char* name,
+        MIR_reg_t reg, MIR_type_t mir_type, TypeId type_id) {
+    if (!mt || !name || mt->scope_depth < 0 || mt->scope_depth >= 64 || !mt->var_scopes[mt->scope_depth]) {
+        return NULL;
+    }
+    JsVarScopeEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.var.reg = reg;
+    entry.var.mir_type = mir_type;
+    entry.var.type_id = type_id;
+    entry.var.typed_array_type = -1;
+    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
+    return found ? &found->var : NULL;
+}
+
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     if (!block || block->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -1387,13 +1421,8 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     size_t iter = 0; void* item;
     while (hashmap_iter(let_consts, &iter, &item)) {
         JsNameSetEntry* e = (JsNameSetEntry*)item;
-        // Skip variables that are module vars (TDZ handled at module level)
-        if (mt->current_fc && mt->module_consts) {
-            JsModuleConstEntry mclookup;
-            memset(&mclookup, 0, sizeof(mclookup));
-            snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
-            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-            if (mc && mc->const_type == MCONST_MODVAR) continue;
+        if (e->from_func_decl) {
+            continue;
         }
         MIR_reg_t tdz_reg = jm_new_reg(mt, e->name, MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -1423,14 +1452,20 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s",
                         (int)fn->name->len, fn->name->chars);
-                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
-                    jm_set_var(mt, vname, fn_reg);
-                    JsMirVarEntry* ve = jm_find_var(mt, vname);
+                    MIR_reg_t binding_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, binding_reg),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                    JsMirVarEntry* ve = jm_set_current_scope_var_fresh(mt, vname, binding_reg, MIR_T_I64, LMD_TYPE_ANY);
                     if (ve) {
                         ve->is_let_const = true;
                         ve->tdz_active = false;
                         ve->from_block_func_decl = true;
                     }
+                    MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, binding_reg),
+                        MIR_new_reg_op(mt->ctx, fn_reg)));
                 }
             }
         }
@@ -1483,14 +1518,20 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
             if (!fc || !fc->func_item) continue;
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
-            MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
-            jm_set_var(mt, vname, fn_reg);
-            JsMirVarEntry* ve = jm_find_var(mt, vname);
+            MIR_reg_t binding_reg = jm_new_reg(mt, vname, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, binding_reg),
+                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+            JsMirVarEntry* ve = jm_set_current_scope_var_fresh(mt, vname, binding_reg, MIR_T_I64, LMD_TYPE_ANY);
             if (ve) {
                 ve->is_let_const = true;
                 ve->tdz_active = false;
                 ve->from_block_func_decl = true;
             }
+            MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, binding_reg),
+                MIR_new_reg_op(mt->ctx, fn_reg)));
             jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
         }
     }
