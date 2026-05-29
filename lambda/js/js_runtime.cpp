@@ -27818,7 +27818,7 @@ static bool js_promise_resolve_elements_with_constructor(Item constructor, Item 
             js_promise_call_capability_reject(reject, error);
             return false;
         }
-        js_array_push(resolved, next);
+        resolved.array->items[i] = next;
     }
     *out_array = resolved;
     return true;
@@ -27845,20 +27845,13 @@ static Item js_promise_combinator_iterable_with_constructor(
         return promise;
     }
 
-    JsPromise* native_result = js_alloc_promise();
-    if (!native_result) return promise;
-    Item native_item = js_promise_to_item(native_result);
-    js_promise_forward_native_to_capability(native_item, resolve, reject);
-
-    Item resolving_state = ItemNull;
-    Item native_resolve_fn = ItemNull;
-    Item native_reject_fn = ItemNull;
-    if (kind == 3) {
-        resolving_state = js_promise_make_resolving_state(native_result);
-        Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
-        Item reject_base = js_new_function((void*)js_reject_callback, 2);
-        native_resolve_fn = js_bind_function(resolve_base, ItemNull, &resolving_state, 1);
-        native_reject_fn = js_bind_function(reject_base, ItemNull, &resolving_state, 1);
+    JsPromise* native_result = nullptr;
+    Item native_item = ItemNull;
+    if (kind != 3) {
+        native_result = js_alloc_promise();
+        if (!native_result) return promise;
+        native_item = js_promise_to_item(native_result);
+        js_promise_forward_native_to_capability(native_item, resolve, reject);
     }
 
     Item counter = ItemNull;
@@ -27897,7 +27890,7 @@ static Item js_promise_combinator_iterable_with_constructor(
 
         if (kind == 3) {
             Item error = ItemNull;
-            if (!js_invoke_promise_then(next_promise, native_resolve_fn, native_reject_fn, &error)) {
+            if (!js_invoke_promise_then(next_promise, resolve, reject, &error)) {
                 js_iterator_close(iterator);
                 if (js_check_exception()) js_clear_exception();
                 js_promise_call_capability_reject(reject, error);
@@ -27917,26 +27910,29 @@ static Item js_promise_combinator_iterable_with_constructor(
             Item fulfill_handler = js_new_function((void*)js_all_resolve_element, 4);
             Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
             fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            js_promise_mark_anonymous_builtin(fulfill_fn);
 
-            Item reject_handler = js_new_function((void*)js_all_reject_element, 4);
-            Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
-            reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            reject_fn = reject;
         } else if (kind == 1) {
             Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
             Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
             fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            js_promise_mark_anonymous_builtin(fulfill_fn);
 
             Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
             Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
             reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            js_promise_mark_anonymous_builtin(reject_fn);
         } else {
             Item fulfill_handler = js_new_function((void*)js_any_fulfill_element, 4);
             Item fulfill_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
             fulfill_fn = js_bind_function(fulfill_handler, ItemNull, fulfill_args, 3);
+            js_promise_mark_anonymous_builtin(fulfill_fn);
 
             Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
             Item reject_args[3] = {counter, (Item){.item = i2it(index)}, native_item};
             reject_fn = js_bind_function(reject_handler, ItemNull, reject_args, 3);
+            js_promise_mark_anonymous_builtin(reject_fn);
         }
 
         Item error = ItemNull;
@@ -27966,6 +27962,11 @@ static Item js_promise_combinator_with_constructor(Item constructor, Item iterab
     Item reject = ItemNull;
     Item promise = js_promise_new_capability(constructor, &resolve, &reject);
     if (js_check_exception()) return ItemNull;
+
+    if (!js_promise_is_builtin_promise_constructor(constructor)) {
+        return js_promise_combinator_iterable_with_constructor(
+            constructor, iterable, kind, promise, resolve, reject);
+    }
 
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) {
         return js_promise_combinator_iterable_with_constructor(constructor, iterable, kind, promise, resolve, reject);
@@ -29876,10 +29877,18 @@ extern "C" Item js_module_get(Item specifier) {
     }
     // node:util
     if ((spec->len == 4 && memcmp(spec->chars, "util", 4) == 0) ||
+        (spec->len == 5 && memcmp(spec->chars, "util/", 5) == 0) ||
         (spec->len == 7 && memcmp(spec->chars, "util.js", 7) == 0) ||
+        (spec->len == 8 && memcmp(spec->chars, "util/.js", 8) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "node:util", 9) == 0)) {
         extern Item js_get_util_namespace(void);
         return js_get_util_namespace();
+    }
+    // npm 'inherits' package — commonly bundled by Browserify-era libraries.
+    if ((spec->len == 8 && memcmp(spec->chars, "inherits", 8) == 0) ||
+        (spec->len == 11 && memcmp(spec->chars, "inherits.js", 11) == 0)) {
+        extern Item js_util_inherits(Item ctor_item, Item super_item);
+        return js_new_function((void*)js_util_inherits, 2);
     }
     // util/types, node:util/types — type checking utilities
     if ((spec->len == 10 && memcmp(spec->chars, "util/types", 10) == 0) ||

@@ -3525,6 +3525,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // `let x = f(...)` to propagate f's return type into x's variable type.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
                          fc->param_count <= 16 && !fc->uses_arguments &&
+                         !fc->has_non_simple_params &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {
@@ -3610,6 +3611,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool eligible = (fc->capture_count == 0 &&
                                  !(fc->node && fc->node->is_generator) &&
                                  !(fc->node && fc->node->is_async) &&
+                                 !fc->has_non_simple_params &&
                                  fc->param_count <= 16);
                 if (eligible) {
                     for (int p = 0; p < fc->param_count; p++) {

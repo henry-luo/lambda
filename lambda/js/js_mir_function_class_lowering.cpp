@@ -286,7 +286,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // Also respect has_native_version flag (Phase 1.76 may have revoked it).
     bool generate_native = false;
     if (fc->has_native_version &&
-        !has_captures && param_count > 0 && param_count <= 16 &&
+        !has_captures && !fc->has_non_simple_params &&
+        param_count > 0 && param_count <= 16 &&
         (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
