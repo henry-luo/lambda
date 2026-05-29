@@ -33,6 +33,10 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
                                   const EditingIntent* intent,
                                   const EditingDispatchHooks* hooks);
 
+void editing_dispatch_log_intent(EventContext* evcon,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent);
+
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
