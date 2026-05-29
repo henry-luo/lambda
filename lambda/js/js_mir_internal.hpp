@@ -183,6 +183,7 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
 void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name);
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
+void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length);
 MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);

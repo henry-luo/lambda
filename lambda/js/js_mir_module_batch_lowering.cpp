@@ -2994,6 +2994,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                         hashmap_free(body_locals);
                     }
+                    if (pfn->body && child->node) {
+                        jm_collect_enclosing_lexicals_for_target(pfn->body,
+                            (JsAstNode*)child->node, parent_own);
+                    }
                     // Also add parent's existing captures as "own" (already available)
                     for (int ci = 0; ci < parent->capture_count; ci++) {
                         jm_name_set_add(parent_own, parent->captures[ci].name);
@@ -4620,6 +4624,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn));
                         }
+                        jm_emit_class_ctor_shape_metadata(mt, cls_obj, ce);
                     }
 
                     // Create __instance_proto__ with all instance methods

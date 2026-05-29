@@ -1565,6 +1565,8 @@ static Item js_apply_constructed_builtin_prototype(Item result, Item callee, Ite
     return result;
 }
 
+static Item js_class_create_shaped_instance_object(Item class_item);
+
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Proxy [[Construct]] trap
     if (js_is_proxy(callee)) {
@@ -2028,7 +2030,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 return result;
             }
         }
-        Item obj = js_new_object();
+        Item obj = js_class_create_shaped_instance_object(callee);
         // Subclass builtin detection: walk the prototype chain of instance_proto
         // to find if a builtin class (Array, etc.) is in the ancestor chain.
         // If so, create the appropriate backing object instead of a plain MAP.
@@ -2441,6 +2443,43 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
         }
     }
     return obj;
+}
+
+extern "C" void js_set_class_ctor_shape_metadata(Item class_item,
+    const char** prop_names, const int* prop_lens, int count) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP || !prop_names || !prop_lens || count <= 0) return;
+    Item names = js_array_new(0);
+    for (int i = 0; i < count; i++) {
+        if (!prop_names[i] || prop_lens[i] <= 0) continue;
+        Item name = (Item){.item = s2it(heap_create_name(prop_names[i], prop_lens[i]))};
+        js_array_push(names, name);
+    }
+    Item key = (Item){.item = s2it(heap_create_name("__ctor_shape_names__", 20))};
+    js_property_set(class_item, key, names);
+    js_mark_non_enumerable(class_item, key);
+}
+
+static Item js_class_create_shaped_instance_object(Item class_item) {
+    if (get_type_id(class_item) != LMD_TYPE_MAP) return js_new_object();
+    bool found = false;
+    Item names = js_map_get_fast(class_item.map, "__ctor_shape_names__", 20, &found);
+    if (!found || get_type_id(names) != LMD_TYPE_ARRAY) return js_new_object();
+    int64_t raw_count = js_array_length(names);
+    if (raw_count <= 0 || raw_count > 64) return js_new_object();
+    const char** prop_names = (const char**)alloca((int)raw_count * sizeof(const char*));
+    int* prop_lens = (int*)alloca((int)raw_count * sizeof(int));
+    int count = 0;
+    for (int64_t i = 0; i < raw_count; i++) {
+        Item name_item = js_array_get(names, (Item){.item = i2it(i)});
+        if (get_type_id(name_item) != LMD_TYPE_STRING) continue;
+        String* name = name_item.get_string();
+        if (!name || name->len <= 0) continue;
+        prop_names[count] = name->chars;
+        prop_lens[count] = (int)name->len;
+        count++;
+    }
+    if (count <= 0) return js_new_object();
+    return js_constructor_create_object_shaped(ItemNull, prop_names, prop_lens, count);
 }
 
 // §7: Create pre-shaped object with shape cache for inline shape guard.
@@ -14265,6 +14304,8 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     // those constructs survive into the pattern the backtracker compiles.
     bool route_to_bt = (special_property_kind == 0) &&
         js_regex_needs_backtrack(effective_pattern, effective_pattern_len);
+    const char* bt_pattern = effective_pattern;
+    int bt_pattern_len = effective_pattern_len;
 
     // count capture groups for backreference validation (Annex B: \8/\9 identity escapes)
     int total_groups = 0;
@@ -14715,8 +14756,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         btflags.dot_all = compile_info.dot_all;
         btflags.unicode = has_unicode;
         btflags.sticky = compile_info.sticky;
-        bt = js_bt_compile(processed_pattern.c_str(), (int)processed_pattern.size(),
-                           btflags, js_input->pool);
+        bt = js_bt_compile(bt_pattern, bt_pattern_len, btflags, js_input->pool);
         if (!bt) {
             log_debug("js bt regex: compile failed for /%.*s/, falling back to RE2",
                       pattern_len, pattern);

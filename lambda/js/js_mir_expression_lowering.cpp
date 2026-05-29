@@ -12931,6 +12931,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn));
                 }
+                jm_emit_class_ctor_shape_metadata(mt, cls_obj, ce);
                 // Create __instance_proto__ with all instance methods
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                 jm_call_void_2(mt, "js_set_default_constructor_property",

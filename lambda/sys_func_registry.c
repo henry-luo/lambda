@@ -878,6 +878,7 @@ extern void js_init_class_instance_fields(Item callee, Item object);
 extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
+extern void js_set_class_ctor_shape_metadata(Item class_item, const char** prop_names, const int* prop_lens, int count);
 extern void js_define_global_var_property(Item key, Item value);
 extern void js_define_global_eval_var_property(Item key, Item value);
 extern void js_define_global_function_property(Item key, Item value);
@@ -1752,6 +1753,7 @@ JitImport jit_runtime_imports[] = {
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
+    {"js_set_class_ctor_shape_metadata", FPTR(js_set_class_ctor_shape_metadata)},
     {"js_define_global_var_property", FPTR(js_define_global_var_property)},
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_define_global_function_property", FPTR(js_define_global_function_property)},

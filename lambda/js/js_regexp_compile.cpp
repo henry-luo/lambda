@@ -250,8 +250,10 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
 
     JsRegExpNameRef groups[JS_REGEXP_MAX_NAMED_GROUPS];
     int group_count = 0;
+    int named_group_count = 0;
     bool in_class = false;
     bool has_named_backref = false;
+    memset(groups, 0, sizeof(groups));
 
     for (int i = 0; i < pattern_len; i++) {
         unsigned char ch = (unsigned char)pattern[i];
@@ -287,6 +289,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
         if (group_count <= JS_REGEXP_MAX_NAMED_GROUPS) {
             groups[group_count - 1].name = pattern + name_start;
             groups[group_count - 1].len = j - name_start;
+            named_group_count++;
         }
         i = j;
     }
@@ -318,7 +321,7 @@ char* js_regexp_rewrite_named_backrefs(const char* pattern, int pattern_len,
                     i = j;
                     continue;
                 }
-                if (group_count == 0) {
+                if (named_group_count == 0) {
                     rewritten[out_pos++] = 'k';
                     for (int k = name_start - 1; k <= j; k++) {
                         rewritten[out_pos++] = pattern[k];

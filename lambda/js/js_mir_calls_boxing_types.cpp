@@ -557,6 +557,29 @@ void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNod
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
 }
 
+void jm_emit_class_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
+    if (!mt || !cls_obj || !ce || !ce->constructor || !ce->constructor->fc) return;
+    JsFuncCollected* ctor_fc = ce->constructor->fc;
+    if (ctor_fc->ctor_prop_count <= 0) return;
+    MIR_reg_t names_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+    MIR_reg_t lens_arr = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+    for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs[i])));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I32, i * (int)sizeof(int), lens_arr, 0, 1),
+            MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
+    }
+    jm_call_void_4(mt, "js_set_class_ctor_shape_metadata",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+}
+
 // Helper: emit js_set_formal_length if formal_length differs from param_count
 void jm_emit_formal_length(JsMirTranspiler* mt, MIR_reg_t fn_reg, int formal_length) {
     if (formal_length < 0) return; // -1 = same as param_count, no correction needed

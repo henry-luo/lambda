@@ -191,18 +191,29 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.type_id = type_id;
     entry.var.typed_array_type = -1;  // P9: not a typed array by default
 
-    // Preserve metadata from an existing same-named binding. This must search
-    // outward (jm_find_var), not only the target scope: a block-scoped let/const
-    // that is captured by a closure is pre-registered in the enclosing function's
-    // scope env, so its TDZ-hoist at the block depth has to inherit that
-    // scope-env slot from the function-scope pre-registration. Restricting the
-    // lookup to the target scope drops that slot and the closure observes a
-    // permanent TDZ value (block-scope/shadowing/lookup-from-closure).
+    // Preserve metadata from an existing same-named binding. Prefer the target
+    // scope so a nested let/const shadow does not inherit an outer capture slot.
+    // When a captured block binding is pre-registered in an enclosing function
+    // scope, it is still TDZ-active when the real block binding is initialized;
+    // that case may safely inherit the scope-env slot.
     {
-        JsMirVarEntry* existing = jm_find_var(mt, name);
+        JsMirVarEntry* existing = NULL;
+        bool existing_in_target_scope = false;
+        if (target_depth >= 0 && mt->var_scopes[target_depth]) {
+            JsVarScopeEntry key;
+            memset(&key, 0, sizeof(key));
+            snprintf(key.name, sizeof(key.name), "%s", name);
+            JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[target_depth], &key);
+            if (found) {
+                existing = &found->var;
+                existing_in_target_scope = true;
+            }
+        }
+        if (!existing) existing = jm_find_var(mt, name);
         if (existing) {
             // v15: In generators, preserve env slot info from hoisted variables
-            if (mt->in_generator && existing->from_env) {
+            if (mt->in_generator && existing->from_env &&
+                (existing_in_target_scope || existing->tdz_active)) {
                 entry.var.from_env = true;
                 entry.var.env_slot = existing->env_slot;
                 entry.var.env_reg = existing->env_reg;
@@ -218,7 +229,8 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
-            if (existing->in_scope_env) {
+            if (existing->in_scope_env &&
+                (existing_in_target_scope || existing->tdz_active)) {
                 entry.var.in_scope_env = true;
                 entry.var.scope_env_slot = existing->scope_env_slot;
                 entry.var.scope_env_reg = existing->scope_env_reg;

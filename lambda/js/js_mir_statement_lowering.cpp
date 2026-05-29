@@ -4775,6 +4775,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn));
                         }
+                        jm_emit_class_ctor_shape_metadata(mt, cls_obj, ce);
                     }
                     // Create __instance_proto__ with instance methods and store as prototype
                     {
