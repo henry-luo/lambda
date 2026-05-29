@@ -249,6 +249,10 @@ typedef struct DocState {
     bool text_selection_press_in_range;  // mouse-down began inside an existing text selection
     View* text_selection_press_view;     // fallback collapse target for press-in-selection mouse-up
     int text_selection_press_offset;
+    bool editing_autoscroll_active;      // selection-drag autoscroll projection
+    View* editing_autoscroll_surface;    // surface that started autoscroll
+    float editing_autoscroll_pointer_x;  // last drag pointer x in viewport coordinates
+    float editing_autoscroll_pointer_y;  // last drag pointer y in viewport coordinates
 
     // ------------------------------------------------------------------
     // DOM-spec Selection / Range (additive — new code path; legacy

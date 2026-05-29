@@ -41,6 +41,18 @@ extern "C" DocState*  radiant_ui_get_state(struct UiContext*);
 extern "C" void           radiant_state_request_repaint(struct DocState*);
 extern "C" bool           radiant_dispatch_rich_composition_event(struct UiContext*, EventType,
                                                                   const char*, uint32_t);
+extern "C" bool           radiant_dispatch_form_text_ime_begin(struct UiContext*,
+                                                                DomElement*,
+                                                                View*);
+extern "C" bool           radiant_dispatch_form_text_ime_update(struct UiContext*,
+                                                                 DomElement*,
+                                                                 View*,
+                                                                 const char*,
+                                                                 uint32_t,
+                                                                 uint32_t);
+extern "C" bool           radiant_dispatch_form_text_ime_cancel(struct UiContext*,
+                                                                 DomElement*,
+                                                                 View*);
 extern "C" bool           radiant_dispatch_form_text_ime_commit(struct UiContext*,
                                                                  DomElement*,
                                                                  View*,
@@ -135,9 +147,15 @@ const char* ns_to_utf8(id obj) {
     const char* utf8 = ns_to_utf8(string);
     uint32_t len = (uint32_t)strlen(utf8);
     if (!te_ime_is_composing(e)) {
-        te_ime_begin(e);
+        if (!radiant_dispatch_form_text_ime_begin(g_ime_uicon, e, (View*)e)) {
+            te_ime_begin(e);
+        }
     }
-    te_ime_update(e, utf8, len, (uint32_t)selectedRange.location);
+    if (!radiant_dispatch_form_text_ime_update(g_ime_uicon, e, (View*)e,
+                                               utf8, len,
+                                               (uint32_t)selectedRange.location)) {
+        te_ime_update(e, utf8, len, (uint32_t)selectedRange.location);
+    }
     log_debug("[IME mac] setMarkedText '%s' caret=%lu",
               utf8, (unsigned long)selectedRange.location);
     // Wake the GLFW main loop so the preedit underline appears immediately
@@ -149,7 +167,9 @@ const char* ns_to_utf8(id obj) {
 - (void)unmarkText {
     DomElement* e = ime_focused_text_control();
     if (e && te_ime_is_composing(e)) {
-        te_ime_cancel(e);
+        if (!radiant_dispatch_form_text_ime_cancel(g_ime_uicon, e, (View*)e)) {
+            te_ime_cancel(e);
+        }
         log_debug("[IME mac] unmarkText -> cancel");
         return;
     }

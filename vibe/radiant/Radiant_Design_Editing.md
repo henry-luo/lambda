@@ -439,6 +439,14 @@ Each tick still enters through the event/state cascade path so log records stay
 ordered (the original Q4 concern is preserved). This shared tick is a
 deliverable of E5, not a later afterthought — see §11.
 
+**Implementation status.** The current implementation has the document
+viewport path in place: mouse selection drags near the viewport edge scroll on
+motion events, continue through the shared editing animation tick while the
+pointer is held still, emit `editing.autoscroll` start/tick/stop records in
+input/timer cascades, and keep drag cleanup tied to mouse-up. The remaining E5
+work is to project the same tick into nearest scroll containers and
+text-control-internal scroll offsets.
+
 ---
 
 ## 7. Unified State Store And Undo/Redo
@@ -525,6 +533,7 @@ Extend `event_state_log` with editing-specific records. Keep JSONL output in
 | `editing.beforeinput` | Beforeinput dispatched | `inputType`, `range_count`, `prevented` |
 | `editing.mutation` | Local mutation committed | `old_len`, `new_len`, `selection_start`, `selection_end` |
 | `editing.selection` | Selection operation | `operation`, `anchor`, `focus`, `drag_mode` |
+| `editing.clipboard` | Clipboard payload summary for Copy/Cut/Paste/Drop | `operation`, `text_len`, `html_len`, `redacted` |
 | `editing.focus` | Surface activation/deactivation | `from`, `to`, `ime_active`, `focus_visible` |
 | `editing.history` | Undo/redo push/restore | `action`, `depth`, `cursor`, `owned_by` |
 | `editing.autoscroll` | Drag selection auto-scroll | `surface`, `dx`, `dy`, `velocity_x`, `velocity_y` |
@@ -805,6 +814,38 @@ For WPT:
   `dispatch_form_caret_collapse()`. This keeps post-handler Backspace, Enter,
   text input, and history clamp projection/logging on the unified selection
   path while preserving handler-owned value updates.
+- Form value replacement now logs the collapsed selection result from the same
+  mutation choke point as `editing.mutation`. Typing, paste, delete, Enter,
+  Cut, and IME commits therefore emit a consistent `replaceCollapse`
+  `editing.selection` record after the value store updates. History restore now
+  reapplies the snapshot selection into the StateStore projection and logs a
+  `historyRestore` `editing.selection` record before the resulting `input`
+  event dispatch.
+- Rich/contenteditable mouse selection and legacy keyboard navigation now
+  mirror their selection result into `editing.selection` records. Rich
+  `selectAll` keeps the shared `editing.intent` logging path but performs the
+  browser default DOM Selection projection directly because it is not a
+  cancelable `beforeinput` operation.
+- Copy, Cut, Paste, and rich Drop now emit `editing.clipboard` records for form
+  text controls and rich/contenteditable selections. Form controls redact
+  password surfaces; rich selections log text/html lengths without changing the
+  editor-owned mutation policy for Cut.
+- Focus transitions now emit `editing.focus` records next to the existing focus
+  state-machine records, including resolved editing surfaces, focus-visible
+  source, and whether either side had an active IME composition.
+- Form undo/redo restores now emit `editing.history` records from the unified
+  `dispatch_form_history()` path before the history mutation and selection
+  restore records. Password surfaces redact history depth/cursor.
+- Form and rich IME paths now emit `editing.composition` records for
+  start/update/commit/cancel. Form begin/update/cancel enter through Radiant
+  dispatch wrappers beside the existing commit wrapper, so the event simulator
+  and platform IME shims share the same logging surface; password surfaces
+  redact preedit/commit lengths and caret.
+- Selection drag autoscroll now records its last pointer position in
+  `DocState`, advances the document viewport from the shared editing animation
+  tick when the pointer is held at the viewport edge, and emits timer-cascade
+  `editing.autoscroll` tick records. The focused regression holds the pointer
+  still and advances simulated time so event-only scrolling cannot satisfy it.
 
 ---
 

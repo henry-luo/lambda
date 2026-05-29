@@ -12,6 +12,8 @@
 #include "event_state_log.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
+#include "text_edit.hpp"
+#include "editing.hpp"
 #include "state_machine.hpp"
 #include "retained_display_list.hpp"
 // str.h included via view.hpp
@@ -666,7 +668,7 @@ extern "C" void legacy_sync_from_dom_selection(DocState* state) {
         CaretState* caret = state->caret;
         caret->view        = foc_view;
         caret->char_offset = foc_off;
-        caret->visible     = true;
+        caret->visible     = ds->is_collapsed;
         caret->blink_time  = 0;
 
         // Resolve layout cache (x/y/height) via the resolver. Best-effort:
@@ -5036,6 +5038,7 @@ void selection_select_all(DocState* state) {
     if (state->selection) {
         state->selection->is_selecting = false;
     }
+    legacy_sync_from_dom_selection(state);
 
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
@@ -5373,6 +5376,33 @@ static void focus_write_optional_ref(JsonWriter* w, const char* key, View* view)
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
 
+static void focus_write_editing_surface_ref(JsonWriter* w,
+                                            const char* key,
+                                            View* view) {
+    jw_key(w, key ? key : "surface");
+    jw_obj_begin(w);
+        EditingSurface surface;
+        EditingSurface* surface_ptr = nullptr;
+        if (editing_surface_from_target(view, &surface)) {
+            surface_ptr = &surface;
+        }
+        jw_kv_str(w, "kind", editing_surface_kind_name(
+            surface_ptr ? surface_ptr->kind : EDIT_SURFACE_NONE));
+        jw_kv_str(w, "mode", editing_mode_name(
+            surface_ptr ? surface_ptr->mode : EDIT_MODE_RICH));
+        event_state_log_write_node_ref(w, "owner",
+            surface_ptr ? (const DomNode*)surface_ptr->owner : nullptr);
+        event_state_log_write_node_ref(w, "target",
+            surface_ptr ? (const DomNode*)surface_ptr->view : (const DomNode*)view);
+    jw_obj_end(w);
+}
+
+static bool focus_editing_ime_active(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    return tc_is_text_control(elem) && te_ime_is_composing(elem);
+}
+
 static void focus_log_transition(DocState* state, const char* transition,
                                  View* from, View* to,
                                  bool from_keyboard, bool focus_visible) {
@@ -5391,6 +5421,21 @@ static void focus_log_transition(DocState* state, const char* transition,
         focus_write_optional_ref(&w, "to", to);
         jw_kv_bool(&w, "from_keyboard", from_keyboard);
         jw_kv_bool(&w, "focus_visible", focus_visible);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.focus", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "operation", transition ? transition : "focus_update");
+        focus_write_editing_surface_ref(&w, "from", from);
+        focus_write_editing_surface_ref(&w, "to", to);
+        jw_kv_bool(&w, "from_keyboard", from_keyboard);
+        jw_kv_bool(&w, "focus_visible", focus_visible);
+        jw_kv_bool(&w, "ime_active",
+                   focus_editing_ime_active(from) ||
+                   focus_editing_ime_active(to));
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
 }

@@ -69,6 +69,19 @@ static void sim_input_turn_yield() {
 
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
+extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
+                                                      DomElement* elem,
+                                                      View* target);
+extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target,
+                                                       const char* preedit,
+                                                       uint32_t len,
+                                                       uint32_t caret_cp);
+extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target);
 extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                                        DomElement* elem,
                                                        View* target,
@@ -2791,22 +2804,27 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             const char* phase = ev->ime_phase ? ev->ime_phase : "update";
             const char* data  = ev->input_text ? ev->input_text : "";
-            uint32_t dlen = (uint32_t)strlen(data);
+            RdtEvent event;
+            memset(&event, 0, sizeof(event));
+            event.composition.timestamp = get_monotonic_time();
+            event.composition.text = data;
+            event.composition.preedit_caret = (uint32_t)ev->expected_char_offset;
             if (strcmp(phase, "begin") == 0) {
-                te_ime_begin(elem);
+                event.composition.type = RDT_EVENT_COMPOSITION_START;
+                handle_event(uicon, doc, &event);
                 log_info("event_sim: ime_compose begin");
             } else if (strcmp(phase, "update") == 0) {
-                te_ime_update(elem, data, dlen,
-                              (uint32_t)ev->expected_char_offset);
+                event.composition.type = RDT_EVENT_COMPOSITION_UPDATE;
+                handle_event(uicon, doc, &event);
                 log_info("event_sim: ime_compose update '%s'", data);
             } else if (strcmp(phase, "commit") == 0) {
-                if (!radiant_dispatch_form_text_ime_commit(uicon, elem, focused,
-                                                           data, dlen)) {
-                    te_ime_commit(elem, state, focused, data, dlen);
-                }
+                event.composition.type = RDT_EVENT_COMPOSITION_END;
+                handle_event(uicon, doc, &event);
                 log_info("event_sim: ime_compose commit '%s'", data);
             } else if (strcmp(phase, "cancel") == 0) {
-                te_ime_cancel(elem);
+                event.composition.type = RDT_EVENT_COMPOSITION_END;
+                event.composition.text = "";
+                handle_event(uicon, doc, &event);
                 log_info("event_sim: ime_compose cancel");
             } else {
                 log_error("event_sim: ime_compose - unknown phase '%s'", phase);
@@ -3697,6 +3715,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             for (int i = 1; i <= steps; i++) {
                 double now = base_time + (step_ms * i) / 1000.0;
                 animation_scheduler_tick(sched, now, &state->dirty_tracker);
+                radiant_editing_animation_tick(uicon, now);
             }
             // Re-render after advancing animation
             force_render_surface(uicon);
