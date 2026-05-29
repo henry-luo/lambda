@@ -60,6 +60,7 @@ extern "C" Item js_clear_exception(void);
 extern "C" const char* js_get_exception_message(void);
 void to_repaint();
 void update_window_title(const char* title);
+extern "C" void legacy_sync_from_dom_selection(DocState* state);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
@@ -212,6 +213,35 @@ static void event_log_editing_surface(JsonWriter* w,
     jw_obj_end(w);
 }
 
+static void event_log_editing_history(DocState* state,
+                                      const EditingSurface* surface,
+                                      const InputIntent* intent,
+                                      const char* action,
+                                      uint32_t depth,
+                                      uint32_t cursor,
+                                      bool did_restore) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    bool redacted = event_log_editing_redact(surface);
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.history", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "action", action ? action : "restore");
+        event_log_editing_surface(&w, surface);
+        jw_kv_str(&w, "input_type",
+                  intent ? input_intent_type_name(intent->type) : "");
+        jw_kv_uint(&w, "depth", redacted ? 0 : depth);
+        jw_kv_uint(&w, "cursor", redacted ? 0 : cursor);
+        jw_kv_bool(&w, "owned_by_form", editing_surface_is_text_control(surface));
+        jw_kv_bool(&w, "restored", did_restore);
+        jw_kv_bool(&w, "redacted", redacted);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void event_log_editing_mutation(DocState* state,
                                        const EditingSurface* surface,
                                        const InputIntent* intent,
@@ -266,6 +296,219 @@ static void event_log_editing_selection(DocState* state,
         jw_kv_bool(&w, "redacted", redacted);
     jw_obj_end(&w);
     event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static void event_log_editing_clipboard(DocState* state,
+                                        const EditingSurface* surface,
+                                        const char* operation,
+                                        uint32_t text_len,
+                                        uint32_t html_len) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    bool redacted = event_log_editing_redact(surface);
+    char buf[2048];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.clipboard", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "operation", operation ? operation : "");
+        event_log_editing_surface(&w, surface);
+        jw_kv_uint(&w, "text_len", redacted ? 0 : text_len);
+        jw_kv_uint(&w, "html_len", redacted ? 0 : html_len);
+        jw_kv_bool(&w, "redacted", redacted);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static bool input_intent_has_clipboard_payload(const InputIntent* intent) {
+    if (!intent) return false;
+    switch (intent->type) {
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
+        case INPUT_INTENT_INSERT_FROM_DROP:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void event_log_editing_clipboard_intent(DocState* state,
+                                               const EditingSurface* surface,
+                                               const InputIntent* intent,
+                                               const char* operation) {
+    if (!input_intent_has_clipboard_payload(intent)) return;
+    const char* op = operation;
+    if (!op) {
+        op = intent->type == INPUT_INTENT_INSERT_FROM_DROP ? "drop" : "paste";
+    }
+    event_log_editing_clipboard(state, surface,
+                                op,
+                                event_log_text_len(intent->data),
+                                event_log_text_len(intent->html_data));
+}
+
+static void event_log_editing_composition(DocState* state,
+                                          const EditingSurface* surface,
+                                          const InputIntent* intent,
+                                          const char* phase,
+                                          uint32_t preedit_len,
+                                          uint32_t commit_len,
+                                          uint32_t caret) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    bool redacted = event_log_editing_redact(surface);
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.composition", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "phase", phase ? phase : "");
+        event_log_editing_surface(&w, surface);
+        jw_kv_str(&w, "input_type",
+                  intent ? input_intent_type_name(intent->type) : "");
+        jw_kv_uint(&w, "preedit_len", redacted ? 0 : preedit_len);
+        jw_kv_uint(&w, "commit_len", redacted ? 0 : commit_len);
+        jw_kv_uint(&w, "caret", redacted ? 0 : caret);
+        jw_kv_bool(&w, "is_composing", intent ? intent->is_composing : false);
+        jw_kv_bool(&w, "redacted", redacted);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static void event_log_editing_autoscroll(DocState* state,
+                                         const EditingSurface* surface,
+                                         const char* operation,
+                                         float dx,
+                                         float dy,
+                                         float velocity_x,
+                                         float velocity_y) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.autoscroll", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "operation", operation ? operation : "tick");
+        event_log_editing_surface(&w, surface);
+        jw_kv_double(&w, "dx", dx);
+        jw_kv_double(&w, "dy", dy);
+        jw_kv_double(&w, "velocity_x", velocity_x);
+        jw_kv_double(&w, "velocity_y", velocity_y);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
+static void dispatch_selection_drag_autoscroll_stop(DocState* state);
+
+static bool dispatch_selection_drag_autoscroll(EventContext* evcon,
+                                               DocState* state,
+                                               View* surface_target,
+                                               float pointer_x,
+                                               float pointer_y) {
+    if (!evcon || !evcon->ui_context || !evcon->ui_context->document ||
+        !state || !surface_target) {
+        return false;
+    }
+    DomDocument* doc = evcon->ui_context->document;
+    if (!doc->view_tree || !doc->view_tree->root ||
+        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
+        return false;
+    }
+
+    ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
+    if (!root_block || !root_block->scroller || !root_block->scroller->pane) {
+        return false;
+    }
+
+    float viewport_w = evcon->ui_context->viewport_width > 0
+        ? (float)evcon->ui_context->viewport_width
+        : root_block->width;
+    float viewport_h = evcon->ui_context->viewport_height > 0
+        ? (float)evcon->ui_context->viewport_height
+        : root_block->height;
+    if (viewport_w <= 0.0f || viewport_h <= 0.0f) return false;
+    state->editing_autoscroll_pointer_x = pointer_x;
+    state->editing_autoscroll_pointer_y = pointer_y;
+
+    const float edge = 24.0f;
+    const float max_step = 36.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+    if (pointer_x < edge) {
+        vx = -max_step * (edge - pointer_x) / edge;
+    } else if (pointer_x > viewport_w - edge) {
+        vx = max_step * (pointer_x - (viewport_w - edge)) / edge;
+    }
+    if (pointer_y < edge) {
+        vy = -max_step * (edge - pointer_y) / edge;
+    } else if (pointer_y > viewport_h - edge) {
+        vy = max_step * (pointer_y - (viewport_h - edge)) / edge;
+    }
+    if (vx < -max_step) vx = -max_step;
+    if (vx > max_step) vx = max_step;
+    if (vy < -max_step) vy = -max_step;
+    if (vy > max_step) vy = max_step;
+
+    if (vx == 0.0f && vy == 0.0f) {
+        dispatch_selection_drag_autoscroll_stop(state);
+        return false;
+    }
+
+    float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
+    scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
+                                       root_block->scroller->pane,
+                                       &h, &v, &h_max, &v_max);
+    float next_h = h + vx;
+    float next_v = v + vy;
+    if (next_h < 0.0f) next_h = 0.0f;
+    if (next_v < 0.0f) next_v = 0.0f;
+    if (next_h > h_max) next_h = h_max;
+    if (next_v > v_max) next_v = v_max;
+    float dx = next_h - h;
+    float dy = next_v - v;
+    if (dx == 0.0f && dy == 0.0f) return false;
+
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(surface_target, &surface)) {
+        surface_ptr = &surface;
+    }
+    if (!state->editing_autoscroll_active) {
+        event_log_editing_autoscroll(state, surface_ptr, "start",
+                                     dx, dy, vx, vy);
+        state->editing_autoscroll_active = true;
+        state->editing_autoscroll_surface = surface_target;
+    } else {
+        event_log_editing_autoscroll(state, surface_ptr, "tick",
+                                     dx, dy, vx, vy);
+    }
+
+    scroll_state_set_position_for_view(state, static_cast<View*>(root_block),
+                                       root_block->scroller->pane,
+                                       next_h, next_v, false);
+    doc_state_sync_viewport_scroll(state, doc, next_h, next_v);
+    evcon->need_repaint = true;
+    return true;
+}
+
+static void dispatch_selection_drag_autoscroll_stop(DocState* state) {
+    if (!state || !state->editing_autoscroll_active) return;
+
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(state->editing_autoscroll_surface, &surface)) {
+        surface_ptr = &surface;
+    }
+    event_log_editing_autoscroll(state, surface_ptr, "stop",
+                                 0.0f, 0.0f, 0.0f, 0.0f);
+    state->editing_autoscroll_active = false;
+    state->editing_autoscroll_surface = nullptr;
+    state->editing_autoscroll_pointer_x = 0.0f;
+    state->editing_autoscroll_pointer_y = 0.0f;
 }
 
 static void sync_viewport_scroll_state(EventContext* evcon) {
@@ -899,6 +1142,11 @@ static DomElement* rich_editable_from_target(View* target) {
 
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state || !selection_has(state)) return false;
+    View* surface_target = nullptr;
+    selection_get_focus_snapshot(state, &surface_target, nullptr,
+                                 nullptr, nullptr, nullptr);
+    if (!surface_target) surface_target = caret_get_view(state);
+
     Pool* temp_pool = pool_create();
     Arena* temp_arena = arena_create_default(temp_pool);
     char* text = extract_selected_text(state, temp_arena);
@@ -912,6 +1160,17 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
         clipboard_copy_text(text);
         log_debug("%s: copied plain selection text=%zu", prefix ? prefix : "copy selection", strlen(text));
         copied = true;
+    }
+    if (copied) {
+        EditingSurface surface;
+        EditingSurface* surface_ptr = nullptr;
+        if (editing_surface_from_target(surface_target, &surface)) {
+            surface_ptr = &surface;
+        }
+        const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
+        event_log_editing_clipboard(state, surface_ptr, op,
+                                    text ? (uint32_t)strlen(text) : 0,
+                                    html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
     pool_destroy(temp_pool);
@@ -1560,7 +1819,108 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
     hooks.copy_selection = dispatch_editing_copy_selection;
     hooks.user = nullptr;
+    DocState* state = (evcon && evcon->ui_context && evcon->ui_context->document)
+        ? (DocState*)evcon->ui_context->document->state
+        : nullptr;
+    event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
     return editing_dispatch_beforeinput(evcon, &surface, intent, &hooks);
+}
+
+static bool dispatch_rich_selection_snapshot(EventContext* evcon,
+                                             DocState* state,
+                                             View* target,
+                                             const char* operation,
+                                             const InputIntent* intent) {
+    if (!evcon || !state || !target) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    int start = 0;
+    int end = 0;
+    if (selection_has(state)) {
+        selection_get_range(state, &start, &end);
+    } else {
+        View* caret_view = nullptr;
+        int caret_offset = 0;
+        if (caret_get_position(state, &caret_view, &caret_offset)) {
+            if (caret_view && caret_view != target) {
+                EditingSurface caret_surface;
+                if (editing_surface_from_target(caret_view, &caret_surface) &&
+                    editing_surface_is_rich(&caret_surface)) {
+                    surface = caret_surface;
+                }
+            }
+            start = caret_offset;
+            end = caret_offset;
+        }
+    }
+
+    uint32_t anchor = start < 0 ? 0 : (uint32_t)start;
+    uint32_t focus = end < 0 ? 0 : (uint32_t)end;
+    event_log_editing_selection(state, &surface, intent,
+                                operation ? operation : "selection",
+                                anchor, focus);
+    return true;
+}
+
+static DomElement* find_element_by_author_id(DomNode* node, const char* id) {
+    if (!node || !id || !id[0]) return nullptr;
+    if (node->node_type == DOM_NODE_ELEMENT) {
+        DomElement* elem = lam::dom_require_element(node);
+        if (elem->id && strcmp(elem->id, id) == 0) return elem;
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            DomElement* found = find_element_by_author_id(child, id);
+            if (found) return found;
+        }
+    }
+    return nullptr;
+}
+
+static bool dispatch_rich_select_all_default(EventContext* evcon,
+                                             DocState* state,
+                                             View* target,
+                                             const InputIntent* intent) {
+    if (!evcon || !state || !target) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_rich(&surface) || !surface.owner) {
+        return false;
+    }
+
+    DomElement* owner = surface.owner;
+    if (owner->id && owner->doc && owner->doc->root) {
+        DomElement* live_owner = find_element_by_author_id(
+            static_cast<DomNode*>(owner->doc->root), owner->id);
+        if (live_owner) {
+            owner = live_owner;
+            surface.owner = live_owner;
+            surface.view = static_cast<View*>(live_owner);
+        }
+    }
+
+    if (!state->dom_selection) {
+        state->dom_selection = dom_selection_create(state);
+    }
+    DomSelection* selection = state->dom_selection;
+    if (!selection) return false;
+
+    const char* exc = nullptr;
+    DomNode* owner_node = static_cast<DomNode*>(owner);
+    if (!dom_selection_select_all_children(selection, owner_node, &exc)) {
+        log_debug("dispatch_rich_select_all_default: rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+    legacy_sync_from_dom_selection(state);
+    state->selection_layout_dirty = true;
+    state->needs_repaint = true;
+    event_log_editing_selection(state, &surface, intent, "selectAll", 0, 0);
+    return true;
 }
 
 static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
@@ -1589,26 +1949,56 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     hooks.copy_selection = dispatch_editing_copy_selection;
     hooks.user = nullptr;
 
+    uint32_t saved_selection_start = 0;
+    uint32_t saved_selection_end = 0;
+    uint8_t saved_selection_direction = 0;
+    form_control_get_selection(state, target,
+                               &saved_selection_start,
+                               &saved_selection_end,
+                               &saved_selection_direction);
+
     bool prevented = false;
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
                                       &prevented);
     if (prevented) {
+        form_control_set_selection(state, target,
+                                   saved_selection_start,
+                                   saved_selection_end,
+                                   saved_selection_direction);
         log_debug("dispatch_form_text_replace: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
         return true;
     }
 
-    uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
-    bool ok = te_replace_byte_range_no_events(elem, state, target, start, end,
+    DomElement* live_elem = elem;
+    View* live_target = target;
+    View* live_focus = focus_get(state);
+    if (live_focus && live_focus->is_element()) {
+        DomElement* focus_elem = lam::dom_require_element(live_focus);
+        if (tc_is_text_control(focus_elem)) {
+            live_elem = focus_elem;
+            live_target = live_focus;
+        }
+    }
+
+    uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
+    bool ok = te_replace_byte_range_no_events(live_elem, state, live_target, start, end,
                                               repl, repl_len);
     if (ok) {
-        FormControlProp* form = elem->form;
+        FormControlProp* form = live_elem->form;
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
+        surface.view = live_target;
+        surface.owner = live_elem;
         event_log_editing_mutation(state, &surface, &intent, "replace",
                                    old_len, new_len,
                                    selection_start, selection_end);
+        uint32_t caret_offset = start + repl_len;
+        if (caret_offset > new_len) caret_offset = new_len;
+        event_log_editing_selection(state, &surface, &intent,
+                                    "replaceCollapse",
+                                    caret_offset, caret_offset);
         editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
     }
     return ok;
@@ -1625,6 +2015,14 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
                                       &sanitized_len, &start, &end)) {
         return 0;
     }
+
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+    event_log_editing_clipboard(state, surface_ptr, "paste", len, 0);
 
     bool ok = dispatch_form_text_replace(evcon, elem, state, target,
                                          start, end,
@@ -1726,6 +2124,14 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
     clipboard_copy_text(buf);
     log_debug("%s: copied form selection bytes=%u",
               prefix ? prefix : "form copy", end - start);
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+    const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
+    event_log_editing_clipboard(state, surface_ptr, op, end - start, 0);
     mem_free(buf);
     return true;
 }
@@ -1911,6 +2317,43 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
     return true;
 }
 
+static bool dispatch_form_history_restore_selection(DomElement* elem,
+                                                    DocState* state,
+                                                    View* target,
+                                                    EditingSurface* surface,
+                                                    InputIntent* intent) {
+    if (!elem || !state || !target || !surface) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    FormControlProp* form = elem->form;
+    if (!form) return false;
+    const char* value = form->current_value ? form->current_value : "";
+    uint32_t value_len = form->current_value ? form->current_value_len : 0;
+    uint32_t start8 = tc_utf16_to_utf8_offset(value, value_len,
+                                              form->selection_start);
+    uint32_t end8 = tc_utf16_to_utf8_offset(value, value_len,
+                                            form->selection_end);
+    if (start8 > value_len) start8 = value_len;
+    if (end8 > value_len) end8 = value_len;
+
+    if (start8 == end8) {
+        if (selection_has_projection(state)) selection_clear(state);
+        caret_set(state, target, (int)start8); // INT_CAST_OK: StateStore caret API uses int offsets.
+    } else if (form->selection_direction == 2) {
+        selection_start(state, target, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        selection_extend(state, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        caret_set(state, target, (int)start8); // INT_CAST_OK: StateStore caret API uses int offsets.
+    } else {
+        selection_start(state, target, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        selection_extend(state, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
+        caret_set(state, target, (int)end8); // INT_CAST_OK: StateStore caret API uses int offsets.
+    }
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, surface, intent, "historyRestore",
+                                start8, end8);
+    return true;
+}
+
 static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
                                   DocState* state, View* target,
                                   InputIntentType input_type) {
@@ -1958,12 +2401,110 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
+        EditHistory* history = form ? (EditHistory*)form->history : nullptr;
+        uint32_t depth = history ? history->count : 0;
+        uint32_t cursor = history ? history->cursor : 0;
+        event_log_editing_history(state, &surface, &intent,
+                                  input_type == INPUT_INTENT_HISTORY_UNDO
+                                      ? "undo"
+                                      : "redo",
+                                  depth, cursor, did);
         event_log_editing_mutation(state, &surface, &intent, "history",
                                    old_len, new_len,
                                    selection_start, selection_end);
+        dispatch_form_history_restore_selection(elem, state, target,
+                                                &surface, &intent);
         editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
     }
     return did;
+}
+
+extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
+                                                      DomElement* elem,
+                                                      View* target) {
+    if (!uicon || !uicon->document || !elem) return false;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state || !tc_is_text_control(elem)) return false;
+
+    View* event_target = target ? target : static_cast<View*>(elem);
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(event_target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_COMPOSITION_START;
+    intent.data = "";
+    intent.is_composing = true;
+
+    te_ime_begin(elem);
+    event_log_editing_composition(state, surface_ptr, &intent,
+                                  "start", 0, 0, 0);
+    doc_state_request_repaint(state);
+    return true;
+}
+
+extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target,
+                                                       const char* preedit,
+                                                       uint32_t len,
+                                                       uint32_t caret_cp) {
+    if (!uicon || !uicon->document || !elem) return false;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state || !tc_is_text_control(elem)) return false;
+
+    View* event_target = target ? target : static_cast<View*>(elem);
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(event_target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+    intent.data = preedit ? preedit : "";
+    intent.composition_caret = caret_cp;
+    intent.is_composing = true;
+
+    te_ime_update(elem, preedit, len, caret_cp);
+    event_log_editing_composition(state, surface_ptr, &intent,
+                                  "update", len, 0, caret_cp);
+    doc_state_request_repaint(state);
+    return true;
+}
+
+extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
+                                                       DomElement* elem,
+                                                       View* target) {
+    if (!uicon || !uicon->document || !elem) return false;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state || !tc_is_text_control(elem)) return false;
+
+    View* event_target = target ? target : static_cast<View*>(elem);
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(event_target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+    intent.data = "";
+    intent.is_composing = false;
+
+    te_ime_cancel(elem);
+    event_log_editing_composition(state, surface_ptr, &intent,
+                                  "cancel", 0, 0, 0);
+    doc_state_request_repaint(state);
+    return true;
 }
 
 extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
@@ -1987,12 +2528,29 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
     evcon.ui_context = uicon;
     evcon.target = target ? target : static_cast<View*>(elem);
 
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(evcon.target, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        surface_ptr = &surface;
+    }
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = (committed && committed[0])
+        ? INPUT_INTENT_INSERT_FROM_COMPOSITION
+        : INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+    intent.data = committed ? committed : "";
+    intent.is_composing = false;
+
     if (should_mutate) {
         dispatch_form_text_replace(&evcon, elem, state, evcon.target,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
     }
     te_ime_commit_finish(elem, committed, len);
+    event_log_editing_composition(state, surface_ptr, &intent,
+                                  (committed && committed[0]) ? "commit" : "cancel",
+                                  0, len, 0);
     return true;
 }
 
@@ -2637,6 +3195,44 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 }
 
 void event_context_cleanup(EventContext* evcon) {
+}
+
+bool radiant_editing_animation_tick(UiContext* uicon, double timestamp) {
+    (void)timestamp;
+    if (!uicon || !uicon->document || !uicon->document->state) return false;
+
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state->editing_autoscroll_active ||
+        !state->editing_autoscroll_surface) {
+        return false;
+    }
+
+    RdtEvent event;
+    memset(&event, 0, sizeof(event));
+    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
+    event.mouse_position.timestamp = timestamp;
+    event.mouse_position.x = (int)state->editing_autoscroll_pointer_x; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
+    event.mouse_position.y = (int)state->editing_autoscroll_pointer_y; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
+
+    EventContext evcon;
+    event_context_init(&evcon, uicon, &event);
+
+    EventStateLog* cascade_log = state->active_event_log
+        ? state->active_event_log : uicon->event_log;
+    uint64_t cascade_id = state_begin_event_cascade(state, cascade_log, "timer");
+
+    bool changed = dispatch_selection_drag_autoscroll(
+        &evcon, state, state->editing_autoscroll_surface,
+        state->editing_autoscroll_pointer_x,
+        state->editing_autoscroll_pointer_y);
+
+    if (evcon.need_repaint) {
+        doc_state_mark_dirty(state);
+        to_repaint();
+    }
+    state_end_event_cascade(state, cascade_log, cascade_id);
+    event_context_cleanup(&evcon);
+    return changed || evcon.need_repaint;
 }
 
 // ============================================================================
@@ -4486,6 +5082,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
+                    dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+                                                       (float)motion->x,
+                                                       (float)motion->y);
                     evcon.need_repaint = true;
                     // skip text selection drag below
                     goto textarea_drag_done;
@@ -4506,12 +5105,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     // compute absolute position of input — see textarea
                     // branch above for why we sum every ancestor's x/y.
-                    float in_abs_x = 0, in_abs_y = 0;
+                    float in_abs_x = 0.0f;
                     {
                         View* p = static_cast<View*>(in_block);
                         while (p) {
                             in_abs_x += p->x;
-                            in_abs_y += p->y;
                             p = static_cast<View*>(p->parent);
                         }
                     }
@@ -4556,6 +5154,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
+                    dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+                                                       (float)motion->x,
+                                                       (float)motion->y);
                     // Refresh StateStore text-control selection projection so
                     // render_form shows the live drag highlight.
                     uint32_t sel_start = 0, sel_end = 0;
@@ -4719,6 +5320,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         anchor_view, drag_target_view);
                 }
                 caret_set(state, drag_target_view, char_offset);
+                dispatch_rich_selection_snapshot(&evcon, state, drag_target_view,
+                    "dragExtend", nullptr);
 
                 // Calculate and set visual position for the caret
                 float caret_x, caret_y, caret_height;
@@ -4747,6 +5350,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, selection_collapsed);
                 evcon.need_repaint = true;
             }
+            dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+                                               (float)motion->x,
+                                               (float)motion->y);
         }
         textarea_drag_done:
 
@@ -4947,12 +5553,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
                     dispatch_selectstart(&evcon, evcon.target);
                     selection_start(state, evcon.target, char_offset);
+                    dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                        "mouseDown", nullptr);
 
                     // Set visual coordinates for selection (same point for start)
                     selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
                 } else if (selection_has(state)) {
                     // Shift-click extends selection
                     selection_extend(state, char_offset);
+                    dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                        "extendMouse", nullptr);
 
                     // Update end visual coordinates
                     selection_project_focus_visual(state, caret_x, caret_y, caret_height);
@@ -4967,11 +5577,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         uint32_t start = te_line_start(text_buf, text_len, click_off);
                         uint32_t end = te_line_end(text_buf, text_len, click_off);
                         te_apply_byte_range(state, evcon.target, start, end);
+                        dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                            "selectLine", nullptr);
                     } else if (event->mouse_button.clicks == 2) {
                         uint32_t start = te_word_start(text_buf, text_len, click_off);
                         uint32_t end = te_word_end(text_buf, text_len, click_off);
                         if (start != end) {
                             te_apply_byte_range(state, evcon.target, start, end);
+                            dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
+                                "selectWord", nullptr);
                         }
                     }
                 }
@@ -5525,7 +6139,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (selection_has_projection(state)) {
                 dispatch_selectionchange(&evcon, state, evcon.target);
                 selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
+                dispatch_selection_drag_autoscroll_stop(state);
             }
+            dispatch_selection_drag_autoscroll_stop(state);
         }
 
         if (evcon.target) {
@@ -5889,6 +6505,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         {
             InputIntent intent;
             if (intent_target && input_intent_from_key_event(key_event, &intent)) {
+                if (intent.type == INPUT_INTENT_SELECT_ALL) {
+                    EditingSurface surface;
+                    bool rich_select_all = editing_surface_from_target(intent_target, &surface) &&
+                        editing_surface_is_rich(&surface);
+                    if (rich_select_all) {
+                        editing_dispatch_log_intent(&evcon, &surface, &intent);
+                        dispatch_rich_select_all_default(&evcon, state,
+                            intent_target, &intent);
+                        input_intent_dispose(&intent);
+                        evcon.need_repaint = true;
+                        break;
+                    }
+                }
                 bool handled = dispatch_rich_beforeinput(&evcon, intent_target, &intent);
                 input_intent_dispose(&intent);
                 if (handled) {
@@ -6376,14 +7005,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool did = dispatch_form_history(&evcon, focus_elem, state,
                                                      focused, history_type);
                     if (did) {
-                        int vlen = focus_elem->form->value
-                            ? (int)strlen(focus_elem->form->value) : 0;
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
                     }
                     break;
@@ -6392,14 +7013,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     key_event->key == RDT_KEY_Y) {
                     if (dispatch_form_history(&evcon, focus_elem, state, focused,
                                               INPUT_INTENT_HISTORY_REDO)) {
-                        int vlen = focus_elem->form->value
-                            ? (int)strlen(focus_elem->form->value) : 0;
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
                     }
                     break;
@@ -6734,9 +7347,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? utf8_offset_by_chars(text_data, caret_offset, -1)
                             : caret_offset - 1;
                         selection_extend(state, new_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "extendBackward", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            ctrl ? "moveWordBackward" : "moveBackward", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6752,9 +7369,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? utf8_offset_by_chars(text_data, caret_offset, 1)
                             : caret_offset + 1;
                         selection_extend(state, new_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "extendForward", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move(state, ctrl ? 10 : 1);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            ctrl ? "moveWordForward" : "moveForward", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6769,9 +7390,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_move_line(state, -1, evcon.ui_context);
                         caret_get_position(state, NULL, &caret_offset);
                         selection_extend(state, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "extendLineBackward", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move_line(state, -1, evcon.ui_context);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "moveLineBackward", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6785,9 +7410,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_move_line(state, 1, evcon.ui_context);
                         caret_get_position(state, NULL, &caret_offset);
                         selection_extend(state, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "extendLineForward", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move_line(state, 1, evcon.ui_context);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            "moveLineForward", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6801,9 +7430,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
                         caret_get_position(state, NULL, &caret_offset);
                         selection_extend(state, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            cmd ? "extendDocumentStart" : "extendLineStart", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 2 : 0);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            cmd ? "moveDocumentStart" : "moveLineStart", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6817,9 +7450,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
                         caret_get_position(state, NULL, &caret_offset);
                         selection_extend(state, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            cmd ? "extendDocumentEnd" : "extendLineEnd", nullptr);
                     } else {
                         selection_clear(state);
                         caret_move_to(state, cmd ? 3 : 1);
+                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                            cmd ? "moveDocumentEnd" : "moveLineEnd", nullptr);
                     }
                     update_caret_visual_position(evcon.ui_context, state);
                     evcon.need_repaint = true;
@@ -6918,11 +7555,55 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         View* focused = focus_get(state);
         event_log_focused_target(cascade_log, cascade_id, focused);
+        if (focused && focused->is_element()) {
+            DomElement* elem = lam::dom_require_element(focused);
+            if (tc_is_text_control(elem)) {
+                if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
+                    radiant_dispatch_form_text_ime_begin(evcon.ui_context,
+                                                         elem, focused);
+                } else if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
+                    radiant_dispatch_form_text_ime_update(evcon.ui_context,
+                                                          elem, focused,
+                                                          comp_event->text,
+                                                          event_log_text_len(comp_event->text),
+                                                          comp_event->preedit_caret);
+                } else {
+                    radiant_dispatch_form_text_ime_commit(evcon.ui_context,
+                                                          elem, focused,
+                                                          comp_event->text,
+                                                          event_log_text_len(comp_event->text));
+                }
+                evcon.need_repaint = true;
+                break;
+            }
+        }
         View* intent_target = focused ? focused : caret_get_view(state);
         InputIntent intent;
-        if (intent_target && input_intent_from_composition_event(comp_event, &intent) &&
-            dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
-            evcon.need_repaint = true;
+        if (intent_target && input_intent_from_composition_event(comp_event, &intent)) {
+            EditingSurface surface;
+            if (editing_surface_from_target(intent_target, &surface) &&
+                editing_surface_is_rich(&surface)) {
+                const char* phase = "update";
+                uint32_t preedit_len = 0;
+                uint32_t commit_len = 0;
+                if (intent.type == INPUT_INTENT_COMPOSITION_START) {
+                    phase = "start";
+                } else if (intent.type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
+                    phase = "update";
+                    preedit_len = event_log_text_len(intent.data);
+                } else if (intent.type == INPUT_INTENT_INSERT_FROM_COMPOSITION) {
+                    phase = "commit";
+                    commit_len = event_log_text_len(intent.data);
+                } else if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
+                    phase = "cancel";
+                }
+                event_log_editing_composition(state, &surface, &intent,
+                                              phase, preedit_len, commit_len,
+                                              intent.composition_caret);
+            }
+            if (dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+                evcon.need_repaint = true;
+            }
         }
         break;
     }

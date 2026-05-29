@@ -69,6 +69,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
                                            int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
 
 static void view_wake_glfw(void* user_data) {
     (void)user_data;
@@ -101,6 +102,7 @@ static double view_next_wait_timeout(RadiantFrameClock* frame_clock, double now,
                                      bool frame_driven, bool caret_visible,
                                      double caret_blink_elapsed,
                                      double caret_blink_interval,
+                                     bool editing_animation_active,
                                      EventSimContext* sim_ctx,
                                      double sim_start_time,
                                      uv_loop_t* uv_loop) {
@@ -112,6 +114,9 @@ static double view_next_wait_timeout(RadiantFrameClock* frame_clock, double now,
         double caret_timeout = caret_blink_interval - caret_blink_elapsed;
         if (caret_timeout < 0.0) caret_timeout = 0.0;
         timeout = view_min_timeout(timeout, caret_timeout);
+    }
+    if (editing_animation_active) {
+        timeout = view_min_timeout(timeout, frame_interval);
     }
 
     if (sim_ctx && sim_ctx->is_running) {
@@ -1221,6 +1226,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             }
         }
 
+        bool editing_animation_active = state && state->editing_autoscroll_active;
+        if (editing_animation_active) {
+            if (radiant_editing_animation_tick(&ui_context, currentTime)) {
+                do_redraw = 1;
+            }
+            editing_animation_active = state && state->editing_autoscroll_active;
+        }
+
         // Tick active animations
         if (state && state->animation_scheduler && state->animation_scheduler->has_active_animations) {
             // set viewport bounds so off-screen animations don't inflate dirty region
@@ -1279,6 +1292,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                                                      frame_driven, caret_visible,
                                                      caretBlinkTime,
                                                      CARET_BLINK_INTERVAL,
+                                                     editing_animation_active,
                                                      sim_ctx, sim_start_time,
                                                      uv_loop);
         if (wait_timeout > 0.0) {

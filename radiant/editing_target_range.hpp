@@ -2,8 +2,10 @@
 #define RADIANT_EDITING_TARGET_RANGE_HPP
 
 // shared StaticRange-style target range computation for editing InputEvents.
-// form text controls intentionally return no ranges until E0 proves a concrete
-// form-value DOM boundary exists.
+// rich hosts use DOM Selection boundaries. Text controls use a synthetic
+// StaticRange-style boundary over the control element with UTF-16
+// selectionStart/End offsets until E0 can promote form values to concrete DOM
+// text nodes.
 
 #include "dom_range.hpp"
 #include "editing.hpp"
