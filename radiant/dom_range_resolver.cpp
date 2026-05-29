@@ -155,6 +155,17 @@ static float interp_x_in_text_rect(DomText* text, TextRect* rect, int bo) {
     return rect->x + ((float)local / (float)visible_len) * pdf_width;
 }
 
+extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
+                                                    ViewText* text,
+                                                    TextRect* rect,
+                                                    int byte_offset) {
+    if (!rect) return 0.0f;
+    if (uicon && text && g_glyph_x_resolver) {
+        return g_glyph_x_resolver(uicon, text, rect, byte_offset);
+    }
+    return interp_x_in_rect(rect, byte_offset);
+}
+
 // Map a (DomNode, UTF-16 offset) boundary to (View*, byte_offset, x, y, h)
 // in absolute CSS coordinates. Returns false if the boundary cannot be
 // resolved (no layout, non-text element with no children, etc.).

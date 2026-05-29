@@ -1071,6 +1071,12 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_is_collapsed = reader.get("is_collapsed").asBool();
         ev->check_dom_selection = reader.get("check_dom").asBool();
     }
+    else if (strcmp(type_str, "assert_form_selection") == 0) {
+        ev->type = SIM_EVENT_ASSERT_FORM_SELECTION;
+        ev->expected_char_offset = reader.get("start").asInt32();
+        ev->expected_selection_end = reader.get("end").asInt32();
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "assert_preedit") == 0) {
         ev->type = SIM_EVENT_ASSERT_PREEDIT;
         const char* equals = reader.get("equals").cstring();
@@ -2106,6 +2112,43 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
     return true;
 }
 
+static bool assert_form_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    if (!doc || !doc->state) {
+        log_error("event_sim: assert_form_selection - no document or state");
+        ctx->fail_count++;
+        return false;
+    }
+
+    View* view = resolve_target_element(ev, doc);
+    if (!view || !view->is_element()) {
+        log_error("event_sim: assert_form_selection - target element not found");
+        ctx->fail_count++;
+        return false;
+    }
+    DomElement* elem = lam::dom_require_element(view);
+    if (!tc_is_text_control(elem)) {
+        log_error("event_sim: assert_form_selection - target is not a text control");
+        ctx->fail_count++;
+        return false;
+    }
+
+    uint32_t start = 0, end = 0;
+    form_control_get_selection(doc->state, view, &start, &end, NULL);
+    uint32_t expected_start = ev->expected_char_offset < 0 ? 0 : (uint32_t)ev->expected_char_offset;
+    uint32_t expected_end = ev->expected_selection_end < 0 ? 0 : (uint32_t)ev->expected_selection_end;
+    if (start != expected_start || end != expected_end) {
+        log_error("event_sim: assert_form_selection - mismatch: expected [%u..%u], got [%u..%u]",
+                  expected_start, expected_end, start, end);
+        ctx->fail_count++;
+        return false;
+    }
+
+    log_info("event_sim: assert_form_selection PASS [%u..%u]", start, end);
+    ctx->pass_count++;
+    return true;
+}
+
 // Assert helper for target view
 static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon->document;
@@ -2845,6 +2888,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_ASSERT_SELECTION:
             log_info("event_sim: assert_selection is_collapsed=%s", ev->expected_is_collapsed ? "true" : "false");
             assert_selection(ctx, uicon, ev);
+            break;
+
+        case SIM_EVENT_ASSERT_FORM_SELECTION:
+            log_info("event_sim: assert_form_selection start=%d end=%d",
+                     ev->expected_char_offset, ev->expected_selection_end);
+            assert_form_selection(ctx, uicon, ev);
             break;
 
         case SIM_EVENT_ASSERT_PREEDIT: {

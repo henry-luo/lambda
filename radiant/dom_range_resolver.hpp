@@ -120,6 +120,11 @@ typedef float (*GlyphXResolverFn)(struct UiContext* uicon, struct ViewText* text
     struct TextRect* rect, int byte_offset);
 void dom_range_set_glyph_x_resolver(GlyphXResolverFn fn);
 
+// Convenience wrapper around the registered resolver. Falls back to linear
+// interpolation across the rect's width when no resolver is registered.
+float dom_range_glyph_x_for_byte_offset(struct UiContext* uicon,
+    struct ViewText* text, struct TextRect* rect, int byte_offset);
+
 // Inverse of GlyphXResolverFn: given a rect-relative X (in the same
 // coordinate space as `TextRect::x`), return the byte offset whose visual
 // position is closest to that X. Used by vertical caret navigation

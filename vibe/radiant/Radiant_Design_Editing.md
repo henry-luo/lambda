@@ -850,6 +850,39 @@ For WPT:
   tick when the pointer is held at the viewport edge, and emits timer-cascade
   `editing.autoscroll` tick records. The focused regression holds the pointer
   still and advances simulated time so event-only scrolling cannot satisfy it.
+- E4 now has a first `radiant/editing_geometry.hpp/.cpp` facade for shared
+  editing boundaries, text-control point-to-offset, caret rects, rich hit
+  testing, and the contenteditable skip-text-control clamp policy. Input and
+  textarea click/drag plus rich click/drag caret projection route through that
+  facade. DOM caret rects use the same glyph-precise X resolver as selection
+  painting. Normal value render carets for input and textarea now reuse the
+  same text-control caret rectangle helper, while renderer-only password and
+  preedit display cases keep their local measurement fallback. Rich DOM text
+  byte offsets now construct `EditingBoundary` values inside the facade rather
+  than open-coding DOM/UTF-16 conversion in mouse handlers. The
+  `test_editing_mixed_selection_clamp` fixture pins the two cross-surface drag
+  rules.
+- Text-control selection highlight geometry also lives behind the E4 facade:
+  `editing_geometry_text_control_for_each_selection_rect()` emits input and
+  textarea selection rectangles from the same value offsets as caret geometry.
+  `render_form.cpp` now applies only paint-time scale, horizontal scroll, and
+  text alignment. Password and IME preedit highlights intentionally keep local
+  fallback math because their rendered strings differ from the stored value.
+- Rich `beforeinput` target-range validation now uses
+  `editing_geometry_surface_contains_range()`. A mutating rich intent whose
+  live DOM Selection crosses an embedded text control is consumed and rejected
+  before JS/Lambda default mutation can run; the mixed fixture now covers this
+  with Ctrl+X over a rich selection that straddles an `<input>`.
+- Rich text point-to-boundary projection is now also available through
+  `editing_geometry_dom_text_boundary_from_point()`, backed by the shared
+  glyph inverse resolver. Rich mousedown, drag extension, and mouseup
+  collapse now ask the facade for the clicked DOM text boundary first, with
+  the older event-local glyph walker kept only as a fallback.
+- Rich Shift+Up/Down/Home/End selection now extends to the caret's post-move
+  view through `selection_extend_to_view()`, using the raw render caret
+  projection after line/document movement. This keeps DOM Selection
+  non-collapsed across line boundaries and gives `editing.selection` logs the
+  actual focus view.
 
 ---
 

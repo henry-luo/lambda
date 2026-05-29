@@ -1,5 +1,6 @@
 #include "editing_dispatch.hpp"
 
+#include "editing_geometry.hpp"
 #include "event_state_log.hpp"
 #include "handler.hpp"
 #include "state_store.hpp"
@@ -21,6 +22,35 @@ static uint32_t editing_log_cstr_len(const char* text) {
 
 static bool editing_log_redact(const EditingSurface* surface) {
     return surface && surface->mode == EDIT_MODE_PASSWORD_TEXT;
+}
+
+static bool editing_intent_needs_target_range_validation(
+        const EditingIntent* intent) {
+    if (!intent || !input_intent_is_dispatchable(intent->type)) return false;
+    switch (intent->type) {
+        case INPUT_INTENT_COMPOSITION_START:
+        case INPUT_INTENT_HISTORY_UNDO:
+        case INPUT_INTENT_HISTORY_REDO:
+            return false;
+        default:
+            return true;
+    }
+}
+
+static bool editing_rich_target_ranges_are_valid(DocState* state,
+                                                 const EditingSurface* surface,
+                                                 const EditingIntent* intent) {
+    if (!editing_intent_needs_target_range_validation(intent)) return true;
+    if (!state || !state->dom_selection || state->dom_selection->range_count == 0) {
+        return true;
+    }
+    for (uint32_t i = 0; i < state->dom_selection->range_count; i++) {
+        DomRange* range = state->dom_selection->ranges[i];
+        if (range && !editing_geometry_surface_contains_range(surface, range)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static void editing_log_write_surface(JsonWriter* w,
@@ -114,9 +144,17 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
     // signal handled to the lower input pipeline.
     bool dispatchable = input_intent_is_dispatchable(intent->type);
     editing_dispatch_log_intent(evcon, surface, intent);
+    DocState* state = editing_dispatch_doc_state(evcon);
+
+    if (!editing_rich_target_ranges_are_valid(state, surface, intent)) {
+        editing_log_record(evcon, surface, intent, "editing.beforeinput",
+                           true, false);
+        log_debug("editing_dispatch_beforeinput: rejected mixed-surface target range for %s",
+                  input_intent_type_name(intent->type));
+        return true;
+    }
 
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
-        DocState* state = editing_dispatch_doc_state(evcon);
         if (!state || !selection_has(state)) return false;
         if (hooks->copy_selection) {
             hooks->copy_selection(state, "rich cut", hooks->user);

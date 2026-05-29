@@ -97,6 +97,7 @@ enum SimEventType {
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
+    SIM_EVENT_ASSERT_FORM_SELECTION,
     SIM_EVENT_ASSERT_PREEDIT,   // verify transient IME preedit text
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
@@ -142,6 +143,7 @@ struct SimEvent {
     int wait_ms;                 // wait duration in milliseconds
     int expected_view_type;      // for assertions
     int expected_char_offset;    // for assertions
+    int expected_selection_end;  // for assert_form_selection
     bool expected_is_collapsed;  // for assertions
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
