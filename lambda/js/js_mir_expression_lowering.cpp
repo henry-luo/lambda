@@ -2905,6 +2905,31 @@ static void jm_emit_destructure_pre_binding_probe(JsMirTranspiler* mt, JsAstNode
     jm_emit_exc_propagate_check(mt);
 }
 
+static bool jm_current_scope_has_var(JsMirTranspiler* mt, const char* vname) {
+    if (!mt || !vname || mt->scope_depth < 0 || mt->scope_depth >= 64 ||
+        !mt->var_scopes[mt->scope_depth]) {
+        return false;
+    }
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", vname);
+    return hashmap_get(mt->var_scopes[mt->scope_depth], &key) != NULL;
+}
+
+static bool jm_current_param_pattern_declares(JsMirTranspiler* mt, const char* vname) {
+    if (!mt || !vname || !mt->current_fc || !mt->current_fc->node) return false;
+    struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    JsAstNode* param = mt->current_fc->node->params;
+    while (param) {
+        jm_collect_pattern_names(param, names);
+        param = param->next;
+    }
+    bool found = jm_name_set_has(names, vname);
+    hashmap_free(names);
+    return found;
+}
+
 // Bind a value to a named variable (find existing or create new register).
 // Handles closure env write-back and scope_env write-back.
 void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t val) {
@@ -2921,6 +2946,12 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
             module_var->var_kind != JS_VAR_CONST) {
             module_var = NULL;
         }
+    }
+
+    bool current_param_binding = jm_current_param_pattern_declares(mt, vname);
+    if (current_param_binding) {
+        if (!jm_current_scope_has_var(mt, vname)) var = NULL;
+        module_var = NULL;
     }
 
     bool local_shadows_module = module_var && var && !mt->destructure_assignment_mode;
@@ -5897,11 +5928,32 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
 
 // P6: Check if a function is eligible for call-site inlining.
 // Requires: native version, no captures, ≤4 params, single return statement body.
+static bool jm_inline_params_are_simple(JsFunctionNode* fn) {
+    if (!fn) return false;
+    JsAstNode* p = fn->params;
+    while (p) {
+        JsAstNode* binding = p;
+        if (binding->node_type == (int)TS_AST_NODE_PARAMETER) {
+            TsParameterNode* tsp = (TsParameterNode*)binding;
+            binding = tsp->pattern;
+        }
+        if (binding && binding->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)binding;
+            binding = ap->left;
+        }
+        if (!binding || binding->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        p = p->next;
+    }
+    return true;
+}
+
 bool jm_should_inline(JsFuncCollected* fc) {
     if (!fc->has_native_version || !fc->native_func_item) return false;
     if (fc->capture_count > 0) return false;
+    if (fc->has_non_simple_params) return false;
     if (fc->param_count > 4) return false;
     if (!fc->node || !fc->node->body) return false;
+    if (!jm_inline_params_are_simple(fc->node)) return false;
     if (fc->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return false;
     JsBlockNode* blk = (JsBlockNode*)fc->node->body;
     // require exactly one statement and it must be a return

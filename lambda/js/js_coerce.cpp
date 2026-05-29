@@ -137,7 +137,8 @@ extern "C" Item js_to_primitive(Item value, JsHint hint) {
         bool null_proto = proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED ||
             proto_type == LMD_TYPE_NULL || proto_type == LMD_TYPE_UNDEFINED;
         Map* object_proto = js_resolve_object_prototype();
-        if (raw_proto_found && null_proto && value.map != object_proto) {
+        if (raw_proto_found && null_proto && value.map != object_proto &&
+            !js_map_kind_uses_default_object_to_primitive(value.map->map_kind)) {
             bool has_vo = false, has_ts = false;
             js_map_get_fast_ext(value.map, "valueOf", 7, &has_vo);
             js_map_get_fast_ext(value.map, "toString", 8, &has_ts);
