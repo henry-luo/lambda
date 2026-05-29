@@ -176,8 +176,13 @@ static void ctx_menu_exec_paste(DomElement* elem, DocState* state,
     te_paste(elem, state, static_cast<View*>(elem), clip, (uint32_t)strlen(clip));
 }
 
-static void ctx_menu_exec_select_all(DomElement* elem) {
+static void ctx_menu_exec_select_all(DomElement* elem, DocState* state,
+                                     const ContextMenuEditHooks* hooks) {
     if (!elem || !elem->form) return;
+    if (hooks && hooks->select_all &&
+        hooks->select_all(hooks->user, elem, state)) {
+        return;
+    }
     tc_set_selection_range(elem, 0, elem->form->current_value_u16_len, 1);
 }
 
@@ -204,7 +209,7 @@ bool context_menu_click_with_hooks(DocState* state, float x, float y,
         case CTX_MENU_COPY:       ctx_menu_exec_copy(elem); break;
         case CTX_MENU_PASTE:      ctx_menu_exec_paste(elem, state, hooks); break;
         case CTX_MENU_DELETE:     ctx_menu_exec_delete(elem, state, hooks); break;
-        case CTX_MENU_SELECT_ALL: ctx_menu_exec_select_all(elem); break;
+        case CTX_MENU_SELECT_ALL: ctx_menu_exec_select_all(elem, state, hooks); break;
     }
     context_menu_close(state);
     return true;

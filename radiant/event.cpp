@@ -242,6 +242,32 @@ static void event_log_editing_mutation(DocState* state,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
+static void event_log_editing_selection(DocState* state,
+                                        const EditingSurface* surface,
+                                        const InputIntent* intent,
+                                        const char* operation,
+                                        uint32_t anchor,
+                                        uint32_t focus) {
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    bool redacted = event_log_editing_redact(surface);
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.selection", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "operation", operation ? operation : "select");
+        event_log_editing_surface(&w, surface);
+        jw_kv_str(&w, "input_type",
+                  intent ? input_intent_type_name(intent->type) : "");
+        jw_kv_uint(&w, "anchor", redacted ? 0 : anchor);
+        jw_kv_uint(&w, "focus", redacted ? 0 : focus);
+        jw_kv_bool(&w, "redacted", redacted);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 static void sync_viewport_scroll_state(EventContext* evcon) {
     if (!evcon || !evcon->ui_context || !evcon->ui_context->document) return;
 
@@ -1635,6 +1661,254 @@ static bool dispatch_context_menu_paste(void* user, DomElement* elem,
     if (!evcon || !elem || !state) return false;
     return dispatch_form_text_paste(evcon, elem, state, static_cast<View*>(elem),
                                     text, len) > 0;
+}
+
+static void dispatch_selectstart(EventContext* evcon, View* target);
+
+static bool dispatch_form_selection_byte_range(DomElement* elem, DocState* state,
+                                               View* target,
+                                               uint32_t* out_start,
+                                               uint32_t* out_end) {
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (!elem || !state || !target || !tc_is_text_control(elem)) return false;
+
+    tc_ensure_init(elem);
+    tc_sync_legacy_to_form(elem, state);
+    FormControlProp* form = elem->form;
+    if (!form || !form->current_value) return false;
+
+    uint32_t start16 = 0;
+    uint32_t end16 = 0;
+    form_control_get_selection(state, target, &start16, &end16, nullptr);
+    if (start16 == end16) return false;
+    if (start16 > end16) {
+        uint32_t t = start16;
+        start16 = end16;
+        end16 = t;
+    }
+
+    uint32_t start8 = tc_utf16_to_utf8_offset(form->current_value,
+                                              form->current_value_len,
+                                              start16);
+    uint32_t end8 = tc_utf16_to_utf8_offset(form->current_value,
+                                            form->current_value_len,
+                                            end16);
+    if (start8 > end8) {
+        uint32_t t = start8;
+        start8 = end8;
+        end8 = t;
+    }
+    if (start8 > form->current_value_len) start8 = form->current_value_len;
+    if (end8 > form->current_value_len) end8 = form->current_value_len;
+    if (start8 == end8) return false;
+
+    if (out_start) *out_start = start8;
+    if (out_end) *out_end = end8;
+    return true;
+}
+
+static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
+                                         DocState* state, View* target,
+                                         const char* prefix) {
+    (void)evcon;
+    uint32_t start = 0;
+    uint32_t end = 0;
+    if (!dispatch_form_selection_byte_range(elem, state, target,
+                                            &start, &end)) {
+        return false;
+    }
+    FormControlProp* form = elem->form;
+    char* buf = (char*)mem_alloc((size_t)(end - start) + 1, MEM_CAT_TEMP);
+    if (!buf) return false;
+    memcpy(buf, form->current_value + start, end - start);
+    buf[end - start] = '\0';
+    clipboard_copy_text(buf);
+    log_debug("%s: copied form selection bytes=%u",
+              prefix ? prefix : "form copy", end - start);
+    mem_free(buf);
+    return true;
+}
+
+static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
+                                        DocState* state, View* target) {
+    if (!evcon || !elem || !state || !target) return false;
+    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
+        !form_control_is_disabled(state, static_cast<View*>(elem));
+    if (!editable) return false;
+
+    uint32_t start = 0;
+    uint32_t end = 0;
+    if (!dispatch_form_selection_byte_range(elem, state, target,
+                                            &start, &end)) {
+        return false;
+    }
+    if (!dispatch_form_copy_selection(evcon, elem, state, target, "form cut")) {
+        return false;
+    }
+    return dispatch_form_text_replace(evcon, elem, state, target,
+                                      start, end, nullptr, 0,
+                                      INPUT_INTENT_DELETE_BY_CUT);
+}
+
+static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return false;
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_SELECT_ALL;
+    editing_dispatch_log_intent(evcon, &surface, &intent);
+
+    const char* value = elem->form ? elem->form->value : nullptr;
+    uint32_t value_len = event_log_text_len(value);
+    selection_start(state, target, 0);
+    selection_extend(state, (int)value_len);
+    selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, &surface, &intent, "selectAll",
+                                0, value_len);
+    return true;
+}
+
+static bool dispatch_context_menu_select_all(void* user, DomElement* elem,
+                                             DocState* state) {
+    EventContext* evcon = (EventContext*)user;
+    if (!evcon || !elem || !state) return false;
+    return dispatch_form_select_all(evcon, elem, state, static_cast<View*>(elem));
+}
+
+static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
+                                         DocState* state, View* target,
+                                         uint32_t offset,
+                                         const char* operation) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return false;
+    }
+
+    const char* value = elem->form ? elem->form->value : nullptr;
+    uint32_t value_len = event_log_text_len(value);
+    if (offset > value_len) offset = value_len;
+
+    caret_set(state, target, (int)offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, &surface, nullptr,
+                                operation ? operation : "collapse",
+                                offset, offset);
+    return true;
+}
+
+static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem,
+                                           DocState* state, View* target,
+                                           int anchor_offset, int focus_offset,
+                                           const char* operation) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return false;
+    }
+
+    const char* value = elem->form ? elem->form->value : nullptr;
+    int value_len = (int)event_log_text_len(value); // INT_CAST_OK: text-control offsets use StateStore int APIs.
+    if (anchor_offset < 0) anchor_offset = 0;
+    if (focus_offset < 0) focus_offset = 0;
+    if (anchor_offset > value_len) anchor_offset = value_len;
+    if (focus_offset > value_len) focus_offset = value_len;
+
+    int log_anchor = anchor_offset;
+    View* existing_anchor_view = nullptr;
+    int existing_anchor_offset = 0;
+    if (selection_get_pointer_anchor(state, &existing_anchor_view,
+                                     &existing_anchor_offset) &&
+        existing_anchor_view == target) {
+        log_anchor = existing_anchor_offset;
+    } else {
+        selection_start(state, target, anchor_offset);
+        selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
+    }
+
+    selection_extend(state, focus_offset);
+    caret_set(state, target, focus_offset);
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, &surface, nullptr,
+                                operation ? operation : "extend",
+                                (uint32_t)log_anchor, (uint32_t)focus_offset);
+    return true;
+}
+
+static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
+                                          DocState* state, View* target,
+                                          uint32_t offset,
+                                          const char* operation) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return false;
+    }
+
+    tc_ensure_init(elem);
+    uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
+    if (offset > value_len) offset = value_len;
+
+    dispatch_selectstart(evcon, target);
+    selection_start(state, target, (int)offset); // INT_CAST_OK: StateStore selection API uses int offsets.
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, &surface, nullptr,
+                                operation ? operation : "start",
+                                offset, offset);
+    return true;
+}
+
+static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
+                                          DocState* state, View* target,
+                                          uint32_t start, uint32_t end,
+                                          const char* operation) {
+    if (!evcon || !elem || !state || !target) return false;
+    if (!tc_is_text_control(elem)) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface)) {
+        return false;
+    }
+
+    tc_ensure_init(elem);
+    uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
+    if (start > value_len) start = value_len;
+    if (end > value_len) end = value_len;
+    if (end < start) {
+        uint32_t t = start;
+        start = end;
+        end = t;
+    }
+
+    selection_start(state, target, (int)start); // INT_CAST_OK: StateStore selection API uses int offsets.
+    selection_extend(state, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+    caret_set(state, target, (int)end); // INT_CAST_OK: StateStore caret API uses int offsets.
+    selection_finish_active_gesture(state);
+    tc_sync_legacy_to_form(elem, state);
+    event_log_editing_selection(state, &surface, nullptr,
+                                operation ? operation : "selectRange",
+                                start, end);
+    return true;
 }
 
 static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
@@ -4210,8 +4484,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                     }
 
-                    selection_extend(state, char_offset);
-                    caret_set(state, anchor_view, char_offset);
+                    dispatch_form_selection_extend(&evcon, anchor_elem, state,
+                        anchor_view, anchor_offset, char_offset, "dragExtend");
                     evcon.need_repaint = true;
                     // skip text selection drag below
                     goto textarea_drag_done;
@@ -4280,11 +4554,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                     }
 
-                    selection_extend(state, char_offset);
-                    caret_set(state, anchor_view, char_offset);
+                    dispatch_form_selection_extend(&evcon, anchor_elem, state,
+                        anchor_view, anchor_offset, char_offset, "dragExtend");
                     // Refresh StateStore text-control selection projection so
                     // render_form shows the live drag highlight.
-                    tc_sync_legacy_to_form(anchor_elem, state);
                     uint32_t sel_start = 0, sel_end = 0;
                     form_control_get_selection(state, static_cast<View*>(anchor_elem), &sel_start, &sel_end, NULL);
                     log_debug("[INPUT DRAG SEL] char_offset=%d sel_u16=[%u..%u] tc_init=%d",
@@ -4544,6 +4817,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     hooks.cut_selection = dispatch_context_menu_cut;
                     hooks.delete_selection = dispatch_context_menu_delete;
                     hooks.paste_text = dispatch_context_menu_paste;
+                    hooks.select_all = dispatch_context_menu_select_all;
                     hooks.user = &evcon;
                     context_menu_click_with_hooks(state, mxp, myp, &hooks);
                 }
@@ -4761,8 +5035,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         char_offset = 0;
                     }
 
-                    caret_set(state, evcon.target, char_offset);
-
                     // Compute caret visual position by measuring text up to char_offset
                     float text_width_to_caret = 0;
                     if (value && char_offset > 0 && input_block->font) {
@@ -4802,21 +5074,31 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // the single-line input drag-selection branch and
                     // mirrors the result back into form->selection_*.
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
-                        dispatch_selectstart(&evcon, evcon.target);
-                        selection_start(state, evcon.target, char_offset);
+                        dispatch_form_selection_start(&evcon, target_elem, state,
+                            evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
-                        selection_extend(state, char_offset);
+                        dispatch_form_selection_extend(&evcon, target_elem, state,
+                            evcon.target, char_offset, char_offset, "extendMouse");
                     }
 
                     // F2 (Radiant_Design_Form_Input.md §3.4): dblclick =>
                     // word selection, tripleclick (or higher) => select-all
                     // for single-line <input>.
                     if (event->mouse_button.clicks >= 3) {
-                        te_select_all(target_elem, state, evcon.target);
+                        dispatch_form_select_all(&evcon, target_elem, state, evcon.target);
                     } else if (event->mouse_button.clicks == 2) {
-                        if (!te_select_word_at(target_elem, state, evcon.target,
-                                               (uint32_t)char_offset)) {
-                            // No word at click — fall through to caret set above.
+                        const char* select_value = target_elem->form
+                            ? target_elem->form->current_value : nullptr;
+                        uint32_t select_len = target_elem->form
+                            ? target_elem->form->current_value_len : 0;
+                        if (select_value && select_len > 0) {
+                            uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                            uint32_t start = te_word_start(select_value, select_len, click_off);
+                            uint32_t end = te_word_end(select_value, select_len, click_off);
+                            if (start != end) {
+                                dispatch_form_selection_range(&evcon, target_elem, state,
+                                    evcon.target, start, end, "selectWord");
+                            }
                         }
                     }
                     evcon.need_repaint = true;
@@ -4904,25 +5186,42 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         char_offset = line_off;
                     }
 
-                    caret_set(state, evcon.target, char_offset);
-
                     // Start/extend textarea selection
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
-                        dispatch_selectstart(&evcon, evcon.target);
-                        selection_start(state, evcon.target, char_offset);
+                        dispatch_form_selection_start(&evcon, target_elem, state,
+                            evcon.target, (uint32_t)char_offset, "mouseDown");
                     } else if (selection_has_projection(state)) {
-                        selection_extend(state, char_offset);
+                        dispatch_form_selection_extend(&evcon, target_elem, state,
+                            evcon.target, char_offset, char_offset, "extendMouse");
                     }
 
                     log_debug("TEXTAREA CARET: offset=%d line=%d", char_offset, click_line);
                     // F2: dblclick selects the word, tripleclick selects the
                     // logical line in <textarea>.
                     if (event->mouse_button.clicks >= 3) {
-                        te_select_line_at(target_elem, state, evcon.target,
-                                          (uint32_t)char_offset);
+                        const char* select_value = target_elem->form
+                            ? target_elem->form->current_value : nullptr;
+                        uint32_t select_len = target_elem->form
+                            ? target_elem->form->current_value_len : 0;
+                        uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                        uint32_t start = te_line_start(select_value, select_len, click_off);
+                        uint32_t end = te_line_end(select_value, select_len, click_off);
+                        dispatch_form_selection_range(&evcon, target_elem, state,
+                            evcon.target, start, end, "selectLine");
                     } else if (event->mouse_button.clicks == 2) {
-                        te_select_word_at(target_elem, state, evcon.target,
-                                          (uint32_t)char_offset);
+                        const char* select_value = target_elem->form
+                            ? target_elem->form->current_value : nullptr;
+                        uint32_t select_len = target_elem->form
+                            ? target_elem->form->current_value_len : 0;
+                        if (select_value && select_len > 0) {
+                            uint32_t click_off = char_offset < 0 ? 0 : (uint32_t)char_offset;
+                            uint32_t start = te_word_start(select_value, select_len, click_off);
+                            uint32_t end = te_word_end(select_value, select_len, click_off);
+                            if (start != end) {
+                                dispatch_form_selection_range(&evcon, target_elem, state,
+                                    evcon.target, start, end, "selectWord");
+                            }
+                        }
                     }
                     evcon.need_repaint = true;
 
@@ -5640,7 +5939,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 int value_len = value ? (int)strlen(value) : 0;
                 int cur = form_caret_offset;
                 bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
+                bool ctrl = (key_event->mods & RDT_MOD_CTRL)  != 0;
                 bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
 
                 // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo. Bypass
                 // the rest of the input-branch dispatch on consume.
@@ -5656,7 +5957,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            caret_set(state, focused, vlen);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)vlen, "historyClamp");
                         }
                         evcon.need_repaint = true;
                     }
@@ -5670,8 +5972,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            caret_set(state, focused, vlen);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)vlen, "historyClamp");
                         }
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+
+                if ((cmd || ctrl) && key_event->key == RDT_KEY_A) {
+                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
+                        evcon.need_repaint = true;
+                    }
+                    break;
+                }
+                if ((cmd || ctrl) && key_event->key == RDT_KEY_C) {
+                    dispatch_form_copy_selection(&evcon, focus_elem, state,
+                                                 focused, "form input copy");
+                    break;
+                }
+                if ((cmd || ctrl) && key_event->key == RDT_KEY_X) {
+                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
+                                                    focused)) {
                         evcon.need_repaint = true;
                     }
                     break;
@@ -5701,42 +6023,80 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                // F3: Alt+Left/Right → word jump (using te_prev/next_word_byte
-                // on the live UTF-8 buffer). Caret-only; no selection extend
-                // here to keep behavior change minimal.
+                // F3: Alt+Left/Right → word jump using te_prev/next_word_byte
+                // on the live UTF-8 buffer; Shift extends from the current
+                // text-control anchor through the unified selection helper.
                 if (alt && key_event->key == RDT_KEY_LEFT) {
-                    caret_set(state, focused, (int)te_prev_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur));
+                    uint32_t new_off = te_prev_word_byte(value, (uint32_t)value_len,
+                                                         (uint32_t)cur);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, (int)new_off, "extendWordBackward");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, new_off, "moveWordBackward");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 if (alt && key_event->key == RDT_KEY_RIGHT) {
-                    caret_set(state, focused, (int)te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur));
+                    uint32_t new_off = te_next_word_byte(value, (uint32_t)value_len,
+                                                         (uint32_t)cur);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, (int)new_off, "extendWordForward");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, new_off, "moveWordForward");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Cmd+Left == Home, Cmd+Right == End on macOS for
                 // single-line inputs.
                 if (cmd && key_event->key == RDT_KEY_LEFT) {
-                    caret_set(state, focused, 0);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, 0, "extendLineStart");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                                     focused, 0, "moveLineStart");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 if (cmd && key_event->key == RDT_KEY_RIGHT) {
-                    caret_set(state, focused, value_len);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, value_len, "extendLineEnd");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)value_len, "moveLineEnd");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Up/Down in single-line <input> mirrors Chrome —
                 // move caret to start/end of value (no vertical motion).
                 if (key_event->key == RDT_KEY_UP) {
-                    caret_set(state, focused, 0);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, 0, "extendLineStart");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                                     focused, 0, "moveLineStart");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 if (key_event->key == RDT_KEY_DOWN) {
-                    caret_set(state, focused, value_len);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, value_len, "extendLineEnd");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)value_len, "moveLineEnd");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -5778,7 +6138,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // walk back to UTF-8 character boundary
                         while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                             new_off--;
-                        caret_set(state, focused, new_off);
+                        if (shift) {
+                            dispatch_form_selection_extend(&evcon, focus_elem, state,
+                                focused, cur, new_off, "extendCharacterBackward");
+                        } else {
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)new_off, "moveCharacterBackward");
+                        }
                     }
                     evcon.need_repaint = true;
                     break;
@@ -5787,17 +6153,37 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (cur < value_len && value) {
                         uint32_t cp;
                         int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
-                        if (bytes > 0)
-                            caret_set(state, focused, cur + bytes);
+                        if (bytes > 0) {
+                            int new_off = cur + bytes;
+                            if (shift) {
+                                dispatch_form_selection_extend(&evcon, focus_elem, state,
+                                    focused, cur, new_off, "extendCharacterForward");
+                            } else {
+                                dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                    focused, (uint32_t)new_off, "moveCharacterForward");
+                            }
+                        }
                     }
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_HOME) {
-                    caret_set(state, focused, 0);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, 0, "extendLineStart");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                                     focused, 0, "moveLineStart");
+                    }
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_END) {
-                    caret_set(state, focused, value_len);
+                    if (shift) {
+                        dispatch_form_selection_extend(&evcon, focus_elem, state,
+                            focused, cur, value_len, "extendLineEnd");
+                    } else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)value_len, "moveLineEnd");
+                    }
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {
@@ -5812,7 +6198,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 new_off--;
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, collapse_off, "lambdaDeleteBackward");
                         }
                     } else if (editable) {
                         // Plain HTML input: perform the delete ourselves.
@@ -5918,73 +6306,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
 
                 // helper: begin or extend selection for shift-modified keys
-                auto sel_begin_or_extend = [&](int new_off) {
-                    if (!selection_has(state)) {
-                        selection_start(state, focused, cur);
-                        selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                    }
-                    selection_extend(state, new_off);
+                // through the unified form editing surface.
+                auto sel_begin_or_extend = [&](int new_off, const char* operation) {
+                    dispatch_form_selection_extend(&evcon, focus_elem, state,
+                        focused, cur, new_off, operation);
                 };
 
                 // Cmd+C: copy selected textarea text to clipboard
-                if (cmd && key_event->key == RDT_KEY_C) {
-                    if (selection_has(state) && value) {
-                        int s, e;
-                        selection_get_range(state, &s, &e);
-                        if (s >= 0 && e > s && e <= value_len) {
-                            Pool* tp = pool_create();
-                            Arena* ta = arena_create_default(tp);
-                            char* buf = (char*)arena_alloc(ta, e - s + 1);
-                            memcpy(buf, value + s, e - s);
-                            buf[e - s] = '\0';
-                            clipboard_copy_text(buf);
-                            log_debug("Textarea copy: %d bytes", e - s);
-                            arena_destroy(ta);
-                            pool_destroy(tp);
-                        }
-                    }
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_C) {
+                    dispatch_form_copy_selection(&evcon, focus_elem, state,
+                                                 focused, "textarea copy");
                     break;
                 }
 
-                // Cmd+X: cut selected textarea text (copy + dispatch "cut" to Lambda)
-                if (cmd && key_event->key == RDT_KEY_X) {
-                    if (selection_has(state) && value) {
-                        int s, e;
-                        selection_get_range(state, &s, &e);
-                        if (s >= 0 && e > s && e <= value_len) {
-                            // copy to clipboard
-                            Pool* tp = pool_create();
-                            Arena* ta = arena_create_default(tp);
-                            char* buf = (char*)arena_alloc(ta, e - s + 1);
-                            memcpy(buf, value + s, e - s);
-                            buf[e - s] = '\0';
-                            clipboard_copy_text(buf);
-                            log_debug("Textarea cut: %d bytes", e - s);
-                            arena_destroy(ta);
-                            pool_destroy(tp);
-
-                            // dispatch "cut" event to Lambda handler
-                            evcon.caret_pos_override_valid = true;
-                            evcon.caret_pos_override = s;
-                            dispatch_lambda_handler(&evcon, focused, "cut");
-                            evcon.caret_pos_override_valid = false;
-                            focused = focus_get(state);
-
-                            // clear selection, clamp caret to new value length
-                            if (focused) caret_set(state, focused, s);
-                            selection_clear(state);
-                            if (focused && focused->is_element()) {
-                                DomElement* fe = lam::dom_require_element(focused);
-                                if (fe->form && fe->form->value) {
-                                    int new_len = (int)strlen(fe->form->value);
-                                    int caret_offset = 0;
-                                    if (caret_get_offset(state, &caret_offset) && caret_offset > new_len)
-                                        caret_set(state, focused, new_len);
-                                }
-                            }
-                        }
+                // Cmd/Ctrl+X: cut selected textarea text through the same
+                // deleteByCut transaction used by context-menu Cut.
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_X) {
+                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
+                                                    focused)) {
+                        evcon.need_repaint = true;
                     }
-                    evcon.need_repaint = true;
                     break;
                 }
 
@@ -6014,12 +6357,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                // Cmd+A: select all text in textarea
-                if (cmd && key_event->key == RDT_KEY_A) {
-                    selection_start(state, focused, 0);
-                    selection_extend(state, value_len);
-                    selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                    evcon.need_repaint = true;
+                // Cmd/Ctrl+A: select all textarea text through the shared
+                // editing surface so keyboard and context-menu selection share
+                // one logging and projection path.
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_A) {
+                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
+                        evcon.need_repaint = true;
+                    }
                     break;
                 }
 
@@ -6035,7 +6380,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            caret_set(state, focused, vlen);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)vlen, "historyClamp");
                         }
                         if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
@@ -6050,7 +6396,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             ? (int)strlen(focus_elem->form->value) : 0;
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            caret_set(state, focused, vlen);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)vlen, "historyClamp");
                         }
                         if (selection_has_projection(state)) selection_clear(state);
                         evcon.need_repaint = true;
@@ -6064,16 +6411,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (alt && key_event->key == RDT_KEY_LEFT) {
                     int new_off = (int)te_prev_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off);
-                    else { caret_set(state, focused, new_off); }
+                    if (shift) sel_begin_or_extend(new_off, "extendWordBackward");
+                    else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
+                            (uint32_t)new_off, "moveWordBackward");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
                 if (alt && key_event->key == RDT_KEY_RIGHT) {
                     int new_off = (int)te_next_word_byte(
                         value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off);
-                    else { caret_set(state, focused, new_off); }
+                    if (shift) sel_begin_or_extend(new_off, "extendWordForward");
+                    else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
+                            (uint32_t)new_off, "moveWordForward");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -6128,8 +6481,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int llen = line_len_from(loff);
                     int target_col = cur_col < llen ? cur_col : llen;
                     int new_off = loff + target_col;
-                    if (shift) sel_begin_or_extend(new_off);
-                    else { caret_set(state, focused, new_off); }
+                    if (shift) {
+                        sel_begin_or_extend(new_off,
+                            key_event->key == RDT_KEY_PAGE_UP
+                                ? "extendPageBackward" : "extendPageForward");
+                    }
+                    else {
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
+                            (uint32_t)new_off,
+                            key_event->key == RDT_KEY_PAGE_UP
+                                ? "movePageBackward" : "movePageForward");
+                    }
                     evcon.need_repaint = true;
                     break;
                 }
@@ -6142,15 +6504,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             new_off--;
                     }
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off, "extendCharacterBackward");
                     } else {
                         // collapse selection if active, else move caret
                         if (selection_has(state)) {
                             int start = 0, end = 0;
                             selection_get_range(state, &start, &end);
-                            caret_set(state, focused, start);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)start, "collapseSelectionStart");
                         } else {
-                            caret_set(state, focused, new_off);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)new_off, "moveCharacterBackward");
                         }
                     }
                     evcon.need_repaint = true;
@@ -6163,14 +6527,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (bytes > 0) new_off = cur + bytes;
                     }
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off, "extendCharacterForward");
                     } else {
                         if (selection_has(state)) {
                             int start = 0, end = 0;
                             selection_get_range(state, &start, &end);
-                            caret_set(state, focused, end);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)end, "collapseSelectionEnd");
                         } else {
-                            caret_set(state, focused, new_off);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, (uint32_t)new_off, "moveCharacterForward");
                         }
                     }
                     evcon.need_repaint = true;
@@ -6184,9 +6550,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         new_off = prev_line_off + target_col;
                     }
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off, "extendLineBackward");
                     } else {
-                        caret_set(state, focused, new_off);
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)new_off, "moveLineBackward");
                     }
                     evcon.need_repaint = true;
                     break;
@@ -6199,18 +6566,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         new_off = next_line_off + target_col;
                     }
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off, "extendLineForward");
                     } else {
-                        caret_set(state, focused, new_off);
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)new_off, "moveLineForward");
                     }
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_HOME) {
                     int new_off = shift && cmd ? 0 : line_start_off(cur_line);
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off,
+                            cmd ? "extendDocumentStart" : "extendLineStart");
                     } else {
-                        caret_set(state, focused, new_off);
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)new_off,
+                            cmd ? "moveDocumentStart" : "moveLineStart");
                     }
                     evcon.need_repaint = true;
                     break;
@@ -6218,9 +6589,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     int loff = line_start_off(cur_line);
                     int new_off = shift && cmd ? value_len : loff + line_len_from(loff);
                     if (shift) {
-                        sel_begin_or_extend(new_off);
+                        sel_begin_or_extend(new_off,
+                            cmd ? "extendDocumentEnd" : "extendLineEnd");
                     } else {
-                        caret_set(state, focused, new_off);
+                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                            focused, (uint32_t)new_off,
+                            cmd ? "moveDocumentEnd" : "moveLineEnd");
                     }
                     evcon.need_repaint = true;
                     break;
@@ -6233,7 +6607,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             // selection was deleted: caret goes to selection start
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            caret_set(state, focused, keydown_sel_start <= new_len ? keydown_sel_start : new_len);
+                            uint32_t collapse_off = (uint32_t)(keydown_sel_start <= new_len
+                                ? keydown_sel_start : new_len);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, collapse_off, "lambdaDeleteSelection");
                         } else if ((had_keydown_caret ? keydown_caret_offset : cur) > 0 && value) {
                             // single char delete: move caret back by 1 UTF-8 char
                             int base_off = had_keydown_caret ? keydown_caret_offset : cur;
@@ -6242,7 +6619,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 new_off--;
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
-                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, collapse_off, "lambdaDeleteBackward");
                         }
                     } else if (editable) {
                         uint32_t a, b;
@@ -6299,13 +6678,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             int new_off = keydown_sel_start + 1;
-                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, collapse_off, "lambdaInsertParagraph");
                         } else {
                             // normal enter: advance caret by 1 byte
                             int new_len = focus_elem->form->value
                                 ? (int)strlen(focus_elem->form->value) : 0;
                             int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
-                            caret_set(state, focused, new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
+                                focused, collapse_off, "lambdaInsertParagraph");
                         }
                     } else if (editable) {
                         // Plain HTML textarea: insert newline ourselves.
@@ -6630,13 +7013,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int new_off;
                         if (had_input_selection) {
                             new_off = input_sel_start + char_bytes;
-                            selection_clear(state);
                         } else {
                             new_off = (had_input_caret ? input_caret_offset : caret_offset) + char_bytes;
                         }
                         const char* val = elem->form->value;
                         int val_len = val ? (int)strlen(val) : 0;
-                        caret_set(state, focused, new_off <= val_len ? new_off : val_len);
+                        uint32_t collapse_off = (uint32_t)(new_off <= val_len ? new_off : val_len);
+                        dispatch_form_caret_collapse(&evcon, elem, state,
+                            focused, collapse_off, "lambdaInsertText");
                     }
                 } else if (editable && caret_get_offset(state, &caret_offset)) {
                     // No Lambda handler — insert directly into the form

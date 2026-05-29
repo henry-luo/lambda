@@ -86,6 +86,12 @@ static void editing_log_record(EventContext* evcon,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
+void editing_dispatch_log_intent(EventContext* evcon,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent) {
+    editing_log_record(evcon, surface, intent, "editing.intent", false, false);
+}
+
 bool editing_dispatch_beforeinput(EventContext* evcon,
                                   const EditingSurface* surface,
                                   const EditingIntent* intent,
@@ -107,7 +113,7 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
     // template handlers, but do not dispatch a JS InputEvent and do not
     // signal handled to the lower input pipeline.
     bool dispatchable = input_intent_is_dispatchable(intent->type);
-    editing_log_record(evcon, surface, intent, "editing.intent", false, false);
+    editing_dispatch_log_intent(evcon, surface, intent);
 
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
         DocState* state = editing_dispatch_doc_state(evcon);
@@ -168,7 +174,7 @@ bool editing_dispatch_form_beforeinput(EventContext* evcon,
     }
 
     bool dispatchable = input_intent_is_dispatchable(intent->type);
-    editing_log_record(evcon, surface, intent, "editing.intent", false, false);
+    editing_dispatch_log_intent(evcon, surface, intent);
     bool js_prevented = false;
     if (dispatchable && hooks->dispatch_input_event) {
         js_prevented = hooks->dispatch_input_event(evcon, surface->view,

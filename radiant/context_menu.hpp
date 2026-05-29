@@ -48,11 +48,14 @@ typedef bool (*ContextMenuReplaceFn)(void* user, DomElement* elem,
 typedef bool (*ContextMenuPasteFn)(void* user, DomElement* elem,
                                    DocState* state,
                                    const char* text, uint32_t len);
+typedef bool (*ContextMenuSelectAllFn)(void* user, DomElement* elem,
+                                       DocState* state);
 
 struct ContextMenuEditHooks {
     ContextMenuReplaceFn cut_selection;
     ContextMenuReplaceFn delete_selection;
     ContextMenuPasteFn paste_text;
+    ContextMenuSelectAllFn select_all;
     void* user;
 };
 

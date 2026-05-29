@@ -776,6 +776,35 @@ For WPT:
   `editing.input`. The form mutation records are emitted at the value-store
   choke points in `event.cpp`, while shared intent/event records live in
   `editing_dispatch.cpp`; password surfaces redact lengths and offsets.
+- Form `selectAll` now has a shared helper for single-line input, textarea,
+  and native context-menu Select All. It logs `editing.intent` plus
+  `editing.selection` and keeps StateStore/form selection projection in one
+  path.
+- Single-line form caret navigation now uses `dispatch_form_caret_collapse()`
+  for character, word, line, Home/End, and Up/Down movement. This keeps caret
+  movement, form selection projection, and `editing.selection` logging together.
+- Textarea non-Shift caret navigation now uses the same collapse helper while
+  preserving textarea-specific line/column offset calculation.
+- Form Shift-selection navigation now uses `dispatch_form_selection_extend()`
+  for single-line input and textarea character, word, line, document, and page
+  extension. The key-specific offset math stays local to each control type,
+  but anchor preservation, StateStore/form projection, and `editing.selection`
+  logging now share one helper.
+- Keyboard Copy/Cut for form text controls now uses a shared text-control
+  selection byte-range helper. Copy still writes plain clipboard text, while
+  Cut routes the deletion through `dispatch_form_text_replace()` with
+  `deleteByCut`, giving input and textarea the same `beforeinput` / mutation /
+  `input` transaction as context-menu Cut.
+- Form mouse selection now shares the same selection helpers for mousedown
+  anchor setup, drag extension, double-click word selection, triple-click line
+  or all selection, and Shift-click extension. The input/textarea geometry
+  math remains local, but the StateStore/form projection and
+  `editing.selection` logging are centralized.
+- Legacy Lambda-template form handlers still own their model mutation, but the
+  caret reconciliation after those handlers now collapses through
+  `dispatch_form_caret_collapse()`. This keeps post-handler Backspace, Enter,
+  text input, and history clamp projection/logging on the unified selection
+  path while preserving handler-owned value updates.
 
 ---
 
