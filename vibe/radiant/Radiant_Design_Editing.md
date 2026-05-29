@@ -850,6 +850,18 @@ For WPT:
   tick when the pointer is held at the viewport edge, and emits timer-cascade
   `editing.autoscroll` tick records. The focused regression holds the pointer
   still and advances simulated time so event-only scrolling cannot satisfy it.
+- E4 now has a first `radiant/editing_geometry.hpp/.cpp` facade for shared
+  editing boundaries, text-control point-to-offset, caret rects, rich hit
+  testing, and the contenteditable skip-text-control clamp policy. Input and
+  textarea click/drag plus rich click/drag caret projection route through that
+  facade. DOM caret rects use the same glyph-precise X resolver as selection
+  painting. Normal value render carets for input and textarea now reuse the
+  same text-control caret rectangle helper, while renderer-only password and
+  preedit display cases keep their local measurement fallback. Rich DOM text
+  byte offsets now construct `EditingBoundary` values inside the facade rather
+  than open-coding DOM/UTF-16 conversion in mouse handlers. The
+  `test_editing_mixed_selection_clamp` fixture pins the two cross-surface drag
+  rules.
 
 ---
 

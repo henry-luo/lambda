@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Mixed Editing Selection Clamp</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 16px; }
+        input { font: 16px Arial, sans-serif; width: 160px; padding: 2px; margin: 6px; }
+        #plain { display: block; margin: 10px 0 18px 0; }
+        #host {
+            width: 520px;
+            min-height: 42px;
+            border: 1px solid #888;
+            padding: 8px;
+            line-height: 28px;
+        }
+        #embedded { width: 120px; margin: 0 8px; }
+    </style>
+</head>
+<body>
+    <input id="plain" value="abcdef">
+    <div id="host" contenteditable="true">
+        Start words <input id="embedded" value="inner"> End words
+    </div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "Editing geometry - mixed surface selection clamp",
+  "html": "test/ui/test_editing_mixed_selection_clamp.html",
+  "viewport": {"width": 700, "height": 260},
+  "events": [
+    {"type": "log", "message": "=== mixed selection clamp ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Form-origin drag clamps to the input value even outside the control"},
+    {"type": "mouse_down", "target": {"selector": "#plain", "offset_x": 1, "offset_y": 12}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"selector": "#host", "offset_x": 480, "offset_y": 22}},
+    {"type": "wait", "ms": 40},
+    {"type": "assert_form_selection", "target": {"selector": "#plain"}, "start": 0, "end": 6},
+    {"type": "mouse_up", "target": {"selector": "#host", "offset_x": 480, "offset_y": 22}, "button": 0},
+    {"type": "wait", "ms": 60},
+
+    {"type": "log", "message": "Rich-origin drag does not enter embedded input selection state"},
+    {"type": "mouse_down", "target": {"text": "Start"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"selector": "#embedded", "offset_x": 60, "offset_y": 12}},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_form_selection", "target": {"selector": "#embedded"}, "start": 5, "end": 5},
+    {"type": "mouse_move", "target": {"text": "End"}},
+    {"type": "wait", "ms": 40},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_form_selection", "target": {"selector": "#embedded"}, "start": 5, "end": 5},
+    {"type": "mouse_up", "target": {"text": "End"}, "button": 0}
+  ]
+}

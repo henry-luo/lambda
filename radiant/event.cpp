@@ -16,6 +16,7 @@
 #include "editing_host.hpp"
 #include "editing.hpp"
 #include "editing_dispatch.hpp"
+#include "editing_geometry.hpp"
 #include "editing_intent.hpp"
 #include "editing_target_range.hpp"
 #include "../lib/tagged.hpp"
@@ -4975,110 +4976,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     anchor_elem->form &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
-                    ViewBlock* ta_block = lam::view_require_block(anchor_elem);
-                    const char* value = anchor_elem->form->value;
-                    int value_len = value ? (int)strlen(value) : 0;
-
-                    float border = (ta_block->bound && ta_block->bound->border)
-                        ? ta_block->bound->border->width.left : 1.0f;
-                    float padding = ta_block->bound
-                        ? ta_block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
-                    float font_size = ta_block->font ? ta_block->font->font_size : 13.333f;
-                    float line_height = font_size * 1.4f;
-
-                    // compute absolute position of textarea by summing
-                    // every ancestor's x/y (matches get_element_rect_abs in
-                    // event_sim.cpp). The previous BLOCK/INLINE_BLOCK-only
-                    // filter dropped offsets contributed by ancestors of
-                    // other view types (e.g. inline / anonymous wrappers),
-                    // making rel_y too small so the drag never escaped
-                    // line 0.
-                    float ta_abs_x = 0, ta_abs_y = 0;
-                    {
-                        View* p = static_cast<View*>(ta_block);
-                        while (p) {
-                            ta_abs_x += p->x;
-                            ta_abs_y += p->y;
-                            p = static_cast<View*>(p->parent);
-                        }
-                    }
-
-                    // Compute mouse position relative to the textarea
-                    // content area. When the drag is still over the
-                    // textarea, reuse the same evcon.offset_x/y the
-                    // MOUSE_DOWN click handler uses (known good). When the
-                    // drag has escaped to a different view, fall back to
-                    // motion->x/y minus the textarea's absolute position.
-                    float rel_x, rel_y;
-                    if (evcon.target == anchor_view) {
-                        rel_x = evcon.offset_x - border - padding;
-                        rel_y = evcon.offset_y - border - padding;
-                    } else {
-                        rel_x = (float)motion->x - ta_abs_x - border - padding;
-                        rel_y = (float)motion->y - ta_abs_y - border - padding;
-                    }
-                    log_debug("[TA DRAG] motion=(%d,%d) ta_abs=(%.1f,%.1f) "
-                              "target_match=%d off=(%.1f,%.1f) line_h=%.1f rel=(%.1f,%.1f)",
-                              motion->x, motion->y, ta_abs_x, ta_abs_y,
-                              evcon.target == anchor_view ? 1 : 0,
-                              evcon.offset_x, evcon.offset_y,
-                              line_height, rel_x, rel_y);
-                    if (rel_x < 0) rel_x = 0;
-                    if (rel_y < 0) rel_y = 0;
-
-                    int click_line = (int)(rel_y / line_height);
-                    int total_lines = 1;
-                    if (value) {
-                        for (int i = 0; i < value_len; i++)
-                            if (value[i] == '\n') total_lines++;
-                    }
-                    if (click_line >= total_lines) click_line = total_lines - 1;
-                    if (click_line < 0) click_line = 0;
-
-                    // find line start offset
-                    int line_off = 0;
-                    {
-                        int ln = 0;
-                        for (int i = 0; i < value_len && ln < click_line; i++) {
-                            if (value[i] == '\n') {
-                                ln++;
-                                if (ln == click_line) { line_off = i + 1; break; }
-                            }
-                        }
-                    }
-                    int line_len = 0;
-                    while (line_off + line_len < value_len && value[line_off + line_len] != '\n')
-                        line_len++;
-
-                    // compute char offset from mouse position
-                    int char_offset = line_off + line_len;
-                    if (value && line_len > 0 && ta_block->font && rel_x >= 0) {
-                        FontBox fbox = {0};
-                        setup_font(evcon.ui_context, &fbox, ta_block->font);
-                        if (fbox.font_handle) {
-                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                                ? evcon.ui_context->pixel_ratio : 1.0f;
-                            const unsigned char* p = (const unsigned char*)(value + line_off);
-                            const unsigned char* p_end = p + line_len;
-                            float accum_w = 0;
-                            int byte_off = 0;
-                            while (p < p_end) {
-                                uint32_t codepoint;
-                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                                if (bytes <= 0) { p++; byte_off++; continue; }
-                                FontStyleDesc sd = font_style_desc_from_prop(ta_block->font);
-                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
-                                if (rel_x < accum_w + gw / 2.0f) {
-                                    char_offset = line_off + byte_off;
-                                    break;
-                                }
-                                accum_w += gw;
-                                p += bytes;
-                                byte_off += bytes;
-                            }
-                        }
-                    }
+                    uint32_t hit_offset = 0;
+                    editing_geometry_text_control_offset_for_point(evcon.ui_context,
+                        anchor_elem, (float)motion->x, (float)motion->y,
+                        &hit_offset);
+                    int char_offset = (int)hit_offset; // INT_CAST_OK: StateStore selection API uses int offsets.
+                    log_debug("[TA DRAG] motion=(%d,%d) char_offset=%d",
+                              motion->x, motion->y, char_offset);
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
@@ -5094,63 +4998,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     anchor_elem->form &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXT) {
-                    ViewBlock* in_block = lam::view_require_block(anchor_elem);
-                    const char* value = anchor_elem->form->value;
-                    int value_len = value ? (int)strlen(value) : 0;
-
-                    float border = (in_block->bound && in_block->bound->border)
-                        ? in_block->bound->border->width.left : 1.0f;
-                    float padding = in_block->bound
-                        ? in_block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
-
-                    // compute absolute position of input — see textarea
-                    // branch above for why we sum every ancestor's x/y.
-                    float in_abs_x = 0.0f;
-                    {
-                        View* p = static_cast<View*>(in_block);
-                        while (p) {
-                            in_abs_x += p->x;
-                            p = static_cast<View*>(p->parent);
-                        }
-                    }
-
-                    // CSS px in. Reuse evcon.offset_x when over the input.
-                    float rel_x;
-                    if (evcon.target == anchor_view) {
-                        rel_x = evcon.offset_x - border - padding;
-                    } else {
-                        rel_x = (float)motion->x - in_abs_x - border - padding;
-                    }
-                    if (rel_x < 0) rel_x = 0;
-
-                    int char_offset = value_len;
-                    if (value && *value && in_block->font && rel_x >= 0) {
-                        FontBox fbox = {0};
-                        setup_font(evcon.ui_context, &fbox, in_block->font);
-                        if (fbox.font_handle) {
-                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                                ? evcon.ui_context->pixel_ratio : 1.0f;
-                            const unsigned char* p = (const unsigned char*)value;
-                            const unsigned char* p_end = p + value_len;
-                            float accum_w = 0;
-                            int byte_off = 0;
-                            while (p < p_end) {
-                                uint32_t codepoint;
-                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                                if (bytes <= 0) { p++; byte_off++; continue; }
-                                FontStyleDesc sd = font_style_desc_from_prop(in_block->font);
-                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
-                                if (rel_x < accum_w + gw / 2.0f) {
-                                    char_offset = byte_off;
-                                    break;
-                                }
-                                accum_w += gw;
-                                p += bytes;
-                                byte_off += bytes;
-                            }
-                        }
-                    }
+                    uint32_t hit_offset = 0;
+                    editing_geometry_text_control_offset_for_point(evcon.ui_context,
+                        anchor_elem, (float)motion->x, (float)motion->y,
+                        &hit_offset);
+                    int char_offset = (int)hit_offset; // INT_CAST_OK: StateStore selection API uses int offsets.
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
@@ -5186,12 +5038,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 drag_target_view = current_target;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
                        doc && doc->view_tree && doc->view_tree->root) {
-                DomBoundary hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root),
-                    (float)motion->x, (float)motion->y);
-                if (hit.node && hit.node->node_type == DOM_NODE_TEXT) {
-                    DomText* hit_text = lam::dom_require_text(hit.node);
+                EditingSurface anchor_surface;
+                EditingBoundary hit_boundary;
+                bool has_anchor_surface = editing_surface_from_target(anchor_view, &anchor_surface) &&
+                    editing_surface_is_rich(&anchor_surface);
+                bool has_hit_boundary = has_anchor_surface &&
+                    editing_geometry_hit_test_boundary(evcon.ui_context,
+                        static_cast<View*>(doc->view_tree->root), &anchor_surface,
+                        (float)motion->x, (float)motion->y,
+                        EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
+                if (has_hit_boundary && hit_boundary.dom.node &&
+                    hit_boundary.dom.node->node_type == DOM_NODE_TEXT) {
+                    DomText* hit_text = lam::dom_require_text(hit_boundary.dom.node);
                     drag_target_view = static_cast<View*>(hit_text);
-                    drag_hit_offset = (int)dom_text_utf16_to_utf8(hit_text, hit.offset); // INT_CAST_OK: editor selection offsets are byte-index ints
+                    drag_hit_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
                 }
             } else if (selection_focus_view &&
                        selection_focus_view->view_type == RDT_VIEW_TEXT &&
@@ -5325,8 +5185,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Calculate and set visual position for the caret
                 float caret_x, caret_y, caret_height;
-                calculate_position_from_char_offset(&evcon, text, rect,
-                    char_offset, &caret_x, &caret_y, &caret_height);
+                EditingCaretRect caret_rect;
+                if (editing_geometry_dom_text_caret_rect(evcon.ui_context,
+                        text, char_offset < 0 ? 0 : (uint32_t)char_offset,
+                        &caret_rect)) {
+                    caret_x = caret_rect.x;
+                    caret_y = caret_rect.y;
+                    caret_height = caret_rect.height;
+                } else {
+                    calculate_position_from_char_offset(&evcon, text, rect,
+                        char_offset, &caret_x, &caret_y, &caret_height);
+                }
 
                 log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
                     char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
@@ -5520,8 +5389,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Calculate visual position for the caret
                 float caret_x = 0, caret_y = 0, caret_height = 16;
-                calculate_position_from_char_offset(&evcon, text, rect, char_offset,
-                    &caret_x, &caret_y, &caret_height);
+                EditingCaretRect caret_rect;
+                if (editing_geometry_dom_text_caret_rect(evcon.ui_context,
+                        text, char_offset < 0 ? 0 : (uint32_t)char_offset,
+                        &caret_rect)) {
+                    caret_x = caret_rect.x;
+                    caret_y = caret_rect.y;
+                    caret_height = caret_rect.height;
+                } else {
+                    calculate_position_from_char_offset(&evcon, text, rect, char_offset,
+                        &caret_x, &caret_y, &caret_height);
+                }
 
                 caret_project_visual_from_block(state, static_cast<View*>(text), caret_x, caret_y, caret_height,
                                                 evcon.block.x, evcon.block.y);
@@ -5604,84 +5482,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     target_elem->form->control_type == FORM_CONTROL_TEXT &&
                     !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
 
-                    ViewBlock* input_block = lam::view_require_block(target_elem);
-                    const char* value = target_elem->form->value;
-                    int value_len = value ? (int)strlen(value) : 0;
+                    EditingBoundary click_boundary;
+                    editing_geometry_text_control_boundary_from_point(evcon.ui_context,
+                        target_elem, (float)event->mouse_button.x,
+                        (float)event->mouse_button.y, &click_boundary);
+                    int char_offset = (int)click_boundary.offset; // INT_CAST_OK: StateStore selection API uses int offsets.
 
-                    // Compute text area geometry
-                    float border = (input_block->bound && input_block->bound->border)
-                        ? input_block->bound->border->width.left : 1.0f;
-                    float padding = input_block->bound
-                        ? input_block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
-
-                    // Calculate char offset from click position within text area
-                    float rel_x = evcon.offset_x - border - padding;  // click X relative to text start (CSS px)
-                    int char_offset = value_len;  // default: end of text
-
-                    if (value && *value && input_block->font && rel_x >= 0) {
-                        FontBox fbox = {0};
-                        setup_font(evcon.ui_context, &fbox, input_block->font);
-                        if (fbox.font_handle) {
-                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                                ? evcon.ui_context->pixel_ratio : 1.0f;
-                            const unsigned char* p = (const unsigned char*)value;
-                            const unsigned char* p_end = p + value_len;
-                            float accum_w = 0;
-                            int byte_off = 0;
-                            while (p < p_end) {
-                                uint32_t codepoint;
-                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                                if (bytes <= 0) { p++; byte_off++; continue; }
-                                FontStyleDesc sd = font_style_desc_from_prop(input_block->font);
-                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
-                                // if click is before midpoint of this glyph, caret goes before it
-                                if (rel_x < accum_w + gw / 2.0f) {
-                                    char_offset = byte_off;
-                                    break;
-                                }
-                                accum_w += gw;
-                                p += bytes;
-                                byte_off += bytes;
-                            }
-                        }
-                    } else if (rel_x < 0) {
-                        char_offset = 0;
+                    EditingCaretRect caret_rect;
+                    if (editing_geometry_caret_rect(evcon.ui_context, &click_boundary, &caret_rect)) {
+                        caret_project_visual_from_block(state, evcon.target,
+                            caret_rect.x, caret_rect.y, caret_rect.height,
+                            evcon.block.x, evcon.block.y);
+                        log_debug("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
+                            char_offset, caret_rect.x, caret_rect.y, caret_rect.height);
                     }
-
-                    // Compute caret visual position by measuring text up to char_offset
-                    float text_width_to_caret = 0;
-                    if (value && char_offset > 0 && input_block->font) {
-                        FontBox fbox = {0};
-                        setup_font(evcon.ui_context, &fbox, input_block->font);
-                        if (fbox.font_handle) {
-                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                                ? evcon.ui_context->pixel_ratio : 1.0f;
-                            const unsigned char* p = (const unsigned char*)value;
-                            const unsigned char* p_end = p + char_offset;
-                            while (p < p_end) {
-                                uint32_t codepoint;
-                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                                if (bytes <= 0) { p++; continue; }
-                                p += bytes;
-                                FontStyleDesc sd = font_style_desc_from_prop(input_block->font);
-                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                if (glyph) text_width_to_caret += glyph->advance_x / pixel_ratio;
-                            }
-                        }
-                    }
-
-                    float font_size = input_block->font ? input_block->font->font_size : 16.0f;
-                    float caret_x = input_block->x + border + padding + text_width_to_caret;
-                    float caret_y = input_block->y + border +
-                        (input_block->height - 2*border - font_size) / 2;
-                    float caret_height = font_size;
-
-                    caret_project_visual_from_block(state, evcon.target, caret_x, caret_y, caret_height,
-                                                    evcon.block.x, evcon.block.y);
-
-                    log_debug("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
-                        char_offset, caret_x, caret_y, caret_height);
 
                     // Start/extend selection so a subsequent mouse drag
                     // (RDT_EVENT_MOUSE_MOVE with is_selecting=true) hits
@@ -5722,83 +5536,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                            target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
                            !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
-                    ViewBlock* ta_block = lam::view_require_block(target_elem);
-                    const char* value = target_elem->form->value;
-                    int value_len = value ? (int)strlen(value) : 0;
-
-                    float border = (ta_block->bound && ta_block->bound->border)
-                        ? ta_block->bound->border->width.left : 1.0f;
-                    float padding = ta_block->bound
-                        ? ta_block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
-                    float font_size = ta_block->font ? ta_block->font->font_size : 13.333f;
-                    float line_height = font_size * 1.4f;
-
-                    // Click position relative to textarea content area (CSS px)
-                    float rel_x = evcon.offset_x - border - padding;
-                    float rel_y = evcon.offset_y - border - padding;
-                    if (rel_x < 0) rel_x = 0;
-                    if (rel_y < 0) rel_y = 0;
-
-                    // Determine which line was clicked
-                    int click_line = (int)(rel_y / line_height);
-
-                    // Count total lines
-                    int total_lines = 1;
-                    if (value) {
-                        for (int i = 0; i < value_len; i++)
-                            if (value[i] == '\n') total_lines++;
-                    }
-                    if (click_line >= total_lines) click_line = total_lines - 1;
-                    if (click_line < 0) click_line = 0;
-
-                    // Find line start offset
-                    int line_off = 0;
-                    {
-                        int ln = 0;
-                        for (int i = 0; i < value_len && ln < click_line; i++) {
-                            if (value[i] == '\n') {
-                                ln++;
-                                if (ln == click_line) { line_off = i + 1; break; }
-                            }
-                        }
-                    }
-
-                    // Find line length
-                    int line_len = 0;
-                    while (line_off + line_len < value_len && value[line_off + line_len] != '\n')
-                        line_len++;
-
-                    // Calculate char offset within line by measuring glyph widths
-                    int char_offset = line_off + line_len;  // default: end of line
-                    if (value && line_len > 0 && ta_block->font && rel_x >= 0) {
-                        FontBox fbox = {0};
-                        setup_font(evcon.ui_context, &fbox, ta_block->font);
-                        if (fbox.font_handle) {
-                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
-                                ? evcon.ui_context->pixel_ratio : 1.0f;
-                            const unsigned char* p = (const unsigned char*)(value + line_off);
-                            const unsigned char* p_end = p + line_len;
-                            float accum_w = 0;
-                            int byte_off = 0;
-                            while (p < p_end) {
-                                uint32_t codepoint;
-                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
-                                if (bytes <= 0) { p++; byte_off++; continue; }
-                                FontStyleDesc sd = font_style_desc_from_prop(ta_block->font);
-                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
-                                if (rel_x < accum_w + gw / 2.0f) {
-                                    char_offset = line_off + byte_off;
-                                    break;
-                                }
-                                accum_w += gw;
-                                p += bytes;
-                                byte_off += bytes;
-                            }
-                        }
-                    } else if (rel_x < 0) {
-                        char_offset = line_off;
-                    }
+                    EditingBoundary click_boundary;
+                    editing_geometry_text_control_boundary_from_point(evcon.ui_context,
+                        target_elem, (float)event->mouse_button.x,
+                        (float)event->mouse_button.y, &click_boundary);
+                    int char_offset = (int)click_boundary.offset; // INT_CAST_OK: StateStore selection API uses int offsets.
 
                     // Start/extend textarea selection
                     if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
@@ -5809,7 +5551,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             evcon.target, char_offset, char_offset, "extendMouse");
                     }
 
-                    log_debug("TEXTAREA CARET: offset=%d line=%d", char_offset, click_line);
+                    log_debug("TEXTAREA CARET: offset=%d", char_offset);
                     // F2: dblclick selects the word, tripleclick selects the
                     // logical line in <textarea>.
                     if (event->mouse_button.clicks >= 3) {

@@ -5,6 +5,7 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "text_control.hpp"
+#include "editing_geometry.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/font/font.h"
@@ -468,10 +469,26 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         int src_len = src_text ? (int)strlen(src_text) : 0;
         if (has_preedit) caret_byte = (int)preedit_caret_byte;
         if (caret_byte > src_len) caret_byte = src_len;
-        int meas_byte = is_password
-            ? password_mask_byte_offset(src_text, caret_byte)
-            : caret_byte;
-        caret_x_logical = measure_input_text_width(rdcon, render_font, text, meas_byte) * s;
+        bool used_shared_geometry = false;
+        if (!has_preedit && !is_password) {
+            EditingCaretRect caret_rect;
+            if (editing_geometry_text_control_caret_rect(rdcon->ui_context,
+                    static_cast<DomElement*>(block), (uint32_t)caret_byte,
+                    &caret_rect)) {
+                float border_css = form_control_border_left_width(block,
+                    has_css_border, use_default_border);
+                float padding_css = block->bound
+                    ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
+                caret_x_logical = (caret_rect.x - block->x - border_css - padding_css) * s;
+                used_shared_geometry = true;
+            }
+        }
+        if (!used_shared_geometry) {
+            int meas_byte = is_password
+                ? password_mask_byte_offset(src_text, caret_byte)
+                : caret_byte;
+            caret_x_logical = measure_input_text_width(rdcon, render_font, text, meas_byte) * s;
+        }
     }
 
     // F4: keep caret_x_logical within [margin, content_w - margin]. A small
@@ -1354,16 +1371,33 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             if (has_preedit) caret_off = (int)preedit_caret_byte;
             if (caret_off > val_len) caret_off = val_len;
 
-            // compute caret line/column from byte offset
-            int caret_line = 0, caret_col = 0;
-            textarea_offset_to_line_col(value, caret_off, &caret_line, &caret_col);
-
-            // compute caret y = content_y + caret_line * line_height
-            float caret_y_pos = content_y + caret_line * line_height;
-
-            // compute caret x by measuring text from line start to caret column
             float caret_x = content_x;
-            if (value && caret_col > 0 && block->font) {
+            float caret_y_pos = content_y;
+            bool used_shared_geometry = false;
+            if (!has_preedit) {
+                EditingCaretRect caret_rect;
+                if (editing_geometry_text_control_caret_rect(rdcon->ui_context,
+                        static_cast<DomElement*>(block), (uint32_t)caret_off,
+                        &caret_rect)) {
+                    float border_css = form_control_border_left_width(block,
+                        has_css_border, use_default_border);
+                    float padding_css = block->bound
+                        ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
+                    caret_x = content_x + (caret_rect.x - block->x - border_css - padding_css) * s;
+                    caret_y_pos = content_y + (caret_rect.y - block->y - border_css - padding_css) * s;
+                    used_shared_geometry = true;
+                }
+            }
+            if (!used_shared_geometry) {
+                // compute caret line/column from byte offset
+                int caret_line = 0, caret_col = 0;
+                textarea_offset_to_line_col(value, caret_off, &caret_line, &caret_col);
+
+                // compute caret y = content_y + caret_line * line_height
+                caret_y_pos = content_y + caret_line * line_height;
+
+                // compute caret x by measuring text from line start to caret column
+                if (value && caret_col > 0 && block->font) {
                 FontBox fbox = {0};
                 setup_font(rdcon->ui_context, &fbox, block->font);
                 if (fbox.font_handle) {
@@ -1372,6 +1406,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                     int line_off = textarea_line_start(value, caret_line);
                     caret_x = content_x + measure_text_width(fbox.font_handle, block->font,
                                                               pixel_ratio, value + line_off, caret_col) * s;
+                }
                 }
             }
 
