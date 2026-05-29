@@ -37,13 +37,11 @@
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into two groups:
 //       (a) CLEAN    — safe to batch (50 tests per process, CPU count - 1 parallel workers)
-//       (b) PARTIAL  — known non-fully-passing tests from previous run (crash,
-//                       OOM, slow >= threshold, timeout). SKIPPED by default.
-//                       With --run-partial they are merged into CLEAN so they
-//                       can graduate back to baseline if fixed.
+//       (b) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
+//                       previous run. They are included in CLEAN every run so
+//                       the partial list can be rebuilt from fresh results.
 //   - Phase 2:  Execute CLEAN tests in batched workers.
-//   - Phase 2a: REMOVED. Partial tests no longer run individually; they are
-//               either skipped or run via --run-partial (see Phase 1).
+//   - Phase 2a: REMOVED. Previous partial tests are no longer skipped.
 //   - Phase 2b: Retry any batch-lost tests individually (crash recovery for
 //               innocent bystanders co-batched with a crash-point).
 //   - Phase 3:  Evaluate results against expected outcomes.
@@ -51,9 +49,8 @@
 //               the failure was a batch interaction → classified as PARTIAL.
 //
 // Key invariant: every test included in CLEAN must have a result after
-// Phase 2 + 2b. PARTIAL tests skipped by default carry forward their previous
-// status in t262_partial.txt; they neither affect baseline pass count nor the
-// regression gate.
+// Phase 2 + 2b. t262_partial.txt is rewritten from this run's results, with
+// no sticky carry-forward entries.
 //
 // =============================================================================
 
@@ -118,8 +115,8 @@
 static const char* TEST262_ROOT = "ref/test262";
 static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
 static std::string g_harness_dir = "ref/test262/harness";
-// Only tests under their timing gate belong in the baseline.
-// Slow tests (>= threshold) should be moved to test/js262/t262_partial.txt (non-fully-passing list) with SLOW status.
+// Only tests under their timing gate belong in the baseline. Known exhaustive
+// slow tests live in t262_slow.txt and run in isolated slow batches.
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
@@ -1383,12 +1380,6 @@ static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static const long SLOW_TEST_THRESHOLD_US = 5000000L;  // 5 seconds
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
-// --run-partial: when set, tests previously listed in t262_partial.txt are
-// re-classified as CLEAN and run together with everything else in Phase 2.
-// When unset (default), partial tests are skipped entirely — Phase 2a is gone.
-// Use --run-partial periodically to graduate fixed partial tests back into
-// the baseline. See test/js262/JS262_Test.md for details.
-static bool g_run_partial = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
@@ -2869,32 +2860,20 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     std::vector<size_t> batch_indices;
     prepare_all_tests(tests, prepared, batch_indices);
 
-    // Partition batch_indices into two groups:
-    //   1. clean_indices   — safe to run in shared batches of 50
-    //   2. partial_indices — known non-fully-passing from previous run (crash, OOM,
-    //                        slow >= threshold, timeout). Skipped entirely by default.
-    //                        With --run-partial they are merged into clean_indices
-    //                        so they get a batch run and can graduate to baseline.
+    // All non-skipped tests run every time. t262_partial.txt is only the
+    // previous run's report; it is not a skip list.
     std::vector<size_t> clean_indices;
-    std::vector<size_t> partial_indices;
+    size_t previous_partial_count = 0;
     for (size_t idx : batch_indices) {
-        if (prepared[idx].is_slow_test) {
-            clean_indices.push_back(idx);
-        } else if (!g_known_partial.empty() && g_known_partial.count(prepared[idx].test_name)) {
-            if (g_run_partial)
-                clean_indices.push_back(idx);   // promote to CLEAN this round
-            else
-                partial_indices.push_back(idx); // tracked, but NOT executed
-        } else {
-            clean_indices.push_back(idx);
-        }
+        if (!g_known_partial.empty() && g_known_partial.count(prepared[idx].test_name))
+            previous_partial_count++;
+        clean_indices.push_back(idx);
     }
 
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu partial-%s)\n",
-            prep_secs, batch_indices.size(), clean_indices.size(), partial_indices.size(),
-            g_run_partial ? "merged" : "skipped");
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu previous-partial included)\n",
+            prep_secs, batch_indices.size(), clean_indices.size(), previous_partial_count);
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
     auto batch_exec_start = std::chrono::steady_clock::now();
@@ -3013,15 +2992,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     batch_kill_tests.size());
     }
 
-    // Phase 2a removed. Partial tests are either:
-    //   - skipped entirely (default), so they keep their previous-run status
-    //     in t262_partial.txt and will not affect this round's baseline gate; or
-    //   - merged into clean_indices via --run-partial above, in which case they
-    //     already ran in Phase 2 and there is nothing extra to do here.
-    if (!partial_indices.empty()) {
-        fprintf(stderr, "[test262] Phase 2a: skipped %zu partial tests (use --run-partial to execute)\n",
-                partial_indices.size());
-    }
+    // Phase 2a removed. Previous partial tests already ran in Phase 2.
 
     // Phase 2b: retry batch-lost tests in small batches (crash recovery)
     // Only needed for NEW unexpected crashes not in the non-fully-passing list.
@@ -3105,155 +3076,37 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     g_cached_batch_results = batch_results;
 
-    // Write non-fully-passing list for next run.
-    // Cumulative: merge previous entries with newly-discovered ones.
-    // Tests are removed from the list if they fully PASS in batch in Phase 2.
+    // Write a fresh non-fully-passing list for next run. Previous entries are
+    // never preserved by themselves; every line must be justified by this run.
     auto partial_start = std::chrono::steady_clock::now();
     {
-        // Preserve manually-added TIMEOUT_ entries, SLOW_ entries, and # comments from the existing file.
-        // TIMEOUT_ entries are tests that loop forever (Lambda bug: missing throw guard),
-        // SLOW_ entries are tests that took >3s — both run individually, not in batch.
-        // SLOW_ entries are regenerated from fresh timing data if the test ran in this session.
-        std::vector<std::string> timeout_lines;
-        std::unordered_set<std::string> timeout_names;  // names to skip re-emitting as CRASH_
-        {
-            FILE* old_f = fopen("test/js262/t262_partial.txt", "r");
-            if (old_f) {
-                char tbuf[2048];
-                while (fgets(tbuf, sizeof(tbuf), old_f)) {
-                    bool is_timeout = strncmp(tbuf, "TIMEOUT_", 8) == 0;
-                    bool is_slow    = strncmp(tbuf, "SLOW_", 5) == 0;
-                    if (is_timeout || is_slow || tbuf[0] == '#') {
-                        size_t tl = strlen(tbuf);
-                        while (tl > 0 && (tbuf[tl-1] == '\n' || tbuf[tl-1] == '\r')) tbuf[--tl] = '\0';
-                        if (tl > 0) {
-                            if (is_timeout) {
-                                // always preserve TIMEOUT_ entries (dedupe by test name)
-                                char* ft = strchr(tbuf, '\t');
-                                if (ft) {
-                                    char* ns = ft + 1;
-                                    char* st = strchr(ns, '\t');
-                                    if (st) *st = '\0';
-                                    std::string name(ns);
-                                    if (!timeout_names.count(name)) {
-                                        // restore the tab we nul'd, so the saved line is intact
-                                        if (st) *st = '\t';
-                                        timeout_lines.push_back(std::string(tbuf));
-                                        timeout_names.insert(name);
-                                    }
-                                }
-                            } else if (is_slow) {
-                                // preserve SLOW_ entries only if test was not re-run this session,
-                                // or if re-run and still slow (>= threshold). Tests that ran faster
-                                // are released from non-fully-passing list and return to batch execution.
-                                // Dedupe by test name — old files may contain duplicate SLOW_ lines
-                                // for the same test (one per partial-list run while still slow).
-                                char slow_buf[2048];
-                                strncpy(slow_buf, tbuf, sizeof(slow_buf));
-                                slow_buf[sizeof(slow_buf)-1] = '\0';
-                                char* ft = strchr(tbuf, '\t');
-                                if (ft) {
-                                    char* ns = ft + 1;
-                                    char* st = strchr(ns, '\t');
-                                    if (st) { *st = '\0'; }
-                                    std::string name(ns);
-                                    if (timeout_names.count(name)) {
-                                        // already kept this slow test — drop the duplicate
-                                    } else {
-                                        auto br_it = batch_results.find(name);
-                                        long threshold_us = slow_threshold_for_test(name);
-                                        if (br_it == batch_results.end() ||
-                                            br_it->second.elapsed_us >= threshold_us) {
-                                            // not re-run or still slow → preserve
-                                            timeout_lines.push_back(std::string(slow_buf));
-                                            timeout_names.insert(name);
-                                        }
-                                        // else: re-run and now fast → release from non-fully-passing list
-                                    }
-                                }
-                            } else {
-                                // # comment lines
-                                timeout_lines.push_back(std::string(tbuf));
-                            }
-                        }
-                    }
-                }
-                fclose(old_f);
-            }
-        }
-
         FILE* partial_log = fopen("test/js262/t262_partial.txt", "w");
         if (partial_log) {
-            // Write preserved TIMEOUT_ entries and comments first
-            for (auto& line : timeout_lines) fprintf(partial_log, "%s\n", line.c_str());
-            if (!timeout_lines.empty()) fprintf(partial_log, "\n");
-
             size_t still_lost = 0;
             size_t crash_exit = 0;
+            size_t slow_count = 0;
+            size_t batch_kill_count = 0;
             std::unordered_set<std::string> written;
-            // skip timeout tests — they are already above, don't re-emit as CRASH_
-            written.insert(timeout_names.begin(), timeout_names.end());
 
-            // Re-evaluate previously non-fully-passing tests.
-            // CRASH entries that still crash (exit > 128) stay on the non-fully-passing list.
-            // CRASH entries that pass individually (exit <= 128) are RELEASED —
-            // they return to batch execution next run. If they crash in batch
-            // again, they'll be re-added as BATCH_KILL.
-            // MISSING entries are removed if they pass individually (they were likely
-            // collateral from a batch kill, not inherently crashing).
-            //
-            // Skip-partial mode (default): partial tests didn't run this round, so we
-            // re-emit each entry verbatim using its original tag from g_partial_tags.
-            // This carries the partial list forward unchanged until --run-partial is
-            // used or the entry is hand-edited.
-            size_t crash_released = 0;
-            for (size_t idx : partial_indices) {
-                const auto& p = prepared[idx];
-                if (written.count(p.test_name)) continue;
-                if (!g_run_partial) {
-                    // Skipped: preserve original tag from previous run
-                    auto tag_it = g_partial_tags.find(p.test_name);
-                    const std::string& tag = (tag_it != g_partial_tags.end()) ? tag_it->second
-                                                                              : std::string("BATCH_KILL");
-                    fprintf(partial_log, "%s\t%s\t%s\n",
-                            tag.c_str(), p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    continue;
+            auto prepared_path_for = [&](const std::string& name) -> const char* {
+                for (size_t idx : clean_indices) {
+                    if (prepared[idx].test_name == name) return prepared[idx].test_path.c_str();
                 }
-                auto it = batch_results.find(p.test_name);
-                if (it == batch_results.end()) {
-                    fprintf(partial_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    still_lost++;
-                } else if (it->second.exit_code > 128) {
-                    fprintf(partial_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
-                            p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    // Only count as crash_exit if this is a NEW crash (not a known partial re-confirming)
-                    bool was_known_crash = false;
-                    if (g_partial_tags.count(p.test_name)) {
-                        const auto& tag = g_partial_tags[p.test_name];
-                        was_known_crash = (tag.substr(0, 5) == "CRASH" ||
-                                           tag.substr(0, 7) == "TIMEOUT" ||
-                                           tag.substr(0, 4) == "SLOW" ||
-                                           tag == "BATCH_KILL");
-                    }
-                    if (!was_known_crash) crash_exit++;
-                } else if (g_partial_tags.count(p.test_name) &&
-                           g_partial_tags[p.test_name].substr(0, 5) == "CRASH") {
-                    // Was a CRASH entry but now passes individually — release from non-fully-passing list.
-                    // It will return to batch execution next run. If it causes a batch crash,
-                    // the BATCH_KILL detection will re-add it.
-                    crash_released++;
+                for (size_t idx : lost_indices) {
+                    if (prepared[idx].test_name == name) return prepared[idx].test_path.c_str();
                 }
-                // else: MISSING/SLOW test passed individually → removed from non-fully-passing list
-            }
-            if (crash_released > 0) {
-                fprintf(stderr, "[test262] Released %zu formerly-crashing tests from non-fully-passing list (now pass individually)\n",
-                        crash_released);
-            }
+                return "";
+            };
+            auto write_partial_once = [&](const char* tag, const std::string& name,
+                                          const char* path) -> bool {
+                if (g_slow_tests.count(name)) return false;
+                if (written.count(name)) return false;
+                fprintf(partial_log, "%s\t%s\t%s\n", tag, name.c_str(), path);
+                written.insert(name);
+                return true;
+            };
 
-            // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
+            // Add crash-exit tests from this run (Phase 2 + 2b)
             // Don't count as crash-exits (baseline gate blocker) if:
             // - BATCH_KILL: pass individually but crash the batch process
             // - Crash-collateral: tests from killed batches
@@ -3269,21 +3122,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         if (ba_it != g_batch_assignment.end() && g_crashed_batches.count(ba_it->second))
                             is_collateral = true;
                     }
-                    const char* path = "";
-                    for (size_t idx : clean_indices) {
-                        if (prepared[idx].test_name == kv.first) {
-                            path = prepared[idx].test_path.c_str();
-                            break;
-                        }
-                    }
-                    fprintf(partial_log, "CRASH_%d\t%s\t%s\n", kv.second.exit_code,
-                            kv.first.c_str(), path);
-                    written.insert(kv.first);
-                    // Only count as crash-exit if it's a genuine regression (was passing in baseline).
-                    // If the test was already tagged as a known crash/timeout/slow/batch-kill in
-                    // a previous run (g_partial_tags), it's not a new regression — with
-                    // --run-partial we promoted it to clean batches, but a re-confirmed crash
-                    // doesn't make it worse than it already was.
+                    char tag[32];
+                    snprintf(tag, sizeof(tag), "CRASH_%d", kv.second.exit_code);
+                    bool wrote = write_partial_once(tag, kv.first, prepared_path_for(kv.first));
+                    // Only count as crash-exit if it's a genuine regression.
                     bool was_known_crash = false;
                     {
                         auto tag_it = g_partial_tags.find(kv.first);
@@ -3295,26 +3137,21 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                                                tag == "BATCH_KILL");
                         }
                     }
-                    if (!is_batch_kill && !is_collateral && was_in_baseline && !was_known_crash) crash_exit++;
+                    if (wrote && !is_batch_kill && !is_collateral && was_in_baseline && !was_known_crash)
+                        crash_exit++;
                 }
             }
-            // Add newly-discovered slow tests above the configured elapsed threshold from clean batches
-            size_t slow_count = 0;
+            // Add slow tests above the configured elapsed threshold from this run.
+            // Tests listed in t262_slow.txt are excluded from t262_partial.txt.
             for (auto& kv : batch_results) {
                 if (written.count(kv.first)) continue;
+                if (g_slow_tests.count(kv.first)) continue;
                 long threshold_us = slow_threshold_for_test(kv.first);
                 if (kv.second.elapsed_us >= threshold_us) {
-                    const char* path = "";
-                    for (size_t idx : clean_indices) {
-                        if (prepared[idx].test_name == kv.first) {
-                            path = prepared[idx].test_path.c_str();
-                            break;
-                        }
-                    }
-                    fprintf(partial_log, "SLOW_%ld\t%s\t%s\n",
-                            kv.second.elapsed_us / 1000, kv.first.c_str(), path);
-                    written.insert(kv.first);
-                    slow_count++;
+                    char tag[32];
+                    snprintf(tag, sizeof(tag), "SLOW_%ld", kv.second.elapsed_us / 1000);
+                    if (write_partial_once(tag, kv.first, prepared_path_for(kv.first)))
+                        slow_count++;
                 }
             }
             // Clean tests still missing after Phase 2b
@@ -3323,9 +3160,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 if (written.count(p.test_name)) continue;
                 auto it = batch_results.find(p.test_name);
                 if (it == batch_results.end()) {
-                    fprintf(partial_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
-                    still_lost++;
+                    if (write_partial_once("MISSING", p.test_name, p.test_path.c_str()))
+                        still_lost++;
                 }
             }
 
@@ -3336,34 +3172,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             // list forces individual execution, preventing collateral loss.
             // Unlike CRASH entries (sticky), BATCH_KILL entries are re-verified
             // each run: if the test no longer appears as a crash-point, it's removed.
-            size_t batch_kill_count = 0;
             for (auto& bk_name : batch_kill_tests) {
                 if (written.count(bk_name)) continue;
-                const char* path = "";
-                for (size_t idx : clean_indices) {
-                    if (prepared[idx].test_name == bk_name) {
-                        path = prepared[idx].test_path.c_str();
-                        break;
-                    }
-                }
-                fprintf(partial_log, "BATCH_KILL\t%s\t%s\n", bk_name.c_str(), path);
-                written.insert(bk_name);
-                batch_kill_count++;
-            }
-            // Re-emit previously known BATCH_KILL entries: always keep them
-            // on the non-fully-passing list. These tests crash the batch process but pass
-            // individually, so they can never prove themselves batch-safe. Dropping
-            // them causes oscillation (partial → release → crash → re-add).
-            for (size_t idx : partial_indices) {
-                const auto& p = prepared[idx];
-                if (written.count(p.test_name)) continue;
-                if (g_partial_tags.count(p.test_name) &&
-                    g_partial_tags[p.test_name] == "BATCH_KILL") {
-                    fprintf(partial_log, "BATCH_KILL\t%s\t%s\n",
-                            p.test_name.c_str(), p.test_path.c_str());
-                    written.insert(p.test_name);
+                if (write_partial_once("BATCH_KILL", bk_name, prepared_path_for(bk_name)))
                     batch_kill_count++;
-                }
             }
 
             fclose(partial_log);
@@ -3504,9 +3316,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // Build classification sets for non-fully-passing logic.
     // All tests must pass in their original Phase 2 batch under their timing gate
     // to be "fully passed".
-    std::set<std::string> clean_set, partial_name_set, phase2b_set;
+    std::set<std::string> clean_set, phase2b_set;
     for (size_t idx : clean_indices)    clean_set.insert(prepared[idx].test_name);
-    for (size_t idx : partial_indices)  partial_name_set.insert(prepared[idx].test_name);
     for (size_t idx : lost_indices)     phase2b_set.insert(prepared[idx].test_name);
 
     // Build set of batches that had crash-points (BATCH_KILL).
@@ -3518,30 +3329,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     // Phase 3: evaluate results and cache, applying non-fully-passing classification
     auto eval_start = std::chrono::steady_clock::now();
-    size_t pp_partial = 0, pp_batch_lost = 0, pp_slow = 0, pp_collateral = 0;
-    size_t pp_skipped_partial = 0;
+    size_t pp_batch_lost = 0, pp_slow = 0, pp_collateral = 0;
     for (size_t i = 0; i < prepared.size(); i++) {
         const auto& pname = prepared[i].test_name;
         g_failure_info[pname] = {prepared[i].test_path, prepared[i].category,
                                  prepared[i].subcategory, prepared[i].features,
                                  prepared[i].includes, prepared[i].native_harness};
-        // Tests on the known-partial list that were NOT promoted to clean (i.e. skipped
-        // from this run's batch) must not be evaluated as FAIL("not found in batch").
-        // They are intentionally skipped — we have no fresh result for them this run.
-        // Preserve their previous baseline status: if they were passing in the baseline,
-        // cache as T262_PASS so the listener won't flag a regression; otherwise cache as
-        // T262_SKIP so they don't pollute the partial/failed counts.
-        if (partial_name_set.count(pname) && !clean_set.count(pname)) {
-            std::string tag = g_partial_tags.count(pname) ? g_partial_tags[pname] : std::string("PARTIAL");
-            std::lock_guard<std::mutex> lock(g_results_mutex);
-            if (g_baseline_passing.count(pname)) {
-                g_cached_results[pname] = {T262_PASS, "skipped this run (previous tag " + tag + ", baseline preserved)"};
-            } else {
-                g_cached_results[pname] = {T262_SKIP, "skipped this run (previous tag " + tag + ")"};
-            }
-            pp_skipped_partial++;
-            continue;
-        }
 
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
 
@@ -3549,29 +3342,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         // Only fully passed if passed in original Phase 2 batch under its timing gate.
         if (result.result == T262_PASS) {
             const auto& name = prepared[i].test_name;
-            if (partial_name_set.count(name)) {
-                // BATCH_KILL tests pass individually by definition (they kill the batch
-                // process via OOM/memory, not because they're flaky). Promote to full pass.
-                // SLOW tests also pass individually reliably — they're on the non-fully-passing
-                // list only for batch performance, not because they're unstable.
-                // Released-CRASH tests (tag was CRASH, now pass individually) are also
-                // promoted — they'll return to batch execution next run.
-                bool is_batch_kill = g_partial_tags.count(name) &&
-                                     g_partial_tags[name] == "BATCH_KILL";
-                bool is_slow = g_partial_tags.count(name) &&
-                               g_partial_tags[name].substr(0, 4) == "SLOW";
-                bool is_released_crash = g_partial_tags.count(name) &&
-                                         g_partial_tags[name].substr(0, 5) == "CRASH" &&
-                                         batch_results.count(name) &&
-                                         batch_results.at(name).exit_code <= 128;
-                if (is_batch_kill || is_slow || is_released_crash) {
-                    // Keep as T262_PASS (full pass)
-                    pp_partial++;  // still count for diagnostics
-                } else {
-                    result = {T262_PARTIAL_PASS, "non-fully-passing: passed individually only, not in batch"};
-                    pp_partial++;
-                }
-            } else if (clean_set.count(name) && phase2b_set.count(name)) {
+            if (clean_set.count(name) && phase2b_set.count(name)) {
                 // Check if this was crash-collateral (batch had a BATCH_KILL crash-point).
                 // Crash-collateral tests are promoted to full pass — they're not genuinely
                 // batch-unstable, they were just killed by a different test's crash.
@@ -3583,7 +3354,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     result = {T262_PARTIAL_PASS, "non-fully-passing: batch-lost, passed only in individual retry"};
                     pp_batch_lost++;
                 }
-            } else if (clean_set.count(name)) {
+            } else if (clean_set.count(name) && !g_slow_tests.count(name)) {
                 auto br_it = batch_results.find(name);
                 long threshold_us = slow_threshold_for_test(name);
                 if (br_it != batch_results.end() && br_it->second.elapsed_us >= threshold_us) {
@@ -3605,9 +3376,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         std::lock_guard<std::mutex> lock(g_results_mutex);
         g_cached_results[prepared[i].test_name] = result;
     }
-    if (pp_partial + pp_batch_lost + pp_collateral + pp_slow + pp_skipped_partial > 0) {
-        fprintf(stderr, "[test262] Phase 3 non-fully-passing: %zu from-list + %zu batch-lost + %zu crash-collateral (promoted) + %zu slow (>= threshold) + %zu skipped-partial\n",
-                pp_partial, pp_batch_lost, pp_collateral, pp_slow, pp_skipped_partial);
+    if (pp_batch_lost + pp_collateral + pp_slow > 0) {
+        fprintf(stderr, "[test262] Phase 3 non-fully-passing: %zu batch-lost + %zu crash-collateral (promoted) + %zu slow (>= threshold)\n",
+                pp_batch_lost, pp_collateral, pp_slow);
     }
     // Expose batch-lost count for --update-baseline gate
     g_phase_batch_lost = pp_batch_lost;
@@ -3958,7 +3729,6 @@ static void print_test262_help(const char* program) {
     printf("Common js262 options:\n");
     printf("  --batch-only              Run the js262 batch runner path.\n");
     printf("  --baseline-only           Run only tests listed in the baseline file.\n");
-    printf("  --run-partial             Include partial/non-fully-passing tests.\n");
     printf("  --update-baseline         Update the baseline when stability gates pass.\n");
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
     printf("  --run-async               Permit async-flagged tests that are also allowlisted.\n");
@@ -4048,9 +3818,6 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
-        }
-        if (strcmp(argv[i], "--run-partial") == 0) {
-            g_run_partial = true;
         }
         if (strcmp(argv[i], "--batch-only") == 0) {
             g_batch_only = true;
