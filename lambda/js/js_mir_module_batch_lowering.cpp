@@ -2432,11 +2432,26 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Scan top-level statements for IIFE patterns
         JsAstNode* stmt = program->body;
         while (stmt) {
-            // Unwrap expression statement
+            // Unwrap expression statements and bundled `var ns = function(){...}();`
+            // initializers. Both forms create an IIFE scope whose local bindings can
+            // be captured by nested closures after the initializer has run.
             JsAstNode* expr = NULL;
             if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
                 JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
                 expr = es->expression;
+            } else if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)stmt;
+                JsAstNode* d = vd->declarations;
+                while (d) {
+                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+                        if (jm_find_iife_function_expr(decl->init)) {
+                            expr = decl->init;
+                            break;
+                        }
+                    }
+                    d = d->next;
+                }
             } else {
                 stmt = stmt->next;
                 continue;
@@ -2841,7 +2856,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     while (hashmap_iter(anc_locals, &al_iter, &al_item)) {
                         JsNameSetEntry* e = (JsNameSetEntry*)al_item;
                         jm_name_set_add(ancestor_names, e->name);
-                        jm_name_set_add(ancestor_func_locals, e->name);
+                        bool is_iife_promoted_module_var = false;
+                        if (mt->module_consts) {
+                            JsModuleConstEntry mclookup;
+                            snprintf(mclookup.name, sizeof(mclookup.name), "%s", e->name);
+                            JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                            is_iife_promoted_module_var = mc && mc->const_type == MCONST_MODVAR &&
+                                mc->is_iife_var && anc->is_iife_body;
+                        }
+                        if (!is_iife_promoted_module_var) {
+                            jm_name_set_add(ancestor_func_locals, e->name);
+                        }
                     }
                     hashmap_free(anc_locals);
                 }
@@ -3045,7 +3070,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                             jm_name_hash, jm_name_cmp, NULL, NULL);
                                         jm_collect_body_locals(anc->node->body, anc_locals);
                                         if (jm_name_set_has(anc_locals, cap_name)) {
+                                            bool is_iife_promoted_module_var = mc_prop->const_type == MCONST_MODVAR &&
+                                                mc_prop->is_iife_var && anc->is_iife_body;
+                                            if (!is_iife_promoted_module_var) {
                                             shadowed_by_ancestor = true;
+                                            }
                                         }
                                         hashmap_free(anc_locals);
                                     }
@@ -3178,9 +3207,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 bool has_nfe_self_capture = false;
                 for (int k = 0; k < child->capture_count; k++) {
                     const char* cname = child->captures[k].name;
-                    // Skip true NFE self-captures (child is a function expression, not declaration)
+                    // Skip true NFE self-captures (child is a function expression, not declaration).
+                    // Name alone is not enough: minified bundles often have an
+                    // outer binding and an NFE self binding with the same name.
                     if (child_self_name[0] && strcmp(cname, child_self_name) == 0
-                        && is_child_nfe) {
+                        && is_child_nfe && child->captures[k].is_nfe_binding) {
                         has_nfe_self_capture = true;
                         continue;
                     }
@@ -3214,9 +3245,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         bool is_child_nfe2 = (child->node && child->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION);
                         for (int k = 0; k < child->capture_count; k++) {
                             const char* cname = child->captures[k].name;
-                            // Same skip as first pass: true NFE self-captures only
+                            // Same skip as first pass: true NFE self-captures only.
                             if (child_self_name2[0] && strcmp(cname, child_self_name2) == 0
-                                && is_child_nfe2) {
+                                && is_child_nfe2 && child->captures[k].is_nfe_binding) {
                                 continue;
                             }
                             if (!jm_name_set_has(scope_vars, cname)) {
@@ -3242,13 +3273,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         (int)child->node->name->len, child->node->name->chars);
                     // Only true NFEs (not function declarations) get extra slots
                     if (child->node->base.node_type != JS_AST_NODE_FUNCTION_EXPRESSION) continue;
+                    bool assigned_nfe_slot = false;
                     for (int k = 0; k < child->capture_count; k++) {
-                        if (strcmp(child->captures[k].name, csn) == 0) {
+                        if (strcmp(child->captures[k].name, csn) == 0 &&
+                            child->captures[k].is_nfe_binding) {
                             child->captures[k].scope_env_slot = extra_slot;
-                            snprintf(parent_fc->scope_env_names[extra_slot], 64, "%s", csn);
-                            extra_slot++;
-                            break;
+                            assigned_nfe_slot = true;
                         }
+                    }
+                    if (assigned_nfe_slot) {
+                        snprintf(parent_fc->scope_env_names[extra_slot], 64, "%s", csn);
+                        extra_slot++;
                     }
                 }
                 int slot_count = extra_slot;
@@ -3281,7 +3316,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             // Skip true NFE self-captures — already assigned dedicated slots
                             if (child_self_remap[0] &&
                                 strcmp(child->captures[k].name, child_self_remap) == 0 &&
-                                is_child_nfe_remap) {
+                                is_child_nfe_remap && child->captures[k].is_nfe_binding) {
                                 continue;
                             }
                             // Find this capture's slot in the normal portion of scope env

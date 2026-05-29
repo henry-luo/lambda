@@ -29,7 +29,9 @@ static void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY) {
     if (!mt || !name || !mt->last_closure_has_env || mt->last_closure_env_reg == 0) return;
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
+        if (mt->last_closure_capture_is_nfe[i]) continue;
         if (strcmp(mt->last_closure_capture_names[i], name) != 0) continue;
+        int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
         MIR_reg_t val = val_reg;
         if (jm_is_native_type(type_id)) {
             val = jm_box_native(mt, val_reg, type_id);
@@ -38,7 +40,7 @@ static void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         // TDZ value. Write the initialized value into that fresh env so the
         // closure observes JS's by-reference lexical binding semantics.
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(uint64_t),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t),
                 mt->last_closure_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, val)));
         return;
@@ -824,7 +826,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     hashmap_free(se_names);
                 }
                 // writeback destructured bindings to module vars
-                if ((mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
+                bool pattern_at_top_for_writeback = (mt->scope_depth <= 1) ||
+                    (var->kind == JS_VAR_VAR && mt->var_hoist_depth <= 1);
+                if (pattern_at_top_for_writeback &&
+                    (mt->in_main || (mt->current_fc && mt->current_fc->is_iife_body)) && mt->module_consts) {
                     struct hashmap* pat_names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
                     jm_collect_pattern_names(d->id, pat_names);
@@ -1078,35 +1083,68 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 // Emitted at the top of each while-loop test to ensure the outer function sees changes
 // made by inner-function (closure) calls during the loop body.
 void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
-    if (mt->scope_env_reg == 0) return;
+    bool reload_iife_modvars = mt->module_consts && mt->current_fc && mt->current_fc->is_iife_body;
+    if (mt->scope_env_reg == 0 && !reload_iife_modvars) return;
     for (int sd = 0; sd <= mt->scope_depth; sd++) {
         if (!mt->var_scopes[sd]) continue;
         size_t iter = 0; void* entry_ptr;
         while (hashmap_iter(mt->var_scopes[sd], &iter, &entry_ptr)) {
             JsVarScopeEntry* e = (JsVarScopeEntry*)entry_ptr;
-            if (!e->var.in_scope_env) continue;
-            int slot = e->var.scope_env_slot;
-            MIR_reg_t env_reg = e->var.scope_env_reg;
-            if (env_reg == 0) continue;
-            // Load boxed value from scope env
-            MIR_reg_t boxed = jm_new_reg(mt, "se_rdld", MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, boxed),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
-            if (e->var.type_id == LMD_TYPE_INT) {
-                MIR_reg_t unboxed = jm_emit_unbox_int(mt, boxed);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, e->var.reg),
-                    MIR_new_reg_op(mt->ctx, unboxed)));
-            } else if (e->var.type_id == LMD_TYPE_FLOAT) {
-                MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                    MIR_new_reg_op(mt->ctx, e->var.reg),
-                    MIR_new_reg_op(mt->ctx, unboxed)));
-            } else {
-                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_reg_op(mt->ctx, e->var.reg),
-                    MIR_new_reg_op(mt->ctx, boxed)));
+            if (e->var.from_block_func_decl) continue;
+            if (strcmp(e->name, "_js_arguments") == 0 &&
+                mt->arguments_reg != 0 && e->var.reg == mt->arguments_reg) {
+                continue;
+            }
+            if (e->var.in_scope_env) {
+                int slot = e->var.scope_env_slot;
+                MIR_reg_t env_reg = e->var.scope_env_reg;
+                if (env_reg != 0) {
+                    // Load boxed value from scope env
+                    MIR_reg_t boxed = jm_new_reg(mt, "se_rdld", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, boxed),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env_reg, 0, 1)));
+                    if (e->var.type_id == LMD_TYPE_INT) {
+                        MIR_reg_t unboxed = jm_emit_unbox_int(mt, boxed);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, unboxed)));
+                    } else if (e->var.type_id == LMD_TYPE_FLOAT) {
+                        MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, unboxed)));
+                    } else {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, boxed)));
+                    }
+                }
+            }
+            if (reload_iife_modvars && e->var.reg != 0) {
+                JsModuleConstEntry lookup;
+                memset(&lookup, 0, sizeof(lookup));
+                snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
+                JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var) {
+                    MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                    if (e->var.type_id == LMD_TYPE_INT) {
+                        MIR_reg_t unboxed = jm_emit_unbox_int(mt, boxed);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, unboxed)));
+                    } else if (e->var.type_id == LMD_TYPE_FLOAT) {
+                        MIR_reg_t unboxed = jm_emit_unbox_float(mt, boxed);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, unboxed)));
+                    } else {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_reg_op(mt->ctx, boxed)));
+                    }
+                }
             }
         }
     }
@@ -1545,8 +1583,12 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         int saved_last_closure_capture_count = mt->last_closure_capture_count;
         bool saved_preserve_last_closure_env = mt->preserve_last_closure_env_after_readback;
         char saved_last_closure_capture_names[16][128];
+        int saved_last_closure_capture_slots[16];
+        bool saved_last_closure_capture_is_nfe[16];
         for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
             snprintf(saved_last_closure_capture_names[sci], 128, "%s", mt->last_closure_capture_names[sci]);
+            saved_last_closure_capture_slots[sci] = mt->last_closure_capture_slots[sci];
+            saved_last_closure_capture_is_nfe[sci] = mt->last_closure_capture_is_nfe[sci];
         }
         mt->last_closure_has_env = false;
         mt->last_closure_env_reg = 0;
@@ -1579,6 +1621,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         mt->preserve_last_closure_env_after_readback = saved_preserve_last_closure_env;
         for (int sci = 0; sci < saved_last_closure_capture_count && sci < 16; sci++) {
             snprintf(mt->last_closure_capture_names[sci], 128, "%s", saved_last_closure_capture_names[sci]);
+            mt->last_closure_capture_slots[sci] = saved_last_closure_capture_slots[sci];
+            mt->last_closure_capture_is_nfe[sci] = saved_last_closure_capture_is_nfe[sci];
         }
     }
 

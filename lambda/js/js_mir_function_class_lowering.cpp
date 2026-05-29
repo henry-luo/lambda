@@ -24,7 +24,7 @@ static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected*
             ap = ap->next;
         }
     } else {
-        mt->arguments_reg = 0;
+        mt->arguments_reg = args_reg;
         mt->arguments_param_count = 0;
     }
 }
@@ -38,6 +38,18 @@ static bool jm_function_has_formal_arguments_binding(JsFunctionNode* fn) {
         if (strcmp(pname, "_js_arguments") == 0) return true;
     }
     return false;
+}
+
+static JsMirVarEntry* jm_function_find_current_scope_var(JsMirTranspiler* mt, const char* name) {
+    if (!mt || !name || mt->scope_depth < 0 || mt->scope_depth >= 64 ||
+        !mt->var_scopes[mt->scope_depth]) {
+        return NULL;
+    }
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", name);
+    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
+    return found ? &found->var : NULL;
 }
 
 static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
@@ -478,12 +490,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                JsMirVarEntry* ve = jm_find_var(mt, lce->name);
+                JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
                 if (!ve) {
                     // Create register for let/const (no longer hoisted by jm_collect_body_locals)
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
                     jm_set_var(mt, lce->name, vr);
-                    ve = jm_find_var(mt, lce->name);
+                    ve = jm_function_find_current_scope_var(mt, lce->name);
                 }
                 if (ve) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -1968,6 +1980,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
                 MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
                 jm_set_var(mt, "_js_arguments", args_obj);
+                jm_scope_env_mark_and_writeback(mt, "_js_arguments", args_obj);
             }
 
             if (has_captures) {
@@ -2460,8 +2473,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
             MIR_reg_t args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
             jm_set_var(mt, "_js_arguments", args_arr);
+            jm_scope_env_mark_and_writeback(mt, "_js_arguments", args_arr);
             arguments_object_materialized = true;
-            mt->arguments_reg = 0;
+            mt->arguments_reg = args_arr;
             mt->arguments_param_count = 0;
         }
 
@@ -2707,11 +2721,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             size_t lciter = 0; void* lcitem;
             while (hashmap_iter(let_consts, &lciter, &lcitem)) {
                 JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
-                JsMirVarEntry* ve = jm_find_var(mt, lce->name);
+                JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
                 if (!ve) {
                     MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
                     jm_set_var(mt, lce->name, vr);
-                    ve = jm_find_var(mt, lce->name);
+                    ve = jm_function_find_current_scope_var(mt, lce->name);
                 }
                 if (ve) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2867,7 +2881,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             ap = ap->next;
                         }
                     } else {
-                        mt->arguments_reg = 0;
+                        mt->arguments_reg = val;
                         mt->arguments_param_count = 0;
                     }
                 } else {
@@ -3018,6 +3032,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // Build arguments object from the actual call-site args (stored by js_invoke_fn)
                 args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
                 jm_set_var(mt, "_js_arguments", args_arr);
+                jm_scope_env_mark_and_writeback(mt, "_js_arguments", args_arr);
             }
             if (args_aliased) {
                 mt->arguments_reg = args_arr;
@@ -3031,7 +3046,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     ap = ap->next;
                 }
             } else {
-                mt->arguments_reg = 0;
+                mt->arguments_reg = args_arr;
                 mt->arguments_param_count = 0;
             }
         } else {

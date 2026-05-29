@@ -722,11 +722,16 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         // The heap persists across tests, so function objects on the heap
         // may still reference code pages in this MIR context. Destroying
         // the context now would leave dangling func_ptr pointers → SIGBUS.
-        // NOTE: We intentionally do NOT keep transpiler pools alive here
-        // to limit memory growth. If a stale function is called and its
-        // code references freed pool strings, the SIGSEGV/SIGBUS handler
-        // catches it and the batch runner recovers gracefully.
         jm_defer_mir_cleanup(ctx);
+        // JIT code and runtime metadata embed raw String* pointers interned in
+        // the transpiler name pool. Keep those pools with the deferred MIR
+        // context so hot-reload cleanup does not leave dangling strings.
+        if (module_mir_context_count > 0) {
+            module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
+            module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+        }
+        tp->name_pool = NULL;
+        tp->ast_pool = NULL;
     } else {
         MIR_finish(ctx);
     }
