@@ -61,6 +61,9 @@ static inline Item js_string_key(const char* s) {
 
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
+extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts);
+extern "C" Item js_eventtarget_dispatch(Item event_item);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -3019,6 +3022,15 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return ItemNull;
     }
 
+    // EventTarget methods must be callable even when MIR takes the generic
+    // property-call fallback instead of the document method dispatcher.
+    if (strcmp(prop, "addEventListener") == 0)
+        return js_new_function((void*)js_eventtarget_add_listener, 3);
+    if (strcmp(prop, "removeEventListener") == 0)
+        return js_new_function((void*)js_eventtarget_remove_listener, 3);
+    if (strcmp(prop, "dispatchEvent") == 0)
+        return js_new_function((void*)js_eventtarget_dispatch, 1);
+
     // Document method names accessed as properties return ITEM_TRUE for feature detection
     static const char* doc_methods[] = {
         "getElementById", "getElementsByTagName", "getElementsByClassName",
@@ -5563,6 +5575,15 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name(attr_val))};
         }
     }
+
+    // EventTarget methods must be callable even when MIR takes the generic
+    // property-call fallback instead of the DOM method dispatcher.
+    if (strcmp(prop, "addEventListener") == 0)
+        return js_new_function((void*)js_eventtarget_add_listener, 3);
+    if (strcmp(prop, "removeEventListener") == 0)
+        return js_new_function((void*)js_eventtarget_remove_listener, 3);
+    if (strcmp(prop, "dispatchEvent") == 0)
+        return js_new_function((void*)js_eventtarget_dispatch, 1);
 
     // DOM method names accessed as properties (not calls) return ITEM_TRUE
     // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`

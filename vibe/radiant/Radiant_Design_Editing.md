@@ -725,13 +725,12 @@ For WPT:
 
 ## 15. Open Questions
 
-1. **Form target ranges:** Should text-control `getTargetRanges()` expose
-   anonymous text-control nodes, host elements with offsets, or a Radiant
-   StaticRange wrapper that maps to `selectionStart/End`? Default proposal:
-   expose the same projected text node used by DOM Selection — **but this is
-   blocked on verifying that node actually exists in the tree (E0/§5.3).** If
-   it does not, fall back to a synthetic StaticRange wrapper over
-   `selectionStart/End` and document the divergence from real DOM nodes.
+1. **Form target ranges:** *Resolved for the E0/E3 bridge.* Text controls now
+   expose a synthetic StaticRange-shaped range whose container is the control
+   element and whose offsets are UTF-16 `selectionStart/End`. This keeps
+   cancellable form `beforeinput` shippable before concrete form-value DOM text
+   nodes exist. A later Selection2/form-value-node phase can replace the
+   synthetic boundary without changing the dispatcher contract.
 2. **Undo coalescing:** Keep current form snapshot ring as-is first, then add
    browser-like coalescing after unification. Default proposal: do not change
    coalescing in E1-E3.
@@ -751,10 +750,11 @@ For WPT:
   now resolves rich/data-editable hosts through `EditingSurface`.
 - E2 shared intent extraction is landed in `editing_intent.{hpp,cpp}`.
 - E3 target-range computation has been extracted to
-  `editing_target_range.{hpp,cpp}` for rich/contenteditable surfaces. Form
-  text controls intentionally return no target ranges until E0 proves a real
-  form-value DOM boundary exists; this avoids inventing synthetic ranges while
-  Selection2 live-range/removal work is still active.
+  `editing_target_range.{hpp,cpp}`. Rich/contenteditable surfaces use DOM
+  selection boundaries; form text controls now expose a synthetic
+  StaticRange-like boundary over the control element with UTF-16 offsets from
+  the live form selection. `test_form_beforeinput_target_ranges` covers
+  cancellation, range reporting, and post-mutation `input`.
 - The rich-host `beforeinput`/`input` policy has been extracted to
   `editing_dispatch.{hpp,cpp}`. `event.cpp` still owns the concrete JS/Lambda
   dispatch bridges, but now adapts them through `EditingDispatchHooks`; form
@@ -821,6 +821,10 @@ For WPT:
   reapplies the snapshot selection into the StateStore projection and logs a
   `historyRestore` `editing.selection` record before the resulting `input`
   event dispatch.
+- Cancellable form `beforeinput` now preserves the original text-control
+  selection when default action is prevented, and non-canceled default
+  insertion re-resolves the live focused control after JS handler DOM work so
+  the mutation lands on the current editing surface.
 - Rich/contenteditable mouse selection and legacy keyboard navigation now
   mirror their selection result into `editing.selection` records. Rich
   `selectAll` keeps the shared `editing.intent` logging path but performs the

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Form Beforeinput Target Ranges</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 12px; }
+        input { font-size: 14px; padding: 4px 6px; width: 220px; }
+        .status { margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <input id="name" type="text" value="abcd">
+    <div id="before-status" class="status">before:none</div>
+    <div id="blocked-status" class="status">blocked:none</div>
+    <div id="input-status" class="status">input:none</div>
+
+    <script>
+        var input = document.getElementById('name');
+        input.onbeforeinput = function (event) {
+            var ranges = event.getTargetRanges();
+            var summary;
+            if (!ranges || ranges.length === 0) {
+                summary = event.inputType + '|0|none|0-0|' + (event.data || '');
+            } else {
+                var range = ranges[0];
+                var container = range.startContainer;
+                var id = container && container.id ? container.id : 'unknown';
+                summary = event.inputType + '|' + ranges.length + '|' + id + '|' +
+                    range.startOffset + '-' + range.endOffset + '|' + (event.data || '');
+            }
+            document.getElementById('before-status').textContent = 'before:' + summary;
+            if (event.data === 'X') {
+                event.preventDefault();
+                document.getElementById('blocked-status').textContent = 'blocked:' + summary;
+            }
+        };
+        input.oninput = function (event) {
+            document.getElementById('input-status').textContent =
+                'input:' + event.inputType + '|' + (event.data || '') + '|' + input.value;
+        };
+    </script>
+</body>
+</html>

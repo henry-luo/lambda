@@ -1949,23 +1949,48 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     hooks.copy_selection = dispatch_editing_copy_selection;
     hooks.user = nullptr;
 
+    uint32_t saved_selection_start = 0;
+    uint32_t saved_selection_end = 0;
+    uint8_t saved_selection_direction = 0;
+    form_control_get_selection(state, target,
+                               &saved_selection_start,
+                               &saved_selection_end,
+                               &saved_selection_direction);
+
     bool prevented = false;
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
                                       &prevented);
     if (prevented) {
+        form_control_set_selection(state, target,
+                                   saved_selection_start,
+                                   saved_selection_end,
+                                   saved_selection_direction);
         log_debug("dispatch_form_text_replace: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
         return true;
     }
 
-    uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
-    bool ok = te_replace_byte_range_no_events(elem, state, target, start, end,
+    DomElement* live_elem = elem;
+    View* live_target = target;
+    View* live_focus = focus_get(state);
+    if (live_focus && live_focus->is_element()) {
+        DomElement* focus_elem = lam::dom_require_element(live_focus);
+        if (tc_is_text_control(focus_elem)) {
+            live_elem = focus_elem;
+            live_target = live_focus;
+        }
+    }
+
+    uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
+    bool ok = te_replace_byte_range_no_events(live_elem, state, live_target, start, end,
                                               repl, repl_len);
     if (ok) {
-        FormControlProp* form = elem->form;
+        FormControlProp* form = live_elem->form;
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
+        surface.view = live_target;
+        surface.owner = live_elem;
         event_log_editing_mutation(state, &surface, &intent, "replace",
                                    old_len, new_len,
                                    selection_start, selection_end);
