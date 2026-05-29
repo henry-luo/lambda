@@ -862,6 +862,27 @@ For WPT:
   than open-coding DOM/UTF-16 conversion in mouse handlers. The
   `test_editing_mixed_selection_clamp` fixture pins the two cross-surface drag
   rules.
+- Text-control selection highlight geometry also lives behind the E4 facade:
+  `editing_geometry_text_control_for_each_selection_rect()` emits input and
+  textarea selection rectangles from the same value offsets as caret geometry.
+  `render_form.cpp` now applies only paint-time scale, horizontal scroll, and
+  text alignment. Password and IME preedit highlights intentionally keep local
+  fallback math because their rendered strings differ from the stored value.
+- Rich `beforeinput` target-range validation now uses
+  `editing_geometry_surface_contains_range()`. A mutating rich intent whose
+  live DOM Selection crosses an embedded text control is consumed and rejected
+  before JS/Lambda default mutation can run; the mixed fixture now covers this
+  with Ctrl+X over a rich selection that straddles an `<input>`.
+- Rich text point-to-boundary projection is now also available through
+  `editing_geometry_dom_text_boundary_from_point()`, backed by the shared
+  glyph inverse resolver. Rich mousedown, drag extension, and mouseup
+  collapse now ask the facade for the clicked DOM text boundary first, with
+  the older event-local glyph walker kept only as a fallback.
+- Rich Shift+Up/Down/Home/End selection now extends to the caret's post-move
+  view through `selection_extend_to_view()`, using the raw render caret
+  projection after line/document movement. This keeps DOM Selection
+  non-collapsed across line boundaries and gives `editing.selection` logs the
+  actual focus view.
 
 ---
 

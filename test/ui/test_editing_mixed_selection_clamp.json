@@ -25,6 +25,15 @@
     {"type": "wait", "ms": 40},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#embedded"}, "start": 5, "end": 5},
-    {"type": "mouse_up", "target": {"text": "End"}, "button": 0}
+    {"type": "mouse_up", "target": {"text": "End"}, "button": 0},
+    {"type": "wait", "ms": 60},
+
+    {"type": "log", "message": "Mutating a rich selection that straddles the embedded input is rejected"},
+    {"type": "key_combo", "key": "x", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#embedded"}, "equals": "inner"},
+    {"type": "assert_text", "target": {"selector": "#host"}, "contains": "Start words"},
+    {"type": "assert_text", "target": {"selector": "#host"}, "contains": "End words"},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
   ]
 }

@@ -84,6 +84,32 @@ static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, 
                       rdcon->clip_shapes, rdcon->clip_shape_depth);
 }
 
+struct TextControlSelectionPaint {
+    RenderContext* rdcon;
+    ViewBlock* block;
+    Color color;
+    float scale;
+    float text_origin_x;
+    float scroll_x;
+    float border_css;
+    float padding_css;
+    bool use_text_origin;
+};
+
+static void paint_text_control_selection_rect(float x, float y, float w, float h,
+                                              void* userdata) {
+    TextControlSelectionPaint* paint = (TextControlSelectionPaint*)userdata;
+    if (!paint || !paint->rdcon || !paint->block || w <= 0.0f || h <= 0.0f) return;
+
+    float rx = paint->rdcon->block.x + x * paint->scale;
+    if (paint->use_text_origin) {
+        float local_x = x - paint->block->x - paint->border_css - paint->padding_css;
+        rx = paint->text_origin_x + local_x * paint->scale - paint->scroll_x;
+    }
+    float ry = paint->rdcon->block.y + y * paint->scale;
+    fill_rect(paint->rdcon, rx, ry, w * paint->scale, h * paint->scale, paint->color);
+}
+
 // Helper to draw a filled circle using RdtVector
 static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
     RdtPath* p = rdt_path_new();
@@ -522,15 +548,37 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
                                                       ? form->current_value_len
                                                       : (uint32_t)strlen(src_text),
                                                   selection_end);
-        int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
-        int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
-        float ax = text_origin_x + measure_input_text_width(rdcon, render_font, text, a8) * s
-                   - scroll_px;
-        float bx = text_origin_x + measure_input_text_width(rdcon, render_font, text, b8) * s
-                   - scroll_px;
-        if (bx > ax) {
-            Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
-            fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
+        Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
+        bool used_shared_selection = false;
+        if (!is_password) {
+            TextControlSelectionPaint paint;
+            memset(&paint, 0, sizeof(paint));
+            paint.rdcon = rdcon;
+            paint.block = block;
+            paint.color = sel_color;
+            paint.scale = s;
+            paint.text_origin_x = text_origin_x;
+            paint.scroll_x = scroll_px;
+            paint.border_css = form_control_border_left_width(block,
+                has_css_border, use_default_border);
+            paint.padding_css = block->bound ? block->bound->padding.left
+                : FormDefaults::TEXT_PADDING_H;
+            paint.use_text_origin = true;
+            used_shared_selection =
+                editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
+                    static_cast<DomElement*>(block), a8_src, b8_src,
+                    paint_text_control_selection_rect, &paint);
+        }
+        if (!used_shared_selection) {
+            int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
+            int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
+            float ax = text_origin_x + measure_input_text_width(rdcon, render_font, text, a8) * s
+                       - scroll_px;
+            float bx = text_origin_x + measure_input_text_width(rdcon, render_font, text, b8) * s
+                       - scroll_px;
+            if (bx > ax) {
+                fill_rect(rdcon, ax, text_y, bx - ax, font_size_scaled, sel_color);
+            }
         }
     }
 
@@ -1279,52 +1327,20 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             if (sel_end > val_len) sel_end = val_len;
 
             if (sel_start < sel_end && value && block->font) {
-                FontBox fbox = {0};
-                setup_font(rdcon->ui_context, &fbox, block->font);
-                if (fbox.font_handle) {
-                    float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                        ? rdcon->ui_context->pixel_ratio : 1.0f;
-
-                    // iterate over each logical line and draw highlight rectangles
-                    int line_off = 0;
-                    int line_num = 0;
-                    while (line_off <= val_len) {
-                        // find end of this line
-                        int line_end_off = line_off;
-                        while (line_end_off < val_len && value[line_end_off] != '\n')
-                            line_end_off++;
-
-                        // check if this line overlaps with selection
-                        // selection range [sel_start, sel_end) may span the \n at line_end_off
-                        int line_range_end = (line_end_off < val_len) ? line_end_off + 1 : line_end_off;
-                        if (sel_start < line_range_end && sel_end > line_off) {
-                            // compute highlight x-range on this line
-                            int hl_start = sel_start > line_off ? sel_start - line_off : 0;
-                            int hl_end = sel_end < line_end_off ? sel_end - line_off : line_end_off - line_off;
-
-                            float x0 = content_x + measure_text_width(fbox.font_handle, block->font,
-                                                                       pixel_ratio, value + line_off, hl_start) * s;
-                            float x1 = content_x + measure_text_width(fbox.font_handle, block->font,
-                                                                       pixel_ratio, value + line_off, hl_end) * s;
-
-                            // if selection includes the newline, extend highlight to content edge
-                            if (sel_end > line_end_off && line_end_off < val_len)
-                                x1 = content_x + content_w;
-
-                            float hl_y = content_y + line_num * line_height;
-                            if (x1 > x0 && hl_y + line_height > y && hl_y < y + h) {
-                                // draw selection rectangle (semi-transparent blue)
-                                // draw selection highlight via RdtVector
-                                Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
-                                rc_fill_rect(rdcon, x0, hl_y, x1 - x0, line_height, sel_color);
-                            }
-                        }
-
-                        if (line_end_off >= val_len) break;
-                        line_off = line_end_off + 1;
-                        line_num++;
-                    }
-                }
+                Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
+                TextControlSelectionPaint paint;
+                memset(&paint, 0, sizeof(paint));
+                paint.rdcon = rdcon;
+                paint.block = block;
+                paint.color = sel_color;
+                paint.scale = s;
+                paint.border_css = form_control_border_left_width(block,
+                    has_css_border, use_default_border);
+                paint.padding_css = block->bound ? block->bound->padding.left
+                    : FormDefaults::TEXTAREA_PADDING;
+                editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
+                    static_cast<DomElement*>(block), (uint32_t)sel_start,
+                    (uint32_t)sel_end, paint_text_control_selection_rect, &paint);
             }
         }
     }

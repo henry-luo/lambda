@@ -6,6 +6,7 @@
 
 struct DocState;
 struct DomText;
+struct TextRect;
 struct UiContext;
 class DomElement;
 
@@ -36,11 +37,17 @@ struct EditingCaretRect {
     bool valid;
 };
 
+typedef void (*EditingGeometryRectCb)(float x, float y, float w, float h,
+                                      void* userdata);
+
 void editing_boundary_clear(EditingBoundary* out);
 void editing_caret_rect_clear(EditingCaretRect* out);
 
 bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
                                                 const EditingBoundary* boundary);
+
+bool editing_geometry_surface_contains_range(const EditingSurface* surface,
+                                             const DomRange* range);
 
 bool editing_geometry_hit_test_boundary(UiContext* uicon,
                                         View* root_view,
@@ -67,9 +74,23 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
                                               uint32_t offset,
                                               EditingCaretRect* out);
 
+bool editing_geometry_text_control_for_each_selection_rect(UiContext* uicon,
+                                                           DomElement* elem,
+                                                           uint32_t start_offset,
+                                                           uint32_t end_offset,
+                                                           EditingGeometryRectCb cb,
+                                                           void* userdata);
+
 bool editing_geometry_dom_text_boundary_from_byte_offset(DomText* text,
                                                          uint32_t byte_offset,
                                                          EditingBoundary* out);
+
+bool editing_geometry_dom_text_boundary_from_point(UiContext* uicon,
+                                                   DomText* text,
+                                                   TextRect* rect,
+                                                   float vx,
+                                                   float vy,
+                                                   EditingBoundary* out);
 
 bool editing_geometry_dom_text_caret_rect(UiContext* uicon,
                                           DomText* text,

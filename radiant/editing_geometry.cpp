@@ -33,6 +33,28 @@ static bool editing_geometry_node_inside_text_control(DomNode* node) {
     return false;
 }
 
+static bool editing_geometry_range_intersects_text_control_descendant(
+        const DomRange* range, DomNode* node, DomElement* owner) {
+    if (!range || !node || !owner) return false;
+    if (!dom_range_intersects_node(range, node)) return false;
+
+    if (node != static_cast<DomNode*>(owner) && node->is_element()) {
+        DomElement* elem = lam::dom_require_element(node);
+        if (tc_is_text_control(elem)) return true;
+    }
+
+    if (node->is_element()) {
+        DomElement* elem = lam::dom_require_element(node);
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            if (editing_geometry_range_intersects_text_control_descendant(
+                    range, child, owner)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void editing_geometry_view_abs_xy(View* view, float* out_x, float* out_y) {
     float x = 0.0f, y = 0.0f;
     View* p = view;
@@ -40,6 +62,22 @@ static void editing_geometry_view_abs_xy(View* view, float* out_x, float* out_y)
         x += p->x;
         y += p->y;
         p = static_cast<View*>(p->parent);
+    }
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+}
+
+static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, float* out_y) {
+    float x = 0.0f, y = 0.0f;
+    if (text) {
+        for (View* p = text->parent; p; p = p->parent) {
+            if (p->view_type == RDT_VIEW_BLOCK ||
+                p->view_type == RDT_VIEW_INLINE_BLOCK ||
+                p->view_type == RDT_VIEW_LIST_ITEM) {
+                x += p->x;
+                y += p->y;
+            }
+        }
     }
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
@@ -185,6 +223,38 @@ bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
         return editing_geometry_node_is_descendant_of(boundary->dom.node, surface->owner);
     }
     return false;
+}
+
+bool editing_geometry_surface_contains_range(const EditingSurface* surface,
+                                             const DomRange* range) {
+    if (!surface || !range || !range->start.node || !range->end.node) return false;
+
+    EditingBoundary start;
+    editing_boundary_clear(&start);
+    start.kind = EDITING_BOUNDARY_DOM;
+    start.surface = *surface;
+    start.dom = range->start;
+    start.view = static_cast<View*>(range->start.node);
+
+    EditingBoundary end;
+    editing_boundary_clear(&end);
+    end.kind = EDITING_BOUNDARY_DOM;
+    end.surface = *surface;
+    end.dom = range->end;
+    end.view = static_cast<View*>(range->end.node);
+
+    if (!editing_geometry_surface_contains_boundary(surface, &start) ||
+        !editing_geometry_surface_contains_boundary(surface, &end)) {
+        return false;
+    }
+
+    if (editing_surface_is_rich(surface)) {
+        if (editing_geometry_range_intersects_text_control_descendant(
+                range, static_cast<DomNode*>(surface->owner), surface->owner)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
@@ -355,6 +425,91 @@ bool editing_geometry_text_control_caret_rect(UiContext* uicon,
     return true;
 }
 
+bool editing_geometry_text_control_for_each_selection_rect(UiContext* uicon,
+                                                           DomElement* elem,
+                                                           uint32_t start_offset,
+                                                           uint32_t end_offset,
+                                                           EditingGeometryRectCb cb,
+                                                           void* userdata) {
+    if (!uicon || !elem || !tc_is_text_control(elem) || !elem->form || !cb) return false;
+    if (start_offset == end_offset) return true;
+
+    ViewBlock* block = lam::view_require_block(elem);
+    if (!block) return false;
+    tc_ensure_init(elem);
+    const char* value = elem->form->current_value ? elem->form->current_value : elem->form->value;
+    uint32_t value_len = elem->form->current_value_len;
+    if (!value) value = "";
+    if (start_offset > value_len) start_offset = value_len;
+    if (end_offset > value_len) end_offset = value_len;
+    if (start_offset > end_offset) {
+        uint32_t tmp = start_offset;
+        start_offset = end_offset;
+        end_offset = tmp;
+    }
+    if (start_offset == end_offset) return true;
+
+    float border = (block->bound && block->bound->border)
+        ? block->bound->border->width.left : 1.0f;
+    float padding = block->bound ? block->bound->padding.left :
+        (elem->form->control_type == FORM_CONTROL_TEXTAREA
+            ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
+    float content_x = block->x + border + padding;
+    float content_y = block->y + border + padding;
+    float content_w = block->width - 2.0f * (border + padding);
+    if (content_w < 0.0f) content_w = 0.0f;
+    float font_size = block->font ? block->font->font_size :
+        (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
+
+    if (elem->form->control_type != FORM_CONTROL_TEXTAREA) {
+        float start_w = 0.0f;
+        float end_w = 0.0f;
+        editing_geometry_text_metrics(uicon, block, value, start_offset, &start_w);
+        editing_geometry_text_metrics(uicon, block, value, end_offset, &end_w);
+        float y = block->y + border + (block->height - 2.0f * border - font_size) / 2.0f;
+        if (end_w > start_w) {
+            cb(content_x + start_w, y, end_w - start_w, font_size, userdata);
+        }
+        return true;
+    }
+
+    float line_height = font_size * 1.4f;
+    uint32_t line_off = 0;
+    uint32_t line_num = 0;
+    while (line_off <= value_len) {
+        uint32_t line_end_off = line_off;
+        while (line_end_off < value_len && value[line_end_off] != '\n') {
+            line_end_off++;
+        }
+
+        uint32_t line_range_end = (line_end_off < value_len) ? line_end_off + 1 : line_end_off;
+        if (start_offset < line_range_end && end_offset > line_off) {
+            uint32_t hl_start = start_offset > line_off ? start_offset - line_off : 0;
+            uint32_t hl_end = end_offset < line_end_off ? end_offset - line_off : line_end_off - line_off;
+
+            float x0_w = 0.0f;
+            float x1_w = 0.0f;
+            editing_geometry_text_metrics(uicon, block, value + line_off, hl_start, &x0_w);
+            editing_geometry_text_metrics(uicon, block, value + line_off, hl_end, &x1_w);
+
+            float x0 = content_x + x0_w;
+            float x1 = content_x + x1_w;
+            if (end_offset > line_end_off && line_end_off < value_len) {
+                x1 = content_x + content_w;
+            }
+            float y = content_y + (float)line_num * line_height;
+            if (x1 > x0) {
+                cb(x0, y, x1 - x0, line_height, userdata);
+            }
+        }
+
+        if (line_end_off >= value_len) break;
+        line_off = line_end_off + 1;
+        line_num++;
+    }
+    return true;
+}
+
 bool editing_geometry_dom_text_boundary_from_byte_offset(DomText* text,
                                                          uint32_t byte_offset,
                                                          EditingBoundary* out) {
@@ -369,6 +524,27 @@ bool editing_geometry_dom_text_boundary_from_byte_offset(DomText* text,
     out->offset = byte_offset;
     editing_surface_from_target(static_cast<View*>(text), &out->surface);
     return true;
+}
+
+bool editing_geometry_dom_text_boundary_from_point(UiContext* uicon,
+                                                   DomText* text,
+                                                   TextRect* rect,
+                                                   float vx,
+                                                   float vy,
+                                                   EditingBoundary* out) {
+    (void)vy;
+    if (!out) return false;
+    editing_boundary_clear(out);
+    if (!uicon || !text || !rect) return false;
+
+    ViewText* view_text = static_cast<ViewText*>(text);
+    float block_x = 0.0f;
+    editing_geometry_text_block_abs_xy(view_text, &block_x, nullptr);
+    float local_x = vx - block_x;
+    int byte_offset = dom_range_byte_offset_for_x(uicon, view_text, rect, local_x);
+    if (byte_offset < 0) byte_offset = 0;
+    return editing_geometry_dom_text_boundary_from_byte_offset(text,
+        (uint32_t)byte_offset, out); // INT_CAST_OK: clamped byte offset from resolver.
 }
 
 bool editing_geometry_dom_text_caret_rect(UiContext* uicon,

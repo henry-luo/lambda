@@ -4778,27 +4778,33 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
             return;
         }
 
-        // Setup event context for font access
-        EventContext evcon;
-        memset(&evcon, 0, sizeof(EventContext));
-        evcon.ui_context = uicon;
-
-        // Setup font from text view
-        if (text->font) {
-            setup_font(uicon, &evcon.font, text->font);
+        EditingCaretRect caret_rect;
+        if (editing_geometry_dom_text_caret_rect(uicon, static_cast<DomText*>(text),
+                caret_offset < 0 ? 0 : (uint32_t)caret_offset,
+                &caret_rect)) {
+            caret_x = caret_rect.x;
+            caret_y = caret_rect.y;
+            caret_height = caret_rect.height;
         } else {
-            // Fall back to default font
-            DomDocument* doc = uicon->document;
-            if (doc && doc->view_tree) {
-                FontProp* default_font = doc->view_tree->html_version == HTML5
-                    ? &uicon->default_font : &uicon->legacy_default_font;
-                setup_font(uicon, &evcon.font, default_font);
-            }
-        }
+            // Setup event context for legacy fallback font access.
+            EventContext evcon;
+            memset(&evcon, 0, sizeof(EventContext));
+            evcon.ui_context = uicon;
 
-        // Calculate visual position for text
-        calculate_position_from_char_offset(&evcon, text, rect, caret_offset,
-            &caret_x, &caret_y, &caret_height);
+            if (text->font) {
+                setup_font(uicon, &evcon.font, text->font);
+            } else {
+                DomDocument* doc = uicon->document;
+                if (doc && doc->view_tree) {
+                    FontProp* default_font = doc->view_tree->html_version == HTML5
+                        ? &uicon->default_font : &uicon->legacy_default_font;
+                    setup_font(uicon, &evcon.font, default_font);
+                }
+            }
+
+            calculate_position_from_char_offset(&evcon, text, rect, caret_offset,
+                &caret_x, &caret_y, &caret_height);
+        }
 
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
@@ -5156,9 +5162,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (in_gap && gap_offset >= 0) {
                     char_offset = gap_offset;
                 } else {
-                    char_offset = calculate_char_offset_from_position(
-                        &evcon, text, rect,
-                        motion->x, motion->y);
+                    EditingBoundary hit_boundary;
+                    if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
+                            static_cast<DomText*>(text), rect,
+                            (float)motion->x, (float)motion->y,
+                            &hit_boundary)) {
+                        char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
+                    } else {
+                        char_offset = calculate_char_offset_from_position(
+                            &evcon, text, rect,
+                            motion->x, motion->y);
+                    }
                 }
 
                 log_debug("[SELECTION DRAG] target_view=%p (same as anchor: %d), char_offset=%d, anchor=%d, picked_rect=(%.1f,%.1f,%.1fx%.1f start=%d len=%d) rel_y=%.1f in_gap=%d margin=%d",
@@ -5367,8 +5381,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Calculate character offset from click position
                 int char_offset = evcon.target_text_offset_valid
                     ? evcon.target_text_offset
-                    : calculate_char_offset_from_position(
-                        &evcon, text, rect, btn_event->x, btn_event->y);
+                    : 0;
+                if (!evcon.target_text_offset_valid) {
+                    EditingBoundary hit_boundary;
+                    if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
+                            static_cast<DomText*>(text), rect,
+                            (float)btn_event->x, (float)btn_event->y,
+                            &hit_boundary)) {
+                        char_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
+                    } else {
+                        char_offset = calculate_char_offset_from_position(
+                            &evcon, text, rect, btn_event->x, btn_event->y);
+                    }
+                }
 
                 log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
 
@@ -5699,10 +5724,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         setup_font(evcon.ui_context, &evcon.font, text->font);
                     }
                     collapse_view = evcon.target;
-                    collapse_offset = evcon.target_text_offset_valid
-                        ? evcon.target_text_offset
-                        : calculate_char_offset_from_position(
-                            &evcon, text, evcon.target_text_rect, btn_event->x, btn_event->y);
+                    if (evcon.target_text_offset_valid) {
+                        collapse_offset = evcon.target_text_offset;
+                    } else {
+                        EditingBoundary hit_boundary;
+                        if (editing_geometry_dom_text_boundary_from_point(evcon.ui_context,
+                                static_cast<DomText*>(text), evcon.target_text_rect,
+                                (float)btn_event->x, (float)btn_event->y,
+                                &hit_boundary)) {
+                            collapse_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints
+                        } else {
+                            collapse_offset = calculate_char_offset_from_position(
+                                &evcon, text, evcon.target_text_rect, btn_event->x, btn_event->y);
+                        }
+                    }
                     evcon.font = saved_font;
                 }
                 selection_start(state, collapse_view, collapse_offset);
@@ -7130,9 +7165,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         }
                         // Calculate line start/end for extending selection
                         caret_move_line(state, -1, evcon.ui_context);
-                        caret_get_position(state, NULL, &caret_offset);
-                        selection_extend(state, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                        View* new_caret_view = caret_view;
+                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
+                            NULL, NULL, NULL, NULL, NULL, NULL);
+                        selection_extend_to_view(state, new_caret_view, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
                             "extendLineBackward", nullptr);
                     } else {
                         selection_clear(state);
@@ -7150,9 +7187,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             selection_start(state, caret_view, caret_offset);
                         }
                         caret_move_line(state, 1, evcon.ui_context);
-                        caret_get_position(state, NULL, &caret_offset);
-                        selection_extend(state, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                        View* new_caret_view = caret_view;
+                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
+                            NULL, NULL, NULL, NULL, NULL, NULL);
+                        selection_extend_to_view(state, new_caret_view, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
                             "extendLineForward", nullptr);
                     } else {
                         selection_clear(state);
@@ -7170,9 +7209,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             selection_start(state, caret_view, caret_offset);
                         }
                         caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
-                        caret_get_position(state, NULL, &caret_offset);
-                        selection_extend(state, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                        View* new_caret_view = caret_view;
+                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
+                            NULL, NULL, NULL, NULL, NULL, NULL);
+                        selection_extend_to_view(state, new_caret_view, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
                             cmd ? "extendDocumentStart" : "extendLineStart", nullptr);
                     } else {
                         selection_clear(state);
@@ -7190,9 +7231,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             selection_start(state, caret_view, caret_offset);
                         }
                         caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
-                        caret_get_position(state, NULL, &caret_offset);
-                        selection_extend(state, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
+                        View* new_caret_view = caret_view;
+                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
+                            NULL, NULL, NULL, NULL, NULL, NULL);
+                        selection_extend_to_view(state, new_caret_view, caret_offset);
+                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
                             cmd ? "extendDocumentEnd" : "extendLineEnd", nullptr);
                     } else {
                         selection_clear(state);
