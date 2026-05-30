@@ -381,6 +381,137 @@ static bool js_typed_array_try_raw_convert_number(JsTypedArray* dst, JsTypedArra
     return true;
 }
 
+static bool js_typed_array_try_raw_convert_bigint(JsTypedArray* dst, JsTypedArray* src,
+                                                  int offset, bool allow_overlap) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!dst || !src) return false;
+    if (!js_typed_array_is_bigint_element(dst->element_type) ||
+        !js_typed_array_is_bigint_element(src->element_type)) return false;
+    if (dst->element_type == src->element_type) return false;
+    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
+
+    int src_len = js_typed_array_current_length(src);
+    if (src_len <= 0) return true;
+    int dst_len = js_typed_array_current_length(dst);
+    if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
+
+    char* src_data = (char*)js_typed_array_current_data(src);
+    char* dst_data = (char*)js_typed_array_current_data(dst);
+    if (!src_data || !dst_data) return false;
+
+    int elem_size = typed_array_element_size(src->element_type);
+    char* dst_start = dst_data + ((size_t)offset * (size_t)elem_size);
+    size_t byte_count = (size_t)src_len * (size_t)elem_size;
+    if (!allow_overlap && js_typed_array_ranges_overlap(dst_start, (int)byte_count,
+                                                        src_data, (int)byte_count)) {
+        return false;
+    }
+    memmove(dst_start, src_data, byte_count);
+    return true;
+}
+
+extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!js_is_typed_array(dst_item) || !js_is_typed_array(src_item)) return false;
+    JsTypedArray* dst = js_get_typed_array_ptr(dst_item.map);
+    JsTypedArray* src = js_get_typed_array_ptr(src_item.map);
+    if (!dst || !src || dst->element_type != src->element_type) return false;
+    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
+    int len = js_typed_array_current_length(src);
+    if (len != js_typed_array_current_length(dst)) return false;
+    if (len <= 0) return true;
+    char* src_data = (char*)js_typed_array_current_data(src);
+    char* dst_data = (char*)js_typed_array_current_data(dst);
+    if (!src_data || !dst_data) return false;
+    int elem_size = typed_array_element_size(src->element_type);
+    memcpy(dst_data, src_data, (size_t)len * (size_t)elem_size);
+    return true;
+}
+
+extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!js_is_typed_array(ta_item)) return false;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta || js_typed_array_is_out_of_bounds(ta)) return false;
+    int len = js_typed_array_current_length(ta);
+    if (len <= 1) return true;
+    char* data = (char*)js_typed_array_current_data(ta);
+    if (!data) return false;
+    int elem_size = typed_array_element_size(ta->element_type);
+    char temp[8];
+    for (int i = 0, j = len - 1; i < j; i++, j--) {
+        char* left = data + (size_t)i * (size_t)elem_size;
+        char* right = data + (size_t)j * (size_t)elem_size;
+        memcpy(temp, left, (size_t)elem_size);
+        memcpy(left, right, (size_t)elem_size);
+        memcpy(right, temp, (size_t)elem_size);
+    }
+    return true;
+}
+
+extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!js_is_typed_array(dst_item) || !js_is_typed_array(src_item)) return false;
+    JsTypedArray* dst = js_get_typed_array_ptr(dst_item.map);
+    JsTypedArray* src = js_get_typed_array_ptr(src_item.map);
+    if (!dst || !src || dst->element_type != src->element_type) return false;
+    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
+    int len = js_typed_array_current_length(src);
+    if (len != js_typed_array_current_length(dst)) return false;
+    if (len <= 0) return true;
+    char* src_data = (char*)js_typed_array_current_data(src);
+    char* dst_data = (char*)js_typed_array_current_data(dst);
+    if (!src_data || !dst_data) return false;
+    int elem_size = typed_array_element_size(src->element_type);
+    for (int i = 0, j = len - 1; i < len; i++, j--) {
+        memcpy(dst_data + (size_t)i * (size_t)elem_size,
+               src_data + (size_t)j * (size_t)elem_size,
+               (size_t)elem_size);
+    }
+    return true;
+}
+
+extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
+                                           int from, bool reverse, bool same_value_zero) {
+    if (!js_typed_array_raw_fast_enabled()) return -2;
+    if (!js_is_typed_array(ta_item)) return -2;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta || !js_typed_array_is_number_element(ta->element_type)) return -2;
+    if (js_typed_array_is_out_of_bounds(ta)) return -2;
+
+    TypeId search_type = get_type_id(search_value);
+    double needle = 0.0;
+    if (search_type == LMD_TYPE_INT) {
+        int64_t iv = it2i(search_value);
+        if (iv <= -(int64_t)JS_SYMBOL_BASE) return -1;
+        needle = (double)iv;
+    } else if (search_type == LMD_TYPE_FLOAT) {
+        needle = it2d(search_value);
+    } else {
+        return -1;
+    }
+
+    int len = js_typed_array_current_length(ta);
+    if (len <= 0) return -1;
+    if (from < 0 || from >= len) return -1;
+    char* data = (char*)js_typed_array_current_data(ta);
+    if (!data) return -2;
+
+    bool needle_nan = isnan(needle);
+    if (reverse) {
+        for (int i = from; i >= 0; i--) {
+            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
+        }
+    } else {
+        for (int i = from; i < len; i++) {
+            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
+        }
+    }
+    return -1;
+}
+
 static bool js_to_index_int(Item value, int* out_index, const char* error_message) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
@@ -1638,8 +1769,9 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
             // fast path: same type → memcpy
             int elem_size = typed_array_element_size(src->element_type);
             memcpy(dst->data, src->data, src->length * elem_size);
-        } else if (js_typed_array_try_raw_convert_number(dst, src, 0, true)) {
-            // fast path: numeric typed-array conversion without Item boxing
+        } else if (js_typed_array_try_raw_convert_number(dst, src, 0, true) ||
+                   js_typed_array_try_raw_convert_bigint(dst, src, 0, true)) {
+            // fast path: typed-array conversion without Item boxing
         } else {
             for (int i = 0; i < src->length; i++) {
                 Item idx = (Item){.item = i2it(i)};
@@ -2095,7 +2227,8 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
         if (js_typed_array_try_raw_set_same_type(dst, src, offset)) {
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
-        if (js_typed_array_try_raw_convert_number(dst, src, offset, false)) {
+        if (js_typed_array_try_raw_convert_number(dst, src, offset, false) ||
+            js_typed_array_try_raw_convert_bigint(dst, src, offset, false)) {
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 
