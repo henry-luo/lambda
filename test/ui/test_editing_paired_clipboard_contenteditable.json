@@ -1,0 +1,15 @@
+{
+  "name": "Editing paired clipboard - contenteditable paste intent and copy",
+  "html": "test/ui/editing/contenteditable.html",
+  "viewport": {"width": 640, "height": 360},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_clipboard_contenteditable ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "paste_text", "target": {"selector": "#surface"}, "text": "clip"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromPaste|clip"},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromPaste|clip|seed"},
+    {"type": "assert_clipboard", "equals": "clip"}
+  ]
+}

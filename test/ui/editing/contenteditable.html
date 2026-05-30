@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Editing paired fixture - contenteditable</title>
+  <style>
+    body { font: 16px Arial, sans-serif; padding: 18px; }
+    #surface {
+      border: 1px solid #888;
+      min-height: 34px;
+      padding: 6px;
+      width: 280px;
+    }
+    #auto-scroll {
+      border: 1px solid #777;
+      height: 160px;
+      line-height: 24px;
+      margin-top: 22px;
+      overflow: scroll;
+      width: 220px;
+    }
+    #auto-rich {
+      background: #f8fbff;
+      height: 680px;
+      padding: 8px;
+      width: 620px;
+    }
+    .auto-gap { height: 500px; }
+    .log { margin-top: 8px; font: 13px monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="surface" contenteditable="true" tabindex="0">seed</div>
+  <div id="auto-scroll">
+    <div id="auto-rich" contenteditable="true" tabindex="0">
+      <p><span id="auto-rich-start">Rich start text</span> inside the scroll container.</p>
+      <div class="auto-gap"></div>
+      <p><span id="auto-rich-end">Rich end text</span> after internal scrolling.</p>
+    </div>
+  </div>
+  <div id="before-log" class="log">before:none</div>
+  <div id="input-log" class="log">input:none</div>
+  <div id="blocked-log" class="log">blocked:none</div>
+  <div id="composition-log" class="log">composition:none</div>
+  <div id="history-log" class="log">history:none</div>
+  <script>
+    var surface = document.getElementById('surface');
+    var beforeLog = document.getElementById('before-log');
+    var inputLog = document.getElementById('input-log');
+    var blockedLog = document.getElementById('blocked-log');
+    var compositionLog = document.getElementById('composition-log');
+    var historyLog = document.getElementById('history-log');
+    var compositionEvents = [];
+
+    function summarize(event) {
+      var ranges = event.getTargetRanges();
+      var rangeText = 'none';
+      var rangeCount = ranges ? ranges.length : 0;
+      if (ranges && ranges.length > 0) {
+        rangeText = ranges[0].startOffset + '-' + ranges[0].endOffset;
+      }
+      return event.inputType + '|' + (event.data || '') + '|' +
+        rangeCount + '|' + rangeText;
+    }
+
+    surface.onbeforeinput = function(event) {
+      var summary = summarize(event);
+      beforeLog.textContent = 'before:' + summary;
+      if (event.inputType === 'historyUndo' ||
+          event.inputType === 'historyRedo') {
+        historyLog.textContent = 'history:' + event.inputType;
+        event.preventDefault();
+      }
+      if (event.inputType === 'insertCompositionText' ||
+          event.inputType === 'insertFromComposition' ||
+          event.inputType === 'deleteCompositionText') {
+        compositionEvents.push('beforeinput:' + event.inputType + ':' +
+          (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+      }
+      if (event.data === 'X') {
+        event.preventDefault();
+        blockedLog.textContent = 'blocked:' + summary;
+      }
+    };
+    surface.oninput = function(event) {
+      inputLog.textContent = 'input:' + event.inputType + '|' +
+        (event.data || '') + '|' + surface.textContent;
+      if (event.inputType === 'insertCompositionText' ||
+          event.inputType === 'insertFromComposition' ||
+          event.inputType === 'deleteCompositionText') {
+        compositionEvents.push('input:' + event.inputType + ':' +
+          (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+        if (!event.isComposing) {
+          compositionLog.textContent = 'composition:' + compositionEvents.join('|');
+        }
+      }
+    };
+    surface.oncompositionstart = function(event) {
+      compositionEvents = ['compositionstart:' + (event.data || '')];
+    };
+    surface.oncompositionupdate = function(event) {
+      compositionEvents.push('compositionupdate:' + (event.data || ''));
+    };
+    surface.oncompositionend = function(event) {
+      compositionEvents.push('compositionend:' + (event.data || ''));
+    };
+  </script>
+</body>
+</html>

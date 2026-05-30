@@ -1,0 +1,17 @@
+{
+  "name": "Editing paired logging - contenteditable intent records",
+  "html": "test/ui/editing/contenteditable.html",
+  "viewport": {"width": 640, "height": 420},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_logging_contenteditable ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "type", "target": {"selector": "#surface"}, "text": "L"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertText|L|seed"},
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.intent\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.beforeinput\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.input\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"owned_by\":\"consumer\"", "min": 1}
+  ]
+}
