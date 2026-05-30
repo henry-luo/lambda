@@ -15,7 +15,7 @@
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|se|"},
-    {"type": "assert_event_log", "contains": "\"inputType\":\"deleteByDrag\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"inputType\":\"insertFromDrop\"", "min": 1}
+    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByDrag", "surface": "text_control", "min": 1},
+    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertFromDrop", "surface": "text_control", "min": 1}
   ]
 }
