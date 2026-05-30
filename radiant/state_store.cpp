@@ -565,6 +565,9 @@ extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
         sel->focus_offset == state->caret->char_offset) {
         return;
     }
+    bool preserve_pointer_selection = sel && sel->is_selecting;
+    View* preserve_anchor_view = sel ? sel->anchor_view : NULL;
+    int preserve_anchor_offset = sel ? sel->anchor_offset : 0;
     DomBoundary b = boundary_from_legacy(state->caret->view, state->caret->char_offset);
     if (!b.node) return;
     const char* exc = NULL;
@@ -573,6 +576,13 @@ extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
         log_debug("[DOM-SYNC] collapse rejected: %s", exc ? exc : "?");
     }
     state->dom_selection_sync_depth--;
+    if (preserve_pointer_selection && state->selection) {
+        state->selection->is_selecting = true;
+        if (preserve_anchor_view) {
+            state->selection->anchor_view = preserve_anchor_view;
+            state->selection->anchor_offset = preserve_anchor_offset;
+        }
+    }
     state->selection_layout_dirty = true;
 }
 

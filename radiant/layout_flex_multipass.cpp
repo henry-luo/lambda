@@ -10,6 +10,7 @@
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
 #include "render_export_support.hpp"
+#include "state_store.hpp"
 
 #include "../lib/log.h"
 #include "../lib/tagged.hpp"
@@ -988,6 +989,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                         lycon->ui_context->pixel_ratio);
                     log_debug(">>> FLEX ITEM IFRAME: load_html_doc returned doc=%p", doc);
                     if (doc) {
+                        radiant_document_ensure_state(doc, "layout_flex_iframe");
                         log_debug(">>> FLEX ITEM IFRAME: doc loaded, allocating embed prop (flex_item=%p, embed before=%p)",
                                   flex_item, flex_item->embed);
                         if (!flex_item->embed) {

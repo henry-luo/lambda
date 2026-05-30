@@ -69,6 +69,74 @@ static void editing_geometry_view_abs_xy(View* view, float* out_x, float* out_y)
     if (out_y) *out_y = y;
 }
 
+static bool editing_geometry_find_document_offset(View* view,
+                                                  DomDocument* target_doc,
+                                                  float base_x,
+                                                  float base_y,
+                                                  float* out_x,
+                                                  float* out_y) {
+    if (!view || !target_doc) return false;
+
+    float here_x = base_x + view->x;
+    float here_y = base_y + view->y;
+
+    if ((view->view_type == RDT_VIEW_BLOCK ||
+         view->view_type == RDT_VIEW_INLINE_BLOCK ||
+         view->view_type == RDT_VIEW_LIST_ITEM) &&
+        view->is_element()) {
+        ViewBlock* block = lam::view_require_block(view);
+        if (block->embed && block->embed->doc) {
+            DomDocument* embed_doc = block->embed->doc;
+            if (embed_doc == target_doc) {
+                if (out_x) *out_x = here_x;
+                if (out_y) *out_y = here_y;
+                return true;
+            }
+            if (embed_doc->view_tree && embed_doc->view_tree->root &&
+                editing_geometry_find_document_offset(
+                    embed_doc->view_tree->root, target_doc,
+                    here_x, here_y, out_x, out_y)) {
+                return true;
+            }
+        }
+    }
+
+    if (!view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        View* child_view = static_cast<View*>(child);
+        if (!child_view->view_type) continue;
+        if (editing_geometry_find_document_offset(child_view, target_doc,
+                                                  here_x, here_y,
+                                                  out_x, out_y)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void editing_geometry_document_viewport_offset(UiContext* uicon,
+                                                      DomDocument* target_doc,
+                                                      float* out_x,
+                                                      float* out_y) {
+    if (out_x) *out_x = 0.0f;
+    if (out_y) *out_y = 0.0f;
+    if (!uicon || !target_doc || !uicon->document ||
+        uicon->document == target_doc ||
+        !uicon->document->view_tree ||
+        !uicon->document->view_tree->root) {
+        return;
+    }
+
+    float doc_x = 0.0f, doc_y = 0.0f;
+    if (editing_geometry_find_document_offset(uicon->document->view_tree->root,
+                                              target_doc, 0.0f, 0.0f,
+                                              &doc_x, &doc_y)) {
+        if (out_x) *out_x = doc_x;
+        if (out_y) *out_y = doc_y;
+    }
+}
+
 static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, float* out_y) {
     float x = 0.0f, y = 0.0f;
     if (text) {
@@ -310,6 +378,10 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
 
     float abs_x = 0.0f, abs_y = 0.0f;
     editing_geometry_view_abs_xy(static_cast<View*>(block), &abs_x, &abs_y);
+    float doc_x = 0.0f, doc_y = 0.0f;
+    editing_geometry_document_viewport_offset(uicon, elem->doc, &doc_x, &doc_y);
+    abs_x += doc_x;
+    abs_y += doc_y;
 
     float border = (block->bound && block->bound->border)
         ? block->bound->border->width.left : 1.0f;

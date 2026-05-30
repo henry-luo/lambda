@@ -17,6 +17,18 @@
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
 void event_context_cleanup(EventContext* evcon);
 
+static DomDocument* editing_controller_document(EventContext* evcon) {
+    if (!evcon) return nullptr;
+    return evcon->target_document
+        ? evcon->target_document
+        : (evcon->ui_context ? evcon->ui_context->document : nullptr);
+}
+
+static DocState* editing_controller_doc_state(EventContext* evcon) {
+    DomDocument* doc = editing_controller_document(evcon);
+    return doc ? (DocState*)doc->state : nullptr;
+}
+
 static void editing_controller_selection_snapshot(
         EventContext* evcon,
         DocState* state,
@@ -92,8 +104,7 @@ bool editing_controller_dispatch_history(EventContext* evcon,
         return false;
     }
     if (!hooks || !hooks->history_dispatch) return false;
-    DocState* state = (evcon->ui_context && evcon->ui_context->document)
-        ? (DocState*)evcon->ui_context->document->state : nullptr;
+    DocState* state = editing_controller_doc_state(evcon);
     editing_interaction_set_active_surface(state, surface);
     return hooks->history_dispatch(evcon, surface, input_type, hooks->user);
 }
@@ -354,14 +365,15 @@ static void editing_controller_extend_selection_after_scroll(
         return;
     }
 
+    DomDocument* doc = editing_controller_document(evcon);
     if (!editing_surface_is_rich(&surface) || !evcon->ui_context ||
-        !evcon->ui_context->document || !evcon->ui_context->document->view_tree) {
+        !doc || !doc->view_tree) {
         return;
     }
 
     EditingBoundary hit_boundary;
     if (!editing_geometry_hit_test_boundary(evcon->ui_context,
-            evcon->ui_context->document->view_tree->root, &surface,
+            doc->view_tree->root, &surface,
             pointer_x, pointer_y, EDITING_CLAMP_SKIP_TEXT_CONTROLS,
             &hit_boundary) ||
         !hit_boundary.dom.node ||
@@ -461,13 +473,14 @@ static bool editing_controller_text_control_drag_autoscroll(
 }
 
 static ViewBlock* editing_controller_root_block(EventContext* evcon) {
-    if (!evcon || !evcon->ui_context || !evcon->ui_context->document ||
-        !evcon->ui_context->document->view_tree ||
-        !evcon->ui_context->document->view_tree->root ||
-        evcon->ui_context->document->view_tree->root->view_type != RDT_VIEW_BLOCK) {
+    DomDocument* doc = editing_controller_document(evcon);
+    if (!evcon || !evcon->ui_context || !doc ||
+        !doc->view_tree ||
+        !doc->view_tree->root ||
+        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
         return nullptr;
     }
-    return lam::view_require_block(evcon->ui_context->document->view_tree->root);
+    return lam::view_require_block(doc->view_tree->root);
 }
 
 static ViewBlock* editing_controller_nearest_scroll_block(DocState* state,
@@ -530,11 +543,11 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
                                         float pointer_x,
                                         float pointer_y,
                                         const EditingControllerHooks* hooks) {
-    if (!evcon || !evcon->ui_context || !evcon->ui_context->document ||
+    DomDocument* doc = editing_controller_document(evcon);
+    if (!evcon || !evcon->ui_context || !doc ||
         !state || !surface_target) {
         return false;
     }
-    DomDocument* doc = evcon->ui_context->document;
 
     EditingSurface surface;
     if (editing_surface_from_target(surface_target, &surface) &&

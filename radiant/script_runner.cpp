@@ -539,8 +539,11 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "document.defaultView = window;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
-    // Postamble: call window.onload if set by scripts
+    // Postamble: fire DOMContentLoaded, then call window.onload if set by scripts.
     strbuf_append_str(wrapped_buf,
+        "\nif (document && document.dispatchEvent && typeof Event === 'function') {\n"
+        "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
+        "}\n"
         "\nif (window.onload) { window.onload(); }\n"
     );
     strbuf_free(script_buf);

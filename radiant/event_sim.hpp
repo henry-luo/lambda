@@ -267,6 +267,8 @@ struct SimEvent {
     bool expected_drag_drop_source;
     bool has_expected_drag_drop_target;
     bool expected_drag_drop_target;
+    bool has_expected_open_dropdown;
+    bool expected_open_dropdown;
     bool has_expected_scrollbar_h_hovered;
     bool expected_scrollbar_h_hovered;
     bool has_expected_scrollbar_v_hovered;
