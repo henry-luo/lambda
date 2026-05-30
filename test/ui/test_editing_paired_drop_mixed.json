@@ -1,0 +1,20 @@
+{
+  "name": "Editing paired drop - mixed form source to rich target",
+  "html": "test/ui/editing/mixed.html",
+  "viewport": {"width": 760, "height": 420},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_drop_mixed ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "type", "target": {"selector": "#embedded-input"}, "text": "inner", "clear": true},
+    {"type": "wait", "ms": 80},
+    {"type": "editing_text_drag_drop",
+     "target": {"selector": "#embedded-input", "start": 0, "end": 2},
+     "to_target": {"selector": "#surface", "start": 0, "end": 0},
+     "text": "in",
+     "move": true},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|in|"},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"deleteByDrag\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"insertFromDrop\"", "min": 1}
+  ]
+}

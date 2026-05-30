@@ -1,0 +1,21 @@
+{
+  "name": "Editing paired drop - input move emits deleteByDrag and insertFromDrop",
+  "html": "test/ui/editing/input.html",
+  "viewport": {"width": 640, "height": 360},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_drop_input ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "type", "target": {"selector": "#surface"}, "text": "seed", "clear": true},
+    {"type": "wait", "ms": 80},
+    {"type": "editing_text_drag_drop",
+     "target": {"selector": "#surface", "start": 0, "end": 2},
+     "to_target": {"selector": "#surface", "start": 4, "end": 4},
+     "text": "se",
+     "move": true},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se"},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|se|"},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"deleteByDrag\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"insertFromDrop\"", "min": 1}
+  ]
+}

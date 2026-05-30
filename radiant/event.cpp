@@ -2498,6 +2498,255 @@ static bool dispatch_form_history_via_controller(EventContext* evcon,
     return dispatch_form_history(evcon, elem, state, target, input_type);
 }
 
+static View* editing_text_drag_first_text_descendant(View* view) {
+    if (!view) return nullptr;
+    if (view->is_text()) return view;
+    if (view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (tc_is_text_control(elem)) return view;
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            View* found = editing_text_drag_first_text_descendant(static_cast<View*>(child));
+            if (found) return found;
+        }
+    }
+    return nullptr;
+}
+
+static View* editing_text_drag_range_view(View* view, const EditingSurface* surface) {
+    if (!view || !surface) return view;
+    if (editing_surface_is_text_control(surface)) {
+        return surface->view ? surface->view : view;
+    }
+    if (editing_surface_is_rich(surface)) {
+        View* text = editing_text_drag_first_text_descendant(view);
+        return text ? text : view;
+    }
+    return view;
+}
+
+static uint32_t editing_text_drag_range_len(View* range_view,
+                                            const EditingSurface* surface) {
+    if (!range_view || !surface) return 0;
+    if (editing_surface_is_text_control(surface)) {
+        DomElement* elem = surface->owner;
+        tc_ensure_init(elem);
+        return (elem && elem->form) ? elem->form->current_value_len : 0;
+    }
+    if (range_view->is_text()) {
+        DomText* text = lam::dom_require_text(static_cast<DomNode*>(range_view));
+        return text && text->text ? (uint32_t)strlen(text->text) : 0;
+    }
+    return 0;
+}
+
+static void editing_text_drag_clamp_range(View* range_view,
+                                          const EditingSurface* surface,
+                                          uint32_t* start,
+                                          uint32_t* end) {
+    if (!start || !end) return;
+    uint32_t len = editing_text_drag_range_len(range_view, surface);
+    if (*start > len) *start = len;
+    if (*end > len) *end = len;
+    if (*end < *start) {
+        uint32_t tmp = *start;
+        *start = *end;
+        *end = tmp;
+    }
+}
+
+static char* editing_text_drag_copy_range_text(View* range_view,
+                                               const EditingSurface* surface,
+                                               uint32_t start,
+                                               uint32_t end) {
+    if (!range_view || !surface) return nullptr;
+    editing_text_drag_clamp_range(range_view, surface, &start, &end);
+    uint32_t len = end > start ? end - start : 0;
+    char* out = (char*)mem_alloc((size_t)len + 1, MEM_CAT_TEMP);
+    if (!out) return nullptr;
+    const char* src = "";
+    if (editing_surface_is_text_control(surface)) {
+        DomElement* elem = surface->owner;
+        tc_ensure_init(elem);
+        src = (elem && elem->form && elem->form->current_value)
+            ? elem->form->current_value
+            : "";
+    } else if (range_view->is_text()) {
+        DomText* text = lam::dom_require_text(static_cast<DomNode*>(range_view));
+        src = (text && text->text) ? text->text : "";
+    }
+    if (len > 0) memcpy(out, src + start, len);
+    out[len] = '\0';
+    return out;
+}
+
+static uint32_t editing_text_drag_adjust_after_delete(uint32_t pos,
+                                                      uint32_t start,
+                                                      uint32_t end) {
+    if (end <= start) return pos;
+    if (pos <= start) return pos;
+    if (pos >= end) return pos - (end - start);
+    return start;
+}
+
+static bool editing_text_drag_set_range(EventContext* evcon,
+                                        const EditingSurface* surface,
+                                        View* range_view,
+                                        uint32_t start,
+                                        uint32_t end,
+                                        const char* operation) {
+    if (!evcon || !surface || !range_view) return false;
+    DocState* state = evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state
+        : nullptr;
+    if (!state) return false;
+    editing_text_drag_clamp_range(range_view, surface, &start, &end);
+    if (editing_surface_is_text_control(surface)) {
+        return dispatch_form_selection_range(evcon, surface->owner, state,
+                                             surface->view, start, end,
+                                             operation);
+    }
+    selection_set(state, range_view, (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+    caret_set(state, range_view, (int)end); // INT_CAST_OK: StateStore caret API uses int offsets.
+    dispatch_rich_selection_snapshot(evcon, state, range_view,
+                                     operation ? operation : "dragDropRange",
+                                     nullptr);
+    return true;
+}
+
+static bool editing_text_drag_dispatch_delete(EventContext* evcon,
+                                              const EditingSurface* surface,
+                                              View* range_view,
+                                              uint32_t start,
+                                              uint32_t end) {
+    if (!evcon || !surface || !range_view) return false;
+    if (end <= start) return true;
+    DocState* state = evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state
+        : nullptr;
+    if (!state) return false;
+    editing_text_drag_set_range(evcon, surface, range_view, start, end,
+                                "dragSource");
+    if (editing_surface_is_text_control(surface)) {
+        tc_ensure_init(surface->owner);
+        return dispatch_form_text_replace(evcon, surface->owner, state,
+                                          surface->view, start, end,
+                                          nullptr, 0,
+                                          INPUT_INTENT_DELETE_BY_DRAG);
+    }
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_DELETE_BY_DRAG;
+    intent.data = "";
+    return dispatch_rich_beforeinput(evcon, range_view, &intent);
+}
+
+static bool editing_text_drag_dispatch_insert(EventContext* evcon,
+                                              const EditingSurface* surface,
+                                              View* range_view,
+                                              uint32_t start,
+                                              uint32_t end,
+                                              const char* payload) {
+    if (!evcon || !surface || !range_view) return false;
+    DocState* state = evcon->ui_context && evcon->ui_context->document
+        ? (DocState*)evcon->ui_context->document->state
+        : nullptr;
+    if (!state) return false;
+    const char* text = payload ? payload : "";
+    uint32_t text_len = (uint32_t)strlen(text);
+    editing_text_drag_set_range(evcon, surface, range_view, start, end,
+                                "dropTarget");
+    if (editing_surface_is_text_control(surface)) {
+        tc_ensure_init(surface->owner);
+        return dispatch_form_text_replace(evcon, surface->owner, state,
+                                          surface->view, start, end,
+                                          text, text_len,
+                                          INPUT_INTENT_INSERT_FROM_DROP);
+    }
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_INSERT_FROM_DROP;
+    intent.data = text;
+    return dispatch_rich_beforeinput(evcon, range_view, &intent);
+}
+
+extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
+                                                         View* source,
+                                                         uint32_t source_start,
+                                                         uint32_t source_end,
+                                                         View* target,
+                                                         uint32_t target_start,
+                                                         uint32_t target_end,
+                                                         const char* payload,
+                                                         bool move) {
+    if (!uicon || !uicon->document || !source || !target) return false;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state) return false;
+
+    EditingSurface source_surface;
+    EditingSurface target_surface;
+    if (!editing_surface_from_target(source, &source_surface) ||
+        !editing_surface_from_target(target, &target_surface)) {
+        log_error("radiant_dispatch_editing_text_drag_drop: missing editing surface");
+        return false;
+    }
+    if ((!editing_surface_is_text_control(&source_surface) &&
+         !editing_surface_is_rich(&source_surface)) ||
+        (!editing_surface_is_text_control(&target_surface) &&
+         !editing_surface_is_rich(&target_surface))) {
+        log_error("radiant_dispatch_editing_text_drag_drop: unsupported surface");
+        return false;
+    }
+
+    View* source_range_view = editing_text_drag_range_view(source, &source_surface);
+    View* target_range_view = editing_text_drag_range_view(target, &target_surface);
+    editing_text_drag_clamp_range(source_range_view, &source_surface,
+                                  &source_start, &source_end);
+    editing_text_drag_clamp_range(target_range_view, &target_surface,
+                                  &target_start, &target_end);
+
+    char* owned_payload = nullptr;
+    const char* drop_text = payload;
+    if (!drop_text) {
+        owned_payload = editing_text_drag_copy_range_text(source_range_view,
+                                                         &source_surface,
+                                                         source_start,
+                                                         source_end);
+        drop_text = owned_payload ? owned_payload : "";
+    }
+
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.ui_context = uicon;
+    evcon.target = source_range_view;
+
+    bool ok = true;
+    if (move && source_end > source_start) {
+        ok = editing_text_drag_dispatch_delete(&evcon, &source_surface,
+                                               source_range_view,
+                                               source_start, source_end);
+        if (ok && editing_surface_is_text_control(&source_surface) &&
+            editing_surface_is_text_control(&target_surface) &&
+            source_surface.owner == target_surface.owner) {
+            target_start = editing_text_drag_adjust_after_delete(target_start,
+                                                                 source_start,
+                                                                 source_end);
+            target_end = editing_text_drag_adjust_after_delete(target_end,
+                                                               source_start,
+                                                               source_end);
+        }
+    }
+    if (ok) {
+        evcon.target = target_range_view;
+        ok = editing_text_drag_dispatch_insert(&evcon, &target_surface,
+                                               target_range_view,
+                                               target_start, target_end,
+                                               drop_text);
+    }
+    if (owned_payload) mem_free(owned_payload);
+    state->needs_repaint = true;
+    return ok;
+}
+
 extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
                                                       DomElement* elem,
                                                       View* target) {

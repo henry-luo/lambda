@@ -1,0 +1,20 @@
+{
+  "name": "Editing paired drop - textarea move preserves multiline payload",
+  "html": "test/ui/editing/textarea.html",
+  "viewport": {"width": 640, "height": 360},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_drop_textarea ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "type", "target": {"selector": "#surface"}, "text": "ab\ncd", "clear": true},
+    {"type": "wait", "ms": 80},
+    {"type": "editing_text_drag_drop",
+     "target": {"selector": "#surface", "start": 0, "end": 3},
+     "to_target": {"selector": "#surface", "start": 5, "end": 5},
+     "text": "ab\n",
+     "move": true},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|ab"},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"deleteByDrag\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"inputType\":\"insertFromDrop\"", "min": 1}
+  ]
+}

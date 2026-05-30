@@ -49,6 +49,10 @@
  *     {"type": "switch_frame", "selector": "iframe#myframe"},
  *     {"type": "switch_frame"},
  *     {"type": "drag_and_drop", "target": {"selector": "#src"}, "to_target": {"selector": "#dest"}},
+ *     {"type": "editing_text_drag_drop",
+ *      "target": {"selector": "#src", "start": 0, "end": 4},
+ *      "to_target": {"selector": "#dest", "start": 6, "end": 6},
+ *      "text": "dragged", "move": true},
  *     {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "draggable", "equals": "true"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
@@ -90,6 +94,7 @@ enum SimEventType {
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
+    SIM_EVENT_EDITING_TEXT_DRAG_DROP, // editing deleteByDrag/insertFromDrop
     // F6: clipboard helpers
     SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
     SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
@@ -204,6 +209,13 @@ struct SimEvent {
     // drag_and_drop / assert_attribute fields
     char* attribute_name;        // HTML attribute name (for assert_attribute)
     int drag_steps;              // number of intermediate mouse_move steps (default 5)
+    // editing_text_drag_drop range fields. Offsets are UTF-8 byte offsets,
+    // matching form-control and contenteditable selection internals.
+    int drag_source_start;
+    int drag_source_end;
+    int drag_target_start;
+    int drag_target_end;
+    bool drag_move;
     // assert_count fields
     int assert_count_expected;   // exact expected count (-1 = not set)
     int assert_count_min;        // minimum expected count (-1 = not set)

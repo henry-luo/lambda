@@ -71,6 +71,15 @@ static void sim_input_turn_yield() {
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
+extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
+                                                         View* source,
+                                                         uint32_t source_start,
+                                                         uint32_t source_end,
+                                                         View* target,
+                                                         uint32_t target_start,
+                                                         uint32_t target_end,
+                                                         const char* payload,
+                                                         bool move);
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
@@ -252,6 +261,32 @@ static bool find_text_position_recursive(View* view, const char* target_text,
 static bool find_text_position(DomDocument* doc, const char* target_text, float* out_x, float* out_y) {
     if (!doc || !doc->view_tree || !doc->view_tree->root) return false;
     return find_text_position_recursive(static_cast<View*>(doc->view_tree->root), target_text, 0, 0, out_x, out_y);
+}
+
+static View* find_text_view_recursive(View* view, const char* target_text) {
+    if (!view || !target_text) return nullptr;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        DomText* text_view = view->as_text();
+        if (text_view && text_view->text && strstr(text_view->text, target_text)) {
+            return view;
+        }
+    }
+    DomElement* elem = view->as_element();
+    if (elem) {
+        View* child = static_cast<View*>(elem->first_child);
+        while (child) {
+            View* found = find_text_view_recursive(child, target_text);
+            if (found) return found;
+            child = static_cast<View*>(child->next_sibling);
+        }
+    }
+    return nullptr;
+}
+
+static View* find_text_view(DomDocument* doc, const char* target_text) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    return find_text_view_recursive(static_cast<View*>(doc->view_tree->root),
+                                    target_text);
 }
 
 // ============================================================================
@@ -1000,6 +1035,55 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         }
         if (!ev->to_target_selector && !ev->to_target_text) {
             log_error("event_sim: drag_and_drop missing 'to_target' (drop target)");
+            mem_free(ev);
+            return NULL;
+        }
+    }
+    else if (strcmp(type_str, "editing_text_drag_drop") == 0) {
+        ev->type = SIM_EVENT_EDITING_TEXT_DRAG_DROP;
+        parse_target(reader, ev);
+        ItemReader target_item = reader.get("target");
+        if (target_item.isMap()) {
+            MapReader target_map = target_item.asMap();
+            ev->drag_source_start = target_map.get("start").asInt32();
+            ev->drag_source_end = target_map.has("end")
+                ? target_map.get("end").asInt32()
+                : ev->drag_source_start;
+        }
+        ev->drag_source_start = reader.has("source_start")
+            ? reader.get("source_start").asInt32()
+            : ev->drag_source_start;
+        ev->drag_source_end = reader.has("source_end")
+            ? reader.get("source_end").asInt32()
+            : ev->drag_source_end;
+        ItemReader to_target_item = reader.get("to_target");
+        if (to_target_item.isMap()) {
+            MapReader to_map = to_target_item.asMap();
+            const char* sel = to_map.get("selector").cstring();
+            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+            const char* txt = to_map.get("text").cstring();
+            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
+            ev->drag_target_start = to_map.get("start").asInt32();
+            ev->drag_target_end = to_map.has("end")
+                ? to_map.get("end").asInt32()
+                : ev->drag_target_start;
+        }
+        ev->drag_target_start = reader.has("target_start")
+            ? reader.get("target_start").asInt32()
+            : ev->drag_target_start;
+        ev->drag_target_end = reader.has("target_end")
+            ? reader.get("target_end").asInt32()
+            : ev->drag_target_end;
+        const char* text = reader.get("text").cstring();
+        if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        ev->drag_move = reader.has("move") ? reader.get("move").asBool() : true;
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: editing_text_drag_drop missing 'target'");
+            mem_free(ev);
+            return NULL;
+        }
+        if (!ev->to_target_selector && !ev->to_target_text) {
+            log_error("event_sim: editing_text_drag_drop missing 'to_target'");
             mem_free(ev);
             return NULL;
         }
@@ -1879,6 +1963,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->option_label) mem_free(ev->option_label);
             if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
             if (ev->js_code) mem_free(ev->js_code);
+            if (ev->ime_phase) mem_free(ev->ime_phase);
             if (ev->replay_event_name) mem_free(ev->replay_event_name);
             mem_free(ev);
         }
@@ -2524,6 +2609,64 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Drop: mouse_up on destination
             sim_mouse_button(uicon, dst_x, dst_y, 0, 0, false);
             log_info("event_sim: drag_and_drop completed");
+            break;
+        }
+
+        case SIM_EVENT_EDITING_TEXT_DRAG_DROP: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: editing_text_drag_drop - no document");
+                ctx->fail_count++;
+                break;
+            }
+            View* src_view = nullptr;
+            if (ev->target_selector) {
+                src_view = find_element_by_selector(doc, ev->target_selector,
+                                                    ev->target_index);
+            } else if (ev->target_text) {
+                src_view = find_text_view(doc, ev->target_text);
+            }
+            if (!src_view) {
+                log_error("event_sim: editing_text_drag_drop - source not found");
+                ctx->fail_count++;
+                break;
+            }
+            View* dst_view = nullptr;
+            if (ev->to_target_selector) {
+                dst_view = find_element_by_selector(doc, ev->to_target_selector);
+            } else if (ev->to_target_text) {
+                dst_view = find_text_view(doc, ev->to_target_text);
+            }
+            if (!dst_view) {
+                log_error("event_sim: editing_text_drag_drop - target not found");
+                ctx->fail_count++;
+                break;
+            }
+            uint32_t source_start = ev->drag_source_start < 0
+                ? 0
+                : (uint32_t)ev->drag_source_start;
+            uint32_t source_end = ev->drag_source_end < 0
+                ? source_start
+                : (uint32_t)ev->drag_source_end;
+            uint32_t target_start = ev->drag_target_start < 0
+                ? 0
+                : (uint32_t)ev->drag_target_start;
+            uint32_t target_end = ev->drag_target_end < 0
+                ? target_start
+                : (uint32_t)ev->drag_target_end;
+            log_info("event_sim: editing_text_drag_drop source=[%u..%u] target=[%u..%u] move=%d text_len=%zu",
+                     source_start, source_end, target_start, target_end,
+                     ev->drag_move ? 1 : 0,
+                     ev->input_text ? strlen(ev->input_text) : 0);
+            bool ok = radiant_dispatch_editing_text_drag_drop(
+                uicon, src_view, source_start, source_end,
+                dst_view, target_start, target_end,
+                ev->input_text, ev->drag_move);
+            if (!ok) {
+                log_error("event_sim: editing_text_drag_drop failed");
+                ctx->fail_count++;
+            }
+            force_render_surface(uicon);
             break;
         }
 
