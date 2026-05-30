@@ -2,7 +2,7 @@
 
 Date: 2026-05-30
 
-Status: partially implemented (P0–P2 landed; P3 deferred to Js53; P4 needs re-diagnosis; P5 pending)
+Status: 4/4 gaps root-caused; 3/4 fixed cleanly; marked/ajv still have additional downstream bugs deferred to Js53.
 
 ## Implementation Status
 
@@ -11,9 +11,8 @@ Status: partially implemented (P0–P2 landed; P3 deferred to Js53; P4 needs re-
 | P0 — Baseline | ✅ landed | 39,258 / 39,258 passing, 137.7s runtime captured |
 | P1 — ESM aliased exports | ✅ landed | js262 clean, 131.6s (−4.4%); chalk@5 native ESM loads; new `test/js/module_aliased_exports.js` added |
 | P2 — Regex `<!--`/`-->` content | ✅ landed | js262 clean, 135.4s (−1.7%); root cause was `js_normalize_source_for_parser` in `lambda/js/js_scope.cpp:629` (rewrote `<!--` → `//--` unconditionally; now skips inside regex literals via ST_REGEX state); new `test/js/regex_html_comment_chars.js` added |
-| P3 — marked segfault | ⚠️ deferred to Js53 | See §6 below for findings |
-| P4 — `new Function` codegen | ⚠️ deferred to Js53 | D1–D3 repros pass after P1/P2; ajv `new Ajv()` still throws "TypeError: is not a function" with no callee name — same opaque-runtime-error class as P3, same kill-switch trigger |
-| P5 — lib suite tightening | ⏸ pending | Wait for P3/P4 |
+| P3+P4 — Class constructor closure captures | ✅ root cause landed | js262 clean, 138.7s (+0.7%). Single root cause for both P3 and P4: `jm_transpile_new_expr` in `lambda/js/js_mir_statement_lowering.cpp:2981` rebuilt the constructor closure at the `new` call site, looking up captures in the CURRENT scope. When `new C()` was called from outside the class's defining scope, captured names (e.g. `exports` from an IIFE) resolved to nothing, so the constructor body read `undefined` for any closure variable. Fix: when `capture_count > 0`, fetch the pre-built `__ctor__` from the class object (which has captures already bound from class-def time) instead of rebuilding. Methods already worked correctly because their function value was stored on the prototype at def time. Marked's `_Lexer.lex` and ajv's `new Ajv()` first-hop both unblocked; subsequent hops still have additional bugs (§5b). |
+| P5 — lib suite tightening | ✅ partial | `lib_chalk.js` converted to native ESM `import chalk from './chalk_src.js'` (P1 unblocked); js262 stays at 39,258 / 0 / 0. markdown-it / marked / ajv lib tests remain blocked by §5b bugs. |
 
 Js52 fixes four distinct engine gaps surfaced while authoring the new
 `lib_*.js` tests under `test/js/` (chalk, immer, snarkdown, tv4, acorn, rxjs,
@@ -528,6 +527,51 @@ The guard tsv must report:
 If the runtime drifts by more than `+5%`, treat that as a regression even
 if pass/fail counts are clean: stop, profile, and resolve before opening
 the next phase.
+
+## 5b. Residual marked/ajv bugs after P3+P4 fix
+
+The constructor closure capture fix unblocks the first hop, but minimal repros
+isolate further bugs that should be addressed in Js53:
+
+**Bug R1 — IIFE parameter scope-analysis confusion under nested `new`**
+
+Repro (`temp/js52/probe_nested_new.js`):
+
+```js
+!function(t, e) { e(exports); }(this, function(exports) {
+  class B {
+    constructor() { this.v = exports.foo; }   // captures exports
+  }
+  class A {
+    constructor() {
+      this.b = new B();   // <-- inside A's ctor body, exports resolves to FUNCTION
+    }
+  }
+  exports.foo = "FOO";
+  exports.A = A;
+});
+new module.exports.A();
+```
+
+Inside A's constructor, `typeof exports === 'function'` — it resolves to the
+factory function `e`, not the inner factory's `exports` parameter. Likely
+candidate: the scope analyzer mishandles a free variable lookup when the same
+name (`exports`) is shadowed at multiple scope levels AND the lookup site is
+inside one class definition that itself sits next to another class
+definition. Single-class repros (`probe_iife2.js`) work correctly. The
+failure pattern requires two classes in the same IIFE plus the second class's
+constructor invoking `new` on the first.
+
+**Bug R2 — ajv constructor opaque "is not a function"**
+
+After R1's class-ctor first-hop fix, `new Ajv()` still throws "TypeError: is
+not a function" with no callee name in the trace. The Ajv constructor calls
+into a chain of helper functions; one of them is unresolved at the call site.
+Diagnosis needs LLDB-level stack capture against the debug build — the
+error-emission path in `js_call_function` does have a `log_error` with the
+last-traced function name, but that log path was suppressed by `--no-log` in
+my smoke runs. Re-run without `--no-log` and capture stderr to surface the
+likely culprit.
 
 ## 5a. P3 Findings — Deferred to Js53
 

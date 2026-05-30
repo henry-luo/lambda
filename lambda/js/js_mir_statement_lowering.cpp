@@ -2980,14 +2980,23 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         }
         if (active_ctor) {
             MIR_reg_t ctor_fn;
+            // Js52 P3/P4: when the constructor captures variables from an enclosing
+            // scope (e.g. `function factory(arg) { class C { constructor(){ ...arg... } } }`),
+            // rebuilding the closure at the `new` call site loses those captures because
+            // the captured names are looked up via jm_find_var in the CURRENT scope.
+            // The correctly-captured closure was already built at class-definition time
+            // and stored on the class object as `__ctor__` — fetch that instead.
+            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
             if (active_ctor->fc->capture_count > 0) {
-                ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
+                MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
+                ctor_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key));
             } else {
                 ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
             }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             // Set pending new.target to the class (picked up by js_call_function)
-            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
             jm_emit_set_function_home_class(mt, ctor_fn, cls_for_nt);
             jm_call_void_1(mt, "js_set_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
