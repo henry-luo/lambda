@@ -2497,7 +2497,10 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
         }
     }
 
-    // Get export specifiers (for export { a, b })
+    // Get export specifiers (for export { a, b as c })
+    // Js52 P1: read both `name` (local) and `alias` (exported name) fields.
+    // Emit JsExportSpecifierNode so downstream consumers can publish under the
+    // aliased name while still resolving the value via the local binding.
     JsAstNode* prev_spec = NULL;
     uint32_t ncount = ts_node_named_child_count(export_node);
     for (uint32_t i = 0; i < ncount; i++) {
@@ -2509,17 +2512,24 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
                 TSNode spec = ts_node_named_child(child, k);
                 if (strcmp(ts_node_type(spec), "export_specifier") == 0) {
                     TSNode name_node = ts_node_child_by_field_name(spec, "name", 4);
-                    if (!ts_node_is_null(name_node)) {
-                        JsAstNode* ident = build_js_identifier(tp, name_node);
-                        if (ident) {
-                            if (!prev_spec) {
-                                node->specifiers = ident;
-                            } else {
-                                prev_spec->next = ident;
-                            }
-                            prev_spec = ident;
-                        }
+                    if (ts_node_is_null(name_node)) continue;
+                    TSNode alias_node = ts_node_child_by_field_name(spec, "alias", 5);
+                    StrView local = js_node_source(tp, name_node);
+                    StrView exported = local; // default: export under local name
+                    if (!ts_node_is_null(alias_node)) {
+                        exported = js_node_source(tp, alias_node);
                     }
+                    JsExportSpecifierNode* espec = (JsExportSpecifierNode*)alloc_js_ast_node(
+                        tp, JS_AST_NODE_EXPORT_SPECIFIER, spec, sizeof(JsExportSpecifierNode));
+                    espec->local_name  = name_pool_create_len(tp->name_pool, local.str,    local.length);
+                    espec->export_name = name_pool_create_len(tp->name_pool, exported.str, exported.length);
+                    JsAstNode* spec_node = (JsAstNode*)espec;
+                    if (!prev_spec) {
+                        node->specifiers = spec_node;
+                    } else {
+                        prev_spec->next = spec_node;
+                    }
+                    prev_spec = spec_node;
                 }
             }
         }

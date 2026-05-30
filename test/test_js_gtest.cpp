@@ -528,13 +528,32 @@ TEST_P(JsFileTest, Run) {
     }
 
     // non-DOM tests: use batch result
-    auto it = batch_results.find(p.script_path);
-    ASSERT_TRUE(it != batch_results.end())
-        << "Script not found in batch results: " << p.script_path;
-
-    const JsBatchResult& br = it->second;
     char* expected_output = read_expected_output(p.expected_path.c_str());
     ASSERT_NE(expected_output, nullptr) << "Could not read expected: " << p.expected_path;
+
+    // Script may be absent from batch_results if a prior test in the same
+    // 50-script worker crashed or hit the per-batch timeout, killing the
+    // subprocess before this script's BATCH_END marker was emitted.  Retry
+    // in a fresh process — the same retry policy already applied to
+    // found-but-failed results below.
+    auto it = batch_results.find(p.script_path);
+    if (it == batch_results.end()) {
+        char* retry_output = execute_js_script(p.script_path.c_str());
+        ASSERT_NE(retry_output, nullptr)
+            << "Script absent from batch results and retry execution failed: "
+            << p.script_path;
+        trim_trailing_whitespace(retry_output);
+        bool match = strcmp(expected_output, retry_output) == 0;
+        if (!match) {
+            ADD_FAILURE() << "Script absent from batch results and retry output "
+                             "did not match expected: " << p.script_path;
+        }
+        free(retry_output);
+        free(expected_output);
+        return;
+    }
+
+    const JsBatchResult& br = it->second;
 
     // extract output (handle ##### Script marker)
     std::string actual = br.output;

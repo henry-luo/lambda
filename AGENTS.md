@@ -1,5 +1,3 @@
-# Claude Instructions for Lambda Script
-
 ## CRITICAL Rules for AI Agents
 
 These rules MUST be followed. Violations are considered errors.

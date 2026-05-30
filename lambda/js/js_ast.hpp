@@ -143,6 +143,7 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_IMPORT_DECLARATION,
     JS_AST_NODE_EXPORT_DECLARATION,
     JS_AST_NODE_IMPORT_SPECIFIER,
+    JS_AST_NODE_EXPORT_SPECIFIER,
 
     // v17: with statement (for strict mode rejection)
     JS_AST_NODE_WITH_STATEMENT,
@@ -635,3 +636,12 @@ typedef struct JsExportNode {
     String* source;                  // Re-export source (NULL for local exports)
     bool is_default;                 // true for export default
 } JsExportNode;
+
+// Js52 P1: Export specifier node (for named exports: export { local as exported })
+// local_name = identifier in the current scope to resolve the value from
+// export_name = name published to consumers (== local_name when no alias)
+typedef struct JsExportSpecifierNode {
+    JsAstNode base;
+    String* local_name;              // Local binding name
+    String* export_name;             // Name published as export (alias if present, else local_name)
+} JsExportSpecifierNode;

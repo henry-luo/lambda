@@ -11472,7 +11472,9 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
 // Helper: create a function or closure value for an inner function declaration.
 // If the function has captures, creates a js_new_closure with env populated from
 // current scope. Otherwise creates a js_new_function.
-static int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped) {
+// Js52 R1: was static; made externally linkable so jm_build_closure_for_method
+// (in js_mir_statement_lowering.cpp) can size remapped envs the same way.
+int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has_remapped) {
     if (!fc) return 0;
     if (!has_remapped) return fc->capture_count;
     int env_size = mt ? mt->scope_env_slot_count : 0;

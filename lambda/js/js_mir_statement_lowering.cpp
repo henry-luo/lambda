@@ -1654,9 +1654,22 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
 // Build a closure for a class method that has captures
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count) {
+    // Js52 R1: honor scope_env_slot when captures are remapped to a parent
+    // scope env layout.  When the function body resolves captures via
+    // scope_env_slot (set by the analysis pass when a function shares its
+    // parent's env layout, e.g. two sibling classes inside the same factory),
+    // the closure builder must write each captured value to that SAME slot
+    // — otherwise body reads find a different capture's value at slot N
+    // (e.g. class A captures [B, exports] with slots [1, 0]; storing at ci
+    // instead of slot would mean body reads `exports` from slot 0 and finds B,
+    // hence the marked / two-classes-in-IIFE failure mode).
+    bool has_remapped = (fc->capture_count > 0 && fc->captures[0].scope_env_slot >= 0);
+    int env_alloc_size = jm_closure_env_alloc_size(mt, fc, has_remapped);
     MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+        MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
     for (int ci = 0; ci < fc->capture_count; ci++) {
+        int slot = has_remapped ? fc->captures[ci].scope_env_slot : ci;
+        if (slot < 0) continue;
         JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
         if (var) {
             MIR_reg_t value_to_store;
@@ -1672,13 +1685,13 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
                 }
             }
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                 MIR_new_reg_op(mt->ctx, value_to_store)));
         } else if (strcmp(fc->captures[ci].name, "_js_this") == 0) {
             // arrow functions capture the lexical this binding without reading it
             MIR_reg_t this_val = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                 MIR_new_reg_op(mt->ctx, this_val)));
         } else if (mt->module_consts) {
             // Try module-level constants
@@ -1740,7 +1753,7 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
                     break;
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                     MIR_new_reg_op(mt->ctx, const_val)));
             } else {
                 log_error("js-mir: captured variable '%s' not found for class method '%s'",
@@ -1748,7 +1761,7 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
                 // Store undefined as graceful fallback to prevent crash from uninitialized env slot.
                 MIR_reg_t undef_val = jm_emit_undefined(mt);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                     MIR_new_reg_op(mt->ctx, undef_val)));
             }
         } else {
@@ -1757,7 +1770,7 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
             // Store undefined as graceful fallback to prevent crash from uninitialized env slot.
             MIR_reg_t undef_val = jm_emit_undefined(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), env, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
                 MIR_new_reg_op(mt->ctx, undef_val)));
         }
     }
@@ -1765,7 +1778,7 @@ MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, 
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+        MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
     // v30: Mark strict mode for class methods (class bodies are implicitly strict)
     if (fc->is_strict) {
         jm_call_void_1(mt, "js_mark_strict_func",
@@ -2980,14 +2993,23 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         }
         if (active_ctor) {
             MIR_reg_t ctor_fn;
+            // Js52 P3/P4: when the constructor captures variables from an enclosing
+            // scope (e.g. `function factory(arg) { class C { constructor(){ ...arg... } } }`),
+            // rebuilding the closure at the `new` call site loses those captures because
+            // the captured names are looked up via jm_find_var in the CURRENT scope.
+            // The correctly-captured closure was already built at class-definition time
+            // and stored on the class object as `__ctor__` — fetch that instead.
+            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
             if (active_ctor->fc->capture_count > 0) {
-                ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
+                MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
+                ctor_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key));
             } else {
                 ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
             }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             // Set pending new.target to the class (picked up by js_call_function)
-            MIR_reg_t cls_for_nt = jm_transpile_box_item(mt, call->callee);
             jm_emit_set_function_home_class(mt, ctor_fn, cls_for_nt);
             jm_call_void_1(mt, "js_set_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));

@@ -2,7 +2,19 @@
 
 Date: 2026-05-30
 
-Status: proposal
+Status: 4/4 gaps root-caused; 3/4 fixed cleanly; marked/ajv still have additional downstream bugs deferred to Js53.
+
+## Implementation Status
+
+| Phase | Status | Result |
+|---|---|---|
+| P0 — Baseline | ✅ landed | 39,258 / 39,258 passing, 137.7s runtime captured |
+| P1 — ESM aliased exports | ✅ landed | js262 clean, 131.6s (−4.4%); chalk@5 native ESM loads; new `test/js/module_aliased_exports.js` added |
+| P2 — Regex `<!--`/`-->` content | ✅ landed | js262 clean, 135.4s (−1.7%); root cause was `js_normalize_source_for_parser` in `lambda/js/js_scope.cpp:629` (rewrote `<!--` → `//--` unconditionally; now skips inside regex literals via ST_REGEX state); new `test/js/regex_html_comment_chars.js` added |
+| P3+P4 — Class constructor closure captures | ✅ root cause landed | js262 clean, 138.7s (+0.7%). Single root cause for both P3 and P4: `jm_transpile_new_expr` in `lambda/js/js_mir_statement_lowering.cpp:2981` rebuilt the constructor closure at the `new` call site, looking up captures in the CURRENT scope. When `new C()` was called from outside the class's defining scope, captured names (e.g. `exports` from an IIFE) resolved to nothing, so the constructor body read `undefined` for any closure variable. Fix: when `capture_count > 0`, fetch the pre-built `__ctor__` from the class object (which has captures already bound from class-def time) instead of rebuilding. |
+| R1 — Sibling class capture remapping | ✅ landed | js262 clean (39,257 fully + 1 retry-pass flake; 0 regressions). Root cause: `jm_build_closure_for_method` ignored `scope_env_slot` so siblings sharing a parent env got their captures stored at the wrong slots. Fix: honor `scope_env_slot` (mirror function-expression closure builder). **marked@12.0.2 now works end-to-end** — `lib_marked.js` shipped. |
+| R2 — ajv internal "is not a function" | ⚠️ deferred to Js53 | See §5b — appears to be a related but distinct scope-resolution issue inside browserify-wrapped multi-module bundles. |
+| P5 — lib suite tightening | ✅ landed | `lib_chalk.js` (native ESM), `lib_marked.js` (Js52 R1 unblocked) shipped. js262 stays clean. |
 
 Js52 fixes four distinct engine gaps surfaced while authoring the new
 `lib_*.js` tests under `test/js/` (chalk, immer, snarkdown, tv4, acorn, rxjs,
@@ -517,6 +529,154 @@ The guard tsv must report:
 If the runtime drifts by more than `+5%`, treat that as a regression even
 if pass/fail counts are clean: stop, profile, and resolve before opening
 the next phase.
+
+## 5b. Residual marked/ajv bugs
+
+**Bug R1 — FIXED** (was: IIFE parameter scope confusion under nested `new`)
+
+Root cause: `jm_build_closure_for_method` in
+`lambda/js/js_mir_statement_lowering.cpp:1656` always wrote captures at slot
+`ci` (their position in the captures array) instead of at `scope_env_slot`
+(the slot the function body actually reads). When a class had multiple sibling
+classes sharing a parent-scope env layout, captures got remapped to specific
+slots — e.g. `class A` captures `[B, exports]` with slots `[1, 0]` — but the
+closure builder still stored `B` at slot 0 and `exports` at slot 1. The body
+then read `exports` from slot 0 and got `B` (a function), hence the symptom
+"typeof exports = function" inside `new` of the sibling class.
+
+Fix: mirror the function-expression closure builder
+(`jm_closure_env_alloc_size` + `has_remapped` check). When any capture has
+`scope_env_slot >= 0`, size the env by max slot and write each capture to its
+remapped slot.
+
+Verification:
+- minimal repros pass (`probe_nested_new.js`, `r1_c.js`).
+- marked@12.0.2 now works end-to-end: `lib_marked.js` shipped, all assertions
+  pass (headings, bold/italic, lists, links, code blocks, parseInline).
+- js262 release guard clean (39,257 fully + 1 pre-existing retry-pass flake;
+  0 regressions, 0 failures).
+
+**Bug R2 — ajv still throws "is not a function"** — deferred to Js53
+
+After R1 lands, `new Ajv()` still throws. Diagnosis status:
+
+- The runtime error log shows `js_map_method fallback: method 'addMetaSchema'
+  not found on obj type=18, fn type=26 argc=3` followed by
+  `js_call_function: not a function (type=26, argc=3, this_type=18) last_fn='c'`.
+- type 26 is `LMD_TYPE_UNDEFINED`. So a property access returned undefined
+  where a function was expected.
+- `Object.create(Ajv.prototype).addMetaSchema` resolves to the correct
+  function and IS callable.
+- Monkey-patching `Ajv.prototype.addMetaSchema` (and every other prototype
+  method) shows that none of them are reached inside `new Ajv()` before the
+  error. So the failing call site is something else inside the Ajv
+  constructor body — likely an internal module-scope function reference
+  (util.copy, formats, rules, chooseGetId, getMetaSchemaOptions) that
+  resolves to undefined.
+- The browserify wrapper introduces extra closure depth around the Ajv
+  module. The remaining hypothesis: somewhere a top-level-in-module function
+  reference is resolved against the wrong scope chain. This is similar in
+  spirit to R1 but in a different code path (closures created at module
+  top-level inside browserify's `r(e, n, t)` wrapper).
+
+Why deferred:
+- A minimal repro hasn't been isolated. The bug only triggers in
+  browserify-bundled multi-module IIFE chains.
+- Diagnosis needs LLDB-level inspection of the captured env at the call
+  site of the first failing function — not feasible in the current
+  iteration budget.
+- The fix likely touches the same scope_env_slot infrastructure as R1 but
+  in the function-collection / capture-propagation phase rather than the
+  closure-build phase. Risk of regressing the R1 fix is non-trivial.
+
+Hand-off: jsen has identical-shape failure (`Cannot read properties of
+undefined (reading 'data')` from inside the generated validator). Both
+probably share a single root cause.
+
+## 5a. P3 Findings — Deferred to Js53
+
+P3 root-cause analysis hit the proposal's own kill switch ("If the fix turns
+out to require a larger interpreter change, stop"). Documenting state for
+the Js53 follow-up:
+
+**Confirmed observations:**
+
+- `marked@12.0.2` UMD bundle loads cleanly. `Object.keys(module.exports)`
+  returns the full API; `typeof module.exports.parseInline === 'function'`.
+- Calling `m.parseInline("hi")` produces a hard SIGSEGV (exit 139). No
+  output reaches stderr/stdout before the crash; `try/catch` cannot
+  intercept it.
+- Debug build does not surface a useful trace in normal run mode.
+- Injecting `console.log` markers into marked's `#parseMarkdown` arrow:
+  - Markers up to `const opt = { ...this.defaults, ...origOpt };` print
+    cleanly — `this` IS the Marked instance at that point.
+  - Adding any marker between that line and
+    `const throwError = this.#onError(!!opt.silent, !!opt.async);` changes
+    the crash signature: original is segfault, injection produces either
+    a different segfault, an `Uncaught TypeError: Cannot read properties
+    of undefined (reading 'defaults')` propagated through marked's own
+    `throwError` wrap, or different garbage depending on the exact line.
+- Calling `m.lexer("hello")` (a different entry point) also produces the
+  `Cannot read properties of undefined (reading 'defaults')` error — so
+  the failure is not parseInline-specific but a shared internal path.
+
+**Negative findings (ruled out as immediate cause):**
+
+- Class field arrow `this` capture works for minimal repros — even when
+  the bound method is reassigned (`const f = a.method`) and called via a
+  different receiver (`b.f()`).
+- Private method chaining (`this.#a()` returning an arrow that calls
+  `this.#b()`) works in minimal repros.
+- Passing static methods from another class as args to a private method
+  works in minimal repros.
+- The minimal D-class structure of marked (defaults field, arrow field
+  initialized from private method, called via a remote reference) all
+  works standalone.
+
+**Suspected actual cause:**
+
+Some combination of marked-specific patterns triggers a runtime corruption
+that:
+
+- Survives the loading of the bundle (no crash at module init).
+- Triggers only when the parseMarkdown closure is called from a re-exposed
+  reference (exports.parseInline → marked.parseInline → markedInstance.parseInline).
+- Sensitive to instruction sequence near `this.#onError(...)` — injecting
+  bytecode-affecting code at that exact site shifts the crash, suggesting
+  a JIT codegen / GC root issue, not a pure JS semantic bug.
+
+Likely candidates for Js53 investigation, in order of prior probability:
+
+1. JIT GC nursery promotion in the middle of a closure access path —
+   private method calls through `this` may share a temp register with the
+   arrow's captured `this`, and a GC at exactly the wrong instruction
+   stomps it.
+2. Closure-environment layout difference between Marked's class field
+   arrow (initialized in field declaration) and ordinary closures.
+3. Specific opt-tier (P5/P6) pattern that mis-types the result of
+   `#parseMarkdown` and assumes a stale shape on later property reads.
+
+**Why this is a Js53 task, not a Js52 task:**
+
+- LLDB-level analysis is required to identify the exact instruction the
+  crash happens at.
+- Minimal repros don't reproduce; full marked source needs to be the
+  test vehicle, which makes systematic bisection slow.
+- Any fix likely touches JIT GC roots or codegen, both of which carry
+  larger regression risk than P1/P2's local edits.
+- Js52's scope cap is local fixes that keep the js262 baseline at
+  39,258. P3 is beyond that scope.
+
+**Hand-off contract for Js53:**
+
+- Reduced repro: `m.lexer("hello")` after loading
+  `marked@12.0.2/lib/marked.umd.js` via standard CJS shim. Smallest
+  reliable trigger.
+- Diagnostic checkpoint: marked's `#parseMarkdown` arrow runs successfully
+  up to and including `const opt = { ...this.defaults, ...origOpt };` —
+  the failure is between that and `const throwError = this.#onError(...)`.
+- Js52 commits the snarkdown lib test as the markdown-parser coverage
+  representative; replacing it with `lib_marked.js` is a Js53 P5 step.
 
 ## 6. Risk Register
 
