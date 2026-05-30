@@ -131,6 +131,19 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
                                   const EditingSurface* surface,
                                   const EditingIntent* intent,
                                   const EditingDispatchHooks* hooks) {
+    return editing_dispatch_beforeinput_ex(evcon, surface, intent, hooks,
+                                           true, nullptr, nullptr);
+}
+
+bool editing_dispatch_beforeinput_ex(EventContext* evcon,
+                                     const EditingSurface* surface,
+                                     const EditingIntent* intent,
+                                     const EditingDispatchHooks* hooks,
+                                     bool dispatch_input_after,
+                                     bool* out_prevented,
+                                     bool* out_lambda_handled) {
+    if (out_prevented) *out_prevented = false;
+    if (out_lambda_handled) *out_lambda_handled = false;
     if (!evcon || !surface || !surface->view || !intent ||
         intent->type == INPUT_INTENT_NONE || !hooks) {
         return false;
@@ -155,6 +168,7 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
     if (!editing_dispatch_target_ranges_are_valid(state, surface, intent)) {
         editing_log_record(evcon, surface, intent, "editing.beforeinput",
                            true, false);
+        if (out_prevented) *out_prevented = true;
         log_debug("editing_dispatch_beforeinput: rejected mixed-surface target range for %s",
                   input_intent_type_name(intent->type));
         return true;
@@ -184,23 +198,41 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
     }
     editing_log_record(evcon, surface, intent, "editing.beforeinput",
                        js_prevented, lambda_handled);
+    if (out_prevented) *out_prevented = js_prevented;
+    if (out_lambda_handled) *out_lambda_handled = lambda_handled;
     if (!lambda_handled && !js_prevented) {
         log_debug("editing_dispatch_beforeinput: no beforeinput handler on %s surface",
                   editing_surface_kind_name(surface->kind));
     }
 
     // `input` is the post-mutation notification and is not cancelable.
-    if (dispatchable && !js_prevented && hooks->dispatch_input_event) {
+    if (dispatch_input_after && !js_prevented) {
+        editing_dispatch_input(evcon, surface, intent, hooks);
+    }
+
+    // Rich editing hosts own the default action. Callers that pass
+    // dispatch_input_after=false perform the default mutation themselves and
+    // then emit `input`; older rich paths keep the legacy event-only behavior.
+    return true;
+}
+
+void editing_dispatch_input(EventContext* evcon,
+                            const EditingSurface* surface,
+                            const EditingIntent* intent,
+                            const EditingDispatchHooks* hooks) {
+    if (!evcon || !surface || !surface->view || !intent ||
+        intent->type == INPUT_INTENT_NONE || !hooks) {
+        return;
+    }
+    if (!input_intent_is_dispatchable(intent->type)) {
+        return;
+    }
+    if (hooks->dispatch_input_event) {
         hooks->dispatch_input_event(evcon, surface->view, "input", intent,
                                     hooks->user);
         editing_log_record(evcon, surface, intent, "editing.input",
                            false, false);
     }
-
-    // Rich editing hosts own the default action. For now the actual mutation
-    // remains consumer-driven, so handled means the keystroke belonged to the
-    // editing host and should not fall through to unrelated platform behavior.
-    return true;
 }
 
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
