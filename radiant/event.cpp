@@ -1961,11 +1961,15 @@ static bool rich_text_default_replace(EventContext* evcon,
                                       const InputIntent* intent,
                                       View* fallback_view,
                                       int fallback_offset) {
-    if (!evcon || !state || !intent || !intent->data) return false;
+    if (!evcon || !state || !intent) return false;
     if (intent->type != INPUT_INTENT_INSERT_TEXT &&
         intent->type != INPUT_INTENT_INSERT_REPLACEMENT_TEXT &&
         intent->type != INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
-        intent->type != INPUT_INTENT_INSERT_FROM_COMPOSITION) {
+        intent->type != INPUT_INTENT_INSERT_FROM_COMPOSITION &&
+        intent->type != INPUT_INTENT_INSERT_PARAGRAPH &&
+        intent->type != INPUT_INTENT_INSERT_LINE_BREAK &&
+        intent->type != INPUT_INTENT_DELETE_CONTENT_BACKWARD &&
+        intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD) {
         return false;
     }
 
@@ -1999,11 +2003,13 @@ static bool rich_text_default_replace(EventContext* evcon,
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
-        if (!caret_get_position(state, &caret_view, &caret_offset) ||
-            !caret_view || !caret_view->is_text()) {
+        if (fallback_view && fallback_view->is_text() &&
+            rich_editable_from_target(fallback_view)) {
             caret_view = fallback_view;
             caret_offset = fallback_offset;
-            if (!caret_view || !caret_view->is_text()) return false;
+        } else if (!caret_get_position(state, &caret_view, &caret_offset) ||
+                   !caret_view || !caret_view->is_text()) {
+            return false;
         }
         text = lam::dom_require_text(static_cast<DomNode*>(caret_view));
         start = caret_offset < 0 ? 0 : (uint32_t)caret_offset;
@@ -2021,25 +2027,76 @@ static bool rich_text_default_replace(EventContext* evcon,
     if (start > old_len) start = old_len;
     if (end > old_len) end = old_len;
 
-    uint32_t data_len = (uint32_t)strlen(intent->data);
+    const char* data = intent->data ? intent->data : "";
+    if (intent->type == INPUT_INTENT_INSERT_PARAGRAPH ||
+        intent->type == INPUT_INTENT_INSERT_LINE_BREAK) {
+        data = "\n";
+    } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
+               intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD) {
+        data = "";
+        if (start == end) {
+            if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
+                if (start == 0) return false;
+                uint32_t prev = start - 1;
+                while (prev > 0 &&
+                       (((unsigned char)old_text[prev] & 0xC0) == 0x80)) {
+                    prev--;
+                }
+                start = prev;
+            } else {
+                if (end >= old_len) return false;
+                uint32_t next = end + 1;
+                while (next < old_len &&
+                       (((unsigned char)old_text[next] & 0xC0) == 0x80)) {
+                    next++;
+                }
+                end = next;
+            }
+        }
+    }
+
+    uint32_t data_len = (uint32_t)strlen(data);
     size_t new_len = (size_t)old_len - (size_t)(end - start) + (size_t)data_len;
     char* replacement = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
     if (!replacement) return false;
 
     if (start > 0) memcpy(replacement, old_text, start);
-    if (data_len > 0) memcpy(replacement + start, intent->data, data_len);
+    if (data_len > 0) memcpy(replacement + start, data, data_len);
     if (end < old_len) {
         memcpy(replacement + start + data_len, old_text + end, old_len - end);
     }
     replacement[new_len] = '\0';
 
+    DomElement* text_parent = text->parent && text->parent->is_element()
+        ? lam::dom_require_element(text->parent)
+        : nullptr;
+    int64_t text_child_idx = dom_text_get_child_index(text);
+
+    doc_state_set_hover_target(state, NULL);
     bool updated = dom_text_set_content(text, replacement);
     mem_free(replacement);
     if (!updated) return false;
 
+    DomText* live_text = text;
+    if (text_parent && text_child_idx >= 0) {
+        int64_t idx = 0;
+        for (DomNode* child = text_parent->first_child; child;
+             child = child->next_sibling, idx++) {
+            if (idx == text_child_idx) {
+                if (child->is_text()) live_text = lam::dom_require_text(child);
+                break;
+            }
+        }
+    }
+
     uint32_t caret_offset = start + data_len;
-    caret_set(state, static_cast<View*>(text),
+    caret_set(state, static_cast<View*>(live_text),
               (int)caret_offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    EditingSurface live_surface;
+    if (editing_surface_from_target(static_cast<View*>(live_text), &live_surface) &&
+        editing_surface_is_rich(&live_surface)) {
+        editing_interaction_set_active_surface(state, &live_surface);
+    }
     doc_state_request_reflow(state);
     evcon->need_repaint = true;
     log_debug("rich_text_default_replace: inserted %u bytes at [%u,%u]",
@@ -3491,6 +3548,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear interaction targets before freeing views so transition helpers can
     // still update pseudo-state mirrors on the old tree.
     if (state) {
+        bool preserve_rich_editing =
+            state->editing.has_active_surface &&
+            editing_surface_is_rich(&state->editing.active_surface);
         doc_state_close_dropdown(state, NULL);
         doc_state_close_context_menu(state);
         doc_state_set_hover_target(state, NULL);
@@ -3498,7 +3558,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc_state_set_drag_state(state, NULL, false);
         if (focus_has_current(state)) {
             focus_clear(state);
-        } else {
+        } else if (!preserve_rich_editing) {
             selection_clear(state);
             caret_clear(state);
         }
@@ -7027,10 +7087,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
         View* caret_intent_view = caret_get_view(state);
+        View* debug_caret_view = nullptr;
+        int debug_caret_offset = 0;
+        if ((!caret_intent_view || !rich_editable_from_target(caret_intent_view)) &&
+            caret_get_debug_snapshot(state, &debug_caret_view, &debug_caret_offset,
+                                     nullptr, nullptr, nullptr, nullptr, nullptr,
+                                     nullptr) &&
+            debug_caret_view && rich_editable_from_target(debug_caret_view)) {
+            caret_intent_view = debug_caret_view;
+        }
         View* intent_target = caret_intent_view &&
             rich_editable_from_target(caret_intent_view)
                 ? caret_intent_view
                 : (focused ? focused : caret_intent_view);
+        if (!intent_target && state->editing.has_active_surface &&
+            editing_surface_is_rich(&state->editing.active_surface)) {
+            intent_target = state->editing.active_surface.view
+                ? state->editing.active_surface.view
+                : static_cast<View*>(state->editing.active_surface.owner);
+        }
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
@@ -7116,6 +7191,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         int keydown_caret_offset = 0;
         bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
+        int rich_keydown_caret_offset = keydown_caret_offset;
+        View* debug_keydown_caret_view = nullptr;
+        int debug_keydown_caret_offset = 0;
+        if (caret_get_debug_snapshot(state, &debug_keydown_caret_view,
+                                     &debug_keydown_caret_offset, nullptr,
+                                     nullptr, nullptr, nullptr, nullptr, nullptr) &&
+            debug_keydown_caret_view &&
+            rich_editable_from_target(debug_keydown_caret_view)) {
+            rich_keydown_caret_offset = debug_keydown_caret_offset;
+        }
 
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for data-editable/contenteditable
@@ -7150,7 +7235,33 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             : editing_redo(&evcon, &surface, &controller_hooks);
                     }
                 } else {
-                    handled = dispatch_rich_beforeinput(&evcon, intent_target, &intent);
+                    EditingSurface rich_surface;
+                    bool beforeinput_prevented = false;
+                    bool beforeinput_lambda_handled = false;
+                    bool defaultable =
+                        intent.type == INPUT_INTENT_INSERT_PARAGRAPH ||
+                        intent.type == INPUT_INTENT_INSERT_LINE_BREAK ||
+                        intent.type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
+                        intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD;
+                    if (defaultable &&
+                        dispatch_rich_beforeinput_defaultable(&evcon, intent_target,
+                            &intent, &rich_surface, &beforeinput_prevented,
+                            &beforeinput_lambda_handled)) {
+                        handled = true;
+                        if (!beforeinput_prevented) {
+                            bool rich_default_done = false;
+                            if (!beforeinput_lambda_handled) {
+                                rich_default_done = rich_text_default_replace(&evcon,
+                                    state, &intent, intent_target,
+                                    rich_keydown_caret_offset);
+                            }
+                            if (beforeinput_lambda_handled || rich_default_done) {
+                                dispatch_rich_input(&evcon, &rich_surface, &intent);
+                            }
+                        }
+                    } else {
+                        handled = dispatch_rich_beforeinput(&evcon, intent_target, &intent);
+                    }
                 }
                 input_intent_dispose(&intent);
                 if (handled) {
@@ -8121,12 +8232,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     &rich_surface, &beforeinput_prevented,
                     &beforeinput_lambda_handled)) {
                 if (!beforeinput_prevented) {
+                    bool rich_default_done = false;
                     if (!beforeinput_lambda_handled) {
-                        rich_text_default_replace(&evcon, state, &intent,
-                                                  intent_target,
-                                                  rich_caret_offset);
+                        rich_default_done = rich_text_default_replace(&evcon,
+                            state, &intent, intent_target, rich_caret_offset);
                     }
-                    dispatch_rich_input(&evcon, &rich_surface, &intent);
+                    if (beforeinput_lambda_handled || rich_default_done) {
+                        dispatch_rich_input(&evcon, &rich_surface, &intent);
+                    }
                 }
                 evcon.need_repaint = true;
                 break;

@@ -1,0 +1,16 @@
+{
+  "name": "Contenteditable default Backspace Delete and Enter mutate text",
+  "html": "test/ui/editing/contenteditable.html",
+  "viewport": { "width": 640, "height": 360 },
+  "events": [
+    { "type": "click", "target": { "selector": "#surface", "offset_x": 32, "offset_y": 18 } },
+    { "type": "assert_caret", "view_type": 1, "char_offset": 3 },
+    { "type": "type", "text": "Z" },
+    { "type": "key_press", "key": "backspace" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "seed" },
+    { "type": "key_press", "key": "delete" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "see" },
+    { "type": "key_press", "key": "enter" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "equals": "see\n" }
+  ]
+}

@@ -1152,15 +1152,26 @@ void state_configure_selector_matcher(DocState* state, SelectorMatcher* matcher)
     selector_matcher_set_pseudo_state_resolver(matcher, state_resolve_selector_pseudo_state, state);
 }
 
+static DomDocument* view_state_resolve_document(View* view) {
+    if (!view) return NULL;
+    DomNode* node = static_cast<DomNode*>(view);
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = lam::dom_require_element(node);
+            if (elem->doc) return elem->doc;
+        }
+        node = node->parent;
+    }
+    return NULL;
+}
+
 static uint32_t view_state_resolve_id(View* view) {
     if (!view) return 0;
     if (view->id != 0) return view->id;
-    if (view->is_element()) {
-        DomElement* elem = lam::dom_require_element(view);
-        if (elem->doc) {
-            view->id = elem->doc->next_node_id++;
-            return view->id;
-        }
+    DomDocument* doc = view_state_resolve_document(view);
+    if (doc) {
+        view->id = doc->next_node_id++;
+        return view->id;
     }
     return 0;
 }
@@ -5842,8 +5853,15 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
     }
 
     if (tc_get_active_element(state)) tc_set_active_element(state, NULL);
-    if (state->caret && state->caret->view) caret_clear(state);
-    if (state->selection && state->selection->anchor_view) selection_clear(state);
+    if (state->caret && selection_is_text_control_view(state->caret->view)) {
+        caret_clear(state);
+    }
+    if (state->selection &&
+        (selection_is_text_control_view(state->selection->anchor_view) ||
+         selection_is_text_control_view(state->selection->focus_view) ||
+         selection_is_text_control_view(state->selection->view))) {
+        selection_clear(state);
+    }
 }
 
 void focus_set(DocState* state, View* view, bool from_keyboard) {
@@ -5939,9 +5957,14 @@ void focus_clear(DocState* state) {
     focus->from_mouse = false;
     focus->focus_visible = false;
 
-    // Also clear caret and selection
-    caret_clear(state);
-    selection_clear(state);
+    bool preserve_rich_editing =
+        state->editing.has_active_surface &&
+        editing_surface_is_rich(&state->editing.active_surface);
+    if (!preserve_rich_editing) {
+        // Also clear caret and selection
+        caret_clear(state);
+        selection_clear(state);
+    }
 
     state->needs_repaint = true;
 
