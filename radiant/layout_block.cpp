@@ -2897,6 +2897,14 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             log_debug("%s finalize: enabling clip for overflow:hidden, wd:%f, hg:%f", block->source_loc(), block->width, block->height);
         }
     }
+
+    if (block->scroller && block->scroller->pane) {
+        DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
+        float h_max = flow_width > block->width ? flow_width - block->width : 0.0f;
+        float v_max = flow_height > block->height ? flow_height - block->height : 0.0f;
+        scroll_state_set_max_for_view(state, static_cast<View*>(block),
+            block->scroller->pane, h_max, v_max);
+    }
 }
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {

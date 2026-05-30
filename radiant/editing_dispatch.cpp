@@ -1,6 +1,7 @@
 #include "editing_dispatch.hpp"
 
 #include "editing_geometry.hpp"
+#include "editing_target_range.hpp"
 #include "event_state_log.hpp"
 #include "handler.hpp"
 #include "state_store.hpp"
@@ -37,16 +38,17 @@ static bool editing_intent_needs_target_range_validation(
     }
 }
 
-static bool editing_rich_target_ranges_are_valid(DocState* state,
-                                                 const EditingSurface* surface,
-                                                 const EditingIntent* intent) {
+static bool editing_dispatch_target_ranges_are_valid(DocState* state,
+                                                     const EditingSurface* surface,
+                                                     const EditingIntent* intent) {
     if (!editing_intent_needs_target_range_validation(intent)) return true;
-    if (!state || !state->dom_selection || state->dom_selection->range_count == 0) {
-        return true;
-    }
-    for (uint32_t i = 0; i < state->dom_selection->range_count; i++) {
-        DomRange* range = state->dom_selection->ranges[i];
-        if (range && !editing_geometry_surface_contains_range(surface, range)) {
+    if (!state || !surface) return true;
+
+    EditingTargetRange ranges[1];
+    uint32_t range_count = editing_compute_target_ranges(state, surface, intent,
+                                                         ranges, 1);
+    for (uint32_t i = 0; i < range_count; i++) {
+        if (!editing_geometry_surface_contains_target_range(surface, &ranges[i])) {
             return false;
         }
     }
@@ -146,7 +148,7 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
     editing_dispatch_log_intent(evcon, surface, intent);
     DocState* state = editing_dispatch_doc_state(evcon);
 
-    if (!editing_rich_target_ranges_are_valid(state, surface, intent)) {
+    if (!editing_dispatch_target_ranges_are_valid(state, surface, intent)) {
         editing_log_record(evcon, surface, intent, "editing.beforeinput",
                            true, false);
         log_debug("editing_dispatch_beforeinput: rejected mixed-surface target range for %s",

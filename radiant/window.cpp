@@ -69,6 +69,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
                                            int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+bool radiant_editing_animation_active(DocState* state);
 bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
 
 static void view_wake_glfw(void* user_data) {
@@ -1166,9 +1167,6 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     }
     log_info("view_frame_clock: using %s clock", radiant_frame_clock_mode_name(&frame_clock));
 
-    double lastTime = radiant_frame_clock_now(&frame_clock);
-    double deltaTime = 0.0;
-    double caretBlinkTime = 0.0;
     const double CARET_BLINK_INTERVAL = 0.5;  // 500ms blink interval
 
     // Give the window a moment to render before starting simulation
@@ -1176,10 +1174,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     double sim_start_time = radiant_frame_clock_now(&frame_clock) + sim_start_delay;
 
     while (!glfwWindowShouldClose(window)) {
-        // calculate deltaTime
         double currentTime = radiant_frame_clock_now(&frame_clock);
-        deltaTime = currentTime - lastTime;
-        lastTime = currentTime;
         bool frame_driven = false;
 
         // poll for new events
@@ -1214,24 +1209,15 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             do_redraw = 1;  // redraw after each simulated event
         }
 
-        // Handle caret blinking
         DocState* state = ui_context.document ? ui_context.document->state : nullptr;
         bool caret_visible = caret_has_projection(state);
-        if (caret_visible) {
-            caretBlinkTime += deltaTime;
-            if (caretBlinkTime >= CARET_BLINK_INTERVAL) {
-                caretBlinkTime = 0.0;
-                caret_toggle_blink(state);
-                do_redraw = 1;  // trigger repaint for caret blink
-            }
-        }
-
-        bool editing_animation_active = state && state->editing_autoscroll_active;
+        bool editing_animation_active = radiant_editing_animation_active(state);
         if (editing_animation_active) {
             if (radiant_editing_animation_tick(&ui_context, currentTime)) {
                 do_redraw = 1;
             }
-            editing_animation_active = state && state->editing_autoscroll_active;
+            caret_visible = caret_has_projection(state);
+            editing_animation_active = radiant_editing_animation_active(state);
         }
 
         // Tick active animations
@@ -1290,7 +1276,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
 
         double wait_timeout = view_next_wait_timeout(&frame_clock, currentTime,
                                                      frame_driven, caret_visible,
-                                                     caretBlinkTime,
+                                                     state ? state->editing_caret_blink_elapsed : 0.0,
                                                      CARET_BLINK_INTERVAL,
                                                      editing_animation_active,
                                                      sim_ctx, sim_start_time,

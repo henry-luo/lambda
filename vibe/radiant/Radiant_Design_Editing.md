@@ -439,13 +439,16 @@ Each tick still enters through the event/state cascade path so log records stay
 ordered (the original Q4 concern is preserved). This shared tick is a
 deliverable of E5, not a later afterthought — see §11.
 
-**Implementation status.** The current implementation has the document
-viewport path in place: mouse selection drags near the viewport edge scroll on
-motion events, continue through the shared editing animation tick while the
-pointer is held still, emit `editing.autoscroll` start/tick/stop records in
-input/timer cascades, and keep drag cleanup tied to mouse-up. The remaining E5
-work is to project the same tick into nearest scroll containers and
-text-control-internal scroll offsets.
+**Implementation status.** The current implementation routes selection-drag
+autoscroll through `editing_controller.{hpp,cpp}` and the shared editing
+animation tick. Mouse drags near the document viewport, the nearest scroll
+container, single-line input edges, or textarea edges continue scrolling while
+the pointer is held still, emit `editing.autoscroll` start/tick/stop records
+in input/timer cascades, and keep drag cleanup tied to mouse-up. Text-control
+geometry and rendering now honor the internal control scroll offsets. The same
+controller tick owns caret blink and the password-field last-inserted-character
+reveal timeout; `event.cpp` supplies only hook adapters for legacy selection
+projection and JSONL logging.
 
 ---
 
@@ -757,9 +760,10 @@ For WPT:
   cancellation, range reporting, and post-mutation `input`.
 - The rich-host `beforeinput`/`input` policy has been extracted to
   `editing_dispatch.{hpp,cpp}`. `event.cpp` still owns the concrete JS/Lambda
-  dispatch bridges, but now adapts them through `EditingDispatchHooks`; form
-  text controls remain on their existing mutation path until E3 can safely
-  provide full form `InputEvent` target ranges.
+  dispatch bridges, but now adapts them through `EditingDispatchHooks`. Form
+  text controls use the same beforeinput/input transaction shape for typing,
+  delete, paste, cut, history restore, and IME commit while keeping the local
+  value/history mutation code in `text_edit.cpp`.
 - Form typing and delete mutations now enter the same dispatch surface through
   `dispatch_form_text_replace()`: build an `EditingIntent`, dispatch form
   `beforeinput`, perform `te_replace_byte_range_no_events()`, then dispatch
@@ -846,10 +850,23 @@ For WPT:
   and platform IME shims share the same logging surface; password surfaces
   redact preedit/commit lengths and caret.
 - Selection drag autoscroll now records its last pointer position in
-  `DocState`, advances the document viewport from the shared editing animation
-  tick when the pointer is held at the viewport edge, and emits timer-cascade
-  `editing.autoscroll` tick records. The focused regression holds the pointer
-  still and advances simulated time so event-only scrolling cannot satisfy it.
+  `DocState`, advances the document viewport, nearest scroll container, input
+  horizontal scroll, and textarea horizontal/vertical scroll from the shared
+  editing animation tick when the pointer is held at an edge, and emits
+  timer-cascade `editing.autoscroll` tick records. The autoscroll and timer
+  policy has moved into `editing_controller.{hpp,cpp}`; `event.cpp` now calls
+  `editing_controller_drag_autoscroll*()` and supplies hook adapters for form
+  selection extension, rich selection snapshots, and autoscroll logging. The
+  focused regressions hold the pointer still and advance simulated time so
+  event-only scrolling cannot satisfy them.
+- Password text controls now use the same editing animation tick for the
+  short last-inserted-character reveal timeout. `text_edit.cpp` records the
+  revealed source byte range on mutation, `render_form.cpp` maps source bytes
+  to the mixed bullet/plain display string for caret and selection geometry,
+  and `window.cpp` now asks the editing controller whether caret blink,
+  autoscroll, or password reveal keeps the shared tick active. Focus loss
+  clears the transient reveal state immediately, and the event simulator has
+  `assert_password_reveal` coverage for both blur cleanup and expiry.
 - E4 now has a first `radiant/editing_geometry.hpp/.cpp` facade for shared
   editing boundaries, text-control point-to-offset, caret rects, rich hit
   testing, and the contenteditable skip-text-control clamp policy. Input and
@@ -865,14 +882,22 @@ For WPT:
 - Text-control selection highlight geometry also lives behind the E4 facade:
   `editing_geometry_text_control_for_each_selection_rect()` emits input and
   textarea selection rectangles from the same value offsets as caret geometry.
-  `render_form.cpp` now applies only paint-time scale, horizontal scroll, and
-  text alignment. Password and IME preedit highlights intentionally keep local
-  fallback math because their rendered strings differ from the stored value.
+  `render_form.cpp` now applies only paint-time scale, internal control
+  scrolling, and text alignment. Password and IME preedit highlights
+  intentionally keep local fallback math because their rendered strings differ
+  from the stored value.
 - Rich `beforeinput` target-range validation now uses
   `editing_geometry_surface_contains_range()`. A mutating rich intent whose
   live DOM Selection crosses an embedded text control is consumed and rejected
   before JS/Lambda default mutation can run; the mixed fixture now covers this
   with Ctrl+X over a rich selection that straddles an `<input>`.
+- The rich validation path now validates the shared E3
+  `EditingTargetRange` snapshot instead of re-reading `DocState::dom_selection`
+  directly. `editing_geometry_surface_contains_target_range()` accepts the
+  synthetic form range shape only when its owner and UTF-16 offsets are valid,
+  and reuses the rich descendant text-control clamp after rejecting invalid or
+  disjoint DOM boundaries. Collapsed caret ranges are boundary checks, not
+  descendant intersections.
 - Rich text point-to-boundary projection is now also available through
   `editing_geometry_dom_text_boundary_from_point()`, backed by the shared
   glyph inverse resolver. Rich mousedown, drag extension, and mouseup
@@ -883,6 +908,15 @@ For WPT:
   projection after line/document movement. This keeps DOM Selection
   non-collapsed across line boundaries and gives `editing.selection` logs the
   actual focus view.
+- The first narrow `editing_controller.{hpp,cpp}` seam now owns rich
+  arrow/Home/End keyboard navigation. `event.cpp` still routes platform
+  events, shortcuts, mouse selection, and IME, but the caret/selection policy
+  for rich navigation has moved behind a controller hook surface that can grow
+  phase-by-phase.
+- The mixed clamp fixture now covers additional E4 edges: an embedded
+  textarea starts its own form-selection drag inside a rich host, and a
+  collapsed rich caret near embedded controls remains a valid collapsed DOM
+  selection rather than being mistaken for a cross-surface range.
 
 ---
 

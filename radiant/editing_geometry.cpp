@@ -1,6 +1,7 @@
 #include "editing_geometry.hpp"
 
 #include "dom_range_resolver.hpp"
+#include "editing_target_range.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
 #include "view.hpp"
@@ -36,6 +37,7 @@ static bool editing_geometry_node_inside_text_control(DomNode* node) {
 static bool editing_geometry_range_intersects_text_control_descendant(
         const DomRange* range, DomNode* node, DomElement* owner) {
     if (!range || !node || !owner) return false;
+    if (dom_range_collapsed(range)) return false;
     if (!dom_range_intersects_node(range, node)) return false;
 
     if (node != static_cast<DomNode*>(owner) && node->is_element()) {
@@ -257,6 +259,43 @@ bool editing_geometry_surface_contains_range(const EditingSurface* surface,
     return true;
 }
 
+bool editing_geometry_surface_contains_target_range(
+        const EditingSurface* surface,
+        const EditingTargetRange* range) {
+    if (!surface || !range || !range->start.node || !range->end.node) return false;
+
+    if (editing_surface_is_text_control(surface)) {
+        DomElement* elem = surface->owner;
+        if (!elem || !tc_is_text_control(elem) || !elem->form) return false;
+        if (range->start.node != static_cast<DomNode*>(elem) ||
+            range->end.node != static_cast<DomNode*>(elem)) {
+            return false;
+        }
+        tc_ensure_init(elem);
+        uint32_t limit = elem->form->current_value_u16_len;
+        return range->start.offset <= limit && range->end.offset <= limit;
+    }
+
+    if (!dom_boundary_is_valid(&range->start) ||
+        !dom_boundary_is_valid(&range->end)) {
+        return false;
+    }
+
+    DomBoundaryOrder order = dom_boundary_compare(&range->start, &range->end);
+    if (order == DOM_BOUNDARY_DISJOINT) return false;
+
+    DomRange dom_range;
+    memset(&dom_range, 0, sizeof(dom_range));
+    dom_range.start = range->start;
+    dom_range.end = range->end;
+    if (order == DOM_BOUNDARY_AFTER) {
+        DomBoundary tmp = dom_range.start;
+        dom_range.start = dom_range.end;
+        dom_range.end = tmp;
+    }
+    return editing_geometry_surface_contains_range(surface, &dom_range);
+}
+
 bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
                                                     DomElement* elem,
                                                     float vx,
@@ -277,13 +316,13 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     float padding = block->bound ? block->bound->padding.left :
         (elem->form->control_type == FORM_CONTROL_TEXTAREA
             ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
-    float rel_x = vx - abs_x - border - padding;
+    float rel_x = vx - abs_x - border - padding + elem->form->scroll_x;
     if (rel_x < 0.0f) rel_x = 0.0f;
 
     if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
         float font_size = block->font ? block->font->font_size : 13.333f;
         float line_height = font_size * 1.4f;
-        float rel_y = vy - abs_y - border - padding;
+        float rel_y = vy - abs_y - border - padding + elem->form->scroll_y;
         if (rel_y < 0.0f) rel_y = 0.0f;
         uint32_t line_start = 0, line_len = 0;
         editing_geometry_textarea_line_for_y(value, value_len, rel_y, line_height,

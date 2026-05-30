@@ -6,6 +6,7 @@
 
 struct DocState;
 struct DomText;
+struct EditingTargetRange;
 struct TextRect;
 struct UiContext;
 class DomElement;
@@ -48,6 +49,10 @@ bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
 
 bool editing_geometry_surface_contains_range(const EditingSurface* surface,
                                              const DomRange* range);
+
+bool editing_geometry_surface_contains_target_range(
+    const EditingSurface* surface,
+    const EditingTargetRange* range);
 
 bool editing_geometry_hit_test_boundary(UiContext* uicon,
                                         View* root_view,

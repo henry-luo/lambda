@@ -6,22 +6,34 @@
     <style>
         * { box-sizing: border-box; }
         body { font-family: Arial, sans-serif; font-size: 16px; padding: 16px; }
-        input { font: 16px Arial, sans-serif; width: 160px; padding: 2px; margin: 6px; }
+        input, textarea { font: 16px Arial, sans-serif; width: 160px; padding: 2px; margin: 6px; }
+        textarea { height: 32px; vertical-align: middle; }
         #plain { display: block; margin: 10px 0 18px 0; }
         #host {
-            width: 520px;
-            min-height: 42px;
+            width: 620px;
+            min-height: 78px;
             border: 1px solid #888;
             padding: 8px;
             line-height: 28px;
         }
         #embedded { width: 120px; margin: 0 8px; }
+        #embeddedArea { width: 120px; margin: 0 8px; }
+        #rich-status { margin-top: 10px; font-size: 13px; }
     </style>
 </head>
 <body>
     <input id="plain" value="abcdef">
     <div id="host" contenteditable="true">
         Start words <input id="embedded" value="inner"> End words
+        More words <textarea id="embeddedArea">area</textarea> Tail words
     </div>
+    <div id="rich-status">rich:none</div>
+    <script>
+        document.getElementById('host').onbeforeinput = function (event) {
+            var ranges = event.getTargetRanges();
+            document.getElementById('rich-status').textContent =
+                'rich:' + event.inputType + '|' + ranges.length + '|' + (event.data || '');
+        };
+    </script>
 </body>
 </html>

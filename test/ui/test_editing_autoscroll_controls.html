@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Editing Autoscroll Controls</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            margin: 0;
+            padding: 20px;
+        }
+        #longInput {
+            display: block;
+            width: 150px;
+            margin-bottom: 18px;
+            font: 16px Arial, sans-serif;
+        }
+        #longArea {
+            display: block;
+            width: 180px;
+            height: 56px;
+            margin-bottom: 18px;
+            font: 16px Arial, sans-serif;
+        }
+        #scrollHost {
+            width: 220px;
+            height: 160px;
+            overflow: scroll;
+            border: 1px solid #777;
+            line-height: 24px;
+        }
+        #scrollContent {
+            width: 620px;
+            height: 680px;
+            padding: 8px;
+            background: #f8fbff;
+        }
+        .gap { height: 500px; }
+    </style>
+</head>
+<body>
+    <input id="longInput" value="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ">
+    <textarea id="longArea">aa
+bb
+cc
+dd
+ee
+ff
+gg
+hh
+ii
+jj
+kk
+ll</textarea>
+    <div id="scrollHost">
+        <div id="scrollContent" contenteditable="true">
+            <p><span id="richStart">Rich start text</span> inside the scroll container.</p>
+            <div class="gap"></div>
+            <p><span id="richEnd">Rich end text</span> after internal scrolling.</p>
+        </div>
+    </div>
+</body>
+</html>

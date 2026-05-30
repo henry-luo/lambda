@@ -106,6 +106,10 @@ void te_focus_capture_value(DomElement* elem);
 // Always clears the snapshot afterwards.
 bool te_blur_should_dispatch_change(DomElement* elem);
 
+// Clear the transient password "last inserted character" reveal state.
+// Returns true when state changed.
+bool te_password_reveal_clear(DomElement* elem);
+
 // ---------- undo/redo ring (skeleton — used by future F4) --------------
 
 struct EditHistoryEntry {

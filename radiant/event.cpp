@@ -15,6 +15,7 @@
 #include "dom_range_resolver.hpp"
 #include "editing_host.hpp"
 #include "editing.hpp"
+#include "editing_controller.hpp"
 #include "editing_dispatch.hpp"
 #include "editing_geometry.hpp"
 #include "editing_intent.hpp"
@@ -378,6 +379,19 @@ static void event_log_editing_composition(DocState* state,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
+static bool dispatch_form_selection_extend(EventContext* evcon,
+                                           DomElement* elem,
+                                           DocState* state,
+                                           View* target,
+                                           int anchor_offset,
+                                           int focus_offset,
+                                           const char* operation);
+static bool dispatch_rich_selection_snapshot(EventContext* evcon,
+                                             DocState* state,
+                                             View* target,
+                                             const char* operation,
+                                             const InputIntent* intent);
+
 static void event_log_editing_autoscroll(DocState* state,
                                          const EditingSurface* surface,
                                          const char* operation,
@@ -403,113 +417,53 @@ static void event_log_editing_autoscroll(DocState* state,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
-static void dispatch_selection_drag_autoscroll_stop(DocState* state);
-
-static bool dispatch_selection_drag_autoscroll(EventContext* evcon,
-                                               DocState* state,
-                                               View* surface_target,
-                                               float pointer_x,
-                                               float pointer_y) {
-    if (!evcon || !evcon->ui_context || !evcon->ui_context->document ||
-        !state || !surface_target) {
-        return false;
-    }
-    DomDocument* doc = evcon->ui_context->document;
-    if (!doc->view_tree || !doc->view_tree->root ||
-        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
-        return false;
-    }
-
-    ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-    if (!root_block || !root_block->scroller || !root_block->scroller->pane) {
-        return false;
-    }
-
-    float viewport_w = evcon->ui_context->viewport_width > 0
-        ? (float)evcon->ui_context->viewport_width
-        : root_block->width;
-    float viewport_h = evcon->ui_context->viewport_height > 0
-        ? (float)evcon->ui_context->viewport_height
-        : root_block->height;
-    if (viewport_w <= 0.0f || viewport_h <= 0.0f) return false;
-    state->editing_autoscroll_pointer_x = pointer_x;
-    state->editing_autoscroll_pointer_y = pointer_y;
-
-    const float edge = 24.0f;
-    const float max_step = 36.0f;
-    float vx = 0.0f;
-    float vy = 0.0f;
-    if (pointer_x < edge) {
-        vx = -max_step * (edge - pointer_x) / edge;
-    } else if (pointer_x > viewport_w - edge) {
-        vx = max_step * (pointer_x - (viewport_w - edge)) / edge;
-    }
-    if (pointer_y < edge) {
-        vy = -max_step * (edge - pointer_y) / edge;
-    } else if (pointer_y > viewport_h - edge) {
-        vy = max_step * (pointer_y - (viewport_h - edge)) / edge;
-    }
-    if (vx < -max_step) vx = -max_step;
-    if (vx > max_step) vx = max_step;
-    if (vy < -max_step) vy = -max_step;
-    if (vy > max_step) vy = max_step;
-
-    if (vx == 0.0f && vy == 0.0f) {
-        dispatch_selection_drag_autoscroll_stop(state);
-        return false;
-    }
-
-    float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
-    scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
-                                       root_block->scroller->pane,
-                                       &h, &v, &h_max, &v_max);
-    float next_h = h + vx;
-    float next_v = v + vy;
-    if (next_h < 0.0f) next_h = 0.0f;
-    if (next_v < 0.0f) next_v = 0.0f;
-    if (next_h > h_max) next_h = h_max;
-    if (next_v > v_max) next_v = v_max;
-    float dx = next_h - h;
-    float dy = next_v - v;
-    if (dx == 0.0f && dy == 0.0f) return false;
-
-    EditingSurface surface;
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(surface_target, &surface)) {
-        surface_ptr = &surface;
-    }
-    if (!state->editing_autoscroll_active) {
-        event_log_editing_autoscroll(state, surface_ptr, "start",
-                                     dx, dy, vx, vy);
-        state->editing_autoscroll_active = true;
-        state->editing_autoscroll_surface = surface_target;
-    } else {
-        event_log_editing_autoscroll(state, surface_ptr, "tick",
-                                     dx, dy, vx, vy);
-    }
-
-    scroll_state_set_position_for_view(state, static_cast<View*>(root_block),
-                                       root_block->scroller->pane,
-                                       next_h, next_v, false);
-    doc_state_sync_viewport_scroll(state, doc, next_h, next_v);
-    evcon->need_repaint = true;
-    return true;
+static bool dispatch_form_selection_extend_for_controller(
+        EventContext* evcon,
+        DomElement* elem,
+        DocState* state,
+        View* target,
+        int anchor_offset,
+        int focus_offset,
+        const char* operation,
+        void* userdata) {
+    (void)userdata;
+    return dispatch_form_selection_extend(evcon, elem, state, target,
+                                          anchor_offset, focus_offset,
+                                          operation);
 }
 
-static void dispatch_selection_drag_autoscroll_stop(DocState* state) {
-    if (!state || !state->editing_autoscroll_active) return;
+static void dispatch_rich_selection_snapshot_for_controller(
+        EventContext* evcon,
+        DocState* state,
+        View* target,
+        const char* operation,
+        const EditingIntent* intent,
+        void* userdata) {
+    (void)userdata;
+    dispatch_rich_selection_snapshot(evcon, state, target, operation, intent);
+}
 
-    EditingSurface surface;
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(state->editing_autoscroll_surface, &surface)) {
-        surface_ptr = &surface;
-    }
-    event_log_editing_autoscroll(state, surface_ptr, "stop",
-                                 0.0f, 0.0f, 0.0f, 0.0f);
-    state->editing_autoscroll_active = false;
-    state->editing_autoscroll_surface = nullptr;
-    state->editing_autoscroll_pointer_x = 0.0f;
-    state->editing_autoscroll_pointer_y = 0.0f;
+static void event_log_editing_autoscroll_for_controller(
+        DocState* state,
+        const EditingSurface* surface,
+        const char* operation,
+        float dx,
+        float dy,
+        float velocity_x,
+        float velocity_y,
+        void* userdata) {
+    (void)userdata;
+    event_log_editing_autoscroll(state, surface, operation, dx, dy,
+                                 velocity_x, velocity_y);
+}
+
+static EditingControllerHooks editing_controller_hooks() {
+    EditingControllerHooks hooks;
+    hooks.selection_snapshot = dispatch_rich_selection_snapshot_for_controller;
+    hooks.form_selection_extend = dispatch_form_selection_extend_for_controller;
+    hooks.autoscroll_log = event_log_editing_autoscroll_for_controller;
+    hooks.user = nullptr;
+    return hooks;
 }
 
 static void sync_viewport_scroll_state(EventContext* evcon) {
@@ -3198,42 +3152,15 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 void event_context_cleanup(EventContext* evcon) {
 }
 
+bool radiant_editing_animation_active(DocState* state) {
+    return editing_controller_animation_active(state);
+}
+
 bool radiant_editing_animation_tick(UiContext* uicon, double timestamp) {
-    (void)timestamp;
-    if (!uicon || !uicon->document || !uicon->document->state) return false;
-
-    DocState* state = (DocState*)uicon->document->state;
-    if (!state->editing_autoscroll_active ||
-        !state->editing_autoscroll_surface) {
-        return false;
-    }
-
-    RdtEvent event;
-    memset(&event, 0, sizeof(event));
-    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
-    event.mouse_position.timestamp = timestamp;
-    event.mouse_position.x = (int)state->editing_autoscroll_pointer_x; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
-    event.mouse_position.y = (int)state->editing_autoscroll_pointer_y; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
-
-    EventContext evcon;
-    event_context_init(&evcon, uicon, &event);
-
-    EventStateLog* cascade_log = state->active_event_log
-        ? state->active_event_log : uicon->event_log;
-    uint64_t cascade_id = state_begin_event_cascade(state, cascade_log, "timer");
-
-    bool changed = dispatch_selection_drag_autoscroll(
-        &evcon, state, state->editing_autoscroll_surface,
-        state->editing_autoscroll_pointer_x,
-        state->editing_autoscroll_pointer_y);
-
-    if (evcon.need_repaint) {
-        doc_state_mark_dirty(state);
-        to_repaint();
-    }
-    state_end_event_cascade(state, cascade_log, cascade_id);
-    event_context_cleanup(&evcon);
-    return changed || evcon.need_repaint;
+    EditingControllerHooks hooks = editing_controller_hooks();
+    bool changed = editing_controller_animation_tick(uicon, timestamp, &hooks);
+    if (changed) to_repaint();
+    return changed;
 }
 
 // ============================================================================
@@ -4134,6 +4061,10 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             // snapshot, dispatch `change` before `blur` (HTML §4.10.5.5).
             if (prev_focus->is_element()) {
                 DomElement* prev_elem = lam::dom_require_element(prev_focus);
+                if (te_password_reveal_clear(prev_elem)) {
+                    doc_state_request_repaint(state);
+                    evcon->need_repaint = true;
+                }
                 if (te_blur_should_dispatch_change(prev_elem)) {
                     dispatch_lambda_handler   (evcon, prev_focus, "change");
                     dispatch_html_event_handler(evcon, prev_focus, "change");
@@ -4184,6 +4115,10 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
             // F1: same `change` dispatch on focus-cleared path.
             if (prev_focus->is_element()) {
                 DomElement* prev_elem = lam::dom_require_element(prev_focus);
+                if (te_password_reveal_clear(prev_elem)) {
+                    doc_state_request_repaint(state);
+                    evcon->need_repaint = true;
+                }
                 if (te_blur_should_dispatch_change(prev_elem)) {
                     dispatch_lambda_handler   (evcon, prev_focus, "change");
                     dispatch_html_event_handler(evcon, prev_focus, "change");
@@ -4992,9 +4927,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
-                    dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+                    EditingControllerHooks hooks = editing_controller_hooks();
+                    editing_controller_drag_autoscroll(&evcon, state, anchor_view,
                                                        (float)motion->x,
-                                                       (float)motion->y);
+                                                       (float)motion->y,
+                                                       &hooks);
                     evcon.need_repaint = true;
                     // skip text selection drag below
                     goto textarea_drag_done;
@@ -5012,9 +4949,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
                         anchor_view, anchor_offset, char_offset, "dragExtend");
-                    dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+                    EditingControllerHooks hooks = editing_controller_hooks();
+                    editing_controller_drag_autoscroll(&evcon, state, anchor_view,
                                                        (float)motion->x,
-                                                       (float)motion->y);
+                                                       (float)motion->y,
+                                                       &hooks);
                     // Refresh StateStore text-control selection projection so
                     // render_form shows the live drag highlight.
                     uint32_t sel_start = 0, sel_end = 0;
@@ -5233,9 +5172,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("Dragging selection to offset %d, collapsed=%d", char_offset, selection_collapsed);
                 evcon.need_repaint = true;
             }
-            dispatch_selection_drag_autoscroll(&evcon, state, anchor_view,
+            EditingControllerHooks hooks = editing_controller_hooks();
+            editing_controller_drag_autoscroll(&evcon, state, anchor_view,
                                                (float)motion->x,
-                                               (float)motion->y);
+                                               (float)motion->y,
+                                               &hooks);
         }
         textarea_drag_done:
 
@@ -5916,9 +5857,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (selection_has_projection(state)) {
                 dispatch_selectionchange(&evcon, state, evcon.target);
                 selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
-                dispatch_selection_drag_autoscroll_stop(state);
+                EditingControllerHooks hooks = editing_controller_hooks();
+                editing_controller_drag_autoscroll_stop(state, &hooks);
             }
-            dispatch_selection_drag_autoscroll_stop(state);
+            EditingControllerHooks hooks = editing_controller_hooks();
+            editing_controller_drag_autoscroll_stop(state, &hooks);
         }
 
         if (evcon.target) {
@@ -7103,190 +7046,55 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* caret_view = NULL;
         int caret_offset = 0;
         if (caret_get_position(state, &caret_view, &caret_offset)) {
-            bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
 
-            // Get text data for UTF-8 aware navigation
-            unsigned char* text_data = nullptr;
-            if (caret_view->is_text()) {
-                text_data = (lam::view_require_text(caret_view))->text_data();
-            }
+            EditingControllerHooks controller_hooks = editing_controller_hooks();
 
-            switch (key_event->key) {
-                case RDT_KEY_LEFT:
-                    if (shift) {
-                        // Extend selection left (UTF-8 aware)
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        int new_offset = text_data
-                            ? utf8_offset_by_chars(text_data, caret_offset, -1)
-                            : caret_offset - 1;
-                        selection_extend(state, new_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            "extendBackward", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move(state, ctrl ? -10 : -1);  // word jump with ctrl
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            ctrl ? "moveWordBackward" : "moveBackward", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_RIGHT:
-                    if (shift) {
-                        // Extend selection right (UTF-8 aware)
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        int new_offset = text_data
-                            ? utf8_offset_by_chars(text_data, caret_offset, 1)
-                            : caret_offset + 1;
-                        selection_extend(state, new_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            "extendForward", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move(state, ctrl ? 10 : 1);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            ctrl ? "moveWordForward" : "moveForward", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_UP:
-                    if (shift) {
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        // Calculate line start/end for extending selection
-                        caret_move_line(state, -1, evcon.ui_context);
-                        View* new_caret_view = caret_view;
-                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
-                            NULL, NULL, NULL, NULL, NULL, NULL);
-                        selection_extend_to_view(state, new_caret_view, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
-                            "extendLineBackward", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move_line(state, -1, evcon.ui_context);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            "moveLineBackward", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_DOWN:
-                    if (shift) {
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        caret_move_line(state, 1, evcon.ui_context);
-                        View* new_caret_view = caret_view;
-                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
-                            NULL, NULL, NULL, NULL, NULL, NULL);
-                        selection_extend_to_view(state, new_caret_view, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
-                            "extendLineForward", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move_line(state, 1, evcon.ui_context);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            "moveLineForward", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_HOME:
-                    if (shift) {
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        caret_move_to(state, cmd ? 2 : 0);  // doc start or line start
-                        View* new_caret_view = caret_view;
-                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
-                            NULL, NULL, NULL, NULL, NULL, NULL);
-                        selection_extend_to_view(state, new_caret_view, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
-                            cmd ? "extendDocumentStart" : "extendLineStart", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move_to(state, cmd ? 2 : 0);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            cmd ? "moveDocumentStart" : "moveLineStart", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_END:
-                    if (shift) {
-                        if (!selection_has(state)) {
-                            selection_start(state, caret_view, caret_offset);
-                        }
-                        caret_move_to(state, cmd ? 3 : 1);  // doc end or line end
-                        View* new_caret_view = caret_view;
-                        caret_get_render_snapshot(state, &new_caret_view, &caret_offset,
-                            NULL, NULL, NULL, NULL, NULL, NULL);
-                        selection_extend_to_view(state, new_caret_view, caret_offset);
-                        dispatch_rich_selection_snapshot(&evcon, state, new_caret_view,
-                            cmd ? "extendDocumentEnd" : "extendLineEnd", nullptr);
-                    } else {
-                        selection_clear(state);
-                        caret_move_to(state, cmd ? 3 : 1);
-                        dispatch_rich_selection_snapshot(&evcon, state, caret_view,
-                            cmd ? "moveDocumentEnd" : "moveLineEnd", nullptr);
-                    }
-                    update_caret_visual_position(evcon.ui_context, state);
-                    evcon.need_repaint = true;
-                    break;
-
-                case RDT_KEY_A:
-                    // Select all (Ctrl+A / Cmd+A)
-                    if (ctrl || cmd) {
-                        selection_select_all(state);
-                        evcon.need_repaint = true;
-                    }
-                    break;
-
-                case RDT_KEY_C:
-                    // Copy selection (Ctrl+C / Cmd+C)
-                    if (ctrl || cmd) {
-                        copy_current_selection_to_clipboard(state, "legacy copy");
-                    }
-                    break;
-
-                case RDT_KEY_X:
-                    // Cut selection (Ctrl+X / Cmd+X)
-                    if (ctrl || cmd) {
-                        if (selection_has(state)) {
-                            copy_current_selection_to_clipboard(state, "legacy cut");
-
-                            // TODO: delete selected text
-                            selection_clear(state);
+            if (!editing_controller_handle_rich_navigation(&evcon, state,
+                    key_event, &controller_hooks)) {
+                switch (key_event->key) {
+                    case RDT_KEY_A:
+                        // Select all (Ctrl+A / Cmd+A)
+                        if (ctrl || cmd) {
+                            selection_select_all(state);
                             evcon.need_repaint = true;
                         }
-                    }
-                    break;
+                        break;
 
-                case RDT_KEY_BACKSPACE:
-                    // TODO: delete selection or character before caret
-                    evcon.need_repaint = true;
-                    break;
+                    case RDT_KEY_C:
+                        // Copy selection (Ctrl+C / Cmd+C)
+                        if (ctrl || cmd) {
+                            copy_current_selection_to_clipboard(state, "legacy copy");
+                        }
+                        break;
 
-                case RDT_KEY_DELETE:
-                    // TODO: delete selection or character after caret
-                    evcon.need_repaint = true;
-                    break;
+                    case RDT_KEY_X:
+                        // Cut selection (Ctrl+X / Cmd+X)
+                        if (ctrl || cmd) {
+                            if (selection_has(state)) {
+                                copy_current_selection_to_clipboard(state, "legacy cut");
 
-                default:
-                    break;
+                                // TODO: delete selected text
+                                selection_clear(state);
+                                evcon.need_repaint = true;
+                            }
+                        }
+                        break;
+
+                    case RDT_KEY_BACKSPACE:
+                        // TODO: delete selection or character before caret
+                        evcon.need_repaint = true;
+                        break;
+
+                    case RDT_KEY_DELETE:
+                        // TODO: delete selection or character after caret
+                        evcon.need_repaint = true;
+                        break;
+
+                    default:
+                        break;
+                }
             }
         }
         // Mirror StateStore selection projection into form->selection_* so JS

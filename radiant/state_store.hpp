@@ -253,6 +253,8 @@ typedef struct DocState {
     View* editing_autoscroll_surface;    // surface that started autoscroll
     float editing_autoscroll_pointer_x;  // last drag pointer x in viewport coordinates
     float editing_autoscroll_pointer_y;  // last drag pointer y in viewport coordinates
+    double editing_tick_last_time;        // shared editing animation clock
+    double editing_caret_blink_elapsed;   // caret blink time on shared tick
 
     // ------------------------------------------------------------------
     // DOM-spec Selection / Range (additive — new code path; legacy

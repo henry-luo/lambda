@@ -1,7 +1,7 @@
 {
   "name": "Editing geometry - mixed surface selection clamp",
   "html": "test/ui/test_editing_mixed_selection_clamp.html",
-  "viewport": {"width": 700, "height": 260},
+  "viewport": {"width": 760, "height": 320},
   "events": [
     {"type": "log", "message": "=== mixed selection clamp ==="},
     {"type": "wait", "ms": 200},
@@ -13,6 +13,15 @@
     {"type": "wait", "ms": 40},
     {"type": "assert_form_selection", "target": {"selector": "#plain"}, "start": 0, "end": 6},
     {"type": "mouse_up", "target": {"selector": "#host", "offset_x": 480, "offset_y": 22}, "button": 0},
+    {"type": "wait", "ms": 60},
+
+    {"type": "log", "message": "Embedded textarea-origin drag clamps to textarea value inside rich host"},
+    {"type": "mouse_down", "target": {"selector": "#embeddedArea", "offset_x": 1, "offset_y": 12}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_move", "target": {"selector": "#host", "offset_x": 600, "offset_y": 56}},
+    {"type": "wait", "ms": 40},
+    {"type": "assert_form_selection", "target": {"selector": "#embeddedArea"}, "start": 0, "end": 4},
+    {"type": "mouse_up", "target": {"selector": "#host", "offset_x": 600, "offset_y": 56}, "button": 0},
     {"type": "wait", "ms": 60},
 
     {"type": "log", "message": "Rich-origin drag does not enter embedded input selection state"},
@@ -34,6 +43,15 @@
     {"type": "assert_value", "target": {"selector": "#embedded"}, "equals": "inner"},
     {"type": "assert_text", "target": {"selector": "#host"}, "contains": "Start words"},
     {"type": "assert_text", "target": {"selector": "#host"}, "contains": "End words"},
-    {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+
+    {"type": "log", "message": "Collapsed rich caret near embedded controls is allowed"},
+    {"type": "click", "target": {"selector": "#host", "offset_x": 610, "offset_y": 70}},
+    {"type": "wait", "ms": 40},
+    {"type": "click", "target": {"text": "Tail"}},
+    {"type": "wait", "ms": 40},
+    {"type": "assert_selection", "is_collapsed": true, "check_dom": true},
+    {"type": "assert_value", "target": {"selector": "#embedded"}, "equals": "inner"},
+    {"type": "assert_value", "target": {"selector": "#embeddedArea"}, "equals": "area"}
   ]
 }
