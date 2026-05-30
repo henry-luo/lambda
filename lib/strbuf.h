@@ -50,15 +50,12 @@ void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
 void strbuf_append_int(StrBuf *buf, int value);
 void strbuf_append_int64(StrBuf *buf, int64_t value);
 void strbuf_append_uint64(StrBuf *buf, uint64_t value);
-// deprecated - use strbuf_append_int64 instead
-void strbuf_append_long(StrBuf *buf, long value);
-// deprecated - use strbuf_append_uint64 instead  
-void strbuf_append_ulong(StrBuf *buf, unsigned long value);
 void strbuf_append_all(StrBuf *sb, int num_args, ...);
 void strbuf_vappend(StrBuf *sb, int num_args, va_list args);
 void strbuf_append_format(StrBuf *sb, const char *format, ...);
 void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args);
 void strbuf_copy(StrBuf *dst, const StrBuf *src);
+bool strbuf_replace_all(StrBuf *sb, const char *needle, const char *replacement);
 bool strbuf_append_file(StrBuf *sb, FILE *file);
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n);
 

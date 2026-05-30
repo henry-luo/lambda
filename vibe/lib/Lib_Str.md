@@ -791,7 +791,7 @@ Migrated four secondary string utility libraries to use `str.h` internally:
 
 **StrView** (`lib/strview.c`): 7 functions delegated to `str.h` equivalents
 (`strview_eq`→`str_eq`, `strview_find`→`str_find`, `strview_trim`→`str_trim`,
-`strview_start_with`→`str_starts_with`, `strview_to_int`→`str_to_int64`,
+`strview_starts_with`→`str_starts_with`, `strview_to_int`→`str_to_int64`,
 `strview_to_cstr`→`str_dup`). Fixed NUL-termination bug in `strview_find` (was
 using `strstr` on non-NUL-terminated views).
 

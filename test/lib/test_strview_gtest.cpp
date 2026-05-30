@@ -66,10 +66,10 @@ TEST_F(StrViewTest, SubEdgeCases) {
 TEST_F(StrViewTest, PrefixSuffix) {
     StrView s = strview_from_str("Hello, World!");
     
-    EXPECT_TRUE(strview_start_with(&s, "Hello"));
-    EXPECT_FALSE(strview_start_with(&s, "World"));
-    EXPECT_TRUE(strview_end_with(&s, "World!"));
-    EXPECT_FALSE(strview_end_with(&s, "Hello"));
+    EXPECT_TRUE(strview_starts_with(&s, "Hello"));
+    EXPECT_FALSE(strview_starts_with(&s, "World"));
+    EXPECT_TRUE(strview_ends_with(&s, "World!"));
+    EXPECT_FALSE(strview_ends_with(&s, "Hello"));
 }
 
 TEST_F(StrViewTest, Find) {
@@ -136,7 +136,7 @@ TEST_F(StrViewTest, FromCstr) {
     EXPECT_EQ(e2.length, 0u);
 }
 
-TEST_F(StrViewTest, StartsEndsWithAliases) {
+TEST_F(StrViewTest, StartsEndsWith) {
     StrView s = strview_from_str("Hello, World!");
     EXPECT_TRUE(strview_starts_with(&s, "Hello"));
     EXPECT_FALSE(strview_starts_with(&s, "World"));
