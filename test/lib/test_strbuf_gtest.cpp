@@ -652,3 +652,31 @@ TEST_F(StrBufTest, StartsEndsWithEmpty) {
     EXPECT_FALSE(strbuf_ends_with(sb, "x"));
     strbuf_free(sb);
 }
+
+TEST_F(StrBufTest, ReplaceAllExpands) {
+    StrBuf* sb = strbuf_create("one fish, two fish");
+    EXPECT_TRUE(strbuf_replace_all(sb, "fish", "catfish"));
+    EXPECT_STREQ(sb->str, "one catfish, two catfish");
+    EXPECT_EQ(sb->length, strlen("one catfish, two catfish"));
+    strbuf_free(sb);
+}
+
+TEST_F(StrBufTest, ReplaceAllShrinksAndDeletes) {
+    StrBuf* sb = strbuf_create("a--b--c--");
+    EXPECT_TRUE(strbuf_replace_all(sb, "--", "-"));
+    EXPECT_STREQ(sb->str, "a-b-c-");
+    EXPECT_TRUE(strbuf_replace_all(sb, "-", ""));
+    EXPECT_STREQ(sb->str, "abc");
+    strbuf_free(sb);
+}
+
+TEST_F(StrBufTest, ReplaceAllNoOpAndNullReplacement) {
+    StrBuf* sb = strbuf_create("alpha beta");
+    EXPECT_TRUE(strbuf_replace_all(sb, "", "x"));
+    EXPECT_STREQ(sb->str, "alpha beta");
+    EXPECT_TRUE(strbuf_replace_all(sb, " beta", nullptr));
+    EXPECT_STREQ(sb->str, "alpha");
+    EXPECT_FALSE(strbuf_replace_all(nullptr, "a", "b"));
+    EXPECT_FALSE(strbuf_replace_all(sb, nullptr, "b"));
+    strbuf_free(sb);
+}

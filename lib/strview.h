@@ -27,15 +27,8 @@ char strview_get(const StrView* s, size_t index);        // Get character at ind
 StrView strview_sub(const StrView* s, size_t start, size_t end);  // Substring
 bool strview_eq(const StrView* a, const StrView* b);  // String comparison
 bool strview_equal(const StrView* a, const char* b);  // strview, string comparison
-bool strview_start_with(const StrView* s, const char* prefix);  // Prefix check
-bool strview_end_with(const StrView* s, const char* suffix);  // Suffix check
-// aliases matching common naming convention (alias for *_with variants).
-static inline bool strview_starts_with(const StrView* s, const char* prefix) {
-    return strview_start_with(s, prefix);
-}
-static inline bool strview_ends_with(const StrView* s, const char* suffix) {
-    return strview_end_with(s, suffix);
-}
+bool strview_starts_with(const StrView* s, const char* prefix);  // Prefix check
+bool strview_ends_with(const StrView* s, const char* suffix);  // Suffix check
 int strview_find(const StrView* s, const char* substr);  // Find substring position
 bool strview_contains(const StrView* s, const char* substr);  // contains substring?
 void strview_trim(StrView* s);                           // Trim whitespace

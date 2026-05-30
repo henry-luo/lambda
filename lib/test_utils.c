@@ -18,9 +18,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "log.h"          // log_init
-#include "mempool.h"      // Pool, pool_create, pool_destroy
-
 // -----------------------------------------------------------------------------
 // Internal: build "./temp/<base>_<pid>_<epoch>[.<ext>]". Caller frees.
 // -----------------------------------------------------------------------------
@@ -203,24 +200,4 @@ void tu_strip_lines(char* s, const char* prefix) {
         read += line_len;
     }
     *write = '\0';
-}
-
-// =============================================================================
-// Pool-only fixture
-// =============================================================================
-
-Pool* tu_setup_pool(void) {
-    log_init(NULL);
-    Pool* pool = pool_create();
-    if (!pool) {
-        // No gtest dependency here — abort so the failure surfaces immediately
-        // rather than crashing later on a NULL pool deref.
-        fprintf(stderr, "tu_setup_pool: pool_create() failed\n");
-        abort();
-    }
-    return pool;
-}
-
-void tu_teardown_pool(Pool* pool) {
-    if (pool) pool_destroy(pool);
 }

@@ -270,16 +270,6 @@ void strbuf_append_int64(StrBuf *buf, int64_t value) {
     }
 }
 
-// Deprecated - use strbuf_append_int64 instead
-void strbuf_append_long(StrBuf *buf, long value) {
-    strbuf_append_int64(buf, (int64_t)value);
-}
-
-// Deprecated - use strbuf_append_uint64 instead
-void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
-    strbuf_append_uint64(buf, (uint64_t)value);
-}
-
 bool strbuf_append_file(StrBuf *sb, FILE *file) {
     if (!file) return false;
     fseek(file, 0, SEEK_END);
@@ -313,4 +303,64 @@ bool strbuf_starts_with(const StrBuf *sb, const char *prefix) {
 bool strbuf_ends_with(const StrBuf *sb, const char *suffix) {
     if (!sb || !suffix) return false;
     return str_ends_with_const(sb->str, sb->length, suffix);
+}
+
+bool strbuf_replace_all(StrBuf *sb, const char *needle, const char *replacement) {
+    if (!sb || !sb->str || !needle) return false;
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0) return true;
+
+    const char *repl = replacement ? replacement : "";
+    size_t repl_len = strlen(repl);
+    size_t count = 0;
+    size_t pos = 0;
+
+    while (pos <= sb->length) {
+        size_t found = str_find(sb->str + pos, sb->length - pos, needle, needle_len);
+        if (found == STR_NPOS) break;
+        count++;
+        pos += found + needle_len;
+    }
+    if (count == 0) return true;
+
+    if (repl_len > needle_len) {
+        size_t growth = repl_len - needle_len;
+        if (count > (SIZE_MAX - sb->length - 1) / growth) return false;
+    }
+    size_t new_len;
+    if (repl_len >= needle_len) {
+        new_len = sb->length + count * (repl_len - needle_len);
+    } else {
+        new_len = sb->length - count * (needle_len - repl_len);
+    }
+    char *new_str = (char*)malloc(new_len + 1);
+    if (!new_str) return false;
+
+    size_t src_pos = 0;
+    size_t dst_pos = 0;
+    while (src_pos < sb->length) {
+        size_t found = str_find(sb->str + src_pos, sb->length - src_pos, needle, needle_len);
+        if (found == STR_NPOS) break;
+        if (found > 0) {
+            memcpy(new_str + dst_pos, sb->str + src_pos, found);
+            dst_pos += found;
+        }
+        if (repl_len > 0) {
+            memcpy(new_str + dst_pos, repl, repl_len);
+            dst_pos += repl_len;
+        }
+        src_pos += found + needle_len;
+    }
+    if (src_pos < sb->length) {
+        size_t tail_len = sb->length - src_pos;
+        memcpy(new_str + dst_pos, sb->str + src_pos, tail_len);
+        dst_pos += tail_len;
+    }
+    new_str[dst_pos] = '\0';
+
+    free(sb->str);
+    sb->str = new_str;
+    sb->length = dst_pos;
+    sb->capacity = new_len + 1;
+    return true;
 }

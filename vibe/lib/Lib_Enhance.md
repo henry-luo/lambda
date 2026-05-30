@@ -137,21 +137,21 @@ After deeper review, view_pool / shape_pool / tile_pool are domain-shaped enough
 ### 2.2 `lib/strview.h` — ✅ drift fixed, API extended
 
 - ✅ `strview_from_cstr` lifted from validator stubs and shipped in `lib/strview.h`.
-- ✅ Added: `strview_starts_with`/`strview_ends_with` aliases, `strview_contains`, `strview_to_int64`, `strview_to_double`, `strview_hash` (sip-compatible), `strview_dup_with_pool`.
+- ✅ Added: `strview_starts_with`/`strview_ends_with`, `strview_contains`, `strview_to_int64`, `strview_to_double`, `strview_hash` (sip-compatible), `strview_dup_with_pool`.
 - ✅ Migrated 9 hand-rolled `{ptr, strlen(ptr)}` initializers to `strview_from_cstr(ptr)` in [build_ast.cpp](../lambda/build_ast.cpp) (5 sites) and [doc_validator.cpp](../lambda/validator/doc_validator.cpp) (2 sites).
 - ✅ Removed redundant `extern "C"` forward-declaration of `strview_to_int` in [radiant/resolve_htm_style.cpp:14](../radiant/resolve_htm_style.cpp).
-- ❌ **Hygiene** Naming inconsistency `strview_start_with` / `strview_end_with` still present alongside the new `_starts_with` / `_ends_with` alias names. Could retire the old names in a breaking change.
+- ✅ Retired the old inconsistent `strview_start_with` / `strview_end_with` API names in favour of `strview_starts_with` / `strview_ends_with`; tests updated.
 
 16 gtest cases cover the extended API.
 
-### 2.3 `lib/strbuf.h` — ⏳ predicates done, escape helpers still open
+### 2.3 `lib/strbuf.h` — ✅ predicates and replacement done, escape helpers deferred
 
 - ✅ Added `strbuf_starts_with` / `strbuf_ends_with` (NULL-safe, delegate to `lib/str.h`).
-- ❌ `strbuf_replace_all(needle, replacement)` — formatters still hand-roll
+- ✅ Added `strbuf_replace_all(needle, replacement)` with expand, shrink, delete, empty-needle, and NULL-replacement coverage.
 - ⛔ `strbuf_append_escaped_*` (JSON/XML/HTML/CSV) — see §3.2 below. `lambda/format/` already has its own `EscapeRule` infrastructure (`JSON_ESCAPE_RULES`, `HTML_TEXT_ESCAPE_RULES`, etc.) that does this internally. Lifting it to lib would be a refactor of that subsystem, not a clean additive change.
-- ❌ **Hygiene** Deprecated `strbuf_append_long` / `strbuf_append_ulong` markers still present; not removed.
+- ✅ Removed deprecated `strbuf_append_long` / `strbuf_append_ulong`; callers use `strbuf_append_int64` / `strbuf_append_uint64`.
 
-33 gtest cases (3 new for predicates).
+36 gtest cases (3 new for predicates, 3 new for replacement).
 
 ### 2.4 `lib/num_stack.h` — ⛔ deferred
 
@@ -277,16 +277,13 @@ Each site has slightly different shape; abstraction win not high.
 
 **Genuinely outstanding (worth doing):**
 
-1. **§1.7 `py_builtins.cpp` insertion sorts** — 3 hand-written sorts at
-   lines 345, 357, 1535. Easy migration to `insertion_sort` + a stock
-   comparator. ~30 minutes.
+None. The previously listed `py_builtins.cpp` insertion sorts are already
+migrated to `insertion_sort`; the remaining hygiene items in §2.2 and §2.3 are
+now completed.
 
 **Hygiene (cosmetic, breaking if pursued):**
 
-- **§2.2** Retire `strview_start_with` / `strview_end_with` in favour of the
-  `_starts_with` / `_ends_with` aliases.
-- **§2.3** Either remove the `strbuf_append_long` / `strbuf_append_ulong`
-  deprecated functions or drop the deprecation marker.
+None currently tracked.
 
 **Bigger scope (separate proposals if pursued):**
 
@@ -304,13 +301,14 @@ Each site has slightly different shape; abstraction win not high.
 - §2.4 (`lib/num_stack.h` — zero callers)
 - §3.4 (`lib/cache_key.h` — only 1 caller after `file_cache_path`)
 - §3.10 (bitset helpers — too scattered)
-- Composite-key hashmap macros (too varied)
+- Composite-key hashmap macros (too varied; see `Lib_Enhance2.md` for a
+  scoped future proposal)
 
 ---
 
 ## Migration tally
 
-After 10 rounds:
+After 11 rounds:
 
 - **10 new lib modules:** lru_cache, binsearch (3 variants), hash, hashmap_helpers (4 macro variants), thread_pool (+ stack-size variant), math_utils, sort (+ stock comparators), hex (lower+upper), time_util, atomic
 - **36 hashmap cmp/hash function pairs eliminated**
@@ -324,9 +322,11 @@ After 10 rounds:
 - **1 mutex+counter → atomic**
 - **6 path-ext lookups via `file_path_ext`** (+ latent bugfix)
 - **1 inline FNV alias**
+- **1 inconsistent strview prefix/suffix API retired**
+- **1 strbuf replacement helper added** + deprecated long/ulong append wrappers removed
 
-Net: 22 actively-tested lib modules with **780 passing tests**. The proposal
-is substantively complete.
+Net: 22 actively-tested lib modules with **783 passing tests**. The proposal
+is substantively complete; follow-up candidates now live in `Lib_Enhance2.md`.
 
 ---
 
@@ -701,4 +701,3 @@ sure. Otherwise leave bash's custom hash alone.
 All six are deferred because the existing code is correct, the migration win
 is small (or carries risk), and no current caller has an unmet need. They
 remain on this list to be picked up when the calculus changes.
-

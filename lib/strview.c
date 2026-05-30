@@ -35,12 +35,12 @@ bool strview_equal(const StrView* a, const char* b) {
     return str_eq_const(a->str, a->length, b);
 }
 
-bool strview_start_with(const StrView* s, const char* prefix) {
+bool strview_starts_with(const StrView* s, const char* prefix) {
     if (!s || !prefix) return false;
     return str_starts_with_const(s->str, s->length, prefix);
 }
 
-bool strview_end_with(const StrView* s, const char* suffix) {
+bool strview_ends_with(const StrView* s, const char* suffix) {
     if (!s || !suffix) return false;
     return str_ends_with_const(s->str, s->length, suffix);
 }

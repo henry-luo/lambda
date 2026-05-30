@@ -1,0 +1,24 @@
+function
+hello world
+<h1>H1</h1>
+<h2>H2</h2>
+<h3>H3</h3>
+<strong>bold</strong>
+<strong>bold</strong>
+<em>italic</em>
+<s>strike</s>
+<strong>bold</strong> and <em>italic</em>
+use <code>code</code> here
+<pre class="code "><code>foo</code></pre>
+<pre class="code js"><code class="language-js">x=1</code></pre>
+<ul><li>a</li><li>b</li><li>c</li></ul>
+<ol><li>one</li><li>two</li></ol>
+<a href="https://example.com">click</a>
+<img src="img.png" alt="alt">
+<blockquote>quoted</blockquote>
+---
+line1<br />line2
+<a href="undefined">ref</a><a href="https://x.com">1</a>
+<script>
+""
+SNARKDOWN_DONE
