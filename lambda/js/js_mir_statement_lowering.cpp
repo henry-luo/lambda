@@ -4423,6 +4423,24 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             if (annexb_suppressed) break;
             JsFuncCollected* fc_decl = jm_find_collected_func(mt, fn_decl);
             if (fc_decl && fc_decl->func_item) {
+                // Js52 R2: for top-level / direct-binding function declarations,
+                // Phase 3 already hoisted the closure value into the existing
+                // binding.  Re-creating it here would mint a SECOND JsFunction
+                // instance with its own (empty) prototype field; the body's
+                // self-reference still points at the hoisted instance, so
+                // `module.exports = y` ends up with one instance while
+                // `y.prototype.method = ...` mutates the other — observed as
+                // ajv's `obj.addMetaSchema` resolving to undefined inside the
+                // constructor while it looks defined from outside.
+                //
+                // The non-direct (block-scoped) Annex B case still needs the
+                // recreate-and-rebind because Phase 3 did NOT hoist it.
+                bool is_direct = jm_statement_function_decl_is_direct_binding(fn_decl);
+                if (existing && is_direct) {
+                    // Skip recreation; existing already holds the hoisted closure.
+                    jm_scope_env_mark_and_writeback(mt, fn_vname, existing->reg);
+                    break;
+                }
                 MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc_decl);
                 if (existing) {
                     // Update existing var-scoped binding with function value
