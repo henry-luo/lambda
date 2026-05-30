@@ -13280,6 +13280,182 @@ static Item js_throw_uri_error(const char* msg) {
     return ItemNull;
 }
 
+static bool js_uri_fast_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_URI_FAST");
+        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
+static inline int js_uri_hex_value(unsigned char c) {
+    static const signed char table[256] = {
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+         0, 1, 2, 3, 4, 5, 6, 7, 8, 9,-1,-1,-1,-1,-1,-1,
+        -1,10,11,12,13,14,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,10,11,12,13,14,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+    };
+    return table[c];
+}
+
+static inline bool js_uri_decode_reserved(unsigned char c) {
+    return c == '#' || c == '$' || c == '&' || c == '+' || c == ',' ||
+           c == '/' || c == ':' || c == ';' || c == '=' || c == '?' || c == '@';
+}
+
+static bool js_uri_fast_decode_bytes(String* s, bool component, char* out, size_t* out_len) {
+    size_t i = 0;
+    size_t j = 0;
+    size_t len = (size_t)s->len;
+    while (i < len) {
+        unsigned char ch = (unsigned char)s->chars[i];
+        if (ch != '%') {
+            out[j++] = (char)ch;
+            i++;
+            continue;
+        }
+        if (i + 2 >= len) return false;
+        int high = js_uri_hex_value((unsigned char)s->chars[i + 1]);
+        int low = js_uri_hex_value((unsigned char)s->chars[i + 2]);
+        if (high < 0 || low < 0) return false;
+        unsigned char lead = (unsigned char)((high << 4) | low);
+        if (!component && js_uri_decode_reserved(lead)) {
+            out[j++] = s->chars[i++];
+            out[j++] = s->chars[i++];
+            out[j++] = s->chars[i++];
+            continue;
+        }
+        out[j++] = (char)lead;
+        i += 3;
+        if (lead < 0x80) continue;
+
+        int expected = 0;
+        if ((lead & 0xE0) == 0xC0) expected = 1;
+        else if ((lead & 0xF0) == 0xE0) expected = 2;
+        else if ((lead & 0xF8) == 0xF0) expected = 3;
+        else return false;
+
+        unsigned char cont[3];
+        for (int k = 0; k < expected; k++) {
+            if (i + 2 >= len || s->chars[i] != '%') return false;
+            int h2 = js_uri_hex_value((unsigned char)s->chars[i + 1]);
+            int l2 = js_uri_hex_value((unsigned char)s->chars[i + 2]);
+            if (h2 < 0 || l2 < 0) return false;
+            cont[k] = (unsigned char)((h2 << 4) | l2);
+            if ((cont[k] & 0xC0) != 0x80) return false;
+            out[j++] = (char)cont[k];
+            i += 3;
+        }
+
+        unsigned int cp = 0;
+        if (expected == 1) {
+            cp = ((lead & 0x1F) << 6) | (cont[0] & 0x3F);
+            if (cp < 0x80) return false;
+        } else if (expected == 2) {
+            cp = ((lead & 0x0F) << 12) | ((cont[0] & 0x3F) << 6) | (cont[1] & 0x3F);
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        } else {
+            cp = ((lead & 0x07) << 18) | ((cont[0] & 0x3F) << 12) |
+                 ((cont[1] & 0x3F) << 6) | (cont[2] & 0x3F);
+            if (cp < 0x10000 || cp > 0x10FFFF) return false;
+        }
+    }
+    *out_len = j;
+    return true;
+}
+
+static bool js_uri_try_fast_decode(String* s, bool component, Item* result) {
+    if (!js_uri_fast_enabled() || !s || s->len <= 0) return false;
+    char stack_buf[512];
+    char* out = stack_buf;
+    bool heap_out = false;
+    if ((size_t)s->len > sizeof(stack_buf)) {
+        out = (char*)mem_alloc((size_t)s->len + 1, MEM_CAT_TEMP);
+        if (!out) return false;
+        heap_out = true;
+    }
+    size_t out_len = 0;
+    bool ok = js_uri_fast_decode_bytes(s, component, out, &out_len);
+    if (!ok) {
+        if (heap_out) mem_free(out);
+        return false;
+    }
+    out[out_len] = '\0';
+    String* decoded = heap_create_name(out, out_len);
+    if (heap_out) mem_free(out);
+    *result = (Item){.item = s2it(decoded)};
+    return true;
+}
+
+static inline bool js_uri_component_encode_keep(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+           c == '.' || c == '~' || c == '!' || c == '\'' ||
+           c == '(' || c == ')' || c == '*';
+}
+
+static inline bool js_uri_encode_keep(unsigned char c, bool component) {
+    if (js_uri_component_encode_keep(c)) return true;
+    return !component && (c == ';' || c == ',' || c == '/' || c == '?' ||
+           c == ':' || c == '@' || c == '&' || c == '=' ||
+           c == '+' || c == '$' || c == '#');
+}
+
+static bool js_uri_try_fast_encode(Item str_val, String* s, bool component, Item* result) {
+    if (!js_uri_fast_enabled() || !s || s->len <= 0) return false;
+    size_t len = (size_t)s->len;
+    bool changed = false;
+    size_t out_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s->chars[i];
+        if (js_uri_encode_keep(c, component)) out_len++;
+        else { out_len += 3; changed = true; }
+    }
+    if (!changed) {
+        *result = str_val;
+        return true;
+    }
+
+    char stack_buf[768];
+    char* out = stack_buf;
+    bool heap_out = false;
+    if (out_len >= sizeof(stack_buf)) {
+        out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
+        if (!out) return false;
+        heap_out = true;
+    }
+    static const char hex[] = "0123456789ABCDEF";
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s->chars[i];
+        if (js_uri_encode_keep(c, component)) {
+            out[j++] = (char)c;
+        } else {
+            out[j++] = '%';
+            out[j++] = hex[c >> 4];
+            out[j++] = hex[c & 0x0F];
+        }
+    }
+    out[j] = '\0';
+    String* encoded = heap_create_name(out, j);
+    if (heap_out) mem_free(out);
+    *result = (Item){.item = s2it(encoded)};
+    return true;
+}
+
 extern "C" Item js_encodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -13288,6 +13464,8 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     if (js_has_lone_surrogate(s->chars, s->len)) {
         return js_throw_uri_error("URI malformed");
     }
+    Item fast_result = ItemNull;
+    if (js_uri_try_fast_encode(str_val, s, true, &fast_result)) return fast_result;
     char* encoded = url_encode_component(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
@@ -13372,6 +13550,7 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (js_uri_try_fast_decode(s, true, &fast_result)) return fast_result;
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
@@ -13403,6 +13582,8 @@ extern "C" Item js_encodeURI(Item str_item) {
     if (js_has_lone_surrogate(s->chars, s->len)) {
         return js_throw_uri_error("URI malformed");
     }
+    Item fast_result = ItemNull;
+    if (js_uri_try_fast_encode(str_val, s, false, &fast_result)) return fast_result;
     char* encoded = url_encode_uri(s->chars, s->len);
     if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(encoded, strlen(encoded));
@@ -13419,6 +13600,7 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item fast_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &fast_result)) return fast_result;
+    if (js_uri_try_fast_decode(s, false, &fast_result)) return fast_result;
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {

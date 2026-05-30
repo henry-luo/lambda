@@ -813,12 +813,34 @@ struct Test262RunResult {
     std::string message;
 };
 
-static bool has_unsupported_feature(const Test262Metadata& meta) {
+static bool is_js51_es2022_cross_realm_test(const std::string& test_name) {
+    static const std::set<std::string> allowed = {
+        "language_expressions_class_private_setter_brand_check_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_static_getter_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_getter_brand_check_multiple_evaluations_of_class_realm_function_ctor_js",
+        "language_expressions_class_private_setter_brand_check_multiple_evaluations_of_class_realm_function_ctor_js",
+        "language_expressions_class_private_static_method_brand_check_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_method_brand_check_multiple_evaluations_of_class_realm_function_ctor_js",
+        "language_expressions_class_private_static_setter_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_static_field_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_getter_brand_check_multiple_evaluations_of_class_realm_js",
+        "language_expressions_class_private_method_brand_check_multiple_evaluations_of_class_realm_js",
+        "built_ins_RegExp_prototype_hasIndices_cross_realm_js",
+    };
+    return allowed.count(test_name) > 0;
+}
+
+static bool has_unsupported_feature_for_test(const Test262Metadata& meta, const std::string& test_name) {
     for (auto& f : meta.features) {
+        if (f == "cross-realm" && is_js51_es2022_cross_realm_test(test_name)) continue;
         if (INTENTIONAL_ES2021_EXCEPTIONS.count(f)) return true;
         if (UNSUPPORTED_FEATURES.count(f)) return true;
     }
     return false;
+}
+
+static bool is_js51_es2022_async_admission_test(const std::string& test_name) {
+    return test_name == "language_expressions_class_elements_after_same_line_method_rs_static_async_method_privatename_identifier_alt_js";
 }
 
 static std::string unsupported_feature_skip_message(const Test262Metadata& meta) {
@@ -2160,7 +2182,7 @@ static void prepare_all_tests(
             p.is_module = meta.is_module;
             p.is_raw = meta.is_raw;
             p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
-            if (has_unsupported_feature(meta)) {
+            if (has_unsupported_feature_for_test(meta, p.test_name)) {
                 p.skip_result = T262_SKIP;
                 p.skip_message = unsupported_feature_skip_message(meta);
                 continue;
@@ -2176,6 +2198,7 @@ static void prepare_all_tests(
                 continue;
             }
             if (meta.is_async && !(async_test_is_enabled(p.test_name) ||
+                    (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
                     (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
                         is_es2021_module_test(p.test_path, meta))))) {
                 p.skip_result = T262_SKIP;
@@ -4144,7 +4167,7 @@ int main(int argc, char** argv) {
             }
             if (metadata_loaded && p.skip_result != T262_SKIP) {
                 p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
-                if (has_unsupported_feature(meta)) {
+                if (has_unsupported_feature_for_test(meta, p.test_name)) {
                     p.skip_result = T262_SKIP;
                     p.skip_message = unsupported_feature_skip_message(meta);
                 } else if (is_module && !(g_run_async && is_es2021_module_test(p.test_path, meta))) {
@@ -4154,6 +4177,7 @@ int main(int argc, char** argv) {
                     p.skip_result = T262_SKIP;
                     p.skip_message = "raw flag";
                 } else if (p.is_async && !(async_test_is_enabled(p.test_name) ||
+                        (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
                         (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
                             is_es2021_module_test(p.test_path, meta))))) {
                     p.skip_result = T262_SKIP;

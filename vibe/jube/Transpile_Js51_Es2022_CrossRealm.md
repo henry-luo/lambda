@@ -2,7 +2,7 @@
 
 Date: 2026-05-30
 
-Status: proposed
+Status: implemented
 
 Js51 targets the remaining clean ES2022-era gaps after the Js50 ES2023
 baseline update. The goal is deliberately narrow: cover the 11 ES2022
@@ -13,7 +13,44 @@ This is not a proposal for full browser-like realm support, ShadowRealm, or
 iframe/subframe behavior. It is a test262 host-runtime phase for the specific
 `$262.createRealm()` semantics needed by the current ES2022 skipped set.
 
-## 1. Current Baseline
+## 1. Implementation Result
+
+Final checked-in release baseline after Js51:
+
+```text
+# Scope: ES2023 (skip ES2024+ features)
+# Total passing: 39258
+# Total tests: 42295  Skipped: 3037  Batched: 39258  Passed: 39258  Failed: 0
+# Runtime: 147.5s total (prep 0.0s + exec 147.4s)
+# Batch size: batched 50 tests/process; async 50 tests/process
+```
+
+Release verification:
+
+| Check | Result |
+|---|---:|
+| Focused cross-realm manifest | 11 / 11 passed |
+| Focused async-admission manifest | 1 / 1 passed |
+| Existing baseline guard | 39,246 / 39,246 passed |
+| Final update baseline | 39,258 / 39,258 passed |
+| Improvements | 12 |
+| Regressions | 0 |
+| Non-fully-passing | 0 |
+| `t262_partial.txt` rows | 0 |
+
+Implementation notes:
+
+- The `cross-realm` intentional exception remains in place for non-target
+  tests; Js51 admits only the 11 exact ES2022 target names.
+- `$262.createRealm()` now installs a realm `eval` path sufficient for the
+  target private-brand tests.
+- The target `RegExp.prototype.hasIndices` cross-realm getter case is covered
+  by a minimal realm-local `RegExp.prototype` identity check, without turning
+  Js51 into full realm-wide RegExp constructor support.
+- The async-admission target is exact-name allowlisted for `--run-async` so
+  unrelated async-skipped tests remain unchanged.
+
+## 2. Starting Baseline
 
 Current checked-in release baseline:
 
@@ -36,7 +73,7 @@ The ES2021 outside-baseline tests are still intentional host/browser
 exceptions (`cross-realm` and `IsHTMLDDA`). Js51 only targets the ES2022
 cross-realm subset plus the one async-admission case.
 
-## 2. Target Test Set
+## 3. Target Test Set
 
 ### Cross-Realm Tests
 
@@ -85,7 +122,7 @@ flags: async, generated
 includes: propertyHelper.js
 ```
 
-## 3. Existing Runtime Situation
+## 4. Existing Runtime Situation
 
 `$262.createRealm()` already exists, but it is shallow. It currently creates a
 new object for `realm.global`, copies constructor functions from the current
@@ -105,7 +142,7 @@ for cross-realm semantics:
 - Built-in prototype identity checks, such as `%RegExpPrototype%`, cannot yet
   distinguish current-realm from other-realm prototypes.
 
-## 4. Scope Decision
+## 5. Scope Decision
 
 Include in Js51:
 
@@ -133,7 +170,7 @@ Explicitly exclude from Js51:
   allowlist these 11 tests first; broad removal should wait for a separate
   audit.
 
-## 5. Phase Plan
+## 6. Phase Plan
 
 ### P1 - Manifest And Baseline Guard
 
@@ -291,7 +328,7 @@ Skipped: 3037
 The exact runtime may shift, but the update gate must still report 0 failures,
 0 regressions, and 0 non-fully-passing tests.
 
-## 6. Completion Criteria
+## 7. Completion Criteria
 
 Js51 is complete when:
 
