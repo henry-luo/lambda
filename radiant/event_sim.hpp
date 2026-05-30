@@ -36,6 +36,10 @@
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll"},
  *     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
+ *     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "min": 1},
+ *     {"type": "set_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
+ *     {"type": "assert_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
+ *     {"type": "assert_editing_value", "target": {"selector": "#editor"}, "equals": "abc"},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
@@ -100,6 +104,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
     // F7: IME composition
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
+    SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -122,6 +127,9 @@ enum SimEventType {
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
     SIM_EVENT_ASSERT_EVENT_LOG, // verify event/state JSONL contains records
+    SIM_EVENT_ASSERT_EDITING_EVENT, // structured editing event-state log assertion
+    SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
+    SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -216,6 +224,20 @@ struct SimEvent {
     int drag_target_start;
     int drag_target_end;
     bool drag_move;
+    // set_editing_selection fields.
+    int editing_selection_start;
+    int editing_selection_end;
+    // assert_editing_event structured filters.
+    char* editing_event_type;
+    char* editing_input_type;
+    char* editing_surface_kind;
+    char* editing_surface_mode;
+    char* editing_operation;
+    char* editing_owned_by;
+    bool has_expected_prevented;
+    bool expected_prevented;
+    bool has_expected_redacted;
+    bool expected_redacted;
     // assert_count fields
     int assert_count_expected;   // exact expected count (-1 = not set)
     int assert_count_min;        // minimum expected count (-1 = not set)

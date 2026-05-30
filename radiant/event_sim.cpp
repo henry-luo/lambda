@@ -198,7 +198,6 @@ static bool find_text_position_recursive(View* view, const char* target_text,
                 if (rect) {
                     // Find the character offset of the match within the text
                     int match_offset = match - text_view->text;
-                    int target_len = strlen(target_text);
 
                     // Walk through TextRects to find which one contains the match
                     while (rect) {
@@ -287,6 +286,52 @@ static View* find_text_view(DomDocument* doc, const char* target_text) {
     if (!doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
     return find_text_view_recursive(static_cast<View*>(doc->view_tree->root),
                                     target_text);
+}
+
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
+                                      int index);
+
+static View* first_text_descendant(View* view) {
+    if (!view) return nullptr;
+    if (view->view_type == RDT_VIEW_TEXT) return view;
+    DomElement* elem = view->as_element();
+    if (elem) {
+        DomNode* child = elem->first_child;
+        while (child) {
+            View* found = first_text_descendant(static_cast<View*>(child));
+            if (found) return found;
+            child = child->next_sibling;
+        }
+    }
+    return nullptr;
+}
+
+static View* resolve_editing_range_view(DomDocument* doc, SimEvent* ev,
+                                        EditingSurface* out_surface) {
+    if (out_surface) editing_surface_clear(out_surface);
+    if (!doc || !ev) return nullptr;
+    View* view = nullptr;
+    if (ev->target_selector) {
+        view = find_element_by_selector(doc, ev->target_selector,
+                                        ev->target_index);
+    } else if (ev->target_text) {
+        view = find_text_view(doc, ev->target_text);
+    }
+    if (!view) return nullptr;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(view, &surface)) return nullptr;
+    if (out_surface) *out_surface = surface;
+    if (editing_surface_is_text_control(&surface)) {
+        tc_ensure_init(surface.owner);
+        return surface.view ? surface.view : view;
+    }
+    if (editing_surface_is_rich(&surface)) {
+        if (view->view_type == RDT_VIEW_TEXT) return view;
+        View* text = first_text_descendant(view);
+        return text ? text : view;
+    }
+    return view;
 }
 
 // ============================================================================
@@ -1145,6 +1190,19 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_selection_end = reader.get("end").asInt32();
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "assert_editing_selection") == 0) {
+        ev->type = SIM_EVENT_ASSERT_EDITING_SELECTION;
+        ev->expected_char_offset = reader.get("start").asInt32();
+        ev->expected_selection_end = reader.has("end")
+            ? reader.get("end").asInt32()
+            : ev->expected_char_offset;
+        parse_target(reader, ev);
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: assert_editing_selection requires target");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_preedit") == 0) {
         ev->type = SIM_EVENT_ASSERT_PREEDIT;
         const char* equals = reader.get("equals").cstring();
@@ -1259,6 +1317,19 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_char_offset = reader.get("caret").asInt32();
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "set_editing_selection") == 0) {
+        ev->type = SIM_EVENT_SET_EDITING_SELECTION;
+        ev->editing_selection_start = reader.get("start").asInt32();
+        ev->editing_selection_end = reader.has("end")
+            ? reader.get("end").asInt32()
+            : ev->editing_selection_start;
+        parse_target(reader, ev);
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: set_editing_selection requires target");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
         const char* contains = reader.get("contains").cstring();
@@ -1269,6 +1340,14 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_VALUE;
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_editing_value") == 0) {
+        ev->type = SIM_EVENT_ASSERT_EDITING_VALUE;
         const char* equals = reader.get("equals").cstring();
         if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
         const char* contains = reader.get("contains").cstring();
@@ -1513,6 +1592,45 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
         if (!ev->assert_contains) {
             log_error("event_sim: assert_event_log requires 'contains'");
+            mem_free(ev);
+            return NULL;
+        }
+    }
+    else if (strcmp(type_str, "assert_editing_event") == 0) {
+        ev->type = SIM_EVENT_ASSERT_EDITING_EVENT;
+        const char* event_type = reader.get("event").cstring();
+        if (!event_type) event_type = reader.get("record").cstring();
+        if (event_type) ev->editing_event_type = mem_strdup(event_type, MEM_CAT_LAYOUT);
+        const char* input_type = reader.get("inputType").cstring();
+        if (!input_type) input_type = reader.get("input_type").cstring();
+        if (input_type) ev->editing_input_type = mem_strdup(input_type, MEM_CAT_LAYOUT);
+        const char* surface = reader.get("surface").cstring();
+        if (!surface) surface = reader.get("surface_kind").cstring();
+        if (surface) ev->editing_surface_kind = mem_strdup(surface, MEM_CAT_LAYOUT);
+        const char* mode = reader.get("mode").cstring();
+        if (!mode) mode = reader.get("surface_mode").cstring();
+        if (mode) ev->editing_surface_mode = mem_strdup(mode, MEM_CAT_LAYOUT);
+        const char* operation = reader.get("operation").cstring();
+        if (operation) ev->editing_operation = mem_strdup(operation, MEM_CAT_LAYOUT);
+        const char* owned_by = reader.get("owned_by").cstring();
+        if (owned_by) ev->editing_owned_by = mem_strdup(owned_by, MEM_CAT_LAYOUT);
+        if (reader.has("prevented")) {
+            ev->has_expected_prevented = true;
+            ev->expected_prevented = reader.get("prevented").asBool();
+        }
+        if (reader.has("redacted")) {
+            ev->has_expected_redacted = true;
+            ev->expected_redacted = reader.get("redacted").asBool();
+        }
+        ev->assert_count_expected = -1;
+        ev->assert_count_min = -1;
+        ev->assert_count_max = -1;
+        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
+        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
+        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
+        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        if (!ev->editing_event_type) {
+            log_error("event_sim: assert_editing_event requires 'event'");
             mem_free(ev);
             return NULL;
         }
@@ -1964,6 +2082,12 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
             if (ev->js_code) mem_free(ev->js_code);
             if (ev->ime_phase) mem_free(ev->ime_phase);
+            if (ev->editing_event_type) mem_free(ev->editing_event_type);
+            if (ev->editing_input_type) mem_free(ev->editing_input_type);
+            if (ev->editing_surface_kind) mem_free(ev->editing_surface_kind);
+            if (ev->editing_surface_mode) mem_free(ev->editing_surface_mode);
+            if (ev->editing_operation) mem_free(ev->editing_operation);
+            if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
             if (ev->replay_event_name) mem_free(ev->replay_event_name);
             mem_free(ev);
         }
@@ -1983,6 +2107,94 @@ static int count_substring_occurrences(const char* haystack, const char* needle)
     while ((scan = strstr(scan, needle)) != NULL) {
         count++;
         scan += needle_len;
+    }
+    return count;
+}
+
+static bool sim_line_contains(const char* line, size_t len, const char* needle) {
+    if (!line || !needle) return false;
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0) return true;
+    if (needle_len > len) return false;
+    size_t limit = len - needle_len;
+    for (size_t i = 0; i <= limit; i++) {
+        if (line[i] == needle[0] && strncmp(line + i, needle, needle_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool sim_line_contains_str_field(const char* line, size_t len,
+                                        const char* key,
+                                        const char* value) {
+    if (!value) return true;
+    char needle[256];
+    snprintf(needle, sizeof(needle), "\"%s\":\"%s\"", key, value);
+    return sim_line_contains(line, len, needle);
+}
+
+static bool sim_line_contains_bool_field(const char* line, size_t len,
+                                         const char* key,
+                                         bool value) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\":%s",
+             key, value ? "true" : "false");
+    return sim_line_contains(line, len, needle);
+}
+
+static bool sim_editing_event_line_matches(const char* line, size_t len,
+                                           SimEvent* ev) {
+    if (!sim_line_contains_str_field(line, len, "type",
+                                     ev->editing_event_type)) {
+        return false;
+    }
+    if (ev->editing_input_type) {
+        bool has_snake = sim_line_contains_str_field(line, len, "input_type",
+                                                     ev->editing_input_type);
+        bool has_camel = sim_line_contains_str_field(line, len, "inputType",
+                                                     ev->editing_input_type);
+        if (!has_snake && !has_camel) return false;
+    }
+    if (!sim_line_contains_str_field(line, len, "kind",
+                                     ev->editing_surface_kind)) {
+        return false;
+    }
+    if (!sim_line_contains_str_field(line, len, "mode",
+                                     ev->editing_surface_mode)) {
+        return false;
+    }
+    if (!sim_line_contains_str_field(line, len, "operation",
+                                     ev->editing_operation)) {
+        return false;
+    }
+    if (!sim_line_contains_str_field(line, len, "owned_by",
+                                     ev->editing_owned_by)) {
+        return false;
+    }
+    if (ev->has_expected_prevented &&
+        !sim_line_contains_bool_field(line, len, "prevented",
+                                      ev->expected_prevented)) {
+        return false;
+    }
+    if (ev->has_expected_redacted &&
+        !sim_line_contains_bool_field(line, len, "redacted",
+                                      ev->expected_redacted)) {
+        return false;
+    }
+    return true;
+}
+
+static int count_editing_event_matches(const char* content, SimEvent* ev) {
+    if (!content || !ev) return 0;
+    int count = 0;
+    const char* line = content;
+    while (*line) {
+        const char* next = strchr(line, '\n');
+        size_t len = next ? (size_t)(next - line) : strlen(line);
+        if (sim_editing_event_line_matches(line, len, ev)) count++;
+        if (!next) break;
+        line = next + 1;
     }
     return count;
 }
@@ -2041,6 +2253,63 @@ static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEve
         ctx->fail_count++;
     }
 
+    mem_free(content);
+}
+
+static void assert_editing_event_impl(EventSimContext* ctx, UiContext* uicon,
+                                      SimEvent* ev) {
+    if (!ctx || !uicon || !ev) return;
+    EventStateLog* event_log = uicon->event_log;
+    if (!event_state_log_enabled(event_log)) {
+        log_info("event_sim: assert_editing_event SKIP - event log disabled");
+        ctx->pass_count++;
+        return;
+    }
+
+    const char* path = event_state_log_path(event_log);
+    if (!path) {
+        log_error("event_sim: assert_editing_event FAIL - event log has no path");
+        ctx->fail_count++;
+        return;
+    }
+
+    char* content = read_text_file(path);
+    if (!content) {
+        log_error("event_sim: assert_editing_event FAIL - cannot read '%s'", path);
+        ctx->fail_count++;
+        return;
+    }
+
+    int actual = count_editing_event_matches(content, ev);
+    int expected = ev->assert_count_expected;
+    int min_count = ev->assert_count_min;
+    int max_count = ev->assert_count_max;
+    if (expected < 0 && min_count < 0 && max_count < 0) min_count = 1;
+
+    bool passed = true;
+    if (expected >= 0 && actual != expected) {
+        log_error("event_sim: assert_editing_event FAIL - event '%s' expected %d, got %d",
+                  ev->editing_event_type, expected, actual);
+        passed = false;
+    }
+    if (min_count >= 0 && actual < min_count) {
+        log_error("event_sim: assert_editing_event FAIL - event '%s' expected min %d, got %d",
+                  ev->editing_event_type, min_count, actual);
+        passed = false;
+    }
+    if (max_count >= 0 && actual > max_count) {
+        log_error("event_sim: assert_editing_event FAIL - event '%s' expected max %d, got %d",
+                  ev->editing_event_type, max_count, actual);
+        passed = false;
+    }
+
+    if (passed) {
+        log_info("event_sim: assert_editing_event PASS - event '%s' count=%d",
+                 ev->editing_event_type, actual);
+        ctx->pass_count++;
+    } else {
+        ctx->fail_count++;
+    }
     mem_free(content);
 }
 
@@ -2307,6 +2576,53 @@ static bool assert_form_selection(EventSimContext* ctx, UiContext* uicon, SimEve
     }
 
     log_info("event_sim: assert_form_selection PASS [%u..%u]", start, end);
+    ctx->pass_count++;
+    return true;
+}
+
+static bool assert_editing_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    if (!doc || !doc->state) {
+        log_error("event_sim: assert_editing_selection - no document or state");
+        ctx->fail_count++;
+        return false;
+    }
+
+    EditingSurface surface;
+    View* range_view = resolve_editing_range_view(doc, ev, &surface);
+    if (!range_view) {
+        log_error("event_sim: assert_editing_selection - target editing range not found");
+        ctx->fail_count++;
+        return false;
+    }
+
+    uint32_t expected_start = ev->expected_char_offset < 0
+        ? 0
+        : (uint32_t)ev->expected_char_offset;
+    uint32_t expected_end = ev->expected_selection_end < 0
+        ? expected_start
+        : (uint32_t)ev->expected_selection_end;
+
+    uint32_t start = 0;
+    uint32_t end = 0;
+    if (editing_surface_is_text_control(&surface)) {
+        form_control_get_selection(doc->state, range_view, &start, &end, NULL);
+    } else {
+        int rich_start = 0;
+        int rich_end = 0;
+        selection_get_range(doc->state, &rich_start, &rich_end);
+        start = rich_start < 0 ? 0 : (uint32_t)rich_start;
+        end = rich_end < 0 ? 0 : (uint32_t)rich_end;
+    }
+
+    if (start != expected_start || end != expected_end) {
+        log_error("event_sim: assert_editing_selection - mismatch: expected [%u..%u], got [%u..%u]",
+                  expected_start, expected_end, start, end);
+        ctx->fail_count++;
+        return false;
+    }
+
+    log_info("event_sim: assert_editing_selection PASS [%u..%u]", start, end);
     ctx->pass_count++;
     return true;
 }
@@ -3105,6 +3421,54 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_SET_EDITING_SELECTION: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: set_editing_selection - no document/state");
+                ctx->fail_count++;
+                break;
+            }
+            EditingSurface surface;
+            View* range_view = resolve_editing_range_view(doc, ev, &surface);
+            if (!range_view) {
+                log_error("event_sim: set_editing_selection - target editing range not found");
+                ctx->fail_count++;
+                break;
+            }
+            uint32_t start = ev->editing_selection_start < 0
+                ? 0
+                : (uint32_t)ev->editing_selection_start;
+            uint32_t end = ev->editing_selection_end < 0
+                ? start
+                : (uint32_t)ev->editing_selection_end;
+            uint32_t len = 0;
+            if (editing_surface_is_text_control(&surface)) {
+                tc_ensure_init(surface.owner);
+                len = surface.owner && surface.owner->form
+                    ? surface.owner->form->current_value_len
+                    : 0;
+            } else if (range_view->view_type == RDT_VIEW_TEXT) {
+                DomText* text = range_view->as_text();
+                len = text && text->text ? (uint32_t)strlen(text->text) : 0;
+            }
+            if (start > len) start = len;
+            if (end > len) end = len;
+            View* focus_view = nullptr;
+            if (editing_surface_is_text_control(&surface)) {
+                focus_view = surface.owner;
+            } else if (editing_surface_is_rich(&surface)) {
+                focus_view = surface.owner ? surface.owner : range_view;
+            }
+            if (focus_view) {
+                focus_set((DocState*)doc->state, focus_view, true);
+            }
+            selection_set((DocState*)doc->state, range_view, (int)start, (int)end);
+            caret_set((DocState*)doc->state, range_view, (int)end);
+            log_info("event_sim: set_editing_selection [%u..%u]", start, end);
+            doc_state_request_repaint((DocState*)doc->state);
+            break;
+        }
+
         // ===== Assertions =====
 
         case SIM_EVENT_ASSERT_CARET:
@@ -3121,6 +3485,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: assert_form_selection start=%d end=%d",
                      ev->expected_char_offset, ev->expected_selection_end);
             assert_form_selection(ctx, uicon, ev);
+            break;
+
+        case SIM_EVENT_ASSERT_EDITING_SELECTION:
+            log_info("event_sim: assert_editing_selection start=%d end=%d",
+                     ev->expected_char_offset, ev->expected_selection_end);
+            assert_editing_selection(ctx, uicon, ev);
             break;
 
         case SIM_EVENT_ASSERT_PREEDIT: {
@@ -3308,6 +3678,51 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             } else {
                 ctx->fail_count++;
             }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_EDITING_VALUE: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem) {
+                log_error("event_sim: assert_editing_value - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            const char* actual = nullptr;
+            StrBuf* rich_text = nullptr;
+            EditingSurface surface;
+            editing_surface_clear(&surface);
+            if (editing_surface_from_target(elem, &surface) &&
+                editing_surface_is_text_control(&surface)) {
+                tc_ensure_init(surface.owner);
+                actual = surface.owner && surface.owner->form &&
+                    surface.owner->form->current_value
+                    ? surface.owner->form->current_value
+                    : "";
+            } else {
+                rich_text = strbuf_new_cap(256);
+                sim_extract_text(elem, rich_text);
+                actual = rich_text && rich_text->str ? rich_text->str : "";
+            }
+            bool passed = true;
+            if (ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
+                log_error("event_sim: assert_editing_value FAIL - expected '%s', got '%s'",
+                          ev->assert_equals, actual);
+                passed = false;
+            }
+            if (ev->assert_contains && !strstr(actual, ev->assert_contains)) {
+                log_error("event_sim: assert_editing_value FAIL - expected to contain '%s', got '%s'",
+                          ev->assert_contains, actual);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_editing_value PASS (value='%s')", actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            if (rich_text) strbuf_free(rich_text);
             break;
         }
 
@@ -3975,6 +4390,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_EVENT_LOG: {
             assert_event_log_impl(ctx, uicon, ev);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_EDITING_EVENT: {
+            assert_editing_event_impl(ctx, uicon, ev);
             break;
         }
 
