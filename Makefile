@@ -336,10 +336,17 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 $(RE2_LIB):
 	@echo "Building re2 library from source..."
 	@mkdir -p build_temp/re2-noabsl/cmake_build
+	@# CMake needs a single executable for CMAKE_*_COMPILER; if ccache is in
+	@# use, $(CC)/$(CXX) is "ccache gcc"/"ccache g++" — split into launcher
+	@# + real compiler so cmake's compiler-ID probe works.
 	@cd build_temp/re2-noabsl/cmake_build && \
+		RE2_CC="$(firstword $(filter-out ccache,$(CC)))" ; \
+		RE2_CXX="$(firstword $(filter-out ccache,$(CXX)))" ; \
+		RE2_LAUNCHER="$(filter ccache,$(firstword $(CC)))" ; \
 		cmake .. \
-			-DCMAKE_C_COMPILER="$(CC)$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
-			-DCMAKE_CXX_COMPILER="$(CXX)$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
+			-DCMAKE_C_COMPILER="$$RE2_CC$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
+			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
+			$$( [ -n "$$RE2_LAUNCHER" ] && echo "-DCMAKE_C_COMPILER_LAUNCHER=$$RE2_LAUNCHER -DCMAKE_CXX_COMPILER_LAUNCHER=$$RE2_LAUNCHER" ) \
 			-DCMAKE_CXX_FLAGS="$(if $(filter /clang64/bin/clang++,$(CXX)),-stdlib=libc++,) -O2" \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_POSITION_INDEPENDENT_CODE=ON \

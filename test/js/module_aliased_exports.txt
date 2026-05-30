@@ -1,0 +1,6 @@
+default: 42
+y: hello
+renamed: 42
+a: 1
+bee: 2
+cee: 3

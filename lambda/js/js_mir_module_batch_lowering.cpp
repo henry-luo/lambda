@@ -683,6 +683,24 @@ void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
 }
 
+// Js52 P1: aliased export — resolve the value via local_name, publish under export_name.
+// When the two names match, behaves identically to jm_emit_module_export(..., false).
+void jm_emit_module_export_aliased(JsMirTranspiler* mt,
+                                          const char* local_name, int local_len,
+                                          const char* export_name, int export_len) {
+    JsIdentifierNode temp_id;
+    memset(&temp_id, 0, sizeof(temp_id));
+    temp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.name = name_pool_create_len(mt->tp->name_pool, local_name, local_len);
+
+    MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
+    MIR_reg_t key = jm_box_string_literal(mt, export_name, export_len);
+    jm_call_3(mt, "js_property_set", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+}
+
 // ============================================================================
 // P6: Return type resolver with local variable tracing
 // When param types are known, trace local variables back through their
@@ -4156,10 +4174,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (current_export->declaration) {
                 actual_stmt = current_export->declaration;
             } else if (current_export->specifiers && mt->is_module) {
-                // export { a, b } — emit exports for each specifier
+                // export { a, b as c } — emit exports for each specifier.
+                // Js52 P1: support aliased exports via JsExportSpecifierNode.
+                // Value is resolved by local_name; published under export_name.
                 JsAstNode* spec = current_export->specifiers;
                 while (spec) {
-                    if (spec->node_type == JS_AST_NODE_IDENTIFIER) {
+                    if (spec->node_type == JS_AST_NODE_EXPORT_SPECIFIER) {
+                        JsExportSpecifierNode* es = (JsExportSpecifierNode*)spec;
+                        jm_emit_module_export_aliased(mt,
+                            es->local_name->chars,  (int)es->local_name->len,
+                            es->export_name->chars, (int)es->export_name->len);
+                    } else if (spec->node_type == JS_AST_NODE_IDENTIFIER) {
+                        // Back-compat path — kept for safety if any caller still
+                        // emits bare identifiers (current AST builder always emits
+                        // JsExportSpecifierNode).
                         JsIdentifierNode* id = (JsIdentifierNode*)spec;
                         jm_emit_module_export(mt, id->name->chars, (int)id->name->len, false);
                     }

@@ -674,10 +674,17 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         ST_TPL,
         ST_LINE_COMMENT,
         ST_BLOCK_COMMENT,
+        ST_REGEX,         // Js52 P2: inside a regex literal /.../
+        ST_REGEX_CLASS,   // Js52 P2: inside a [...] character class in regex
     } state = ST_DEFAULT;
 
     bool escaped = false;
     bool tagged_template = false;
+    // Js52 P2: track whether the previous significant token allows a regex
+    // literal to follow.  Start of source allows regex (first token can be a
+    // regex literal in an expression statement).  Updated on each non-comment
+    // /non-whitespace char.  Used to disambiguate `/` between regex and div.
+    bool prev_allows_regex = true;
     for (size_t i = 0; i < length; i++) {
         char c = out[i];
         char n = (i + 1 < length) ? out[i + 1] : '\0';
@@ -750,7 +757,10 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
                 escaped = true;
                 continue;
             }
-            if (c == '\'') state = ST_DEFAULT;
+            if (c == '\'') {
+                state = ST_DEFAULT;
+                prev_allows_regex = false;  // Js52 P2: closing quote is value-end
+            }
             continue;
         }
         if (state == ST_DQ) {
@@ -766,7 +776,10 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
                 escaped = true;
                 continue;
             }
-            if (c == '"') state = ST_DEFAULT;
+            if (c == '"') {
+                state = ST_DEFAULT;
+                prev_allows_regex = false;  // Js52 P2: closing quote is value-end
+            }
             continue;
         }
         if (state == ST_TPL) {
@@ -789,6 +802,35 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
             if (c == '`') {
                 state = ST_DEFAULT;
                 tagged_template = false;
+                prev_allows_regex = false;  // Js52 P2: closing backtick is value-end
+            }
+            continue;
+        }
+
+        // Js52 P2: inside a regex literal — consume up to the closing '/' so the
+        // `<!--` rewrite below cannot fire inside regex bodies.  Handles `[...]`
+        // character classes (where `/` is literal) and `\\` escapes.
+        if (state == ST_REGEX) {
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\') { escaped = true; continue; }
+            if (c == '[') { state = ST_REGEX_CLASS; continue; }
+            if (c == '/') {
+                state = ST_DEFAULT;
+                prev_allows_regex = false;  // value-producing token
+                continue;
+            }
+            if (c == '\n') {
+                // unterminated regex — bail out of regex state, let parser flag it
+                state = ST_DEFAULT;
+            }
+            continue;
+        }
+        if (state == ST_REGEX_CLASS) {
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\') { escaped = true; continue; }
+            if (c == ']') { state = ST_REGEX; continue; }
+            if (c == '\n') {
+                state = ST_DEFAULT;
             }
             continue;
         }
@@ -801,6 +843,14 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         if (c == '/' && n == '*') {
             state = ST_BLOCK_COMMENT;
             i++;
+            continue;
+        }
+        // Js52 P2: regex literal — `/` after an operator-like context opens a
+        // regex; after a value-producing token it's division.  Skipping the
+        // body here ensures the `<!--` rewrite below cannot misinterpret regex
+        // content (markdown-it, parsers in general use /-->/, /<!--/, etc.).
+        if (c == '/' && prev_allows_regex) {
+            state = ST_REGEX;
             continue;
         }
         if (c == '\'') {
@@ -861,11 +911,32 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
         if (c == '<' && n == '!' && n2 == '-' && n3 == '-') {
             // Normalize `<!--` to `//--` so parser treats it as single-line comment.
             // Keep source length unchanged to avoid offset shifts in diagnostics.
+            // Js52 P2: this only fires when state == ST_DEFAULT — the ST_REGEX /
+            // ST_REGEX_CLASS branches above already `continue` past this point,
+            // so `<!--` inside a regex literal stays untouched.
             out[i] = '/';
             out[i + 1] = '/';
             state = ST_LINE_COMMENT;
             i++;
             continue;
+        }
+
+        // Js52 P2: track whether the next `/` can open a regex literal.
+        // Rule of thumb: after a value-producing token (identifier, digit,
+        // `)`, `]`), `/` is division; after anything else (operators, `(`,
+        // `[`, `,`, `;`, `=`, etc.), `/` opens a regex.
+        // This is the same disambiguation tree-sitter-javascript's lexer does.
+        // Edge case not covered: keywords that allow regex (return, typeof,
+        // delete, void, new, throw, yield, await, in, of, instanceof).  When
+        // those are followed by a regex containing `<!--`, the regex body
+        // would be rewritten — but that combination is exceedingly rare.
+        {
+            unsigned char uc = (unsigned char)c;
+            bool is_word_end =
+                (uc >= 'a' && uc <= 'z') || (uc >= 'A' && uc <= 'Z') ||
+                (uc >= '0' && uc <= '9') || uc == '_' || uc == '$' ||
+                uc == ')' || uc == ']';
+            prev_allows_regex = !is_word_end;
         }
     }
 
