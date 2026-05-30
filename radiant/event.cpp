@@ -1007,10 +1007,32 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
         }
         target_children(evcon, view);
+        bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
+        bool rich_host = is_rich_editable_host(static_cast<View*>(block));
+        if (!rich_host_margin_hit_allowed && rich_host) {
+            bool event_inside_later_sibling = false;
+            for (View* sibling = static_cast<View*>(block)->next_sibling;
+                 sibling; sibling = sibling->next_sibling) {
+                if (sibling->view_type != RDT_VIEW_BLOCK &&
+                    sibling->view_type != RDT_VIEW_INLINE_BLOCK &&
+                    sibling->view_type != RDT_VIEW_LIST_ITEM) {
+                    continue;
+                }
+                ViewBlock* sibling_block = lam::view_require_block(sibling);
+                float sibling_x = pa_block.x + sibling_block->x;
+                float sibling_y = pa_block.y + sibling_block->y;
+                if (sibling_x <= event->x && event->x < sibling_x + sibling_block->width &&
+                    sibling_y <= event->y && event->y < sibling_y + sibling_block->height) {
+                    event_inside_later_sibling = true;
+                    break;
+                }
+            }
+            rich_host_margin_hit_allowed = !event_inside_later_sibling;
+        }
         if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
-            (is_rich_editable_host(static_cast<View*>(block)) || event_inside_block(evcon, block))) {
+            rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
-            bool include_vertical_gap = is_rich_editable_host(static_cast<View*>(block));
+            bool include_vertical_gap = rich_host;
             for (View* child = view; child; child = child->next()) {
                 if (!child->view_type) continue;
                 find_editable_margin_text_hit(evcon, child, evcon->block.x, evcon->block.y,
@@ -1731,7 +1753,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     handler_ctx.heap = rt->heap;
                                     handler_ctx.nursery = rt->nursery;
                                     handler_ctx.name_pool = rt->name_pool;
-                                    handler_ctx.pool = rt->heap->pool;
+                                    handler_ctx.pool = rt->reuse_pool ?
+                                        rt->reuse_pool : rt->heap->pool;
                                     handler_ctx.type_info = type_info;
                                     context = &handler_ctx;
                                 }
@@ -3439,7 +3462,8 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                     handler_ctx.heap = heap;
                     handler_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
                     handler_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
-                    handler_ctx.pool = heap->pool;
+                    handler_ctx.pool = doc->js_runtime_pool ?
+                        (Pool*)doc->js_runtime_pool : heap->pool;
                 }
                 // §7.4.6 (U-7): allocate transient type_list so the
                 // synthetic-event factories below (which install accessor
@@ -3589,7 +3613,8 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx.heap = heap;
     s->handler_ctx.nursery = (gc_nursery_t*)s->doc->js_runtime_nursery;
     s->handler_ctx.name_pool = (NamePool*)s->doc->js_runtime_name_pool;
-    s->handler_ctx.pool = heap->pool;
+    s->handler_ctx.pool = s->doc->js_runtime_pool ?
+        (Pool*)s->doc->js_runtime_pool : heap->pool;
     // Allocate a per-dispatch type_list. C-level `js_create_event` callers
     // need a non-NULL type_list so map_rebuild_for_type_change can append
     // freshly-created TypeMaps. Compiled JS handlers swap to their own
@@ -5681,17 +5706,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             selection_get_focus_snapshot(state, &selection_focus_view,
                 &selection_focus_offset, &selection_iframe_offset_x,
                 &selection_iframe_offset_y, &selection_collapsed);
+            DomDocument* selection_doc = event_context_target_document(&evcon);
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
                 drag_target_view = current_target;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
-                       doc && doc->view_tree && doc->view_tree->root) {
+                       selection_doc && selection_doc->view_tree &&
+                       selection_doc->view_tree->root) {
                 EditingSurface anchor_surface;
                 EditingBoundary hit_boundary;
                 bool has_anchor_surface = editing_surface_from_target(anchor_view, &anchor_surface) &&
                     editing_surface_is_rich(&anchor_surface);
                 bool has_hit_boundary = has_anchor_surface &&
                     editing_geometry_hit_test_boundary(evcon.ui_context,
-                        static_cast<View*>(doc->view_tree->root), &anchor_surface,
+                        static_cast<View*>(selection_doc->view_tree->root), &anchor_surface,
                         (float)motion->x, (float)motion->y,
                         EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
                 if (has_hit_boundary && hit_boundary.dom.node &&
@@ -6006,6 +6033,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // toolbar controls use this to keep text-control selection active.
             if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
+            } else if (!evcon.default_prevented && evcon.iframe_container &&
+                       evcon.target->view_type == RDT_VIEW_TEXT) {
+                DomElement* rich_host = rich_editable_from_target(evcon.target);
+                if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
+                    update_focus_state(&evcon, static_cast<View*>(rich_host), false);
+                }
             }
 
             // Handle click in text - position caret or start selection.
@@ -6866,7 +6899,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* focused = focus_get(state);
         event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
-        View* intent_target = focused ? focused : caret_get_view(state);
+        View* caret_intent_view = caret_get_view(state);
+        View* intent_target = caret_intent_view &&
+            rich_editable_from_target(caret_intent_view)
+                ? caret_intent_view
+                : (focused ? focused : caret_intent_view);
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
@@ -7944,7 +7981,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             char utf8_buf[5];
             View* caret_view = NULL;
             caret_get_position(state, &caret_view, NULL);
-            View* intent_target = focused ? focused : caret_view;
+            View* intent_target = caret_view && rich_editable_from_target(caret_view)
+                ? caret_view
+                : (focused ? focused : caret_view);
             if (intent_target && input_intent_from_text_input(text_event->codepoint,
                     &intent, utf8_buf, sizeof(utf8_buf)) &&
                 dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {

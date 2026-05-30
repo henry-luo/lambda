@@ -35,7 +35,12 @@
     { "type": "assert_value", "target": { "selector": "#bio" }, "contains": "Z" },
     { "type": "switch_frame" },
 
-    { "type": "mouse_drag", "from_x": 40, "from_y": 160, "to_x": 120, "to_y": 160, "button": 0 },
+    { "type": "mouse_down", "x": 40, "y": 160, "button": 0 },
+    { "type": "wait", "ms": 500 },
+    { "type": "mouse_move", "x": 40, "y": 160 },
+    { "type": "wait", "ms": 100 },
+    { "type": "mouse_move", "x": 120, "y": 160 },
+    { "type": "mouse_up", "x": 120, "y": 160, "button": 0 },
     { "type": "switch_frame", "selector": "#frame" },
     { "type": "assert_selection", "is_collapsed": false },
     { "type": "switch_frame" },

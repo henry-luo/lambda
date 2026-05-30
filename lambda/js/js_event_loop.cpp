@@ -9,18 +9,22 @@
  * - Drain: uv_run(UV_RUN_DEFAULT) — runs until no active handles
  */
 #include "js_event_loop.h"
+#include "js_dom.h"
 #include "js_runtime.h"
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
+#include "../../lib/arraylist.h"
 
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
 #include <setjmp.h>
 #include <signal.h>
+
+extern __thread EvalContext* context;
 
 // =============================================================================
 // Task Queues
@@ -226,6 +230,11 @@ typedef struct JsTimerHandle {
     bool       is_interval;
     Item       extra_args[8];   // extra args to pass to callback
     int        extra_count;     // number of extra args
+    Heap*      runtime_heap;
+    gc_nursery_t* runtime_nursery;
+    NamePool*  runtime_name_pool;
+    Pool*      runtime_pool;
+    void*      runtime_doc;
 } JsTimerHandle;
 
 #define MAX_TIMER_HANDLES 1024
@@ -233,13 +242,86 @@ static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
 static int timer_handle_count = 0;
 static int64_t next_timer_id = 1;
 
+typedef struct JsTimerRuntimeScope {
+    EvalContext runtime_ctx;
+    EvalContext* saved_context;
+    ArrayList* type_list;
+    void* saved_doc;
+    bool active;
+    bool doc_active;
+} JsTimerRuntimeScope;
+
+static void timer_capture_runtime(JsTimerHandle* th) {
+    if (!th) return;
+    if (context) {
+        th->runtime_heap = context->heap;
+        th->runtime_nursery = context->nursery;
+        th->runtime_name_pool = context->name_pool;
+        th->runtime_pool = context->pool;
+    }
+    th->runtime_doc = js_dom_get_document();
+}
+
+static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
+    if (!th || !scope) return false;
+    memset(scope, 0, sizeof(JsTimerRuntimeScope));
+    scope->saved_doc = js_dom_get_document();
+    bool needs_runtime_scope =
+        !context || (th->runtime_heap && context->heap != th->runtime_heap);
+    if (needs_runtime_scope) {
+        if (!th->runtime_heap || !th->runtime_nursery || !th->runtime_name_pool) {
+            return false;
+        }
+        scope->runtime_ctx.heap = th->runtime_heap;
+        scope->runtime_ctx.nursery = th->runtime_nursery;
+        scope->runtime_ctx.name_pool = th->runtime_name_pool;
+        scope->runtime_ctx.pool = th->runtime_pool ?
+            th->runtime_pool : th->runtime_heap->pool;
+        scope->type_list = arraylist_new(16);
+        scope->runtime_ctx.type_list = scope->type_list;
+        scope->saved_context = context;
+        context = &scope->runtime_ctx;
+        scope->active = true;
+    }
+    if (th->runtime_doc) {
+        js_dom_set_document(th->runtime_doc);
+        scope->doc_active = true;
+    }
+    return true;
+}
+
+static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
+    if (!scope) return;
+    if (scope->doc_active) {
+        EvalContext* active_context = context;
+        if (scope->active && scope->saved_context) {
+            context = scope->saved_context;
+        }
+        js_dom_set_document(scope->saved_doc);
+        context = active_context;
+        scope->doc_active = false;
+    }
+    if (scope->active) {
+        context = scope->saved_context;
+        if (scope->type_list) {
+            arraylist_free(scope->type_list);
+            scope->type_list = nullptr;
+        }
+        scope->active = false;
+    }
+}
+
 static void timer_close_cb(uv_handle_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
     // unregister GC roots before freeing
     extern void heap_unregister_gc_root(uint64_t* slot);
-    heap_unregister_gc_root(&th->callback.item);
-    for (int j = 0; j < th->extra_count; j++) {
-        heap_unregister_gc_root(&th->extra_args[j].item);
+    JsTimerRuntimeScope scope;
+    if (timer_runtime_enter(th, &scope)) {
+        heap_unregister_gc_root(&th->callback.item);
+        for (int j = 0; j < th->extra_count; j++) {
+            heap_unregister_gc_root(&th->extra_args[j].item);
+        }
+        timer_runtime_exit(&scope);
     }
     // remove from tracking array
     for (int i = 0; i < timer_handle_count; i++) {
@@ -256,29 +338,35 @@ static void timer_close_cb(uv_handle_t *handle) {
 // survive garbage collection while the timer is pending
 static void timer_register_gc_roots(JsTimerHandle *th) {
     extern void heap_register_gc_root(uint64_t* slot);
+    JsTimerRuntimeScope scope;
+    if (!timer_runtime_enter(th, &scope)) return;
     heap_register_gc_root(&th->callback.item);
     for (int j = 0; j < th->extra_count; j++) {
         heap_register_gc_root(&th->extra_args[j].item);
     }
+    timer_runtime_exit(&scope);
 }
 
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
-    if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
-        if (th->extra_count > 0) {
-            js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
-        } else {
-            js_call_function(th->callback, ItemNull, NULL, 0);
+    JsTimerRuntimeScope scope;
+    if (timer_runtime_enter(th, &scope)) {
+        if (get_type_id(th->callback) == LMD_TYPE_FUNC) {
+            if (th->extra_count > 0) {
+                js_call_function(th->callback, ItemNull, th->extra_args, th->extra_count);
+            } else {
+                js_call_function(th->callback, ItemNull, NULL, 0);
+            }
         }
+        timer_runtime_exit(&scope);
+    } else {
+        log_error("event_loop: timer fired without captured JS runtime");
     }
-    // nextTick and Promise microtasks are drained at libuv phase checkpoints.
-
     if (!th->is_interval) {
         uv_timer_stop(&th->timer);
         uv_close((uv_handle_t *)&th->timer, timer_close_cb);
     }
 }
-
 static double item_to_ms(Item delay) {
     if (get_type_id(delay) == LMD_TYPE_FLOAT) {
         return *((double *)delay.item);
@@ -381,6 +469,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     th->is_interval = false;
     th->extra_count = 0;
     th->timer.data = th;
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
@@ -428,6 +517,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
         }
         th->extra_count = count;
     }
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
@@ -507,6 +597,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     th->is_interval = true;
     th->extra_count = 0;
     th->timer.data = th;
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);
@@ -553,6 +644,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
         }
         th->extra_count = count;
     }
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, (uint64_t)ms);
@@ -686,6 +778,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     th->extra_args[0] = value;
     th->extra_count = 1;
     th->timer.data = th;
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, (uint64_t)ms, 0);
@@ -753,6 +846,7 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
     th->extra_args[0] = value;
     th->extra_count = 1;
     th->timer.data = th;
+    timer_capture_runtime(th);
 
     uv_timer_init(loop, &th->timer);
     uv_timer_start(&th->timer, timer_fire_cb, 0, 0);

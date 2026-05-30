@@ -3,6 +3,7 @@
 #include "render_media.hpp"
 #include "render_svg_inline.hpp"
 #include "render_clip.hpp"
+#include "render_overlay.hpp"
 #include "scroller.hpp"
 #include "layout.hpp"
 
@@ -142,6 +143,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 } else {
                     // Regular HTML document - render with background
                     render_block_view(rdcon, root_block);
+                }
+                if (doc->state) {
+                    render_ui_overlays(rdcon, doc->state);
                 }
 
                 rdcon->font = pa_font;

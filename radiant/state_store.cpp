@@ -3718,6 +3718,9 @@ void caret_set(DocState* state, View* view, int char_offset) {
         log_debug("caret_set: projected active selection focus view=%p offset=%d", view, char_offset);
         return;
     }
+    bool preserve_pointer_selection = active_selection && active_selection->is_selecting;
+    View* preserve_anchor_view = active_selection ? active_selection->anchor_view : NULL;
+    int preserve_anchor_offset = active_selection ? active_selection->anchor_offset : 0;
 
     if (selection_is_text_control_view(view)) {
         // Canonical: update DomSelection only, then sync projections.
@@ -3727,6 +3730,13 @@ void caret_set(DocState* state, View* view, int char_offset) {
         if (!dom_selection_collapse(sel, boundary.node, boundary.offset, &exc)) {
             log_debug("caret_set: text-control collapse rejected: %s", exc ? exc : "?");
             return;
+        }
+        if (preserve_pointer_selection && state->selection) {
+            state->selection->is_selecting = true;
+            if (preserve_anchor_view) {
+                state->selection->anchor_view = preserve_anchor_view;
+                state->selection->anchor_offset = preserve_anchor_offset;
+            }
         }
         // Sync legacy projections from canonical state
         text_control_sync_selection(state, view);
@@ -3747,7 +3757,15 @@ void caret_set(DocState* state, View* view, int char_offset) {
         return;
     }
     if (state->selection) {
-        state->selection->is_selecting = false;
+        if (preserve_pointer_selection) {
+            state->selection->is_selecting = true;
+            if (preserve_anchor_view) {
+                state->selection->anchor_view = preserve_anchor_view;
+                state->selection->anchor_offset = preserve_anchor_offset;
+            }
+        } else {
+            state->selection->is_selecting = false;
+        }
     }
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
