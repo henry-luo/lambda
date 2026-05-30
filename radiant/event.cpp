@@ -513,9 +513,11 @@ static EditingControllerHooks editing_controller_hooks() {
 }
 
 static void sync_viewport_scroll_state(EventContext* evcon) {
-    if (!evcon || !evcon->ui_context || !evcon->ui_context->document) return;
+    if (!evcon || !evcon->ui_context) return;
 
-    DomDocument* doc = evcon->ui_context->document;
+    DomDocument* doc = evcon->target_document
+        ? evcon->target_document
+        : evcon->ui_context->document;
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->view_tree || !doc->view_tree->root ||
         doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
@@ -532,6 +534,63 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
     // Keep viewport scroll in the centralized state store and the document
     // reflow target so incremental relayout does not snap back to top.
     doc_state_sync_viewport_scroll(state, doc, scroll_x, scroll_y);
+}
+
+static DocState* event_context_target_state(EventContext* evcon) {
+    if (!evcon) return NULL;
+    DomDocument* target_doc = evcon->target_document
+        ? evcon->target_document
+        : (evcon->ui_context ? evcon->ui_context->document : NULL);
+    return target_doc ? target_doc->state : NULL;
+}
+
+static DomDocument* event_context_target_document(EventContext* evcon) {
+    if (!evcon) return NULL;
+    return evcon->target_document
+        ? evcon->target_document
+        : (evcon->ui_context ? evcon->ui_context->document : NULL);
+}
+
+static DocState* event_view_owner_state(View* view) {
+    if (!view || !view->is_element()) return NULL;
+    DomElement* elem = lam::dom_require_element(view);
+    return elem && elem->doc ? (DocState*)elem->doc->state : NULL;
+}
+
+static DomDocument* event_context_find_focused_document(DomDocument* doc,
+                                                        uint8_t depth);
+
+static DomDocument* event_context_find_focused_document_in_view(View* view,
+                                                                uint8_t depth) {
+    if (!view || depth > 8) return NULL;
+    if ((view->view_type == RDT_VIEW_BLOCK ||
+         view->view_type == RDT_VIEW_INLINE_BLOCK ||
+         view->view_type == RDT_VIEW_LIST_ITEM) &&
+        view->is_element()) {
+        ViewBlock* block = lam::view_require_block(view);
+        if (block->embed && block->embed->doc) {
+            DomDocument* found = event_context_find_focused_document(
+                block->embed->doc, (uint8_t)(depth + 1));
+            if (found) return found;
+        }
+    }
+    if (!view->is_element()) return NULL;
+    DomElement* elem = lam::dom_require_element(view);
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        DomDocument* found = event_context_find_focused_document_in_view(
+            static_cast<View*>(child), depth);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static DomDocument* event_context_find_focused_document(DomDocument* doc,
+                                                        uint8_t depth) {
+    if (!doc) return NULL;
+    DocState* state = doc->state;
+    if (state && focus_get(state)) return doc;
+    if (!doc->view_tree || !doc->view_tree->root) return NULL;
+    return event_context_find_focused_document_in_view(doc->view_tree->root, depth);
 }
 
 static bool pdf_text_run_metrics(ViewText* text, float* out_width, bool* out_copy_space) {
@@ -823,8 +882,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             log_debug("hit not on block scroll");
         }
         // setup scrolling offset
-        DocState* state = evcon && evcon->ui_context && evcon->ui_context->document
-            ? evcon->ui_context->document->state : NULL;
+        DocState* state = event_view_owner_state(static_cast<View*>(block));
+        if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
         scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
@@ -906,10 +965,12 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
             // Save current state
             View* prev_target = evcon->target;
+            DomDocument* prev_target_document = evcon->target_document;
 
             // Target into the embedded document's view tree
             // The coordinate system is already set up correctly (evcon->block.x/y)
             // since we added block->x and block->y above
+            evcon->target_document = iframe_doc;
             target_html_doc(evcon, iframe_doc->view_tree);
 
             // If we found a target inside the iframe, we're done
@@ -922,6 +983,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 goto RETURN;
             }
 
+            evcon->target_document = prev_target_document;
             log_debug("no target found inside iframe, will target iframe block itself");
         }
     }
@@ -1076,14 +1138,16 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
             scrollpane_scroll(evcon, block, block->scroller->pane);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
-            scroll_state_is_hovered_for_view(evcon->ui_context->document->state, static_cast<View*>(block))) {
+            scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),
+                                             static_cast<View*>(block))) {
             scrollpane_mouse_down(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
-            scroll_state_is_dragging_for_view(evcon->ui_context->document->state, static_cast<View*>(block))) {
+            scroll_state_is_dragging_for_view(event_view_owner_state(static_cast<View*>(block)),
+                                              static_cast<View*>(block))) {
             scrollpane_drag(evcon, block);
         }
     }
@@ -1659,7 +1723,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 // (pointed to a stack-local Runner). Restore it from the retained runtime.
                                 EvalContext handler_ctx;
                                 memset(&handler_ctx, 0, sizeof(handler_ctx));
-                                DomDocument* doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+                                DomDocument* doc = event_context_target_document(evcon);
                                 Runtime* rt = doc ? doc->lambda_runtime : nullptr;
                                 EvalContext* saved_context = context;
                                 Context* saved_input_context = input_context;
@@ -1828,9 +1892,7 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
     hooks.copy_selection = dispatch_editing_copy_selection;
     hooks.user = nullptr;
-    DocState* state = (evcon && evcon->ui_context && evcon->ui_context->document)
-        ? (DocState*)evcon->ui_context->document->state
-        : nullptr;
+    DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
     return editing_dispatch_beforeinput(evcon, &surface, intent, &hooks);
 }
@@ -1981,17 +2043,28 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
 
     DomElement* live_elem = elem;
     View* live_target = target;
-    View* live_focus = focus_get(state);
     bool preserve_dispatch_target =
         input_type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
         input_type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
-    if (!preserve_dispatch_target && live_focus && live_focus->is_element()) {
-        DomElement* focus_elem = lam::dom_require_element(live_focus);
-        if (tc_is_text_control(focus_elem)) {
-            live_elem = focus_elem;
-            live_target = live_focus;
+    if (!preserve_dispatch_target) {
+        if (elem->id && elem->doc && elem->doc->root) {
+            DomElement* live_by_id = find_element_by_author_id(
+                static_cast<DomNode*>(elem->doc->root), elem->id);
+            if (live_by_id && tc_is_text_control(live_by_id)) {
+                live_elem = live_by_id;
+                live_target = static_cast<View*>(live_by_id);
+            }
+        }
+        View* live_focus = focus_get(state);
+        if (live_elem == elem && live_focus && live_focus->is_element()) {
+            DomElement* focus_elem = lam::dom_require_element(live_focus);
+            if (tc_is_text_control(focus_elem)) {
+                live_elem = focus_elem;
+                live_target = live_focus;
+            }
         }
     }
+    tc_ensure_init(live_elem);
 
     uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
     const char* previous_history_input_type =
@@ -2451,7 +2524,7 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
     }
 
     if (editing_surface_is_text_control(surface)) {
-        DomDocument* doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+        DomDocument* doc = event_context_target_document(evcon);
         DocState* state = doc ? (DocState*)doc->state : nullptr;
         DomElement* elem = surface->owner;
         View* target = surface->view ? surface->view : static_cast<View*>(elem);
@@ -2465,8 +2538,7 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
         intent.data = "";
         View* target = surface->view ? surface->view : static_cast<View*>(surface->owner);
         bool handled = dispatch_rich_beforeinput(evcon, target, &intent);
-        DocState* state = (evcon->ui_context && evcon->ui_context->document)
-            ? (DocState*)evcon->ui_context->document->state : nullptr;
+        DocState* state = event_context_target_state(evcon);
         event_log_editing_history(state, surface, &intent,
                                   input_type == INPUT_INTENT_HISTORY_UNDO
                                       ? "undo"
@@ -2595,9 +2667,7 @@ static bool editing_text_drag_set_range(EventContext* evcon,
                                         uint32_t end,
                                         const char* operation) {
     if (!evcon || !surface || !range_view) return false;
-    DocState* state = evcon->ui_context && evcon->ui_context->document
-        ? (DocState*)evcon->ui_context->document->state
-        : nullptr;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return false;
     editing_text_drag_clamp_range(range_view, surface, &start, &end);
     if (editing_surface_is_text_control(surface)) {
@@ -2620,9 +2690,7 @@ static bool editing_text_drag_dispatch_delete(EventContext* evcon,
                                               uint32_t end) {
     if (!evcon || !surface || !range_view) return false;
     if (end <= start) return true;
-    DocState* state = evcon->ui_context && evcon->ui_context->document
-        ? (DocState*)evcon->ui_context->document->state
-        : nullptr;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return false;
     editing_text_drag_set_range(evcon, surface, range_view, start, end,
                                 "dragSource");
@@ -2647,9 +2715,7 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
                                               uint32_t end,
                                               const char* payload) {
     if (!evcon || !surface || !range_view) return false;
-    DocState* state = evcon->ui_context && evcon->ui_context->document
-        ? (DocState*)evcon->ui_context->document->state
-        : nullptr;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return false;
     const char* text = payload ? payload : "";
     uint32_t text_len = (uint32_t)strlen(text);
@@ -3145,7 +3211,7 @@ static bool dispatch_editing_composition_for_controller(EventContext* evcon,
     }
 
     radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     event_log_editing_composition(state, surface, intent, phase, preedit_len,
                                   commit_len, intent->composition_caret);
     bool composing = intent->type == INPUT_INTENT_COMPOSITION_START ||
@@ -3239,7 +3305,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
                                        std::chrono::high_resolution_clock::time_point t_start,
                                        std::chrono::high_resolution_clock::time_point t_handler) {
     using namespace std::chrono;
-    DomDocument* doc = evcon->ui_context->document;
+    DomDocument* doc = event_context_target_document(evcon);
+    if (!doc) return;
     int mutations = doc->js_mutation_count;
 
     if (mutations == 0) {
@@ -3309,7 +3376,10 @@ static void post_html_handler_rebuild(EventContext* evcon,
         clear_dom_view_pool_pointers(static_cast<DomNode*>(doc->root));
     }
 
+    DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+    if (evcon->ui_context) evcon->ui_context->document = doc;
     layout_html_doc(evcon->ui_context, doc, false);
+    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
 
     auto t2 = high_resolution_clock::now();
 
@@ -3512,7 +3582,7 @@ typedef struct {
 static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->tmp_type_list = nullptr;
-    s->doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+    s->doc = event_context_target_document(evcon);
     if (!s->doc || !s->doc->js_mir_ctx || !s->doc->js_runtime_heap) return false;
     memset(&s->handler_ctx, 0, sizeof(s->handler_ctx));
     Heap* heap = (Heap*)s->doc->js_runtime_heap;
@@ -3561,12 +3631,15 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          const char* type, int client_x, int client_y,
                                          int button, int buttons,
                                          bool ctrl, bool shift, bool alt, bool meta,
-                                         int detail)
+                                         int detail,
+                                         bool* dispatched = nullptr)
 {
+    if (dispatched) *dispatched = false;
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
     JsCtxScope scope;
     if (!radiant_js_ctx_enter(&scope, evcon)) return false;
+    if (dispatched) *dispatched = true;
     auto t_start = std::chrono::high_resolution_clock::now();
     Item ev = js_create_native_mouse_event(type, client_x, client_y,
         button, buttons, ctrl, shift, alt, meta, detail, ItemNull);
@@ -3656,7 +3729,7 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     EditingSurface surface;
     bool has_surface = editing_surface_from_target(target, &surface);
     EditingTargetRange ranges[1];
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     uint32_t n_ranges = has_surface
         ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
         : 0;
@@ -3768,6 +3841,10 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
     evcon->event = *event;
+    evcon->target_document = uicon
+        ? event_context_find_focused_document(uicon->document, 0)
+        : NULL;
+    if (!evcon->target_document && uicon) evcon->target_document = uicon->document;
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
@@ -3939,7 +4016,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
  * Sets :hover on target and all ancestors, clears :hover on previous target
  */
 void update_hover_state(EventContext* evcon, View* new_target) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return;
 
     View* prev_hover = static_cast<View*>(state->hover_target);
@@ -3982,7 +4059,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
  * Update active state on mouse down/up
  */
 void update_active_state(EventContext* evcon, View* target, bool is_active) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return;
 
     if (is_active) {
@@ -4206,7 +4283,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
     View* input = find_checkbox_radio_input(target);
     if (!input) return false;
 
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return false;
 
     ViewElement* elem = lam::view_require_element(input);
@@ -4389,7 +4466,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: select_view=%p", (void*)select_view);
     if (!select_view) return false;
 
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return false;
 
     ViewBlock* select = lam::view_require_block(select_view);
@@ -4442,7 +4519,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
  * @return true if an option was selected
  */
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state || !state->open_dropdown) return false;
 
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
@@ -4488,7 +4565,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
  * Handle mouse move to update hover state in dropdown
  */
 static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state || !state->open_dropdown) return;
 
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
@@ -4520,7 +4597,7 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
  * Handle keyboard navigation in dropdown
  */
 static bool handle_dropdown_key(EventContext* evcon, int key) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state || !state->open_dropdown) return false;
 
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
@@ -4561,7 +4638,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
  * Close dropdown if clicking outside
  */
 static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state || !state->open_dropdown) return;
 
     ViewBlock* select = lam::view_require_block(state->open_dropdown);
@@ -4668,7 +4745,7 @@ bool is_view_focusable(View* view) {
  * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
  */
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return;
 
     View* prev_focus = focus_get(state);
@@ -4765,7 +4842,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
  * Update drag state
  */
 void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
-    DocState* state = (DocState*)evcon->ui_context->document->state;
+    DocState* state = event_context_target_state(evcon);
     if (!state) return;
 
     DragTransitionArgs drag_args = { .target = target, .dragging = is_dragging };
@@ -5467,7 +5544,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         // fire drag event if dragging in progress
-        DocState* state = (DocState*)evcon.ui_context->document->state;
+        DocState* state = event_context_target_state(&evcon);
 
         // Handle element drag-and-drop
         if (state && state->drag_drop && (state->drag_drop->pending || state->drag_drop->active)) {
@@ -5858,7 +5935,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        DocState* state = (DocState*)evcon.ui_context->document->state;
+        DocState* state = event_context_target_state(&evcon);
 
         // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
         // hit-testing. Runs before any focus / drag work so a click inside
@@ -6344,6 +6421,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // listeners can call event.preventDefault() to suppress them. The
                 // legacy inline-handler path runs separately at end of block on a
                 // disjoint registry, so no double-fire.
+                bool js_click_dispatched = false;
+                View* click_check_radio = evcon.target
+                    ? find_checkbox_radio_input(evcon.target) : nullptr;
+                DocState* click_check_radio_state = click_check_radio
+                    ? event_context_target_state(&evcon) : nullptr;
+                bool click_check_radio_had_state = click_check_radio &&
+                    click_check_radio_state;
+                bool click_check_radio_before = click_check_radio_had_state
+                    ? state_get_pseudo_state(click_check_radio_state,
+                                             click_check_radio,
+                                             PSEUDO_STATE_CHECKED)
+                    : false;
                 if (evcon.target) {
                     bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                         "click", mouse_x, mouse_y,
@@ -6352,13 +6441,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         (btn_event->mods & GLFW_MOD_SHIFT) != 0,
                         (btn_event->mods & GLFW_MOD_ALT) != 0,
                         (btn_event->mods & GLFW_MOD_SUPER) != 0,
-                        1);
+                        1,
+                        &js_click_dispatched);
                     if (prevented) evcon.default_prevented = true;
                 }
 
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
-                if (evcon.target && !evcon.default_prevented) {
+                bool click_check_radio_changed = false;
+                if (click_check_radio_had_state) {
+                    bool after = state_get_pseudo_state(click_check_radio_state,
+                                                        click_check_radio,
+                                                        PSEUDO_STATE_CHECKED);
+                    click_check_radio_changed = after != click_check_radio_before;
+                }
+                if (evcon.target && !evcon.default_prevented &&
+                    (!js_click_dispatched || (click_check_radio && !click_check_radio_changed))) {
                     handle_checkbox_radio_click(&evcon, evcon.target);
                 }
 
@@ -6582,6 +6680,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
                                           1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
                         if (new_doc) {
+                            radiant_document_ensure_state(new_doc, "iframe_target_navigation");
                             // Set scale for nested document
                             // Iframe content uses default scale (1.0), combined with display pixel_ratio
                             new_doc->given_scale = 1.0f;
@@ -6678,7 +6777,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Phase 6E: sync legacy caret/selection into form->selection_*
         // after mouse-driven focus / hit-test / drag operations.
         {
-            DocState* tc_state = (DocState*)evcon.ui_context->document->state;
+            DocState* tc_state = event_context_target_state(&evcon);
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = lam::dom_require_element(tc_focused);
@@ -6746,7 +6845,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_KEY_DOWN: {
         KeyEvent* key_event = &event->key;
-        DocState* state = (DocState*)evcon.ui_context->document->state;
+        DocState* state = event_context_target_state(&evcon);
         if (!state) break;
 
         // F8: Esc closes the native context menu before any other handler.
@@ -6785,8 +6884,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Tab navigation
         if (key_event->key == RDT_KEY_TAB && !rich_editable_from_target(intent_target)) {
             bool forward = !(key_event->mods & RDT_MOD_SHIFT);
-            if (doc->view_tree && doc->view_tree->root) {
-                focus_move(state, doc->view_tree->root, forward);
+            DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
+            if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
+                focus_move(state, focus_doc->view_tree->root, forward);
             }
             evcon.need_repaint = true;
             break;
@@ -6805,10 +6905,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool handled = false;
             if (tag == HTM_TAG_INPUT && key_event->key == RDT_KEY_SPACE) {
                 if (is_checkbox(focused) || is_radio(focused)) {
-                    handle_checkbox_radio_click(&evcon, focused);
                     dispatch_html_event_handler(&evcon, focused, "click");
+                    bool js_click_dispatched = false;
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1);
+                        0, 0, 0, 0, false, false, false, false, 1,
+                        &js_click_dispatched);
+                    if (!js_click_dispatched && !evcon.default_prevented) {
+                        handle_checkbox_radio_click(&evcon, focused);
+                    }
                     handled = true;
                 }
             } else if (tag == HTM_TAG_BUTTON) {
@@ -7747,7 +7851,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Mirror StateStore selection projection into form->selection_* so JS
         // reads (selectionStart/End/value) observe text edits immediately.
         {
-            DocState* tc_state = (DocState*)evcon.ui_context->document->state;
+            DocState* tc_state = event_context_target_state(&evcon);
             View* tc_focused = tc_state ? focus_get(tc_state) : nullptr;
             if (tc_focused && tc_focused->is_element()) {
                 DomElement* tc_elem = lam::dom_require_element(tc_focused);
@@ -7762,7 +7866,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Key release - forward to layer-mode webview if focused
         log_debug("Key up: key=%d", event->key.key);
         {
-            DocState* state = (DocState*)evcon.ui_context->document->state;
+            DocState* state = event_context_target_state(&evcon);
             if (state) {
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
@@ -7790,7 +7894,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     case RDT_EVENT_COMPOSITION_UPDATE:
     case RDT_EVENT_COMPOSITION_END: {
         CompositionEvent* comp_event = &event->composition;
-        DocState* state = (DocState*)evcon.ui_context->document->state;
+        DocState* state = event_context_target_state(&evcon);
         if (!state) break;
 
         View* focused = focus_get(state);
@@ -7802,7 +7906,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_TEXT_INPUT: {
         TextInputEvent* text_event = &event->text_input;
-        DocState* state = (DocState*)evcon.ui_context->document->state;
+        DocState* state = event_context_target_state(&evcon);
         if (!state) break;
 
         View* focused = focus_get(state);
@@ -7972,7 +8076,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
 
     if (evcon.need_repaint) {
-        doc_state_mark_dirty(uicon->document->state);
+        if (state) doc_state_mark_dirty(state);
+        if (uicon->document && uicon->document != evcon.target_document &&
+            uicon->document->state) {
+            doc_state_request_repaint(uicon->document->state);
+        }
         to_repaint();
     }
     log_debug("end of event %d", event->type);

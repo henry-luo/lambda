@@ -76,6 +76,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 // Save parent context and reset for embedded document
                 FontBox pa_font = rdcon->font;
                 Color pa_color = rdcon->color;
+                DomDocument* pa_doc = rdcon->ui_context
+                    ? rdcon->ui_context->document : nullptr;
+                if (rdcon->ui_context) rdcon->ui_context->document = doc;
 
                 // Reset color to black for embedded document (don't inherit from parent doc)
                 // Each document should start with default black text color
@@ -143,6 +146,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
                 rdcon->font = pa_font;
                 rdcon->color = pa_color;
+                if (rdcon->ui_context) rdcon->ui_context->document = pa_doc;
             }
             else {
                 log_debug("Invalid root view");

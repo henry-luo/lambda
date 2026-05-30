@@ -979,7 +979,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
 
         // Load document based on file extension, or evaluate an in-memory
         // Lambda document script supplied by a caller such as PDF view.
-        log_notice("view: loading document...");
+        Url* log_doc_url = url_parse_with_base(file_to_load, cwd);
+        const char* log_doc_href = log_doc_url ? url_get_href(log_doc_url) : file_to_load;
+        log_notice("view: loading document: %s", log_doc_href ? log_doc_href : file_to_load);
+        if (log_doc_url) url_destroy(log_doc_url);
         log_mem_stage("before-load");
         DomDocument* doc = nullptr;
         if (doc_source) {

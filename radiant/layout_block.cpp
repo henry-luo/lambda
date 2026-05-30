@@ -17,6 +17,7 @@
 #include "form_control.hpp"
 #include "render_svg_inline.hpp"
 #include "render_export_support.hpp"
+#include "state_store.hpp"
 #include "webview.h"
 
 #include "../lib/log.h"
@@ -2945,6 +2946,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 iframe_depth--;
                 // todo: use a placeholder
             } else {
+                radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 block->embed->doc = doc; // assign loaded document to embed property
                 if (doc->html_root) {

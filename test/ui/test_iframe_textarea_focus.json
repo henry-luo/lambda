@@ -1,0 +1,47 @@
+{
+  "name": "Iframe form controls use the embedded document state",
+  "html": "test/ui/test_iframe_textarea_focus.html",
+  "viewport": { "width": 480, "height": 320 },
+  "events": [
+    { "type": "log", "message": "=== iframe form controls ===" },
+    { "type": "click", "x": 34, "y": 34 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_checked", "target": { "selector": "#agree" }, "checked": true },
+    { "type": "switch_frame" },
+
+    { "type": "click", "x": 34, "y": 60 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_checked", "target": { "selector": "#choice" }, "checked": true },
+    { "type": "switch_frame" },
+
+    { "type": "click", "x": 42, "y": 88 },
+    { "type": "type", "text": "Q" },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_focus", "target": { "selector": "#name" } },
+    { "type": "assert_value", "target": { "selector": "#name" }, "contains": "Q" },
+    { "type": "switch_frame" },
+
+    { "type": "click", "x": 42, "y": 120 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_state_store", "target": { "selector": "#color" }, "open_dropdown": true },
+    { "type": "key_press", "key": "escape" },
+    { "type": "switch_frame" },
+
+    { "type": "click", "x": 42, "y": 160 },
+    { "type": "type", "text": "Z" },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_focus", "target": { "selector": "#bio" } },
+    { "type": "assert_state", "target": { "selector": "#bio" }, "state": ":focus", "value": true },
+    { "type": "assert_value", "target": { "selector": "#bio" }, "contains": "Z" },
+    { "type": "switch_frame" },
+
+    { "type": "mouse_drag", "from_x": 40, "from_y": 160, "to_x": 120, "to_y": 160, "button": 0 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_selection", "is_collapsed": false },
+    { "type": "switch_frame" },
+
+    { "type": "click", "x": 54, "y": 214 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_text", "target": { "selector": "#status" }, "equals": "clicked" }
+  ]
+}

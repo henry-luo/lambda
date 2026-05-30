@@ -37,7 +37,7 @@
     {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
     {"type": "ime_compose", "phase": "commit", "commit": "blocked"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_value", "target": {"selector": "#field"}, "equals": ""},
+    {"type": "assert_value", "target": {"selector": "#field"}, "equals": "done"},
     {"type": "assert_text", "target": {"selector": "#blockedFormLog"}, "equals": "beforeinput:insertFromComposition:blocked:0|prevent:insertFromComposition"},
 
     {"type": "click", "target": {"selector": "#rich"}},

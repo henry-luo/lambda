@@ -160,20 +160,27 @@ void tc_ensure_init(DomElement* elem) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
     if (f->tc_initialized) return;
-    if (!f->current_value) {
-        uint32_t len = 0;
-        f->current_value = tc_initial_value(elem, &len);
-        f->current_value_len = len;
-        f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
-    } else {
-        f->current_value_u16_len = tc_utf8_to_utf16_length(
-            f->current_value, f->current_value_len);
+    DocState* state = f->state_ref
+        ? f->state_ref
+        : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
+    f->state_ref = state;
+    bool restored = form_control_restore_text_control_state(state, (View*)elem);
+    if (!restored) {
+        if (!f->current_value) {
+            uint32_t len = 0;
+            f->current_value = tc_initial_value(elem, &len);
+            f->current_value_len = len;
+            f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
+        } else {
+            f->current_value_u16_len = tc_utf8_to_utf16_length(
+                f->current_value, f->current_value_len);
+        }
+        f->selection_start = f->current_value_u16_len;
+        f->selection_end = f->current_value_u16_len;
+        f->selection_direction = 0;
+        f->tc_initialized = 1;
+        form_control_sync_text_control_state(f->state_ref, (View*)elem);
     }
-    f->selection_start = f->current_value_u16_len;
-    f->selection_end = f->current_value_u16_len;
-    f->selection_direction = 0;
-    f->tc_initialized = 1;
-    form_control_sync_text_control_state(f->state_ref, (View*)elem);
     // Mirror live value into legacy display field used by render_form.cpp.
     if (!f->value || f->value != f->current_value) {
         f->value = f->current_value;
@@ -316,19 +323,17 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
-    const char* val = f->value ? f->value : "";
-    uint32_t blen = (uint32_t)strlen(val);
-    // Always keep current_value in sync with value pointer
-    if (val != f->current_value) {
-        if (f->current_value) mem_free(f->current_value);
+    if (!f->current_value) {
+        const char* val = f->value ? f->value : "";
+        uint32_t blen = (uint32_t)strlen(val);
         f->current_value = (char*)mem_alloc(blen + 1, MEM_CAT_DOM);
+        if (!f->current_value) return;
         memcpy(f->current_value, val, blen);
         f->current_value[blen] = '\0';
         f->current_value_len = blen;
-        f->value = f->current_value;
-    } else {
-        f->current_value_len = blen;
     }
+    uint32_t blen = f->current_value_len;
+    f->value = f->current_value;
     f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, blen);
     // Derive selection fields from DomSelection (canonical)
     DomSelection* ds = state->dom_selection;

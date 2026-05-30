@@ -11,10 +11,13 @@
 #include <string.h>
 
 static DocState* editing_dispatch_doc_state(EventContext* evcon) {
-    if (!evcon || !evcon->ui_context || !evcon->ui_context->document) {
+    if (!evcon) {
         return nullptr;
     }
-    return (DocState*)evcon->ui_context->document->state;
+    DomDocument* doc = evcon->target_document
+        ? evcon->target_document
+        : (evcon->ui_context ? evcon->ui_context->document : nullptr);
+    return doc ? (DocState*)doc->state : nullptr;
 }
 
 static uint32_t editing_log_cstr_len(const char* text) {

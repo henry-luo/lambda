@@ -782,6 +782,10 @@ static void validate_view_state_registry(DocState* state,
                 if (view_state->data.form.selection_direction > 3) {
                     report_fail(report, "view form state selection direction is invalid");
                 }
+                if (view_state->data.form.has_current_value &&
+                    view_state->data.form.selection_end > view_state->data.form.current_value_u16_len) {
+                    report_fail(report, "view form state selection exceeds text value");
+                }
                 if (view_state->data.form.range_value < 0.0f || view_state->data.form.range_value > 1.0f) {
                     report_fail(report, "view form state range value is out of bounds");
                 }

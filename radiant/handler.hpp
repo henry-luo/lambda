@@ -5,6 +5,7 @@
 struct ViewText;
 struct TextRect;
 struct DocState;
+struct DomDocument;
 
 typedef struct EventContext {
     RdtEvent event;
@@ -42,6 +43,7 @@ typedef struct EventContext {
     // iframe block in the parent document so events can propagate across
     // the iframe boundary
     View* iframe_container;
+    DomDocument* target_document;
 
     UiContext* ui_context;
 } EventContext;

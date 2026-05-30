@@ -1548,6 +1548,10 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ev->has_expected_drag_drop_target = true;
             ev->expected_drag_drop_target = reader.get("drag_drop_target").asBool();
         }
+        if (reader.has("open_dropdown")) {
+            ev->has_expected_open_dropdown = true;
+            ev->expected_open_dropdown = reader.get("open_dropdown").asBool();
+        }
         if (reader.has("scrollbar_h_hovered")) {
             ev->has_expected_scrollbar_h_hovered = true;
             ev->expected_scrollbar_h_hovered = reader.get("scrollbar_h_hovered").asBool();
@@ -4343,6 +4347,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (drag_drop && elem && ev->has_expected_drag_drop_target && ((drag_drop->drop_target == elem) != ev->expected_drag_drop_target)) {
                 log_error("event_sim: assert_state_store FAIL - drag_drop target expectation mismatch");
+                passed = false;
+            }
+            if (state && elem && ev->has_expected_open_dropdown && ((state->open_dropdown == elem) != ev->expected_open_dropdown)) {
+                log_error("event_sim: assert_state_store FAIL - open dropdown expectation mismatch");
                 passed = false;
             }
             if (elem && ev->expected_view_state_kind) {

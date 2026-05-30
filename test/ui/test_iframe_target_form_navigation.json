@@ -1,0 +1,12 @@
+{
+  "name": "Iframe target navigation attaches state for form controls",
+  "html": "test/html/index.html",
+  "viewport": { "width": 900, "height": 720 },
+  "events": [
+    { "type": "click", "target": { "selector": "a", "index": 20 } },
+    { "type": "wait", "ms": 100 },
+    { "type": "switch_frame", "selector": "iframe" },
+    { "type": "click", "target": { "selector": "#select-basic" } },
+    { "type": "assert_state_store", "target": { "selector": "#select-basic" }, "open_dropdown": true }
+  ]
+}
