@@ -471,6 +471,47 @@ extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
     return true;
 }
 
+extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
+                                           int from, bool reverse, bool same_value_zero) {
+    if (!js_typed_array_raw_fast_enabled()) return -2;
+    if (!js_is_typed_array(ta_item)) return -2;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    if (!ta || !js_typed_array_is_number_element(ta->element_type)) return -2;
+    if (js_typed_array_is_out_of_bounds(ta)) return -2;
+
+    TypeId search_type = get_type_id(search_value);
+    double needle = 0.0;
+    if (search_type == LMD_TYPE_INT) {
+        int64_t iv = it2i(search_value);
+        if (iv <= -(int64_t)JS_SYMBOL_BASE) return -1;
+        needle = (double)iv;
+    } else if (search_type == LMD_TYPE_FLOAT) {
+        needle = it2d(search_value);
+    } else {
+        return -1;
+    }
+
+    int len = js_typed_array_current_length(ta);
+    if (len <= 0) return -1;
+    if (from < 0 || from >= len) return -1;
+    char* data = (char*)js_typed_array_current_data(ta);
+    if (!data) return -2;
+
+    bool needle_nan = isnan(needle);
+    if (reverse) {
+        for (int i = from; i >= 0; i--) {
+            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
+        }
+    } else {
+        for (int i = from; i < len; i++) {
+            double value = js_typed_array_raw_load_number(ta->element_type, data, i);
+            if (value == needle || (same_value_zero && needle_nan && isnan(value))) return i;
+        }
+    }
+    return -1;
+}
+
 static bool js_to_index_int(Item value, int* out_index, const char* error_message) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {

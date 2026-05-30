@@ -17263,6 +17263,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
                 if (from >= len) return (Item){.item = i2it(-1)};
+                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, false, false);
+                if (raw_index >= -1) return (Item){.item = i2it(raw_index)};
                 for (int i = from; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
@@ -17306,6 +17308,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 if (from < 0) from += len;
                 if (from < 0) return (Item){.item = i2it(-1)};
+                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, true, false);
+                if (raw_index >= -1) return (Item){.item = i2it(raw_index)};
                 for (int i = from; i >= 0; i--) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
@@ -17346,6 +17350,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 if (from < 0) { from += len; if (from < 0) from = 0; }
                 if (from >= len) return (Item){.item = ITEM_FALSE};
+                int raw_index = js_typed_array_raw_index_of(obj, search_val, from, false, true);
+                if (raw_index >= -1) return (Item){.item = raw_index >= 0 ? ITEM_TRUE : ITEM_FALSE};
                 for (int i = from; i < len; i++) {
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = (Item){.item = ITEM_JS_UNDEFINED};

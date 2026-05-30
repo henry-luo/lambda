@@ -1,7 +1,7 @@
 # Transpile JS Tune4 Proposal
 
 Date: 2026-05-30
-Status: proposed
+Status: closed
 Source run: `test/js262/results/release_run_006`
 
 ## Goal
@@ -537,6 +537,48 @@ does show the intended effect. The script performs constructor-from-typed-array,
 This supports keeping the raw bulk/view paths even though JS262 timing is
 neutral: the optimization targets large typed-array data movement, not the tiny
 arrays used by most conformance tests.
+
+Final no-callback expansion on 2026-05-30:
+
+- added a guarded raw numeric search helper for `indexOf`, `lastIndexOf`, and
+  `includes`;
+- left BigInt typed arrays on the boxed fallback because BigUint64 values above
+  `INT64_MAX` need exact BigInt comparison semantics;
+- left `join` on the existing path because string conversion dominates and is
+  more observable than raw numeric scanning;
+- observed that `fill`, `slice`, and `copyWithin` already use raw typed
+  loops/memory copies in the current runtime.
+
+Focused search verification:
+
+- `indexOf` / `includes` manifest: 108 passed, 0 failed out of 130 with the raw
+  path enabled;
+- the same manifest also passed with `LAMBDA_JS_TA_RAW_FAST=0`.
+
+Broader TypedArray verification after the search expansion:
+
+- `built-ins/TypedArray` + `built-ins/TypedArrayConstructors`: 1936 passed, 0
+  failed out of 2174.
+
+A bulk search workload with 80 iterations over a 400k-element `Float64Array`
+shows the intended improvement. It repeatedly calls `indexOf`, `lastIndexOf`,
+and `includes(NaN)`, producing the same checksum (`32000000`) in both modes:
+
+| Scope | Fast path off | Fast path on | Result |
+| --- | ---: | ---: | --- |
+| bulk numeric search smoke | 30.01s real, 29.27s user | 0.11s real, 0.10s user | clear win |
+
+Final full release JS262 verification after all Tune4 changes:
+
+- `make release` completed successfully;
+- `make test262-full` completed with `39258 / 39258` fully passing;
+- `0` failed, `0` non-fully-passing, `0` regressions versus baseline;
+- wall time `146.0s`;
+- summed per-test timing `524.397s` from `temp/_t262_timing_o0.tsv`.
+
+Tune4 is closed. Remaining RegExp range-set containment and any deeper
+TypedArray `join` or callback-method work should be treated as a new Tune5
+proposal, not as open Tune4 work.
 
 ### T4-P1 URI Codec Gate Check
 
