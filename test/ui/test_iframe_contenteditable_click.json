@@ -1,0 +1,15 @@
+{
+  "name": "Iframe target navigation delivers contenteditable clicks",
+  "html": "test/html/index.html",
+  "viewport": { "width": 900, "height": 720 },
+  "events": [
+    { "type": "click", "target": { "selector": "a", "index": 21 } },
+    { "type": "wait", "ms": 100 },
+    { "type": "click", "x": 75, "y": 383 },
+    { "type": "click", "x": 120, "y": 409 },
+    { "type": "switch_frame", "selector": "iframe" },
+    { "type": "click", "target": { "selector": "#surface" } },
+    { "type": "type", "target": { "selector": "#surface" }, "text": "Y" },
+    { "type": "assert_text", "target": { "selector": "#before-log" }, "contains": "before:insertText|Y|" }
+  ]
+}

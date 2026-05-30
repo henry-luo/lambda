@@ -1,0 +1,11 @@
+{
+  "name": "Contenteditable default typing mutates DOM text",
+  "html": "test/ui/editing/contenteditable.html",
+  "viewport": { "width": 640, "height": 360 },
+  "events": [
+    { "type": "click", "target": { "selector": "#surface", "offset_x": 32, "offset_y": 18 } },
+    { "type": "type", "text": "Z" },
+    { "type": "assert_text", "target": { "selector": "#surface" }, "contains": "Z" },
+    { "type": "assert_text", "target": { "selector": "#input-log" }, "contains": "input:insertText|Z|" }
+  ]
+}

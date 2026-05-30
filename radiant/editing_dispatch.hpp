@@ -33,6 +33,19 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
                                   const EditingIntent* intent,
                                   const EditingDispatchHooks* hooks);
 
+bool editing_dispatch_beforeinput_ex(EventContext* evcon,
+                                     const EditingSurface* surface,
+                                     const EditingIntent* intent,
+                                     const EditingDispatchHooks* hooks,
+                                     bool dispatch_input_after,
+                                     bool* out_prevented,
+                                     bool* out_lambda_handled);
+
+void editing_dispatch_input(EventContext* evcon,
+                            const EditingSurface* surface,
+                            const EditingIntent* intent,
+                            const EditingDispatchHooks* hooks);
+
 void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent);

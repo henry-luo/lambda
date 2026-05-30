@@ -9,6 +9,6 @@
     {"type": "assert_state_store", "target": {"selector": "#auto-scroll"}, "view_state": true, "kind": "scroll"},
     {"type": "scroll", "x": 120, "y": 180, "dx": 0, "dy": -8},
     {"type": "wait", "ms": 80},
-    {"type": "assert_state_store", "target": {"selector": "#auto-scroll"}, "view_scroll_y": 120, "tolerance": 120}
+    {"type": "assert_state_store", "target": {"selector": "#auto-scroll"}, "view_scroll_y": 400, "tolerance": 80}
   ]
 }

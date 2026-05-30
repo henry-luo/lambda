@@ -1007,10 +1007,32 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
         }
         target_children(evcon, view);
+        bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
+        bool rich_host = is_rich_editable_host(static_cast<View*>(block));
+        if (!rich_host_margin_hit_allowed && rich_host) {
+            bool event_inside_later_sibling = false;
+            for (View* sibling = static_cast<View*>(block)->next_sibling;
+                 sibling; sibling = sibling->next_sibling) {
+                if (sibling->view_type != RDT_VIEW_BLOCK &&
+                    sibling->view_type != RDT_VIEW_INLINE_BLOCK &&
+                    sibling->view_type != RDT_VIEW_LIST_ITEM) {
+                    continue;
+                }
+                ViewBlock* sibling_block = lam::view_require_block(sibling);
+                float sibling_x = pa_block.x + sibling_block->x;
+                float sibling_y = pa_block.y + sibling_block->y;
+                if (sibling_x <= event->x && event->x < sibling_x + sibling_block->width &&
+                    sibling_y <= event->y && event->y < sibling_y + sibling_block->height) {
+                    event_inside_later_sibling = true;
+                    break;
+                }
+            }
+            rich_host_margin_hit_allowed = !event_inside_later_sibling;
+        }
         if (!evcon->target && is_in_rich_editable_subtree(static_cast<View*>(block)) &&
-            (is_rich_editable_host(static_cast<View*>(block)) || event_inside_block(evcon, block))) {
+            rich_host_margin_hit_allowed) {
             EditableMarginTextHit margin_hit = { NULL, NULL, 0, 0.0f, 0.0f, -1.0f };
-            bool include_vertical_gap = is_rich_editable_host(static_cast<View*>(block));
+            bool include_vertical_gap = rich_host;
             for (View* child = view; child; child = child->next()) {
                 if (!child->view_type) continue;
                 find_editable_margin_text_hit(evcon, child, evcon->block.x, evcon->block.y,
@@ -1731,7 +1753,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     handler_ctx.heap = rt->heap;
                                     handler_ctx.nursery = rt->nursery;
                                     handler_ctx.name_pool = rt->name_pool;
-                                    handler_ctx.pool = rt->heap->pool;
+                                    handler_ctx.pool = rt->reuse_pool ?
+                                        rt->reuse_pool : rt->heap->pool;
                                     handler_ctx.type_info = type_info;
                                     context = &handler_ctx;
                                 }
@@ -1895,6 +1918,133 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
     return editing_dispatch_beforeinput(evcon, &surface, intent, &hooks);
+}
+
+static bool dispatch_rich_beforeinput_defaultable(EventContext* evcon, View* target,
+                                                  const InputIntent* intent,
+                                                  EditingSurface* out_surface,
+                                                  bool* out_prevented,
+                                                  bool* out_lambda_handled) {
+    if (out_prevented) *out_prevented = false;
+    if (out_lambda_handled) *out_lambda_handled = false;
+    if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return false;
+    if (!editing_surface_is_rich(&surface)) return false;
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+    DocState* state = event_context_target_state(evcon);
+    event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
+    bool dispatched = editing_dispatch_beforeinput_ex(evcon, &surface, intent,
+        &hooks, false, out_prevented, out_lambda_handled);
+    if (dispatched && out_surface) *out_surface = surface;
+    return dispatched;
+}
+
+static void dispatch_rich_input(EventContext* evcon,
+                                const EditingSurface* surface,
+                                const InputIntent* intent) {
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+    editing_dispatch_input(evcon, surface, intent, &hooks);
+}
+
+static bool rich_text_default_replace(EventContext* evcon,
+                                      DocState* state,
+                                      const InputIntent* intent,
+                                      View* fallback_view,
+                                      int fallback_offset) {
+    if (!evcon || !state || !intent || !intent->data) return false;
+    if (intent->type != INPUT_INTENT_INSERT_TEXT &&
+        intent->type != INPUT_INTENT_INSERT_REPLACEMENT_TEXT &&
+        intent->type != INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
+        intent->type != INPUT_INTENT_INSERT_FROM_COMPOSITION) {
+        return false;
+    }
+
+    DomText* text = nullptr;
+    uint32_t start = 0;
+    uint32_t end = 0;
+    DomSelection* dom_selection = state->dom_selection;
+    if (dom_selection && dom_selection->range_count > 0 &&
+        dom_selection->ranges[0] && !dom_selection->is_collapsed) {
+        View* anchor_view = nullptr;
+        View* focus_view = nullptr;
+        if (selection_get_extent_views(state, &anchor_view, &focus_view) &&
+            anchor_view && anchor_view == focus_view && anchor_view->is_text()) {
+            int start_i = 0;
+            int end_i = 0;
+            selection_get_range(state, &start_i, &end_i);
+            text = lam::dom_require_text(static_cast<DomNode*>(anchor_view));
+            start = start_i < 0 ? 0 : (uint32_t)start_i;
+            end = end_i < 0 ? 0 : (uint32_t)end_i;
+        } else {
+            DomRange* range = dom_selection->ranges[0];
+            if (!range->start.node || !range->end.node ||
+                range->start.node != range->end.node ||
+                !range->start.node->is_text()) {
+                return false;
+            }
+            text = static_cast<DomText*>(range->start.node);
+            start = dom_text_utf16_to_utf8(text, range->start.offset);
+            end = dom_text_utf16_to_utf8(text, range->end.offset);
+        }
+    } else {
+        View* caret_view = nullptr;
+        int caret_offset = 0;
+        if (!caret_get_position(state, &caret_view, &caret_offset) ||
+            !caret_view || !caret_view->is_text()) {
+            caret_view = fallback_view;
+            caret_offset = fallback_offset;
+            if (!caret_view || !caret_view->is_text()) return false;
+        }
+        text = lam::dom_require_text(static_cast<DomNode*>(caret_view));
+        start = caret_offset < 0 ? 0 : (uint32_t)caret_offset;
+        end = start;
+    }
+
+    if (!text) return false;
+    if (end < start) {
+        uint32_t tmp = start;
+        start = end;
+        end = tmp;
+    }
+    const char* old_text = text->text ? text->text : "";
+    uint32_t old_len = text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(old_text);
+    if (start > old_len) start = old_len;
+    if (end > old_len) end = old_len;
+
+    uint32_t data_len = (uint32_t)strlen(intent->data);
+    size_t new_len = (size_t)old_len - (size_t)(end - start) + (size_t)data_len;
+    char* replacement = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
+    if (!replacement) return false;
+
+    if (start > 0) memcpy(replacement, old_text, start);
+    if (data_len > 0) memcpy(replacement + start, intent->data, data_len);
+    if (end < old_len) {
+        memcpy(replacement + start + data_len, old_text + end, old_len - end);
+    }
+    replacement[new_len] = '\0';
+
+    bool updated = dom_text_set_content(text, replacement);
+    mem_free(replacement);
+    if (!updated) return false;
+
+    uint32_t caret_offset = start + data_len;
+    caret_set(state, static_cast<View*>(text),
+              (int)caret_offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    doc_state_request_reflow(state);
+    evcon->need_repaint = true;
+    log_debug("rich_text_default_replace: inserted %u bytes at [%u,%u]",
+              data_len, start, end);
+    return true;
 }
 
 static bool dispatch_rich_selection_snapshot(EventContext* evcon,
@@ -3439,7 +3589,8 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                     handler_ctx.heap = heap;
                     handler_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
                     handler_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
-                    handler_ctx.pool = heap->pool;
+                    handler_ctx.pool = doc->js_runtime_pool ?
+                        (Pool*)doc->js_runtime_pool : heap->pool;
                 }
                 // §7.4.6 (U-7): allocate transient type_list so the
                 // synthetic-event factories below (which install accessor
@@ -3589,7 +3740,8 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx.heap = heap;
     s->handler_ctx.nursery = (gc_nursery_t*)s->doc->js_runtime_nursery;
     s->handler_ctx.name_pool = (NamePool*)s->doc->js_runtime_name_pool;
-    s->handler_ctx.pool = heap->pool;
+    s->handler_ctx.pool = s->doc->js_runtime_pool ?
+        (Pool*)s->doc->js_runtime_pool : heap->pool;
     // Allocate a per-dispatch type_list. C-level `js_create_event` callers
     // need a non-NULL type_list so map_rebuild_for_type_change can append
     // freshly-created TypeMaps. Compiled JS handlers swap to their own
@@ -5681,17 +5833,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             selection_get_focus_snapshot(state, &selection_focus_view,
                 &selection_focus_offset, &selection_iframe_offset_x,
                 &selection_iframe_offset_y, &selection_collapsed);
+            DomDocument* selection_doc = event_context_target_document(&evcon);
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
                 drag_target_view = current_target;
             } else if (anchor_view && anchor_view->view_type == RDT_VIEW_TEXT &&
-                       doc && doc->view_tree && doc->view_tree->root) {
+                       selection_doc && selection_doc->view_tree &&
+                       selection_doc->view_tree->root) {
                 EditingSurface anchor_surface;
                 EditingBoundary hit_boundary;
                 bool has_anchor_surface = editing_surface_from_target(anchor_view, &anchor_surface) &&
                     editing_surface_is_rich(&anchor_surface);
                 bool has_hit_boundary = has_anchor_surface &&
                     editing_geometry_hit_test_boundary(evcon.ui_context,
-                        static_cast<View*>(doc->view_tree->root), &anchor_surface,
+                        static_cast<View*>(selection_doc->view_tree->root), &anchor_surface,
                         (float)motion->x, (float)motion->y,
                         EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
                 if (has_hit_boundary && hit_boundary.dom.node &&
@@ -6006,6 +6160,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // toolbar controls use this to keep text-control selection active.
             if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
+            } else if (!evcon.default_prevented && evcon.iframe_container &&
+                       evcon.target->view_type == RDT_VIEW_TEXT) {
+                DomElement* rich_host = rich_editable_from_target(evcon.target);
+                if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
+                    update_focus_state(&evcon, static_cast<View*>(rich_host), false);
+                }
             }
 
             // Handle click in text - position caret or start selection.
@@ -6866,7 +7026,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* focused = focus_get(state);
         event_log_focused_target(cascade_log, cascade_id, focused);
         log_debug("Key down: key=%d, mods=0x%x, focused=%p", key_event->key, key_event->mods, focused);
-        View* intent_target = focused ? focused : caret_get_view(state);
+        View* caret_intent_view = caret_get_view(state);
+        View* intent_target = caret_intent_view &&
+            rich_editable_from_target(caret_intent_view)
+                ? caret_intent_view
+                : (focused ? focused : caret_intent_view);
 
         // Forward key events to layer-mode webview if it has focus
         if (focused && focused->is_element()) {
@@ -7943,11 +8107,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             InputIntent intent;
             char utf8_buf[5];
             View* caret_view = NULL;
-            caret_get_position(state, &caret_view, NULL);
-            View* intent_target = focused ? focused : caret_view;
+            int rich_caret_offset = 0;
+            caret_get_position(state, &caret_view, &rich_caret_offset);
+            View* intent_target = caret_view && rich_editable_from_target(caret_view)
+                ? caret_view
+                : (focused ? focused : caret_view);
+            EditingSurface rich_surface;
+            bool beforeinput_prevented = false;
+            bool beforeinput_lambda_handled = false;
             if (intent_target && input_intent_from_text_input(text_event->codepoint,
                     &intent, utf8_buf, sizeof(utf8_buf)) &&
-                dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
+                dispatch_rich_beforeinput_defaultable(&evcon, intent_target, &intent,
+                    &rich_surface, &beforeinput_prevented,
+                    &beforeinput_lambda_handled)) {
+                if (!beforeinput_prevented) {
+                    if (!beforeinput_lambda_handled) {
+                        rich_text_default_replace(&evcon, state, &intent,
+                                                  intent_target,
+                                                  rich_caret_offset);
+                    }
+                    dispatch_rich_input(&evcon, &rich_surface, &intent);
+                }
                 evcon.need_repaint = true;
                 break;
             }

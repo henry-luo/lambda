@@ -23,6 +23,7 @@
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../transpiler.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../../lib/arraylist.h"
@@ -79,7 +80,8 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
     scope->runtime_ctx.heap = (Heap*)doc->js_runtime_heap;
     scope->runtime_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
     scope->runtime_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
-    scope->runtime_ctx.pool = (Pool*)doc->js_runtime_pool;
+    scope->runtime_ctx.pool = doc->js_runtime_pool ?
+        (Pool*)doc->js_runtime_pool : scope->runtime_ctx.heap->pool;
     scope->type_list = arraylist_new(16);
     scope->runtime_ctx.type_list = scope->type_list;
     scope->saved_context = context;

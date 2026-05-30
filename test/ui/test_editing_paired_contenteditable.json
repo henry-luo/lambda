@@ -16,8 +16,8 @@
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:none"},
     {"type": "type", "target": {"selector": "#surface"}, "text": "Y"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seedY"},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertText|Y|"},
-    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertText|Y|seed"}
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertText|Y|seedY"}
   ]
 }

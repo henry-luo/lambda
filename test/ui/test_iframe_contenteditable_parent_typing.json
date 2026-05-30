@@ -1,0 +1,13 @@
+{
+  "name": "Iframe contenteditable accepts typing after parent-coordinate click",
+  "html": "test/html/index.html",
+  "viewport": { "width": 900, "height": 720 },
+  "events": [
+    { "type": "click", "target": { "selector": "a", "index": 21 } },
+    { "type": "wait", "ms": 100 },
+    { "type": "click", "x": 43, "y": 129 },
+    { "type": "type", "text": "Z" },
+    { "type": "switch_frame", "selector": "iframe" },
+    { "type": "assert_text", "target": { "selector": "#input-log" }, "contains": "insertText|Z" }
+  ]
+}

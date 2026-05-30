@@ -830,7 +830,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     handler_compile_ctx.heap = runtime.heap;
     handler_compile_ctx.nursery = runtime.nursery;
     handler_compile_ctx.name_pool = runtime.name_pool;
-    handler_compile_ctx.pool = runtime.heap ? runtime.heap->pool : nullptr;
+    handler_compile_ctx.pool = runtime.reuse_pool ? runtime.reuse_pool :
+        (runtime.heap ? runtime.heap->pool : nullptr);
     EvalContext* saved_ctx = context;
     context = &handler_compile_ctx;
 
