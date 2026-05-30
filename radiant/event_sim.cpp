@@ -7,6 +7,7 @@
 #include "event_state_log.hpp"
 #include "state_store.hpp"
 #include "dom_range.hpp"
+#include "editing.hpp"
 #include "form_control.hpp"
 #include "render.hpp"
 #include "render_export_support.hpp"
@@ -70,23 +71,6 @@ static void sim_input_turn_yield() {
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
-extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
-                                                      DomElement* elem,
-                                                      View* target);
-extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
-                                                       DomElement* elem,
-                                                       View* target,
-                                                       const char* preedit,
-                                                       uint32_t len,
-                                                       uint32_t caret_cp);
-extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
-                                                       DomElement* elem,
-                                                       View* target);
-extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
-                                                       DomElement* elem,
-                                                       View* target,
-                                                       const char* committed,
-                                                       uint32_t len);
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
@@ -2907,9 +2891,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
-        // F7: drive te_ime_begin / update / commit / cancel against the
-        // focused (or specified) text control. Mirrors the OS shim path
-        // without requiring NSTextInputClient / IMM in the test runner.
+        // F7: drive the shared composition event path against the focused
+        // editing surface. Mirrors the OS shim path without requiring
+        // NSTextInputClient / IMM in the test runner.
         case SIM_EVENT_IME_COMPOSE: {
             DomDocument* doc = uicon->document;
             if (!doc || !doc->state) {
@@ -2927,14 +2911,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DocState* state = (DocState*)doc->state;
             View* focused = focus_get(state);
-            if (!focused || !focused->is_element()) {
-                log_error("event_sim: ime_compose - no focused element");
-                ctx->fail_count++;
-                break;
-            }
-            DomElement* elem = lam::dom_require_element(focused);
-            if (!tc_is_text_control(elem)) {
-                log_error("event_sim: ime_compose - focused is not a text control");
+            View* intent_target = focused ? focused : caret_get_view(state);
+            EditingSurface surface;
+            if (!intent_target ||
+                !editing_surface_from_target(intent_target, &surface) ||
+                (!editing_surface_is_text_control(&surface) &&
+                 !editing_surface_is_rich(&surface))) {
+                log_error("event_sim: ime_compose - no focused editing surface");
                 ctx->fail_count++;
                 break;
             }

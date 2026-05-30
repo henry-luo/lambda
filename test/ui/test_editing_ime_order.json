@@ -1,0 +1,55 @@
+{
+  "name": "Editing IME composition event order is shared for form and rich surfaces",
+  "html": "test/ui/test_editing_ime_order.html",
+  "viewport": {"width": 640, "height": 560},
+  "events": [
+    {"type": "log", "message": "=== editing_ime_order ==="},
+    {"type": "wait", "ms": 150},
+
+    {"type": "click", "target": {"selector": "#field"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
+    {"type": "ime_compose", "phase": "commit", "commit": "done"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#formLog"}, "equals": "compositionstart:|compositionupdate:pre|beforeinput:insertCompositionText:pre:1|input:insertCompositionText:pre:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
+    {"type": "click", "target": {"selector": "#field"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "x", "caret": 1},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#formLog"}, "contains": "compositionend:|beforeinput:deleteCompositionText::0|input:deleteCompositionText::0"},
+
+    {"type": "click", "target": {"selector": "#rich"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
+    {"type": "ime_compose", "phase": "commit", "commit": "done"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#richLog"}, "equals": "compositionstart:|compositionupdate:pre|beforeinput:insertCompositionText:pre:1|input:insertCompositionText:pre:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
+    {"type": "click", "target": {"selector": "#rich"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "x", "caret": 1},
+    {"type": "ime_compose", "phase": "cancel"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#richLog"}, "contains": "compositionend:|beforeinput:deleteCompositionText::0|input:deleteCompositionText::0"},
+
+    {"type": "click", "target": {"selector": "#field"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "pre", "caret": 3},
+    {"type": "ime_compose", "phase": "commit", "commit": "blocked"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_value", "target": {"selector": "#field"}, "equals": ""},
+    {"type": "assert_text", "target": {"selector": "#blockedFormLog"}, "equals": "beforeinput:insertFromComposition:blocked:0|prevent:insertFromComposition"},
+
+    {"type": "click", "target": {"selector": "#rich"}},
+    {"type": "ime_compose", "phase": "begin"},
+    {"type": "ime_compose", "phase": "update", "preedit": "stop", "caret": 4},
+    {"type": "ime_compose", "phase": "commit", "commit": "done"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#blockedRichLog"}, "equals": "beforeinput:insertCompositionText:stop:1|prevent:insertCompositionText|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
+
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.composition\"", "min": 6},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"insertCompositionText\"", "min": 2},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"insertFromComposition\"", "min": 2},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"deleteCompositionText\"", "min": 2}
+  ]
+}

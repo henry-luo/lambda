@@ -123,6 +123,9 @@ Item js_create_native_keyboard_event(const char* type,
 
 Item js_create_native_focus_event(const char* type, Item related_target);
 
+Item js_create_native_composition_event(const char* type,
+    const char* data);
+
 Item js_create_native_wheel_event(const char* type,
     int client_x, int client_y,
     double delta_x, double delta_y,

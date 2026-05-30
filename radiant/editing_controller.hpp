@@ -41,11 +41,18 @@ typedef bool (*EditingHistoryDispatchFn)(EventContext* evcon,
                                          InputIntentType input_type,
                                          void* userdata);
 
+typedef bool (*EditingCompositionDispatchFn)(EventContext* evcon,
+                                             const EditingSurface* surface,
+                                             const CompositionEvent* comp_event,
+                                             const EditingIntent* intent,
+                                             void* userdata);
+
 struct EditingControllerHooks {
     EditingSelectionSnapshotFn selection_snapshot;
     EditingFormSelectionExtendFn form_selection_extend;
     EditingAutoscrollLogFn autoscroll_log;
     EditingHistoryDispatchFn history_dispatch;
+    EditingCompositionDispatchFn composition_dispatch;
     void* user;
 };
 
@@ -58,6 +65,11 @@ bool editing_controller_dispatch_history(EventContext* evcon,
                                          const EditingSurface* surface,
                                          InputIntentType input_type,
                                          const EditingControllerHooks* hooks);
+
+bool editing_controller_handle_composition(EventContext* evcon,
+                                           DocState* state,
+                                           const CompositionEvent* comp_event,
+                                           const EditingControllerHooks* hooks);
 
 bool editing_controller_undo(EventContext* evcon,
                              const EditingSurface* surface,

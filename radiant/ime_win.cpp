@@ -2,9 +2,9 @@
 //
 // Subclasses the GLFW HWND's WndProc with `SetWindowLongPtrW` and
 // intercepts WM_IME_STARTCOMPOSITION / WM_IME_COMPOSITION /
-// WM_IME_ENDCOMPOSITION, dispatching to te_ime_* whenever the focused
-// element is a text control. Other messages (and IME messages received
-// while no text control is focused) fall through to GLFW's WndProc.
+// WM_IME_ENDCOMPOSITION, dispatching to Radiant's shared editing
+// composition controller whenever the focused element is a text control.
+// Other messages fall through to GLFW's WndProc.
 //
 // On non-Windows platforms this file compiles to an empty stub.
 
@@ -24,6 +24,7 @@
 
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "event.hpp"
 
 // Opaque types — see ime_mac.mm comment.
 struct UiContext;
@@ -33,32 +34,13 @@ class View;
 
 extern "C" GLFWwindow*   radiant_ui_get_glfw_window(struct UiContext*);
 extern "C" DocState* radiant_ui_get_state(struct UiContext*);
-extern "C" bool radiant_dispatch_form_text_ime_begin(struct UiContext*,
-                                                      DomElement*,
-                                                      View*);
-extern "C" bool radiant_dispatch_form_text_ime_update(struct UiContext*,
-                                                       DomElement*,
-                                                       View*,
-                                                       const char*,
-                                                       uint32_t,
-                                                       uint32_t);
-extern "C" bool radiant_dispatch_form_text_ime_cancel(struct UiContext*,
-                                                       DomElement*,
-                                                       View*);
-extern "C" bool radiant_dispatch_form_text_ime_commit(struct UiContext*,
-                                                       DomElement*,
-                                                       View*,
-                                                       const char*,
-                                                       uint32_t);
+extern "C" bool radiant_dispatch_editing_composition_event(struct UiContext*,
+                                                           EventType,
+                                                           const char*,
+                                                           uint32_t);
 
 View* focus_get(DocState*);
 bool  tc_is_text_control(DomElement*);
-
-void te_ime_begin(DomElement*);
-void te_ime_update(DomElement*, const char*, uint32_t, uint32_t);
-void te_ime_commit(DomElement*, DocState*, void*, const char*, uint32_t);
-void te_ime_cancel(DomElement*);
-bool te_ime_is_composing(DomElement*);
 
 extern "C" void radiant_ime_win_attach(struct UiContext* uicon);
 
@@ -66,6 +48,7 @@ namespace {
 
 UiContext* g_ime_uicon  = nullptr;
 WNDPROC    g_orig_wndproc = nullptr;
+bool       g_form_composing = false;
 
 DomElement* ime_focused_text_control() {
     if (!g_ime_uicon) return nullptr;
@@ -77,9 +60,10 @@ DomElement* ime_focused_text_control() {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-DocState* ime_state() {
-    if (!g_ime_uicon) return nullptr;
-    return radiant_ui_get_state(g_ime_uicon);
+bool ime_dispatch_editing(EventType event_type, const char* text, uint32_t caret) {
+    return g_ime_uicon &&
+        radiant_dispatch_editing_composition_event(g_ime_uicon, event_type,
+                                                   text, caret);
 }
 
 // Read GCS_COMPSTR or GCS_RESULTSTR as UTF-8. Returns mem_alloc'd buffer
@@ -112,14 +96,14 @@ uint32_t ime_caret_position(HIMC himc) {
 
 LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     DomElement* e = ime_focused_text_control();
-    DocState* state = ime_state();
 
     if (e) {
         switch (msg) {
         case WM_IME_STARTCOMPOSITION:
-            if (!radiant_dispatch_form_text_ime_begin(g_ime_uicon, e, (View*)e)) {
-                te_ime_begin(e);
+            if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_START, "", 0)) {
+                break;
             }
+            g_form_composing = true;
             log_debug("[IME win] WM_IME_STARTCOMPOSITION");
             return 0;
         case WM_IME_COMPOSITION: {
@@ -128,11 +112,10 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (lp & GCS_RESULTSTR) {
                 uint32_t len = 0;
                 char* u8 = ime_read_string(himc, GCS_RESULTSTR, &len);
-                if (u8 && state) {
-                    if (!radiant_dispatch_form_text_ime_commit(g_ime_uicon, e,
-                                                               (View*)e,
-                                                               u8, len)) {
-                        te_ime_commit(e, state, (void*)e, u8, len);
+                if (u8) {
+                    if (ime_dispatch_editing(RDT_EVENT_COMPOSITION_END,
+                                             u8, 0)) {
+                        g_form_composing = false;
                     }
                     log_debug("[IME win] commit '%s'", u8);
                 }
@@ -143,14 +126,15 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 char* u8 = ime_read_string(himc, GCS_COMPSTR, &len);
                 uint32_t caret = ime_caret_position(himc);
                 if (u8) {
-                    if (!te_ime_is_composing(e) &&
-                        !radiant_dispatch_form_text_ime_begin(g_ime_uicon, e, (View*)e)) {
-                        te_ime_begin(e);
+                    if (!g_form_composing &&
+                        ime_dispatch_editing(RDT_EVENT_COMPOSITION_START,
+                                             "", 0)) {
+                        g_form_composing = true;
                     }
-                    if (!radiant_dispatch_form_text_ime_update(g_ime_uicon, e,
-                                                               (View*)e,
-                                                               u8, len, caret)) {
-                        te_ime_update(e, u8, len, caret);
+                    if (g_form_composing &&
+                        !ime_dispatch_editing(RDT_EVENT_COMPOSITION_UPDATE,
+                                              u8, caret)) {
+                        g_form_composing = false;
                     }
                     log_debug("[IME win] update '%s' caret=%u", u8, caret);
                 }
@@ -160,9 +144,9 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_IME_ENDCOMPOSITION:
-            if (te_ime_is_composing(e) &&
-                !radiant_dispatch_form_text_ime_cancel(g_ime_uicon, e, (View*)e)) {
-                te_ime_cancel(e);
+            if (g_form_composing &&
+                ime_dispatch_editing(RDT_EVENT_COMPOSITION_END, "", 0)) {
+                g_form_composing = false;
             }
             log_debug("[IME win] WM_IME_ENDCOMPOSITION");
             return 0;

@@ -1139,6 +1139,20 @@ extern "C" Item js_ctor_composition_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
+extern "C" Item js_create_native_composition_event(const char* type,
+    const char* data)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", false);
+    event_set_bool(init, "composed", true);
+    event_set_str(init, "data", data ? data : "");
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : "compositionupdate"))};
+    Item ev = js_ctor_composition_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
 // CE-7 (Radiant_Design_Content_Editable.md §6.1, §10): StaticRange
 // constructor. Per Input Events Level 2 / DOM, a StaticRange is an
 // immutable snapshot of {startContainer, startOffset, endContainer,

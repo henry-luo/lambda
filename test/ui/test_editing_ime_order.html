@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Editing IME order</title>
+  <style>
+    body { font: 16px sans-serif; padding: 24px; }
+    input, [contenteditable] { display: block; margin: 12px 0; padding: 8px; width: 360px; border: 1px solid #888; box-sizing: border-box; }
+    [contenteditable] { height: 38px; overflow: hidden; }
+    .log { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <input id="field" value="">
+  <div id="rich" contenteditable="true" tabindex="0">rich text</div>
+  <div id="formLog" class="log"></div>
+  <div id="richLog" class="log"></div>
+  <div id="blockedFormLog" class="log"></div>
+  <div id="blockedRichLog" class="log"></div>
+  <script>
+    var formEvents = [];
+    var richEvents = [];
+    function attach(target, out, log) {
+      function push(value) {
+        out.push(value);
+      }
+      target.addEventListener('compositionstart', function(event) {
+        push('compositionstart:' + (event.data || ''));
+      });
+      target.addEventListener('compositionupdate', function(event) {
+        push('compositionupdate:' + (event.data || ''));
+      });
+      target.addEventListener('compositionend', function(event) {
+        push('compositionend:' + (event.data || ''));
+      });
+      target.addEventListener('beforeinput', function(event) {
+        push('beforeinput:' + event.inputType + ':' + (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+      });
+      target.addEventListener('input', function(event) {
+        push('input:' + event.inputType + ':' + (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+        if (!event.isComposing) {
+          log.textContent = out.join('|');
+        }
+      });
+    }
+    attach(document.getElementById('field'), formEvents, document.getElementById('formLog'));
+    attach(document.getElementById('rich'), richEvents, document.getElementById('richLog'));
+
+    function attachPreventProbe(target, log, blockedType, blockedData) {
+      var events = [];
+      var active = false;
+      function push(value) {
+        events.push(value);
+      }
+      function flush() {
+        log.textContent = events.join('|');
+      }
+      target.addEventListener('beforeinput', function(event) {
+        var data = event.data || '';
+        if (!active && event.inputType === blockedType && data === blockedData) {
+          active = true;
+        }
+        if (!active) {
+          return;
+        }
+        push('beforeinput:' + event.inputType + ':' + data + ':' + (event.isComposing ? '1' : '0'));
+        if (event.inputType === blockedType && data === blockedData) {
+          event.preventDefault();
+          push('prevent:' + event.inputType);
+          if (!event.isComposing) {
+            flush();
+          }
+        }
+      });
+      target.addEventListener('input', function(event) {
+        if (!active) {
+          return;
+        }
+        push('input:' + event.inputType + ':' + (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+        if (!event.isComposing) {
+          flush();
+          active = false;
+        }
+      });
+    }
+    attachPreventProbe(document.getElementById('field'), document.getElementById('blockedFormLog'), 'insertFromComposition', 'blocked');
+    attachPreventProbe(document.getElementById('rich'), document.getElementById('blockedRichLog'), 'insertCompositionText', 'stop');
+  </script>
+</body>
+</html>

@@ -94,7 +94,7 @@ enum SimEventType {
     SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
     SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
     // F7: IME composition
-    SIM_EVENT_IME_COMPOSE,     // drive te_ime_begin/update/commit/cancel
+    SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,

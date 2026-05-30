@@ -769,15 +769,6 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 
-// Weak hooks so the JS DOM bridge can override per build (mirrors the
-// `input` / `beforeinput` pattern above).
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionstart(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionstart(DomElement* /*elem*/) {}
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionupdate(DomElement* elem, const char* data);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionupdate(DomElement* /*elem*/, const char* /*data*/) {}
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionend(DomElement* elem, const char* data);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_compositionend(DomElement* /*elem*/, const char* /*data*/) {}
-
 static void te_clear_preedit(FormControlProp* f) {
     if (!f) return;
     if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
@@ -798,7 +789,6 @@ void te_ime_begin(DomElement* elem) {
     // drop it.
     te_clear_preedit(f);
     log_debug("te_ime_begin: starting composition");
-    js_dom_queue_textcontrol_compositionstart(elem);
 }
 
 void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
@@ -824,8 +814,6 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
         f->preedit_caret = caret_cp;
     }
     log_debug("te_ime_update: %u bytes preedit, caret=%u", len, caret_cp);
-    js_dom_queue_textcontrol_compositionupdate(elem,
-        f->preedit_utf8 ? f->preedit_utf8 : "");
 }
 
 void te_ime_commit(DomElement* elem, DocState* state, void* target,
@@ -889,9 +877,6 @@ void te_ime_commit_finish(DomElement* elem, const char* committed,
                           uint32_t len) {
     if (!elem || !tc_is_text_control(elem)) return;
     log_debug("te_ime_commit: committed %u bytes", len);
-    char tmp_null = '\0';
-    js_dom_queue_textcontrol_compositionend(elem,
-        committed ? committed : &tmp_null);
 }
 
 void te_ime_cancel(DomElement* elem) {
@@ -904,7 +889,6 @@ void te_ime_cancel(DomElement* elem) {
     state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
         elem, STATE_PLACEHOLDER, show);
     log_debug("te_ime_cancel: composition aborted");
-    js_dom_queue_textcontrol_compositionend(elem, "");
 }
 
 // ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
