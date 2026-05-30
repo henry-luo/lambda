@@ -2913,10 +2913,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             View* focused = focus_get(state);
             View* intent_target = focused ? focused : caret_get_view(state);
             EditingSurface surface;
-            if (!intent_target ||
-                !editing_surface_from_target(intent_target, &surface) ||
-                (!editing_surface_is_text_control(&surface) &&
-                 !editing_surface_is_rich(&surface))) {
+            editing_surface_clear(&surface);
+            if (state->editing.composition.active &&
+                state->editing.composition.surface.kind != EDIT_SURFACE_NONE) {
+                surface = state->editing.composition.surface;
+            } else if (!intent_target ||
+                !editing_surface_from_target(intent_target, &surface)) {
+                log_error("event_sim: ime_compose - no focused editing surface");
+                ctx->fail_count++;
+                break;
+            }
+            if (!editing_surface_is_text_control(&surface) &&
+                !editing_surface_is_rich(&surface)) {
                 log_error("event_sim: ime_compose - no focused editing surface");
                 ctx->fail_count++;
                 break;

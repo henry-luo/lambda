@@ -38,6 +38,11 @@ extern "C" bool radiant_dispatch_editing_composition_event(struct UiContext*,
                                                            EventType,
                                                            const char*,
                                                            uint32_t);
+extern "C" bool radiant_editing_focused_caret_rect(struct UiContext*,
+                                                   float*,
+                                                   float*,
+                                                   float*,
+                                                   float*);
 
 View* focus_get(DocState*);
 bool  tc_is_text_control(DomElement*);
@@ -64,6 +69,24 @@ bool ime_dispatch_editing(EventType event_type, const char* text, uint32_t caret
     return g_ime_uicon &&
         radiant_dispatch_editing_composition_event(g_ime_uicon, event_type,
                                                    text, caret);
+}
+
+void ime_update_candidate_window(HIMC himc) {
+    if (!himc || !g_ime_uicon) return;
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+    if (!radiant_editing_focused_caret_rect(g_ime_uicon, &x, &y, &w, &h)) {
+        return;
+    }
+    CANDIDATEFORM form;
+    memset(&form, 0, sizeof(form));
+    form.dwIndex = 0;
+    form.dwStyle = CFS_CANDIDATEPOS;
+    form.ptCurrentPos.x = (LONG)x;
+    form.ptCurrentPos.y = (LONG)(y + h);
+    ImmSetCandidateWindow(himc, &form);
 }
 
 // Read GCS_COMPSTR or GCS_RESULTSTR as UTF-8. Returns mem_alloc'd buffer
@@ -109,6 +132,7 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_IME_COMPOSITION: {
             HIMC himc = ImmGetContext(hwnd);
             if (!himc) break;
+            ime_update_candidate_window(himc);
             if (lp & GCS_RESULTSTR) {
                 uint32_t len = 0;
                 char* u8 = ime_read_string(himc, GCS_RESULTSTR, &len);

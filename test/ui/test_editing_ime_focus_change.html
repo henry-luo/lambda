@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Editing IME focus change</title>
+  <style>
+    body { font: 16px sans-serif; padding: 24px; }
+    input, [contenteditable] {
+      display: block;
+      margin: 12px 0;
+      padding: 8px;
+      width: 360px;
+      box-sizing: border-box;
+    }
+    [contenteditable] { min-height: 38px; border: 1px solid #888; }
+    .log { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <input id="field" value="">
+  <input id="other" value="">
+  <div id="rich" contenteditable="true" tabindex="0">rich</div>
+  <div id="formLog" class="log"></div>
+  <div id="richLog" class="log"></div>
+  <script>
+    function attach(target, log) {
+      var events = [];
+      function push(value) {
+        events.push(value);
+      }
+      function flush() {
+        log.textContent = events.join('|');
+      }
+      target.addEventListener('compositionstart', function(event) {
+        push('compositionstart:' + (event.data || ''));
+      });
+      target.addEventListener('compositionupdate', function(event) {
+        push('compositionupdate:' + (event.data || ''));
+      });
+      target.addEventListener('compositionend', function(event) {
+        push('compositionend:' + (event.data || ''));
+      });
+      target.addEventListener('beforeinput', function(event) {
+        push('beforeinput:' + event.inputType + ':' + (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+      });
+      target.addEventListener('input', function(event) {
+        push('input:' + event.inputType + ':' + (event.data || '') + ':' + (event.isComposing ? '1' : '0'));
+        if (!event.isComposing) {
+          flush();
+        }
+      });
+    }
+    attach(document.getElementById('field'), document.getElementById('formLog'));
+    attach(document.getElementById('rich'), document.getElementById('richLog'));
+  </script>
+</body>
+</html>

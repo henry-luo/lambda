@@ -796,6 +796,16 @@ void radiant_state_reset(DocState* state) {
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
     state->editing.composing = false;
+    state->editing.composition.active = false;
+    editing_surface_clear(&state->editing.composition.surface);
+    state->editing.composition.anchor_view = NULL;
+    state->editing.composition.anchor_offset = 0;
+    state->editing.composition.preedit_len = 0;
+    state->editing.composition.commit_len = 0;
+    state->editing.composition.caret = 0;
+    state->editing.composition.update_count = 0;
+    state->editing.composition.committed = false;
+    state->editing.composition.canceled = false;
     state->editing.autoscroll.active = false;
     state->editing.autoscroll.surface = NULL;
     state->editing.autoscroll.pointer_x = 0.0f;
@@ -824,18 +834,32 @@ void radiant_state_reset(DocState* state) {
 void editing_interaction_set_active_surface(DocState* state,
                                             const EditingSurface* surface) {
     if (!state) return;
+    if (state->editing.composition.active) {
+        if (!surface || surface->kind == EDIT_SURFACE_NONE) return;
+        bool same_composition_surface =
+            state->editing.composition.surface.kind == surface->kind &&
+            state->editing.composition.surface.owner == surface->owner &&
+            state->editing.composition.surface.view == surface->view;
+        if (!same_composition_surface) return;
+    }
     if (surface && surface->kind != EDIT_SURFACE_NONE) {
         bool same_surface = state->editing.has_active_surface &&
             state->editing.active_surface.kind == surface->kind &&
             state->editing.active_surface.owner == surface->owner &&
             state->editing.active_surface.view == surface->view;
-        if (!same_surface) state->editing.composing = false;
+        if (!same_surface) {
+            state->editing.composing = false;
+            state->editing.composition.active = false;
+            editing_surface_clear(&state->editing.composition.surface);
+        }
         state->editing.active_surface = *surface;
         state->editing.has_active_surface = true;
     } else {
         editing_surface_clear(&state->editing.active_surface);
         state->editing.has_active_surface = false;
         state->editing.composing = false;
+        state->editing.composition.active = false;
+        editing_surface_clear(&state->editing.composition.surface);
     }
 }
 
@@ -888,6 +912,65 @@ void editing_interaction_set_composing(DocState* state,
     state->editing.composing = composing;
 }
 
+void editing_interaction_begin_composition(DocState* state,
+                                           const EditingSurface* surface,
+                                           View* anchor_view,
+                                           int anchor_offset) {
+    if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
+    editing_interaction_set_active_surface(state, surface);
+    state->editing.composing = true;
+    state->editing.composition.active = true;
+    state->editing.composition.surface = *surface;
+    state->editing.composition.anchor_view = anchor_view;
+    state->editing.composition.anchor_offset = anchor_offset;
+    state->editing.composition.preedit_len = 0;
+    state->editing.composition.commit_len = 0;
+    state->editing.composition.caret = 0;
+    state->editing.composition.update_count = 0;
+    state->editing.composition.committed = false;
+    state->editing.composition.canceled = false;
+}
+
+void editing_interaction_update_composition(DocState* state,
+                                            const EditingSurface* surface,
+                                            uint32_t preedit_len,
+                                            uint32_t caret) {
+    if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
+    if (!state->editing.composition.active) {
+        View* anchor_view = surface->view;
+        int anchor_offset = 0;
+        editing_interaction_begin_composition(state, surface,
+                                              anchor_view, anchor_offset);
+    } else {
+        editing_interaction_set_active_surface(state, surface);
+        state->editing.composition.surface = *surface;
+    }
+    state->editing.composing = true;
+    state->editing.composition.preedit_len = preedit_len;
+    state->editing.composition.caret = caret;
+    state->editing.composition.update_count++;
+    state->editing.composition.committed = false;
+    state->editing.composition.canceled = false;
+}
+
+void editing_interaction_end_composition(DocState* state,
+                                         const EditingSurface* surface,
+                                         uint32_t commit_len,
+                                         bool canceled) {
+    if (!state) return;
+    if (surface && surface->kind != EDIT_SURFACE_NONE) {
+        editing_interaction_set_active_surface(state, surface);
+        state->editing.composition.surface = *surface;
+    }
+    state->editing.composing = false;
+    state->editing.composition.active = false;
+    state->editing.composition.commit_len = commit_len;
+    state->editing.composition.preedit_len = 0;
+    state->editing.composition.caret = 0;
+    state->editing.composition.committed = !canceled && commit_len > 0;
+    state->editing.composition.canceled = canceled;
+}
+
 void editing_interaction_sync_projection(DocState* state) {
     if (!state) return;
 
@@ -908,6 +991,14 @@ void editing_interaction_sync_projection(DocState* state) {
         state->editing.drag_anchor_view = NULL;
         state->editing.drag_anchor_offset = 0;
         state->editing.drag_mode = EDITING_DRAG_CHAR;
+    }
+
+    if (state->editing.composition.active &&
+        state->editing.composition.surface.kind != EDIT_SURFACE_NONE) {
+        state->editing.active_surface = state->editing.composition.surface;
+        state->editing.has_active_surface = true;
+        state->editing.composing = true;
+        return;
     }
 
     EditingSurface surface;
