@@ -135,6 +135,12 @@ void         te_history_free(EditHistory* h);
 // entry (deduplication). Drops the oldest when full.
 void te_history_push(DomElement* elem);
 
+// Set an ambient inputType label for history pushes performed inside a
+// unified editing transaction. Returns the previous label so callers can
+// restore it after the mutation.
+const char* te_history_input_type_set(const char* input_type);
+void te_history_input_type_restore(const char* previous);
+
 // Move cursor backward/forward through the ring; restores value + selection.
 // Returns false if no further undo/redo is available.
 bool te_history_undo(DomElement* elem);

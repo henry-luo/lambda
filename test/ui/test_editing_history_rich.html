@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Rich editing history intent</title>
+  <style>
+    body {
+      font: 16px sans-serif;
+      margin: 24px;
+    }
+    #host {
+      border: 1px solid #777;
+      padding: 12px;
+      width: 420px;
+      min-height: 48px;
+    }
+    #log {
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="host" contenteditable="true">alpha beta gamma</div>
+  <div id="log">none</div>
+  <script>
+    var host = document.getElementById('host');
+    var log = document.getElementById('log');
+    host.addEventListener('beforeinput', function(event) {
+      if (event.inputType === 'historyUndo' ||
+          event.inputType === 'historyRedo') {
+        log.textContent = event.inputType;
+        event.preventDefault();
+      }
+    });
+  </script>
+</body>
+</html>

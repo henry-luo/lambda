@@ -19,7 +19,7 @@
 
 extern bool is_view_focusable(View* view);
 
-#define STATE_MACHINE_RECORD_BUFSZ 2048
+#define STATE_MACHINE_RECORD_BUFSZ 4096
 
 static void transition_enter(DocState* state) {
     if (state) state->transition_depth++;
@@ -55,6 +55,7 @@ bool focus_transition(DocState* state,
             return false;
     }
     transition_leave(state);
+    editing_interaction_sync_projection(state);
     radiant_state_assert_valid(state, "focus_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -86,6 +87,7 @@ bool caret_transition(DocState* state,
     }
     transition_leave(state);
     state_machine_sync_selection_projection(state);
+    editing_interaction_sync_projection(state);
     radiant_state_assert_valid(state, "caret_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -100,7 +102,9 @@ bool selection_transition(DocState* state,
         case SELECTION_TRANSITION_START_POINTER_SELECTION:
             if (!args) { transition_leave(state); return false; }
             selection_start(state, args->target, args->focus_offset);
-            if (state->selection) state->selection->is_selecting = true;
+            if (state->selection && state->editing.drag_anchor_view) {
+                state->selection->is_selecting = true;
+            }
             break;
         case SELECTION_TRANSITION_END_POINTER_SELECTION:
             if (state->selection) state->selection->is_selecting = false;
@@ -135,6 +139,7 @@ bool selection_transition(DocState* state,
     }
     transition_leave(state);
     state_machine_sync_selection_projection(state);
+    editing_interaction_sync_projection(state);
     radiant_state_assert_valid(state, "selection_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -539,6 +544,96 @@ static void validate_drag_invariants(DocState* state,
     }
 }
 
+static bool editing_surface_matches(const EditingSurface* a,
+                                    const EditingSurface* b) {
+    if (!a || !b) return false;
+    return a->kind == b->kind &&
+        a->mode == b->mode &&
+        a->owner == b->owner &&
+        a->view == b->view;
+}
+
+static void validate_editing_interaction_invariants(DocState* state,
+                                                    StateValidationReport* report) {
+    if (!state) return;
+
+    const EditingInteractionState* editing = &state->editing;
+    if (!editing->has_active_surface &&
+        editing->active_surface.kind != EDIT_SURFACE_NONE) {
+        report_fail(report, "inactive editing surface has stale kind");
+    }
+    if (!editing->has_active_surface && editing->composing) {
+        report_fail(report, "editing composition has no active surface");
+    }
+
+    if (editing->has_active_surface) {
+        const EditingSurface* surface = &editing->active_surface;
+        if (surface->kind == EDIT_SURFACE_NONE) {
+            report_fail(report, "active editing surface has none kind");
+        }
+        if (!surface->owner) {
+            report_fail(report, "active editing surface has no owner");
+        } else if (!view_has_document_root(static_cast<View*>(surface->owner))) {
+            report_fail(report, "active editing surface owner is detached");
+        }
+        if (!surface->view) {
+            report_fail(report, "active editing surface has no target");
+        } else if (!view_has_document_root(surface->view)) {
+            report_fail(report, "active editing surface target is detached");
+        } else {
+            EditingSurface resolved;
+            if (!editing_surface_from_target(surface->view, &resolved)) {
+                report_fail(report, "active editing surface no longer resolves");
+            } else if (!editing_surface_matches(surface, &resolved)) {
+                report_fail(report, "active editing surface projection is stale");
+            }
+        }
+    }
+
+    if (editing->autoscroll.active != state->editing_autoscroll_active ||
+        editing->autoscroll.surface != state->editing_autoscroll_surface ||
+        editing->autoscroll.pointer_x != state->editing_autoscroll_pointer_x ||
+        editing->autoscroll.pointer_y != state->editing_autoscroll_pointer_y ||
+        editing->autoscroll.tick_last_time != state->editing_tick_last_time ||
+        editing->autoscroll.caret_blink_elapsed != state->editing_caret_blink_elapsed) {
+        report_fail(report, "editing autoscroll projection is stale");
+    }
+    if (editing->autoscroll.active && !editing->autoscroll.surface) {
+        report_fail(report, "active editing autoscroll has no surface");
+    }
+    if (editing->autoscroll.surface &&
+        !view_has_document_root(editing->autoscroll.surface)) {
+        report_fail(report, "editing autoscroll surface is detached");
+    }
+    if (!editing->autoscroll.active &&
+        (editing->autoscroll.pointer_x != 0.0f ||
+         editing->autoscroll.pointer_y != 0.0f)) {
+        report_fail(report, "inactive editing autoscroll has stale pointer");
+    }
+
+    if (editing->pointer_selecting != selection_is_pointer_range_active(state)) {
+        report_fail(report, "editing pointer-selection projection is stale");
+    }
+    if (editing->pointer_selecting && !editing->drag_anchor_view) {
+        report_fail(report, "active editing pointer selection has no anchor");
+    }
+    if (!editing->pointer_selecting && !state->text_selection_press_in_range &&
+        editing->drag_anchor_view) {
+        report_fail(report, "inactive editing pointer selection has stale anchor");
+    }
+    if (editing->drag_anchor_view &&
+        !view_has_document_root(editing->drag_anchor_view)) {
+        report_fail(report, "editing drag anchor is detached");
+    }
+    if (editing->drag_anchor_offset < 0) {
+        report_fail(report, "editing drag anchor offset is negative");
+    }
+    if (editing->drag_anchor_view &&
+        (uint32_t)editing->drag_anchor_offset > legacy_view_offset_limit(editing->drag_anchor_view)) {
+        report_fail(report, "editing drag anchor offset exceeds target length");
+    }
+}
+
 static void validate_selection_invariants(DocState* state,
                                           StateValidationReport* report) {
     if (!state || !state->dom_selection) return;
@@ -722,6 +817,7 @@ bool radiant_state_validate_interaction(DocState* state,
     validate_hover_invariants(state, report);
     validate_active_invariants(state, report);
     validate_drag_invariants(state, report);
+    validate_editing_interaction_invariants(state, report);
     validate_view_state_registry(state, report);
 
     if (state->caret) {
@@ -879,6 +975,69 @@ static void write_optional_view_ref(JsonWriter* w, const char* key, View* view) 
     event_state_log_write_node_ref(w, key, (const DomNode*)view);
 }
 
+static const char* editing_drag_mode_name(EditingDragMode mode) {
+    switch (mode) {
+        case EDITING_DRAG_CHAR: return "char";
+        case EDITING_DRAG_WORD: return "word";
+        case EDITING_DRAG_LINE: return "line";
+        default: return "unknown";
+    }
+}
+
+static void write_editing_surface_ref(JsonWriter* w,
+                                      const EditingSurface* surface) {
+    if (!surface || surface->kind == EDIT_SURFACE_NONE) {
+        jw_null(w);
+        return;
+    }
+    jw_obj_begin(w);
+        jw_kv_str(w, "kind", editing_surface_kind_name(surface->kind));
+        jw_kv_str(w, "mode", editing_mode_name(surface->mode));
+        event_state_log_write_node_ref(w, "owner",
+            (const DomNode*)surface->owner);
+        event_state_log_write_node_ref(w, "target",
+            (const DomNode*)surface->view);
+    jw_obj_end(w);
+}
+
+static void write_editing_interaction_snapshot(JsonWriter* w,
+                                               const DocState* state) {
+    jw_key(w, "editing");
+    jw_obj_begin(w);
+        const EditingInteractionState* editing = &state->editing;
+        jw_kv_bool(w, "has_active_surface", editing->has_active_surface);
+        jw_key(w, "active_surface");
+        write_editing_surface_ref(w, editing->has_active_surface
+            ? &editing->active_surface : NULL);
+        jw_kv_bool(w, "pointer_selecting", editing->pointer_selecting);
+        jw_kv_str(w, "drag_mode",
+                  editing_drag_mode_name(editing->drag_mode));
+        jw_key(w, "drag_anchor");
+        if (editing->drag_anchor_view) {
+            jw_obj_begin(w);
+                write_optional_view_ref(w, "target",
+                                        editing->drag_anchor_view);
+                jw_kv_int(w, "offset", editing->drag_anchor_offset);
+            jw_obj_end(w);
+        } else {
+            jw_null(w);
+        }
+        jw_kv_bool(w, "composing", editing->composing);
+        jw_key(w, "autoscroll");
+        jw_obj_begin(w);
+            jw_kv_bool(w, "active", editing->autoscroll.active);
+            write_optional_view_ref(w, "surface",
+                                    editing->autoscroll.surface);
+            jw_kv_double(w, "pointer_x", editing->autoscroll.pointer_x);
+            jw_kv_double(w, "pointer_y", editing->autoscroll.pointer_y);
+            jw_kv_double(w, "tick_last_time",
+                         editing->autoscroll.tick_last_time);
+            jw_kv_double(w, "caret_blink_elapsed",
+                         editing->autoscroll.caret_blink_elapsed);
+        jw_obj_end(w);
+    jw_obj_end(w);
+}
+
 static void emit_state_snapshot(DocState* state,
                                 EventStateLog* log,
                                 uint64_t cascade_id) {
@@ -961,6 +1120,8 @@ static void emit_state_snapshot(DocState* state,
                 jw_kv_bool(&w, "needs_reflow", state->needs_reflow);
                 jw_kv_bool(&w, "needs_repaint", state->needs_repaint);
             jw_obj_end(&w);
+
+            write_editing_interaction_snapshot(&w, state);
         }
     jw_obj_end(&w);
     event_state_log_finish_record(log, &w);

@@ -36,10 +36,16 @@ typedef void (*EditingAutoscrollLogFn)(DocState* state,
                                        float velocity_y,
                                        void* userdata);
 
+typedef bool (*EditingHistoryDispatchFn)(EventContext* evcon,
+                                         const EditingSurface* surface,
+                                         InputIntentType input_type,
+                                         void* userdata);
+
 struct EditingControllerHooks {
     EditingSelectionSnapshotFn selection_snapshot;
     EditingFormSelectionExtendFn form_selection_extend;
     EditingAutoscrollLogFn autoscroll_log;
+    EditingHistoryDispatchFn history_dispatch;
     void* user;
 };
 
@@ -47,6 +53,27 @@ bool editing_controller_handle_rich_navigation(EventContext* evcon,
                                                DocState* state,
                                                const KeyEvent* key_event,
                                                const EditingControllerHooks* hooks);
+
+bool editing_controller_dispatch_history(EventContext* evcon,
+                                         const EditingSurface* surface,
+                                         InputIntentType input_type,
+                                         const EditingControllerHooks* hooks);
+
+bool editing_controller_undo(EventContext* evcon,
+                             const EditingSurface* surface,
+                             const EditingControllerHooks* hooks);
+
+bool editing_controller_redo(EventContext* evcon,
+                             const EditingSurface* surface,
+                             const EditingControllerHooks* hooks);
+
+bool editing_undo(EventContext* evcon,
+                  const EditingSurface* surface,
+                  const EditingControllerHooks* hooks);
+
+bool editing_redo(EventContext* evcon,
+                  const EditingSurface* surface,
+                  const EditingControllerHooks* hooks);
 
 bool editing_controller_drag_autoscroll(EventContext* evcon,
                                         DocState* state,
