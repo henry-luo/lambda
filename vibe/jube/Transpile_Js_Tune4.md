@@ -473,6 +473,84 @@ slower-test total came from tests that regressed by less than `50ms` each
 (`0-10ms`: `61.954s`; `10-50ms`: `51.528s`). This pattern points to
 system-wide run noise or machine load rather than a single Tune4 runtime path.
 
+### T4-P1 URI Codec Gate Check
+
+The URI focused manifest was generated from the four URI builtin directories:
+`encodeURI`, `encodeURIComponent`, `decodeURI`, and `decodeURIComponent`
+(`173` tests). The existing `LAMBDA_JS_URI_FAST` gate was measured with a
+single worker:
+
+| Gate | Focused result | Wall time | User time | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `LAMBDA_JS_URI_FAST=1` | `173 / 173` passed | `16.67s` | `12.72s` | default |
+| `LAMBDA_JS_URI_FAST=0` | `173 / 173` passed | `16.87s` | `12.72s` | fallback |
+
+The gate is effectively neutral for the focused subset. The remaining URI time
+is concentrated in the two exhaustive 4-byte decode tests:
+`built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js` and
+`built_ins_decodeURI_S15_1_3_1_A2_5_T1_js`. Those tests already hit earlier
+generic/test262-harness optimizations: cached `decimalToPercentHexString`
+results, percent-concat code-point metadata, and the lowered
+`decodeURI(...) === String.fromCharCode(...)` comparison helper. The residual
+cost is primarily the million-iteration JS loop and temporary string creation,
+so no additional URI runtime change is accepted in this pass without a cleaner
+semantic guard.
+
+### T4-P0 Unicode Large-Source MIR Interpreter Policy
+
+Added optional per-test JS MIR phase timing for the JS262 runner. When enabled
+with:
+
+```text
+LAMBDA_JS_PHASE_TIMING=1
+```
+
+the runner writes `temp/_t262_phase_timing_o<opt>.tsv` with parse, AST, early
+error, import, MIR generation, link, execute, cleanup, and total phase timings.
+
+The Unicode identifier manifest contains the `language/identifiers` Unicode
+start/part tests (`121` tests). Phase timing showed the dominant cost was not
+the parser or scanner. With the large-source policy disabled, the focused subset
+passed `121 / 121` but spent most time in MIR link/code generation:
+
+| Mode | Result | Summed elapsed | Link phase | Execute phase | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `LAMBDA_JS_LARGE_INTERP=0` | `121 / 121` | `12.779s` | `9.215s` | `1.656s` | native MIR codegen |
+| default 15KB policy | `121 / 121` | `3.879s` | `0.461s` | `1.620s` | large sources use MIR interpreter at opt `0` |
+| all `--mir-interp` probe | `121 / 121` | `3.221s` | `0.106s` | `1.444s` | diagnostic only |
+
+The default policy improved the focused subset by `8.900s` (`-69.65%`) versus
+the disabled gate. Link time dropped by `8.754s`, so the win is attributable to
+skipping native MIR code generation for generated, short-lived, large JS files.
+The execution phase was effectively neutral in this subset.
+
+Standalone profiling matched the batch diagnosis. For
+`language_identifiers_start_unicode_9_0_0_js`, native codegen spent `827ms` in
+link and `62ms` executing (`985ms` total), while MIR interpreter mode spent
+`7ms` in link and `67ms` executing (`285ms` total). That confirms the cost is
+intrinsic to native MIR generation for this source shape, not only accumulated
+batch state.
+
+The accepted tuning is generic and source-shape based: when JS is already
+compiled at opt level `0` and the source is at least `15000` bytes, initialize
+that script's MIR context in interpreter mode and link it through
+`MIR_set_interp_interface`. It does not match JS262 filenames or constants. The
+policy can be disabled or threshold-tuned for A/B runs:
+
+```text
+LAMBDA_JS_LARGE_INTERP=0
+LAMBDA_JS_LARGE_INTERP_BYTES=<bytes>
+```
+
+`make build-test` passed after the instrumentation and policy change.
+
+Full release JS262 verification also passed after enabling the policy:
+
+- `39258 / 39258` fully passing;
+- `0` non-fully-passing, `0` failed, `0` regressions versus baseline;
+- summed per-test time `407.320s`;
+- wall time `132.0s`.
+
 ## Proposed Tune4 Order
 
 1. Add Unicode phase instrumentation if cheap, so future parser/compiler work is

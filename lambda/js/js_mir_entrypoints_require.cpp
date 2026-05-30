@@ -1,6 +1,46 @@
 #include "js_mir_internal.hpp"
+#ifndef _WIN32
+#include <sys/time.h>
+#else
+#include <windows.h>
+#endif
 
 int js_dynamic_import_suppress_module_drain = 0;
+
+static JsMirPhaseTiming g_last_js_mir_phase_timing;
+
+static long js_mir_phase_now_us(void) {
+#ifndef _WIN32
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec * 1000000L + (long)tv.tv_usec;
+#else
+    return (long)GetTickCount64() * 1000L;
+#endif
+}
+
+extern "C" void js_mir_reset_last_phase_timing(void) {
+    memset(&g_last_js_mir_phase_timing, 0, sizeof(g_last_js_mir_phase_timing));
+}
+
+extern "C" void js_mir_get_last_phase_timing(JsMirPhaseTiming* out) {
+    if (!out) return;
+    *out = g_last_js_mir_phase_timing;
+}
+
+static bool js_mir_large_source_interp_enabled(void) {
+    const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
+    return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
+}
+
+static size_t js_mir_large_source_interp_threshold(void) {
+    const char* value = getenv("LAMBDA_JS_LARGE_INTERP_BYTES");
+    if (!value || !value[0]) return 15000;
+    char* end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || parsed <= 0) return 15000;
+    return (size_t)parsed;
+}
 
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -290,6 +330,8 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
 }
 
 Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
+    js_mir_reset_last_phase_timing();
+    long phase_total_start = js_mir_phase_now_us();
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     log_mem_stage("js-core: enter");
 
@@ -364,31 +406,37 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
 
     // Parse JavaScript source
+    long phase_start = js_mir_phase_now_us();
     if (!js_transpiler_parse(tp, js_source, js_source_len)) {
         log_error("js-mir: parse failed");
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ts_parsed");
 
     TSNode root = ts_tree_root_node(tp->tree);
 
     // Build JavaScript AST
+    phase_start = js_mir_phase_now_us();
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_built");
 
     // Run early error detection (static semantic validation)
+    phase_start = js_mir_phase_now_us();
     int early_errors = js_check_early_errors(tp, js_ast);
     if (early_errors > 0) {
         log_error("js-mir: %d early error(s) detected", early_errors);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
     // Set up evaluation context EARLY — needed before module loading
     // so that heap-allocated module objects (namespaces, strings) persist.
@@ -428,6 +476,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // then executes serially.  jm_load_imports() below will skip already-loaded modules.
 #ifndef _WIN32
     // fast-path: skip import precompile for scripts with no imports
+    phase_start = js_mir_phase_now_us();
     if (js_source_contains_ascii(js_source, js_source_len, "import ") ||
         js_source_contains_ascii(js_source, js_source_len, "import{")) {
         jm_precompile_js_imports(runtime, js_source, filename);
@@ -437,10 +486,28 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Load imported modules before main compilation (recursive)
     // After precompile, all modules with >=2 imports are already loaded — this handles
     // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
+#ifdef _WIN32
+    phase_start = js_mir_phase_now_us();
+#endif
     jm_load_imports(runtime, js_ast, filename);
+    g_last_js_mir_phase_timing.imports_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: imports_loaded");
 
+    bool use_mir_interp_for_script = g_mir_interp_mode != 0;
+    bool auto_interp_for_large_source = false;
+    int saved_mir_interp_mode = g_mir_interp_mode;
+    if (!use_mir_interp_for_script && g_js_mir_optimize_level == 0 &&
+        js_mir_large_source_interp_enabled() &&
+        js_source_len >= js_mir_large_source_interp_threshold()) {
+        g_mir_interp_mode = 1;
+        use_mir_interp_for_script = true;
+        auto_interp_for_large_source = true;
+        log_info("js-mir: large source (%zu bytes) uses MIR interpreter at opt=0", js_source_len);
+    }
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
+    if (auto_interp_for_large_source) {
+        g_mir_interp_mode = saved_mir_interp_mode;
+    }
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
         js_transpiler_destroy(tp);
@@ -473,7 +540,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     mt->module = MIR_new_module(ctx, "js_script");
 
     // Transpile AST to MIR
+    phase_start = js_mir_phase_now_us();
     transpile_js_mir_ast(mt, js_ast);
+    g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_to_mir");
 
 #ifndef NDEBUG
@@ -558,7 +627,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             effective_opt = 0;
         }
     }
-    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    phase_start = js_mir_phase_now_us();
+    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: mir_linked");
     // Restore opt level if we changed it
     if (effective_opt != g_js_mir_optimize_level) {
@@ -621,6 +692,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
 
     // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
+    phase_start = js_mir_phase_now_us();
     Item result;
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
@@ -638,6 +710,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     } else {
         result = js_main((Context*)context);
     }
+    g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
     log_mem_stage("js-core: js_main_done");
 
@@ -706,6 +779,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     context = old_context;
 
     // Cleanup
+    phase_start = js_mir_phase_now_us();
     jm_destroy_mir_transpiler(mt);
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
@@ -757,6 +831,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     js_transpiler_destroy(tp);
 
     if (injected_source) mem_free(injected_source);
+    g_last_js_mir_phase_timing.cleanup_us = js_mir_phase_now_us() - phase_start;
+    g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;
 
     log_debug("js-mir: transpilation completed");
     return final_result;

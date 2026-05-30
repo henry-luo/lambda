@@ -3545,6 +3545,7 @@ int main(int argc, char *argv[]) {
             size_t rss_before = get_rss_bytes();
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
+            js_mir_reset_last_phase_timing();
 
             if (!inline_source) {
                 if (!file_exists(script_path)) {
@@ -3671,7 +3672,13 @@ int main(int argc, char *argv[]) {
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
             size_t rss_after = get_rss_bytes();
-            printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
+            JsMirPhaseTiming phase_timing;
+            js_mir_get_last_phase_timing(&phase_timing);
+            printf("\x01" "BATCH_END %d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
+                   result, elapsed_us, rss_before, rss_after,
+                   phase_timing.parse_us, phase_timing.ast_us, phase_timing.early_us,
+                   phase_timing.imports_us, phase_timing.mir_us, phase_timing.link_us,
+                   phase_timing.execute_us, phase_timing.cleanup_us, phase_timing.total_us);
             fflush(stdout);
             batch_in_test = false;
 
