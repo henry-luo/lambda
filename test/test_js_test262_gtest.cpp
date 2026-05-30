@@ -125,8 +125,8 @@ static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
 static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
-// Features above ES2021 — skip tests requiring these.
-// Target: ES2021 compliance. All features ≤ES2021 are in scope, except
+// Features above ES2023 — skip tests requiring these.
+// Target: ES2023 compliance. All features ≤ES2023 are in scope, except
 // intentional product-scope exceptions listed separately below.
 // Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> INTENTIONAL_ES2021_EXCEPTIONS = {
@@ -152,8 +152,8 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // "class-static-fields-private",             // SUPPORTED
     // "class-static-methods-private",            // SUPPORTED
     // "class-static-block",                      // SUPPORTED
-    "top-level-await",                            // Module-level await
-    "regexp-match-indices",                       // /d flag, .indices
+    // "top-level-await",                         // Module-level await - SUPPORTED
+    // "regexp-match-indices",                    // /d flag, .indices - SUPPORTED
     // "Object.hasOwn",                            // SUPPORTED
     // "Array.prototype.at",                       // SUPPORTED
     // "String.prototype.at",                      // SUPPORTED
@@ -852,14 +852,20 @@ static bool is_dynamic_import_script_test(const std::string& test_path, const Te
 }
 
 static bool is_es2021_raw_test(const std::string& test_path, const Test262Metadata& meta) {
-    if (!meta.is_raw || meta.is_module) return false;
-    if (test_path.find("/language/comments/hashbang/") != std::string::npos) return false;
+    if (!meta.is_raw) return false;
+    if (test_path.find("/language/comments/hashbang/") != std::string::npos) return true;
+    if (meta.is_module) return false;
     return test_path.find("/language/directive-prologue/") != std::string::npos ||
         test_path.find("/annexB/language/comments/single-line-html-close-first-line-") != std::string::npos;
 }
 
 static bool is_es2021_module_test(const std::string& test_path, const Test262Metadata& meta) {
     if (!meta.is_module) return false;
+    if (test_path.find("/language/comments/hashbang/module.js") != std::string::npos) return true;
+    if (test_path.find("/language/expressions/class/elements/class-name-static-initializer-default-export.js") != std::string::npos) return true;
+    for (auto& f : meta.features) {
+        if (f == "top-level-await") return true;
+    }
     if (test_path.find("/language/expressions/dynamic-import/") == std::string::npos) return false;
     if (test_path.find("/language/expressions/dynamic-import/import-attributes/") != std::string::npos) return false;
     if (test_path.find("/language/expressions/dynamic-import/import-defer/") != std::string::npos) return false;
@@ -1051,6 +1057,7 @@ static std::string assemble_test_source(
 static std::string assemble_module_test_source(const Test262Prepared& p) {
     std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
+    if (p.is_raw) return source;
 
     std::string combined;
     combined.reserve(g_harness_sta.size() + g_harness_assert.size() + source.size() + 8192);
@@ -1932,7 +1939,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
     fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
             get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
-    fprintf(f, "# Scope: ES2021 (skip ES2022+ features)\n");
+    fprintf(f, "# Scope: ES2023 (skip ES2024+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
     fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",
             total_tests, skipped, batched, passing.size(), failed);

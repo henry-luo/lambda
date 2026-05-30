@@ -2479,6 +2479,15 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
         node->declaration = build_js_expression(tp, value_node);
     }
 
+    if (node->is_default && node->declaration &&
+        (node->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+         node->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+        JsClassNode* cls = (JsClassNode*)node->declaration;
+        if (!cls->name) {
+            cls->name = name_pool_create_len(tp->name_pool, "default", 7);
+        }
+    }
+
     // Get source (for re-exports: export { a } from 'module')
     TSNode source_node = ts_node_child_by_field_name(export_node, "source", strlen("source"));
     if (!ts_node_is_null(source_node)) {

@@ -7490,6 +7490,7 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0);
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit);
 static Item js_string_matchall_get_flags(Item rx);
 static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all);
+static bool js_regex_internal_has_indices(Item obj);
 // v18k: Forward declarations for Object/Array/Number static methods (js_globals.cpp)
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 
@@ -10494,7 +10495,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item src = js_map_get_fast(this_val.map, "source", 6, &own);
             return own ? src : (Item){.item = s2it(heap_create_name("(?:)", 4))};
         }
-        // Boolean flag getters — read from own data properties
+        // Boolean flag getters - read from own data properties, except /d which
+        // is stored only in the internal regex data slot.
         {
             const char* prop = NULL;
             int prop_len = 0;
@@ -10505,7 +10507,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 case JS_BUILTIN_REGEXP_GET_DOTALL:     prop = "dotAll";     prop_len = 6; break;
                 case JS_BUILTIN_REGEXP_GET_UNICODE:    prop = "unicode";    prop_len = 7; break;
                 case JS_BUILTIN_REGEXP_GET_STICKY:     prop = "sticky";     prop_len = 6; break;
-                case JS_BUILTIN_REGEXP_GET_HASINDICES: prop = "hasIndices"; prop_len = 10; break;
+                case JS_BUILTIN_REGEXP_GET_HASINDICES:
+                    return (Item){.item = b2it(js_regex_internal_has_indices(this_val) ? BOOL_TRUE : BOOL_FALSE)};
                 default: return make_js_undefined();
             }
             bool own = false;
@@ -11944,6 +11947,7 @@ struct JsRegexData {
     bool ignore_case;         // 'i' flag
     bool multiline;           // 'm' flag
     bool sticky;              // 'y' flag (v46)
+    bool has_indices;         // 'd' flag
     bool unicode;             // 'u' or 'v' flag: indices are reported as UTF-16 code units
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
@@ -11959,6 +11963,7 @@ struct JsRegexCacheEntry {
     const char* canonical_flags; // heap-allocated canonical flags
     int canonical_flags_len;
     bool dot_all;
+    bool has_indices;
     bool has_unicode;
 };
 
@@ -12966,6 +12971,7 @@ static bool js_regex_match_special_property(int special_kind, const char* input,
 struct Re2PermanentEntry {
     re2::RE2* re2;              // new-allocated, never freed
     bool global, ignore_case, multiline, sticky, dot_all, has_unicode;
+    bool has_indices;
     char* canonical_flags;      // new-allocated, never freed
     int canonical_flags_len;
     int source_len;             // length check for collision detection
@@ -13490,6 +13496,7 @@ static void js_regex_put_fresh(Item obj, const char* key, int key_len, Item valu
 static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     JsRegexData* rd = ce.rd;
     rd->unicode = ce.has_unicode;
+    rd->has_indices = ce.has_indices;
     Item regex_obj = js_new_object();
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
@@ -13541,11 +13548,16 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
 static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
                                              char* canonical_flags,
                                              int* canonical_flags_len,
+                                             bool* has_indices,
                                              bool* has_unicode) {
+    bool seen_d = false;
     bool seen_u = false;
     bool seen_v = false;
     for (int i = 0; i < flags_len; i++) {
-        if (flags[i] == 'u') {
+        if (flags[i] == 'd') {
+            if (seen_d) return false;
+            seen_d = true;
+        } else if (flags[i] == 'u') {
             if (seen_u) return false;
             seen_u = true;
         } else if (flags[i] == 'v') {
@@ -13557,10 +13569,12 @@ static bool js_regex_parse_simple_fast_flags(const char* flags, int flags_len,
     }
     if (seen_u && seen_v) return false;
     int len = 0;
+    if (seen_d) canonical_flags[len++] = 'd';
     if (seen_u) canonical_flags[len++] = 'u';
     if (seen_v) canonical_flags[len++] = 'v';
     canonical_flags[len] = '\0';
     *canonical_flags_len = len;
+    *has_indices = seen_d;
     *has_unicode = seen_u || seen_v;
     return true;
 }
@@ -14040,13 +14054,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     if (special_property_kind != 0) {
         char canonical_flags[4];
         int canonical_flags_len = 0;
+        bool has_indices = false;
         bool has_unicode = false;
         if (js_regex_parse_simple_fast_flags(flags, flags_len, canonical_flags,
-                                             &canonical_flags_len, &has_unicode)) {
+                                             &canonical_flags_len, &has_indices, &has_unicode)) {
             JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
             rd->special_property_kind = special_property_kind;
+            rd->has_indices = has_indices;
             JsRegexCacheEntry ce = {rd, pattern, pattern_len, canonical_flags,
-                                    canonical_flags_len, false, has_unicode};
+                                    canonical_flags_len, false, has_indices, has_unicode};
             return js_regex_build_object_from_cache(ce);
         }
     }
@@ -14101,7 +14117,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern = literal_buf;
         rd->literal_pattern_len = literal_len;
         static const char empty_flags[] = "";
-        JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false};
+        JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false, false};
         return js_regex_build_object_from_cache(ce);
     }
 
@@ -14126,8 +14142,10 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 rd->ignore_case = pe.ignore_case;
                 rd->multiline = pe.multiline;
                 rd->sticky = pe.sticky;
+                rd->has_indices = pe.has_indices;
                 rd->unicode = pe.has_unicode;
-                JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len, pe.dot_all, pe.has_unicode};
+                JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len,
+                                        pe.dot_all, pe.has_indices, pe.has_unicode};
                 g_regex_compile_cache[cache_key] = ce;
                 return js_regex_build_object_from_cache(ce);
             }
@@ -14908,6 +14926,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     rd->ignore_case = !opts.case_sensitive();
     rd->multiline = multiline;
     rd->sticky = sticky;
+    rd->has_indices = compile_info.has_indices;
     rd->unicode = has_unicode;
     rd->needs_utf16_subject = needs_utf16_subject;
     rd->literal_fast = literal_fast;
@@ -15009,12 +15028,13 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, flg_buf, flags_len + 1);
         g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
-                                            dot_all, has_unicode, perm_flags, (int)strlen(perm_flags), pattern_len};
+                                            dot_all, has_unicode, compile_info.has_indices, perm_flags,
+                                            (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
     if (special_property_kind == 0) {
         g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
-                                             (int)strlen(flg_buf), dot_all, has_unicode};
+                                             (int)strlen(flg_buf), dot_all, compile_info.has_indices, has_unicode};
     }
     return regex_obj;
 }
@@ -15154,6 +15174,11 @@ static JsRegexData* js_get_regex_data(Item obj) {
     int64_t ptr_val = it2i(rd_item);
     if (ptr_val == 0) return NULL;
     return (JsRegexData*)(uintptr_t)ptr_val;
+}
+
+static bool js_regex_internal_has_indices(Item obj) {
+    JsRegexData* rd = js_get_regex_data(obj);
+    return rd && rd->has_indices;
 }
 
 static bool js_regex_set_lastindex_strict(Item regex, Item li_key, int64_t value);
@@ -15456,6 +15481,101 @@ static int64_t js_regex_advance_string_index_bytes(String* s, int64_t index, boo
     return index + 1;
 }
 
+static int js_regex_match_offset_to_index(const char* input, int input_len,
+                                          const char* match_ptr, int extra_bytes,
+                                          bool code_unit_indices) {
+    int offset = (int)(match_ptr - input) + extra_bytes;
+    if (code_unit_indices) {
+        return (int)js_utf16_index_from_byte(input, input_len, offset);
+    }
+    return offset;
+}
+
+static Item js_regex_make_indices_pair(const char* input, int input_len,
+                                       re2::StringPiece match,
+                                       bool code_unit_indices) {
+    if (!match.data()) return make_js_undefined();
+    Item pair = js_array_new(2);
+    int start = js_regex_match_offset_to_index(input, input_len, match.data(), 0,
+                                               code_unit_indices);
+    int end = js_regex_match_offset_to_index(input, input_len, match.data(),
+                                             (int)match.size(), code_unit_indices);
+    bool prev_skip = js_skip_accessor_dispatch;
+    js_skip_accessor_dispatch = true;
+    js_array_set_int(pair, 0, (Item){.item = i2it(start)});
+    js_array_set_int(pair, 1, (Item){.item = i2it(end)});
+    js_skip_accessor_dispatch = prev_skip;
+    return pair;
+}
+
+static void js_regex_attach_indices(Item result, JsRegexData* rd,
+                                    const char* input, int input_len,
+                                    re2::StringPiece* matches, int num_groups,
+                                    bool code_unit_indices) {
+    if (!rd || !rd->has_indices) return;
+
+    Item indices = js_array_new(num_groups);
+    bool prev_skip = js_skip_accessor_dispatch;
+    js_skip_accessor_dispatch = true;
+    for (int i = 0; i < num_groups; i++) {
+        js_array_set_int(indices, i, js_regex_make_indices_pair(input, input_len,
+            matches[i], code_unit_indices));
+    }
+    js_skip_accessor_dispatch = prev_skip;
+
+    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
+    Item groups_obj = make_js_undefined();
+    if (rd->bt) {
+        int nc = js_bt_named_count(rd->bt);
+        if (nc > 0) {
+            groups_obj = js_object_create(ItemNull);
+            for (int gi = 0; gi < nc; gi++) {
+                int nl = 0;
+                const char* nm = js_bt_named_name(rd->bt, gi, &nl);
+                int idx = js_bt_named_index(rd->bt, gi);
+                Item val = make_js_undefined();
+                if (idx >= 0 && idx < num_groups) {
+                    val = js_regex_make_indices_pair(input, input_len, matches[idx],
+                        code_unit_indices);
+                }
+                Item key = (Item){.item = s2it(heap_create_name(nm, nl))};
+                js_create_data_property(groups_obj, key, val);
+            }
+        }
+    } else if (!rd->literal_fast && rd->re2) {
+        const auto& named = rd->re2->NamedCapturingGroups();
+        if (!named.empty()) {
+            groups_obj = js_object_create(ItemNull);
+            for (auto& pair : named) {
+                int re2_idx = pair.second;
+                int idx = re2_idx;
+                if (rd->wrapper && rd->wrapper->group_remap) {
+                    for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
+                        if (rd->wrapper->group_remap[g] == re2_idx) {
+                            idx = g;
+                            break;
+                        }
+                    }
+                }
+                Item val = make_js_undefined();
+                if (idx >= 0 && idx < num_groups) {
+                    val = js_regex_make_indices_pair(input, input_len, matches[idx],
+                        code_unit_indices);
+                }
+                int js_name_len = (int)pair.first.size();
+                const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
+                    (int)pair.first.size(), &js_name_len);
+                Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
+                js_create_data_property(groups_obj, key, val);
+            }
+        }
+    }
+    js_create_data_property(indices, groups_key, groups_obj);
+
+    Item indices_key = (Item){.item = s2it(heap_create_name("indices", 7))};
+    js_create_data_property(result, indices_key, indices);
+}
+
 extern "C" Item js_regex_exec(Item regex, Item str) {
     JsRegexData* rd = js_get_regex_data(regex);
     if (!rd) return js_throw_type_error("Method RegExp.prototype.exec called on incompatible receiver");
@@ -15609,61 +15729,67 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
         } else {
             js_create_data_property(result, groups_key, make_js_undefined());
         }
+        js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
+            code_unit_indices);
         return result;
     }
     if (!rd->literal_fast && rd->re2) {
-        const std::map<std::string, int>& named = rd->re2->NamedCapturingGroups();
+        const auto& named = rd->re2->NamedCapturingGroups();
         if (!named.empty()) {
-        Item groups_obj = js_object_create(ItemNull);
-        for (auto& pair : named) {
-            int re2_idx = pair.second;
-            // when wrapper is active, matches[] uses original JS indices (already remapped)
-            // RE2's NamedCapturingGroups returns RE2-internal indices; reverse-map needed
-            int idx = re2_idx;
-            if (rd->wrapper && rd->wrapper->group_remap) {
-                // reverse lookup: find original JS index that maps to this RE2 index
-                for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
-                    if (rd->wrapper->group_remap[g] == re2_idx) {
-                        idx = g;
-                        break;
+            Item groups_obj = js_object_create(ItemNull);
+            for (auto& pair : named) {
+                int re2_idx = pair.second;
+                // when wrapper is active, matches[] uses original JS indices (already remapped)
+                // RE2's NamedCapturingGroups returns RE2-internal indices; reverse-map needed
+                int idx = re2_idx;
+                if (rd->wrapper && rd->wrapper->group_remap) {
+                    // reverse lookup: find original JS index that maps to this RE2 index
+                    for (int g = 0; g < rd->wrapper->group_remap_count; g++) {
+                        if (rd->wrapper->group_remap[g] == re2_idx) {
+                            idx = g;
+                            break;
+                        }
                     }
                 }
-            }
-            Item val = make_js_undefined();
-            if (idx < num_groups && matches[idx].data()) {
-                int mlen = (int)matches[idx].size();
-                if (utf16_subject) {
-                    int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
-                        (int)(matches[idx].data() - match_chars));
-                    int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
-                        (int)(matches[idx].data() - match_chars) + mlen);
-                    val = js_str_substring_utf16(str, start_units, end_units);
-                } else if (full_unicode) {
-                    int start_units = (int)js_utf16_index_from_byte(chars, len,
-                        (int)(matches[idx].data() - match_chars));
-                    int end_units = (int)js_utf16_index_from_byte(chars, len,
-                        (int)(matches[idx].data() - match_chars) + mlen);
-                    val = js_str_substring_utf16(str, start_units, end_units);
-                } else {
-                    val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                Item val = make_js_undefined();
+                if (idx < num_groups && matches[idx].data()) {
+                    int mlen = (int)matches[idx].size();
+                    if (utf16_subject) {
+                        int start_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                            (int)(matches[idx].data() - match_chars));
+                        int end_units = (int)js_utf16_index_from_byte(match_chars, match_len,
+                            (int)(matches[idx].data() - match_chars) + mlen);
+                        val = js_str_substring_utf16(str, start_units, end_units);
+                    } else if (full_unicode) {
+                        int start_units = (int)js_utf16_index_from_byte(chars, len,
+                            (int)(matches[idx].data() - match_chars));
+                        int end_units = (int)js_utf16_index_from_byte(chars, len,
+                            (int)(matches[idx].data() - match_chars) + mlen);
+                        val = js_str_substring_utf16(str, start_units, end_units);
+                    } else {
+                        val = (Item){.item = s2it(heap_strcpy((char*)matches[idx].data(), mlen))};
+                    }
                 }
+                int js_name_len = (int)pair.first.size();
+                const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
+                    (int)pair.first.size(), &js_name_len);
+                Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
+                // CreateDataProperty: a group literally named "__proto__" must become
+                // an own data property of the null-prototype groups object, not set
+                // its [[Prototype]].
+                js_create_data_property(groups_obj, key, val);
             }
-            int js_name_len = (int)pair.first.size();
-            const char* js_name = js_regex_original_group_name(rd, pair.first.c_str(),
-                (int)pair.first.size(), &js_name_len);
-            Item key = (Item){.item = s2it(heap_create_name(js_name, js_name_len))};
-            // CreateDataProperty: a group literally named "__proto__" must become
-            // an own data property of the null-prototype groups object, not set
-            // its [[Prototype]].
-            js_create_data_property(groups_obj, key, val);
-        }
-        // CreateDataProperty per spec — define `groups` as an own data property,
-        // bypassing any Array.prototype "groups" setter on the result array.
-        js_create_data_property(result, groups_key, groups_obj);
+            // CreateDataProperty per spec — define `groups` as an own data property,
+            // bypassing any Array.prototype "groups" setter on the result array.
+            js_create_data_property(result, groups_key, groups_obj);
+            js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
+                code_unit_indices);
             return result;
         }
     }
     js_create_data_property(result, groups_key, make_js_undefined());
+    js_regex_attach_indices(result, rd, match_chars, match_len, matches, num_groups,
+        code_unit_indices);
     return result;
 }
 
