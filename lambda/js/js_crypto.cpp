@@ -20,7 +20,6 @@ extern "C" Item js_get_current_this(void);
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
 #include "../../lib/digest.h"
-#include <mbedtls/md.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -46,22 +45,6 @@ static int crypto_digest_bits_for_name(const char* digest, bool allow_sha1, bool
     if (strcmp(digest, "sha512") == 0) return DIGEST_SHA512;
     if (allow_sha224 && strcmp(digest, "sha224") == 0) return DIGEST_SHA224;
     return 0;
-}
-
-static mbedtls_md_type_t crypto_md_type_for_name(const char* digest, bool allow_sha1, bool allow_sha224) {
-    switch (crypto_digest_bits_for_name(digest, allow_sha1, allow_sha224)) {
-        case DIGEST_SHA1: return MBEDTLS_MD_SHA1;
-        case DIGEST_SHA224: return MBEDTLS_MD_SHA224;
-        case DIGEST_SHA256: return MBEDTLS_MD_SHA256;
-        case DIGEST_SHA384: return MBEDTLS_MD_SHA384;
-        case DIGEST_SHA512: return MBEDTLS_MD_SHA512;
-        default: return MBEDTLS_MD_NONE;
-    }
-}
-
-static int crypto_md_output_len(mbedtls_md_type_t md) {
-    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(md);
-    return info ? (int)mbedtls_md_get_size(info) : 0;
 }
 
 static bool crypto_digest_compute_bits(int bits, const uint8_t* data,
@@ -296,19 +279,18 @@ static void hmac_compute(const uint8_t* key, int key_len,
     if (out_len) *out_len = 0;
     if (!out || !out_len) return;
 
-    mbedtls_md_type_t md = crypto_md_type_for_name(alg, false, false);
-    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(md);
-    int hash_len = crypto_md_output_len(md);
-    if (!info || hash_len <= 0) return;
+    int bits = crypto_digest_bits_for_name(alg, false, false);
+    int hash_len = (int)digest_output_len_bits(bits);
+    if (hash_len <= 0) return;
 
     if (key_len < 0) key_len = 0;
     if (data_len < 0) data_len = 0;
     const uint8_t* key_bytes = key ? key : crypto_empty_bytes;
     const uint8_t* data_bytes = data ? data : crypto_empty_bytes;
-    int ret = mbedtls_md_hmac(info, key_bytes, (size_t)key_len,
-                              data_bytes, (size_t)data_len, out);
-    if (ret != 0) {
-        log_error("crypto: hmac compute failed for alg=%s ret=%d", alg ? alg : "(null)", ret);
+    if (!digest_hmac_compute_bits(bits, key_bytes, (size_t)key_len,
+                                  data_bytes, (size_t)data_len,
+                                  out, (size_t)hash_len)) {
+        log_error("crypto: hmac compute failed for alg=%s", alg ? alg : "(null)");
         return;
     }
     *out_len = hash_len;
@@ -979,12 +961,6 @@ extern "C" Item js_crypto_createDecipheriv(Item alg_item, Item key_item, Item iv
 // pbkdf2(password, salt, iterations, keylen, digest, callback) → void
 // ============================================================================
 
-#include <mbedtls/pkcs5.h>
-
-static mbedtls_md_type_t resolve_md_type(const char* digest) {
-    return crypto_md_type_for_name(digest, true, true);
-}
-
 extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_item,
                                       Item keylen_item, Item digest_item) {
     uint8_t* pass = NULL; int pass_len = 0;
@@ -1010,21 +986,23 @@ extern "C" Item js_crypto_pbkdf2Sync(Item pass_item, Item salt_item, Item iter_i
         digest_buf[dlen] = '\0';
     }
 
-    mbedtls_md_type_t md = resolve_md_type(digest_buf);
-    if (md == MBEDTLS_MD_NONE) {
+    int bits = crypto_digest_bits_for_name(digest_buf, true, true);
+    if (bits == 0) {
         log_error("crypto: pbkdf2Sync: unsupported digest: %s", digest_buf);
         mem_free(pass); mem_free(salt);
         return ItemNull;
     }
 
     uint8_t* output = (uint8_t*)mem_alloc((size_t)keylen, MEM_CAT_JS_RUNTIME);
-    int ret = mbedtls_pkcs5_pbkdf2_hmac_ext(md, pass, (size_t)pass_len,
-                salt, (size_t)salt_len, (unsigned int)iterations, (uint32_t)keylen, output);
+    bool ok = digest_pbkdf2_hmac_bits(bits, pass, (size_t)pass_len,
+                                      salt, (size_t)salt_len,
+                                      (unsigned int)iterations,
+                                      output, (size_t)keylen);
     mem_free(pass);
     mem_free(salt);
 
-    if (ret != 0) {
-        log_error("crypto: pbkdf2Sync failed: %d", ret);
+    if (!ok) {
+        log_error("crypto: pbkdf2Sync failed");
         mem_free(output);
         return ItemNull;
     }
@@ -1202,10 +1180,11 @@ extern "C" Item js_crypto_scryptSync(Item pass_item, Item salt_item, Item keylen
     int B_len = p * block_size;
     uint8_t* B = (uint8_t*)mem_alloc((size_t)B_len, MEM_CAT_JS_RUNTIME);
 
-    int ret = mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256, pass, (size_t)pass_len,
-                salt, (size_t)salt_len, 1, (uint32_t)B_len, B);
-    if (ret != 0) {
-        log_error("crypto: scryptSync: initial PBKDF2 failed: %d", ret);
+    bool ok = digest_pbkdf2_hmac_bits(DIGEST_SHA256, pass, (size_t)pass_len,
+                                      salt, (size_t)salt_len, 1,
+                                      B, (size_t)B_len);
+    if (!ok) {
+        log_error("crypto: scryptSync: initial PBKDF2 failed");
         mem_free(pass); mem_free(salt); mem_free(B);
         return ItemNull;
     }
@@ -1217,14 +1196,15 @@ extern "C" Item js_crypto_scryptSync(Item pass_item, Item salt_item, Item keylen
 
     // step 3: PBKDF2-HMAC-SHA256 with B as salt to derive final key
     uint8_t* output = (uint8_t*)mem_alloc((size_t)keylen, MEM_CAT_JS_RUNTIME);
-    ret = mbedtls_pkcs5_pbkdf2_hmac_ext(MBEDTLS_MD_SHA256, pass, (size_t)pass_len,
-                B, (size_t)B_len, 1, (uint32_t)keylen, output);
+    ok = digest_pbkdf2_hmac_bits(DIGEST_SHA256, pass, (size_t)pass_len,
+                                 B, (size_t)B_len, 1,
+                                 output, (size_t)keylen);
     mem_free(pass);
     mem_free(salt);
     mem_free(B);
 
-    if (ret != 0) {
-        log_error("crypto: scryptSync: final PBKDF2 failed: %d", ret);
+    if (!ok) {
+        log_error("crypto: scryptSync: final PBKDF2 failed");
         mem_free(output);
         return ItemNull;
     }

@@ -69,6 +69,46 @@ TEST_F(DigestTest, StreamingMatchesOneShot) {
     EXPECT_STREQ(streamed_hex, one_shot_hex);
 }
 
+TEST_F(DigestTest, HmacSha256KnownVector) {
+    const char* key = "key";
+    const char* data = "The quick brown fox jumps over the lazy dog";
+    uint8_t hmac[32];
+    char hex[65];
+
+    ASSERT_TRUE(digest_hmac_compute_bits(DIGEST_SHA256, key, strlen(key),
+                                         data, strlen(data),
+                                         hmac, sizeof(hmac)));
+    hex_encode(hmac, sizeof(hmac), hex);
+
+    EXPECT_STREQ(hex, "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+}
+
+TEST_F(DigestTest, Pbkdf2HmacSha1KnownVector) {
+    uint8_t key[20];
+    char hex[41];
+
+    ASSERT_TRUE(digest_pbkdf2_hmac_bits(DIGEST_SHA1,
+                                        "password", strlen("password"),
+                                        "salt", strlen("salt"),
+                                        1, key, sizeof(key)));
+    hex_encode(key, sizeof(key), hex);
+
+    EXPECT_STREQ(hex, "0c60c80f961f0e71f3a9b524af6012062fe037a6");
+}
+
+TEST_F(DigestTest, Pbkdf2HmacSha256KnownVector) {
+    uint8_t key[32];
+    char hex[65];
+
+    ASSERT_TRUE(digest_pbkdf2_hmac_bits(DIGEST_SHA256,
+                                        "password", strlen("password"),
+                                        "salt", strlen("salt"),
+                                        1, key, sizeof(key)));
+    hex_encode(key, sizeof(key), hex);
+
+    EXPECT_STREQ(hex, "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b");
+}
+
 TEST_F(DigestTest, RejectsShortOutputBuffer) {
     uint8_t hash[31];
 

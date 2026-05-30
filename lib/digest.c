@@ -4,6 +4,7 @@
 #include "mem.h"
 
 #include <mbedtls/md.h>
+#include <mbedtls/pkcs5.h>
 
 struct DigestCtx {
     mbedtls_md_context_t md_ctx;
@@ -35,16 +36,77 @@ size_t digest_output_len_bits(int bits) {
     return info ? (size_t)mbedtls_md_get_size(info) : 0;
 }
 
+static bool digest_input_bytes(const void* data, size_t len, const uint8_t** bytes) {
+    if (data) {
+        *bytes = (const uint8_t*)data;
+        return true;
+    }
+    if (len == 0) {
+        *bytes = DIGEST_EMPTY_BYTES;
+        return true;
+    }
+    return false;
+}
+
 bool digest_compute_bits(int bits, const void* data, size_t len,
                          uint8_t* out, size_t out_len) {
     const mbedtls_md_info_t* info = digest_info_for_bits(bits);
     size_t digest_len = info ? (size_t)mbedtls_md_get_size(info) : 0;
     if (!info || !out || out_len < digest_len) return false;
 
-    const uint8_t* bytes = data ? (const uint8_t*)data : DIGEST_EMPTY_BYTES;
+    const uint8_t* bytes = NULL;
+    if (!digest_input_bytes(data, len, &bytes)) return false;
     int ret = mbedtls_md(info, bytes, len, out);
     if (ret != 0) {
         log_error("digest: one-shot digest failed bits=%d ret=%d", bits, ret);
+        return false;
+    }
+    return true;
+}
+
+bool digest_hmac_compute_bits(int bits, const void* key, size_t key_len,
+                              const void* data, size_t len,
+                              uint8_t* out, size_t out_len) {
+    const mbedtls_md_info_t* info = digest_info_for_bits(bits);
+    size_t digest_len = info ? (size_t)mbedtls_md_get_size(info) : 0;
+    if (!info || !out || out_len < digest_len) return false;
+
+    const uint8_t* key_bytes = NULL;
+    const uint8_t* data_bytes = NULL;
+    if (!digest_input_bytes(key, key_len, &key_bytes) ||
+        !digest_input_bytes(data, len, &data_bytes)) {
+        return false;
+    }
+
+    int ret = mbedtls_md_hmac(info, key_bytes, key_len, data_bytes, len, out);
+    if (ret != 0) {
+        log_error("digest: hmac failed bits=%d ret=%d", bits, ret);
+        return false;
+    }
+    return true;
+}
+
+bool digest_pbkdf2_hmac_bits(int bits, const void* password, size_t password_len,
+                             const void* salt, size_t salt_len,
+                             unsigned int iterations,
+                             uint8_t* out, size_t out_len) {
+    mbedtls_md_type_t md_type = digest_md_type_for_bits(bits);
+    if (md_type == MBEDTLS_MD_NONE || iterations == 0 || !out || out_len == 0) {
+        return false;
+    }
+
+    const uint8_t* password_bytes = NULL;
+    const uint8_t* salt_bytes = NULL;
+    if (!digest_input_bytes(password, password_len, &password_bytes) ||
+        !digest_input_bytes(salt, salt_len, &salt_bytes)) {
+        return false;
+    }
+
+    int ret = mbedtls_pkcs5_pbkdf2_hmac_ext(md_type, password_bytes, password_len,
+                                            salt_bytes, salt_len, iterations,
+                                            (uint32_t)out_len, out);
+    if (ret != 0) {
+        log_error("digest: pbkdf2-hmac failed bits=%d ret=%d", bits, ret);
         return false;
     }
     return true;
@@ -88,7 +150,8 @@ bool digest_update(DigestCtx* ctx, const void* data, size_t len) {
     if (!ctx || !ctx->active) return false;
     if (len == 0) return true;
 
-    const uint8_t* bytes = data ? (const uint8_t*)data : DIGEST_EMPTY_BYTES;
+    const uint8_t* bytes = NULL;
+    if (!digest_input_bytes(data, len, &bytes)) return false;
     int ret = mbedtls_md_update(&ctx->md_ctx, bytes, len);
     if (ret != 0) {
         log_error("digest: context update failed ret=%d", ret);

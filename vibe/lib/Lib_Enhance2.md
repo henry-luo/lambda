@@ -132,14 +132,17 @@ has unwanted link impact for small test binaries.
   `crypto.subtle.digest()` now use the shared digest facade.
 - ✅ `lambda/network/enhanced_file_cache.cpp`: cache-key SHA-256 now uses the
   shared digest facade instead of direct `mbedtls_sha256_*` calls.
-- ✅ HMAC and PBKDF2 continue to use mbedTLS directly because `lib/digest` owns
-  plain digest operations, not MAC or KDF APIs.
+- ✅ Added HMAC and PBKDF2-HMAC facade wrappers to `lib/digest`.
+- ✅ `lambda/js/js_crypto.cpp`: `createHmac()`, `pbkdf2Sync()`, async
+  `pbkdf2()`, and the PBKDF2 steps inside `scryptSync()` now call the shared
+  digest facade instead of direct `mbedtls_md_hmac()` /
+  `mbedtls_pkcs5_pbkdf2_hmac_ext()` calls.
 
 ### Recommendation
 
-Keep `lib/digest` deliberately small. Add HMAC/KDF wrappers only if another
-non-JS caller needs those APIs; otherwise JS crypto can stay close to mbedTLS
-for Node-compatible MAC and PBKDF2 behavior.
+Keep `lib/digest` deliberately small. The facade now covers plain digest,
+HMAC, and PBKDF2-HMAC primitives; add higher-level crypto APIs only if another
+non-JS caller needs them.
 
 ---
 
@@ -324,10 +327,11 @@ Implemented:
 4. Formatter escape helpers using the shared `lib/escape` loop and shared
    JSON/HTML/XML/LaTeX/YAML/JSX tables.
 5. Sort wrapper entry points.
-6. JS crypto SHA/HMAC reuse of mbedTLS `md` APIs.
+6. JS crypto SHA/HMAC/PBKDF2 reuse through the shared digest facade.
 7. Composite-key hashmap helper macros and three local map migrations.
-8. Generic digest facade and JS/cache SHA migrations.
+8. Generic digest facade, JS/cache SHA migrations, and JS HMAC/PBKDF2 facade
+   migration.
 
 Still deferred:
 
-1. HMAC/KDF facade wrappers: wait for a second non-JS caller.
+None.
