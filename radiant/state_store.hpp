@@ -712,6 +712,13 @@ bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
                                   int* out_anchor_offset);
 
 /**
+ * Snapshot the current anchor endpoint for keyboard/pointer range extension.
+ */
+bool selection_get_anchor_snapshot(DocState* state, View** out_anchor_view,
+                                   int* out_anchor_offset,
+                                   bool* out_collapsed);
+
+/**
  * Snapshot the current focus endpoint for drag fallback/geometry.
  */
 bool selection_get_focus_snapshot(DocState* state, View** out_focus_view,
