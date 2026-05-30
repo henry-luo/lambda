@@ -2375,7 +2375,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_mark_builder_deepcopy_gtest.exe",
                         "icon": "🔄"
@@ -2392,7 +2393,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_mark_editor_gtest.exe",
                         "icon": "✏️"
@@ -2410,7 +2412,8 @@
                         ],
                         "additional_sources": [
                             "lambda/edit_bridge.cpp",
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_edit_bridge_gtest.exe",
                         "icon": "✏️"
@@ -2427,7 +2430,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_name_pool_gtest.exe",
                         "icon": "🔤"
@@ -2444,7 +2448,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_namespace_gtest.exe",
                         "icon": "🌐"
@@ -2531,7 +2536,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_format_markup_gtest.exe",
                         "icon": "📝"
@@ -2695,7 +2701,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_html_gtest.exe",
                         "icon": "🌐"
@@ -2756,7 +2763,8 @@
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/editing_host.cpp",
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_dom_range_gtest.exe",
                         "icon": "🎯"
@@ -2783,7 +2791,8 @@
                             "radiant/dom_range_resolver.cpp",
                             "radiant/source_pos_bridge.cpp",
                             "radiant/editing_host.cpp",
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_source_pos_bridge_gtest.exe",
                         "icon": "🪢"
@@ -2845,7 +2854,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_validator_input_gtest.exe",
                         "icon": "✅"
@@ -2862,7 +2872,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_validator_features_gtest.exe",
                         "icon": "🛠️"
@@ -2879,7 +2890,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_null_vs_missing_gtest.exe",
                         "icon": "✅"
@@ -2980,7 +2992,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_sysinfo_gtest.exe",
                         "icon": "🖥️"
@@ -3168,7 +3181,8 @@
                             "lambda/input/css/selector_matcher.cpp",
                             "radiant/symbol_resolver.cpp",
                             "radiant/layout_counters.cpp",
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_html_css_gtest.exe",
                         "icon": "🌐"
@@ -3430,7 +3444,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/test_utils.c"
+                            "lib/test_utils.c",
+                            "lib/test_utils_pool.c"
                         ],
                         "binary": "test_ast_validator_gtest.exe",
                         "disabled": false,

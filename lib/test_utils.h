@@ -8,8 +8,9 @@
 //   - runtime fixture (Pool + Heap + EvalContext + thread-local `context`)
 //
 // Include this header from any gtest *.cpp. To use, the test entry in
-// build_lambda_config.json must list "lib/test_utils.cpp" under
-// "additional_sources".
+// build_lambda_config.json must list "lib/test_utils.c" under
+// "additional_sources". Tests that call tu_setup_pool() / tu_teardown_pool()
+// must also list "lib/test_utils_pool.c".
 
 #ifndef LIB_TEST_UTILS_H
 #define LIB_TEST_UTILS_H
