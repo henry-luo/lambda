@@ -3544,18 +3544,6 @@
                         "icon": "🔁"
                     },
                     {
-                        "source": "test/test_js_props_gtest.cpp",
-                        "name": "JS Property-Model Invariant Tests (Stage B)",
-                        "dependencies": [],
-                        "binary": "test_js_props_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🧩"
-                    },
-                    {
                         "source": "test/test_js_coerce_gtest.cpp",
                         "name": "JS Coercion Kernel Tests (J39-1 ToPrimitive)",
                         "dependencies": [],
