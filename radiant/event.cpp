@@ -5975,8 +5975,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                 } else {
 
-                // Set caret at clicked position
-                caret_set(state, evcon.target, char_offset);
+                bool shift_extending = (event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                    selection_has_projection(state);
+                if (!shift_extending) {
+                    // Set caret at clicked position for a fresh placement. A
+                    // shift-click must preserve the existing collapsed
+                    // selection anchor so selection_extend() can use it.
+                    caret_set(state, evcon.target, char_offset);
+                }
 
                 // Calculate visual position for the caret
                 float caret_x = 0, caret_y = 0, caret_height = 16;
@@ -6027,7 +6033,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                     // Set visual coordinates for selection (same point for start)
                     selection_project_anchor_visual_from_caret(state, caret_x, caret_y, caret_height);
-                } else if (selection_has(state)) {
+                } else if (shift_extending) {
                     // Shift-click extends selection
                     selection_extend(state, char_offset);
                     dispatch_rich_selection_snapshot(&evcon, state, evcon.target,

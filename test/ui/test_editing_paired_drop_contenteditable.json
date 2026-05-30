@@ -12,7 +12,7 @@
      "move": true},
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
-    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se|"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se|1|4-4"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|se|seed"},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByDrag", "surface": "contenteditable", "min": 1},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertFromDrop", "surface": "contenteditable", "min": 1},

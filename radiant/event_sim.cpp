@@ -1330,6 +1330,17 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "set_editing_value") == 0) {
+        ev->type = SIM_EVENT_SET_EDITING_VALUE;
+        const char* text = reader.get("text").cstring();
+        ev->input_text = mem_strdup(text ? text : "", MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: set_editing_value requires target");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
         const char* contains = reader.get("contains").cstring();
@@ -3465,6 +3476,49 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             selection_set((DocState*)doc->state, range_view, (int)start, (int)end);
             caret_set((DocState*)doc->state, range_view, (int)end);
             log_info("event_sim: set_editing_selection [%u..%u]", start, end);
+            doc_state_request_repaint((DocState*)doc->state);
+            break;
+        }
+
+        case SIM_EVENT_SET_EDITING_VALUE: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: set_editing_value - no document/state");
+                ctx->fail_count++;
+                break;
+            }
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: set_editing_value - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            EditingSurface surface;
+            editing_surface_clear(&surface);
+            if (!editing_surface_from_target(elem, &surface) ||
+                !editing_surface_is_text_control(&surface)) {
+                log_error("event_sim: set_editing_value - target is not a text control");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* owner = surface.owner;
+            tc_ensure_init(owner);
+            uint32_t old_len = owner && owner->form
+                ? owner->form->current_value_len
+                : 0;
+            const char* text = ev->input_text ? ev->input_text : "";
+            uint32_t text_len = (uint32_t)strlen(text);
+            bool ok = te_replace_byte_range_no_events(owner, (DocState*)doc->state,
+                                                      surface.view, 0, old_len,
+                                                      text, text_len);
+            if (!ok) {
+                log_error("event_sim: set_editing_value - replace failed");
+                ctx->fail_count++;
+                break;
+            }
+            dom_element_set_attribute(owner, "value", text);
+            caret_set((DocState*)doc->state, surface.view, (int)text_len);
+            log_info("event_sim: set_editing_value len=%u", text_len);
             doc_state_request_repaint((DocState*)doc->state);
             break;
         }
