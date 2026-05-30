@@ -43,6 +43,11 @@ extern "C" bool           radiant_dispatch_editing_composition_event(struct UiCo
                                                                      EventType,
                                                                      const char*,
                                                                      uint32_t);
+extern "C" bool           radiant_editing_focused_caret_rect(struct UiContext*,
+                                                             float*,
+                                                             float*,
+                                                             float*,
+                                                             float*);
 
 View* focus_get(DocState* state);
 bool  tc_is_text_control(DomElement* elem);
@@ -196,12 +201,24 @@ const char* ns_to_utf8(id obj) {
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range
                          actualRange:(NSRangePointer)actualRange {
-    // TODO: derive an accurate caret rect via te_x_at_offset + the text
-    // control's screen position.
     if (actualRange) *actualRange = range;
+    float x = 0.0f;
+    float y = 0.0f;
+    float w_rect = 0.0f;
+    float h_rect = 0.0f;
     NSWindow* w = [self window];
     NSRect frame = w ? [w frame] : NSMakeRect(0, 0, 0, 0);
-    return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0);
+    if (!radiant_editing_focused_caret_rect(g_ime_uicon,
+            &x, &y, &w_rect, &h_rect)) {
+        return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0);
+    }
+    CGFloat scale = w ? [w backingScaleFactor] : 1.0;
+    CGFloat screen_x = frame.origin.x + ((CGFloat)x / scale);
+    CGFloat screen_y = frame.origin.y + frame.size.height -
+        (((CGFloat)y + (CGFloat)h_rect) / scale);
+    return NSMakeRect(screen_x, screen_y,
+                      (CGFloat)w_rect / scale,
+                      (CGFloat)h_rect / scale);
 }
 
 @end

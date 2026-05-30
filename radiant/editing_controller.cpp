@@ -49,6 +49,37 @@ static bool editing_controller_is_history_intent(InputIntentType input_type) {
         input_type == INPUT_INTENT_HISTORY_REDO;
 }
 
+static void editing_controller_composition_anchor(
+        DocState* state,
+        const EditingSurface* surface,
+        View** out_view,
+        int* out_offset) {
+    if (out_view) *out_view = surface ? surface->view : nullptr;
+    if (out_offset) *out_offset = 0;
+    if (!state || !surface) return;
+
+    View* caret_view = nullptr;
+    int caret_offset = 0;
+    if (caret_get_position(state, &caret_view, &caret_offset) && caret_view) {
+        if (out_view) *out_view = caret_view;
+        if (out_offset) *out_offset = caret_offset;
+        return;
+    }
+
+    if (editing_surface_is_text_control(surface) && surface->owner &&
+        surface->owner->form) {
+        if (out_view) *out_view = surface->view
+            ? surface->view : static_cast<View*>(surface->owner);
+        if (out_offset) {
+            *out_offset = (int)surface->owner->form->selection_start; // INT_CAST_OK: StateStore projection exposes selection offsets as int.
+        }
+    }
+}
+
+static uint32_t editing_controller_text_len(const char* text) {
+    return text ? (uint32_t)strlen(text) : 0; // INT_CAST_OK: event payload length is bounded by in-memory string size.
+}
+
 bool editing_controller_dispatch_history(EventContext* evcon,
                                          const EditingSurface* surface,
                                          InputIntentType input_type,
@@ -76,25 +107,53 @@ bool editing_controller_handle_composition(EventContext* evcon,
         return false;
     }
 
-    View* focused = focus_get(state);
-    View* target = focused ? focused : caret_get_view(state);
-    if (!target) return false;
-
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface)) return false;
-    if (!editing_surface_is_text_control(&surface) &&
-        !editing_surface_is_rich(&surface)) {
-        return false;
-    }
-
     EditingIntent intent;
     if (!input_intent_from_composition_event(comp_event, &intent)) {
         return false;
     }
 
+    EditingSurface surface;
+    editing_surface_clear(&surface);
+    if (intent.type != INPUT_INTENT_COMPOSITION_START &&
+        state->editing.composition.active &&
+        state->editing.composition.surface.kind != EDIT_SURFACE_NONE) {
+        surface = state->editing.composition.surface;
+    } else {
+        View* focused = focus_get(state);
+        View* target = focused ? focused : caret_get_view(state);
+        if (!target) return false;
+        if (!editing_surface_from_target(target, &surface)) return false;
+    }
+    if (!editing_surface_is_text_control(&surface) &&
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
     editing_interaction_set_active_surface(state, &surface);
-    return hooks->composition_dispatch(evcon, &surface, comp_event,
-                                       &intent, hooks->user);
+    if (intent.type == INPUT_INTENT_COMPOSITION_START) {
+        View* anchor_view = nullptr;
+        int anchor_offset = 0;
+        editing_controller_composition_anchor(state, &surface,
+                                              &anchor_view, &anchor_offset);
+        editing_interaction_begin_composition(state, &surface,
+                                              anchor_view, anchor_offset);
+    } else if (intent.type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
+        editing_interaction_update_composition(state, &surface,
+            editing_controller_text_len(intent.data),
+            intent.composition_caret);
+    }
+
+    bool handled = hooks->composition_dispatch(evcon, &surface, comp_event,
+                                               &intent, hooks->user);
+
+    if (intent.type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
+        intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
+        bool canceled = intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+        editing_interaction_end_composition(state, &surface,
+            canceled ? 0 : editing_controller_text_len(intent.data),
+            canceled);
+    }
+    return handled;
 }
 
 bool editing_controller_undo(EventContext* evcon,

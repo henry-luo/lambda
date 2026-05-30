@@ -831,7 +831,9 @@ bool radiant_state_validate_interaction(DocState* state,
             (uint32_t)state->caret->char_offset > legacy_view_offset_limit(state->caret->view)) {
             report_fail(report, "caret offset exceeds target length");
         }
-        if (state->caret->view && state->caret->view->is_element() &&
+        bool composition_active = state->editing.composition.active;
+        if (!composition_active &&
+            state->caret->view && state->caret->view->is_element() &&
             state->focus && state->focus->current &&
             state->caret->view != state->focus->current) {
             report_fail(report, "caret target differs from focus target");
@@ -1023,6 +1025,36 @@ static void write_editing_interaction_snapshot(JsonWriter* w,
             jw_null(w);
         }
         jw_kv_bool(w, "composing", editing->composing);
+        jw_key(w, "composition");
+        jw_obj_begin(w);
+            jw_kv_bool(w, "active", editing->composition.active);
+            jw_key(w, "surface");
+            write_editing_surface_ref(w, editing->composition.active ||
+                editing->composition.surface.kind != EDIT_SURFACE_NONE
+                    ? &editing->composition.surface : NULL);
+            jw_key(w, "anchor");
+            if (editing->composition.anchor_view) {
+                jw_obj_begin(w);
+                    write_optional_view_ref(w, "target",
+                                            editing->composition.anchor_view);
+                    jw_kv_int(w, "offset",
+                              editing->composition.anchor_offset);
+                jw_obj_end(w);
+            } else {
+                jw_null(w);
+            }
+            jw_kv_uint(w, "preedit_len",
+                       editing->composition.preedit_len);
+            jw_kv_uint(w, "commit_len",
+                       editing->composition.commit_len);
+            jw_kv_uint(w, "caret", editing->composition.caret);
+            jw_kv_uint(w, "update_count",
+                       editing->composition.update_count);
+            jw_kv_bool(w, "committed",
+                       editing->composition.committed);
+            jw_kv_bool(w, "canceled",
+                       editing->composition.canceled);
+        jw_obj_end(w);
         jw_key(w, "autoscroll");
         jw_obj_begin(w);
             jw_kv_bool(w, "active", editing->autoscroll.active);

@@ -895,6 +895,17 @@ For WPT:
   covers cancellable IME `beforeinput` defaults: preventing form
   `insertFromComposition` leaves the value unchanged, and preventing rich
   `insertCompositionText` suppresses the paired `input` event.
+- E7 now has a real shared composition session projection in
+  `DocState::editing.composition`. `editing_controller_handle_composition()`
+  opens the session at `compositionstart`, updates preedit length/caret on
+  `insertCompositionText`, and closes with committed/canceled state after the
+  final intent. `state.snapshot` logs the session surface, anchor,
+  preedit/commit lengths, caret, update count, and final committed/canceled
+  result. Native IME candidate-window placement now asks the shared
+  `editing_geometry` caret-rect facade instead of returning a fixed fallback
+  rectangle. Active composition also pins its editing surface across focus and
+  selection projection changes until commit/cancel, covered by
+  `test_editing_ime_focus_change`.
 - Selection drag autoscroll now records its last pointer position in
   `DocState`, advances the document viewport, nearest scroll container, input
   horizontal scroll, and textarea horizontal/vertical scroll from the shared

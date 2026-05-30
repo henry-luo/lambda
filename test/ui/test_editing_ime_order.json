@@ -50,6 +50,9 @@
     {"type": "assert_event_log", "contains": "\"type\":\"editing.composition\"", "min": 6},
     {"type": "assert_event_log", "contains": "\"input_type\":\"insertCompositionText\"", "min": 2},
     {"type": "assert_event_log", "contains": "\"input_type\":\"insertFromComposition\"", "min": 2},
-    {"type": "assert_event_log", "contains": "\"input_type\":\"deleteCompositionText\"", "min": 2}
+    {"type": "assert_event_log", "contains": "\"input_type\":\"deleteCompositionText\"", "min": 2},
+    {"type": "assert_event_log", "contains": "\"composition\":{\"active\":true", "min": 2},
+    {"type": "assert_event_log", "contains": "\"committed\":true", "min": 2},
+    {"type": "assert_event_log", "contains": "\"canceled\":true", "min": 2}
   ]
 }

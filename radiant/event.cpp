@@ -1982,7 +1982,10 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     DomElement* live_elem = elem;
     View* live_target = target;
     View* live_focus = focus_get(state);
-    if (live_focus && live_focus->is_element()) {
+    bool preserve_dispatch_target =
+        input_type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
+        input_type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+    if (!preserve_dispatch_target && live_focus && live_focus->is_element()) {
         DomElement* focus_elem = lam::dom_require_element(live_focus);
         if (tc_is_text_control(focus_elem)) {
             live_elem = focus_elem;
@@ -2747,9 +2750,15 @@ extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
     View* focused = focus_get(state);
     View* target = focused ? focused : caret_get_view(state);
     EditingSurface surface;
-    if (!target || !editing_surface_from_target(target, &surface) ||
-        (!editing_surface_is_text_control(&surface) &&
-         !editing_surface_is_rich(&surface))) {
+    editing_surface_clear(&surface);
+    if (state->editing.composition.active &&
+        state->editing.composition.surface.kind != EDIT_SURFACE_NONE) {
+        surface = state->editing.composition.surface;
+    } else if (!target || !editing_surface_from_target(target, &surface)) {
+        return false;
+    }
+    if (!editing_surface_is_text_control(&surface) &&
+        !editing_surface_is_rich(&surface)) {
         return false;
     }
 
@@ -2760,6 +2769,63 @@ extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
     event.composition.text = text ? text : "";
     event.composition.preedit_caret = caret_cp;
     handle_event(uicon, uicon->document, &event);
+    return true;
+}
+
+extern "C" bool radiant_editing_focused_caret_rect(UiContext* uicon,
+                                                   float* out_x,
+                                                   float* out_y,
+                                                   float* out_w,
+                                                   float* out_h) {
+    if (out_x) *out_x = 0.0f;
+    if (out_y) *out_y = 0.0f;
+    if (out_w) *out_w = 0.0f;
+    if (out_h) *out_h = 0.0f;
+    if (!uicon || !uicon->document || !uicon->document->state) return false;
+
+    DocState* state = (DocState*)uicon->document->state;
+    View* target = focus_get(state);
+    if (!target) target = caret_get_view(state);
+    if (!target) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return false;
+
+    EditingCaretRect rect;
+    editing_caret_rect_clear(&rect);
+    if (editing_surface_is_text_control(&surface) && surface.owner &&
+        surface.owner->form) {
+        tc_ensure_init(surface.owner);
+        const char* value = surface.owner->form->current_value
+            ? surface.owner->form->current_value : surface.owner->form->value;
+        uint32_t value_len = surface.owner->form->current_value_len;
+        uint32_t caret_u16 = surface.owner->form->selection_end;
+        uint32_t caret_utf8 = tc_utf16_to_utf8_offset(value ? value : "",
+                                                      value_len, caret_u16);
+        if (!editing_geometry_text_control_caret_rect(uicon, surface.owner,
+                caret_utf8, &rect)) {
+            return false;
+        }
+    } else {
+        View* caret_view = nullptr;
+        int caret_offset = 0;
+        if (!caret_get_position(state, &caret_view, &caret_offset) ||
+            !caret_view || !caret_view->is_text()) {
+            return false;
+        }
+        uint32_t offset = caret_offset > 0
+            ? (uint32_t)caret_offset : 0; // INT_CAST_OK: caret offset is clamped non-negative for byte-offset geometry.
+        if (!editing_geometry_dom_text_caret_rect(uicon,
+                static_cast<DomText*>(caret_view), offset, &rect)) {
+            return false;
+        }
+    }
+
+    if (!rect.valid) return false;
+    if (out_x) *out_x = rect.x;
+    if (out_y) *out_y = rect.y;
+    if (out_w) *out_w = rect.width;
+    if (out_h) *out_h = rect.height;
     return true;
 }
 

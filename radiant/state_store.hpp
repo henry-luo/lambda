@@ -215,6 +215,19 @@ typedef struct EditingScrollState {
     double caret_blink_elapsed;
 } EditingScrollState;
 
+typedef struct EditingCompositionState {
+    bool active;
+    EditingSurface surface;
+    View* anchor_view;
+    int anchor_offset;
+    uint32_t preedit_len;
+    uint32_t commit_len;
+    uint32_t caret;
+    uint32_t update_count;
+    bool committed;
+    bool canceled;
+} EditingCompositionState;
+
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
@@ -223,6 +236,7 @@ typedef struct EditingInteractionState {
     View* drag_anchor_view;
     int drag_anchor_offset;
     bool composing;
+    EditingCompositionState composition;
     EditingScrollState autoscroll;
 } EditingInteractionState;
 
@@ -798,6 +812,18 @@ void editing_interaction_set_clock(DocState* state,
 void editing_interaction_set_composing(DocState* state,
                                        const EditingSurface* surface,
                                        bool composing);
+void editing_interaction_begin_composition(DocState* state,
+                                           const EditingSurface* surface,
+                                           View* anchor_view,
+                                           int anchor_offset);
+void editing_interaction_update_composition(DocState* state,
+                                            const EditingSurface* surface,
+                                            uint32_t preedit_len,
+                                            uint32_t caret);
+void editing_interaction_end_composition(DocState* state,
+                                         const EditingSurface* surface,
+                                         uint32_t commit_len,
+                                         bool canceled);
 
 // ============================================================================
 // Doc-Level Scheduling / Viewport State API
