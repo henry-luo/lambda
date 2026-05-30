@@ -63,6 +63,7 @@ static Item js_global_var_module_binding_global = {0};
 
 extern "C" Item js_get_global_this(void);
 extern "C" uint64_t js_get_heap_epoch(void);
+static Item js_262_eval_script(Item code);
 
 static bool js_global_var_binding_key_same(Item a, Item b) {
     if (a.item == b.item) return true;
@@ -9416,8 +9417,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(global, (Item){.item = s2it(heap_create_name("globalThis", 10))}, global);
         js_property_set(global, (Item){.item = s2it(heap_create_name("self", 4))}, global);
         js_property_set(global, (Item){.item = s2it(heap_create_name("window", 6))}, global);
+        js_property_set(global, (Item){.item = s2it(heap_create_name("eval", 4))},
+            js_new_function((void*)js_262_eval_script, 1));
+        Item realm_regexp = js_new_object();
+        Item realm_regexp_proto = js_new_object();
+        Item has_indices_key = (Item){.item = s2it(heap_create_name("hasIndices", 10))};
+        Item has_indices_getter = js_get_or_create_builtin(
+            JS_BUILTIN_262_REALM_REGEXP_GET_HASINDICES, "get hasIndices", 0);
+        js_install_native_accessor(realm_regexp_proto, has_indices_key, has_indices_getter, ItemNull, JSPD_NON_ENUMERABLE);
+        js_property_set(realm_regexp, (Item){.item = s2it(heap_create_name("prototype", 9))}, realm_regexp_proto);
+        js_property_set(global, (Item){.item = s2it(heap_create_name("RegExp", 6))}, realm_regexp);
         js_property_set(realm, (Item){.item = s2it(heap_create_name("global", 6))}, global);
         return realm;
+    }
+    case JS_BUILTIN_262_REALM_REGEXP_GET_HASINDICES: {
+        return js_throw_type_error("RegExp.prototype getter called on incompatible receiver");
     }
     case JS_BUILTIN_TYPED_ARRAY_FROM: {
         // %TypedArray%.from(source [, mapfn [, thisArg]])
