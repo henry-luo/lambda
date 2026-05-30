@@ -658,6 +658,50 @@ Full release JS262 verification also passed after enabling the policy:
 - summed per-test time `407.320s`;
 - wall time `132.0s`.
 
+### Adaptive MIR Interpreter Policy v2 Probe
+
+Attempted on 2026-05-30 and reverted.
+
+The v2 probe extended the accepted large-source policy with post-transpile
+MIR/AST complexity gates. It counted generated MIR instructions and selected
+MIR interpreter mode at opt level `0` for complex scripts, with temporary A/B
+controls:
+
+```text
+LAMBDA_JS_COMPLEX_INTERP=0
+LAMBDA_JS_COMPLEX_INTERP_INSNS=<count>
+LAMBDA_JS_COMPLEX_INTERP_CLASSES=<count>
+LAMBDA_JS_COMPLEX_INTERP_FUNCS=<count>
+```
+
+Focused evidence was mixed but initially promising:
+
+| Focused slice | v2 enabled | v2 disabled | Result |
+| --- | ---: | ---: | --- |
+| class-heavy top slice | `11.73s` real, `315 / 315` run tests passed | `16.68s` real, `315 / 315` run tests passed | clear class win |
+| RegExp property escapes | `43.80s` real, `409 / 409` passed | `43.90s` real, `409 / 409` passed | neutral |
+
+Whole-suite release JS262 did not show a clear improvement:
+
+| Mode | Result | Phase 2 execute | Real time | Worker time | Summed per-test time |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| v2 enabled, first run | `39258 / 39258` fully passing | `164.6s` | `169.64s` | `1132.9s` | not preserved |
+| v2 disabled | `39258 / 39258` fully passing | `161.5s` | `166.59s` | `1114.6s` | `752.861s` |
+| v2 enabled, rerun | `39256 / 39258` fully passing; `2` recovered in Phase 4 retry | `168.7s` | `180.78s` including retry | `1164.1s` before retry | `789.386s` |
+
+The cleanest wall-clock comparison was therefore about `+3.05s` (`+1.8%`)
+slower with v2 enabled. The rerun was worse and also produced two
+batch-unstable URI tests that recovered only in Phase 4 retry:
+`built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` and
+`built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js`.
+
+Decision: revert the v2 code. The class-heavy improvement is real, but the
+suite-wide improvement is not obvious and the broader complexity gate appears
+to select interpreter mode for enough unrelated tests to offset the focused
+win. Any future version should be treated as a new Tune5 candidate and should
+use a tighter class-specific guard rather than a broad MIR instruction-count
+threshold.
+
 ## Proposed Tune4 Order
 
 1. Add Unicode phase instrumentation if cheap, so future parser/compiler work is
