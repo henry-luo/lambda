@@ -5,11 +5,11 @@ round. The first round is now substantively complete; this document captures
 larger or newer centralization opportunities that should be picked up only when
 their risk/benefit balance is favorable.
 
-**Status legend:** Proposed · Defer · Do when needed
+**Status legend:** Done · Partial · Deferred
 
 ---
 
-## 1. `lib/escape.h` / `lib/escape.c` — Proposed
+## 1. `lib/escape.h` / `lib/escape.c` — Done
 
 ### Rationale
 
@@ -46,13 +46,28 @@ extern const EscapeRule ESCAPE_RULES_HTML_ATTR[];
 extern const int ESCAPE_RULES_HTML_ATTR_COUNT;
 extern const EscapeRule ESCAPE_RULES_XML_ATTR[];
 extern const int ESCAPE_RULES_XML_ATTR_COUNT;
+extern const EscapeRule ESCAPE_RULES_LATEX[];
+extern const int ESCAPE_RULES_LATEX_COUNT;
+extern const EscapeRule ESCAPE_RULES_YAML[];
+extern const int ESCAPE_RULES_YAML_COUNT;
+extern const EscapeRule ESCAPE_RULES_JSX_TEXT[];
+extern const int ESCAPE_RULES_JSX_TEXT_COUNT;
+extern const EscapeRule ESCAPE_RULES_JSX_ATTR[];
+extern const int ESCAPE_RULES_JSX_ATTR_COUNT;
 ```
 
 ### Migration targets
 
-- `lambda/format/format-utils.{h,cpp}`: move rule tables and core escape loop.
-- `radiant/render_svg_inline.cpp`: replace local XML/SVG text and attribute
-  escapers.
+- ✅ Added `lib/escape.h` / `lib/escape.c` with `escape_append()` and shared
+  JSON, HTML text, HTML attr, and XML attr rule tables.
+- ✅ Added `lib/escape.c` to the `lambda-lib` target.
+- ✅ `radiant/render_svg_inline.cpp`: replaced local SVG subscene text and
+  attribute escapers.
+- ✅ Added `escape_append_stringbuf()` so formatters can reuse the shared escape
+  loop without changing `StringBuf` ownership.
+- ✅ `lambda/format/format-utils.{h,cpp}`: generic escape helpers now delegate
+  to `lib/escape`; JSON, HTML, XML, LaTeX, YAML, and JSX rule tables now alias
+  shared lib tables.
 - Future HTTP/log/debug output paths that need JSON or HTML-safe emission.
 
 ### Risk
@@ -61,20 +76,21 @@ Medium. Escaping bugs are quiet output bugs. The current formatter API uses
 `StringBuf*`, while `lib/strbuf.h` uses `StrBuf*`; the migration either needs a
 small adapter layer or a deliberate string-buffer unification step.
 
-### Recommendation
+### Verification
 
-Do this when a second non-format caller needs robust escaping. Do not fold it
-into unrelated formatter work.
+`test_strbuf_gtest` covers JSON control escaping and XML attribute escaping.
+`test_stringbuf_gtest` covers the `StringBuf` adapter path and formatter rule
+tables for LaTeX, YAML, and JSX.
 
 ---
 
-## 2. `lib/digest.h` / `lib/digest.c` — Do when needed
+## 2. `lib/digest.h` / `lib/digest.c` — Done
 
 ### Rationale
 
-SHA logic is still split:
+SHA logic used to be split:
 
-- `lambda/js/js_crypto.cpp` has native SHA-256 and SHA-384/SHA-512
+- `lambda/js/js_crypto.cpp` had native SHA-256 and SHA-384/SHA-512
   implementations for JS crypto and HMAC.
 - `lambda/network/enhanced_file_cache.cpp` uses mbedTLS SHA-256 for cache keys.
 
@@ -84,13 +100,16 @@ hash code, and could let `js_crypto` use mbedTLS where linked.
 ### Proposed API
 
 ```c
-void digest_sha256(const void* data, size_t len, uint8_t out[32]);
-void digest_sha384(const void* data, size_t len, uint8_t out[48]);
-void digest_sha512(const void* data, size_t len, uint8_t out[64]);
+size_t digest_output_len_bits(int bits);
+bool digest_compute_bits(int bits, const void* data, size_t len,
+                         uint8_t* out, size_t out_len);
+bool digest_sha256(const void* data, size_t len, uint8_t out[32]);
+bool digest_sha384(const void* data, size_t len, uint8_t out[48]);
+bool digest_sha512(const void* data, size_t len, uint8_t out[64]);
 
 typedef struct DigestCtx DigestCtx;
 DigestCtx* digest_ctx_new(int bits);
-void digest_update(DigestCtx* ctx, const void* data, size_t len);
+bool digest_update(DigestCtx* ctx, const void* data, size_t len);
 bool digest_finalize(DigestCtx* ctx, uint8_t* out, size_t out_len);
 void digest_ctx_free(DigestCtx* ctx);
 ```
@@ -102,14 +121,29 @@ needs targeted verification, especially empty input, block-boundary input, and
 large input. Also consider whether pulling mbedTLS into a generic lib object
 has unwanted link impact for small test binaries.
 
+### Migration targets
+
+- ✅ `lambda/js/js_crypto.cpp`: removed the local SHA-256/SHA-384/SHA-512 block
+  implementations from the JS crypto module.
+- ✅ Added `lib/digest.h` / `lib/digest.c` with mbedTLS `md` backed one-shot
+  SHA-1/SHA-224/SHA-256/SHA-384/SHA-512 dispatch and streaming context support.
+- ✅ Added `lib/digest.c` to `lambda-lib` and linked `mbedcrypto` there.
+- ✅ `lambda/js/js_crypto.cpp`: native SHA helpers, `createHash()`, and
+  `crypto.subtle.digest()` now use the shared digest facade.
+- ✅ `lambda/network/enhanced_file_cache.cpp`: cache-key SHA-256 now uses the
+  shared digest facade instead of direct `mbedtls_sha256_*` calls.
+- ✅ HMAC and PBKDF2 continue to use mbedTLS directly because `lib/digest` owns
+  plain digest operations, not MAC or KDF APIs.
+
 ### Recommendation
 
-Worth doing if another SHA caller appears or JS crypto becomes a measured
-hotspot.
+Keep `lib/digest` deliberately small. Add HMAC/KDF wrappers only if another
+non-JS caller needs those APIs; otherwise JS crypto can stay close to mbedTLS
+for Node-compatible MAC and PBKDF2 behavior.
 
 ---
 
-## 3. `lib/sort.h` O(n log n) sort — Proposed
+## 3. `lib/sort.h` O(n log n) sort — Done
 
 ### Rationale
 
@@ -127,13 +161,15 @@ void introsort(void* base, size_t count, size_t stride,
                SortCmpFn cmp, void* udata);
 ```
 
-`sort_qsort_r` can be a portability shim over platform `qsort_r`; `introsort`
-can wait until there is a measured need for a local algorithm.
+`sort_qsort_r` is implemented as a portable heap-sort based helper using the
+existing `SortCmpFn` signature and user-data argument. `introsort` is currently
+an alias to the O(n log n) helper, keeping a stable API name for future tuning.
 
 ### Migration targets
 
-- `lambda/lambda-vector.cpp`: `fn_sort1`, median helpers.
-- `lambda/py/py_builtins.cpp`: `sorted()` and `list.sort()`.
+- ✅ Added public `sort_qsort_r()` / `introsort()` entry points in `lib/sort.h`.
+- ⏳ Existing small-array callers remain on `insertion_sort()`; migrate vector
+  and Python sort paths when profiling says large inputs matter.
 
 ### Risk
 
@@ -145,9 +181,11 @@ semantics must remain exactly compatible with current `SortCmpFn`.
 Add the `qsort_r` shim first if sort performance shows up in profiles. Keep
 `insertion_sort()` for tiny and nearly sorted arrays.
 
+`test_sort_gtest` covers user-data comparators and the `introsort()` alias.
+
 ---
 
-## 4. Composite-key hashmap helper macros — Defer
+## 4. Composite-key hashmap helper macros — Done
 
 ### Rationale
 
@@ -162,11 +200,23 @@ several composite-key maps remain:
 ### Proposed API
 
 ```c
-HASHMAP_DEFINE_PTR_PTR_KEY(name, struct_type, first_field, second_field)
-HASHMAP_DEFINE_INT_PTR_KEY(name, struct_type, int_field, ptr_field)
-HASHMAP_DEFINE_PTR_STR_KEY(name, struct_type, ptr_field, str_field)
-HASHMAP_DEFINE_CUSTOM_KEY(name, struct_type, hash_body, cmp_body)
+HASHMAP_DEFINE_FIELD2_KEY(name, struct_type, first_field, second_field)
+HASHMAP_DEFINE_FIELD3_KEY(name, struct_type, first_field, second_field, third_field)
 ```
+
+The implemented macros accept scalar or pointer identity fields, including
+nested field expressions such as `key.source_item.item`.
+
+### Migration targets
+
+- ✅ Added `HASHMAP_DEFINE_FIELD2_KEY()` and `HASHMAP_DEFINE_FIELD3_KEY()` to
+  `lib/hashmap_helpers.h`.
+- ✅ `radiant/state_store.cpp`: `StateEntry` key `(node, name)` now uses
+  `HASHMAP_DEFINE_FIELD2_KEY()`.
+- ✅ `lambda/render_map.cpp`: reverse result lookup and `(source_item,
+  template_ref)` render-map keys now use hashmap helper macros.
+- ✅ `lambda/template_state.cpp`: `(model_item, template_ref, state_name)` now
+  uses `HASHMAP_DEFINE_FIELD3_KEY()`.
 
 ### Risk
 
@@ -174,14 +224,14 @@ Medium. The API can quickly become a macro zoo, and changing hash mixing changes
 bucket layout. Correctness should hold, but performance and iteration order can
 shift.
 
-### Recommendation
+### Verification
 
-Defer until a new composite map appears. If implemented, start with exactly one
-shape that has two or more current callers.
+`test_hashmap_helpers_gtest` covers two-field and three-field composite identity
+keys.
 
 ---
 
-## 5. Path extension helpers — Proposed
+## 5. Path extension helpers — Done
 
 ### Rationale
 
@@ -200,9 +250,12 @@ bool file_path_has_ext_ci(const char* path, const char* ext);
 
 ### Migration targets
 
-- `radiant/window.cpp` document-format detection.
-- `radiant/webview_child_linux.cpp` MIME detection.
-- `lambda/input/markup/format_registry.cpp` filename format detection.
+- ✅ Added `file_path_ext_len()` and `file_path_has_ext_ci()` to `lib/file`.
+- ✅ `radiant/window.cpp` document-format detection now uses `file_path_ext_len()`.
+- ✅ `radiant/webview_child_linux.cpp` MIME detection now uses
+  `file_path_has_ext_ci()`.
+- ✅ `lambda/input/markup/format_registry.cpp` filename format detection now
+  uses `file_path_ext_len()`.
 
 ### Risk
 
@@ -213,9 +266,12 @@ Low. This is a narrow extension of existing path utilities.
 Good small follow-up. Prefer this before introducing another file-format
 detection helper.
 
+`test_file_module_gtest` covers explicit-length extension lookup, dots in
+directories, trailing separators, trailing dots, and case-insensitive checks.
+
 ---
 
-## 6. Non-mutating string split iterator — Proposed
+## 6. Non-mutating string split iterator — Done
 
 ### Rationale
 
@@ -240,7 +296,9 @@ bool strview_split_next(StrViewSplitIter* it, StrView* token);
 
 ### Migration targets
 
-- `lambda/input/input-toml.cpp`: dotted section path traversal.
+- ✅ Added `StrViewSplitIter` to `lib/strview`.
+- ✅ `lambda/input/input-toml.cpp`: dotted section path traversal no longer uses
+  `strtok()` or a fixed mutable section buffer.
 - CSS/DOM class-token parsing sites that currently use copied buffers plus
   `strtok()`.
 
@@ -252,13 +310,24 @@ Low, provided callers retain current empty-token behavior where it matters.
 
 Worth doing as a contained parser-safety cleanup.
 
+`test_strview_gtest` covers normal split iteration and empty-token preservation.
+
 ---
 
 ## Priority order
 
-1. Path extension helpers: small, low-risk, likely bug prevention.
-2. String split iterator migration: small parser-safety improvement.
-3. `lib/escape`: larger, valuable once another caller needs it.
-4. Sort wrapper: performance-driven.
-5. Digest wrapper: dependency/performance-driven.
-6. Composite hashmap macros: defer until a new repeated shape appears.
+Implemented:
+
+1. Path extension helpers and three call-site migrations.
+2. String split iterator and TOML dotted-section migration.
+3. `lib/escape` and SVG subscene escaping migration.
+4. Formatter escape helpers using the shared `lib/escape` loop and shared
+   JSON/HTML/XML/LaTeX/YAML/JSX tables.
+5. Sort wrapper entry points.
+6. JS crypto SHA/HMAC reuse of mbedTLS `md` APIs.
+7. Composite-key hashmap helper macros and three local map migrations.
+8. Generic digest facade and JS/cache SHA migrations.
+
+Still deferred:
+
+1. HMAC/KDF facade wrappers: wait for a second non-JS caller.

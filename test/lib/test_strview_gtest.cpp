@@ -218,3 +218,41 @@ TEST_F(StrViewTest, DupWithPool) {
 
     pool_destroy(pool);
 }
+
+TEST_F(StrViewTest, SplitIterator) {
+    StrView input = strview_from_str("alpha.beta.gamma");
+    StrViewSplitIter iter;
+    StrView token;
+
+    strview_split_init(&iter, input, '.');
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 5u);
+    EXPECT_EQ(strncmp(token.str, "alpha", token.length), 0);
+
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 4u);
+    EXPECT_EQ(strncmp(token.str, "beta", token.length), 0);
+
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 5u);
+    EXPECT_EQ(strncmp(token.str, "gamma", token.length), 0);
+
+    EXPECT_FALSE(strview_split_next(&iter, &token));
+}
+
+TEST_F(StrViewTest, SplitIteratorKeepsEmptyTokens) {
+    StrView input = strview_from_str("a..b.");
+    StrViewSplitIter iter;
+    StrView token;
+
+    strview_split_init(&iter, input, '.');
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 1u);
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 0u);
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 1u);
+    ASSERT_TRUE(strview_split_next(&iter, &token));
+    EXPECT_EQ(token.length, 0u);
+    EXPECT_FALSE(strview_split_next(&iter, &token));
+}

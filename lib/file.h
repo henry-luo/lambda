@@ -157,6 +157,13 @@ const char* file_path_basename(const char* path);
 // File extension including dot (pointer into input string — no alloc).
 const char* file_path_ext(const char* path);
 
+// File extension for an explicit path length. Returns pointer into `path` and
+// writes extension length, including dot, to `ext_len` when non-NULL.
+const char* file_path_ext_len(const char* path, size_t path_len, size_t* ext_len);
+
+// Case-insensitive extension check. `ext` may be "txt" or ".txt".
+bool file_path_has_ext_ci(const char* path, const char* ext);
+
 // ---------------------------------------------------------------------------
 // Cache / directory convenience
 // ---------------------------------------------------------------------------

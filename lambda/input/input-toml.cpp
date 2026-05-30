@@ -3,6 +3,9 @@
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
+extern "C" {
+#include "../../lib/strview.h"
+}
 
 using namespace lambda;
 
@@ -861,6 +864,12 @@ static String* create_string_key(InputContext& ctx, const char* key_str) {
     return key;
 }
 
+static String* create_string_key_view(InputContext& ctx, const StrView* key_view) {
+    if (!key_view) return NULL;
+    MarkBuilder& builder = ctx.builder;
+    return builder.createName(key_view->str, key_view->length);
+}
+
 // Helper function to find or create a section in the root map
 static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char* section_name) {
     Input* input = ctx.input();
@@ -892,22 +901,22 @@ static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char*
 // Helper function to handle nested sections (like "database.credentials")
 static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* section_path) {
     Input* input = ctx.input();
-    char path_copy[512];
-    strncpy(path_copy, section_path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
+    if (!section_path) return NULL;
 
-    // Split the path by dots
-    char* first_part = strtok(path_copy, ".");
-    char* remaining_path = strtok(NULL, "");
-
-    if (!first_part) return NULL;
+    StrView section_view = strview_from_cstr(section_path);
+    StrViewSplitIter iter;
+    StrView part;
+    strview_split_init(&iter, section_view, '.');
+    if (!strview_split_next(&iter, &part) || part.length == 0) return NULL;
 
     // Get or create the first level section
+    char* first_part = strview_dup_with_pool(&part, input->pool);
+    if (!first_part) return NULL;
     Map* current_map = find_or_create_section(ctx, root_map, first_part);
     if (!current_map) return NULL;
 
     // If there's no remaining path, return the current section
-    if (!remaining_path) return current_map;
+    if (iter.finished) return current_map;
 
     // Handle nested parts
     TypeMap* current_map_type = (TypeMap*)current_map->type;
@@ -918,9 +927,9 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
         }
     }
 
-    char* token = strtok(remaining_path, ".");
-    while (token != NULL) {
-        String* key = create_string_key(ctx, token);
+    while (strview_split_next(&iter, &part)) {
+        if (part.length == 0) return NULL;
+        String* key = create_string_key_view(ctx, &part);
         if (!key) return NULL;
 
         // Look for existing nested table in current map
@@ -954,8 +963,6 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
                 current_shape_entry = current_shape_entry->next;
             }
         }
-
-        token = strtok(NULL, ".");
     }
 
     return current_map;

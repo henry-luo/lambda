@@ -202,3 +202,25 @@ TEST(SortTest, AsRAdapterWorksWithInsertionSort) {
     EXPECT_EQ(arr[0], 1);
     EXPECT_EQ(arr[4], 9);
 }
+
+TEST(SortTest, SortQsortRUsesUserData) {
+    struct OffsetCmp {
+        static int cmp(const void* a, const void* b, void* udata) {
+            int offset = *(int*)udata;
+            int va = *(const int*)a + offset;
+            int vb = *(const int*)b + offset;
+            return (va > vb) - (va < vb);
+        }
+    };
+
+    int arr[] = {9, 1, 4, 3, 7, 0, 2, 8, 5, 6};
+    int offset = 10;
+    sort_qsort_r(arr, 10, sizeof(int), OffsetCmp::cmp, &offset);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(arr[i], i);
+}
+
+TEST(SortTest, IntrosortAliasSorts) {
+    int arr[] = {4, 2, 5, 1, 3};
+    introsort(arr, 5, sizeof(int), cmp_int, nullptr);
+    for (int i = 0; i < 5; ++i) EXPECT_EQ(arr[i], i + 1);
+}

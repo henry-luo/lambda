@@ -145,6 +145,52 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
                            name##_hash, name##_cmp, elfree, NULL); \
     }
 
+// emit cmp/hash/new for a struct keyed by two scalar or pointer identity fields.
+// field expressions may name nested fields, e.g. `key.source_item.item`.
+#define HASHMAP_DEFINE_FIELD2_KEY(name, struct_type, field1, field2) \
+    static uint64_t name##_hash(const void* item, uint64_t s0, uint64_t s1) { \
+        const struct_type* e = (const struct_type*)item; \
+        uint64_t h1 = hashmap_murmur(&e->field1, sizeof(e->field1), s0, s1); \
+        uint64_t h2 = hashmap_murmur(&e->field2, sizeof(e->field2), s0, s1); \
+        return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL); \
+    } \
+    static int name##_cmp(const void* a, const void* b, void* udata) { \
+        (void)udata; \
+        const struct_type* ea = (const struct_type*)a; \
+        const struct_type* eb = (const struct_type*)b; \
+        if (ea->field1 != eb->field1) return ea->field1 < eb->field1 ? -1 : 1; \
+        if (ea->field2 != eb->field2) return ea->field2 < eb->field2 ? -1 : 1; \
+        return 0; \
+    } \
+    static inline struct hashmap* name##_new(size_t cap) { \
+        return hashmap_new(sizeof(struct_type), cap, 0, 0, \
+                           name##_hash, name##_cmp, NULL, NULL); \
+    }
+
+// emit cmp/hash/new for a struct keyed by three scalar or pointer identity fields.
+// field expressions may name nested fields, e.g. `key.model_item.item`.
+#define HASHMAP_DEFINE_FIELD3_KEY(name, struct_type, field1, field2, field3) \
+    static uint64_t name##_hash(const void* item, uint64_t s0, uint64_t s1) { \
+        const struct_type* e = (const struct_type*)item; \
+        uint64_t h1 = hashmap_murmur(&e->field1, sizeof(e->field1), s0, s1); \
+        uint64_t h2 = hashmap_murmur(&e->field2, sizeof(e->field2), s0, s1); \
+        uint64_t h3 = hashmap_murmur(&e->field3, sizeof(e->field3), s0, s1); \
+        return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL) ^ (h3 * 0x517cc1b727220a95ULL); \
+    } \
+    static int name##_cmp(const void* a, const void* b, void* udata) { \
+        (void)udata; \
+        const struct_type* ea = (const struct_type*)a; \
+        const struct_type* eb = (const struct_type*)b; \
+        if (ea->field1 != eb->field1) return ea->field1 < eb->field1 ? -1 : 1; \
+        if (ea->field2 != eb->field2) return ea->field2 < eb->field2 ? -1 : 1; \
+        if (ea->field3 != eb->field3) return ea->field3 < eb->field3 ? -1 : 1; \
+        return 0; \
+    } \
+    static inline struct hashmap* name##_new(size_t cap) { \
+        return hashmap_new(sizeof(struct_type), cap, 0, 0, \
+                           name##_hash, name##_cmp, NULL, NULL); \
+    }
+
 #ifdef __cplusplus
 }
 #endif

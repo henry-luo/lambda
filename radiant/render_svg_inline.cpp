@@ -23,6 +23,7 @@
 #include "../lib/mempool.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
+#include "../lib/escape.h"
 #include <string.h>
 #include "../lib/mem.h"
 #include "../lib/base64.h"
@@ -5121,28 +5122,11 @@ static void svg_subscene_indent(StrBuf* out, int indent_level) {
 }
 
 static void svg_subscene_escape_text(StrBuf* out, const char* s, size_t len) {
-    if (!out || !s) return;
-    for (size_t i = 0; i < len; i++) {
-        switch (s[i]) {
-        case '&': strbuf_append_str(out, "&amp;"); break;
-        case '<': strbuf_append_str(out, "&lt;"); break;
-        case '>': strbuf_append_str(out, "&gt;"); break;
-        default: strbuf_append_char(out, s[i]); break;
-        }
-    }
+    escape_append(out, s, len, ESCAPE_RULES_HTML_TEXT, ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 }
 
 static void svg_subscene_escape_attr(StrBuf* out, const char* s, size_t len) {
-    if (!out || !s) return;
-    for (size_t i = 0; i < len; i++) {
-        switch (s[i]) {
-        case '&': strbuf_append_str(out, "&amp;"); break;
-        case '<': strbuf_append_str(out, "&lt;"); break;
-        case '>': strbuf_append_str(out, "&gt;"); break;
-        case '"': strbuf_append_str(out, "&quot;"); break;
-        default: strbuf_append_char(out, s[i]); break;
-        }
-    }
+    escape_append(out, s, len, ESCAPE_RULES_XML_ATTR, ESCAPE_RULES_XML_ATTR_COUNT, ESCAPE_CTRL_XML_NUMERIC);
 }
 
 static bool svg_subscene_attr_name_equals(ShapeEntry* field, const char* name) {

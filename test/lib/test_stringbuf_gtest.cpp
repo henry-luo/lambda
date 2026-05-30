@@ -3,6 +3,7 @@
 
 extern "C" {
 #include "../../lib/stringbuf.h"
+#include "../../lib/escape.h"
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 }
@@ -88,6 +89,44 @@ TEST_F(StringBufTest, TestStringbufAppendStrN) {
     stringbuf_append_str_n(sb, " World!", 6);
     ASSERT_EQ(sb->str->len, 11) << "length should be 11 after appending ' World'";
     ASSERT_STREQ(sb->str->chars, "Hello World") << "content should be 'Hello World'";
+
+    stringbuf_free(sb);
+}
+
+TEST_F(StringBufTest, TestEscapeAppendStringBufJsonControls) {
+    StringBuf *sb = stringbuf_new(test_pool);
+
+    escape_append_stringbuf(sb, "\"a\"\x01\n", strlen("\"a\"\x01\n"),
+                            ESCAPE_RULES_JSON, ESCAPE_RULES_JSON_COUNT,
+                            ESCAPE_CTRL_JSON_UNICODE);
+
+    ASSERT_NE(sb->str, nullptr);
+    EXPECT_STREQ(sb->str->chars, "\\\"a\\\"\\u0001\\n");
+    EXPECT_EQ(sb->length, strlen("\\\"a\\\"\\u0001\\n"));
+
+    stringbuf_free(sb);
+}
+
+TEST_F(StringBufTest, TestEscapeAppendStringBufFormatterTables) {
+    StringBuf *sb = stringbuf_new(test_pool);
+
+    escape_append_stringbuf(sb, "{a}&", strlen("{a}&"),
+                            ESCAPE_RULES_LATEX, ESCAPE_RULES_LATEX_COUNT,
+                            ESCAPE_CTRL_NONE);
+    ASSERT_NE(sb->str, nullptr);
+    EXPECT_STREQ(sb->str->chars, "\\{a\\}\\&");
+
+    stringbuf_reset(sb);
+    escape_append_stringbuf(sb, "\"a\\b\n", strlen("\"a\\b\n"),
+                            ESCAPE_RULES_YAML, ESCAPE_RULES_YAML_COUNT,
+                            ESCAPE_CTRL_NONE);
+    EXPECT_STREQ(sb->str->chars, "\\\"a\\\\b\\n");
+
+    stringbuf_reset(sb);
+    escape_append_stringbuf(sb, "<x>{y}&", strlen("<x>{y}&"),
+                            ESCAPE_RULES_JSX_TEXT, ESCAPE_RULES_JSX_TEXT_COUNT,
+                            ESCAPE_CTRL_NONE);
+    EXPECT_STREQ(sb->str->chars, "&lt;x&gt;&#123;y&#125;&amp;");
 
     stringbuf_free(sb);
 }

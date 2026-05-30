@@ -29,31 +29,7 @@ extern bool is_view_focusable(View* view);
 
 static void focus_sync_text_control_state(DocState* state, View* view);
 
-// ============================================================================
-// Hash and Compare Functions for StateKey
-// ============================================================================
-
-static uint64_t state_key_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const StateEntry* entry = (const StateEntry*)item;
-    // Combine node pointer hash and name pointer hash
-    uint64_t node_hash = hashmap_murmur(&entry->key.node, sizeof(void*), seed0, seed1);
-    uint64_t name_hash = hashmap_murmur(&entry->key.name, sizeof(void*), seed0, seed1);
-    return node_hash ^ (name_hash * 0x9e3779b97f4a7c15ULL);
-}
-
-static int state_key_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const StateEntry* ea = (const StateEntry*)a;
-    const StateEntry* eb = (const StateEntry*)b;
-    if (ea->key.node != eb->key.node) {
-        return ea->key.node < eb->key.node ? -1 : 1;
-    }
-    if (ea->key.name != eb->key.name) {
-        return ea->key.name < eb->key.name ? -1 : 1;
-    }
-    return 0;
-}
-
+HASHMAP_DEFINE_FIELD2_KEY(state_key, StateEntry, key.node, key.name)
 HASHMAP_DEFINE_INTKEY(view_state_entry, ViewStateEntry, view_id)
 
 static void view_state_release_payload(ViewState* view_state);
@@ -176,7 +152,7 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
         64,  // initial capacity
         0x12345678, 0x87654321,  // hash seeds
         state_key_hash,
-        state_key_compare,
+        state_key_cmp,
         NULL,  // no element free function
         NULL   // no user data
     );
@@ -3240,7 +3216,7 @@ DocState* state_set_immutable(DocState* state, void* node, const char* name, Ite
         hashmap_count(state->state_map) + 16,
         0x12345678, 0x87654321,
         state_key_hash,
-        state_key_compare,
+        state_key_cmp,
         NULL, NULL
     );
 
@@ -3290,7 +3266,7 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
         hashmap_count(state->state_map),
         0x12345678, 0x87654321,
         state_key_hash,
-        state_key_compare,
+        state_key_cmp,
         NULL, NULL
     );
 

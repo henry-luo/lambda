@@ -42,6 +42,15 @@ char* strview_to_cstr(const StrView* s);                 // Convert to null-term
 // pool-allocated NUL-terminated copy. pool may be NULL (falls back to mem_alloc).
 char* strview_dup_with_pool(const StrView* s, Pool* pool);
 
+typedef struct {
+    StrView rest;
+    char delimiter;
+    bool finished;
+} StrViewSplitIter;
+
+void strview_split_init(StrViewSplitIter* it, StrView input, char delimiter);
+bool strview_split_next(StrViewSplitIter* it, StrView* token);
+
 #ifdef __cplusplus
 }
 #endif

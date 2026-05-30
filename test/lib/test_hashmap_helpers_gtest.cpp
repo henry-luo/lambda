@@ -44,6 +44,12 @@ HASHMAP_DEFINE_INTKEY(u32_entry, struct U32Entry, id)
 struct LenStrEntry { const char* name; size_t name_len; int value; };
 HASHMAP_DEFINE_LENSTRKEY(len_str_entry, struct LenStrEntry, name, name_len)
 
+struct Field2Entry { uint64_t id; const char* tag; int value; };
+HASHMAP_DEFINE_FIELD2_KEY(field2_entry, struct Field2Entry, id, tag)
+
+struct Field3Entry { uint64_t id; const char* tag; const char* state; int value; };
+HASHMAP_DEFINE_FIELD3_KEY(field3_entry, struct Field3Entry, id, tag, state)
+
 }  // namespace
 
 TEST(HashmapHelpersTest, StrKeyInlineArray) {
@@ -235,6 +241,58 @@ TEST(HashmapHelpersTest, LenStrKey) {
     found = (const LenStrEntry*)hashmap_get(m, &empty_probe);
     ASSERT_NE(found, nullptr);
     EXPECT_EQ(found->value, 99);
+
+    hashmap_free(m);
+}
+
+TEST(HashmapHelpersTest, Field2CompositeKey) {
+    struct hashmap* m = field2_entry_new(0);
+    ASSERT_NE(m, nullptr);
+
+    const char tag_a[] = "same";
+    const char tag_b[] = "same";
+    Field2Entry a{7, tag_a, 10};
+    Field2Entry b{7, tag_b, 20};
+    Field2Entry c{8, tag_a, 30};
+    hashmap_set(m, &a);
+    hashmap_set(m, &b);
+    hashmap_set(m, &c);
+    EXPECT_EQ(hashmap_count(m), 3u);
+
+    Field2Entry probe{7, tag_a, 0};
+    const Field2Entry* found = (const Field2Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 10);
+
+    probe.tag = tag_b;
+    found = (const Field2Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 20);
+
+    hashmap_free(m);
+}
+
+TEST(HashmapHelpersTest, Field3CompositeKey) {
+    struct hashmap* m = field3_entry_new(0);
+    ASSERT_NE(m, nullptr);
+
+    const char tmpl[] = "tmpl";
+    const char hover[] = "hover";
+    const char focus[] = "focus";
+    Field3Entry a{11, tmpl, hover, 1};
+    Field3Entry b{11, tmpl, focus, 2};
+    hashmap_set(m, &a);
+    hashmap_set(m, &b);
+
+    Field3Entry probe{11, tmpl, focus, 0};
+    const Field3Entry* found = (const Field3Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 2);
+
+    probe.state = hover;
+    found = (const Field3Entry*)hashmap_get(m, &probe);
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->value, 1);
 
     hashmap_free(m);
 }

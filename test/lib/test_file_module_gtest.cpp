@@ -792,6 +792,31 @@ TEST_F(FilePathTest, ExtInPath) {
     EXPECT_STREQ(e, ".cpp");
 }
 
+TEST_F(FilePathTest, ExtIgnoresDotInDirectory) {
+    EXPECT_EQ(file_path_ext("src.v1/Makefile"), nullptr);
+}
+
+TEST_F(FilePathTest, ExtLenExplicitLength) {
+    const char path[] = "archive.tar.gz?ignored";
+    size_t ext_len = 0;
+    const char* e = file_path_ext_len(path, strlen("archive.tar.gz"), &ext_len);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(ext_len, 3u);
+    EXPECT_EQ(strncmp(e, ".gz", ext_len), 0);
+}
+
+TEST_F(FilePathTest, ExtLenTrailingSlashAndTrailingDot) {
+    EXPECT_EQ(file_path_ext_len("dir/file.txt/", strlen("dir/file.txt/"), nullptr), nullptr);
+    EXPECT_EQ(file_path_ext_len("dir/file.", strlen("dir/file."), nullptr), nullptr);
+}
+
+TEST_F(FilePathTest, HasExtCaseInsensitive) {
+    EXPECT_TRUE(file_path_has_ext_ci("assets/ICON.SVG", "svg"));
+    EXPECT_TRUE(file_path_has_ext_ci("assets/ICON.SVG", ".svg"));
+    EXPECT_FALSE(file_path_has_ext_ci("assets.v2/Makefile", "v2"));
+    EXPECT_FALSE(file_path_has_ext_ci("assets/ICON.SVG", ""));
+}
+
 /* ================================================================== *
  *  §7  Directory Operations                                          *
  * ================================================================== */
