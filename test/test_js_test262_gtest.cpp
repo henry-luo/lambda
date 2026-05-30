@@ -1229,6 +1229,15 @@ struct BatchResult {
     long elapsed_us;  // per-test execution time in microseconds
     size_t rss_before; // RSS bytes before test
     size_t rss_after;  // RSS bytes after test
+    long parse_us;
+    long ast_us;
+    long early_us;
+    long imports_us;
+    long mir_us;
+    long link_us;
+    long execute_us;
+    long cleanup_us;
+    long phase_total_us;
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
@@ -1456,6 +1465,33 @@ static double g_phase_timing_secs = 0;     // timing TSV write runtime
 static double g_phase_memory_secs = 0;     // memory TSV + summary runtime
 static double g_phase_evaluate_secs = 0;   // Phase 3 result evaluation runtime
 static double g_phase4_secs = 0;           // Phase 4 regression retry runtime
+
+static bool t262_phase_timing_enabled() {
+    const char* flag = getenv("LAMBDA_JS_PHASE_TIMING");
+    return flag && strcmp(flag, "0") != 0;
+}
+
+static void write_phase_timing_log(const std::unordered_map<std::string, BatchResult>& batch_results) {
+    if (!t262_phase_timing_enabled()) return;
+    char phase_path[128] = "temp/_t262_phase_timing.tsv";
+    if (g_opt_level >= 0) {
+        snprintf(phase_path, sizeof(phase_path), "temp/_t262_phase_timing_o%d.tsv", g_opt_level);
+    }
+    FILE* phase_log = fopen(phase_path, "w");
+    if (!phase_log) return;
+    fprintf(phase_log,
+            "test_name\texit_code\telapsed_us\tparse_us\tast_us\tearly_us\timports_us\tmir_us\tlink_us\texecute_us\tcleanup_us\tphase_total_us\n");
+    for (const auto& kv : batch_results) {
+        const BatchResult& br = kv.second;
+        fprintf(phase_log, "%s\t%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
+                kv.first.c_str(), br.exit_code, br.elapsed_us,
+                br.parse_us, br.ast_us, br.early_us, br.imports_us, br.mir_us,
+                br.link_us, br.execute_us, br.cleanup_us, br.phase_total_us);
+    }
+    fclose(phase_log);
+    fprintf(stderr, "[test262] Phase timing data: %zu entries → %s\n",
+            batch_results.size(), phase_path);
+}
 
 // Stable checkpoint baseline (commit 86235a964, 2026-04-15).
 // --update-baseline requires fully passing >= this value.
@@ -2362,20 +2398,18 @@ static int run_t262_sub_batch(
                     current_output.clear();
                     in_script = true;
                 } else if (strncmp(buf + 1, "BATCH_END ", 10) == 0) {
-                    int status = atoi(buf + 11);
+                    int status = 0;
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
-                    const char* space2 = strchr(buf + 11, ' ');
-                    if (space2) {
-                        elapsed_us = atol(space2 + 1);
-                        const char* space3 = strchr(space2 + 1, ' ');
-                        if (space3) {
-                            rss_before = (size_t)atol(space3 + 1);
-                            const char* space4 = strchr(space3 + 1, ' ');
-                            if (space4) rss_after = (size_t)atol(space4 + 1);
-                        }
-                    }
-                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after};
+                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
+                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                           &status, &elapsed_us, &rss_before, &rss_after,
+                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
+                                               parse_us, ast_us, early_us, imports_us, mir_us,
+                                               link_us, execute_us, cleanup_us, phase_total_us};
                     in_script = false;
                 } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
@@ -2498,20 +2532,18 @@ static int run_t262_sub_batch(
                     current_output.clear();
                     in_script = true;
                 } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
-                    int status = atoi(buffer + 11);
+                    int status = 0;
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
-                    const char* space2 = strchr(buffer + 11, ' ');
-                    if (space2) {
-                        elapsed_us = atol(space2 + 1);
-                        const char* space3 = strchr(space2 + 1, ' ');
-                        if (space3) {
-                            rss_before = (size_t)atol(space3 + 1);
-                            const char* space4 = strchr(space3 + 1, ' ');
-                            if (space4) rss_after = (size_t)atol(space4 + 1);
-                        }
-                    }
-                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after};
+                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
+                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                           &status, &elapsed_us, &rss_before, &rss_after,
+                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
+                                               parse_us, ast_us, early_us, imports_us, mir_us,
+                                               link_us, execute_us, cleanup_us, phase_total_us};
                     in_script = false;
                 } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
@@ -3238,6 +3270,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                     batch_results.size(), timing_path);
         }
     }
+    write_phase_timing_log(batch_results);
     auto timing_done = std::chrono::steady_clock::now();
     double timing_secs = std::chrono::duration<double>(timing_done - timing_start).count();
 
@@ -4245,6 +4278,7 @@ int main(int argc, char** argv) {
             }
             fprintf(stderr, "\n");
         }
+        write_phase_timing_log(results);
         fprintf(stderr, "\n[test262] Batch file result: %d passed, %d failed out of %zu\n",
                 passed, failed, prepared.size());
         if (!failed_names.empty()) {

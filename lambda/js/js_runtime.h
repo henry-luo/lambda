@@ -579,6 +579,21 @@ Item js_escape(Item str_item);
 Item js_atob(Item str_item);
 Item js_btoa(Item str_item);
 
+typedef struct JsMirPhaseTiming {
+    long parse_us;
+    long ast_us;
+    long early_us;
+    long imports_us;
+    long mir_us;
+    long link_us;
+    long execute_us;
+    long cleanup_us;
+    long total_us;
+} JsMirPhaseTiming;
+
+void js_mir_reset_last_phase_timing(void);
+void js_mir_get_last_phase_timing(JsMirPhaseTiming* out);
+
 // globalThis / global object
 Item js_get_global_this(void);
 Item js_get_global_object(void);
