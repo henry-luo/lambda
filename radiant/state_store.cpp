@@ -5437,6 +5437,20 @@ bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
     return true;
 }
 
+bool selection_get_anchor_snapshot(DocState* state, View** out_anchor_view,
+                                   int* out_anchor_offset,
+                                   bool* out_collapsed) {
+    if (out_anchor_view) *out_anchor_view = NULL;
+    if (out_anchor_offset) *out_anchor_offset = 0;
+    if (out_collapsed) *out_collapsed = true;
+    if (!state || !state->selection) return false;
+
+    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
+    if (out_anchor_offset) *out_anchor_offset = state->selection->anchor_offset;
+    if (out_collapsed) *out_collapsed = state->selection->is_collapsed;
+    return true;
+}
+
 bool selection_get_focus_snapshot(DocState* state, View** out_focus_view,
                                   int* out_focus_offset,
                                   float* out_iframe_offset_x,

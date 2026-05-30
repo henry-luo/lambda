@@ -2258,6 +2258,11 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
                                      &existing_anchor_offset) &&
         existing_anchor_view == target) {
         log_anchor = existing_anchor_offset;
+    } else if (selection_get_anchor_snapshot(state, &existing_anchor_view,
+                                             &existing_anchor_offset, nullptr) &&
+               existing_anchor_view == target) {
+        anchor_offset = existing_anchor_offset;
+        log_anchor = existing_anchor_offset;
     } else {
         selection_start(state, target, anchor_offset);
         selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
