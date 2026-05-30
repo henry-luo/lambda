@@ -185,6 +185,10 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+static bool js_typed_array_is_bigint_element(JsTypedArrayType type) {
+    return type == JS_TYPED_BIGINT64 || type == JS_TYPED_BIGUINT64;
+}
+
 static int js_typed_array_current_byte_length(JsTypedArray* ta) {
     if (!ta) return 0;
     if (!ta->buffer) return ta->byte_length;
@@ -224,6 +228,35 @@ static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
     if (ta->buffer->detached) return true;
     if (ta->length_tracking) return ta->buffer->byte_length < ta->byte_offset;
     return ta->buffer->byte_length < ta->byte_offset + ta->byte_length;
+}
+
+static bool js_typed_array_raw_fast_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* flag = getenv("LAMBDA_JS_TA_RAW_FAST");
+        enabled = (!flag || strcmp(flag, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
+static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray* src, int offset) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!dst || !src || dst->element_type != src->element_type) return false;
+    if (js_typed_array_is_out_of_bounds(dst) || js_typed_array_is_out_of_bounds(src)) return false;
+
+    int src_len = js_typed_array_current_length(src);
+    if (src_len <= 0) return true;
+    int dst_len = js_typed_array_current_length(dst);
+    if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
+
+    char* src_data = (char*)js_typed_array_current_data(src);
+    char* dst_data = (char*)js_typed_array_current_data(dst);
+    if (!src_data || !dst_data) return false;
+
+    int elem_size = typed_array_element_size(src->element_type);
+    size_t byte_count = (size_t)src_len * (size_t)elem_size;
+    memmove(dst_data + ((size_t)offset * (size_t)elem_size), src_data, byte_count);
+    return true;
 }
 
 extern "C" bool js_typed_array_is_out_of_bounds_item(Item ta_item) {
@@ -1490,6 +1523,11 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
     if (js_is_typed_array(source)) {
         // Copy from another typed array
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
+        bool src_bigint = js_typed_array_is_bigint_element(src->element_type);
+        bool dst_bigint = js_typed_array_is_bigint_element((JsTypedArrayType)type_id);
+        if (src_bigint != dst_bigint) {
+            return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
+        }
         Item result = js_typed_array_new(type_id, src->length);
         JsTypedArray* dst = js_get_typed_array_ptr(result.map);
         if (src->element_type == (JsTypedArrayType)type_id) {
@@ -1944,6 +1982,13 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
             return js_throw_range_error("source is too large");
         }
         if (src_len <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
+        if (js_typed_array_is_bigint_element(dst->element_type) !=
+            js_typed_array_is_bigint_element(src->element_type)) {
+            return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
+        }
+        if (js_typed_array_try_raw_set_same_type(dst, src, offset)) {
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
 
         Item* values = (Item*)mem_alloc((size_t)src_len * sizeof(Item), MEM_CAT_JS_RUNTIME);
         if (!values) return js_throw_type_error("TypedArray.prototype.set allocation failed");
