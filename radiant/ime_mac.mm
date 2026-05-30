@@ -4,9 +4,9 @@
 // NSTextInputClient and feeds glfwSetCharCallback) intact. We replace the
 // view's class at runtime (`object_setClass`) with a small subclass that
 // overrides the four NSTextInputClient methods we care about and forwards
-// to `te_ime_*` whenever a text control currently has Radiant focus.
-// Calls fall back to `super` (via objc_msgSendSuper) so plain-text input
-// on non-text-control elements still flows through GLFW unchanged.
+// composition events to Radiant's shared editing controller. Calls fall back
+// to `super` (via objc_msgSendSuper) so plain-text input on non-editing
+// elements still flows through GLFW unchanged.
 //
 // This translation unit deliberately avoids including view.hpp because
 // AppKit's MacTypes defines `Rect` and conflicts with view.hpp::Rect. We
@@ -39,41 +39,20 @@ class View;
 extern "C" GLFWwindow*    radiant_ui_get_glfw_window(struct UiContext*);
 extern "C" DocState*  radiant_ui_get_state(struct UiContext*);
 extern "C" void           radiant_state_request_repaint(struct DocState*);
-extern "C" bool           radiant_dispatch_rich_composition_event(struct UiContext*, EventType,
-                                                                  const char*, uint32_t);
-extern "C" bool           radiant_dispatch_form_text_ime_begin(struct UiContext*,
-                                                                DomElement*,
-                                                                View*);
-extern "C" bool           radiant_dispatch_form_text_ime_update(struct UiContext*,
-                                                                 DomElement*,
-                                                                 View*,
-                                                                 const char*,
-                                                                 uint32_t,
-                                                                 uint32_t);
-extern "C" bool           radiant_dispatch_form_text_ime_cancel(struct UiContext*,
-                                                                 DomElement*,
-                                                                 View*);
-extern "C" bool           radiant_dispatch_form_text_ime_commit(struct UiContext*,
-                                                                 DomElement*,
-                                                                 View*,
-                                                                 const char*,
-                                                                 uint32_t);
+extern "C" bool           radiant_dispatch_editing_composition_event(struct UiContext*,
+                                                                     EventType,
+                                                                     const char*,
+                                                                     uint32_t);
 
 View* focus_get(DocState* state);
 bool  tc_is_text_control(DomElement* elem);
-
-void te_ime_begin(DomElement* elem);
-void te_ime_update(DomElement* elem, const char* preedit, uint32_t len, uint32_t caret);
-void te_ime_commit(DomElement* elem, DocState* state, void* target,
-                   const char* committed, uint32_t len);
-void te_ime_cancel(DomElement* elem);
-bool te_ime_is_composing(DomElement* elem);
 
 extern "C" void radiant_ime_mac_attach(struct UiContext* uicon);
 
 namespace {
 
 UiContext* g_ime_uicon = nullptr;
+bool g_form_composing = false;
 bool g_rich_composing = false;
 
 DomElement* ime_focused_text_control() {
@@ -91,9 +70,10 @@ DocState* ime_state() {
     return radiant_ui_get_state(g_ime_uicon);
 }
 
-bool ime_dispatch_rich(EventType event_type, const char* text, uint32_t caret) {
+bool ime_dispatch_editing(EventType event_type, const char* text, uint32_t caret) {
     if (!g_ime_uicon) return false;
-    bool handled = radiant_dispatch_rich_composition_event(g_ime_uicon, event_type, text, caret);
+    bool handled = radiant_dispatch_editing_composition_event(g_ime_uicon,
+        event_type, text, caret);
     if (handled) {
         radiant_state_request_repaint(ime_state());
         glfwPostEmptyEvent();
@@ -125,7 +105,7 @@ const char* ns_to_utf8(id obj) {
     if (!e) {
         const char* utf8 = ns_to_utf8(string);
         if (!g_rich_composing) {
-            if (!ime_dispatch_rich(RDT_EVENT_COMPOSITION_START, "", 0)) {
+            if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_START, "", 0)) {
                 struct objc_super sup = { self, [self superclass] };
                 ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
                     &sup, _cmd, string, selectedRange, replacementRange);
@@ -133,7 +113,7 @@ const char* ns_to_utf8(id obj) {
             }
             g_rich_composing = true;
         }
-        if (!ime_dispatch_rich(RDT_EVENT_COMPOSITION_UPDATE, utf8, (uint32_t)selectedRange.location)) {
+        if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_UPDATE, utf8, (uint32_t)selectedRange.location)) {
             g_rich_composing = false;
             struct objc_super sup = { self, [self superclass] };
             ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
@@ -145,39 +125,39 @@ const char* ns_to_utf8(id obj) {
         return;
     }
     const char* utf8 = ns_to_utf8(string);
-    uint32_t len = (uint32_t)strlen(utf8);
-    if (!te_ime_is_composing(e)) {
-        if (!radiant_dispatch_form_text_ime_begin(g_ime_uicon, e, (View*)e)) {
-            te_ime_begin(e);
+    if (!g_form_composing) {
+        if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_START, "", 0)) {
+            struct objc_super sup = { self, [self superclass] };
+            ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
+                &sup, _cmd, string, selectedRange, replacementRange);
+            return;
         }
+        g_form_composing = true;
     }
-    if (!radiant_dispatch_form_text_ime_update(g_ime_uicon, e, (View*)e,
-                                               utf8, len,
-                                               (uint32_t)selectedRange.location)) {
-        te_ime_update(e, utf8, len, (uint32_t)selectedRange.location);
+    if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_UPDATE, utf8,
+                              (uint32_t)selectedRange.location)) {
+        g_form_composing = false;
+        struct objc_super sup = { self, [self superclass] };
+        ((void (*)(struct objc_super*, SEL, id, NSRange, NSRange))objc_msgSendSuper)(
+            &sup, _cmd, string, selectedRange, replacementRange);
+        return;
     }
     log_debug("[IME mac] setMarkedText '%s' caret=%lu",
               utf8, (unsigned long)selectedRange.location);
-    // Wake the GLFW main loop so the preedit underline appears immediately
-    // (the IME callbacks bypass GLFW's regular event callbacks).
-    radiant_state_request_repaint(ime_state());
-    glfwPostEmptyEvent();
 }
 
 - (void)unmarkText {
-    DomElement* e = ime_focused_text_control();
-    if (e && te_ime_is_composing(e)) {
-        if (!radiant_dispatch_form_text_ime_cancel(g_ime_uicon, e, (View*)e)) {
-            te_ime_cancel(e);
-        }
+    if (g_form_composing && ime_dispatch_editing(RDT_EVENT_COMPOSITION_END, "", 0)) {
+        g_form_composing = false;
         log_debug("[IME mac] unmarkText -> cancel");
         return;
     }
-    if (g_rich_composing && ime_dispatch_rich(RDT_EVENT_COMPOSITION_END, "", 0)) {
+    if (g_rich_composing && ime_dispatch_editing(RDT_EVENT_COMPOSITION_END, "", 0)) {
         g_rich_composing = false;
         log_debug("[IME mac] rich unmarkText -> cancel");
         return;
     }
+    if (g_form_composing) g_form_composing = false;
     if (g_rich_composing) g_rich_composing = false;
     struct objc_super sup = { self, [self superclass] };
     ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&sup, _cmd);
@@ -185,11 +165,10 @@ const char* ns_to_utf8(id obj) {
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
     DomElement* e = ime_focused_text_control();
-    DocState* state = ime_state();
-    if (!e || !state || !te_ime_is_composing(e)) {
+    if (!e || !g_form_composing) {
         if (g_rich_composing) {
             const char* utf8 = ns_to_utf8(string);
-            if (ime_dispatch_rich(RDT_EVENT_COMPOSITION_END, utf8, 0)) {
+            if (ime_dispatch_editing(RDT_EVENT_COMPOSITION_END, utf8, 0)) {
                 g_rich_composing = false;
                 log_debug("[IME mac] rich insertText commit '%s'", utf8);
                 return;
@@ -204,16 +183,15 @@ const char* ns_to_utf8(id obj) {
         return;
     }
     const char* utf8 = ns_to_utf8(string);
-    uint32_t len = (uint32_t)strlen(utf8);
-    if (!radiant_dispatch_form_text_ime_commit(g_ime_uicon, e, (View*)e,
-                                               utf8, len)) {
-        te_ime_commit(e, state, (void*)e, utf8, len);
+    if (!ime_dispatch_editing(RDT_EVENT_COMPOSITION_END, utf8, 0)) {
+        g_form_composing = false;
+        struct objc_super sup = { self, [self superclass] };
+        ((void (*)(struct objc_super*, SEL, id, NSRange))objc_msgSendSuper)(
+            &sup, _cmd, string, replacementRange);
+        return;
     }
+    g_form_composing = false;
     log_debug("[IME mac] insertText commit '%s'", utf8);
-    // Wake the GLFW main loop so the committed text appears without
-    // waiting for the next mouse-move / animation tick.
-    radiant_state_request_repaint(state);
-    glfwPostEmptyEvent();
 }
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range

@@ -133,9 +133,10 @@ bool editing_dispatch_beforeinput(EventContext* evcon,
         return false;
     }
 
-    // the shared dispatcher is currently enabled for rich hosts. Form text
-    // controls still use their existing value-mutation path until the form
-    // value boundary store can produce stable InputEvent target ranges.
+    // rich hosts use this full dispatcher because their model mutation is
+    // consumer-owned. Form text controls use the sibling form dispatcher below,
+    // which shares intent logging and beforeinput/input ordering while keeping
+    // value-store mutation in text_edit.cpp.
     if (!editing_surface_is_rich(surface)) {
         return false;
     }

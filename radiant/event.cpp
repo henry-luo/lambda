@@ -430,6 +430,11 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
                                                     const EditingSurface* surface,
                                                     InputIntentType input_type,
                                                     void* userdata);
+static bool dispatch_editing_composition_for_controller(EventContext* evcon,
+                                                        const EditingSurface* surface,
+                                                        const CompositionEvent* comp_event,
+                                                        const EditingIntent* intent,
+                                                        void* userdata);
 
 static void event_log_editing_autoscroll(DocState* state,
                                          const EditingSurface* surface,
@@ -502,6 +507,7 @@ static EditingControllerHooks editing_controller_hooks() {
     hooks.form_selection_extend = dispatch_form_selection_extend_for_controller;
     hooks.autoscroll_log = event_log_editing_autoscroll_for_controller;
     hooks.history_dispatch = dispatch_editing_history_for_controller;
+    hooks.composition_dispatch = dispatch_editing_composition_for_controller;
     hooks.user = nullptr;
     return hooks;
 }
@@ -1778,6 +1784,14 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
                                          const char* type,
                                          const InputIntent* intent);
+static void radiant_dispatch_composition_event(EventContext* evcon,
+                                               View* target,
+                                               const char* type,
+                                               const char* data);
+extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
+                                                           EventType event_type,
+                                                           const char* text,
+                                                           uint32_t caret_cp);
 
 static bool dispatch_editing_input_event(EventContext* evcon, View* target,
                                          const char* type,
@@ -2485,6 +2499,7 @@ extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
 
     View* event_target = target ? target : static_cast<View*>(elem);
     EditingSurface surface;
+    editing_surface_clear(&surface);
     EditingSurface* surface_ptr = nullptr;
     if (editing_surface_from_target(event_target, &surface) &&
         editing_surface_is_text_control(&surface)) {
@@ -2497,8 +2512,15 @@ extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
     intent.data = "";
     intent.is_composing = true;
 
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.ui_context = uicon;
+    evcon.target = event_target;
+
     te_ime_begin(elem);
     editing_interaction_set_composing(state, surface_ptr, true);
+    radiant_dispatch_composition_event(&evcon, event_target,
+                                       "compositionstart", "");
     event_log_editing_composition(state, surface_ptr, &intent,
                                   "start", 0, 0, 0);
     doc_state_request_repaint(state);
@@ -2517,11 +2539,13 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
 
     View* event_target = target ? target : static_cast<View*>(elem);
     EditingSurface surface;
+    editing_surface_clear(&surface);
     EditingSurface* surface_ptr = nullptr;
     if (editing_surface_from_target(event_target, &surface) &&
         editing_surface_is_text_control(&surface)) {
         surface_ptr = &surface;
     }
+    if (!surface_ptr) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -2530,8 +2554,32 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     intent.composition_caret = caret_cp;
     intent.is_composing = true;
 
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.ui_context = uicon;
+    evcon.target = event_target;
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+
+    radiant_dispatch_composition_event(&evcon, event_target,
+                                       "compositionupdate",
+                                       preedit ? preedit : "");
+    bool prevented = false;
+    editing_dispatch_form_beforeinput(&evcon, &surface, &intent, &hooks,
+                                      &prevented);
+    if (prevented) {
+        log_debug("radiant_dispatch_form_text_ime_update: beforeinput prevented");
+        event_log_editing_composition(state, surface_ptr, &intent,
+                                      "update", len, 0, caret_cp);
+        return true;
+    }
     te_ime_update(elem, preedit, len, caret_cp);
     editing_interaction_set_composing(state, surface_ptr, true);
+    editing_dispatch_form_input(&evcon, &surface, &intent, &hooks);
     event_log_editing_composition(state, surface_ptr, &intent,
                                   "update", len, 0, caret_cp);
     doc_state_request_repaint(state);
@@ -2547,11 +2595,13 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
 
     View* event_target = target ? target : static_cast<View*>(elem);
     EditingSurface surface;
+    editing_surface_clear(&surface);
     EditingSurface* surface_ptr = nullptr;
     if (editing_surface_from_target(event_target, &surface) &&
         editing_surface_is_text_control(&surface)) {
         surface_ptr = &surface;
     }
+    if (!surface_ptr) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -2559,8 +2609,31 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
     intent.data = "";
     intent.is_composing = false;
 
+    EventContext evcon;
+    memset(&evcon, 0, sizeof(evcon));
+    evcon.ui_context = uicon;
+    evcon.target = event_target;
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+
+    radiant_dispatch_composition_event(&evcon, event_target,
+                                       "compositionend", "");
+    bool prevented = false;
+    editing_dispatch_form_beforeinput(&evcon, &surface, &intent, &hooks,
+                                      &prevented);
+    if (prevented) {
+        log_debug("radiant_dispatch_form_text_ime_cancel: beforeinput prevented");
+        event_log_editing_composition(state, surface_ptr, &intent,
+                                      "cancel", 0, 0, 0);
+        return true;
+    }
     te_ime_cancel(elem);
     editing_interaction_set_composing(state, surface_ptr, false);
+    editing_dispatch_form_input(&evcon, &surface, &intent, &hooks);
     event_log_editing_composition(state, surface_ptr, &intent,
                                   "cancel", 0, 0, 0);
     doc_state_request_repaint(state);
@@ -2589,6 +2662,7 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
     evcon.target = target ? target : static_cast<View*>(elem);
 
     EditingSurface surface;
+    editing_surface_clear(&surface);
     EditingSurface* surface_ptr = nullptr;
     if (editing_surface_from_target(evcon.target, &surface) &&
         editing_surface_is_text_control(&surface)) {
@@ -2602,12 +2676,33 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
     intent.data = committed ? committed : "";
     intent.is_composing = false;
 
+    radiant_dispatch_composition_event(&evcon, evcon.target,
+                                       "compositionend",
+                                       committed ? committed : "");
+
     if (should_mutate) {
+        te_ime_commit_finish(elem, committed, len);
         dispatch_form_text_replace(&evcon, elem, state, evcon.target,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
+    } else {
+        EditingDispatchHooks hooks;
+        hooks.dispatch_input_event = dispatch_editing_input_event;
+        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+        hooks.copy_selection = dispatch_editing_copy_selection;
+        hooks.user = nullptr;
+
+        bool prevented = false;
+        if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && surface_ptr) {
+            editing_dispatch_form_beforeinput(&evcon, surface_ptr, &intent,
+                                              &hooks, &prevented);
+        }
+        te_ime_commit_finish(elem, committed, len);
+        if (!prevented && intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT &&
+            surface_ptr) {
+            editing_dispatch_form_input(&evcon, surface_ptr, &intent, &hooks);
+        }
     }
-    te_ime_commit_finish(elem, committed, len);
     editing_interaction_set_composing(state, surface_ptr, false);
     event_log_editing_composition(state, surface_ptr, &intent,
                                   (committed && committed[0]) ? "commit" : "cancel",
@@ -2633,6 +2728,14 @@ extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
                                                         EventType event_type,
                                                         const char* text,
                                                         uint32_t caret_cp) {
+    return radiant_dispatch_editing_composition_event(uicon, event_type,
+                                                      text, caret_cp);
+}
+
+extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
+                                                           EventType event_type,
+                                                           const char* text,
+                                                           uint32_t caret_cp) {
     if (!uicon || !uicon->document || !uicon->document->state) return false;
     if (event_type != RDT_EVENT_COMPOSITION_START &&
         event_type != RDT_EVENT_COMPOSITION_UPDATE &&
@@ -2643,7 +2746,12 @@ extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
     DocState* state = (DocState*)uicon->document->state;
     View* focused = focus_get(state);
     View* target = focused ? focused : caret_get_view(state);
-    if (!target || !rich_editable_from_target(target)) return false;
+    EditingSurface surface;
+    if (!target || !editing_surface_from_target(target, &surface) ||
+        (!editing_surface_is_text_control(&surface) &&
+         !editing_surface_is_rich(&surface))) {
+        return false;
+    }
 
     RdtEvent event;
     memset(&event, 0, sizeof(event));
@@ -2652,6 +2760,80 @@ extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
     event.composition.text = text ? text : "";
     event.composition.preedit_caret = caret_cp;
     handle_event(uicon, uicon->document, &event);
+    return true;
+}
+
+static bool dispatch_editing_composition_for_controller(EventContext* evcon,
+                                                        const EditingSurface* surface,
+                                                        const CompositionEvent* comp_event,
+                                                        const EditingIntent* intent,
+                                                        void* userdata) {
+    (void)userdata;
+    if (!evcon || !surface || !comp_event || !intent ||
+        !evcon->ui_context || !evcon->ui_context->document) {
+        return false;
+    }
+
+    if (editing_surface_is_text_control(surface) && surface->owner) {
+        DomElement* elem = surface->owner;
+        View* target = surface->view ? surface->view : static_cast<View*>(elem);
+        uint32_t text_len = event_log_text_len(comp_event->text);
+        if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
+            radiant_dispatch_form_text_ime_begin(evcon->ui_context,
+                                                 elem, target);
+        } else if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
+            radiant_dispatch_form_text_ime_update(evcon->ui_context,
+                                                  elem, target,
+                                                  comp_event->text,
+                                                  text_len,
+                                                  comp_event->preedit_caret);
+        } else if (comp_event->type == RDT_EVENT_COMPOSITION_END) {
+            radiant_dispatch_form_text_ime_commit(evcon->ui_context,
+                                                  elem, target,
+                                                  comp_event->text,
+                                                  text_len);
+        } else {
+            return false;
+        }
+        evcon->need_repaint = true;
+        return true;
+    }
+
+    if (!editing_surface_is_rich(surface)) return false;
+
+    View* target = surface->view ? surface->view : static_cast<View*>(surface->owner);
+    if (!target) return false;
+
+    const char* event_name = "compositionupdate";
+    const char* phase = "update";
+    uint32_t preedit_len = 0;
+    uint32_t commit_len = 0;
+    if (intent->type == INPUT_INTENT_COMPOSITION_START) {
+        event_name = "compositionstart";
+        phase = "start";
+    } else if (intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
+        event_name = "compositionupdate";
+        phase = "update";
+        preedit_len = event_log_text_len(intent->data);
+    } else if (intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION) {
+        event_name = "compositionend";
+        phase = "commit";
+        commit_len = event_log_text_len(intent->data);
+    } else if (intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
+        event_name = "compositionend";
+        phase = "cancel";
+    }
+
+    radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
+    DocState* state = (DocState*)evcon->ui_context->document->state;
+    event_log_editing_composition(state, surface, intent, phase, preedit_len,
+                                  commit_len, intent->composition_caret);
+    bool composing = intent->type == INPUT_INTENT_COMPOSITION_START ||
+        intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+    editing_interaction_set_composing(state, surface, composing);
+    if (dispatch_rich_beforeinput(evcon, target, intent)) {
+        evcon->need_repaint = true;
+    }
     return true;
 }
 
@@ -3191,6 +3373,23 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     bool prevented = js_event_is_default_prevented(ev);
     radiant_js_ctx_exit(&scope, evcon, t_start);
     return prevented;
+}
+
+static void radiant_dispatch_composition_event(EventContext* evcon,
+                                               View* target,
+                                               const char* type,
+                                               const char* data)
+{
+    if (!evcon || !target || !type) return;
+    DomElement* dom_target = radiant_view_to_dom_element(target);
+    if (!dom_target) return;
+    JsCtxScope scope;
+    if (!radiant_js_ctx_enter(&scope, evcon)) return;
+    auto t_start = std::chrono::high_resolution_clock::now();
+    Item ev = js_create_native_composition_event(type, data ? data : "");
+    Item target_item = js_dom_wrap_element(dom_target);
+    js_dom_dispatch_event(target_item, ev);
+    radiant_js_ctx_exit(&scope, evcon, t_start);
 }
 
 /**
@@ -7270,59 +7469,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         View* focused = focus_get(state);
         event_log_focused_target(cascade_log, cascade_id, focused);
-        if (focused && focused->is_element()) {
-            DomElement* elem = lam::dom_require_element(focused);
-            if (tc_is_text_control(elem)) {
-                if (comp_event->type == RDT_EVENT_COMPOSITION_START) {
-                    radiant_dispatch_form_text_ime_begin(evcon.ui_context,
-                                                         elem, focused);
-                } else if (comp_event->type == RDT_EVENT_COMPOSITION_UPDATE) {
-                    radiant_dispatch_form_text_ime_update(evcon.ui_context,
-                                                          elem, focused,
-                                                          comp_event->text,
-                                                          event_log_text_len(comp_event->text),
-                                                          comp_event->preedit_caret);
-                } else {
-                    radiant_dispatch_form_text_ime_commit(evcon.ui_context,
-                                                          elem, focused,
-                                                          comp_event->text,
-                                                          event_log_text_len(comp_event->text));
-                }
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-        View* intent_target = focused ? focused : caret_get_view(state);
-        InputIntent intent;
-        if (intent_target && input_intent_from_composition_event(comp_event, &intent)) {
-            EditingSurface surface;
-            if (editing_surface_from_target(intent_target, &surface) &&
-                editing_surface_is_rich(&surface)) {
-                const char* phase = "update";
-                uint32_t preedit_len = 0;
-                uint32_t commit_len = 0;
-                if (intent.type == INPUT_INTENT_COMPOSITION_START) {
-                    phase = "start";
-                } else if (intent.type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
-                    phase = "update";
-                    preedit_len = event_log_text_len(intent.data);
-                } else if (intent.type == INPUT_INTENT_INSERT_FROM_COMPOSITION) {
-                    phase = "commit";
-                    commit_len = event_log_text_len(intent.data);
-                } else if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
-                    phase = "cancel";
-                }
-                event_log_editing_composition(state, &surface, &intent,
-                                              phase, preedit_len, commit_len,
-                                              intent.composition_caret);
-                bool composing = intent.type == INPUT_INTENT_COMPOSITION_START ||
-                    intent.type == INPUT_INTENT_INSERT_COMPOSITION_TEXT;
-                editing_interaction_set_composing(state, &surface, composing);
-            }
-            if (dispatch_rich_beforeinput(&evcon, intent_target, &intent)) {
-                evcon.need_repaint = true;
-            }
-        }
+        EditingControllerHooks controller_hooks = editing_controller_hooks();
+        editing_controller_handle_composition(&evcon, state, comp_event,
+                                              &controller_hooks);
         break;
     }
     case RDT_EVENT_TEXT_INPUT: {

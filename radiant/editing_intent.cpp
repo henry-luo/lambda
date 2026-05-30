@@ -58,6 +58,7 @@ const char* input_intent_type_name(InputIntentType type) {
 
 bool input_intent_is_dispatchable(InputIntentType type) {
     switch (type) {
+        case INPUT_INTENT_COMPOSITION_START:
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:

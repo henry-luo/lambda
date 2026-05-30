@@ -38,11 +38,11 @@ keyboard, text-input, IME, clipboard, and drag/drop event:
 | Surface detection | `tc_is_text_control()` / `tc_get_or_create_form()` in `text_control.*` | `editing_host_lookup()` in `editing_host.*` |
 | Canonical selection | `DocState::dom_selection` is the intended canonical object, but legacy `state->caret` / `state->selection` (`state_store.hpp:247-248`) still run **in parallel**; the projection migration is in progress, not complete | DOM Range/Selection directly |
 | Value/model mutation | `te_replace_byte_range()`, `tc_set_value()`, `FormControlProp::current_value` | No default DOM mutation; JS/Lambda consumer owns the model |
-| Input intent | Mostly direct calls from `event.cpp` to `te_*` helpers; weak `te_dispatch_beforeinput()` lacks full `InputEvent` payload | `InputIntent` -> `inputType`, `dispatch_rich_beforeinput()`, JS `InputEvent` with `getTargetRanges()` |
+| Input intent | Shared `EditingIntent` for typing, delete, paste, cut, history, and IME; value mutation still lives in `text_edit.cpp` | `InputIntent` -> `inputType`, `dispatch_rich_beforeinput()`, JS `InputEvent` with `getTargetRanges()` |
 | Focus | `focus_set()` syncs text-control state and fires focus events from `update_focus_state()` | Editing hosts are implicitly focusable via `is_view_focusable()` |
 | Undo/redo | Per-control `EditHistory` ring exists in `text_edit.*` | Consumer-owned; Radiant emits `historyUndo` / `historyRedo` intents |
-| Composition | `te_ime_*` for text controls; platform shims in progress | macOS rich composition lowers to `InputIntent` in `event.cpp` |
-| Logging | `event_state_log` emits raw input and state transitions; selection/focus transitions are logged | Same log infrastructure, but rich beforeinput operations are not first-class log records |
+| Composition | Native shims and simulator enter `radiant_dispatch_editing_composition_event()`; `text_edit.cpp` owns only preedit storage/cleanup | Same controller entry; rich hosts receive the same `composition*` and composition `beforeinput` intents |
+| Logging | First-class `editing.intent`, `editing.beforeinput`, `editing.input`, `editing.mutation`, `editing.selection`, `editing.focus`, `editing.history`, `editing.clipboard`, and `editing.composition` records | Same log infrastructure with rich model mutation still consumer-owned |
 
 The intended structural win — `DocState::dom_selection` as the single
 canonical selection object — is **partially landed**. The object exists
@@ -58,9 +58,10 @@ promoted to a prerequisite phase (E0, §11).
 > [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md) §2.3 predates
 > this work and is now stale: it lists undo, IME, and `beforeinput` as
 > "Missing", but all three exist in code today (`form_control.hpp:216`
-> EditHistory ring, `text_edit.hpp:181-189` `te_ime_*`,
-> `te_dispatch_beforeinput`). Where the two docs disagree on what exists,
-> this table is authoritative. This proposal supersedes that gap analysis.
+> EditHistory ring, `text_edit.hpp:181-189` preedit helpers, and
+> `editing_dispatch_form_beforeinput()`). Where the two docs disagree on what
+> exists, this table is authoritative. This proposal supersedes that gap
+> analysis.
 
 ---
 
@@ -200,18 +201,13 @@ struct EditingIntent {
 The `format*` and `selectAll` exclusion policy from the contenteditable doc
 stays intact for Radiant-synthesized `InputEvent`s.
 
-**Composition fields must be designed now, not in E7.** `is_composing` and
-`composition_caret` are frozen into this struct in E2, but the composition
-*transaction model* (one `insertCompositionText` transaction per IME session,
-preedit lifecycle, ordering of `compositionstart/update/end` relative to
-`beforeinput`/`input`) is not implemented until E7. These two paths are
-genuinely different today — forms use `te_ime_*` (`text_edit.hpp:181-189`),
-contenteditable lowers composition to `InputIntent` in `event.cpp`. If the
-transaction shape is left undesigned until E7, this struct will almost
-certainly need rework. **E2 must include a paper sketch of the composition
-transaction** (fields, event order, session boundaries) sufficient to prove
-the struct above is the right shape — even though the implementation lands in
-E7. See §11 E2 exit criterion.
+**Composition fields were designed before E7.** `is_composing` and
+`composition_caret` were frozen into this struct in E2 so the later
+composition transaction could land without changing intent shape. At proposal
+time the paths were genuinely different: forms used `te_ime_*` directly while
+contenteditable lowered composition to `InputIntent` in `event.cpp`. E7 now
+routes both through `editing_controller_handle_composition()` and the native
+`radiant_dispatch_editing_composition_event()` bridge.
 
 ### 5.2 One Dispatcher
 
@@ -877,6 +873,28 @@ For WPT:
   dispatch wrappers beside the existing commit wrapper, so the event simulator
   and platform IME shims share the same logging surface; password surfaces
   redact preedit/commit lengths and caret.
+- E7 composition ordering has started landing across surfaces. Radiant now
+  constructs native `CompositionEvent`s for the JS event pipeline, the
+  simulator's `ime_compose` action routes through the shared platform
+  composition event path for both form controls and rich hosts, and form
+  `insertCompositionText` updates emit the same cancellable
+  `beforeinput`/`input` transaction as rich hosts. Platform composition
+  events now enter `editing_controller_handle_composition()` first; `event.cpp`
+  supplies the form/rich dispatch hook while the controller owns surface
+  resolution and intent construction. The focused
+  `test_editing_ime_order` fixture pins the shared order:
+  `compositionstart`, `compositionupdate`,
+  `beforeinput/input insertCompositionText`, `compositionend`, then
+  `beforeinput/input insertFromComposition`; it also covers canceled sessions
+  ending in `deleteCompositionText`.
+- The native macOS and Windows IME shims now enter the same
+  `radiant_dispatch_editing_composition_event()` bridge instead of calling
+  form-specific `te_ime_*` mutation helpers directly. The legacy form
+  wrappers remain as controller hook adapters, while `text_edit.cpp` owns only
+  the transient preedit buffer and commit cleanup. The order fixture also
+  covers cancellable IME `beforeinput` defaults: preventing form
+  `insertFromComposition` leaves the value unchanged, and preventing rich
+  `insertCompositionText` suppresses the paired `input` event.
 - Selection drag autoscroll now records its last pointer position in
   `DocState`, advances the document viewport, nearest scroll container, input
   horizontal scroll, and textarea horizontal/vertical scroll from the shared

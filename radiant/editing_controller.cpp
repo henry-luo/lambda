@@ -67,6 +67,36 @@ bool editing_controller_dispatch_history(EventContext* evcon,
     return hooks->history_dispatch(evcon, surface, input_type, hooks->user);
 }
 
+bool editing_controller_handle_composition(EventContext* evcon,
+                                           DocState* state,
+                                           const CompositionEvent* comp_event,
+                                           const EditingControllerHooks* hooks) {
+    if (!evcon || !state || !comp_event || !hooks ||
+        !hooks->composition_dispatch) {
+        return false;
+    }
+
+    View* focused = focus_get(state);
+    View* target = focused ? focused : caret_get_view(state);
+    if (!target) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return false;
+    if (!editing_surface_is_text_control(&surface) &&
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    EditingIntent intent;
+    if (!input_intent_from_composition_event(comp_event, &intent)) {
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, &surface);
+    return hooks->composition_dispatch(evcon, &surface, comp_event,
+                                       &intent, hooks->user);
+}
+
 bool editing_controller_undo(EventContext* evcon,
                              const EditingSurface* surface,
                              const EditingControllerHooks* hooks) {

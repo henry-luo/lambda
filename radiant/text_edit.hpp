@@ -188,19 +188,10 @@ bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 //
-// Composition lifecycle (mirrors the DOM CompositionEvent contract):
-//
-//   te_ime_begin   → sets composing flag, fires `compositionstart`.
-//   te_ime_update  → replaces the preedit buffer (transient overlay,
-//                    NOT part of value), fires `compositionupdate`.
-//   te_ime_commit  → drops preedit, inserts `committed` at the caret via
-//                    te_replace_byte_range (so undo + input fire), then
-//                    `compositionend`.
-//   te_ime_cancel  → drops preedit and fires `compositionend` with empty
-//                    data; value is unchanged.
-//
-// The OS shim (NSTextInputClient on macOS, IMM on Windows) calls these.
-// Tests drive them via the `ime_compose` simulation event.
+// Composition buffer lifecycle. DOM `composition*` and
+// `beforeinput`/`input` dispatch are owned by the unified editing controller;
+// these helpers only maintain transient form-control preedit state and final
+// cleanup.
 void te_ime_begin (DomElement* elem);
 void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
                    uint32_t caret_cp);
