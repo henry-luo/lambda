@@ -398,6 +398,34 @@ This is lower priority than URI and TypedArray because the previous cursor work
 already captured the obvious local win, and a range-set implementation has more
 surface area.
 
+### Rejected RegExp LastIndex Fast Path
+
+Attempted on 2026-05-30 and reverted.
+
+The candidate optimization tried to speed up `RegExp.prototype.test` and
+`RegExp.prototype.exec` by reading the ordinary own `lastIndex` data slot
+directly when it was a plain non-accessor shape entry, while falling back to the
+existing property path for accessor, deleted, or non-standard cases. The goal
+was to reduce the repeated `heap_create_name("lastIndex")`, `js_property_get`,
+and `js_to_number` overhead seen in RegExp property-escape tests.
+
+Correctness looked safe in the narrow focused run:
+
+- lastIndex-focused RegExp subset: 40 passed, 0 failed.
+- generated property-escape subset: 439 passed, 0 failed out of 469 manifest
+  entries.
+
+Performance did not justify keeping the change:
+
+| Scope | Fast path off | Fast path on | Result |
+| --- | ---: | ---: | --- |
+| generated property escapes | 21.94s real, 15.47s user | 21.68s real, 15.51s user | noise-level wall win, no CPU win |
+| all `built-ins/RegExp` | 42.85s real, 22.92s user | 54.21s real, 31.37s user | clear regression |
+
+The final A/B showed that direct shape lookup and extra branching were more
+expensive than the existing property path across the broader RegExp workload.
+The patch was fully backed out; no RegExp lastIndex fast path is retained.
+
 ## Measurement Plan
 
 1. Capture the current release-run numbers as baseline:
@@ -472,6 +500,43 @@ time came from very small per-test changes: `113.482s` of the `127.788s`
 slower-test total came from tests that regressed by less than `50ms` each
 (`0-10ms`: `61.954s`; `10-50ms`: `51.528s`). This pattern points to
 system-wide run noise or machine load rather than a single Tune4 runtime path.
+
+Incremental bulk/view pass on 2026-05-30:
+
+- added raw BigInt64Array/BigUint64Array cross-type copying for constructor and
+  `%TypedArray%.prototype.set`;
+- added raw same-type copy for `%TypedArray%.prototype.with`;
+- added raw in-place byte swap for `%TypedArray%.prototype.reverse`;
+- added raw reverse-copy for `%TypedArray%.prototype.toReversed`.
+
+Correctness remained clean:
+
+- focused `reverse` / `toReversed` / `with` manifest: 45 passed, 0 failed out
+  of 52;
+- broader `built-ins/TypedArray` + `built-ins/TypedArrayConstructors` manifest:
+  1936 passed, 0 failed out of 2174, with the same unsupported/cross-realm
+  skips in both fast-path modes.
+
+The broad JS262 TypedArray manifest does not show a measurable suite-level win
+because most compliance tests use tiny arrays and the runner overhead dominates:
+
+| Scope | Fast path off | Fast path on | Result |
+| --- | ---: | ---: | --- |
+| TypedArray + constructors JS262 manifest | 43.50s real, 22.17s user | 43.58s real, 22.21s user | neutral/noise |
+
+A bulk workload with 80 iterations over 200k-element `Int32Array` instances
+does show the intended effect. The script performs constructor-from-typed-array,
+`reverse`, `toReversed`, `with`, and `set`, and produced the same checksum
+(`15999920`) with the fast path enabled and disabled:
+
+| Run | Fast path off | Fast path on | Result |
+| --- | ---: | ---: | --- |
+| bulk smoke #1 | 0.80s real, 0.70s user | 0.16s real, 0.14s user | clear win |
+| bulk smoke #2 | 1.09s real, 0.73s user | 0.17s real, 0.14s user | clear win |
+
+This supports keeping the raw bulk/view paths even though JS262 timing is
+neutral: the optimization targets large typed-array data movement, not the tiny
+arrays used by most conformance tests.
 
 ### T4-P1 URI Codec Gate Check
 
