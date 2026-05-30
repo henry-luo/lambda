@@ -157,6 +157,11 @@ typedef struct ViewState {
             uint32_t selection_start;
             uint32_t selection_end;
             uint8_t selection_direction;
+            uint8_t has_current_value : 1;
+            uint8_t text_reserved : 7;
+            char* current_value;
+            uint32_t current_value_len;
+            uint32_t current_value_u16_len;
         } form;
     } data;
 } ViewState;
@@ -923,6 +928,12 @@ const char* form_control_get_value(DocState* state, View* view, uint32_t* out_le
  * This is the only supported writer path for value mutations.
  */
 void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len);
+
+/**
+ * Restore a recreated text control's live value/selection from ViewState.
+ * Returns true when a retained live value was applied.
+ */
+bool form_control_restore_text_control_state(DocState* state, View* view);
 
 /**
  * Get the current text selection offsets for a text control.

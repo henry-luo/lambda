@@ -56,6 +56,18 @@ static int state_key_compare(const void* a, const void* b, void* udata) {
 
 HASHMAP_DEFINE_INTKEY(view_state_entry, ViewStateEntry, view_id)
 
+static void view_state_release_payload(ViewState* view_state);
+
+static void view_state_release_all_payloads(HashMap* view_state_map) {
+    if (!view_state_map) return;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(view_state_map, &iter, &item)) {
+        ViewStateEntry* entry = (ViewStateEntry*)item;
+        if (entry) view_state_release_payload(entry->state);
+    }
+}
+
 // ============================================================================
 // Interned State Names
 // ============================================================================
@@ -723,6 +735,7 @@ void radiant_state_destroy(DocState* state) {
     }
 
     if (state->view_state_map) {
+        view_state_release_all_payloads(state->view_state_map);
         hashmap_free(state->view_state_map);
         state->view_state_map = NULL;
     }
@@ -766,6 +779,7 @@ void radiant_state_reset(DocState* state) {
 
     // Clear the state map
     hashmap_clear(state->state_map, false);
+    view_state_release_all_payloads(state->view_state_map);
     hashmap_clear(state->view_state_map, false);
 
     // Reset arenas
@@ -1266,6 +1280,8 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     doc_state_detach_transient_owner(state, view);
     if (view_id != 0 && state->view_state_map) {
         ViewStateEntry query = { .view_id = view_id, .state = NULL };
+        const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+        if (found) view_state_release_payload(found->state);
         if (hashmap_delete(state->view_state_map, &query)) {
             removed++;
         }
@@ -1406,6 +1422,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
             View* state_live = view_state_find_live_id(root, state_view_id);
             if (!entry->state || !key_live || !state_live) {
                 ViewStateEntry query = { .view_id = entry->view_id, .state = NULL };
+                view_state_release_payload(entry->state);
                 hashmap_delete(state->view_state_map, &query);
                 removed++;
                 found_orphan = true;
@@ -1795,6 +1812,49 @@ static ViewState* form_view_state_get(DocState* state, View* view) {
     return view_state;
 }
 
+static void view_state_release_form_payload(ViewState* view_state) {
+    if (!view_state || view_state->kind != VIEW_STATE_FORM_CONTROL) return;
+    if (view_state->data.form.current_value) {
+        mem_free(view_state->data.form.current_value);
+        view_state->data.form.current_value = NULL;
+    }
+    view_state->data.form.current_value_len = 0;
+    view_state->data.form.current_value_u16_len = 0;
+    view_state->data.form.has_current_value = 0;
+}
+
+static void view_state_release_payload(ViewState* view_state) {
+    if (!view_state) return;
+    if (view_state->kind == VIEW_STATE_FORM_CONTROL) {
+        view_state_release_form_payload(view_state);
+    }
+}
+
+static bool form_view_is_text_control(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    return elem && tc_is_text_control(elem);
+}
+
+static void form_view_state_store_text_value(ViewState* view_state,
+                                             FormControlProp* form) {
+    if (!view_state || !form || !form->current_value) return;
+    char* copy = (char*)mem_alloc((size_t)form->current_value_len + 1,
+                                  MEM_CAT_DOM);
+    if (!copy) return;
+    if (form->current_value_len > 0) {
+        memcpy(copy, form->current_value, form->current_value_len);
+    }
+    copy[form->current_value_len] = '\0';
+    if (view_state->data.form.current_value) {
+        mem_free(view_state->data.form.current_value);
+    }
+    view_state->data.form.current_value = copy;
+    view_state->data.form.current_value_len = form->current_value_len;
+    view_state->data.form.current_value_u16_len = form->current_value_u16_len;
+    view_state->data.form.has_current_value = 1;
+}
+
 static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
     if (!state || !view || !form) return NULL;
     ViewState* view_state = view_state_get(state, view);
@@ -1825,6 +1885,9 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
         view_state->data.form.selection_start = form->selection_start;
         view_state->data.form.selection_end = form->selection_end;
         view_state->data.form.selection_direction = form->selection_direction;
+        if (form_view_is_text_control(view) && form->current_value) {
+            form_view_state_store_text_value(view_state, form);
+        }
     }
     return view_state;
 }
@@ -2514,8 +2577,12 @@ bool scroll_state_is_dragging_for_view(DocState* state, View* view) {
 }
 
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len) {
-    (void)state;
     if (out_len) *out_len = 0;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (view_state && view_state->data.form.has_current_value) {
+        if (out_len) *out_len = view_state->data.form.current_value_len;
+        return view_state->data.form.current_value;
+    }
     if (!view || !view->is_block()) return nullptr;
 
     ViewBlock* block = lam::view_require_block(view);
@@ -2524,6 +2591,53 @@ const char* form_control_get_value(DocState* state, View* view, uint32_t* out_le
     FormControlProp* form = block->form;
     if (out_len) *out_len = form->current_value_len;
     return form->current_value;
+}
+
+bool form_control_restore_text_control_state(DocState* state, View* view) {
+    if (!state || !view || !view->is_element()) return false;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (!view_state || !view_state->data.form.has_current_value) return false;
+
+    DomElement* elem = lam::dom_require_element(view);
+    if (!elem || !tc_is_text_control(elem)) return false;
+    FormControlProp* form = elem->form;
+    if (!form) return false;
+
+    char* copy = (char*)mem_alloc((size_t)view_state->data.form.current_value_len + 1,
+                                  MEM_CAT_DOM);
+    if (!copy) return false;
+    if (view_state->data.form.current_value_len > 0) {
+        memcpy(copy, view_state->data.form.current_value,
+               view_state->data.form.current_value_len);
+    }
+    copy[view_state->data.form.current_value_len] = '\0';
+
+    if (form->current_value) mem_free(form->current_value);
+    form->current_value = copy;
+    form->current_value_len = view_state->data.form.current_value_len;
+    form->current_value_u16_len = view_state->data.form.current_value_u16_len;
+    if (form->current_value_u16_len == 0 && form->current_value_len > 0) {
+        form->current_value_u16_len = tc_utf8_to_utf16_length(
+            form->current_value, form->current_value_len);
+    }
+    form->selection_start = view_state->data.form.selection_start;
+    form->selection_end = view_state->data.form.selection_end;
+    if (form->selection_start > form->current_value_u16_len) {
+        form->selection_start = form->current_value_u16_len;
+    }
+    if (form->selection_end > form->current_value_u16_len) {
+        form->selection_end = form->current_value_u16_len;
+    }
+    if (form->selection_end < form->selection_start) {
+        form->selection_end = form->selection_start;
+    }
+    form->selection_direction = view_state->data.form.selection_direction;
+    if (form->selection_direction > 2) form->selection_direction = 0;
+    form->tc_initialized = 1;
+    form->state_ref = state;
+    form->value = form->current_value;
+    view->view_state_ref = view_state;
+    return true;
 }
 
 void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
@@ -2564,6 +2678,9 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         view_state->data.form.selection_start = block->form->selection_start;
         view_state->data.form.selection_end = block->form->selection_end;
         view_state->data.form.selection_direction = block->form->selection_direction;
+        if (tc_is_text_control(elem) && block->form->current_value) {
+            form_view_state_store_text_value(view_state, block->form);
+        }
     }
 
     form_state_mark_dirty(state);
@@ -2680,6 +2797,9 @@ void form_control_sync_text_control_state(DocState* state, View* view) {
     view_state->data.form.selection_start = form->selection_start;
     view_state->data.form.selection_end = form->selection_end;
     view_state->data.form.selection_direction = form->selection_direction;
+    if (form->current_value) {
+        form_view_state_store_text_value(view_state, form);
+    }
 }
 
 void form_control_sync_text_control_focus_state(DocState* state, View* view) {

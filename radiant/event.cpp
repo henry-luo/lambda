@@ -1981,17 +1981,28 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
 
     DomElement* live_elem = elem;
     View* live_target = target;
-    View* live_focus = focus_get(state);
     bool preserve_dispatch_target =
         input_type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
         input_type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
-    if (!preserve_dispatch_target && live_focus && live_focus->is_element()) {
-        DomElement* focus_elem = lam::dom_require_element(live_focus);
-        if (tc_is_text_control(focus_elem)) {
-            live_elem = focus_elem;
-            live_target = live_focus;
+    if (!preserve_dispatch_target) {
+        if (elem->id && elem->doc && elem->doc->root) {
+            DomElement* live_by_id = find_element_by_author_id(
+                static_cast<DomNode*>(elem->doc->root), elem->id);
+            if (live_by_id && tc_is_text_control(live_by_id)) {
+                live_elem = live_by_id;
+                live_target = static_cast<View*>(live_by_id);
+            }
+        }
+        View* live_focus = focus_get(state);
+        if (live_elem == elem && live_focus && live_focus->is_element()) {
+            DomElement* focus_elem = lam::dom_require_element(live_focus);
+            if (tc_is_text_control(focus_elem)) {
+                live_elem = focus_elem;
+                live_target = live_focus;
+            }
         }
     }
+    tc_ensure_init(live_elem);
 
     uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
     const char* previous_history_input_type =
