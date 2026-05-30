@@ -430,6 +430,49 @@ capture a new release results directory.
    - total summed per-test elapsed;
    - wall-clock time where available.
 
+## Tune4 Measurement Results
+
+### T4-P2 TypedArray Raw Bulk Paths
+
+Implemented TypedArray same-type raw copy, numeric cross-type raw conversion,
+and early BigInt/Number category rejection in the typed-array constructor and
+`%TypedArray%.prototype.set` paths. The optimization is guarded by:
+
+```text
+LAMBDA_JS_TA_RAW_FAST=0/1
+```
+
+Focused verification:
+
+- same-type and cross-type smoke/performance scripts passed with the fast path
+  enabled and disabled;
+- focused TypedArray JS262 manifest passed `1936 / 1936`;
+- full JS262 baseline had zero pass/fail regressions.
+
+Measured support from three full-suite runs:
+
+| Run | Context | JS262 result | Summed per-test time | Wall time |
+| --- | --- | --- | ---: | ---: |
+| `release_run_006` | release baseline before Tune4 | `39258 / 39258` fully passing | `516.889s` | `147.5s` |
+| Current Tune4 run | noisy machine during app activity | `39258 / 39258` fully passing | `604.078s` | `166.2s` |
+| Current Tune4 rerun | quiet machine after apps stopped | `39257 / 39258` fully passing; `1` recovered in Phase 4 retry | `426.386s` | `135.4s` |
+
+The quiet-machine rerun was `177.692s` faster than the noisy current run
+(`-29.42%`) and `90.503s` faster than `release_run_006` (`-17.51%`) by summed
+per-test time. This supports keeping the TypedArray tuning and indicates the
+earlier broad slowdown was machine/load noise rather than a TypedArray
+regression. The lone non-fully-passing entry in the quiet rerun was
+`language_identifiers_start_unicode_9_0_0_js`, which passed in the isolated
+Phase 4 retry and did not count as a pass/fail regression.
+
+The regression-looking noisy run was broad rather than localized. Compared with
+`release_run_006`, it added `127.788s` across `27147` slower tests while saving
+`40.600s` across `12049` faster tests, for a net `+87.189s`. Most of the added
+time came from very small per-test changes: `113.482s` of the `127.788s`
+slower-test total came from tests that regressed by less than `50ms` each
+(`0-10ms`: `61.954s`; `10-50ms`: `51.528s`). This pattern points to
+system-wide run noise or machine load rather than a single Tune4 runtime path.
+
 ## Proposed Tune4 Order
 
 1. Add Unicode phase instrumentation if cheap, so future parser/compiler work is
