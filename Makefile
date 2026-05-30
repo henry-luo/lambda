@@ -932,11 +932,6 @@ test262-update-baseline: build-test
 	@$(MAKE) build-release-compile
 	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline
 
-# test262 strip comments: create comment-stripped test files for faster I/O
-test262-strip:
-	@echo "Stripping comments from test262 files..."
-	@python3 utils/strip_test262_comments.py
-
 # Node.js official: install Lambda-compatible shims for test harness
 node-shim:
 	@echo "Installing Lambda test shims into ref/node/test/common/..."

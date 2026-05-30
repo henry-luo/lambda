@@ -2,7 +2,7 @@
 
 Date: 2026-05-28
 
-Status: proposal
+Status: implemented (2026-05-30)
 
 This proposal defines the next milestone after Js48: expand LambdaJS from the
 current ES2021 js262 scope to a credible ES2022 scope, while preserving the
@@ -12,17 +12,23 @@ The rule is the same as Js48: do not grow the baseline by weakening gates.
 Every newly admitted test must pass in normal batch execution, not only in
 retry, and release runtime must remain stable.
 
+Implementation result: Js49 is implemented. The checked-in release baseline is
+now ES2022-scoped with 39,223 fully passing tests, 3,072 skipped tests, 0
+failures, and 0 non-fully-passing tests in the final update pass.
+
 ## 1. Current Baseline
 
 Current checked-in release baseline:
 
 ```text
-# Scope: ES2021 (skip ES2022+ features)
-# Total passing: 38939
-# Total tests: 42295  Skipped: 3356  Batched: 38941  Passed: 38939  Failed: 0
-# Runtime: 181.3s total (prep 0.1s + exec 180.1s)
-# Batch size: batched 50 tests/process; async 50 test/process
+# Scope: ES2022 (skip ES2023+ features)
+# Total passing: 39223
+# Total tests: 42295  Skipped: 3072  Batched: 39223  Passed: 39223  Failed: 0
+# Runtime: 136.1s total (prep 0.0s + exec 136.0s)
+# Batch size: batched 50 tests/process; async 50 tests/process
 ```
+
+This reflects the final Js49 release update pass, captured on 2026-05-30.
 
 Js48 also made the following explicit non-ES2021-scope decisions:
 
@@ -150,7 +156,8 @@ Representative tests:
 Expected implementation areas:
 
 - Parser/runtime acceptance for the `d` RegExp flag.
-- Store `hasIndices` on RegExp instances.
+- Store `hasIndices` in internal RegExp data, without adding an own enumerable
+  property to RegExp instances.
 - Add `RegExp.prototype.hasIndices`.
 - Include `d` in `RegExp.prototype.flags` in spec order.
 - Extend match result construction so `exec`, `match`, and related paths expose
@@ -335,7 +342,7 @@ make release
   --gtest_brief=1
 
 ./test/test_js_test262_gtest.exe --batch-only --run-async \
-  --async-list=test/js262/test262_baseline.txt \
+  --async-list=temp/js49_async_baseline_plus_accepted_all.txt \
   --async-chunk-size=50 \
   --update-baseline \
   --write-failures=temp/js49_update.tsv \
@@ -410,7 +417,29 @@ Acceptance for every phase:
 - No release runtime regression above 5% without explanation.
 - No broadening of ES2023+/proposal scope by accident.
 
-## 7. Js49 Milestone Definition
+## 7. Implementation Results
+
+Final verification was run in release mode on 2026-05-30.
+
+- P2 RegExp match indices: 26/26 actionable tests passed and were admitted.
+- P3 top-level await: 9/9 actionable tests passed and were admitted.
+- P4 ES2022 async admission: 52/53 candidates were admitted. The excluded
+  test is
+  `language_expressions_class_elements_after_same_line_method_rs_static_async_method_privatename_identifier_alt_js`;
+  it passed alone with async chunk size 1 but timed out in the normal chunk-50
+  batch shape, so it remains outside the baseline.
+- P5 ES2022 module admission: 1/1 candidate passed and was admitted after
+  fixing anonymous default-export class naming for static initializer semantics.
+- P6 release guard: the existing 39,135-test release baseline passed
+  39,135/39,135 with 0 regressions before the baseline update.
+- Baseline update: the final release update pass fully passed 39,223/39,223
+  admitted tests, with 0 failures, 0 non-fully-passing tests, and 0 regressions.
+  The earlier successful update admitted 88 improvements over the Js48
+  baseline; a later header-regeneration run had a transient Unicode identifier
+  batch kill, then the final rerun completed cleanly and cleared
+  `test/js262/t262_partial.txt`.
+
+## 8. Js49 Milestone Definition
 
 Js49 can claim "full ES2022 support in current js262 scope" when:
 
