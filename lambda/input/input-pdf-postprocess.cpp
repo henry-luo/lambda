@@ -1569,11 +1569,7 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
 
     Item filter_it = map_lookup(dict, "Filter");
     if (filter_item_has_name(filter_it, "DCTDecode", "DCT")) {
-        const uint8_t* bytes = (const uint8_t*)pix->chars;
-        if (pix->len >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
-            return bytes_to_data_uri(input, "image/jpeg", bytes, pix->len);
-        }
-        return nullptr;
+        return bytes_to_data_uri(input, "image/jpeg", (const uint8_t*)pix->chars, pix->len);
     }
 
     if (w <= 0 || h <= 0 || bpc != 8) return nullptr;
