@@ -16,6 +16,7 @@
 extern "C" {
 #include "../lib/log.h"
 }
+#include "../lib/test_utils.h"
 
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator/validator.hpp"
@@ -88,11 +89,7 @@ protected:
     Input* input = nullptr;
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        test_pool = pool_create();
-        ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
-
+        test_pool = tu_setup_pool();
         validator = schema_validator_create(test_pool);
         ASSERT_NE(validator, nullptr) << "Failed to create schema validator";
 
@@ -102,18 +99,13 @@ protected:
     }
 
     void TearDown() override {
-        if (input) {
-            arraylist_free(input->type_list);
-        }
+        if (input) arraylist_free(input->type_list);
         if (validator) {
             schema_validator_destroy(validator);
             validator = nullptr;
         }
-
-        if (test_pool) {
-            pool_destroy(test_pool);
-            test_pool = nullptr;
-        }
+        tu_teardown_pool(test_pool);
+        test_pool = nullptr;
     }
 
     // Helper function to create typed items for testing

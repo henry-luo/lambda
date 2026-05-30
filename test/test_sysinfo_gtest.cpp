@@ -5,6 +5,7 @@
 #include "../lib/string.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 #include <cstring>
 
 // Test fixture for system information functionality
@@ -12,18 +13,8 @@ class SysInfoTest : public ::testing::Test {
 protected:
     Pool* pool;
 
-    void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr) << "Should create pool";
-    }
-
-    void TearDown() override {
-        if (pool) {
-            pool_destroy(pool);
-        }
-    }
+    void SetUp() override    { pool = tu_setup_pool(); }
+    void TearDown() override { tu_teardown_pool(pool); }
 };
 
 // Test sys:// URL detection

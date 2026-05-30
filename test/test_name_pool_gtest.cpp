@@ -9,6 +9,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 #include <cstring>
 
 // Test fixture for NamePool tests
@@ -16,17 +17,8 @@ class NamePoolTest : public ::testing::Test {
 protected:
     Pool* pool;
 
-    void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool = pool_create();
-    }
-
-    void TearDown() override {
-        if (pool) {
-            pool_destroy(pool);
-        }
-    }
+    void SetUp() override    { pool = tu_setup_pool(); }
+    void TearDown() override { tu_teardown_pool(pool); }
 };
 
 // Test basic name creation and interning

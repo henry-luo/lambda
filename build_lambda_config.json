@@ -325,6 +325,7 @@
                 "lib/mime-detect.c",
                 "lib/mime-types.c",
                 "lib/shell.c",
+                "lib/file.c",
                 "lib/file_utils.c",
                 "lib/sqlite/sqlite3.c",
                 "lib/rdb.c",
@@ -336,7 +337,7 @@
             ],
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
-            "link": "static",
+            "link": "dynamic",
             "pic": true,
             "defines": [
                 "UTF8PROC_STATIC",
@@ -2373,6 +2374,9 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
+                        ],
                         "binary": "test_mark_builder_deepcopy_gtest.exe",
                         "icon": "🔄"
                     },
@@ -2386,6 +2390,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_mark_editor_gtest.exe",
                         "icon": "✏️"
@@ -2402,7 +2409,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lambda/edit_bridge.cpp"
+                            "lambda/edit_bridge.cpp",
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_edit_bridge_gtest.exe",
                         "icon": "✏️"
@@ -2418,6 +2426,9 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
+                        ],
                         "binary": "test_name_pool_gtest.exe",
                         "icon": "🔤"
                     },
@@ -2431,6 +2442,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_namespace_gtest.exe",
                         "icon": "🌐"
@@ -2515,6 +2529,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_format_markup_gtest.exe",
                         "icon": "📝"
@@ -2677,6 +2694,9 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
+                        ],
                         "binary": "test_html_gtest.exe",
                         "icon": "🌐"
                     },
@@ -2735,7 +2755,8 @@
                             "radiant/layout_counters.cpp",
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
-                            "radiant/editing_host.cpp"
+                            "radiant/editing_host.cpp",
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_dom_range_gtest.exe",
                         "icon": "🎯"
@@ -2761,7 +2782,8 @@
                             "radiant/dom_range.cpp",
                             "radiant/dom_range_resolver.cpp",
                             "radiant/source_pos_bridge.cpp",
-                            "radiant/editing_host.cpp"
+                            "radiant/editing_host.cpp",
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_source_pos_bridge_gtest.exe",
                         "icon": "🪢"
@@ -2775,6 +2797,10 @@
                         "libraries": [
                             "gtest",
                             "gtest_main"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c",
+                            "lib/test_utils_runtime.cpp"
                         ],
                         "binary": "test_dir_gtest.exe",
                         "icon": "📁"
@@ -2818,6 +2844,9 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
+                        ],
                         "binary": "test_validator_input_gtest.exe",
                         "icon": "✅"
                     },
@@ -2832,6 +2861,9 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
+                        ],
                         "binary": "test_validator_features_gtest.exe",
                         "icon": "🛠️"
                     },
@@ -2845,6 +2877,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_null_vs_missing_gtest.exe",
                         "icon": "✅"
@@ -2943,6 +2978,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_sysinfo_gtest.exe",
                         "icon": "🖥️"
@@ -3129,7 +3167,8 @@
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
                             "radiant/symbol_resolver.cpp",
-                            "radiant/layout_counters.cpp"
+                            "radiant/layout_counters.cpp",
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_html_css_gtest.exe",
                         "icon": "🌐"
@@ -3389,6 +3428,9 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "binary": "test_ast_validator_gtest.exe",
                         "disabled": false,
@@ -3819,6 +3861,9 @@
                         "binary": "test_bash_official_gtest.exe",
                         "libraries": [
                             "gtest"
+                        ],
+                        "additional_sources": [
+                            "lib/test_utils.c"
                         ],
                         "requires_lambda_exe": true,
                         "requires_jube_exe": true,

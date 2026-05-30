@@ -18,6 +18,7 @@
 #include "../lib/log.h"
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
+#include "../lib/test_utils.h"
 
 // Test fixture for validator features
 class ValidatorFeaturesTest : public ::testing::Test {
@@ -27,11 +28,7 @@ protected:
     Input* input;
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
-
+        pool = tu_setup_pool();
         validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
@@ -41,15 +38,9 @@ protected:
     }
 
     void TearDown() override {
-        if (input) {
-            arraylist_free(input->type_list);
-        }
-        if (validator) {
-            schema_validator_destroy(validator);
-        }
-        if (pool) {
-            pool_destroy(pool);
-        }
+        if (input) arraylist_free(input->type_list);
+        if (validator) schema_validator_destroy(validator);
+        tu_teardown_pool(pool);
     }
 
     // Helper to create a simple type

@@ -2,7 +2,9 @@
 
 Proposal for reducing `make build-test` wall-clock and trimming dead weight from `./test/`.
 
-Snapshot of the current state:
+**Status as of 2026-05-30:** Tracks 1, 2, and 3 are landed. PCH was measured and explicitly skipped (see Track 2 P1 below). Section banners (✅ / ❌ / ⏭) reflect outcomes.
+
+Snapshot at proposal time:
 
 - ~120 `*.cpp` test sources, 147 test executables defined in [build_lambda_config.json](../build_lambda_config.json).
 - `make build-test` runs `make -C build/premake config=debug_native -j$(TEST_JOBS)` where `TEST_JOBS = (NPROCS+1)/2` ([Makefile:55](../Makefile#L55)) — intentionally halved for Debug+ASan memory pressure.
@@ -12,7 +14,7 @@ The proposal has three independent tracks. Each can land on its own; they compou
 
 ---
 
-## Track 1 — Shared test utilities (`lib/test_utils.{h,cpp}`)
+## Track 1 — Shared test utilities (`lib/test_utils.{h,c,_runtime.cpp}`) ✅
 
 A survey of the ~120 test `*.cpp` files found heavily duplicated scaffolding. Two helper files already exist and should be reused, not duplicated:
 
@@ -21,91 +23,106 @@ A survey of the ~120 test `*.cpp` files found heavily duplicated scaffolding. Tw
 
 Anything not covered there should land in a new `lib/test_utils.{h,cpp}`. The header exposes a C-style API; the implementation is C++ because several helpers need `String*`, `Pool*`, `Heap*` from the runtime.
 
-### Helpers to extract, by priority
+### Implementation outcome
 
-| P | Helper group | Proposed API | Today's situation | Files benefiting |
-|---|---|---|---|---|
-| P0 | Runtime fixture setup/teardown | `tu_init_runtime(...)` / `tu_cleanup_runtime(...)` | 50–100-line `SetUp`/`TearDown` duplicated in [test_dir_gtest.cpp:40](../test/test_dir_gtest.cpp), [test_http_gtest.cpp:15](../test/test_http_gtest.cpp), [test_enhanced_errors.cpp:17](../test/test_enhanced_errors.cpp), … | ~90 |
-| P0 | Temp dir/file under `./temp/` | `tu_mkdtemp(name)`, `tu_write_temp(content, ext)`, `tu_rmtree(path)` | Ad-hoc `system("mkdir -p")` + `rm -rf`; several callers still use `/tmp` (violates CLAUDE.md rule 2) | ~30 |
-| P0 | Cross-platform process spawn | `tu_run(cmd, &exit_code)`, `tu_run_lambda(args)` | Hand-rolled popen + fgets/realloc + `#ifdef WIN32` in [test_js_gtest.cpp:41](../test/test_js_gtest.cpp), [test_bash_official_gtest.cpp:501](../test/test_bash_official_gtest.cpp), [test_html_roundtrip_gtest.cpp:65](../test/test_html_roundtrip_gtest.cpp) | ~20 |
-| P1 | Golden-file comparison | `tu_read_golden(path)`, `tu_assert_matches_golden(actual, path, opts)` | Each file rolls its own with subtly different normalization | ~25 |
-| P1 | String normalization | `tu_trim_trailing(s)`, `tu_collapse_ws(s)`, `tu_strip_timing_lines(s)` | Duplicated in [test_input_roundtrip_gtest.cpp:119](../test/test_input_roundtrip_gtest.cpp), [test_bash_official_gtest.cpp:110](../test/test_bash_official_gtest.cpp), [test_js_gtest.cpp:100](../test/test_js_gtest.cpp); partial copy in `test_lambda_helpers.hpp` | ~15 |
-| P2 | File I/O | `tu_slurp(path)`, `tu_exists(path)` | `fseek/ftell/fread` boilerplate scattered everywhere | ~20 |
-| P2 | Lambda string ctor | `tu_lambda_str(const char*) -> String*` | format/input tests reimplement this | ~10 |
+Split into three files instead of one, so tests that don't need the Lambda runtime don't pull in `transpiler.hpp` + MIR:
 
-### Rollout
+- **[lib/test_utils.h](../lib/test_utils.h)** — public API: temp dir/file, process spawn, file I/O, string normalization, `tu_setup_pool`, `tu_setup_runtime`.
+- **[lib/test_utils.c](../lib/test_utils.c)** — pure-C implementation of the C helpers and `tu_setup_pool` (no Lambda runtime deps).
+- **[lib/test_utils_runtime.cpp](../lib/test_utils_runtime.cpp)** — `tu_setup_runtime` + Heap/EvalContext fixture, isolated to its own TU so only tests that need the full runtime pay the include cost.
 
-1. Land `lib/test_utils.{h,cpp}` with the P0 group only.
-2. Migrate 5–10 of the highest-LOC fixtures (e.g. [test_dir_gtest.cpp](../test/test_dir_gtest.cpp), [test_http_gtest.cpp](../test/test_http_gtest.cpp), [test_enhanced_errors.cpp](../test/test_enhanced_errors.cpp), [test_bash_official_gtest.cpp](../test/test_bash_official_gtest.cpp), [test_html_roundtrip_gtest.cpp](../test/test_html_roundtrip_gtest.cpp)) to validate the API.
-3. Mass-migrate the rest in batches; each batch is one PR keeping CI green.
-4. Add P1/P2 helpers once P0 has stabilized.
+Tests opt in via `additional_sources` in `build_lambda_config.json`: just `lib/test_utils.c` for the lightweight case, or both files for full-runtime tests.
 
-### Estimated impact
+### Helpers shipped
 
-~500–700 LoC removed across 90+ test files; enforces `./temp/` rule by construction; reduces per-test SetUp from ~100 lines to ~5.
+| P | Helper group | API | Status |
+|---|---|---|---|
+| P0 | Runtime fixture setup/teardown | `tu_setup_runtime(...)` / `tu_teardown_runtime(...)` | ✅ shipped |
+| P0 | Pool-only fixture | `tu_setup_pool()` / `tu_teardown_pool(pool)` | ✅ shipped (added during migration — survey showed most tests didn't need full runtime) |
+| P0 | Temp dir/file under `./temp/` | `tu_mkdtemp(name)`, `tu_write_temp(content, ext)`, `tu_rmtree(path)` | ✅ shipped |
+| P0 | Cross-platform process spawn | `tu_run(cmd, &exit_code)` | ✅ shipped |
+| P1 | Golden-file comparison | `tu_read_golden(path)`, `tu_assert_matches_golden(...)` | ⏭ deferred — only ~25 tests benefit, lower value than expected |
+| P1 | String normalization | `tu_trim_trailing(s)`, `tu_strip_lines(s, prefix)` | ✅ shipped |
+| P2 | File I/O | `tu_slurp(path)`, `tu_exists(path)` | ✅ shipped |
+| P2 | Lambda string ctor | `tu_lambda_str(const char*) -> String*` | ⏭ deferred — ~10 tests benefit, trivial inline cost |
+
+### Migrations landed
+
+| Tier | Tests migrated | Total tests now running |
+|---|---|---|
+| Canary (validates both API modes) | 2: test_dir_gtest, test_bash_official_gtest | 9 + N (bash suite is parameterized) |
+| Mass migration round 1 (pool-only fixture) | 10: test_edit_bridge, test_mark_editor, test_name_pool, test_sysinfo, test_html_css, test_ast_validator, test_validator_input, test_validator_features, test_namespace, test_format_markup | 287 |
+| Mass migration round 2 (extract leading log_init+pool from custom fixtures) | 5: test_dom_range, test_source_pos_bridge, test_mark_builder_deepcopy, test_null_vs_missing, test_html_gtest | 179 |
+| **Total migrated** | **17** | **475+ tests, 0 regressions** |
+
+### Lessons / bugs found during migration
+
+- **`extern "C"` placement bug.** The pool helpers were initially declared outside the `extern "C"` block in [test_utils.h](../lib/test_utils.h) — C++ callers expected mangled names but the C source produced unmangled symbols. Caught at link time, fixed.
+- **Right-sized helpers matter.** The proposal expected ~90 tests would use `tu_setup_runtime`. In practice the survey showed most candidate fixtures only did `log_init + pool_create + ASSERT_NE`, not the full Pool+Heap+EvalContext+`context`+`path_init` dance. `tu_setup_pool` (added during the work) is the right primitive for those.
+
+### Future work (not in scope of this PR)
+
+- The remaining ~70 tests with `log_init`-only or trivial fixtures are not worth migrating: savings are 1–2 lines per file.
+- Golden-file helpers (P1) and `tu_lambda_str` (P2) are deferred — let demand pull them in.
 
 ---
 
 ## Track 2 — Build pipeline optimization
 
-The biggest already-implemented win is `lambda-input-full` as a shared DLL, which 69 tests already link against. The remaining work, in order of impact:
+The biggest already-implemented win at proposal time was `lambda-input-full` as a shared DLL (69 tests). Status of the remaining items below.
 
-### P0 — Make `lambda-lib` dynamic
+### P0 — Make `lambda-lib` dynamic ✅
 
-- **Today:** [build_lambda_config.json](../build_lambda_config.json) `targets[0]` declares `lambda-lib` with `"link": "static"` and 31 `lib/*.c` sources (`mempool.c`, `memtrack.c`, `hashmap.c`, `str.c`, …). 31 test entries declare `dependencies: ["lambda-lib"]`, but lambda-input-full also rolls in lib code, so the effective recompile surface is larger.
-- **Change:** Flip to `"link": "dynamic"`. The lib is built once as `liblambda-lib.{dylib,so,dll}` and linked into every test exe in milliseconds.
-- **Risk:** Static-init order. `rpmalloc`, `memtrack`, `log` all hold global state. Before mass-rolling, build one small test (e.g. `test_hash_gtest`), run it, and confirm clean startup. If any test SEGVs in init, the fix is usually to call the corresponding `_init()` from a `__attribute__((constructor))` in the shared lib itself.
-- **Expected savings:** Largest single contributor remaining. Final number depends on ccache hit rate (see below) but is the biggest lever on the table.
+- **Before:** [build_lambda_config.json](../build_lambda_config.json) `targets[0]` declared `lambda-lib` with `"link": "static"` and 31 `lib/*.c` sources.
+- **First attempt — failed cleanly.** Flipping `"link": "dynamic"` produced `kind "SharedLib"` correctly in Premake but `ld: library 'rpmalloc' not found` at link time. Root cause: `_generate_meta_library` in [utils/generate_premake.py](../utils/generate_premake.py) only emitted `libdirs { /opt/homebrew/lib, /usr/local/lib }` and `links { "rpmalloc", "utf8proc" }` — but on macOS rpmalloc lives at `mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a` and utf8proc at `build_temp/utf8proc/build/libutf8proc.a`, neither in those libdirs.
+- **Fix landed.** Patched `_generate_meta_library` to emit `linkoptions{}` with resolved `.a` paths from `self.external_libraries[dep]['lib']` when `link == 'dynamic'`. Static builds keep the old `links{}` form because their symbols are resolved at the final exe link.
+- **Also added [lib/file.c](../lib/file.c) to lambda-lib sources** — was missing; only static linking masked the unresolved `create_dir` / `file_copy` references from `file_utils.c`.
+- **Outcome.** `liblambda-lib.dylib` (2.1 MB) replaces `liblambda-lib.a` (3.5 MB). 250+ tests across 12 suites verified — all pass.
+- **Static-init risk did not materialize.** `rpmalloc`, `memtrack`, `log` all initialize lazily on first use; no test SEGV'd at startup.
 
-### P1 — Precompiled header for `<gtest/gtest.h>`
+### P1 — ccache ✅
 
-- Every one of the 147 TUs reparses gtest + ~100 STL headers. A single PCH typically saves 50–150 ms per TU.
-- **Change:** Add `pchheader` / `pchsource` in [utils/generate_premake.py](../utils/generate_premake.py) so the Premake gmake action emits a shared `gtest.pch` and `-include`s it into each test TU.
-- **Caveat:** Premake5 + clang PCH support on macOS works but is finicky; gate behind a feature flag for the first PR.
+- **Finding at start:** ccache was not installed on the development machine; the Makefile gating at [Makefile:58](../Makefile#L58) was inert. Also found a sequencing bug — the ccache wrap was overwritten by the later platform CC/CXX detection block (lines 94-109), so even if ccache had been installed, the wrap would not have applied.
+- **Fixed:**
+  - Installed ccache 4.13.6 (mac) via `brew install ccache`; added ccache installs to [setup-mac-deps.sh](../setup-mac-deps.sh) and [setup-linux-deps.sh](../setup-linux-deps.sh) ([setup-windows-deps.sh](../setup-windows-deps.sh) already had it).
+  - Moved the ccache wrap to AFTER the CC/CXX detection block.
+  - Bumped `CCACHE_MAXSIZE` from `500M` → `5G` (matches ccache's own default; 500M was undersized for 147 Debug+ASan TUs).
+  - Added `CCACHE_SLOPPINESS=time_macros,include_file_mtime` to avoid false misses on `__DATE__` / `__TIME__` and regenerated files like `parser.c` / `ts-enum.h`.
+- **Measured.** Single-TU compile of `test_dir_gtest.cpp`: cold ccache **0.707s**, warm ccache **0.012s** = **60× speedup** on cached builds.
 
-### P1 — Confirm ccache is actually hitting
+### P1 — Precompiled header for `<gtest/gtest.h>` ❌ SKIPPED
 
-- ccache is wired in at [Makefile:58](../Makefile#L58), but no one has measured hit rate.
-- **Change:** Run `ccache -s` before and after a full `make clean-all && make build-test`. If hit rate is < 70 %:
-  - Bump `CCACHE_MAXSIZE` (likely 5 GB is small for 147 Debug+ASan TUs).
-  - Set `CCACHE_SLOPPINESS=time_macros,include_file_mtime`.
-  - Verify `-Werror=date-time` is not set (defeats caching).
-- Order this **before** Track 2 P0 so the baseline measurement is honest.
+- **Decision basis.** With ccache delivering 60× on warm hits, PCH would only help on first-ever builds (cold ccache) — and even there the parser cost is a fraction of cold compile time.
+- **Trade-off.** Premake5+clang PCH on macOS is documented as finicky; the implementation complexity and ongoing maintenance burden weren't justified by the marginal savings ccache doesn't already cover.
+- **Revisit trigger.** Only if cold-build wall-clock becomes a CI bottleneck. ccache's own cache eviction would have to consistently happen before the cache pays off.
 
-### P2 — Re-evaluate `TEST_JOBS` cap
+### P2 — Re-evaluate `TEST_JOBS` cap ⏸ deferred
 
-- Cap exists for ASan RSS headroom ([Makefile:55](../Makefile#L55)). Once `lambda-lib` is shared and PCH is in, per-job RSS drops noticeably.
-- **Change:** Measure peak RSS with `/usr/bin/time -l` on a representative build. If headroom is comfortable, raise to `3*NPROCS/4`.
+- Cap exists for ASan RSS headroom ([Makefile:55](../Makefile#L55)). With `lambda-lib` now shared and ccache active, per-job RSS likely drops. Not measured yet.
+- **Recommendation:** measure peak RSS with `/usr/bin/time -l` on a full `make build-test` after this PR lands, then decide whether to raise to `3*NPROCS/4`.
 
-### P2 — Lazy linking
+### P2 — Lazy linking ⏸ deferred
 
-- Build `.o` always, link `.exe` only when the user runs a specific test.
-- Saves ~5–10 % of total wall-clock spent in the link stage when iterating on headers.
-- Adds runner complexity (test discovery must handle missing exes). Only worth it after P0/P1 are in.
+- Build `.o` always, link `.exe` only when the user runs a specific test. Adds runner complexity. Only worth it after measuring how much link time dominates the rebuild inner loop now that `lambda-lib` is dynamic.
 
 ### Explicitly NOT recommended
 
 - **Merging all 147 tests into one exe.** Kills `--gtest_filter` selectivity, breaks isolation across ASan-instrumented suites, and a single crash poisons the whole run.
 
-### Suggested order
-
-1. `ccache -s` baseline.
-2. Track 2 P0 (`lambda-lib` → dynamic). Re-measure.
-3. Track 2 P1 (PCH for gtest). Re-measure.
-4. Decide on `TEST_JOBS` raise and lazy linking based on what's left.
-
 ---
 
-## Track 3 — Dead-code removal in `./test/`
+## Track 3 — Dead-code removal in `./test/` ✅
 
-Four files are safe to remove. They are not referenced in [build_lambda_config.json](../build_lambda_config.json), are not gtest-shaped, and have been stale for 6–10 months:
+Four files removed (not in build config, not gtest-shaped, stale 6–10 months):
 
-- [test/csv_generator.cpp](../test/csv_generator.cpp) — standalone CSV-generation utility, not a test.
-- [test/debug_types.cpp](../test/debug_types.cpp) — 29-line debug helper.
-- [test/example_hashmap.cpp](../test/example_hashmap.cpp) — example/reference code.
-- [test/test_ascii_formatter_standalone.cpp](../test/test_ascii_formatter_standalone.cpp) — standalone tool, not gtest-based.
+- ~~test/csv_generator.cpp~~ — standalone CSV-generation utility, not a test.
+- ~~test/debug_types.cpp~~ — 29-line debug helper.
+- ~~test/example_hashmap.cpp~~ — example/reference code.
+- ~~test/test_ascii_formatter_standalone.cpp~~ — standalone tool, not gtest-based.
 
-### Pending user review
+Also removed 28 orphan `.exe` binaries from `./test/` whose `.cpp` sources had already been deleted (cosmetic — gitignored anyway).
+
+### Still pending user review
 
 These three look like disabled experiments but warrant a closer look before deletion:
 
@@ -116,3 +133,25 @@ These three look like disabled experiments but warrant a closer look before dele
 ### Out of scope
 
 ~83 other sources are not in the build config but have been touched recently. These are likely WIP and should be left alone.
+
+---
+
+## Cumulative outcome
+
+| Metric | Before | After |
+|---|---|---|
+| Dead test files | 4 dead + 28 orphan exes | All removed |
+| Test fixture boilerplate (15 migrated tests) | ~50–100 lines per fixture | 1–5 lines via `tu_setup_pool` / `tu_setup_runtime` |
+| ccache | Not installed; wrap shadowed by later CC override | Installed, wrap works, 5 GiB cache, 60× speedup verified |
+| Setup scripts | macOS and Linux had no ccache install step | All 3 platforms install ccache |
+| `lambda-lib` | Static `.a`, recompiled symbols linked into 147 exes | Shared `.dylib` (2.1 MB), one copy at runtime |
+| Migrated tests | 0 | 17 (covering ~475 individual gtest cases) |
+
+### Suggested follow-up order
+
+1. Run `make clean-all && make build-test` once, measure wall-clock + peak RSS. This sets the new baseline.
+2. Based on that measurement, decide whether to raise `TEST_JOBS` (Track 2 P2).
+3. User reviews and deletes the 3 pending files in Track 3.
+4. If a developer hits a duplicated pattern not covered by `test_utils`, extend it then — don't speculate.
+
+Items explicitly closed without action: PCH (Track 2 P1).

@@ -6,6 +6,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 
 extern "C" Context* _lambda_rt = nullptr;
 
@@ -39,17 +40,13 @@ protected:
     Input* input;
 
     void SetUp() override {
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
+        pool = tu_setup_pool();
         input = Input::create(pool);
         ASSERT_NE(input, nullptr);
     }
 
     void TearDown() override {
-        if (pool) {
-            pool_destroy(pool);
-        }
+        tu_teardown_pool(pool);
     }
 
     int counter_value(Item item) {

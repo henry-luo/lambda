@@ -155,6 +155,19 @@ check_and_install_tool "g++" "build-essential" || exit 1
 check_and_install_tool "git" "git" || exit 1
 check_and_install_tool "curl" "curl" || exit 1
 
+# ccache speeds up test rebuilds significantly. Optional — the Makefile
+# auto-detects it via `which ccache` and wraps CC/CXX when present.
+if ! command -v ccache >/dev/null 2>&1; then
+    echo "Installing ccache (optional, speeds up rebuilds)..."
+    if sudo apt install -y ccache; then
+        echo "✅ ccache installed successfully"
+    else
+        echo "⚠️  ccache install failed (non-fatal — builds will still work, just slower)"
+    fi
+else
+    echo "✅ ccache already available"
+fi
+
 # xxd is now a separate package in Ubuntu 24.04+
 if ! command -v xxd >/dev/null 2>&1; then
     echo "Installing xxd..."

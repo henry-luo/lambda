@@ -13,6 +13,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -253,8 +254,7 @@ protected:
     const char* tref = "rt_template";
 
     void SetUp() override {
-        log_init(NULL);
-        pool = pool_create();
+        pool = tu_setup_pool();
         arena = arena_create_default(pool);
         doc_storage.pool = pool;
         doc_storage.arena = arena;
@@ -299,7 +299,7 @@ protected:
         delete para;
         delete root;
         if (arena) arena_destroy(arena);
-        if (pool) pool_destroy(pool);
+        tu_teardown_pool(pool);
     }
 
     DomElement* make_element() {

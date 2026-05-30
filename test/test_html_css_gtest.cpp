@@ -22,6 +22,7 @@ extern "C" {
 #include "../lib/url.h"
 #include "../lib/log.h"
 }
+#include "../lib/test_utils.h"
 
 /**
  * HTML to CSS End-to-End Integration Test Suite
@@ -221,25 +222,16 @@ protected:
     DomDocument* doc;
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
-
+        pool = tu_setup_pool();
         // Initialize CSS property system via css_engine_create (lives in shared
         // library, ensures the dylib's static globals are initialized)
         css_engine_create(pool);
-
         doc = nullptr;  // Will be created per test when needed
     }
 
     void TearDown() override {
-        if (doc) {
-            dom_document_destroy(doc);
-        }
-        if (pool) {
-            pool_destroy(pool);
-        }
+        if (doc) dom_document_destroy(doc);
+        tu_teardown_pool(pool);
     }
 
     // Helper: Read HTML file
