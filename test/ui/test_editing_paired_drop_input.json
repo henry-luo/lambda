@@ -5,15 +5,14 @@
   "events": [
     {"type": "log", "message": "=== editing_paired_drop_input ==="},
     {"type": "wait", "ms": 150},
-    {"type": "type", "target": {"selector": "#surface"}, "text": "seed", "clear": true},
-    {"type": "wait", "ms": 80},
+    {"type": "set_editing_value", "target": {"selector": "#surface"}, "text": "seed"},
     {"type": "editing_text_drag_drop",
      "target": {"selector": "#surface", "start": 0, "end": 2},
      "to_target": {"selector": "#surface", "start": 4, "end": 4},
      "text": "se",
      "move": true},
     {"type": "wait", "ms": 80},
-    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|se|1|2-2"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|se|"},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByDrag", "surface": "text_control", "min": 1},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertFromDrop", "surface": "text_control", "min": 1}

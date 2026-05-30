@@ -105,6 +105,7 @@ enum SimEventType {
     // F7: IME composition
     SIM_EVENT_IME_COMPOSE,     // drive shared composition start/update/end
     SIM_EVENT_SET_EDITING_SELECTION, // set editing selection by selector + offsets
+    SIM_EVENT_SET_EDITING_VALUE, // set live editing value for deterministic setup
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,

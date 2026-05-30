@@ -29,7 +29,14 @@
     var compositionEvents = [];
 
     function summarize(event) {
-      return event.inputType + '|' + (event.data || '');
+      var ranges = event.getTargetRanges();
+      var rangeText = 'none';
+      var rangeCount = ranges ? ranges.length : 0;
+      if (ranges && ranges.length > 0) {
+        rangeText = ranges[0].startOffset + '-' + ranges[0].endOffset;
+      }
+      return event.inputType + '|' + (event.data || '') + '|' +
+        rangeCount + '|' + rangeText;
     }
 
     surface.onbeforeinput = function(event) {
