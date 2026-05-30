@@ -15,6 +15,7 @@ extern "C" {
     void rpmalloc_initialize();
     void rpmalloc_finalize();
 }
+#include "../lib/test_utils.h"
 
 // Helper to create Lambda String
 String* create_lambda_string(const char* text) {
@@ -37,24 +38,20 @@ protected:
     String* html_type;
 
     void SetUp() override {
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
+        pool = tu_setup_pool();
 
         html_type = create_lambda_string("html");
         ASSERT_NE(html_type, nullptr);
 
+        // Re-init log with log.conf to enable category-level filtering for
+        // these tests (overrides the default log_init from tu_setup_pool).
         log_parse_config_file("log.conf");
         log_init("");
     }
 
     void TearDown() override {
-        if (html_type) {
-            free(html_type);
-        }
-        if (pool) {
-            pool_destroy(pool);
-        }
+        if (html_type) free(html_type);
+        tu_teardown_pool(pool);
     }
 
     Item parseHtml(const char* html) {

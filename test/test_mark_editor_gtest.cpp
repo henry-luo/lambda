@@ -6,6 +6,7 @@
 #include "../lambda/format/format.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 
 // Test fixture for MarkEditor tests
 class MarkEditorTest : public ::testing::Test {
@@ -14,20 +15,13 @@ protected:
     Input* input;
 
     void SetUp() override {
-        // Initialize logging for debug output
-        log_init(NULL);
-
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
-
+        pool = tu_setup_pool();
         input = Input::create(pool);
         ASSERT_NE(input, nullptr);
     }
 
     void TearDown() override {
-        if (pool) {
-            pool_destroy(pool);
-        }
+        tu_teardown_pool(pool);
     }
 };
 

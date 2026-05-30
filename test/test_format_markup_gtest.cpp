@@ -14,6 +14,7 @@
 #include "../lambda/format/format-utils.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 
 extern "C" {
     Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
@@ -51,15 +52,14 @@ protected:
     MarkBuilder* mb_;
 
     void SetUp() override {
-        log_init(NULL);
-        pool_ = pool_create();
+        pool_ = tu_setup_pool();
         input_ = Input::create(pool_);
         mb_ = new MarkBuilder(input_);
     }
 
     void TearDown() override {
         delete mb_;
-        pool_destroy(pool_);
+        tu_teardown_pool(pool_);
     }
 
     // Build a simple document with a heading and paragraph

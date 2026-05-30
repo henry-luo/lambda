@@ -1441,14 +1441,45 @@ class PremakeGenerator:
                 self.premake_content.extend([
                     '    }',
                     '    ',
-                    '    links {',
                 ])
-                for dep in external_deps:
-                    self.premake_content.append(f'        "{dep}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
+
+                # For SharedLib (link: dynamic) we must resolve external symbols
+                # at link time — that means feeding the actual .a/.dylib paths to
+                # the linker rather than `-l<name>`, because deps like
+                # `librpmalloc_no_override.a` and `build_temp/utf8proc/build/...`
+                # don't live in any standard libdir. For static archives, the
+                # plain `links { "<name>" }` form is fine: symbols get deferred
+                # to the final exe link, where lambda-input-full or the test
+                # entry provides the resolved paths.
+                if link_type == 'dynamic':
+                    self.premake_content.append('    linkoptions {')
+                    for dep in external_deps:
+                        if dep in self.external_libraries:
+                            lib_path = self.external_libraries[dep].get('lib', '')
+                            if lib_path:
+                                # Premake gmake files live in build/premake/,
+                                # so prefix relative paths to climb back to repo root.
+                                if not lib_path.startswith('/'):
+                                    lib_path = f'../../{lib_path}'
+                                self.premake_content.append(f'        "{lib_path}",')
+                            else:
+                                # External lib has no `lib` field (e.g. system
+                                # framework). Fall back to -l form.
+                                self.premake_content.append(f'        "-l{dep}",')
+                        else:
+                            self.premake_content.append(f'        "-l{dep}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+                else:
+                    self.premake_content.append('    links {')
+                    for dep in external_deps:
+                        self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
 
         # Get compiler-specific build options
         base_compiler, _ = self._get_compiler_info()

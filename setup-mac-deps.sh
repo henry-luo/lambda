@@ -161,6 +161,17 @@ if ! command -v meson >/dev/null 2>&1; then
     fi
 fi
 
+# Check for ccache (optional but speeds up test rebuilds significantly).
+# The Makefile auto-detects ccache via `which ccache` and wraps CC/CXX.
+if ! command -v ccache >/dev/null 2>&1; then
+    echo "Installing ccache..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install ccache
+    else
+        echo "Warning: ccache not installed. Builds will be slower. Install Homebrew or run: brew install ccache"
+    fi
+fi
+
 # Check for mbedtls (needed for libcurl with TLS support)
 if ! brew list mbedtls@3 >/dev/null 2>&1; then
     echo "Installing mbedtls@3..."

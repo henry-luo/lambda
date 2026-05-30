@@ -22,6 +22,7 @@
 #include "../lib/arena.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
+#include "../lib/test_utils.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -81,14 +82,13 @@ protected:
     Pool* mem_pool;
 
     void SetUp() override {
-        log_init(NULL);
+        mem_pool = tu_setup_pool();
         input = InputManager::create_input(nullptr);
-        mem_pool = pool_create();
     }
 
     void TearDown() override {
         // InputManager handles cleanup
-        if (mem_pool) pool_destroy(mem_pool);
+        tu_teardown_pool(mem_pool);
     }
 };
 

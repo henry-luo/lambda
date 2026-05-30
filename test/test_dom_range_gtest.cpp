@@ -16,6 +16,7 @@ extern "C" {
 #include "../lib/arena.h"
 #include "../lib/log.h"
 }
+#include "../lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../radiant/dom_range.hpp"
@@ -59,9 +60,7 @@ protected:
     DomText*    world = nullptr;
 
     void SetUp() override {
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr);
+        pool = tu_setup_pool();
         arena = arena_create_default(pool);
         ASSERT_NE(arena, nullptr);
         fake_state.arena = arena;
@@ -91,7 +90,7 @@ protected:
         delete span;
         delete div;
         if (arena) arena_destroy(arena);
-        if (pool) pool_destroy(pool);
+        tu_teardown_pool(pool);
     }
 
     // Create a minimally-initialized DomElement.

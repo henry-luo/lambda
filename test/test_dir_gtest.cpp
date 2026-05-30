@@ -5,71 +5,38 @@
 #include <gtest/gtest.h>
 #include "../lambda/transpiler.hpp"
 #include "../lambda/input/input.hpp"
-#include <sys/stat.h>
-#include <unistd.h>
+#include "../lib/test_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-
-extern "C" {
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-}
-
-// External path API (defined in path.c)
-extern "C" {
-    void path_init(void);
-}
-
-// Thread-local context (defined in runner.cpp)
-#ifdef _WIN32
-__thread EvalContext* context;
-#else
-extern __thread EvalContext* context;
-#endif
 
 // Test fixture for directory tests
 class InputDirTest : public ::testing::Test {
 protected:
-    static char test_dir_name[256];
+    static char* test_dir_name;  // allocated per-SetUp under ./temp/
     Pool* pool;
     EvalContext test_context;
     Heap test_heap;
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        
-        // Set up a minimal context for path operations
-        pool = pool_create();
-        test_heap.pool = pool;
-        test_heap.gc = nullptr;
-        
-        memset(&test_context, 0, sizeof(test_context));
-        test_context.heap = &test_heap;
-        test_context.pool = pool;
-        
-        // Set thread-local context
-        context = &test_context;
-        
-        // Initialize path system
-        path_init();
-        
-        // Generate unique directory name using PID to avoid race conditions
-        snprintf(test_dir_name, sizeof(test_dir_name), "test_temp_dir_%d_%ld", getpid(), (long)time(NULL));
+        // Pool + Heap + EvalContext + thread-local `context` + path_init().
+        tu_setup_runtime(&pool, &test_heap, &test_context);
+
+        // Fresh unique directory under ./temp/ (CLAUDE.md rule 2).
+        test_dir_name = tu_mkdtemp("dir_test");
+        ASSERT_NE(test_dir_name, nullptr) << "tu_mkdtemp failed";
         setup_test_directory();
     }
 
     void TearDown() override {
-        cleanup_test_directory();
-        context = nullptr;
-        if (pool) {
-            pool_destroy(pool);
-        }
+        tu_rmtree(test_dir_name);
+        free(test_dir_name);
+        test_dir_name = nullptr;
+        tu_teardown_runtime(pool);
     }
 
-    // Helper function to create a test directory structure
+    // Populate the temp dir with a fixture tree:
+    //   subdir1/nested/file3.txt, subdir1/file2.txt, subdir2/, file1.txt, empty.txt
     static void setup_test_directory() {
         char cmd[512];
         snprintf(cmd, sizeof(cmd), "mkdir -p %s/subdir1/nested", test_dir_name);
@@ -85,17 +52,10 @@ protected:
         snprintf(cmd, sizeof(cmd), "touch %s/empty.txt", test_dir_name);
         system(cmd);
     }
-
-    // Helper function to cleanup test directory
-    static void cleanup_test_directory() {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "rm -rf %s", test_dir_name);
-        system(cmd);
-    }
 };
 
 // Static member definition
-char InputDirTest::test_dir_name[256];
+char* InputDirTest::test_dir_name = nullptr;
 
 // Test basic directory listing functionality - returns List of Path items
 TEST_F(InputDirTest, ListCurrentDirectory) {
@@ -194,46 +154,24 @@ protected:
     EvalContext test_context;
     Heap test_heap;
 
-    void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        
-        // Set up a minimal context for path operations
-        pool = pool_create();
-        test_heap.pool = pool;
-        test_heap.gc = nullptr;
-        
-        memset(&test_context, 0, sizeof(test_context));
-        test_context.heap = &test_heap;
-        test_context.pool = pool;
-        
-        // Set thread-local context
-        context = &test_context;
-        
-        // Initialize path system
-        path_init();
-    }
-
-    void TearDown() override {
-        context = nullptr;
-        if (pool) {
-            pool_destroy(pool);
-        }
-    }
+    void SetUp() override    { tu_setup_runtime(&pool, &test_heap, &test_context); }
+    void TearDown() override { tu_teardown_runtime(pool); }
 };
 
 // Test empty directory handling
 TEST_F(InputDirTestSimple, EmptyDirectoryHandling) {
-    system("mkdir -p test_empty_dir");
+    char* empty_dir = tu_mkdtemp("empty_dir_test");
+    ASSERT_NE(empty_dir, nullptr);
 
-    Input* input = input_from_directory("test_empty_dir", "test_empty_dir", false, 1);
+    Input* input = input_from_directory(empty_dir, empty_dir, false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory should handle empty directories";
 
     List* root = (List*)input->root.array;
     ASSERT_NE(root, nullptr) << "Root list should exist for empty directory";
     ASSERT_EQ(root->length, 0) << "Empty directory should have 0 items";
 
-    system("rm -rf test_empty_dir");
+    tu_rmtree(empty_dir);
+    free(empty_dir);
 }
 
 // Test integration with input_from_url for directory URLs (simplified test)

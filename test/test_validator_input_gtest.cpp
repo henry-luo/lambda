@@ -23,6 +23,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 
 // Forward declarations for input functions
 extern "C" {
@@ -50,11 +51,7 @@ protected:
     SchemaValidator* validator = nullptr;
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool = pool_create();
-        ASSERT_NE(pool, nullptr) << "Failed to create memory pool";
-
+        pool = tu_setup_pool();
         validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr) << "Failed to create validator";
     }
@@ -64,11 +61,8 @@ protected:
             schema_validator_destroy(validator);
             validator = nullptr;
         }
-
-        if (pool) {
-            pool_destroy(pool);
-            pool = nullptr;
-        }
+        tu_teardown_pool(pool);
+        pool = nullptr;
     }
 
     // Helper to create test items

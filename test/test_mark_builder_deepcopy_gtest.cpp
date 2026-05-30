@@ -8,6 +8,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/test_utils.h"
 #include <cstring>
 
 // Test fixture for deep copy tests
@@ -20,11 +21,8 @@ protected:
     Input* child_input;  // Child of input1 for parent chain testing
 
     void SetUp() override {
-        // Initialize logging
-        log_init(NULL);
-        pool1 = pool_create();
+        pool1 = tu_setup_pool();  // also handles log_init
         pool2 = pool_create();
-        ASSERT_NE(pool1, nullptr);
         ASSERT_NE(pool2, nullptr);
 
         input1 = Input::create(pool1, nullptr);
@@ -39,8 +37,8 @@ protected:
     }
 
     void TearDown() override {
-        if (pool1) pool_destroy(pool1);
-        if (pool2) pool_destroy(pool2);
+        tu_teardown_pool(pool1);
+        tu_teardown_pool(pool2);
     }
 };
 

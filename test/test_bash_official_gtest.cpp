@@ -14,6 +14,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
+#include "../lib/test_utils.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -66,10 +67,9 @@ struct BashOfficialTestInfo {
 // Helpers
 //==============================================================================
 
+// Thin std::string wrapper around lib/test_utils.h tu_exists.
 static bool file_exists(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "r");
-    if (f) { fclose(f); return true; }
-    return false;
+    return tu_exists(path.c_str());
 }
 
 #ifndef _WIN32
@@ -89,32 +89,9 @@ static bool ensure_test_shell_wrapper(const std::string& tests_dir, const std::s
 }
 #endif
 
-static char* read_file_contents(const char* path) {
-    FILE* file = fopen(path, "r");
-    if (!file) return nullptr;
-
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char* content = (char*)malloc(file_size + 1);
-    if (!content) { fclose(file); return nullptr; }
-
-    size_t read_size = fread(content, 1, file_size, file);
-    content[read_size] = '\0';
-    fclose(file);
-
-    return content;
-}
-
-static void trim_trailing_whitespace(char* str) {
-    if (!str) return;
-    size_t len = strlen(str);
-    while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r' ||
-                       str[len - 1] == ' '  || str[len - 1] == '\t')) {
-        str[--len] = '\0';
-    }
-}
+// File I/O and trimming are provided by lib/test_utils.h:
+//   tu_slurp        — read entire file (formerly read_file_contents)
+//   tu_trim_trailing — strip trailing whitespace (formerly trim_trailing_whitespace)
 
 // Normalize `declare -A name=([k1]="v1" [k2]="v2" )` lines by sorting
 // the key-value pairs alphabetically. Bash's hash table iteration order is
@@ -304,7 +281,7 @@ static std::string make_test_name(const std::string& filename) {
 // Check if the official run-* script for a test uses `grep -v '^expect'`
 static bool run_script_filters_expect(const std::string& tests_dir, const std::string& base) {
     std::string run_path = tests_dir + "/run-" + base;
-    char* contents = read_file_contents(run_path.c_str());
+    char* contents = tu_slurp(run_path.c_str());
     if (!contents) return false;
     bool found = (strstr(contents, "grep -v") != nullptr && strstr(contents, "expect") != nullptr);
     free(contents);
@@ -559,14 +536,14 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
     }
 
     // Read expected output
-    char* expected = read_file_contents(info.right_path.c_str());
+    char* expected = tu_slurp(info.right_path.c_str());
     ASSERT_NE(expected, nullptr)
         << "Could not read expected output: " << info.right_path;
 
     // Trim trailing whitespace from both
     char* actual_cstr = strdup(actual.c_str());
-    trim_trailing_whitespace(actual_cstr);
-    trim_trailing_whitespace(expected);
+    tu_trim_trailing(actual_cstr);
+    tu_trim_trailing(expected);
 
     // Normalize associative array key order for comparison
     std::string norm_expected = normalize_assoc_arrays(expected);

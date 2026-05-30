@@ -54,14 +54,8 @@ LINK_JOBS := 1
 # to avoid OOM kills on machines with limited RAM.
 TEST_JOBS := $(shell echo $$(( ($(NPROCS) + 1) / 2 )) )
 
-# Enable ccache for faster builds if available
-ifneq ($(shell which ccache 2>/dev/null),)
-	CC := ccache $(CC)
-	CXX := ccache $(CXX)
-	export CCACHE_DIR := $(shell pwd)/build/.ccache
-	export CCACHE_MAXSIZE := 500M
-	export CCACHE_COMPRESS := 1
-endif
+# ccache enablement moved below — must run AFTER the CC/CXX compiler-detection
+# block (lines ~94-109) so the ccache prefix isn't overwritten.
 
 # Detect Python executable
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
@@ -101,6 +95,22 @@ else
 	CXX := g++
 	AR := ar
 	RANLIB := ranlib
+endif
+
+# Enable ccache for faster builds if available.
+# MUST come after the CC/CXX detection block above; otherwise the platform
+# branches overwrite our `ccache <compiler>` wrap.
+ifneq ($(shell which ccache 2>/dev/null),)
+	CC := ccache $(CC)
+	CXX := ccache $(CXX)
+	export CCACHE_DIR := $(shell pwd)/build/.ccache
+	# 5 GiB matches ccache's own default; 500M was undersized for 147 test TUs.
+	export CCACHE_MAXSIZE := 5G
+	export CCACHE_COMPRESS := 1
+	# time_macros: __DATE__/__TIME__ shouldn't invalidate cache entries.
+	# include_file_mtime: rely on content hash, not mtime, when headers are
+	#   regenerated identically (common with generated parser.c / ts-enum.h).
+	export CCACHE_SLOPPINESS := time_macros,include_file_mtime
 endif
 
 # Tree-sitter grammar dependencies
