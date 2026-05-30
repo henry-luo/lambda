@@ -35,6 +35,7 @@
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_state": true, "kind": "scroll"},
+ *     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
@@ -115,6 +116,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
+    SIM_EVENT_ASSERT_EVENT_LOG, // verify event/state JSONL contains records
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element

@@ -30,6 +30,15 @@ void selection_clear  (DocState* state);
 extern "C" void tc_history_guard_enter();
 extern "C" void tc_history_guard_exit ();
 
+extern "C" __attribute__((weak)) void radiant_text_edit_history_notify(
+    DomElement* elem, const char* action, const char* input_type,
+    uint32_t depth, uint32_t cursor);
+extern "C" __attribute__((weak)) void radiant_text_edit_history_notify(
+    DomElement* /*elem*/, const char* /*action*/, const char* /*input_type*/,
+    uint32_t /*depth*/, uint32_t /*cursor*/) {}
+
+static thread_local const char* g_te_history_input_type = nullptr;
+
 // Default ring capacity for the undo history. 64 entries is enough for
 // typical interactive editing sessions while bounding worst-case memory.
 static constexpr uint16_t TE_HISTORY_DEFAULT_CAP = 64;
@@ -424,6 +433,16 @@ static EditHistory* tc_get_or_create_history(FormControlProp* f) {
     return (EditHistory*)f->history;
 }
 
+const char* te_history_input_type_set(const char* input_type) {
+    const char* previous = g_te_history_input_type;
+    g_te_history_input_type = input_type;
+    return previous;
+}
+
+void te_history_input_type_restore(const char* previous) {
+    g_te_history_input_type = previous;
+}
+
 void te_history_push(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* f = elem->form;
@@ -467,6 +486,8 @@ void te_history_push(DomElement* elem) {
 
     h->head = (uint16_t)((h->head + 1) % h->cap);
     if (h->count < h->cap) h->count++;
+    radiant_text_edit_history_notify(elem, "push", g_te_history_input_type,
+                                     h->count, h->cursor);
 }
 
 bool te_history_undo(DomElement* elem) {

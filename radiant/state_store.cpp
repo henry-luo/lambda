@@ -789,6 +789,19 @@ void radiant_state_reset(DocState* state) {
     state->editing_autoscroll_pointer_y = 0.0f;
     state->editing_tick_last_time = 0.0;
     state->editing_caret_blink_elapsed = 0.0;
+    editing_surface_clear(&state->editing.active_surface);
+    state->editing.has_active_surface = false;
+    state->editing.pointer_selecting = false;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
+    state->editing.drag_anchor_view = NULL;
+    state->editing.drag_anchor_offset = 0;
+    state->editing.composing = false;
+    state->editing.autoscroll.active = false;
+    state->editing.autoscroll.surface = NULL;
+    state->editing.autoscroll.pointer_x = 0.0f;
+    state->editing.autoscroll.pointer_y = 0.0f;
+    state->editing.autoscroll.tick_last_time = 0.0;
+    state->editing.autoscroll.caret_blink_elapsed = 0.0;
 
     // Reset dirty state
     state->is_dirty = false;
@@ -806,6 +819,110 @@ void radiant_state_reset(DocState* state) {
     state->version++;
 
     log_debug("radiant_state_reset: reset state store to version %llu", state->version);
+}
+
+void editing_interaction_set_active_surface(DocState* state,
+                                            const EditingSurface* surface) {
+    if (!state) return;
+    if (surface && surface->kind != EDIT_SURFACE_NONE) {
+        bool same_surface = state->editing.has_active_surface &&
+            state->editing.active_surface.kind == surface->kind &&
+            state->editing.active_surface.owner == surface->owner &&
+            state->editing.active_surface.view == surface->view;
+        if (!same_surface) state->editing.composing = false;
+        state->editing.active_surface = *surface;
+        state->editing.has_active_surface = true;
+    } else {
+        editing_surface_clear(&state->editing.active_surface);
+        state->editing.has_active_surface = false;
+        state->editing.composing = false;
+    }
+}
+
+void editing_interaction_set_autoscroll(DocState* state,
+                                        bool active,
+                                        View* surface,
+                                        float pointer_x,
+                                        float pointer_y) {
+    if (!state) return;
+
+    state->editing_autoscroll_active = active;
+    state->editing_autoscroll_surface = active ? surface : NULL;
+    state->editing_autoscroll_pointer_x = active ? pointer_x : 0.0f;
+    state->editing_autoscroll_pointer_y = active ? pointer_y : 0.0f;
+
+    state->editing.autoscroll.active = active;
+    state->editing.autoscroll.surface = active ? surface : NULL;
+    state->editing.autoscroll.pointer_x = active ? pointer_x : 0.0f;
+    state->editing.autoscroll.pointer_y = active ? pointer_y : 0.0f;
+
+    if (active && surface) {
+        EditingSurface resolved;
+        if (editing_surface_from_target(surface, &resolved)) {
+            editing_interaction_set_active_surface(state, &resolved);
+        }
+    }
+}
+
+void editing_interaction_clear_autoscroll(DocState* state) {
+    editing_interaction_set_autoscroll(state, false, NULL, 0.0f, 0.0f);
+}
+
+void editing_interaction_set_clock(DocState* state,
+                                   double tick_last_time,
+                                   double caret_blink_elapsed) {
+    if (!state) return;
+    state->editing_tick_last_time = tick_last_time;
+    state->editing_caret_blink_elapsed = caret_blink_elapsed;
+    state->editing.autoscroll.tick_last_time = tick_last_time;
+    state->editing.autoscroll.caret_blink_elapsed = caret_blink_elapsed;
+}
+
+void editing_interaction_set_composing(DocState* state,
+                                       const EditingSurface* surface,
+                                       bool composing) {
+    if (!state) return;
+    if (surface && surface->kind != EDIT_SURFACE_NONE) {
+        editing_interaction_set_active_surface(state, surface);
+    }
+    state->editing.composing = composing;
+}
+
+void editing_interaction_sync_projection(DocState* state) {
+    if (!state) return;
+
+    state->editing.autoscroll.active = state->editing_autoscroll_active;
+    state->editing.autoscroll.surface = state->editing_autoscroll_surface;
+    state->editing.autoscroll.pointer_x = state->editing_autoscroll_pointer_x;
+    state->editing.autoscroll.pointer_y = state->editing_autoscroll_pointer_y;
+    state->editing.autoscroll.tick_last_time = state->editing_tick_last_time;
+    state->editing.autoscroll.caret_blink_elapsed = state->editing_caret_blink_elapsed;
+    bool pointer_selecting = selection_is_pointer_range_active(state);
+    state->editing.pointer_selecting = pointer_selecting;
+    if (pointer_selecting && !state->editing.drag_anchor_view &&
+        state->selection && state->selection->anchor_view) {
+        state->editing.drag_anchor_view = state->selection->anchor_view;
+        state->editing.drag_anchor_offset = state->selection->anchor_offset;
+        state->editing.drag_mode = EDITING_DRAG_CHAR;
+    } else if (!pointer_selecting && !state->text_selection_press_in_range) {
+        state->editing.drag_anchor_view = NULL;
+        state->editing.drag_anchor_offset = 0;
+        state->editing.drag_mode = EDITING_DRAG_CHAR;
+    }
+
+    EditingSurface surface;
+    if (editing_surface_from_focus(state, &surface)) {
+        editing_interaction_set_active_surface(state, &surface);
+        return;
+    }
+
+    View* caret_view = caret_get_view(state);
+    if (caret_view && editing_surface_from_target(caret_view, &surface)) {
+        editing_interaction_set_active_surface(state, &surface);
+        return;
+    }
+
+    editing_interaction_set_active_surface(state, NULL);
 }
 
 // ============================================================================
@@ -4580,6 +4697,10 @@ void selection_project_focus_visual(DocState* state, float x, float y, float hei
 void selection_finish_active_gesture(DocState* state) {
     if (!state || !state->selection) return;
     state->selection->is_selecting = false;
+    state->editing.pointer_selecting = false;
+    state->editing.drag_anchor_view = NULL;
+    state->editing.drag_anchor_offset = 0;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
 }
 
 void selection_press_in_range_begin(DocState* state, View* view, int offset) {
@@ -4594,6 +4715,10 @@ void selection_press_in_range_clear(DocState* state) {
     state->text_selection_press_in_range = false;
     state->text_selection_press_view = NULL;
     state->text_selection_press_offset = 0;
+    state->editing.drag_anchor_view = NULL;
+    state->editing.drag_anchor_offset = 0;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
+    editing_interaction_sync_projection(state);
 }
 
 bool selection_press_in_range_pending(DocState* state, View** out_view, int* out_offset) {
@@ -4795,6 +4920,10 @@ void selection_start(DocState* state, View* view, int char_offset) {
             return;
         }
         text_control_sync_selection(state, view);
+        state->editing.pointer_selecting = true;
+        state->editing.drag_anchor_view = view;
+        state->editing.drag_anchor_offset = char_offset;
+        state->editing.drag_mode = EDITING_DRAG_CHAR;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "start_text_control_selection",
@@ -4814,6 +4943,10 @@ void selection_start(DocState* state, View* view, int char_offset) {
     if (state->selection) {
         state->selection->is_selecting = true;
     }
+    state->editing.pointer_selecting = true;
+    state->editing.drag_anchor_view = view;
+    state->editing.drag_anchor_offset = char_offset;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     selection_log_transition(state, "start_pointer_selection", view, char_offset, view, char_offset);
@@ -5145,6 +5278,10 @@ void selection_clear(DocState* state) {
             dom_selection_remove_all_ranges(selection);
         }
         text_control_sync_selection(state, caret_view);
+        state->editing.pointer_selecting = false;
+        state->editing.drag_anchor_view = NULL;
+        state->editing.drag_anchor_offset = 0;
+        state->editing.drag_mode = EDITING_DRAG_CHAR;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "clear_text_control_selection",
@@ -5167,6 +5304,10 @@ void selection_clear(DocState* state) {
     if (state->selection) {
         state->selection->is_selecting = false;
     }
+    state->editing.pointer_selecting = false;
+    state->editing.drag_anchor_view = NULL;
+    state->editing.drag_anchor_offset = 0;
+    state->editing.drag_mode = EDITING_DRAG_CHAR;
 
     state->selection_layout_dirty = true;
     state->needs_repaint = true;

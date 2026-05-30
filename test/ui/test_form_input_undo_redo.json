@@ -33,6 +33,11 @@
     {"type": "key_combo", "key": "y", "mods_str": "ctrl"},
     {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
-    {"type": "assert_caret", "char_offset": 3}
+    {"type": "assert_caret", "char_offset": 3},
+
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 4},
+    {"type": "assert_event_log", "contains": "\"action\":\"push\"", "min": 3},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"insertText\"", "min": 3},
+    {"type": "assert_event_log", "contains": "\"owned_by\":\"radiant\"", "min": 4}
   ]
 }

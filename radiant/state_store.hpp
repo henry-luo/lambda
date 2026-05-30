@@ -7,6 +7,7 @@
 #include "../lambda/template_state.h"
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
+#include "editing.hpp"
 
 // Forward declarations
 struct AnimationScheduler;
@@ -199,6 +200,32 @@ typedef struct DragDropState {
     const char* drag_data;         // application-defined drag data type
 } DragDropState;
 
+typedef enum EditingDragMode {
+    EDITING_DRAG_CHAR = 0,
+    EDITING_DRAG_WORD,
+    EDITING_DRAG_LINE,
+} EditingDragMode;
+
+typedef struct EditingScrollState {
+    bool active;
+    View* surface;
+    float pointer_x;
+    float pointer_y;
+    double tick_last_time;
+    double caret_blink_elapsed;
+} EditingScrollState;
+
+typedef struct EditingInteractionState {
+    EditingSurface active_surface;
+    bool has_active_surface;
+    bool pointer_selecting;
+    EditingDragMode drag_mode;
+    View* drag_anchor_view;
+    int drag_anchor_offset;
+    bool composing;
+    EditingScrollState autoscroll;
+} EditingInteractionState;
+
 /**
  * Visited links tracking (privacy-preserving via hash)
  */
@@ -255,6 +282,7 @@ typedef struct DocState {
     float editing_autoscroll_pointer_y;  // last drag pointer y in viewport coordinates
     double editing_tick_last_time;        // shared editing animation clock
     double editing_caret_blink_elapsed;   // caret blink time on shared tick
+    EditingInteractionState editing;      // shared editing controller projection
 
     // ------------------------------------------------------------------
     // DOM-spec Selection / Range (additive — new code path; legacy
@@ -755,6 +783,21 @@ void doc_state_update_drag_drop_motion(DocState* state, float x, float y);
 void doc_state_set_drag_drop_active(DocState* state, bool active);
 void doc_state_set_drag_drop_target(DocState* state, View* drop_target);
 void doc_state_clear_drag_drop(DocState* state);
+void editing_interaction_sync_projection(DocState* state);
+void editing_interaction_set_active_surface(DocState* state,
+                                            const EditingSurface* surface);
+void editing_interaction_set_autoscroll(DocState* state,
+                                        bool active,
+                                        View* surface,
+                                        float pointer_x,
+                                        float pointer_y);
+void editing_interaction_clear_autoscroll(DocState* state);
+void editing_interaction_set_clock(DocState* state,
+                                   double tick_last_time,
+                                   double caret_blink_elapsed);
+void editing_interaction_set_composing(DocState* state,
+                                       const EditingSurface* surface,
+                                       bool composing);
 
 // ============================================================================
 // Doc-Level Scheduling / Viewport State API

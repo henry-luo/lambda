@@ -1,0 +1,23 @@
+{
+  "name": "Rich contenteditable history shortcuts emit beforeinput intents",
+  "html": "test/ui/test_editing_history_rich.html",
+  "viewport": {"width": 640, "height": 360},
+  "events": [
+    {"type": "log", "message": "=== editing_history_rich ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "click", "target": {"text": "beta"}},
+    {"type": "wait", "ms": 80},
+    {"type": "key_combo", "key": "z", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "historyUndo"},
+    {"type": "click", "target": {"text": "beta"}},
+    {"type": "wait", "ms": 80},
+    {"type": "key_combo", "key": "y", "mods_str": "ctrl"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "historyRedo"},
+
+    {"type": "assert_event_log", "contains": "\"owned_by\":\"consumer\"", "min": 2},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"historyUndo\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"input_type\":\"historyRedo\"", "min": 1}
+  ]
+}

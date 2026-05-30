@@ -44,6 +44,57 @@ static bool editing_controller_form_selection_extend(
                                         hooks->user);
 }
 
+static bool editing_controller_is_history_intent(InputIntentType input_type) {
+    return input_type == INPUT_INTENT_HISTORY_UNDO ||
+        input_type == INPUT_INTENT_HISTORY_REDO;
+}
+
+bool editing_controller_dispatch_history(EventContext* evcon,
+                                         const EditingSurface* surface,
+                                         InputIntentType input_type,
+                                         const EditingControllerHooks* hooks) {
+    if (!evcon || !surface || !editing_controller_is_history_intent(input_type)) {
+        return false;
+    }
+    if (!editing_surface_is_text_control(surface) &&
+        !editing_surface_is_rich(surface)) {
+        return false;
+    }
+    if (!hooks || !hooks->history_dispatch) return false;
+    DocState* state = (evcon->ui_context && evcon->ui_context->document)
+        ? (DocState*)evcon->ui_context->document->state : nullptr;
+    editing_interaction_set_active_surface(state, surface);
+    return hooks->history_dispatch(evcon, surface, input_type, hooks->user);
+}
+
+bool editing_controller_undo(EventContext* evcon,
+                             const EditingSurface* surface,
+                             const EditingControllerHooks* hooks) {
+    return editing_controller_dispatch_history(evcon, surface,
+                                              INPUT_INTENT_HISTORY_UNDO,
+                                              hooks);
+}
+
+bool editing_controller_redo(EventContext* evcon,
+                             const EditingSurface* surface,
+                             const EditingControllerHooks* hooks) {
+    return editing_controller_dispatch_history(evcon, surface,
+                                              INPUT_INTENT_HISTORY_REDO,
+                                              hooks);
+}
+
+bool editing_undo(EventContext* evcon,
+                  const EditingSurface* surface,
+                  const EditingControllerHooks* hooks) {
+    return editing_controller_undo(evcon, surface, hooks);
+}
+
+bool editing_redo(EventContext* evcon,
+                  const EditingSurface* surface,
+                  const EditingControllerHooks* hooks) {
+    return editing_controller_redo(evcon, surface, hooks);
+}
+
 static void editing_controller_log_autoscroll(
         DocState* state,
         const EditingSurface* surface,
@@ -301,9 +352,12 @@ static bool editing_controller_text_control_drag_autoscroll(
     if (!state->editing_autoscroll_active) {
         editing_controller_log_autoscroll(state, surface_ptr, "start", dx, dy,
                                           vx, vy, hooks);
-        state->editing_autoscroll_active = true;
-        state->editing_autoscroll_surface = static_cast<View*>(elem);
+        editing_interaction_set_autoscroll(state, true, static_cast<View*>(elem),
+                                           pointer_x, pointer_y);
     } else {
+        editing_interaction_set_autoscroll(state, true,
+                                           state->editing_autoscroll_surface,
+                                           pointer_x, pointer_y);
         editing_controller_log_autoscroll(state, surface_ptr, "tick", dx, dy,
                                           vx, vy, hooks);
     }
@@ -396,8 +450,11 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
     EditingSurface surface;
     if (editing_surface_from_target(surface_target, &surface) &&
         editing_surface_is_text_control(&surface) && surface.owner) {
-        state->editing_autoscroll_pointer_x = pointer_x;
-        state->editing_autoscroll_pointer_y = pointer_y;
+        if (state->editing_autoscroll_active) {
+            editing_interaction_set_autoscroll(state, true,
+                                               state->editing_autoscroll_surface,
+                                               pointer_x, pointer_y);
+        }
         return editing_controller_text_control_drag_autoscroll(evcon, state,
             surface.owner, pointer_x, pointer_y, hooks);
     }
@@ -427,8 +484,11 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
     }
     if (rect_w <= 0.0f || rect_h <= 0.0f) return false;
 
-    state->editing_autoscroll_pointer_x = pointer_x;
-    state->editing_autoscroll_pointer_y = pointer_y;
+    if (state->editing_autoscroll_active) {
+        editing_interaction_set_autoscroll(state, true,
+                                           state->editing_autoscroll_surface,
+                                           pointer_x, pointer_y);
+    }
 
     float vx = 0.0f;
     float vy = 0.0f;
@@ -459,9 +519,12 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
     if (!state->editing_autoscroll_active) {
         editing_controller_log_autoscroll(state, surface_ptr, "start",
                                           dx, dy, vx, vy, hooks);
-        state->editing_autoscroll_active = true;
-        state->editing_autoscroll_surface = surface_target;
+        editing_interaction_set_autoscroll(state, true, surface_target,
+                                           pointer_x, pointer_y);
     } else {
+        editing_interaction_set_autoscroll(state, true,
+                                           state->editing_autoscroll_surface,
+                                           pointer_x, pointer_y);
         editing_controller_log_autoscroll(state, surface_ptr, "tick",
                                           dx, dy, vx, vy, hooks);
     }
@@ -487,10 +550,7 @@ void editing_controller_drag_autoscroll_stop(DocState* state,
     }
     editing_controller_log_autoscroll(state, surface_ptr, "stop",
                                       0.0f, 0.0f, 0.0f, 0.0f, hooks);
-    state->editing_autoscroll_active = false;
-    state->editing_autoscroll_surface = nullptr;
-    state->editing_autoscroll_pointer_x = 0.0f;
-    state->editing_autoscroll_pointer_y = 0.0f;
+    editing_interaction_clear_autoscroll(state);
 }
 
 bool editing_controller_animation_active(DocState* state) {
@@ -511,7 +571,8 @@ bool editing_controller_animation_tick(UiContext* uicon,
         delta = timestamp - state->editing_tick_last_time;
         if (delta > 1.0) delta = 1.0;
     }
-    state->editing_tick_last_time = timestamp;
+    editing_interaction_set_clock(state, timestamp,
+                                  state->editing_caret_blink_elapsed);
 
     bool changed = false;
     if (editing_controller_password_reveal_tick(state, delta)) changed = true;
@@ -526,6 +587,8 @@ bool editing_controller_animation_tick(UiContext* uicon,
     } else {
         state->editing_caret_blink_elapsed = 0.0;
     }
+    editing_interaction_set_clock(state, state->editing_tick_last_time,
+                                  state->editing_caret_blink_elapsed);
 
     if (!state->editing_autoscroll_active ||
         !state->editing_autoscroll_surface) {

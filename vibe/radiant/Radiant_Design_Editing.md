@@ -784,6 +784,21 @@ For WPT:
 - Form undo/redo now dispatches `historyUndo` / `historyRedo` through
   `dispatch_form_history()`, preserving `text_edit.cpp` snapshot restore while
   giving history the same `beforeinput` / mutation / `input` transaction shape.
+- E6 has started landing: `DocState` now exposes an
+  `EditingInteractionState` projection for the active editing surface,
+  pointer-selection/autoscroll state, and shared animation clock. The
+  projection mirrors the legacy fields while controller call sites migrate,
+  refreshes at the focus/caret/selection state-machine boundary, and records
+  the active composition surface during the existing IME lifecycle. State
+  snapshots now include the projection (`editing.active_surface`,
+  pointer-selection anchor, composition flag, and autoscroll/clock mirror), so
+  event logs can diagnose drift between legacy state and the shared editing
+  controller surface. Undo/redo
+  now enters through `editing_controller_dispatch_history()`: form controls
+  still restore local `text_edit.cpp` snapshots after cancellable
+  `beforeinput`, while contenteditable/rich hosts receive
+  `historyUndo` / `historyRedo` `beforeinput` intents through the same
+  controller hook. `test_editing_history_rich` pins the rich-host intent path.
 - Unified editing dispatch now emits first-class JSONL records:
   `editing.intent`, `editing.beforeinput`, `editing.mutation`, and
   `editing.input`. The form mutation records are emitted at the value-store
@@ -843,7 +858,20 @@ For WPT:
   source, and whether either side had an active IME composition.
 - Form undo/redo restores now emit `editing.history` records from the unified
   `dispatch_form_history()` path before the history mutation and selection
-  restore records. Password surfaces redact history depth/cursor.
+  restore records. The record now carries the `owned_by` field from the E6
+  schema (`radiant` for form-local history, `consumer` for model-owned
+  surfaces). Password surfaces redact history depth/cursor.
+- Form text-control history pushes now notify the same `editing.history`
+  stream from the `text_edit.cpp` ring push choke point, so value mutations
+  expose both the snapshot push and later restore/redo records. Password
+  surfaces use the same redaction path for push depth/cursor. Pushes that
+  occur inside the unified form transaction carry the originating
+  `inputType`; focus-seed and direct value-setter pushes intentionally leave
+  `input_type` empty because no editing intent caused them.
+- The proposal-level `editing_undo()` / `editing_redo()` controller API names
+  now exist and keyboard history paths use them; the older
+  `editing_controller_undo()` / `editing_controller_redo()` names remain as
+  compatibility wrappers around the same dispatch.
 - Form and rich IME paths now emit `editing.composition` records for
   start/update/commit/cancel. Form begin/update/cancel enter through Radiant
   dispatch wrappers beside the existing commit wrapper, so the event simulator
