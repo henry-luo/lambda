@@ -783,6 +783,12 @@ void radiant_state_reset(DocState* state) {
     state->cursor = NULL;
     state->scroll_x = 0;
     state->scroll_y = 0;
+    state->editing_autoscroll_active = false;
+    state->editing_autoscroll_surface = NULL;
+    state->editing_autoscroll_pointer_x = 0.0f;
+    state->editing_autoscroll_pointer_y = 0.0f;
+    state->editing_tick_last_time = 0.0;
+    state->editing_caret_blink_elapsed = 0.0;
 
     // Reset dirty state
     state->is_dirty = false;

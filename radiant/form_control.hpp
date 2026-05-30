@@ -231,6 +231,10 @@ struct FormControlProp {
     float    scroll_y;
     float    caret_blink_t;
     uint8_t  caret_on : 1;
+    uint8_t  password_reveal_active : 1;
+    uint32_t password_reveal_start;
+    uint32_t password_reveal_end;
+    double   password_reveal_elapsed;
 
     // ------------------------------------------------------------------
     // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
@@ -266,7 +270,9 @@ struct FormControlProp {
         custom_validity_msg(nullptr),
         value_at_focus(nullptr), value_at_focus_len(0), history(nullptr),
         scroll_x(0.0f), scroll_y(0.0f), caret_blink_t(0.0f),
-        caret_on(1),
+        caret_on(1), password_reveal_active(0),
+        password_reveal_start(0), password_reveal_end(0),
+        password_reveal_elapsed(0.0),
         preedit_utf8(nullptr), preedit_len(0), preedit_caret(0) {}
 
     ~FormControlProp() {

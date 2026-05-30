@@ -91,6 +91,7 @@ struct TextControlSelectionPaint {
     float scale;
     float text_origin_x;
     float scroll_x;
+    float scroll_y;
     float border_css;
     float padding_css;
     bool use_text_origin;
@@ -105,8 +106,10 @@ static void paint_text_control_selection_rect(float x, float y, float w, float h
     if (paint->use_text_origin) {
         float local_x = x - paint->block->x - paint->border_css - paint->padding_css;
         rx = paint->text_origin_x + local_x * paint->scale - paint->scroll_x;
+    } else {
+        rx -= paint->scroll_x;
     }
-    float ry = paint->rdcon->block.y + y * paint->scale;
+    float ry = paint->rdcon->block.y + y * paint->scale - paint->scroll_y;
     fill_rect(paint->rdcon, rx, ry, w * paint->scale, h * paint->scale, paint->color);
 }
 
@@ -296,47 +299,86 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
  * when out_offset_map is non-null — used for caret-X math so the caret
  * lands on the correct masked-glyph boundary.
  */
-static char* build_password_mask(const char* src, int src_len) {
+static bool password_reveal_covers(uint32_t cp_start,
+                                   uint32_t cp_end,
+                                   uint32_t reveal_start,
+                                   uint32_t reveal_end) {
+    return reveal_start < reveal_end &&
+        cp_start >= reveal_start && cp_end <= reveal_end;
+}
+
+static char* build_password_display(const char* src,
+                                    int src_len,
+                                    uint32_t reveal_start,
+                                    uint32_t reveal_end) {
     if (!src) return nullptr;
-    int cp = 0;
+    uint32_t display_len = 0;
     const unsigned char* p = (const unsigned char*)src;
     const unsigned char* p_end = p + src_len;
     while (p < p_end) {
+        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
         uint32_t codepoint;
         int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
         if (bytes <= 0) { p++; continue; }
+        uint32_t cp_end = cp_start + (uint32_t)bytes;
+        display_len += password_reveal_covers(cp_start, cp_end,
+            reveal_start, reveal_end) ? (uint32_t)bytes : 3;
         p += bytes;
-        cp++;
     }
-    char* out = (char*)mem_alloc((size_t)cp * 3 + 1, MEM_CAT_RENDER);
+    char* out = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
     if (!out) return nullptr;
-    for (int i = 0; i < cp; i++) {
-        out[i*3 + 0] = (char)0xE2;
-        out[i*3 + 1] = (char)0x97;
-        out[i*3 + 2] = (char)0x8F;
+
+    p = (const unsigned char*)src;
+    uint32_t out_i = 0;
+    while (p < p_end) {
+        uint32_t cp_start = (uint32_t)(p - (const unsigned char*)src);
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        uint32_t cp_end = cp_start + (uint32_t)bytes;
+        if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
+            memcpy(out + out_i, p, (size_t)bytes);
+            out_i += (uint32_t)bytes;
+        } else {
+            out[out_i++] = (char)0xE2;
+            out[out_i++] = (char)0x97;
+            out[out_i++] = (char)0x8F;
+        }
+        p += bytes;
     }
-    out[cp * 3] = '\0';
+    out[out_i] = '\0';
     return out;
 }
 
 /**
  * F4 helper: convert a UTF-8 byte offset in the source value to the
- * corresponding byte offset in the masked rendering (each source
- * codepoint becomes 3 bytes in the mask).
+ * corresponding byte offset in the password rendering. Masked codepoints
+ * become 3-byte bullets; the temporarily revealed codepoint keeps its
+ * original UTF-8 bytes.
  */
-static int password_mask_byte_offset(const char* src, int src_byte_off) {
+static int password_display_byte_offset(const char* src,
+                                        int src_byte_off,
+                                        uint32_t reveal_start,
+                                        uint32_t reveal_end) {
     if (!src || src_byte_off <= 0) return 0;
-    int cp = 0;
+    int display = 0;
     const unsigned char* p = (const unsigned char*)src;
-    const unsigned char* p_end = p + src_byte_off;
+    const unsigned char* p_end = (const unsigned char*)src + src_byte_off;
+    const unsigned char* src_start = (const unsigned char*)src;
     while (p < p_end) {
+        uint32_t cp_start = (uint32_t)(p - src_start);
         uint32_t codepoint;
         int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
         if (bytes <= 0) { p++; continue; }
+        uint32_t cp_end = cp_start + (uint32_t)bytes;
+        if (password_reveal_covers(cp_start, cp_end, reveal_start, reveal_end)) {
+            display += bytes;
+        } else {
+            display += 3;
+        }
         p += bytes;
-        cp++;
     }
-    return cp * 3;
+    return display;
 }
 
 static uint32_t utf8_byte_offset_for_codepoints(const char* text, uint32_t len,
@@ -442,6 +484,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     uint32_t value_len = (uint32_t)strlen(value_text);
     DocState* state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
+    bool focused_here = state && focus_get(state) == static_cast<View*>(block);
     uint32_t selection_start = 0, selection_end = 0;
     form_control_get_selection(state, static_cast<View*>(block), &selection_start, &selection_end, NULL);
     uint32_t preedit_start = 0;
@@ -463,10 +506,17 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     }
     bool is_password = !has_preedit && !is_placeholder && src_text
         && form->input_type && strcmp(form->input_type, "password") == 0;
+    uint32_t password_reveal_start = 0;
+    uint32_t password_reveal_end = 0;
+    if (is_password && focused_here && form->password_reveal_active) {
+        password_reveal_start = form->password_reveal_start;
+        password_reveal_end = form->password_reveal_end;
+    }
     char* mask_buf = nullptr;
     const char* text = src_text;
     if (is_password) {
-        mask_buf = build_password_mask(src_text, (int)strlen(src_text));
+        mask_buf = build_password_display(src_text, (int)strlen(src_text),
+            password_reveal_start, password_reveal_end);
         if (mask_buf) text = mask_buf;
     }
     FontProp* render_font = form_render_font(block, form, is_placeholder);
@@ -487,7 +537,6 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     // F4: compute caret X (logical, before scroll) so we can clamp scroll_x
     // to keep the caret inside the content box. Done up-front so the same
     // scroll offset is applied to text, selection and caret rendering.
-    bool focused_here = state && focus_get(state) == static_cast<View*>(block);
     float caret_x_logical = 0.0f;
     int caret_byte = 0;
     if (focused_here && !is_placeholder && text && render_font &&
@@ -511,7 +560,8 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         }
         if (!used_shared_geometry) {
             int meas_byte = is_password
-                ? password_mask_byte_offset(src_text, caret_byte)
+                ? password_display_byte_offset(src_text, caret_byte,
+                    password_reveal_start, password_reveal_end)
                 : caret_byte;
             caret_x_logical = measure_input_text_width(rdcon, render_font, text, meas_byte) * s;
         }
@@ -570,8 +620,14 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
                     paint_text_control_selection_rect, &paint);
         }
         if (!used_shared_selection) {
-            int a8 = is_password ? password_mask_byte_offset(src_text, (int)a8_src) : (int)a8_src;
-            int b8 = is_password ? password_mask_byte_offset(src_text, (int)b8_src) : (int)b8_src;
+            int a8 = is_password
+                ? password_display_byte_offset(src_text, (int)a8_src,
+                    password_reveal_start, password_reveal_end)
+                : (int)a8_src;
+            int b8 = is_password
+                ? password_display_byte_offset(src_text, (int)b8_src,
+                    password_reveal_start, password_reveal_end)
+                : (int)b8_src;
             float ax = text_origin_x + measure_input_text_width(rdcon, render_font, text, a8) * s
                        - scroll_px;
             float bx = text_origin_x + measure_input_text_width(rdcon, render_font, text, b8) * s
@@ -1268,17 +1324,19 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             Color saved_color = rdcon->color;
             rdcon->color = text_color;
 
-            float pen_y = content_y;
+            float scroll_x_px = form ? form->scroll_x * s : 0.0f;
+            float scroll_y_px = form ? form->scroll_y * s : 0.0f;
+            float pen_y = content_y - scroll_y_px;
             const char* line_start = text;
 
-            while (*line_start && pen_y + line_height <= y + h) {
+            while (*line_start && pen_y <= y + h) {
                 // find end of this logical line
                 const char* line_end = line_start;
                 while (*line_end && *line_end != '\n') line_end++;
                 int line_byte_len = (int)(line_end - line_start);
 
                 // render this line's characters
-                float pen_x = content_x;
+                float pen_x = content_x - scroll_x_px;
                 const unsigned char* p = (const unsigned char*)line_start;
                 const unsigned char* p_end = p + line_byte_len;
                 while (p < p_end) {
@@ -1297,13 +1355,16 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                     // soft wrap: if glyph exceeds content width, wrap to next visual line
                     if (pen_x + glyph->advance_x > content_x + content_w && pen_x > content_x) {
                         pen_y += line_height;
-                        pen_x = content_x;
+                        pen_x = content_x - scroll_x_px;
                         if (pen_y + line_height > y + h) break;
                     }
 
-                    draw_glyph(rdcon, &glyph->bitmap,
-                               lroundf(pen_x + glyph->bitmap.bearing_x),
-                               lroundf(pen_y + ascender - glyph->bitmap.bearing_y));
+                    if (pen_y + line_height >= y && pen_x + glyph->advance_x >= content_x &&
+                        pen_x <= content_x + content_w) {
+                        draw_glyph(rdcon, &glyph->bitmap,
+                                   lroundf(pen_x + glyph->bitmap.bearing_x),
+                                   lroundf(pen_y + ascender - glyph->bitmap.bearing_y));
+                    }
                     pen_x += glyph->advance_x;
                 }
 
@@ -1338,6 +1399,8 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                     has_css_border, use_default_border);
                 paint.padding_css = block->bound ? block->bound->padding.left
                     : FormDefaults::TEXTAREA_PADDING;
+                paint.scroll_x = form ? form->scroll_x * s : 0.0f;
+                paint.scroll_y = form ? form->scroll_y * s : 0.0f;
                 editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
                     static_cast<DomElement*>(block), (uint32_t)sel_start,
                     (uint32_t)sel_end, paint_text_control_selection_rect, &paint);
@@ -1366,7 +1429,12 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                                                            end_col) * s;
                 if (ux1 > ux0) {
                     Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
-                    float uy = content_y + start_line * line_height + font_size_scaled - 2.0f * s;
+                    float ux_scroll = form ? form->scroll_x * s : 0.0f;
+                    float uy_scroll = form ? form->scroll_y * s : 0.0f;
+                    ux0 -= ux_scroll;
+                    ux1 -= ux_scroll;
+                    float uy = content_y + start_line * line_height +
+                        font_size_scaled - 2.0f * s - uy_scroll;
                     rc_fill_rect(rdcon, ux0, uy, ux1 - ux0, 1.0f * s, underline);
                 }
             }
@@ -1399,8 +1467,10 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                         has_css_border, use_default_border);
                     float padding_css = block->bound
                         ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
-                    caret_x = content_x + (caret_rect.x - block->x - border_css - padding_css) * s;
-                    caret_y_pos = content_y + (caret_rect.y - block->y - border_css - padding_css) * s;
+                    caret_x = content_x + (caret_rect.x - block->x - border_css - padding_css) * s
+                        - (form ? form->scroll_x * s : 0.0f);
+                    caret_y_pos = content_y + (caret_rect.y - block->y - border_css - padding_css) * s
+                        - (form ? form->scroll_y * s : 0.0f);
                     used_shared_geometry = true;
                 }
             }
@@ -1410,7 +1480,8 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 textarea_offset_to_line_col(value, caret_off, &caret_line, &caret_col);
 
                 // compute caret y = content_y + caret_line * line_height
-                caret_y_pos = content_y + caret_line * line_height;
+                caret_y_pos = content_y + caret_line * line_height -
+                    (form ? form->scroll_y * s : 0.0f);
 
                 // compute caret x by measuring text from line start to caret column
                 if (value && caret_col > 0 && block->font) {
@@ -1421,7 +1492,8 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                         ? rdcon->ui_context->pixel_ratio : 1.0f;
                     int line_off = textarea_line_start(value, caret_line);
                     caret_x = content_x + measure_text_width(fbox.font_handle, block->font,
-                                                              pixel_ratio, value + line_off, caret_col) * s;
+                                                              pixel_ratio, value + line_off, caret_col) * s
+                        - (form ? form->scroll_x * s : 0.0f);
                 }
                 }
             }

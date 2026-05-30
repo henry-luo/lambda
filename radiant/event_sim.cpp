@@ -1085,6 +1085,13 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "assert_password_reveal") == 0) {
+        ev->type = SIM_EVENT_ASSERT_PASSWORD_REVEAL;
+        ev->expected_password_reveal_active = reader.get("active").asBool();
+        ev->expected_char_offset = reader.has("start") ? reader.get("start").asInt32() : -1;
+        ev->expected_selection_end = reader.has("end") ? reader.get("end").asInt32() : -1;
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "assert_target") == 0) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
         ev->expected_view_type = reader.get("view_type").asInt32();
@@ -2926,6 +2933,51 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (passed) {
                 log_info("event_sim: assert_preedit PASS (preedit='%s')", actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_PASSWORD_REVEAL: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: assert_password_reveal - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = lam::dom_require_element(elem);
+            if (!tc_is_text_control(dom_elem) || !dom_elem->form) {
+                log_error("event_sim: assert_password_reveal - target is not a text control");
+                ctx->fail_count++;
+                break;
+            }
+            bool actual_active = dom_elem->form->password_reveal_active != 0;
+            bool passed = true;
+            if (actual_active != ev->expected_password_reveal_active) {
+                log_error("event_sim: assert_password_reveal FAIL - active expected %s, got %s",
+                          ev->expected_password_reveal_active ? "true" : "false",
+                          actual_active ? "true" : "false");
+                passed = false;
+            }
+            if (ev->expected_char_offset >= 0 &&
+                dom_elem->form->password_reveal_start != (uint32_t)ev->expected_char_offset) {
+                log_error("event_sim: assert_password_reveal FAIL - start expected %d, got %u",
+                          ev->expected_char_offset,
+                          dom_elem->form->password_reveal_start);
+                passed = false;
+            }
+            if (ev->expected_selection_end >= 0 &&
+                dom_elem->form->password_reveal_end != (uint32_t)ev->expected_selection_end) {
+                log_error("event_sim: assert_password_reveal FAIL - end expected %d, got %u",
+                          ev->expected_selection_end,
+                          dom_elem->form->password_reveal_end);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_password_reveal PASS");
                 ctx->pass_count++;
             } else {
                 ctx->fail_count++;

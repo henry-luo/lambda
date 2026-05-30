@@ -52,6 +52,49 @@ static const char* tc_buffer(FormControlProp* f, uint32_t* out_len) {
     return v;
 }
 
+static bool te_is_password_control(DomElement* elem) {
+    return elem && elem->form && elem->form->input_type &&
+        strcasecmp(elem->form->input_type, "password") == 0;
+}
+
+static uint32_t te_last_codepoint_start(const char* text, uint32_t len) {
+    if (!text || len == 0) return 0;
+    uint32_t last = 0;
+    uint32_t i = 0;
+    while (i < len) {
+        last = i;
+        unsigned char b = (unsigned char)text[i];
+        uint32_t step = 1;
+        if (b >= 0xF0) step = 4;
+        else if (b >= 0xE0) step = 3;
+        else if (b >= 0xC0) step = 2;
+        if (i + step > len) step = 1;
+        i += step;
+    }
+    return last;
+}
+
+static void te_password_reveal_update(DomElement* elem,
+                                      uint32_t insert_start,
+                                      const char* repl,
+                                      uint32_t repl_len,
+                                      uint32_t new_len) {
+    if (!elem || !elem->form || !te_is_password_control(elem)) return;
+    FormControlProp* f = elem->form;
+    if (!repl || repl_len == 0) {
+        te_password_reveal_clear(elem);
+        return;
+    }
+
+    uint32_t last = te_last_codepoint_start(repl, repl_len);
+    f->password_reveal_start = insert_start + last;
+    f->password_reveal_end = insert_start + repl_len;
+    if (f->password_reveal_start > new_len) f->password_reveal_start = new_len;
+    if (f->password_reveal_end > new_len) f->password_reveal_end = new_len;
+    f->password_reveal_active = f->password_reveal_start < f->password_reveal_end ? 1 : 0;
+    f->password_reveal_elapsed = 0.0;
+}
+
 // ASCII-fast path word-character classifier. Treats letter/digit/underscore
 // as word; treats any non-ASCII byte (>= 0x80) as word too, which avoids a
 // full UCD lookup and matches browser dblclick behavior for most scripts.
@@ -70,6 +113,20 @@ static inline uint32_t clamp_off(uint32_t off, uint32_t len) {
 } // namespace
 
 // ---------- word boundary ----------------------------------------------
+
+bool te_password_reveal_clear(DomElement* elem) {
+    if (!elem || !elem->form || !te_is_password_control(elem)) return false;
+    FormControlProp* f = elem->form;
+    bool changed = f->password_reveal_active != 0 ||
+        f->password_reveal_start != 0 ||
+        f->password_reveal_end != 0 ||
+        f->password_reveal_elapsed != 0.0;
+    f->password_reveal_active = 0;
+    f->password_reveal_start = 0;
+    f->password_reveal_end = 0;
+    f->password_reveal_elapsed = 0.0;
+    return changed;
+}
 
 uint32_t te_word_start(const char* buf, uint32_t buf_len, uint32_t byte_off) {
     if (!buf || buf_len == 0) return 0;
@@ -260,6 +317,7 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
 
     tc_set_value(elem, nbuf, new_len);
     mem_free(nbuf);
+    te_password_reveal_update(elem, start, repl, repl_len, new_len);
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;

@@ -99,6 +99,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_SELECTION,
     SIM_EVENT_ASSERT_FORM_SELECTION,
     SIM_EVENT_ASSERT_PREEDIT,   // verify transient IME preedit text
+    SIM_EVENT_ASSERT_PASSWORD_REVEAL, // verify password reveal timer state
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
     SIM_EVENT_ASSERT_VALUE,    // verify form field value
@@ -164,6 +165,7 @@ struct SimEvent {
     char* assert_equals;         // for assert_text: exact match
     bool expected_visible;       // for assert_visible
     bool expected_checked;       // for assert_checked
+    bool expected_password_reveal_active; // for assert_password_reveal
     char* state_name;            // for assert_state: e.g. ":hover", ":active"
     bool expected_state_value;   // for assert_state: expected boolean
     float expected_scroll_x;     // for assert_scroll
