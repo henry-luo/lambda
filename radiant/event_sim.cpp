@@ -1432,6 +1432,23 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         }
         if (ev->scroll_tolerance <= 0) ev->scroll_tolerance = 1.0f;
     }
+    else if (strcmp(type_str, "assert_event_log") == 0) {
+        ev->type = SIM_EVENT_ASSERT_EVENT_LOG;
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        ev->assert_count_expected = -1;
+        ev->assert_count_min = -1;
+        ev->assert_count_max = -1;
+        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
+        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
+        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
+        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        if (!ev->assert_contains) {
+            log_error("event_sim: assert_event_log requires 'contains'");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -1887,6 +1904,75 @@ void event_sim_free(EventSimContext* ctx) {
     if (ctx->test_name) mem_free(ctx->test_name);
     if (ctx->result_file) fclose(ctx->result_file);
     mem_free(ctx);
+}
+
+static int count_substring_occurrences(const char* haystack, const char* needle) {
+    if (!haystack || !needle || !needle[0]) return 0;
+    int count = 0;
+    size_t needle_len = strlen(needle);
+    const char* scan = haystack;
+    while ((scan = strstr(scan, needle)) != NULL) {
+        count++;
+        scan += needle_len;
+    }
+    return count;
+}
+
+static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    if (!ctx || !uicon || !ev) return;
+    EventStateLog* event_log = uicon->event_log;
+    if (!event_state_log_enabled(event_log)) {
+        log_info("event_sim: assert_event_log SKIP - event log disabled");
+        ctx->pass_count++;
+        return;
+    }
+
+    const char* path = event_state_log_path(event_log);
+    if (!path) {
+        log_error("event_sim: assert_event_log FAIL - event log has no path");
+        ctx->fail_count++;
+        return;
+    }
+
+    char* content = read_text_file(path);
+    if (!content) {
+        log_error("event_sim: assert_event_log FAIL - cannot read '%s'", path);
+        ctx->fail_count++;
+        return;
+    }
+
+    int actual = count_substring_occurrences(content, ev->assert_contains);
+    int expected = ev->assert_count_expected;
+    int min_count = ev->assert_count_min;
+    int max_count = ev->assert_count_max;
+    if (expected < 0 && min_count < 0 && max_count < 0) min_count = 1;
+
+    bool passed = true;
+    if (expected >= 0 && actual != expected) {
+        log_error("event_sim: assert_event_log FAIL - '%s' expected %d, got %d",
+            ev->assert_contains, expected, actual);
+        passed = false;
+    }
+    if (min_count >= 0 && actual < min_count) {
+        log_error("event_sim: assert_event_log FAIL - '%s' expected min %d, got %d",
+            ev->assert_contains, min_count, actual);
+        passed = false;
+    }
+    if (max_count >= 0 && actual > max_count) {
+        log_error("event_sim: assert_event_log FAIL - '%s' expected max %d, got %d",
+            ev->assert_contains, max_count, actual);
+        passed = false;
+    }
+
+    if (passed) {
+        log_info("event_sim: assert_event_log PASS - '%s' count=%d",
+            ev->assert_contains, actual);
+        ctx->pass_count++;
+    } else {
+        ctx->fail_count++;
+    }
+
+    mem_free(content);
 }
 
 // Simulate a mouse move event
@@ -3750,6 +3836,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             } else {
                 ctx->fail_count++;
             }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_EVENT_LOG: {
+            assert_event_log_impl(ctx, uicon, ev);
             break;
         }
 
