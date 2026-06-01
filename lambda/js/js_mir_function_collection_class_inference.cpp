@@ -1623,6 +1623,52 @@ static bool jm_expr_has_bigint_literal(JsAstNode* node) {
                jm_expr_has_bigint_literal(cond->consequent) ||
                jm_expr_has_bigint_literal(cond->alternate);
     }
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (jm_expr_has_bigint_literal(call->callee)) return true;
+        JsAstNode* arg = call->arguments;
+        while (arg) {
+            if (jm_expr_has_bigint_literal(arg)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        return jm_expr_has_bigint_literal(ret->argument);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        JsAstNode* decl = vd->declarations;
+        while (decl) {
+            if (jm_expr_has_bigint_literal(decl)) return true;
+            decl = decl->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        return jm_expr_has_bigint_literal(vd->init);
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_expr_has_bigint_literal(es->expression);
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_expr_has_bigint_literal(ifn->test) ||
+               jm_expr_has_bigint_literal(ifn->consequent) ||
+               jm_expr_has_bigint_literal(ifn->alternate);
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* stmt = blk->statements;
+        while (stmt) {
+            if (jm_expr_has_bigint_literal(stmt)) return true;
+            stmt = stmt->next;
+        }
+        return false;
+    }
     default:
         return false;
     }
@@ -1995,6 +2041,14 @@ void jm_infer_param_types(JsFuncCollected* fc) {
         jm_get_param_name(p, i, param_names[i], 128);
     }
 
+    if (jm_expr_has_bigint_literal(fn->body)) {
+        for (int i = 0; i < pc; i++) {
+            fc->param_types[i] = LMD_TYPE_ANY;
+        }
+        log_debug("js-mir P4: boxed params for %s because body uses BigInt literals", fc->name);
+        return;
+    }
+
     // Build self-name for recursive call detection
     char self_name[128] = {0};
     if (fn->name && fn->name->chars) {
@@ -2263,6 +2317,12 @@ void jm_infer_return_type(JsFuncCollected* fc) {
                 fc->return_type == LMD_TYPE_INT ? "INT" : fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
             return;
         }
+    }
+
+    if (jm_expr_has_bigint_literal(fn->body)) {
+        fc->return_type = LMD_TYPE_ANY;
+        log_debug("js-mir P4: boxed return for %s because body uses BigInt literals", fc->name);
+        return;
     }
 
     char self_name[128] = {0};

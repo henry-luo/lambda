@@ -709,6 +709,78 @@ void jm_emit_module_export_aliased(JsMirTranspiler* mt,
 
 // Resolve expression type given known param types and a simple local type map.
 // local_names/local_types track declared locals (let x , etc).
+static bool jm_p6_expr_has_bigint_literal(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)node;
+        return lit->literal_type == JS_LITERAL_NUMBER && lit->is_bigint;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_p6_expr_has_bigint_literal(bin->left) || jm_p6_expr_has_bigint_literal(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_p6_expr_has_bigint_literal(un->operand);
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        return jm_p6_expr_has_bigint_literal(cond->test) ||
+               jm_p6_expr_has_bigint_literal(cond->consequent) ||
+               jm_p6_expr_has_bigint_literal(cond->alternate);
+    }
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        if (jm_p6_expr_has_bigint_literal(call->callee)) return true;
+        JsAstNode* arg = call->arguments;
+        while (arg) {
+            if (jm_p6_expr_has_bigint_literal(arg)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        return jm_p6_expr_has_bigint_literal(ret->argument);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        JsAstNode* decl = vd->declarations;
+        while (decl) {
+            if (jm_p6_expr_has_bigint_literal(decl)) return true;
+            decl = decl->next;
+        }
+        return false;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        return jm_p6_expr_has_bigint_literal(vd->init);
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_p6_expr_has_bigint_literal(es->expression);
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_p6_expr_has_bigint_literal(ifn->test) ||
+               jm_p6_expr_has_bigint_literal(ifn->consequent) ||
+               jm_p6_expr_has_bigint_literal(ifn->alternate);
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* stmt = blk->statements;
+        while (stmt) {
+            if (jm_p6_expr_has_bigint_literal(stmt)) return true;
+            stmt = stmt->next;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
 TypeId jm_p6_expr_type(JsAstNode* expr,
                                const char param_names[][128], TypeId* param_types, int param_count,
                                const char local_names[][128], TypeId* local_types, int local_count) {
@@ -907,6 +979,10 @@ void jm_p6_return_walk(JsAstNode* node,
 void jm_p6_reinfer_return_type(JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     if (!fn || !fn->body) return;
+    if (jm_p6_expr_has_bigint_literal(fn->body)) {
+        fc->return_type = LMD_TYPE_ANY;
+        return;
+    }
 
     // Build param names array
     char param_names[16][128];
@@ -969,8 +1045,10 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
     if (!arg) return LMD_TYPE_ANY;
     if (arg->node_type == JS_AST_NODE_LITERAL) {
         JsLiteralNode* lit = (JsLiteralNode*)arg;
-        if (lit->literal_type == JS_LITERAL_NUMBER)
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            if (lit->is_bigint) return LMD_TYPE_DECIMAL;
             return lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+        }
         if (lit->literal_type == JS_LITERAL_STRING) return LMD_TYPE_STRING;
         if (lit->literal_type == JS_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
         return LMD_TYPE_ANY;
@@ -989,6 +1067,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
                 if (mc->const_type == MCONST_MODVAR) {
                     if (mc->modvar_type == LMD_TYPE_INT) return LMD_TYPE_INT;
                     if (mc->modvar_type == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+                    if (mc->modvar_type == LMD_TYPE_DECIMAL) return LMD_TYPE_DECIMAL;
                 }
             }
         }
@@ -1005,6 +1084,7 @@ TypeId jm_p6_static_arg_type(JsMirTranspiler* mt, JsAstNode* arg) {
         }
         TypeId lt = jm_p6_static_arg_type(mt, bin->left);
         TypeId rt = jm_p6_static_arg_type(mt, bin->right);
+        if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) return LMD_TYPE_ANY;
         switch (bin->op) {
         case JS_OP_ADD:
             if (lt == LMD_TYPE_STRING || rt == LMD_TYPE_STRING) return LMD_TYPE_STRING;
@@ -1478,8 +1558,11 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                 if (arg->node_type == JS_AST_NODE_LITERAL) {
                     JsLiteralNode* lit = (JsLiteralNode*)arg;
                     TypeId arg_type = LMD_TYPE_ANY;
-                    if (lit->literal_type == JS_LITERAL_NUMBER)
+                    if (lit->literal_type == JS_LITERAL_NUMBER) {
+                        if (lit->is_bigint) arg_type = LMD_TYPE_DECIMAL;
+                        else
                         arg_type = lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                    }
                     else if (lit->literal_type == JS_LITERAL_STRING)
                         arg_type = LMD_TYPE_STRING;
                     else if (lit->literal_type == JS_LITERAL_BOOLEAN)
@@ -1960,7 +2043,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
                                     if (mlit->literal_type == JS_LITERAL_NUMBER) {
                                         double mdv = mlit->value.number_value;
-                                        if (!mlit->has_decimal && mdv == (double)(int64_t)mdv &&
+                                        if (mlit->is_bigint) {
+                                            mce.modvar_type = LMD_TYPE_DECIMAL;
+                                        } else if (!mlit->has_decimal && mdv == (double)(int64_t)mdv &&
                                             mdv >= -36028797018963968.0 && mdv <= 36028797018963967.0) {
                                             mce.modvar_type = LMD_TYPE_INT;
                                         } else {

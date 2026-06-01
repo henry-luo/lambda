@@ -94,6 +94,122 @@ static bool jm_statement_function_decl_is_direct_binding(JsFunctionNode* fn) {
         ts_node_end_byte(body) == ts_node_end_byte(parent);
 }
 
+static bool jm_assignment_targets_name(JsAstNode* left, const char* bare_name, int bare_len) {
+    if (!left || !bare_name || bare_len <= 0) return false;
+    if (left->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)left;
+    return id->name && id->name->len == (size_t)bare_len &&
+        strncmp(id->name->chars, bare_name, bare_len) == 0;
+}
+
+static bool jm_mutable_native_var_needs_boxing_walk(JsMirTranspiler* mt,
+        JsAstNode* node, const char* bare_name, int bare_len, TypeId native_type) {
+    if (!node || !bare_name || bare_len <= 0) return false;
+
+    switch (node->node_type) {
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+        return false;
+
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        if (jm_assignment_targets_name(asgn->left, bare_name, bare_len)) {
+            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
+            if (asgn->op == JS_OP_ASSIGN) {
+                return rhs_type != native_type;
+            }
+            return rhs_type != native_type && rhs_type != LMD_TYPE_ANY;
+        }
+        return jm_mutable_native_var_needs_boxing_walk(mt, asgn->left, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, asgn->right, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+        for (JsAstNode* d = vd->declarations; d; d = d->next) {
+            if (jm_mutable_native_var_needs_boxing_walk(mt, d, bare_name, bare_len, native_type)) return true;
+        }
+        return false;
+    }
+
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)node;
+        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)vd->id;
+            if (id->name && id->name->len == (size_t)bare_len &&
+                    strncmp(id->name->chars, bare_name, bare_len) == 0) {
+                return false;
+            }
+        }
+        return jm_mutable_native_var_needs_boxing_walk(mt, vd->init, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, es->expression, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        for (JsAstNode* s = blk->statements; s; s = s->next) {
+            if (jm_mutable_native_var_needs_boxing_walk(mt, s, bare_name, bare_len, native_type)) return true;
+        }
+        return false;
+    }
+
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, ifn->test, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, ifn->consequent, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, ifn->alternate, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* wn = (JsWhileNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, wn->test, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, wn->body, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dn = (JsDoWhileNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, dn->body, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, dn->test, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* fn = (JsForNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, fn->init, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, fn->test, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, fn->update, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, fn->body, bare_name, bare_len, native_type);
+    }
+
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForOfNode* fo = (JsForOfNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, fo->left, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, fo->right, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, fo->body, bare_name, bare_len, native_type);
+    }
+
+    default:
+        return false;
+    }
+}
+
+static bool jm_mutable_native_var_needs_boxing(JsMirTranspiler* mt,
+        JsVariableDeclarationNode* decl, JsIdentifierNode* id, TypeId native_type) {
+    if (!mt || !decl || !id || !id->name) return false;
+    if (decl->kind == JS_VAR_CONST) return false;
+    if (!jm_is_native_type(native_type)) return false;
+    if (!mt->current_fc || !mt->current_fc->node || !mt->current_fc->node->body) return false;
+    return jm_mutable_native_var_needs_boxing_walk(mt, mt->current_fc->node->body,
+        id->name->chars, (int)id->name->len, native_type);
+}
+
 static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
         JsVariableDeclarationNode* decl, JsIdentifierNode* id, MIR_reg_t value) {
     if (!mt || !decl || !id || !id->name || !value) return;
@@ -440,6 +556,11 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     if (init_type == LMD_TYPE_INT && jm_should_widen_to_float(mt, vname)) {
                         init_type = LMD_TYPE_FLOAT;
                         log_debug("P9: widening var '%s' from INT to FLOAT", vname);
+                    }
+
+                    if (jm_mutable_native_var_needs_boxing(mt, var, id, init_type)) {
+                        log_debug("P9: boxing mutable native var '%s' because later assignments are not native", vname);
+                        init_type = LMD_TYPE_ANY;
                     }
 
                     if (init_type == LMD_TYPE_INT) {
@@ -2174,6 +2295,71 @@ static bool jm_class_name_is_unique(JsMirTranspiler* mt, const char* name, int l
     return found == 1;
 }
 
+static bool jm_ctor_name_is_builtin_collision(const char* name, int len) {
+    if (!name || len <= 0) return false;
+    switch (len) {
+        case 3:
+            return strncmp(name, "Map", 3) == 0 ||
+                   strncmp(name, "Set", 3) == 0 ||
+                   strncmp(name, "URL", 3) == 0;
+        case 4:
+            return strncmp(name, "Date", 4) == 0;
+        case 5:
+            return strncmp(name, "Array", 5) == 0 ||
+                   strncmp(name, "Error", 5) == 0 ||
+                   strncmp(name, "Image", 5) == 0 ||
+                   strncmp(name, "Proxy", 5) == 0;
+        case 6:
+            return strncmp(name, "Object", 6) == 0 ||
+                   strncmp(name, "Number", 6) == 0 ||
+                   strncmp(name, "String", 6) == 0 ||
+                   strncmp(name, "BigInt", 6) == 0 ||
+                   strncmp(name, "RegExp", 6) == 0 ||
+                   strncmp(name, "Buffer", 6) == 0;
+        case 7:
+            return strncmp(name, "Boolean", 7) == 0 ||
+                   strncmp(name, "WeakMap", 7) == 0 ||
+                   strncmp(name, "WeakSet", 7) == 0 ||
+                   strncmp(name, "Promise", 7) == 0;
+        case 8:
+            return strncmp(name, "URIError", 8) == 0 ||
+                   strncmp(name, "Function", 8) == 0 ||
+                   strncmp(name, "DataView", 8) == 0;
+        case 9:
+            return strncmp(name, "TypeError", 9) == 0 ||
+                   strncmp(name, "EvalError", 9) == 0 ||
+                   strncmp(name, "Int8Array", 9) == 0;
+        case 10:
+            return strncmp(name, "RangeError", 10) == 0 ||
+                   strncmp(name, "Int32Array", 10) == 0 ||
+                   strncmp(name, "Int16Array", 10) == 0 ||
+                   strncmp(name, "Uint8Array", 10) == 0;
+        case 11:
+            return strncmp(name, "SyntaxError", 11) == 0 ||
+                   strncmp(name, "Uint32Array", 11) == 0 ||
+                   strncmp(name, "Uint16Array", 11) == 0 ||
+                   strncmp(name, "ArrayBuffer", 11) == 0 ||
+                   strncmp(name, "TextEncoder", 11) == 0 ||
+                   strncmp(name, "TextDecoder", 11) == 0;
+        case 12:
+            return strncmp(name, "Float64Array", 12) == 0 ||
+                   strncmp(name, "Float32Array", 12) == 0;
+        case 14:
+            return strncmp(name, "ReferenceError", 14) == 0 ||
+                   strncmp(name, "AggregateError", 14) == 0 ||
+                   strncmp(name, "ReadableStream", 14) == 0 ||
+                   strncmp(name, "WritableStream", 14) == 0 ||
+                   strncmp(name, "XMLHttpRequest", 14) == 0;
+        case 15:
+            return strncmp(name, "OffscreenCanvas", 15) == 0;
+        case 17:
+            return strncmp(name, "Uint8ClampedArray", 17) == 0 ||
+                   strncmp(name, "SharedArrayBuffer", 17) == 0;
+        default:
+            return false;
+    }
+}
+
 static MIR_reg_t jm_emit_dynamic_new_expr(JsMirTranspiler* mt, JsCallNode* call, int arg_count) {
     MIR_reg_t callee_value = jm_transpile_box_item(mt, call->callee);
     MIR_reg_t callee = jm_new_reg(mt, "new_callee", MIR_T_I64);
@@ -2295,6 +2481,14 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 6 && strncmp(ctor_name, "Buffer", 6) == 0) { is_buffer = true; is_builtin = true; }
     // OffscreenCanvas constructor (Canvas text measurement)
     else if (ctor_len == 15 && strncmp(ctor_name, "OffscreenCanvas", 15) == 0) is_builtin = true;
+
+    if (is_builtin && call->callee->node_type == JS_AST_NODE_IDENTIFIER &&
+            jm_ctor_name_is_builtin_collision(ctor_name, ctor_len)) {
+        JsClassEntry* user_ce = jm_find_class(mt, ctor_name, ctor_len);
+        if (user_ce && jm_class_name_is_unique(mt, ctor_name, ctor_len)) {
+            is_builtin = false;
+        }
+    }
 
     // new BigInt() — BigInt is not a constructor (must be called as function)
     if (ctor_len == 6 && strncmp(ctor_name, "BigInt", 6) == 0) {
@@ -2554,14 +2748,14 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     // v11: new Map() / new Set()
-    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) {
+    if (is_builtin && ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) {
         if (first_arg) {
             return jm_call_1(mt, "js_map_collection_new_from", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
         }
         return jm_call_0(mt, "js_map_collection_new", MIR_T_I64);
     }
-    if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) {
+    if (is_builtin && ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) {
         if (first_arg) {
             return jm_call_1(mt, "js_set_collection_new_from", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
