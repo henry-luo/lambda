@@ -5,6 +5,7 @@
 #include "render_map.h"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -15,34 +16,8 @@
 static HashMap* s_template_state_map = NULL;
 static bool s_owns_map = false;  // true if we created the map
 
-// ============================================================================
-// Hash and compare for TemplateStateKey
-// ============================================================================
-
-static uint64_t tmpl_state_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const TemplateStateEntry* entry = (const TemplateStateEntry*)item;
-    // combine hashes of model_item value, template_ref pointer, state_name pointer
-    uint64_t h1 = hashmap_murmur(&entry->key.model_item, sizeof(Item), seed0, seed1);
-    uint64_t h2 = hashmap_murmur(&entry->key.template_ref, sizeof(void*), seed0, seed1);
-    uint64_t h3 = hashmap_murmur(&entry->key.state_name, sizeof(void*), seed0, seed1);
-    return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL) ^ (h3 * 0x517cc1b727220a95ULL);
-}
-
-static int tmpl_state_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const TemplateStateEntry* ea = (const TemplateStateEntry*)a;
-    const TemplateStateEntry* eb = (const TemplateStateEntry*)b;
-    if (ea->key.model_item.item != eb->key.model_item.item) {
-        return ea->key.model_item.item < eb->key.model_item.item ? -1 : 1;
-    }
-    if (ea->key.template_ref != eb->key.template_ref) {
-        return ea->key.template_ref < eb->key.template_ref ? -1 : 1;
-    }
-    if (ea->key.state_name != eb->key.state_name) {
-        return ea->key.state_name < eb->key.state_name ? -1 : 1;
-    }
-    return 0;
-}
+HASHMAP_DEFINE_FIELD3_KEY(tmpl_state, TemplateStateEntry,
+                          key.model_item.item, key.template_ref, key.state_name)
 
 // ============================================================================
 // Ensure map exists (lazy creation)
@@ -53,7 +28,7 @@ static HashMap* ensure_map(void) {
         s_template_state_map = hashmap_new(
             sizeof(TemplateStateEntry), 64,
             0xABCD1234, 0x5678EFAB,
-            tmpl_state_hash, tmpl_state_compare,
+            tmpl_state_hash, tmpl_state_cmp,
             NULL, NULL
         );
         s_owns_map = true;

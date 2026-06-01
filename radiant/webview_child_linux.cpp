@@ -23,6 +23,7 @@
 #include "webview_handle_linux.h"
 
 extern "C" {
+#include "../lib/file.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 }
@@ -115,21 +116,19 @@ static void on_script_message(WebKitUserContentManager* manager,
 // ---------------------------------------------------------------------------
 
 static const char* mime_for_ext(const char* path) {
-    const char* dot = strrchr(path, '.');
-    if (!dot) return "application/octet-stream";
-    dot++;
-    if      (strcasecmp(dot, "html") == 0 || strcasecmp(dot, "htm") == 0) return "text/html";
-    else if (strcasecmp(dot, "css")  == 0) return "text/css";
-    else if (strcasecmp(dot, "js")   == 0) return "application/javascript";
-    else if (strcasecmp(dot, "json") == 0) return "application/json";
-    else if (strcasecmp(dot, "png")  == 0) return "image/png";
-    else if (strcasecmp(dot, "jpg")  == 0 || strcasecmp(dot, "jpeg") == 0) return "image/jpeg";
-    else if (strcasecmp(dot, "gif")  == 0) return "image/gif";
-    else if (strcasecmp(dot, "svg")  == 0) return "image/svg+xml";
-    else if (strcasecmp(dot, "webp") == 0) return "image/webp";
-    else if (strcasecmp(dot, "woff") == 0) return "font/woff";
-    else if (strcasecmp(dot, "woff2")== 0) return "font/woff2";
-    else if (strcasecmp(dot, "ttf")  == 0) return "font/ttf";
+    if (!path) return "application/octet-stream";
+    if      (file_path_has_ext_ci(path, "html") || file_path_has_ext_ci(path, "htm")) return "text/html";
+    else if (file_path_has_ext_ci(path, "css")) return "text/css";
+    else if (file_path_has_ext_ci(path, "js")) return "application/javascript";
+    else if (file_path_has_ext_ci(path, "json")) return "application/json";
+    else if (file_path_has_ext_ci(path, "png")) return "image/png";
+    else if (file_path_has_ext_ci(path, "jpg") || file_path_has_ext_ci(path, "jpeg")) return "image/jpeg";
+    else if (file_path_has_ext_ci(path, "gif")) return "image/gif";
+    else if (file_path_has_ext_ci(path, "svg")) return "image/svg+xml";
+    else if (file_path_has_ext_ci(path, "webp")) return "image/webp";
+    else if (file_path_has_ext_ci(path, "woff")) return "font/woff";
+    else if (file_path_has_ext_ci(path, "woff2")) return "font/woff2";
+    else if (file_path_has_ext_ci(path, "ttf")) return "font/ttf";
     return "application/octet-stream";
 }
 

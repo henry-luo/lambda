@@ -2851,8 +2851,10 @@ static Item build_process_versions(void) {
                     (Item){.item = s2it(heap_create_name("1.0.0", 5))});
     js_property_set(versions, (Item){.item = s2it(heap_create_name("modules", 7))},
                     (Item){.item = s2it(heap_create_name("115", 3))});
+    // LambdaJS exposes crypto compatibility APIs backed by mbedTLS, not full
+    // OpenSSL 3 provider/FIPS/RSA-keygen semantics.
     js_property_set(versions, (Item){.item = s2it(heap_create_name("openssl", 7))},
-                    (Item){.item = s2it(heap_create_name("3.0.0", 5))});
+                    (Item){.item = s2it(heap_create_name("1.1.1", 5))});
     js_property_set(versions, (Item){.item = s2it(heap_create_name("zlib", 4))},
                     (Item){.item = s2it(heap_create_name("1.3.0", 5))});
     js_property_set(versions, (Item){.item = s2it(heap_create_name("napi", 4))},

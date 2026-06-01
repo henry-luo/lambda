@@ -44,6 +44,58 @@ static inline void insertion_sort(void* base, size_t count, size_t stride,
     }
 }
 
+static inline void sort_swap_bytes(char* a, char* b, size_t stride) {
+    if (a == b) return;
+    for (size_t i = 0; i < stride; i++) {
+        char tmp = a[i];
+        a[i] = b[i];
+        b[i] = tmp;
+    }
+}
+
+static inline void sort_heap_sift_down(char* arr, size_t start, size_t end,
+                                       size_t stride, SortCmpFn cmp, void* udata) {
+    size_t root = start;
+    while (root * 2 + 1 <= end) {
+        size_t child = root * 2 + 1;
+        size_t swap_idx = root;
+
+        if (cmp(arr + swap_idx * stride, arr + child * stride, udata) < 0) {
+            swap_idx = child;
+        }
+        if (child + 1 <= end &&
+            cmp(arr + swap_idx * stride, arr + (child + 1) * stride, udata) < 0) {
+            swap_idx = child + 1;
+        }
+        if (swap_idx == root) return;
+
+        sort_swap_bytes(arr + root * stride, arr + swap_idx * stride, stride);
+        root = swap_idx;
+    }
+}
+
+// Portable qsort_r-shaped entry point: `cmp(a, b, udata)`.
+// Uses heapsort internally so callers get O(n log n) behavior everywhere.
+static inline void sort_qsort_r(void* base, size_t count, size_t stride,
+                                SortCmpFn cmp, void* udata) {
+    if (!base || count < 2 || stride == 0 || !cmp) return;
+    char* arr = (char*)base;
+
+    for (size_t start = (count - 2) / 2 + 1; start > 0; start--) {
+        sort_heap_sift_down(arr, start - 1, count - 1, stride, cmp, udata);
+    }
+
+    for (size_t end = count - 1; end > 0; end--) {
+        sort_swap_bytes(arr, arr + end * stride, stride);
+        sort_heap_sift_down(arr, 0, end - 1, stride, cmp, udata);
+    }
+}
+
+static inline void introsort(void* base, size_t count, size_t stride,
+                             SortCmpFn cmp, void* udata) {
+    sort_qsort_r(base, count, stride, cmp, udata);
+}
+
 // Sort a pointer array ascending by an integer key.
 typedef long (*SortKeyIntFn)(const void* item, void* udata);
 

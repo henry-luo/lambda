@@ -3190,6 +3190,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
 finish_boxed:
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
     jm_pop_scope(mt);
     MIR_finish_func(mt->ctx);
 

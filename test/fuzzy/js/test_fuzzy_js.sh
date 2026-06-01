@@ -206,10 +206,14 @@ print_progress() {
     elapsed=$((now - START_TIME))
     remaining=$((DURATION_SEC - elapsed))
     if [[ $remaining -lt 0 ]]; then remaining=0; fi
+    local crash_text="crash=$TESTS_CRASHED"
+    if [[ "$TESTS_CRASHED" -gt 0 ]]; then
+        crash_text="${RED}${crash_text}${NC}"
+    fi
 
     echo -e "${CYAN}[Round $ROUND | ${elapsed}s/${DURATION_SEC}s]${NC}" \
         "run=$TESTS_RUN pass=$TESTS_PASSED" \
-        "${RED}crash=$TESTS_CRASHED${NC}" \
+        "$crash_text" \
         "${YELLOW}timeout=$TESTS_TIMEOUT${NC}" \
         "error=$TESTS_ERROR"
 }

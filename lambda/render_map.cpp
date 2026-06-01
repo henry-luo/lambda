@@ -7,6 +7,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
+#include "../lib/hashmap_helpers.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -70,55 +71,21 @@ typedef struct ReverseMapEntry {
 
 static HashMap* s_reverse_map = NULL;
 
-static uint64_t reverse_map_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ReverseMapEntry* entry = (const ReverseMapEntry*)item;
-    return hashmap_murmur(&entry->result_item_bits, sizeof(uint64_t), seed0, seed1);
-}
-
-static int reverse_map_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const ReverseMapEntry* ea = (const ReverseMapEntry*)a;
-    const ReverseMapEntry* eb = (const ReverseMapEntry*)b;
-    if (ea->result_item_bits < eb->result_item_bits) return -1;
-    if (ea->result_item_bits > eb->result_item_bits) return 1;
-    return 0;
-}
+HASHMAP_DEFINE_INTKEY(reverse_map, ReverseMapEntry, result_item_bits)
 
 static HashMap* ensure_reverse_map(void) {
     if (!s_reverse_map) {
         s_reverse_map = hashmap_new(
             sizeof(ReverseMapEntry), 64,
             0xABCD1234, 0x5678FACE,
-            reverse_map_hash, reverse_map_compare,
+            reverse_map_hash, reverse_map_cmp,
             NULL, NULL
         );
     }
     return s_reverse_map;
 }
 
-// ============================================================================
-// Hash and compare for RenderMapKey
-// ============================================================================
-
-static uint64_t render_map_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RenderMapEntry* entry = (const RenderMapEntry*)item;
-    uint64_t h1 = hashmap_murmur(&entry->key.source_item, sizeof(Item), seed0, seed1);
-    uint64_t h2 = hashmap_murmur(&entry->key.template_ref, sizeof(void*), seed0, seed1);
-    return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL);
-}
-
-static int render_map_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RenderMapEntry* ea = (const RenderMapEntry*)a;
-    const RenderMapEntry* eb = (const RenderMapEntry*)b;
-    if (ea->key.source_item.item != eb->key.source_item.item) {
-        return ea->key.source_item.item < eb->key.source_item.item ? -1 : 1;
-    }
-    if (ea->key.template_ref != eb->key.template_ref) {
-        return ea->key.template_ref < eb->key.template_ref ? -1 : 1;
-    }
-    return 0;
-}
+HASHMAP_DEFINE_FIELD2_KEY(render_map, RenderMapEntry, key.source_item.item, key.template_ref)
 
 // ============================================================================
 // Ensure map exists (lazy creation)
@@ -129,7 +96,7 @@ static HashMap* ensure_map(void) {
         s_render_map = hashmap_new(
             sizeof(RenderMapEntry), 64,
             0xFACE1234, 0x5678DEAD,
-            render_map_hash, render_map_compare,
+            render_map_hash, render_map_cmp,
             NULL, NULL
         );
         s_owns_map = true;

@@ -97,6 +97,45 @@ char* execute_js_script(const char* script_path) {
     return full_output;
 }
 
+int execute_js_script_status(const char* script_path, char* output, size_t output_size) {
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log 2>&1", script_path);
+#else
+    snprintf(command, sizeof(command), "timeout 5 ./lambda.exe js \"%s\" --no-log 2>&1", script_path);
+#endif
+
+    if (output && output_size > 0) output[0] = '\0';
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        return -1;
+    }
+
+    char buffer[256];
+    size_t total_size = 0;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (output && output_size > 0 && total_size < output_size - 1) {
+            size_t len = strlen(buffer);
+            size_t copy_len = len;
+            if (copy_len > output_size - 1 - total_size) {
+                copy_len = output_size - 1 - total_size;
+            }
+            memcpy(output + total_size, buffer, copy_len);
+            total_size += copy_len;
+            output[total_size] = '\0';
+        }
+    }
+
+    int status = pclose(pipe);
+#ifdef _WIN32
+    return status;
+#else
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return status;
+#endif
+}
+
 // Helper function to trim trailing whitespace
 void trim_trailing_whitespace(char* str) {
     if (!str) return;
@@ -607,6 +646,33 @@ TEST(JavaScriptBasic, CommandInterface) {
     char* output = execute_js_builtin_tests();
     ASSERT_NE(output, nullptr) << "JavaScript command should execute successfully";
     free(output);
+}
+
+TEST(JavaScriptFuzz, FuzzIifeObjectLabelBlockDoesNotTimeout) {
+    char output[2048];
+    int status = execute_js_script_status("test/js/fuzz_iife_invalid_object_block.js",
+                                          output, sizeof(output));
+#ifndef _WIN32
+    ASSERT_NE(status, 124) << "IIFE object-like label block should not timeout";
+#endif
+    ASSERT_EQ(status, 0) << output;
+}
+
+TEST(JavaScriptFuzz, FuzzGeneratorObjectLabelBlockDoesNotTimeout) {
+    char output[2048];
+    int status = execute_js_script_status("test/js/fuzz_generator_invalid_object_block.js",
+                                          output, sizeof(output));
+#ifndef _WIN32
+    ASSERT_NE(status, 124) << "Generator object-like label block should not timeout";
+#endif
+    ASSERT_EQ(status, 0) << output;
+}
+
+TEST(JavaScriptFuzz, FuzzScopeClosureShadowDoesNotCrash) {
+    char output[2048];
+    int status = execute_js_script_status("test/js/fuzz_scope_closure_shadow_crash.js",
+                                          output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
 }
 
 int main(int argc, char **argv) {

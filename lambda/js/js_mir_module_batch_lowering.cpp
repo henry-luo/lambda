@@ -2902,8 +2902,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 {
                     JsAstNode* s = program->body;
                     while (s) {
-                        if (s->node_type == JS_AST_NODE_BLOCK_STATEMENT)
-                            jm_collect_let_const_names(s, let_const_names);
                         // Also check top-level variable declarations
                         if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                             JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
@@ -3679,15 +3677,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     if (eligible) {
                         TypeId rt = fc->return_type;
-                        if (rt != LMD_TYPE_INT && rt != LMD_TYPE_FLOAT &&
-                            rt != LMD_TYPE_BOOL && rt != LMD_TYPE_NULL &&
-                            rt != LMD_TYPE_ANY)
+                        if (rt != LMD_TYPE_INT && rt != LMD_TYPE_FLOAT)
                             eligible = false;
                     }
                 }
                 if (eligible && !fc->has_native_version) {
                     fc->has_native_version = true;
                     log_info("P6 enabled native version for %s (return_type=%d)", fc->name, fc->return_type);
+                } else if (!eligible) {
+                    fc->has_native_version = false;
+                    fc->native_func_item = 0;
                 }
             }
         }
@@ -3781,6 +3780,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     MIR_func_t main_func = MIR_get_item_func(mt->ctx, main_item);
     mt->current_func_item = main_item;
     mt->current_func = main_func;
+    mt->current_func_index = -1;
+    mt->current_fc = NULL;
+    mt->current_class = NULL;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->eval_local_frame_reg = 0;
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
     mt->in_main = true;
     mt->func_except_label = 0;  // reset for js_main
 

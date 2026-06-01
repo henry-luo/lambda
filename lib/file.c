@@ -43,6 +43,7 @@ extern char *strdup(const char *s);
 #include <stdbool.h>
 #include "file.h"
 #include "log.h"
+#include "str.h"
 
 // Function to read and display the content of a text file
 char* read_text_file(const char *filename) {
@@ -865,12 +866,54 @@ const char* file_path_basename(const char* path) {
 
 const char* file_path_ext(const char* path) {
     if (!path) return NULL;
-    const char* base = file_path_basename(path);
-    if (!base) return NULL;
+    return file_path_ext_len(path, strlen(path), NULL);
+}
 
-    const char* dot = strrchr(base, '.');
-    if (!dot || dot == base) return NULL;
+const char* file_path_ext_len(const char* path, size_t path_len, size_t* ext_len) {
+    if (ext_len) *ext_len = 0;
+    if (!path || path_len == 0) return NULL;
+    if (IS_SEP(path[path_len - 1])) return NULL;
+
+    size_t end = path_len;
+    while (end > 0 && IS_SEP(path[end - 1])) end--;
+    if (end == 0) return NULL;
+
+    size_t base_start = 0;
+    for (size_t i = end; i > 0; i--) {
+        if (IS_SEP(path[i - 1])) {
+            base_start = i;
+            break;
+        }
+    }
+
+    const char* dot = NULL;
+    for (size_t i = end; i > base_start; i--) {
+        if (path[i - 1] == '.') {
+            dot = path + i - 1;
+            break;
+        }
+    }
+    if (!dot || dot == path + base_start || dot == path + end - 1) return NULL;
+    if (ext_len) *ext_len = (size_t)(path + end - dot);
     return dot;
+}
+
+bool file_path_has_ext_ci(const char* path, const char* ext) {
+    if (!path || !ext) return false;
+
+    size_t path_ext_len = 0;
+    const char* path_ext = file_path_ext_len(path, strlen(path), &path_ext_len);
+    if (!path_ext) return false;
+
+    if (ext[0] == '.') ext++;
+    size_t cmp_ext_len = strlen(ext);
+    if (cmp_ext_len == 0) return false;
+
+    if (path_ext[0] == '.') {
+        path_ext++;
+        path_ext_len--;
+    }
+    return str_ieq(path_ext, path_ext_len, ext, cmp_ext_len);
 }
 
 // ---------------------------------------------------------------------------

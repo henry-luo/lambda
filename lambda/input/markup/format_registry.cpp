@@ -8,6 +8,7 @@
 #include <cctype>
 
 extern "C" {
+#include "../../../lib/file.h"
 #include "../../../lib/str.h"
 }
 
@@ -110,12 +111,13 @@ Format FormatRegistry::detectFromFilename(const char* filename) {
     if (!filename) return Format::AUTO_DETECT;
 
     // Find the extension
-    const char* ext = strrchr(filename, '.');
+    size_t ext_len = 0;
+    const char* ext = file_path_ext_len(filename, strlen(filename), &ext_len);
     if (!ext) return Format::AUTO_DETECT;
 
     // Convert to lowercase for comparison
     char ext_lower[32];
-    size_t i = strlen(ext);
+    size_t i = ext_len;
     if (i > sizeof(ext_lower) - 1) i = sizeof(ext_lower) - 1;
     str_to_lower(ext_lower, ext, i);
     ext_lower[i] = '\0';

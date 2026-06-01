@@ -310,6 +310,8 @@
                 "lib/utf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
+                "lib/escape.c",
+                "lib/digest.c",
                 "lib/string.c",
                 "lib/num_stack.c",
                 "lib/gc/gc_nursery.c",
@@ -332,6 +334,7 @@
                 "lib/rdb_sqlite.c"
             ],
             "libraries": [
+                "mbedcrypto",
                 "utf8proc",
                 "rpmalloc"
             ],
@@ -1549,6 +1552,19 @@
                         ],
                         "binary": "test_strbuf_gtest.exe",
                         "icon": "📝"
+                    },
+                    {
+                        "source": "lib/test_digest_gtest.cpp",
+                        "name": "Digest Facade Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_digest_gtest.exe",
+                        "icon": "🔐"
                     },
                     {
                         "source": "test_gc_heap_gtest.cpp",

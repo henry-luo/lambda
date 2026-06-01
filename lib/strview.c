@@ -111,3 +111,29 @@ char* strview_dup_with_pool(const StrView* s, Pool* pool) {
     out[n] = '\0';
     return out;
 }
+
+void strview_split_init(StrViewSplitIter* it, StrView input, char delimiter) {
+    if (!it) return;
+    it->rest = input;
+    it->delimiter = delimiter;
+    it->finished = false;
+}
+
+bool strview_split_next(StrViewSplitIter* it, StrView* token) {
+    if (!it || !token || it->finished) return false;
+
+    size_t pos = str_find_byte(it->rest.str, it->rest.length, it->delimiter);
+    if (pos == STR_NPOS) {
+        *token = it->rest;
+        it->rest.str = it->rest.str ? it->rest.str + it->rest.length : NULL;
+        it->rest.length = 0;
+        it->finished = true;
+        return true;
+    }
+
+    token->str = it->rest.str;
+    token->length = pos;
+    it->rest.str += pos + 1;
+    it->rest.length -= pos + 1;
+    return true;
+}

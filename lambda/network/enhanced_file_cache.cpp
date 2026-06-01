@@ -10,9 +10,9 @@
 #include "../../lib/str.h"
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
+#include "../../lib/digest.h"
 #include <string.h>
 #include <errno.h>
-#include <mbedtls/sha256.h>
 
 // hashmap entry for URL→CacheMetadata lookup
 typedef struct {
@@ -34,14 +34,12 @@ static void cache_entry_free(void* item) {
     }
 }
 
-// compute sha-256 hash using mbedtls
+// compute sha-256 hash through the shared digest facade
 static void compute_sha256(const char* input, unsigned char* output) {
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);  // 0 = SHA-256 (not SHA-224)
-    mbedtls_sha256_update(&ctx, (const unsigned char*)input, strlen(input));
-    mbedtls_sha256_finish(&ctx, output);
-    mbedtls_sha256_free(&ctx);
+    if (!digest_sha256(input ? input : "", input ? strlen(input) : 0, output)) {
+        memset(output, 0, 32);
+        log_error("cache: sha256 digest failed");
+    }
 }
 
 // convert hash to hex (delegates to lib/hex.h; caller frees the result)

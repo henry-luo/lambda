@@ -151,11 +151,11 @@ typedef enum {
 static DocFormat detect_doc_format(const char* filename) {
     if (!filename) return DOC_FORMAT_UNKNOWN;
 
-    const char* ext = strrchr(filename, '.');
+    size_t ext_len = 0;
+    const char* ext = file_path_ext_len(filename, strlen(filename), &ext_len);
     if (!ext) return DOC_FORMAT_UNKNOWN;
-
     ext++; // skip the '.'
-    size_t ext_len = strlen(ext);
+    ext_len--;
 
     if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm")) {
         return DOC_FORMAT_HTML;

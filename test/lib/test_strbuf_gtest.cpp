@@ -58,6 +58,7 @@
 
 extern "C" {
 #include "../../lib/strbuf.h"
+#include "../../lib/escape.h"
 #include "../../lib/log.h"
 }
 
@@ -678,5 +679,24 @@ TEST_F(StrBufTest, ReplaceAllNoOpAndNullReplacement) {
     EXPECT_STREQ(sb->str, "alpha");
     EXPECT_FALSE(strbuf_replace_all(nullptr, "a", "b"));
     EXPECT_FALSE(strbuf_replace_all(sb, nullptr, "b"));
+    strbuf_free(sb);
+}
+
+TEST_F(StrBufTest, EscapeAppendJsonControls) {
+    StrBuf* sb = strbuf_new();
+    escape_append(sb, "\"a\"\x01\n", strlen("\"a\"\x01\n"),
+                  ESCAPE_RULES_JSON, ESCAPE_RULES_JSON_COUNT,
+                  ESCAPE_CTRL_JSON_UNICODE);
+    EXPECT_STREQ(sb->str, "\\\"a\\\"\\u0001\\n");
+    strbuf_free(sb);
+}
+
+TEST_F(StrBufTest, EscapeAppendXmlAttr) {
+    StrBuf* sb = strbuf_new();
+    const char* raw = "a&b <c> \"d\"";
+    escape_append(sb, raw, strlen(raw),
+                  ESCAPE_RULES_XML_ATTR, ESCAPE_RULES_XML_ATTR_COUNT,
+                  ESCAPE_CTRL_XML_NUMERIC);
+    EXPECT_STREQ(sb->str, "a&amp;b &lt;c&gt; &quot;d&quot;");
     strbuf_free(sb);
 }
