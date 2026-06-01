@@ -1979,27 +1979,7 @@ static bool rich_text_default_replace(EventContext* evcon,
     DomSelection* dom_selection = state->dom_selection;
     if (dom_selection && dom_selection->range_count > 0 &&
         dom_selection->ranges[0] && !dom_selection->is_collapsed) {
-        View* anchor_view = nullptr;
-        View* focus_view = nullptr;
-        if (selection_get_extent_views(state, &anchor_view, &focus_view) &&
-            anchor_view && anchor_view == focus_view && anchor_view->is_text()) {
-            int start_i = 0;
-            int end_i = 0;
-            selection_get_range(state, &start_i, &end_i);
-            text = lam::dom_require_text(static_cast<DomNode*>(anchor_view));
-            start = start_i < 0 ? 0 : (uint32_t)start_i;
-            end = end_i < 0 ? 0 : (uint32_t)end_i;
-        } else {
-            DomRange* range = dom_selection->ranges[0];
-            if (!range->start.node || !range->end.node ||
-                range->start.node != range->end.node ||
-                !range->start.node->is_text()) {
-                return false;
-            }
-            text = static_cast<DomText*>(range->start.node);
-            start = dom_text_utf16_to_utf8(text, range->start.offset);
-            end = dom_text_utf16_to_utf8(text, range->end.offset);
-        }
+        return false;
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
@@ -2158,6 +2138,24 @@ static DomElement* find_element_by_author_id(DomNode* node, const char* id) {
     return nullptr;
 }
 
+static void rich_select_all_sync_descendant_text_controls(DocState* state,
+                                                          DomNode* node) {
+    if (!state || !node) return;
+    if (!node->is_element()) return;
+
+    DomElement* elem = lam::dom_require_element(node);
+    if (tc_is_text_control(elem)) {
+        tc_ensure_init(elem);
+        uint32_t len = elem->form ? elem->form->current_value_u16_len : 0;
+        form_control_set_selection(state, static_cast<View*>(elem), 0, len, 1);
+        return;
+    }
+
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        rich_select_all_sync_descendant_text_controls(state, child);
+    }
+}
+
 static bool dispatch_rich_select_all_default(EventContext* evcon,
                                              DocState* state,
                                              View* target,
@@ -2195,6 +2193,7 @@ static bool dispatch_rich_select_all_default(EventContext* evcon,
         return false;
     }
     legacy_sync_from_dom_selection(state);
+    rich_select_all_sync_descendant_text_controls(state, owner_node);
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     event_log_editing_selection(state, &surface, intent, "selectAll", 0, 0);

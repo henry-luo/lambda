@@ -448,7 +448,10 @@ extern "C" void js_dom_set_document(void* dom_doc) {
     if (js_document_proxy_item.item != ITEM_NULL &&
         get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
         js_document_proxy_item.map) {
+        js_document_proxy_item.map->map_kind = MAP_KIND_DOC_PROXY;
+        js_document_proxy_item.map->type = (void*)&js_document_proxy_marker;
         js_document_proxy_item.map->data = dom_doc;
+        js_document_proxy_item.map->data_cap = 0;
     }
     if (dom_doc) {
         js_doc_mark_has_browsing_context(dom_doc);
@@ -687,8 +690,11 @@ extern "C" bool js_is_dom_implementation(Item item) {
 extern "C" Item js_get_document_object_value() {
     if (js_document_proxy_item.item != ITEM_NULL) {
         if (get_type_id(js_document_proxy_item) == LMD_TYPE_MAP &&
-            js_document_proxy_item.map && !js_document_proxy_item.map->data) {
+            js_document_proxy_item.map) {
+            js_document_proxy_item.map->map_kind = MAP_KIND_DOC_PROXY;
+            js_document_proxy_item.map->type = (void*)&js_document_proxy_marker;
             js_document_proxy_item.map->data = _js_main_document;
+            js_document_proxy_item.map->data_cap = 0;
         }
         return js_document_proxy_item;
     }
@@ -736,7 +742,15 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
             return value;
         }
     }
-    return ItemNull;
+
+    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    if (!stub_v) return value;
+
+    Item exp_map = expando_get_or_create_map((DomNode*)stub_v);
+    if (exp_map.item == ITEM_NULL) return value;
+    js_property_set(exp_map, prop_name, value);
+    return value;
 }
 
 // ============================================================================
@@ -3083,6 +3097,18 @@ extern "C" Item js_document_get_property(Item prop_name) {
             child = child->next_sibling;
         }
         return root ? js_dom_wrap_element(root) : ItemNull;
+    }
+
+    DomDocument* expando_doc = _js_current_document ? _js_current_document : _js_main_document;
+    void* stub_v = js_dom_get_or_create_doc_node(expando_doc);
+    if (stub_v) {
+        Item exp_map = expando_get_map((DomNode*)stub_v);
+        if (exp_map.item != ITEM_NULL) {
+            Item exp_value = js_property_get(exp_map, prop_name);
+            if (exp_value.item != ITEM_NULL) {
+                return exp_value;
+            }
+        }
     }
 
     log_debug("js_document_get_property: unknown property '%s'", prop);

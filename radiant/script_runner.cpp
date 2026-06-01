@@ -379,13 +379,11 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             }
             return;
         }
-        // Inline scripts are emitted without try/catch wrapping so that
-        // function declarations remain at global scope. This allows cross-script
-        // function references (e.g. setTimeout(myFunc, 0) in onload) to resolve
-        // correctly in the MIR transpiler. Signal-level guards (SIGALRM, SIGSEGV,
-        // SIGBUS) still protect against crashes and infinite loops.
+        // Each classic script runs as its own unit. A script exception must not
+        // cancel later scripts or the document load handler.
+        strbuf_append_str(script_buf, "try {\n");
         extract_script_text(elem, script_buf);
-        strbuf_append_str(script_buf, "\n");
+        strbuf_append_str(script_buf, "\n} catch(_script_err) {}\n");
         return;  // don't recurse into script children
     }
 
@@ -424,7 +422,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     //   <body onload="doTest()">  → collected in onload_buf
     //   window.onload = function() { ... }  → set on window object below
     if (onload_buf->length > 0) {
+        strbuf_append_str(script_buf, "try {\n");
         strbuf_append_str(script_buf, onload_buf->str);
+        strbuf_append_str(script_buf, "\n} catch(_onload_err) {}\n");
     }
 
     if (script_buf->length == 0) {

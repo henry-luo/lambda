@@ -4,6 +4,7 @@
 #include "layout_positioned.hpp"
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
+#include "layout_table.hpp"
 #include "form_control.hpp"
 #include "render_export_support.hpp"
 #include "state_store.hpp"
@@ -881,6 +882,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewText* text_view = lam::view_require_text(view);
         TextRect* rect = text_view->rect;
         while (rect) {
+            if (rect->line_number != lycon->block.line_number) {
+                rect = rect->next;
+                continue;
+            }
             float item_height = rect->height;
             // for text, baseline is at font.ascender
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
@@ -898,8 +903,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         adjust_text_bounds(text_view);
     }
-    else if (view->view_type == RDT_VIEW_INLINE_BLOCK) {
+    else if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
+             view->view_type == RDT_VIEW_TABLE) {
         ViewBlock* block = lam::view_require_block(view);
+        bool is_inline_table = view->view_type == RDT_VIEW_TABLE &&
+            (block->display.outer == CSS_VALUE_INLINE ||
+             block->display.outer == CSS_VALUE_INLINE_BLOCK);
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
@@ -910,7 +919,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // browser behavior: baseline = bottom border edge (margin.top + height).
         // For non-replaced empty inline-blocks: baseline = bottom margin edge.
         float item_baseline;
-        if (block->display.inner == RDT_DISPLAY_REPLACED) {
+        if (is_inline_table) {
+            float table_baseline = find_first_baseline_recursive(lycon, view, 0.0f, true);
+            if (table_baseline >= 0.0f) {
+                item_baseline = (block->bound ? block->bound->margin.top : 0) +
+                    table_baseline;
+            } else {
+                item_baseline = item_height;
+            }
+        } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
             item_baseline = block->height +
                 (block->bound ? block->bound->margin.top : 0);
         } else {
@@ -925,11 +942,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             bool overflow_visible = !block->scroller ||
                 (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
                  block->scroller->overflow_y == CSS_VALUE_VISIBLE);
-            bool is_form_text_ctl = (block->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                block->form && block->form->control_type != FORM_CONTROL_HIDDEN &&
-                block->form->control_type != FORM_CONTROL_IMAGE &&
-                block->form->control_type != FORM_CONTROL_SELECT);
-            if (!is_replaced_elem && (overflow_visible || is_form_text_ctl)) {
+            if (!is_replaced_elem && overflow_visible) {
                 item_baseline = (block->bound ? block->bound->margin.top : 0) +
                     block->blk->last_line_max_ascender;
             }

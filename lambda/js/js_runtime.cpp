@@ -3077,13 +3077,15 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
     Map* m = object.map;
     switch (m->map_kind) {
     case MAP_KIND_DOC_PROXY:
-        if (m->data_cap == 0 && js_input) {
-            m->type = (void*)&EmptyMap;
-            m->data = NULL;
-            m->data_cap = 0;
-        }
-        return false;
-    case MAP_KIND_FOREIGN_DOC:
+        *out_result = js_document_proxy_set_property(key, *value);
+        return true;
+    case MAP_KIND_FOREIGN_DOC: {
+        void* prev = js_dom_swap_active_document(js_get_foreign_doc(object));
+        *out_result = js_document_proxy_set_property(key, *value);
+        js_dom_restore_active_document(prev);
+        return true;
+    }
+    case MAP_KIND_ITERATOR:
         *out_result = *value;
         return true;
     case MAP_KIND_DOM:
@@ -3104,9 +3106,6 @@ static bool js_try_exotic_property_set(Item object, Item key, Item* value, Item*
     case MAP_KIND_TYPED_ARRAY:
         js_upgrade_native_backed_map_for_properties(m, "__ta__", 6);
         return false;
-    case MAP_KIND_ITERATOR:
-        *out_result = *value;
-        return true;
     case MAP_KIND_PROCESS_ENV:
         if (get_type_id(key) == LMD_TYPE_SYMBOL) {
             *out_result = js_throw_type_error("Cannot convert a Symbol value to a string");

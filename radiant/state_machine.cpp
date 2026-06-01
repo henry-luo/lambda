@@ -836,7 +836,7 @@ bool radiant_state_validate_interaction(DocState* state,
             report_fail(report, "caret offset exceeds target length");
         }
         bool composition_active = state->editing.composition.active;
-        if (!composition_active &&
+        if (!composition_active && state->caret->visible &&
             state->caret->view && state->caret->view->is_element() &&
             state->focus && state->focus->current &&
             state->caret->view != state->focus->current) {

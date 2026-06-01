@@ -134,6 +134,57 @@ static float get_parent_table_cellpadding(DomNode* elmt) {
     return -1;
 }
 
+// Get the rules attribute from the parent TABLE element.
+// HTML rules presentational hints affect table border conflict resolution and
+// per-cell borders (e.g. rules="cols" creates vertical cell rules).
+static const char* get_parent_table_rules(DomNode* elmt) {
+    DomNode* node = elmt->parent;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->tag_id == HTM_TAG_TABLE) {
+                return elem->get_attribute("rules");
+            }
+        }
+        node = node->parent;
+    }
+    return nullptr;
+}
+
+static void apply_html_table_rules_cell_border(LayoutContext* lycon, ViewBlock* block,
+                                               const char* rules_attr, bool is_header) {
+    if (!rules_attr) return;
+
+    size_t rules_len = strlen(rules_attr);
+    bool rules_cols = str_ieq_const(rules_attr, rules_len, "cols");
+    bool rules_rows = str_ieq_const(rules_attr, rules_len, "rows");
+    bool rules_all = str_ieq_const(rules_attr, rules_len, "all");
+    if (!rules_cols && !rules_rows && !rules_all) return;
+
+    if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+    if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+
+    BorderProp* border = block->bound->border;
+    Color grey = {0};
+    grey.r = 128;
+    grey.g = 128;
+    grey.b = 128;
+    grey.a = 255;
+    if (rules_cols || rules_all) {
+        border->width.left = border->width.right = 1.0f;
+        border->width.left_specificity = border->width.right_specificity = -1;
+        border->left_style = border->right_style = CSS_VALUE_SOLID;
+        border->left_color = border->right_color = grey;
+    }
+    if (rules_rows || rules_all) {
+        border->width.top = border->width.bottom = 1.0f;
+        border->width.top_specificity = border->width.bottom_specificity = -1;
+        border->top_style = border->bottom_style = CSS_VALUE_SOLID;
+        border->top_color = border->bottom_color = grey;
+    }
+    log_debug("[HTML] %s border from parent TABLE rules=%s", is_header ? "TH" : "TD", rules_attr);
+}
+
 // get parent TR's valign attribute (for TD/TH cells)
 static const char* get_parent_tr_valign(DomNode* elmt) {
     // TD/TH -> TR, check TR's valign attribute
@@ -1164,6 +1215,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_TR: {
+        // Browser UA stylesheet: tbody/thead/tfoot default to vertical-align:
+        // middle, and table rows inherit it. Preserve that computed value even
+        // when author CSS changes a <tr> to an inline box.
+        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
+        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+
         // Handle HTML bgcolor attribute for table rows
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
@@ -1268,6 +1325,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 log_debug("[HTML] TH border from parent TABLE: 1px inset grey");
             }
         }
+        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), true);
         break;
     }
     case HTM_TAG_TD: {
@@ -1362,6 +1420,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 log_debug("[HTML] TD border from parent TABLE: 1px inset grey");
             }
         }
+        apply_html_table_rules_cell_border(lycon, block, get_parent_table_rules(elmt), false);
         break;
     }
     case HTM_TAG_CAPTION:
