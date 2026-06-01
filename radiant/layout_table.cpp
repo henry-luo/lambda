@@ -570,6 +570,10 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         has_any = true;
     }
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
+    if (tcell->content_height > content_height) {
+        content_height = tcell->content_height;
+        has_any = true;
+    }
 
     log_debug("%s measure_cell_content: inline=%.1f (y:%.1f-%.1f), block=%.1f (y:%.1f-%.1f) -> %.1f", tcell->source_loc(),
               has_inline_content ? (inline_content_max_y - inline_content_min_y) : 0.0f,
@@ -650,6 +654,8 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // or the first in-flow table-row in the cell, whichever comes first. If a cell has
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
+static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow);
+
 float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh) {
     for (View* child = lam::view_require_element(parent)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
@@ -699,6 +705,10 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
             // always recurse into table structure for baseline search
             float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y, use_normal_lh);
             if (result >= 0) return result;
+            if (child->view_type == RDT_VIEW_TABLE_ROW) {
+                float row_baseline = find_table_row_baseline(lycon, lam::view_require<RDT_VIEW_TABLE_ROW>(child));
+                if (row_baseline >= 0) return cumulative_y + child->y + row_baseline;
+            }
         } else if (is_block_like) {
             // recurse into blocks, but skip blocks inside tables (those are captions)
             bool parent_is_table = (parent->view_type == RDT_VIEW_TABLE);
@@ -767,6 +777,25 @@ static float find_cell_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
                   tcell->td->col_index, tcell->td->row_index, baseline);
     }
     return baseline;
+}
+
+// CSS 2.1 §17.5.4: The baseline of a table row is established by the baselines
+// of the cells in that row. Empty cells still have a cell baseline: the bottom
+// of their content edge. This is also the baseline used by an inline-table's
+// first row when the row contains no text.
+static float find_table_row_baseline(LayoutContext* lycon, ViewTableRow* trow) {
+    if (!trow) return -1.0f;
+
+    float row_baseline = -1.0f;
+    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+        if (!tcell->td) continue;
+        float cell_baseline = tcell->y + find_cell_baseline(lycon, tcell);
+        if (cell_baseline > row_baseline) {
+            row_baseline = cell_baseline;
+        }
+    }
+    log_debug("%s find_table_row_baseline: baseline=%.1f", trow->source_loc(), row_baseline);
+    return row_baseline;
 }
 
 // CSS 2.1 §17.5.4: Apply baseline alignment across all cells in a row.
@@ -871,7 +900,96 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 }
 
 // Apply vertical alignment to cell children
-static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, float content_height) {
+static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tcell) {
+    if (!lycon || !tcell) return 0.0f;
+
+    FontBox saved_font = lycon->font;
+    BlockContextScope bscope(lycon);
+
+    if (tcell->font) {
+        setup_font(lycon->ui_context, &lycon->font, tcell->font);
+    }
+    setup_line_height(lycon, tcell);
+    if (lycon->font.font_handle) {
+        if (lycon->block.line_height_is_normal) {
+            font_get_normal_lh_split(lycon->font.font_handle,
+                &lycon->block.init_ascender, &lycon->block.init_descender);
+        } else {
+            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+            if (typo.valid && typo.use_typo_metrics) {
+                lycon->block.init_ascender = typo.ascender;
+                lycon->block.init_descender = typo.descender;
+            } else {
+                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+                if (m) {
+                    lycon->block.init_ascender = m->hhea_ascender;
+                    lycon->block.init_descender = -(m->hhea_descender);
+                }
+            }
+        }
+    }
+    float half_leading = (lycon->block.line_height -
+        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+    float baseline = lycon->block.init_ascender + half_leading;
+    lycon->font = saved_font;
+    return baseline;
+}
+
+static float compute_inline_atomic_baseline_for_cell(LayoutContext* lycon, ViewBlock* block) {
+    if (!block) return 0.0f;
+
+    float item_height = block->height + (block->bound ?
+        block->bound->margin.top + block->bound->margin.bottom : 0.0f);
+    bool is_inline_table = block->view_type == RDT_VIEW_TABLE &&
+        (block->display.outer == CSS_VALUE_INLINE ||
+         block->display.outer == CSS_VALUE_INLINE_BLOCK);
+    if (is_inline_table) {
+        float table_baseline = find_first_baseline_recursive(lycon, static_cast<View*>(block), 0.0f, true);
+        if (table_baseline >= 0.0f) {
+            return (block->bound ? block->bound->margin.top : 0.0f) + table_baseline;
+        }
+    }
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {
+        return block->height + (block->bound ? block->bound->margin.top : 0.0f);
+    }
+    if (block->blk && block->blk->last_line_max_ascender > 0.0f) {
+        bool overflow_visible = !block->scroller ||
+            (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
+             block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+        if (overflow_visible) {
+            return (block->bound ? block->bound->margin.top : 0.0f) +
+                block->blk->last_line_max_ascender;
+        }
+    }
+    return item_height;
+}
+
+static float find_cell_content_top_for_vertical_align(LayoutContext* lycon, ViewTableCell* tcell,
+                                                      float fallback_top) {
+    float content_top = fallback_top;
+    bool found_line_box_top = false;
+    float strut_baseline = compute_cell_strut_baseline(lycon, tcell);
+    if (strut_baseline <= 0.0f) return content_top;
+
+    for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
+        if (!child->view_type) continue;
+        if (child->view_type == RDT_VIEW_INLINE_BLOCK || child->view_type == RDT_VIEW_TABLE) {
+            ViewBlock* block = lam::view_require_block(child);
+            float item_height = block->height + (block->bound ?
+                block->bound->margin.top + block->bound->margin.bottom : 0.0f);
+            if (item_height > 0.5f) continue;
+            float item_baseline = compute_inline_atomic_baseline_for_cell(lycon, block);
+            float line_top = child->y + item_baseline - strut_baseline;
+            if (!found_line_box_top || line_top < content_top) {
+                content_top = line_top;
+                found_line_box_top = true;
+            }
+        }
+    }
+    return content_top;
+}
+
+static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell, float cell_height, float content_height) {
     log_debug("%s apply_cell_vertical_align: valign=%d, cell_height=%.1f, content_height=%.1f, is_empty=%d", tcell->source_loc(),
            tcell->td->vertical_align, cell_height, content_height, tcell->td->is_empty);
 
@@ -954,6 +1072,8 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
         if (ct < current_content_top) current_content_top = ct;
     }
     if (current_content_top >= 1e8f) return; // no content
+
+    current_content_top = find_cell_content_top_for_vertical_align(lycon, tcell, current_content_top);
 
     float y_adjustment = target_y - current_content_top;
     log_debug("%s   vertical-align: target_y=%.1f, current_content_top=%.1f, y_adjustment=%.1f", tcell->source_loc(),
@@ -1108,7 +1228,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     }
 
     // Apply vertical alignment
-    apply_cell_vertical_align(tcell, cell_height_val, content_height);
+    apply_cell_vertical_align(lycon, tcell, cell_height_val, content_height);
 
     // Handle rowspan for row height calculation
     // For single-row cells, full height contributes to row
@@ -1129,7 +1249,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
 // Apply fixed row height to row and all its cells
 // Forward declaration
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell);
-static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, float content_height);
+static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell, float cell_height, float content_height);
 
 static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, float fixed_height) {
     trow->height = fixed_height;
@@ -1140,7 +1260,7 @@ static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, flo
             cell->height = fixed_height;
             // Re-apply vertical alignment with correct cell height
             float content_height = measure_cell_content_height(lycon, cell);
-            apply_cell_vertical_align(cell, fixed_height, content_height);
+            apply_cell_vertical_align(lycon, cell, fixed_height, content_height);
         }
     }
 }
@@ -1723,6 +1843,18 @@ static ViewTableCell* find_cell_at(ViewTable* table, int target_row, int target_
     return nullptr;
 }
 
+static bool is_out_of_flow_table_cell_slot(View* view) {
+    ViewElement* elem = lam::view_as_element(view);
+    if (!elem || elem->view_type == RDT_VIEW_TABLE_CELL) return false;
+
+    uintptr_t tag = elem->tag();
+    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return false;
+
+    return elem->position &&
+           (elem->position->position == CSS_VALUE_ABSOLUTE ||
+            elem->position->position == CSS_VALUE_FIXED);
+}
+
 // Resolve collapsed borders for all cells in table
 // This implements CSS 2.1 Section 17.6.2 border conflict resolution
 // CSS 2.1 §17.6.2: Each border around a cell can be specified by various elements
@@ -2187,6 +2319,18 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                 table->tb->border_spacing_h = spacing;
                 table->tb->border_spacing_v = spacing;
                 log_debug("[HTML] TABLE cellspacing attribute: %.0fpx", spacing);
+            }
+
+            // HTML rules presentational hint: browsers put these tables into the
+            // collapsed border model. The CSS border-spacing computed value still
+            // reports the UA 2px value, but it is ignored by collapsed layout.
+            const char* rules_attr = dom_elem->get_attribute("rules");
+            if (rules_attr) {
+                size_t rules_len = strlen(rules_attr);
+                if (!str_ieq_const(rules_attr, rules_len, "none")) {
+                    table->tb->border_collapse = true;
+                    log_debug("[HTML] TABLE rules=%s -> border-collapse: collapse", rules_attr);
+                }
             }
         }
     }
@@ -3095,8 +3239,7 @@ static void wrap_node_in_cell_if_needed(LayoutContext* lycon, DomNode* node, Dom
     bool is_already_cell = false;
     if (node->is_element()) {
         DisplayValue disp = resolve_display_value(node);
-        uintptr_t tag = node->tag();
-        is_already_cell = is_cell_display(disp.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+        is_already_cell = is_cell_display(disp.inner);
     }
 
     if (is_already_cell) {
@@ -3127,8 +3270,7 @@ static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* 
         bool is_cell = false;
         if (node->is_element()) {
             DisplayValue disp = resolve_display_value(node);
-            uintptr_t tag = node->tag();
-            is_cell = is_cell_display(disp.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+            is_cell = is_cell_display(disp.inner);
         }
 
         if (is_cell) {
@@ -3181,8 +3323,6 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     // Track runs of consecutive cells that need wrapping
     ArrayList* current_cell_run = arraylist_new(8);
     ArrayList* current_row_run = arraylist_new(8);
-    DomNode* insertion_point = nullptr;  // Where to insert wrapped elements
-
     for (int i = 0; i < children_to_process->length; ) {
         DomNode* child = static_cast<DomNode*>(children_to_process->data[i]);
 
@@ -3251,10 +3391,9 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         uintptr_t tag = child->tag();
 
         // Check if this is a proper table child
-        bool is_row_group = is_row_group_display(display.inner) ||
-                           tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT;
-        bool is_row = is_row_display(display.inner) || tag == HTM_TAG_TR;
-        bool is_cell = is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH;
+        bool is_row_group = is_row_group_display(display.inner);
+        bool is_row = is_row_display(display.inner);
+        bool is_cell = is_cell_display(display.inner);
         bool is_column = is_column_display(display.inner) ||
                         tag == HTM_TAG_COL || tag == HTM_TAG_COLGROUP;
         bool is_caption = is_caption_display(display.inner) || tag == HTM_TAG_CAPTION;
@@ -3407,11 +3546,9 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
         DomElement* row_group = child->as_element();
         DisplayValue display = resolve_display_value(child);
-        uintptr_t tag = child->tag();
 
         // Only process row groups
-        if (!is_row_group_display(display.inner) &&
-            tag != HTM_TAG_THEAD && tag != HTM_TAG_TBODY && tag != HTM_TAG_TFOOT) {
+        if (!is_row_group_display(display.inner)) {
             continue;
         }
 
@@ -3469,10 +3606,9 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             }
 
             DisplayValue gdisp = resolve_display_value(gchild);
-            uintptr_t gtag = gchild->tag();
 
-            bool is_row = is_row_display(gdisp.inner) || gtag == HTM_TAG_TR;
-            bool is_cell = is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH;
+            bool is_row = is_row_display(gdisp.inner);
+            bool is_cell = is_cell_display(gdisp.inner);
 
             if (is_row) {
                 // Flush any accumulated cells before this row
@@ -3536,11 +3672,9 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
         DomElement* row_group = group_node->as_element();
         DisplayValue group_display = resolve_display_value(group_node);
-        uintptr_t group_tag = group_node->tag();
 
         // Only process row groups
-        if (!is_row_group_display(group_display.inner) &&
-            group_tag != HTM_TAG_THEAD && group_tag != HTM_TAG_TBODY && group_tag != HTM_TAG_TFOOT) {
+        if (!is_row_group_display(group_display.inner)) {
             continue;
         }
 
@@ -3550,10 +3684,9 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
             DomElement* row = row_node->as_element();
             DisplayValue row_display = resolve_display_value(row_node);
-            uintptr_t row_tag = row_node->tag();
 
             // Only process rows
-            if (!is_row_display(row_display.inner) && row_tag != HTM_TAG_TR) {
+            if (!is_row_display(row_display.inner)) {
                 continue;
             }
 
@@ -3609,9 +3742,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 }
 
                 DisplayValue rdisp = resolve_display_value(rchild);
-                uintptr_t rtag = rchild->tag();
 
-                bool is_cell = is_cell_display(rdisp.inner) || rtag == HTM_TAG_TD || rtag == HTM_TAG_TH;
+                bool is_cell = is_cell_display(rdisp.inner);
 
                 if (is_cell) {
                     // Flush any accumulated non-cell content
@@ -3977,8 +4109,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             // Context auto-restored by lscope destructor
         }
     }
-    else if (tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT ||
-             display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+    else if (display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
              display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
              display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) {
         // Row group - mark and recurse
@@ -3999,7 +4130,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             }
         }
     }
-    else if (tag == HTM_TAG_TR || display.inner == CSS_VALUE_TABLE_ROW) {
+    else if (display.inner == CSS_VALUE_TABLE_ROW) {
         // Row - mark and recurse
         ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW>(set_view(lycon, RDT_VIEW_TABLE_ROW, node));
         if (row) {
@@ -4053,7 +4184,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             }
         }
     }
-    else if (tag == HTM_TAG_TD || tag == HTM_TAG_TH || display.inner == CSS_VALUE_TABLE_CELL) {
+    else if (display.inner == CSS_VALUE_TABLE_CELL) {
         // Cell - mark with styles and attributes
         ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(set_view(lycon, RDT_VIEW_TABLE_CELL, node));
         if (cell) {
@@ -4194,7 +4325,10 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
             float child_bottom = text->y + text->height;
             if (child_bottom > max_y) max_y = child_bottom;
             has_content = true;
-        } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
+        } else if (child->view_type == RDT_VIEW_BLOCK ||
+                   child->view_type == RDT_VIEW_LIST_ITEM ||
+                   child->view_type == RDT_VIEW_INLINE ||
+                   child->view_type == RDT_VIEW_BR) {
             ViewElement* element = lam::view_require_element(child);
             if (element->y < min_y) min_y = element->y;
             float child_bottom = element->y + element->height;
@@ -4247,7 +4381,10 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
                 text->y += vertical_offset;
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
                          vertical_offset, (int)valign); // INT_CAST_OK: enum for log
-            } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_INLINE) {
+            } else if (child->view_type == RDT_VIEW_BLOCK ||
+                       child->view_type == RDT_VIEW_LIST_ITEM ||
+                       child->view_type == RDT_VIEW_INLINE ||
+                       child->view_type == RDT_VIEW_BR) {
                 ViewElement* element = lam::view_require_element(child);
                 element->y += vertical_offset;
             }
@@ -4294,6 +4431,13 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
             if (child_bottom > content_max_y) content_max_y = child_bottom;
             has_content = true;
         }
+        else if (child->view_type == RDT_VIEW_BR) {
+            ViewElement* element = lam::view_require_element(child);
+            if (element->y < content_min_y) content_min_y = element->y;
+            float child_bottom = element->y + element->height;
+            if (child_bottom > content_max_y) content_max_y = child_bottom;
+            has_content = true;
+        }
         // Handle other child types (ViewBlock, etc.)
         else if (child->view_type >= RDT_VIEW_BLOCK) {
             ViewBlock* block = lam::view_require_block(child);
@@ -4335,9 +4479,13 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
             if (child->view_type == RDT_VIEW_TEXT) {
                 ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
                 text->y += adjustment;
-                if (text->rect) {
-                    text->rect->y += adjustment;
+                for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                    rect->y += adjustment;
                 }
+            }
+            else if (child->view_type == RDT_VIEW_BR) {
+                ViewElement* element = lam::view_require_element(child);
+                element->y += adjustment;
             }
             else if (child->view_type >= RDT_VIEW_BLOCK) {
                 ViewBlock* block = lam::view_require_block(child);
@@ -4602,6 +4750,11 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     }
 
     if (tcell->is_element()) {
+        DomElement* cell_elem = lam::dom_require_element(tcell);
+        if (cell_elem && wrap_orphaned_table_children(lycon, cell_elem)) {
+            log_debug("%s [TABLE CELL] Wrapped orphaned table-internal content", cell->source_loc());
+        }
+
         DomNode* cc = lam::dom_require_element(tcell)->first_child;
         for (; cc; cc = cc->next_sibling) {
             uintptr_t child_tag = cc->tag();
@@ -4621,6 +4774,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     } else {
         line_align(lycon);
     }
+    cell->content_height = lycon->block.advance_y - content_start_y;
+    if (cell->content_height < 0.0f) cell->content_height = 0.0f;
 
     // Apply CSS vertical-align positioning after content layout
     apply_cell_vertical_alignment(lycon, tcell, content_height);
@@ -5233,8 +5388,13 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
         rows++;
         int row_cells = 0;
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
-            row_cells += cell->td->col_span;
+        for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+            if (child->view_type == RDT_VIEW_TABLE_CELL) {
+                ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
+                row_cells += cell->td->col_span;
+            } else if (is_out_of_flow_table_cell_slot(child)) {
+                row_cells++;
+            }
         }
         if (row_cells > columns) columns = row_cells;
     }
@@ -5303,7 +5463,18 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             cur_row = 0;
             for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
                 int col = 0;
-                for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+                for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+                    if (is_out_of_flow_table_cell_slot(child)) {
+                        while (col < est_cols && occupied[cur_row * est_cols + col]) col++;
+                        if (col < est_cols) occupied[cur_row * est_cols + col] = true;
+                        int right = col + 1;
+                        if (right > max_col_used) max_col_used = right;
+                        col++;
+                        continue;
+                    }
+                    if (child->view_type != RDT_VIEW_TABLE_CELL) continue;
+
+                    ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
                     // Find next free column
                     while (col < est_cols && occupied[cur_row * est_cols + col]) col++;
                     // Mark occupied
@@ -5340,7 +5511,20 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
         }
 
         int col = 0;
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
+        for (View* child = static_cast<View*>(row->first_child); child; child = static_cast<View*>(child->next_sibling)) {
+            if (is_out_of_flow_table_cell_slot(child)) {
+                while (col < columns && meta->grid(current_row, col)) {
+                    col++;
+                }
+                if (col < columns) {
+                    meta->grid(current_row, col) = true;
+                }
+                col++;
+                continue;
+            }
+            if (child->view_type != RDT_VIEW_TABLE_CELL) continue;
+
+            ViewTableCell* cell = lam::view_require<RDT_VIEW_TABLE_CELL>(child);
             // Find next available column
             while (col < columns && meta->grid(current_row, col)) {
                 col++;
@@ -6541,15 +6725,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Try to get container width from parent element first
         float container_width = 0;
         bool margins_already_subtracted = false;
+        bool table_box_already_subtracted = false;
 
         // CSS 2.1 §9.5 + §17.5.2.2: For auto-width tables inside a BFC that avoids
         // floats, use lycon->block.content_width which already accounts for float
         // avoidance width reduction computed by layout_block().
-        // Note: lycon->block.content_width already has the table's margins subtracted
-        // (computed in layout_block.cpp as parent_content - margins - border - padding).
+        // Note: lycon->block.content_width is the table content-box width computed
+        // by layout_block.cpp from parent_content - margins - border - padding.
         if (lycon->block.content_width > 0) {
             container_width = lycon->block.content_width;
             margins_already_subtracted = true;
+            table_box_already_subtracted = true;
             log_debug("Container width from lycon content_width (BFC float avoidance): %.1fpx", container_width);
         }
 
@@ -6590,10 +6776,30 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                      container_width, margin_left, margin_right);
         }
 
-        max_available_width = container_width;
+        float table_horizontal_overhead = 0.0f;
+        if (!table_box_already_subtracted) {
+            if (!table->tb->border_collapse && table->bound) {
+                if (table->bound->padding.left > 0.0f) {
+                    table_horizontal_overhead += table->bound->padding.left;
+                }
+                if (table->bound->padding.right > 0.0f) {
+                    table_horizontal_overhead += table->bound->padding.right;
+                }
+                if (table->bound->border) {
+                    table_horizontal_overhead += table->bound->border->width.left +
+                        table->bound->border->width.right;
+                }
+            } else if (table->tb->border_collapse) {
+                table_horizontal_overhead += meta->collapsed_border_left / 2.0f +
+                    meta->collapsed_border_right / 2.0f;
+            }
+        }
+
+        max_available_width = container_width - table_horizontal_overhead;
         if (max_available_width < 0) max_available_width = 0;
 
-        log_debug("Auto table max available width: %.1fpx", max_available_width);
+        log_debug("Auto table max available grid width: %.1fpx (container=%.1f, table overhead=%.1f)",
+                  max_available_width, container_width, table_horizontal_overhead);
 
         // Constrain preferred width to available space
         // But never go below minimum content width (table will overflow)
@@ -7529,7 +7735,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 tcell->height = row->height;
                                 // Re-apply vertical alignment with correct cell height
                                 float content_height = measure_cell_content_height(lycon, tcell);
-                                apply_cell_vertical_align(tcell, tcell->height, content_height);
+                                apply_cell_vertical_align(lycon, tcell, tcell->height, content_height);
                             }
                         }
                     }
@@ -7604,7 +7810,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 if (tcell->height < r->height) {
                                     tcell->height = r->height;
                                     float cell_content_h = measure_cell_content_height(lycon, tcell);
-                                    apply_cell_vertical_align(tcell, tcell->height, cell_content_h);
+                                    apply_cell_vertical_align(lycon, tcell, tcell->height, cell_content_h);
                                 }
                             }
 
@@ -7732,7 +7938,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (tcell->height < trow->height) {
                     tcell->height = trow->height;
                     float content_height = measure_cell_content_height(lycon, tcell);
-                    apply_cell_vertical_align(tcell, tcell->height, content_height);
+                    apply_cell_vertical_align(lycon, tcell, tcell->height, content_height);
                 }
             }
 
@@ -7790,7 +7996,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     if (tcell->td->row_span == 1 && tcell->height < row->height) {
                                         tcell->height = row->height;
                                         float content_h = measure_cell_content_height(lycon, tcell);
-                                        apply_cell_vertical_align(tcell, tcell->height, content_h);
+                                        apply_cell_vertical_align(lycon, tcell, tcell->height, content_h);
                                     }
                                 }
                             }
@@ -7813,7 +8019,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             if (tcell->td->row_span == 1 && tcell->height < child->height) {
                                 tcell->height = child->height;
                                 float content_h = measure_cell_content_height(lycon, tcell);
-                                apply_cell_vertical_align(tcell, tcell->height, content_h);
+                                apply_cell_vertical_align(lycon, tcell, tcell->height, content_h);
                             }
                         }
                     }
@@ -8251,7 +8457,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                             cell->height = row->height;
                                             // Re-apply vertical alignment with new height
                                             float content_h = measure_cell_content_height(lycon, cell);
-                                            apply_cell_vertical_align(cell, cell->height, content_h);
+                                            apply_cell_vertical_align(lycon, cell, cell->height, content_h);
                                         }
                                     }
                                     break;  // Found the row index
@@ -8279,7 +8485,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 if (cell->td->row_span == 1) {
                                     cell->height = child->height;
                                     float content_h = measure_cell_content_height(lycon, cell);
-                                    apply_cell_vertical_align(cell, cell->height, content_h);
+                                    apply_cell_vertical_align(lycon, cell, cell->height, content_h);
                                 }
                             }
                             break;

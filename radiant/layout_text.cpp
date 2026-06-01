@@ -1595,6 +1595,7 @@ void line_break(LayoutContext* lycon) {
     if (lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender ||
         lycon->line.has_different_inline_font ||
+        lycon->line.has_replaced_content ||
         lycon->line.max_top_bottom_height > 0 ||
         lycon->line.max_top_height > 0 ||
         lycon->line.max_bottom_height > 0) {
@@ -2068,6 +2069,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
     rect->length = text_length;
     rect->width = text_width;
+    rect->line_number = lycon->block.line_number;
+    if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(text);
     lycon->line.advance_x += text_width;
     // CSS 2.1 §16.6.1: Commit trailing space info for cross-node line break trimming.
     // When new text content is output, the previous trailing space is no longer at
@@ -2376,6 +2379,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         rect->y = lycon->block.advance_y;
         rect->width = 0.0f;
         rect->height = 0.0f;
+        rect->line_number = lycon->block.line_number;
         return;
     }
 

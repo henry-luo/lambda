@@ -406,9 +406,12 @@ static bool selection_is_text_control_view(View* view) {
     return view && view->is_element() && tc_is_text_control(lam::dom_require_element(view));
 }
 
+extern "C" void legacy_sync_from_dom_selection(DocState* state);
+
 static void text_control_sync_selection(DocState* state, View* view) {
     if (!state || !selection_is_text_control_view(view)) return;
     tc_sync_legacy_to_form(lam::dom_require_element(view), state);
+    legacy_sync_from_dom_selection(state);
 }
 
 // Called from `dom_selection_create` (in dom_range.cpp) immediately after the

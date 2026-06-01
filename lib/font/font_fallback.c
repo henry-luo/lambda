@@ -23,7 +23,7 @@
 
 static const char* serif_fonts[] = {
 #ifdef __APPLE__
-    "Times", "Times New Roman", "Liberation Serif", "Nimbus Roman",
+    "Times New Roman", "Times", "Liberation Serif", "Nimbus Roman",
 #else
     "Times New Roman", "Liberation Serif", "Times", "Nimbus Roman",
 #endif
@@ -96,7 +96,7 @@ static const struct {
 } font_alias_table[] = {
     // Liberation fonts are metrically compatible with their MS counterparts
     {"Times New Roman",   {"Liberation Serif", "DejaVu Serif", "Nimbus Roman", NULL}},
-    {"Times",             {"Liberation Serif", "DejaVu Serif", "Nimbus Roman", NULL}},
+    {"Times",             {"Times New Roman", "Liberation Serif", "DejaVu Serif", NULL}},
     {"Arial",             {"Liberation Sans", "DejaVu Sans", "Nimbus Sans", NULL}},
     {"Helvetica",         {"Liberation Sans", "DejaVu Sans", "Nimbus Sans", NULL}},
     {"Helvetica Neue",    {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
@@ -115,7 +115,18 @@ static const struct {
     {NULL, {NULL, NULL, NULL, NULL}}
 };
 
-const char** font_get_aliases(const char* family) {
+static const char* times_browser_aliases[] = {"Times New Roman", NULL};
+
+const char* const* font_get_browser_compat_aliases(const char* family) {
+    if (!family) return NULL;
+    // Chromium on macOS serializes the default serif as "Times", but shapes it
+    // with Times New Roman-compatible metrics. Prefer that alias before an
+    // exact installed Apple Times face so CSS line wrapping follows the browser.
+    if (str_ieq_const(family, strlen(family), "Times")) return times_browser_aliases;
+    return NULL;
+}
+
+const char* const* font_get_aliases(const char* family) {
     if (!family) return NULL;
     for (int i = 0; font_alias_table[i].name; i++) {
         if (str_ieq(font_alias_table[i].name, strlen(font_alias_table[i].name),

@@ -129,6 +129,25 @@ static const char* select_intrinsic_font_family(LayoutContext* lycon, const CssV
     return fallback;
 }
 
+static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
+                                                      FontProp* parent_font) {
+    if (!font || !font->family || font->font_size <= 0.0f ||
+        !font->font_size_from_medium) {
+        return;
+    }
+    bool current_is_mono =
+        str_ieq_const(font->family, strlen(font->family), "monospace");
+    bool parent_is_mono = parent_font && parent_font->family &&
+        str_ieq_const(parent_font->family, strlen(parent_font->family), "monospace");
+    if (!current_is_mono || parent_is_mono) return;
+
+    float original_size = font->font_size;
+    font->font_size = original_size * 13.0f / 16.0f;
+    font->font_size_from_medium = false;
+    log_debug("intrinsic monospace generic-family quirk: %.1f -> %.1f",
+              original_size, font->font_size);
+}
+
 static bool css_has_horizontal_box_decl(StyleTree* style) {
     if (!style) return false;
     return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
@@ -1318,12 +1337,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
                         // font-size found
+                        bool parent_from_medium = lycon->font.style &&
+                            lycon->font.style->font_size_from_medium;
                         if (v->type == CSS_VALUE_TYPE_LENGTH) {
                             float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
-                            if (sz > 0) temp_font_prop->font_size = sz;
+                            if (sz > 0) {
+                                temp_font_prop->font_size = sz;
+                                temp_font_prop->font_size_from_medium =
+                                    (v->data.length.unit == CSS_UNIT_EM) && parent_from_medium;
+                            }
                         } else {
                             float parent_sz = lycon->font.style ? lycon->font.style->font_size : 16.0f;
                             temp_font_prop->font_size = (float)(v->data.percentage.value / 100.0 * parent_sz);
+                            temp_font_prop->font_size_from_medium = parent_from_medium;
                         }
                         // skip /line-height, then extract font-family
                         size_t fam_idx = fi + 1;
@@ -1364,7 +1390,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 temp_font_prop->font_style = v->data.keyword;
                             } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE) {
                                 float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
-                                if (sz > 0) temp_font_prop->font_size = sz;
+                                if (sz > 0) {
+                                    temp_font_prop->font_size = sz;
+                                    temp_font_prop->font_size_from_medium = true;
+                                }
                                 // everything after is font-family
                                 size_t fam_idx = fi + 1;
                                 if (fam_idx < count) {
@@ -1433,19 +1462,31 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (font_size_decl && font_size_decl->value &&
             (!font_shorthand_decl || font_size_decl->source_order > font_shorthand_decl->source_order)) {
             float resolved_size = 0;
+            bool resolved_from_medium = false;
+            bool parent_from_medium = lycon->font.style &&
+                lycon->font.style->font_size_from_medium;
             if (font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                 resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
                                                          font_size_decl->value);
+                resolved_from_medium =
+                    font_size_decl->value->data.length.unit == CSS_UNIT_EM &&
+                    parent_from_medium;
             } else if (font_size_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // e.g., font-size: 85% → percentage of parent font size
                 float parent_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
                 resolved_size = (float)(font_size_decl->value->data.percentage.value / 100.0 * parent_size);
+                resolved_from_medium = parent_from_medium;
+            } else if (font_size_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
+                                                     font_size_decl->value);
+                resolved_from_medium = true;
             }
             if (resolved_size > 0) {
                 // When shorthand already triggered setup, apply size unconditionally
                 // (even if it matches parent) to override shorthand's default size
                 if (need_font_setup || fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
                     temp_font_prop->font_size = resolved_size;
+                    temp_font_prop->font_size_from_medium = resolved_from_medium;
                     need_font_setup = true;
                 }
             }
@@ -1534,7 +1575,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Carry over font-size if not changed (needed for correct font loading)
             if (temp_font_prop->font_size <= 0 && lycon->font.style) {
                 temp_font_prop->font_size = lycon->font.style->font_size;
+                temp_font_prop->font_size_from_medium = lycon->font.style->font_size_from_medium;
             }
+            intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
             setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             font_changed = true;
         }

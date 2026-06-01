@@ -1094,6 +1094,7 @@ typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
+    int line_number;  // block-local line index assigned when this rect enters inline flow
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     TextRect* next;

@@ -34,6 +34,8 @@
 #include <cstdlib>
 using namespace std::chrono;
 
+extern void adjust_text_bounds(ViewText* text);
+
 // Check if a view element is a descendant of another view element
 static bool view_is_descendant_of(ViewElement* child, ViewElement* ancestor) {
     ViewElement* walker = child->parent_view();
@@ -4472,6 +4474,91 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
 
 static int layout_block_content_count = 0;
 
+static bool view_is_floated_box(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewBlock* block = lam::view_as_block(view);
+    return block && block->position && element_has_float(block);
+}
+
+static void shift_current_line_view_for_float(View* view, float offset, float line_y) {
+    if (!view || view_is_floated_box(view)) return;
+
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require_text(view);
+        bool shifted = false;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->y >= line_y - 1.0f) {
+                rect->x += offset;
+                shifted = true;
+            }
+        }
+        if (shifted) {
+            adjust_text_bounds(text);
+        }
+    } else if (view->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (span->y >= line_y - 1.0f) {
+            span->x += offset;
+        }
+        for (View* child = span->first_child; child; child = child->next()) {
+            shift_current_line_view_for_float(child, offset, line_y);
+        }
+    } else if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
+               view->view_type == RDT_VIEW_TABLE ||
+               view->view_type == RDT_VIEW_MARKER) {
+        if (view->y >= line_y - 1.0f) {
+            view->x += offset;
+        }
+    }
+}
+
+static void shift_current_line_content_before_float(ViewBlock* float_block, float offset, float line_y) {
+    DomNode* node = static_cast<DomNode*>(float_block)->prev_sibling;
+    while (node) {
+        View* view = static_cast<View*>(node);
+        if (view->view_type != RDT_VIEW_NONE) {
+            shift_current_line_view_for_float(view, offset, line_y);
+        }
+        node = node->prev_sibling;
+    }
+}
+
+static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Linebox* pa_line,
+                                                      BlockContext* bfc, ViewBlock* float_block) {
+    if (!pa_block || !pa_line || !bfc || !float_block) return;
+    if (pa_line->is_line_start || !pa_line->start_view) return;
+    if (!float_block->position || float_block->position->float_prop != CSS_VALUE_LEFT) return;
+
+    float line_height = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
+    float query_y = pa_block->bfc_offset_y + pa_block->advance_y;
+    FloatAvailableSpace space = block_context_space_at_y(bfc, query_y, line_height);
+    if (!space.has_left_float) return;
+
+    float new_effective_left = max(space.left - pa_block->bfc_offset_x, pa_line->left);
+    float new_effective_right = min(space.right - pa_block->bfc_offset_x, pa_line->right);
+    if (new_effective_left <= pa_line->effective_left + 0.01f) return;
+
+    float old_effective_left = pa_line->has_float_intrusion ? pa_line->effective_left : pa_line->left;
+    float current_line_width = max(pa_line->advance_x - old_effective_left, 0.0f);
+    float available_width = max(new_effective_right - new_effective_left, 0.0f);
+    if (current_line_width > available_width + 0.5f) {
+        log_debug("%s same-line float: current line content %.1f does not fit in %.1f, leaving line unchanged",
+            float_block->source_loc(), current_line_width, available_width);
+        return;
+    }
+
+    float offset = new_effective_left - old_effective_left;
+    if (offset <= 0.01f) return;
+
+    shift_current_line_content_before_float(float_block, offset, pa_block->advance_y);
+    pa_line->advance_x += offset;
+    pa_line->effective_left = new_effective_left;
+    pa_line->effective_right = new_effective_right;
+    pa_line->has_float_intrusion = true;
+    log_debug("%s same-line float: shifted current line by %.1f to effective_left %.1f",
+        float_block->source_loc(), offset, new_effective_left);
+}
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     layout_block_content_count++;
@@ -6334,10 +6421,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         BlockContext* bfc = block_context_find_bfc(pa_block);
         if (bfc) {
             block_context_add_float(bfc, block);
+            adjust_current_line_after_same_line_float(pa_block, pa_line, bfc, block);
             log_debug("%s [BlockContext] Float added to BFC root (bfc=%p, pa_block=%p)", block->source_loc(), (void*)bfc, (void*)pa_block);
         } else {
             // Fallback to parent if no BFC found
             block_context_add_float(pa_block, block);
+            adjust_current_line_after_same_line_float(pa_block, pa_line, pa_block, block);
             log_debug("%s [BlockContext] Float added to parent context (no BFC found)", block->source_loc());
         }
     }
@@ -6465,8 +6554,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    // Only cause line break for non-inline-block, non-float, non-blockified-inline-abspos blocks
-    if (display.outer != CSS_VALUE_INLINE_BLOCK && !is_float && !is_blockified_inline_abspos) {
+    bool is_inline_table = display.outer == CSS_VALUE_INLINE &&
+        display.inner == CSS_VALUE_TABLE;
+    bool is_inline_atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
+        is_inline_table;
+
+    // Only cause line break for non-inline atomic, non-float, non-blockified-inline-abspos blocks
+    if (!is_inline_atomic && !is_float && !is_blockified_inline_abspos) {
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         } else if (lycon->line.start_view) {
@@ -6697,7 +6791,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // originally inline-block should NOT be positioned as inline-block.
         // The float positioning in finalize_block already set the correct x/y.
         bool is_float_element = block->position && element_has_float(block);
-        if (display.outer == CSS_VALUE_INLINE_BLOCK && !is_float_element) {
+        if (is_inline_atomic && !is_float_element) {
             if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(block);
 
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
@@ -6875,11 +6969,22 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (is_inline_table && table_baseline >= 0) {
                     // Inline-table with first-row baseline found
                     item_baseline = (block->bound ? block->bound->margin.top : 0) + table_baseline;
+                } else if (block->tag() == HTM_TAG_TEXTAREA) {
+                    // Textarea is a scrollable text control whose inline baseline
+                    // matches the bottom border edge in browsers; margin-bottom
+                    // contributes below the baseline, not above it.
+                    item_baseline = block->height + (block->bound ? block->bound->margin.top : 0);
                 } else if (content_has_line_boxes && overflow_visible) {
                     // Baseline from top of margin-box = margin.top + content_baseline
                     item_baseline = (block->bound ? block->bound->margin.top : 0) + content_last_line_ascender;
+                } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
+                    // Browser engines align true replaced inline boxes on their
+                    // bottom border edge; margin-bottom contributes below the
+                    // baseline. Keep this first-pass baseline consistent with
+                    // view_vertical_align().
+                    item_baseline = block->height + (block->bound ? block->bound->margin.top : 0);
                 } else {
-                    // Replaced or no content: baseline at bottom margin edge
+                    // Non-replaced empty inline-block: baseline at bottom margin edge
                     item_baseline = item_height;
                 }
                 // CSS 2.1 §10.8.1: Use the strut's baseline as a reference for alignment
@@ -6894,12 +6999,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float offset = calculate_vertical_align_offset(
                     lycon, valign, item_height, line_height,
                     baseline_ref, item_baseline, valign_offset);
-                // For baseline-relative alignment (including length/percentage offsets),
-                // update BOTH max_ascender and max_descender so the line box expands
-                // to accommodate raised/lowered inline-blocks.  This ensures that the
-                // offset recomputed below (and in view_vertical_align's second pass)
-                // is non-negative, making the max(offset,0) clamp a no-op.
-                if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
+                // For baseline-relative alignment (including the default baseline
+                // value and length/percentage offsets), update BOTH max_ascender
+                // and max_descender so the line box expands to accommodate atomic
+                // inline-level boxes. This is what lets inline-table baselines
+                // participate in the parent line box instead of falling back to
+                // the block strut.
+                if (valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     float asc_contribution, desc_contribution;
                     if (valign == CSS_VALUE_MIDDLE) {
                         // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with
@@ -6939,7 +7045,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     offset, line_height, block->height, lycon->block.advance_y, block->y, valign);
                 // max_ascender/max_descender already updated above for
                 // baseline-relative alignment; only update here for other cases.
-                if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
+                if (valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     // already handled above
                 }
                 log_debug("%s new max_descender=%f", elmt->source_loc(), lycon->line.max_descender);
@@ -7080,16 +7186,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
                      block->scroller->overflow_y == CSS_VALUE_VISIBLE);
 
-                // Form controls with text always report an internal text baseline,
-                // regardless of overflow setting (they set last_line_ascender in layout_form_control).
-                // SELECT is excluded: it uses bottom-margin-edge baseline (handled via is_replaced above).
-                bool is_form_text_control = (block->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                    block->form && block->form->control_type != FORM_CONTROL_HIDDEN &&
-                    block->form->control_type != FORM_CONTROL_IMAGE &&
-                    block->form->control_type != FORM_CONTROL_SELECT);
-
                 bool uses_content_baseline = (content_has_line_boxes && overflow_visible) ||
-                    (content_has_line_boxes && is_form_text_control) ||
                     (is_inline_table && table_baseline >= 0);
 
                 float effective_baseline = content_last_line_ascender;
@@ -7107,6 +7204,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     float descender_part = block->height - effective_baseline +
                         (block->bound ? block->bound->margin.bottom : 0);
                     lycon->line.max_descender = max(lycon->line.max_descender, descender_part);
+                    // CSS 2.1 §10.8.1: The block container's strut is present
+                    // even when the line's visible content is an atomic inline
+                    // with a content-derived baseline. Keep the strut's
+                    // below-baseline extent so an inline-table cannot collapse
+                    // the line box to only its own border box.
+                    float half_leading = (lycon->block.line_height -
+                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+                    float strut_below = lycon->block.init_descender + half_leading;
+                    if (strut_below > 0.0f) {
+                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                    }
                     log_debug("%s inline-block with content baseline: ascender=%.1f, descender=%.1f, block_h=%.1f", elmt->source_loc(),
                         effective_baseline, descender_part, block->height);
                 } else {
