@@ -10671,15 +10671,6 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 TypeId field_type = p1_ce->constructor->fc->ctor_prop_types[p4_slot];
                 int64_t byte_offset = (int64_t)p4_slot * (int64_t)sizeof(void*);
 
-                // TRACE: log P4b slot reads for .R property
-                if (p4_prop->name->len == 1 && p4_prop->name->chars[0] == 'R') {
-                    log_error("TRACE P4b .R: field_type=%d slot=%d offset=%d class='%s' obj='%.*s'",
-                        (int)field_type, p4_slot, (int)byte_offset,
-                        p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name ?
-                        p1_ce->constructor->fc->name : "anon",
-                        (int)p4_obj->name->len, p4_obj->name->chars);
-                }
-
                 // P4b: Type-specialized slot read with guard.
                 // When shape_cache_ptr available: §7 inline shape guard → direct memory load + boxing.
                 // Otherwise: map_kind guard → js_get_slot_i/f + boxing.

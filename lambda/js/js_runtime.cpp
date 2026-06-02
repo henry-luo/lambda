@@ -4857,7 +4857,32 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
     return found && val.item != JS_DELETED_SENTINEL_VAL;
 }
 
+// Fast path for writing an existing own dense data element of a plain Array.
+// Per ES OrdinarySet, an own writable data property is written directly without
+// consulting accessors, the prototype chain, or typed-array proto exotics — so
+// none of those checks are observable here. arr->extra==0 guarantees the array
+// carries no indexed accessor / non-writable / sparse descriptors (those all live
+// in the companion map), and is_content!=1 excludes the arguments-exotic object,
+// so every present dense slot is a plain writable data property. Returns true
+// when it handled the store. Keeps array-heavy loops off the slow runtime path.
+static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
+    Array* arr = object.array;
+    if (arr->extra != 0 || arr->is_content == 1) return false;
+    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
+    arr->items[index] = value;
+    return true;
+}
+
 extern "C" Item js_property_set(Item object, Item key, Item value) {
+    // Fast path: result[i] = v where i is an existing own dense element of a
+    // plain array. Bypasses the symbol/marker/accessor/proto preamble below,
+    // which is all no-op for a non-negative integer key on such an array.
+    if (get_type_id(object) == LMD_TYPE_ARRAY && get_type_id(key) == LMD_TYPE_INT) {
+        int64_t kidx = it2i(key);
+        if (kidx >= 0 && js_array_fast_own_dense_set(object, kidx, value)) return value;
+    }
     // process.env: symbol keys throw TypeError (before symbol-to-key conversion)
     if (js_key_is_symbol(key) && get_type_id(object) == LMD_TYPE_MAP &&
         object.map->map_kind == MAP_KIND_PROCESS_ENV) {
@@ -6832,6 +6857,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         return js_property_set(array, key, value);
     }
     Array* arr = array.array;
+    // Fast path: overwrite an existing own dense data element. Per ES OrdinarySet
+    // this is a direct write with no accessor / prototype-chain / typed-array-proto
+    // consultation, so it short-circuits the per-write work below.
+    if (js_array_fast_own_dense_set(array, index, value)) return value;
     Item index_key = (Item){.item = i2it((int)index)};
     bool ta_proto_no_op = false;
     bool ta_proto_bypass_accessor = js_array_ta_proto_numeric_set(array, index_key, &ta_proto_no_op);

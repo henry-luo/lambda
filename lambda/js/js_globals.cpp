@@ -7911,6 +7911,43 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
 }
 
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
+    // Fast path (object-literal / spread / fromEntries hot path):
+    // CreateDataProperty == [[DefineOwnProperty]] of a data property with default
+    // attributes (writable/enumerable/configurable = true). [[DefineOwnProperty]]
+    // NEVER consults the prototype chain — so for a brand-new own key on an
+    // ordinary, extensible plain object it is exactly a raw own-field store via
+    // map_put: no throwaway descriptor object, no interning of the four attribute
+    // names, no prototype walk. This is the correct primitive — unlike
+    // js_property_set, which implements [[Set]] and would honour inherited
+    // non-writable / accessor properties (wrong for CreateDataProperty, and the
+    // reason an earlier js_property_set-based attempt was reverted).
+    //
+    // Guards keep it strictly equivalent to the slow descriptor path below:
+    //  - ordinary plain object (MAP_KIND_PLAIN, class NONE/OBJECT): excludes
+    //    proxies, typed arrays, String/Array/Date/etc. exotics with special
+    //    [[DefineOwnProperty]] behaviour;
+    //  - string key not "__"-prefixed: excludes __proto__ (own-proto marking),
+    //    symbol keys (__sym_*), private fields (__private_*) and attribute markers;
+    //  - key has no existing shape entry (js_map_get_fast_ext reports found even
+    //    for deleted-sentinel entries, so map_put never creates a duplicate, and
+    //    redefinition of an existing own property keeps its spec-correct path);
+    //  - target is extensible.
+    if (js_input && get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
+        Map* m = obj.map;
+        JsClass cls = js_class_id(obj);
+        if (m && m->map_kind == MAP_KIND_PLAIN &&
+            (cls == JS_CLASS_NONE || cls == JS_CLASS_OBJECT)) {
+            String* nm = it2s(name);
+            if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
+                bool key_exists = false;
+                js_map_get_fast_ext(m, nm->chars, (int)nm->len, &key_exists);
+                if (!key_exists && js_is_truthy(js_object_is_extensible(obj))) {
+                    map_put(m, nm, value, js_input);
+                    return obj;
+                }
+            }
+        }
+    }
     if (get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
         String* name_str = it2s(name);
         if (name_str && name_str->len == 9 && strncmp(name_str->chars, "__proto__", 9) == 0) {
