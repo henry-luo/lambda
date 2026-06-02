@@ -174,6 +174,15 @@ void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block) {
     render_walk_positioned_children(&backend, &walk_state, block);
 }
 
+void render_raster_positive_z_descendants(RenderContext* rdcon, View* view) {
+    if (!rdcon || !view) return;
+    RenderBackend backend;
+    render_raster_backend_init(&backend, rdcon);
+    RenderWalkState walk_state;
+    render_raster_walk_state_init(&walk_state, rdcon);
+    render_walk_positive_z_descendants(&backend, &walk_state, view);
+}
+
 void render_children(RenderContext* rdcon, View* view) {
     if (!rdcon || !view) return;
     auto trc_start = std::chrono::high_resolution_clock::now();

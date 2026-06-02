@@ -84,6 +84,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view);
 void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
 void render_children(RenderContext* rdcon, View* view);
 void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block);
+void render_raster_positive_z_descendants(RenderContext* rdcon, View* view);
 void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree);
 RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block);
 void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope);
