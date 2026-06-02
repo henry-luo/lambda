@@ -530,6 +530,7 @@ static void render_block_walk_children_phase(RenderContext* rdcon, ViewBlock* bl
         log_debug("render absolute/fixed positioned children");
         render_raster_positioned_children(rdcon, block);
     }
+    render_raster_positive_z_descendants(rdcon, block->first_child);
 }
 
 static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock* block,

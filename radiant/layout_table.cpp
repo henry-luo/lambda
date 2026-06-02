@@ -422,6 +422,8 @@ static float find_descendant_float_max_y(ViewElement* parent, float y_offset) {
     return max_y;
 }
 
+static bool table_cell_vertical_align_skips_child(View* child);
+
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     bool has_block_content = false;
@@ -447,6 +449,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     // block auto-restored by bscope destructor
 
     for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
+        if (table_cell_vertical_align_skips_child(child)) {
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             // Track min/max Y for text content to handle multi-line cells with <br> elements
@@ -989,6 +994,29 @@ static float find_cell_content_top_for_vertical_align(LayoutContext* lycon, View
     return content_top;
 }
 
+static void shift_table_cell_vertical_align_child(View* child, float y_adjustment) {
+    if (!child || !child->view_type) return;
+
+    child->y += y_adjustment;
+    if (child->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            rect->y += y_adjustment;
+        }
+        return;
+    }
+
+    if (child->view_type == RDT_VIEW_INLINE) {
+        ViewElement* element = lam::view_require_element(child);
+        for (View* grandchild = element->first_child; grandchild; grandchild = grandchild->next_sibling) {
+            if (table_cell_vertical_align_skips_child(grandchild)) {
+                continue;
+            }
+            shift_table_cell_vertical_align_child(grandchild, y_adjustment);
+        }
+    }
+}
+
 static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell, float cell_height, float content_height) {
     log_debug("%s apply_cell_vertical_align: valign=%d, cell_height=%.1f, content_height=%.1f, is_empty=%d", tcell->source_loc(),
            tcell->td->vertical_align, cell_height, content_height, tcell->td->is_empty);
@@ -1060,6 +1088,9 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     float current_content_top = 1e8f;
     for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue; // skip uninitialized view nodes
+        if (table_cell_vertical_align_skips_child(child)) {
+            continue;
+        }
         float ct = child->y;
         if (child->view_type == RDT_VIEW_BLOCK ||
             child->view_type == RDT_VIEW_LIST_ITEM ||
@@ -1082,15 +1113,10 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     if (y_adjustment != 0) {
         for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
             if (!child->view_type) continue; // skip uninitialized view nodes
-            child->y += y_adjustment;
-            // Also update TextRect for ViewText nodes
-            if (child->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-                // Update ALL text rects in the chain (multi-line wrapped text has multiple rects)
-                for (TextRect* r = text->rect; r; r = r->next) {
-                    r->y += y_adjustment;
-                }
+            if (table_cell_vertical_align_skips_child(child)) {
+                continue;
             }
+            shift_table_cell_vertical_align_child(child, y_adjustment);
         }
     }
 }
@@ -4306,6 +4332,13 @@ static void calculate_rowspan_heights(ViewTable* table, TableMetadata* meta, flo
 }
 
 // Apply CSS vertical-align positioning to cell content
+static bool table_cell_vertical_align_skips_child(View* child) {
+    ViewElement* element = lam::view_as_element(child);
+    return element && element->position &&
+        (element->position->position == CSS_VALUE_ABSOLUTE ||
+         element->position->position == CSS_VALUE_FIXED);
+}
+
 static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* tcell, float content_height) {
     if (!tcell || !tcell->td) return;
 
@@ -4319,6 +4352,9 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
 
     // Find the bounding box of all child content
     for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
+        if (table_cell_vertical_align_skips_child(child)) {
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             if (text->y < min_y) min_y = text->y;
@@ -4341,6 +4377,9 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
 
     // Content actual height is the span from first content to last content bottom
     float content_actual_height = max_y - min_y;
+    if (tcell->content_height > content_actual_height) {
+        content_actual_height = tcell->content_height;
+    }
     log_debug("%s Cell vertical-align: content_height=%.1f, content_actual_height=%.1f (min_y=%.1f, max_y=%.1f)", tcell->source_loc(),
              content_height, content_actual_height, min_y, max_y);
 
@@ -4374,19 +4413,15 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
     }
 
     // Apply offset to all child content
-    if (vertical_offset > 0) {
+    if (vertical_offset != 0.0f) {
         for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
+            if (table_cell_vertical_align_skips_child(child)) {
+                continue;
+            }
+            shift_table_cell_vertical_align_child(child, vertical_offset);
             if (child->view_type == RDT_VIEW_TEXT) {
-                ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-                text->y += vertical_offset;
                 log_debug("%s CSS vertical-align: adjusted text Y by +%.1fpx (align=%d)", tcell->source_loc(),
                          vertical_offset, (int)valign); // INT_CAST_OK: enum for log
-            } else if (child->view_type == RDT_VIEW_BLOCK ||
-                       child->view_type == RDT_VIEW_LIST_ITEM ||
-                       child->view_type == RDT_VIEW_INLINE ||
-                       child->view_type == RDT_VIEW_BR) {
-                ViewElement* element = lam::view_require_element(child);
-                element->y += vertical_offset;
             }
         }
     }
