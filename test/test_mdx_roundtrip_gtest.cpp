@@ -27,19 +27,15 @@ static char* normalize_mdx(const char* mdx) {
     if (!normalized) return NULL;
 
     size_t write_pos = 0;
-    bool in_jsx_tag = false;
     bool prev_was_space = false;
 
     for (size_t i = 0; i < len; i++) {
         char c = mdx[i];
 
-        // Track JSX tag boundaries
         if (c == '<') {
-            in_jsx_tag = true;
             normalized[write_pos++] = c;
             prev_was_space = false;
         } else if (c == '>') {
-            in_jsx_tag = false;
             normalized[write_pos++] = c;
             prev_was_space = false;
         } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {

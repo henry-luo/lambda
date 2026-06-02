@@ -63,14 +63,6 @@ TEST_F(CssEngineNegativeTest, UnclosedString_DoubleQuote) {
     CssToken* tokens = nullptr;
     int token_count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
 
-    // Should detect BAD_STRING token or handle gracefully
-    bool has_bad_string = false;
-    for (int i = 0; i < token_count; i++) {
-        if (tokens[i].type == CSS_TOKEN_BAD_STRING) {
-            has_bad_string = true;
-            break;
-        }
-    }
     // Either detect the error or parse without crashing
     EXPECT_TRUE(token_count >= 0);
 }
@@ -96,14 +88,6 @@ TEST_F(CssEngineNegativeTest, UnclosedURL) {
     CssToken* tokens = nullptr;
     int token_count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
 
-    // Should detect BAD_URL token or handle gracefully
-    bool has_bad_url = false;
-    for (int i = 0; i < token_count; i++) {
-        if (tokens[i].type == CSS_TOKEN_BAD_URL) {
-            has_bad_url = true;
-            break;
-        }
-    }
     EXPECT_TRUE(token_count >= 0);
 }
 

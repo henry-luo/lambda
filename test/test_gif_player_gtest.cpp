@@ -131,6 +131,13 @@ TEST(GifDetection, StaticGifReturnsNull) {
     EXPECT_EQ(frames, nullptr);
 }
 
+TEST(GifDetection, AnimatedGifReturnsFrames) {
+    GifFrames* frames = gif_detect_animated_from_memory(ANIM_GIF_2FRAME, ANIM_GIF_2FRAME_LEN);
+    ASSERT_NE(frames, nullptr);
+    EXPECT_EQ(frames->frame_count, 2);
+    image_gif_free(frames);
+}
+
 // ============================================================================
 // GIF Frame Count Tests (file-based helpers)
 // ============================================================================
@@ -146,6 +153,11 @@ TEST(GifFrameCount, NonExistentFileReturnsZero) {
 TEST(GifFrameCount, MemoryStaticGif) {
     int count = image_gif_frame_count_from_memory(STATIC_GIF, STATIC_GIF_LEN);
     EXPECT_EQ(count, 1);
+}
+
+TEST(GifFrameCount, MemoryAnimatedGif) {
+    int count = image_gif_frame_count_from_memory(ANIM_GIF_2FRAME, ANIM_GIF_2FRAME_LEN);
+    EXPECT_EQ(count, 2);
 }
 
 // ============================================================================

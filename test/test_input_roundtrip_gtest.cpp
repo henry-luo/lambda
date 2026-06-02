@@ -251,7 +251,7 @@ protected:
 
         // Compare the original and formatted content
         bool content_matches = false;
-        if (formatted->chars && strlen(formatted->chars) > 0) {
+        if (strlen(formatted->chars) > 0) {
             // For JSON and XML, we can do direct comparison
             if (strcmp(format_type, "json") == 0 || strcmp(format_type, "xml") == 0) {
                 content_matches = strings_equal_normalized(original_content, formatted->chars);
@@ -2291,7 +2291,6 @@ TEST_F(CsvTests, CsvRoundtrip) {
     ASSERT_NE(parsed_input, nullptr) << "Failed to parse CSV content";
     printf("CSV parsed successfully\n");
 
-    Item root_item = parsed_input->root;
     printf("Formatting back to CSV...\n");
 
     // Note: CSV format may not be implemented in format_data

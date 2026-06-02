@@ -429,14 +429,12 @@ static std::string execute_bash_test(const std::string& tests_path) {
 
     std::string output;
     char buffer[4096];
-    bool timed_out = false;
 
     // Read with timeout using select()
     time_t start = time(nullptr);
     while (true) {
         int elapsed = (int)(time(nullptr) - start);
         if (elapsed >= TEST_TIMEOUT_SECONDS) {
-            timed_out = true;
             kill(-pid, SIGKILL);
             break;
         }
@@ -458,7 +456,6 @@ static std::string execute_bash_test(const std::string& tests_path) {
 
             // Cap output to 1MB to prevent memory issues on infinite-output tests
             if (output.size() > 1024 * 1024) {
-                timed_out = true;
                 kill(-pid, SIGKILL);
                 break;
             }
