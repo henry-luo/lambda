@@ -624,6 +624,8 @@ bool path_has_wildcards(Path* path) {
 #include "../lib/file.h"
 #include "../lib/file_utils.h"
 #include "../lib/arraylist.h"
+#include "../lib/url.h"
+#include "../lib/mem.h"
 
 // Extern declaration for datetime_from_unix (defined in datetime.c)
 // In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*
@@ -851,14 +853,12 @@ extern RetItem fn_input1(Item url);
  * Returns parsed structure (String, Map, Element, etc.)
  */
 static Item resolve_file_content(Path* path, const char* file_path) {
-    // Build URL string for input system
-    StrBuf* url_buf = strbuf_new();
-    strbuf_append_str(url_buf, "file://");
-    strbuf_append_str(url_buf, file_path);
-    
-    String* url_str = heap_strcpy(url_buf->str, url_buf->length);
-    strbuf_free(url_buf);
-    
+    // Build file:// URL string for input system (percent-encodes, cross-platform)
+    char* file_url = url_from_local_path(file_path);
+    if (!file_url) return ITEM_ERROR;
+    String* url_str = heap_strcpy(file_url, strlen(file_url));
+    mem_free(file_url);
+
     // Use existing input system to load and parse
     RetItem content_ri = fn_input1(s2it(url_str));
     

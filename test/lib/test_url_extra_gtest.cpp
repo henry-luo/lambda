@@ -422,3 +422,86 @@ TEST_F(UrlExtraTest, ExtremelyLongUrls) {
         SUCCEED() << "Extremely long URL handled without crashing";
     }
 }
+
+// ── url_from_local_path / url_to_local_path round-trip ──
+TEST_F(UrlExtraTest, FromLocalPathPosix) {
+    char* u = url_from_local_path("/Users/henry/file.html");
+    ASSERT_NE(u, nullptr);
+    EXPECT_STREQ(u, "file:///Users/henry/file.html");
+    free(u);
+}
+
+TEST_F(UrlExtraTest, FromLocalPathPercentEncodesSpaces) {
+    char* u = url_from_local_path("/tmp/a b#c.txt");
+    ASSERT_NE(u, nullptr);
+    // space -> %20, '#' -> %23, '/' and unreserved preserved
+    EXPECT_STREQ(u, "file:///tmp/a%20b%23c.txt");
+    free(u);
+}
+
+TEST_F(UrlExtraTest, FromLocalPathRoundTrip) {
+    const char* path = "/var/data/some file (1).json";
+    char* u = url_from_local_path(path);
+    ASSERT_NE(u, nullptr);
+    Url* parsed = url_parse(u);
+    ASSERT_NE(parsed, nullptr);
+    char* back = url_to_local_path(parsed);
+    ASSERT_NE(back, nullptr);
+    EXPECT_STREQ(back, path);
+    free(back);
+    url_destroy(parsed);
+    free(u);
+}
+
+TEST_F(UrlExtraTest, FromLocalPathNull) {
+    EXPECT_EQ(url_from_local_path(nullptr), nullptr);
+}
+
+// ── url_decode_form: %XX plus '+' -> space ──
+TEST_F(UrlExtraTest, DecodeForm) {
+    size_t out_len = 0;
+    const char* in = "a+b%20c%2Bd";
+    char* d = url_decode_form(in, strlen(in), &out_len);
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d, "a b c+d");
+    EXPECT_EQ(out_len, strlen("a b c+d"));
+    free(d);
+}
+
+TEST_F(UrlExtraTest, DecodeFormLenientBadEscape) {
+    size_t out_len = 0;
+    const char* in = "x%zzy"; // malformed -> passes through literally
+    char* d = url_decode_form(in, strlen(in), &out_len);
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d, "x%zzy");
+    free(d);
+}
+
+// ── url_decode_inplace: zero-alloc in-place decode ──
+TEST_F(UrlExtraTest, DecodeInplaceForm) {
+    char buf[] = "hello+world%21";
+    size_t n = url_decode_inplace(buf, true);
+    EXPECT_STREQ(buf, "hello world!");
+    EXPECT_EQ(n, strlen("hello world!"));
+}
+
+TEST_F(UrlExtraTest, DecodeInplaceNoForm) {
+    char buf[] = "a+b%2Fc"; // '+' preserved when form=false
+    size_t n = url_decode_inplace(buf, false);
+    EXPECT_STREQ(buf, "a+b/c");
+    EXPECT_EQ(n, strlen("a+b/c"));
+}
+
+// ── url_encode_with_table: caller-supplied keep set ──
+TEST_F(UrlExtraTest, EncodeWithTable) {
+    uint8_t keep[256];
+    memset(keep, 0, sizeof(keep));
+    for (int c = 'a'; c <= 'z'; c++) keep[c] = 1;
+    const char* in = "abc def";
+    char* e = url_encode_with_table(in, strlen(in), keep);
+    ASSERT_NE(e, nullptr);
+    // 'a','b','c' kept; ' ' and 'd','e','f' (uppercase-only kept? no, lowercase kept) ...
+    // here d/e/f are lowercase and kept; only space is encoded
+    EXPECT_STREQ(e, "abc%20def");
+    free(e);
+}

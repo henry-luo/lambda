@@ -7,6 +7,7 @@
 #include "serve_utils.hpp"
 #include <string.h>
 #include "../../lib/mem.h"
+#include "../../lib/url.h"
 #include <ctype.h>
 
 // ============================================================================
@@ -39,37 +40,6 @@ void cookie_entries_free(CookieEntry *list) {
 // Internal helpers
 // ============================================================================
 
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-static size_t url_decode_inplace(char *str) {
-    if (!str) return 0;
-    char *src = str, *dst = str;
-    while (*src) {
-        if (*src == '%' && src[1] && src[2]) {
-            int hi = hex_digit(src[1]);
-            int lo = hex_digit(src[2]);
-            if (hi >= 0 && lo >= 0) {
-                *dst++ = (char)((hi << 4) | lo);
-                src += 3;
-                continue;
-            }
-        }
-        if (*src == '+') {
-            *dst++ = ' ';
-            src++;
-        } else {
-            *dst++ = *src++;
-        }
-    }
-    *dst = '\0';
-    return (size_t)(dst - str);
-}
-
 static void parse_query_params(HttpRequest *req) {
     if (!req->query_string) return;
     char *copy = serve_strdup(req->query_string);
@@ -83,11 +53,11 @@ static void parse_query_params(HttpRequest *req) {
             *eq = '\0';
             char *key = pair;
             char *val = eq + 1;
-            url_decode_inplace(key);
-            url_decode_inplace(val);
+            url_decode_inplace(key, true);
+            url_decode_inplace(val, true);
             req->query_params = http_header_add(req->query_params, key, val);
         } else {
-            url_decode_inplace(pair);
+            url_decode_inplace(pair, true);
             req->query_params = http_header_add(req->query_params, pair, "");
         }
         pair = strtok_r(NULL, "&", &saveptr);
@@ -198,7 +168,7 @@ HttpRequest* http_request_parse(const char *data, size_t len) {
             req->query_string = serve_strdup(qmark + 1);
         }
         req->path = serve_strdup(work);
-        if (req->path) url_decode_inplace(req->path);
+        if (req->path) url_decode_inplace(req->path, true);
         serve_free(work);
     }
 

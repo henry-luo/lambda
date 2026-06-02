@@ -11,6 +11,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include "../../lib/mem.h"
+#include "../../lib/hex.h"
 
 #include <cstring>
 
@@ -83,7 +84,6 @@ do_encode:;
 
     // Node's noEscape table: unreserved chars that pass through unencoded
     // A-Z a-z 0-9 - _ . ~ ! ' ( ) *
-    static const char hex[] = "0123456789ABCDEF";
     // Worst case: every code point becomes 4 bytes → 12 percent-encoded chars
     size_t max_out = s->len * 12 + 1;
     char* out = (char*)mem_alloc(max_out, MEM_CAT_TEMP);
@@ -123,7 +123,7 @@ do_encode:;
                 cc == '(' || cc == ')' || cc == '*') {
                 out[j++] = (char)cc;
             } else {
-                out[j++] = '%'; out[j++] = hex[cc >> 4]; out[j++] = hex[cc & 0x0F];
+                out[j++] = '%'; out[j++] = hex_encode_nibble_upper(cc >> 4); out[j++] = hex_encode_nibble_upper(cc & 0x0F);
             }
             continue;
         }
@@ -132,8 +132,8 @@ do_encode:;
         if (c < 0x800) {
             unsigned char b1 = 0xC0 | (c >> 6);
             unsigned char b2 = 0x80 | (c & 0x3F);
-            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b1 >> 4); out[j++] = hex_encode_nibble_upper(b1 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b2 >> 4); out[j++] = hex_encode_nibble_upper(b2 & 0x0F);
             continue;
         }
 
@@ -176,10 +176,10 @@ do_encode:;
             unsigned char b2 = 0x80 | ((cp >> 12) & 0x3F);
             unsigned char b3 = 0x80 | ((cp >> 6) & 0x3F);
             unsigned char b4 = 0x80 | (cp & 0x3F);
-            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b4 >> 4]; out[j++] = hex[b4 & 0x0F];
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b1 >> 4); out[j++] = hex_encode_nibble_upper(b1 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b2 >> 4); out[j++] = hex_encode_nibble_upper(b2 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b3 >> 4); out[j++] = hex_encode_nibble_upper(b3 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b4 >> 4); out[j++] = hex_encode_nibble_upper(b4 & 0x0F);
             continue;
         }
 
@@ -188,9 +188,9 @@ do_encode:;
             unsigned char b1 = 0xE0 | (c >> 12);
             unsigned char b2 = 0x80 | ((c >> 6) & 0x3F);
             unsigned char b3 = 0x80 | (c & 0x3F);
-            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b1 >> 4); out[j++] = hex_encode_nibble_upper(b1 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b2 >> 4); out[j++] = hex_encode_nibble_upper(b2 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b3 >> 4); out[j++] = hex_encode_nibble_upper(b3 & 0x0F);
             continue;
         }
 
@@ -200,10 +200,10 @@ do_encode:;
             unsigned char b2 = 0x80 | ((c >> 12) & 0x3F);
             unsigned char b3 = 0x80 | ((c >> 6) & 0x3F);
             unsigned char b4 = 0x80 | (c & 0x3F);
-            out[j++] = '%'; out[j++] = hex[b1 >> 4]; out[j++] = hex[b1 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b2 >> 4]; out[j++] = hex[b2 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b3 >> 4]; out[j++] = hex[b3 & 0x0F];
-            out[j++] = '%'; out[j++] = hex[b4 >> 4]; out[j++] = hex[b4 & 0x0F];
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b1 >> 4); out[j++] = hex_encode_nibble_upper(b1 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b2 >> 4); out[j++] = hex_encode_nibble_upper(b2 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b3 >> 4); out[j++] = hex_encode_nibble_upper(b3 & 0x0F);
+            out[j++] = '%'; out[j++] = hex_encode_nibble_upper(b4 >> 4); out[j++] = hex_encode_nibble_upper(b4 & 0x0F);
         }
     }
     out[j] = '\0';

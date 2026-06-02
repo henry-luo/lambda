@@ -52,27 +52,14 @@ static Url* get_cwd_url(void) {
         return NULL;
     }
 
-    // Convert to file:// URL
-    StrBuf* url_buf = strbuf_new();
-    strbuf_append_str(url_buf, "file://");
-
-#ifdef _WIN32
-    // Windows: convert C:\path to /C:/path
-    if (cwd_buf[1] == ':') {
-        strbuf_append_char(url_buf, '/');
-    }
-#endif
-
-    // Append path, converting backslashes to forward slashes
-    for (char* p = cwd_buf; *p; p++) {
-        if (*p == '\\') {
-            strbuf_append_char(url_buf, '/');
-        } else {
-            strbuf_append_char(url_buf, *p);
-        }
-    }
-
+    // Convert to a percent-encoded, cross-platform file:// URL
+    char* file_url = url_from_local_path(cwd_buf);
     mem_free(cwd_buf);
+    if (!file_url) return NULL;
+
+    StrBuf* url_buf = strbuf_new();
+    strbuf_append_str(url_buf, file_url);
+    mem_free(file_url);
 
     // Ensure trailing slash for directory
     if (url_buf->length > 0 && url_buf->str[url_buf->length - 1] != '/') {
@@ -197,11 +184,11 @@ Target* item_to_target(uint64_t item, Url* cwd) {
 #ifdef _WIN32
         // Detect Windows absolute path with drive letter (e.g., C:/... or D:\...)
         // Convert to file:// URL to prevent the drive letter being parsed as a URL scheme
-        char file_url_buf[2048];
         if (isalpha((unsigned char)url_str[0]) && url_str[1] == ':' &&
             (url_str[2] == '/' || url_str[2] == '\\')) {
-            snprintf(file_url_buf, sizeof(file_url_buf), "file:///%s", url_str);
-            url = url_parse(file_url_buf);
+            char* file_url_buf = url_from_local_path(url_str);
+            url = url_parse(file_url_buf ? file_url_buf : url_str);
+            if (file_url_buf) mem_free(file_url_buf);
         } else
 #endif
         if (cwd) {

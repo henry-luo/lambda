@@ -161,6 +161,15 @@
   object-fit: contain;
 }
 
+.render-document {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 480px;
+  border: none;
+  background: #ffffff;
+}
+
 .diff-badge {
   padding: 2px 8px;
   border-radius: 4px;

@@ -11,6 +11,7 @@
 #include "../../lib/log.h"
 #include "../../lib/url.h"
 #include "../../lib/mem.h"
+#include "../../lib/hex.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -277,58 +278,27 @@ extern "C" Item js_url_fileURLToPath(Item url_item) {
 #endif
     }
 
-    // URL-decode %XX sequences
-    char decoded[4096];
-    int di = 0;
-    for (int i = 0; path[i] && di < (int)sizeof(decoded) - 1; i++) {
-        if (path[i] == '%' && path[i+1] && path[i+2]) {
-            auto hex_digit = [](char c) -> int {
-                if (c >= '0' && c <= '9') return c - '0';
-                if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-                if (c >= 'A' && c <= 'F') return 10 + c - 'A';
-                return 0;
-            };
-            decoded[di++] = (char)((hex_digit(path[i+1]) << 4) | hex_digit(path[i+2]));
-            i += 2;
-        } else {
-            decoded[di++] = path[i];
-        }
-    }
-    decoded[di] = '\0';
-
-    return make_string_item(decoded, di);
+    // URL-decode %XX sequences (paths: no '+' -> space). Fall back to the raw
+    // path if it is not well-formed percent-encoding.
+    size_t out_len = 0;
+    char* decoded = url_decode_component(path, strlen(path), &out_len);
+    Item result = decoded ? make_string_item(decoded, (int)out_len)
+                          : make_string_item(path);
+    if (decoded) mem_free(decoded);
+    return result;
 }
 
 // ─── pathToFileURL(path) — convert local path to file:// URL ────────────────
 extern "C" Item js_url_pathToFileURL(Item path_item) {
     if (get_type_id(path_item) != LMD_TYPE_STRING) return ItemNull;
     String* s = it2s(path_item);
-    char buf[4096];
-    int len = (int)s->len;
-    if (len >= (int)sizeof(buf) - 8) len = (int)sizeof(buf) - 9;
 
-    // build file:// URL — simple path encoding
-    int pos = 0;
-    memcpy(buf, "file://", 7);
-    pos = 7;
-
-#ifdef _WIN32
-    // windows: file:///C:/foo
-    buf[pos++] = '/';
-#endif
-
-    // encode path: replace spaces with %20, leave / alone
-    for (int i = 0; i < len && pos < (int)sizeof(buf) - 4; i++) {
-        char c = s->chars[i];
-        if (c == ' ') {
-            buf[pos++] = '%'; buf[pos++] = '2'; buf[pos++] = '0';
-        } else {
-            buf[pos++] = c;
-        }
-    }
-    buf[pos] = '\0';
-
-    return make_string_item(buf, pos);
+    // build a percent-encoded, cross-platform file:// URL
+    char* file_url = url_from_local_path(s->chars);
+    if (!file_url) return ItemNull;
+    Item result = make_string_item(file_url);
+    mem_free(file_url);
+    return result;
 }
 
 // =============================================================================
@@ -345,27 +315,8 @@ static Item parse_query_entries(const char* qs, int qs_len) {
     memcpy(buf, qs, qs_len);
     buf[qs_len] = '\0';
 
-    // URL-decode a string in-place
-    auto url_decode = [](char* s) {
-        char* out = s;
-        for (char* p = s; *p; p++) {
-            if (*p == '+') {
-                *out++ = ' ';
-            } else if (*p == '%' && p[1] && p[2]) {
-                auto hex = [](char c) -> int {
-                    if (c >= '0' && c <= '9') return c - '0';
-                    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-                    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
-                    return 0;
-                };
-                *out++ = (char)((hex(p[1]) << 4) | hex(p[2]));
-                p += 2;
-            } else {
-                *out++ = *p;
-            }
-        }
-        *out = '\0';
-    };
+    // URL-decode a string in-place (application/x-www-form-urlencoded: '+' -> ' ')
+    auto url_decode = [](char* s) { url_decode_inplace(s, true); };
 
     char* saveptr = NULL;
     char* pair = strtok_r(buf, "&", &saveptr);
@@ -580,10 +531,9 @@ extern "C" Item js_usp_toString(void) {
                 } else if (c == ' ') {
                     buf[pos++] = '+';
                 } else {
-                    static const char hex[] = "0123456789ABCDEF";
                     buf[pos++] = '%';
-                    buf[pos++] = hex[(unsigned char)c >> 4];
-                    buf[pos++] = hex[(unsigned char)c & 0x0F];
+                    buf[pos++] = hex_encode_nibble_upper((unsigned char)c >> 4);
+                    buf[pos++] = hex_encode_nibble_upper((unsigned char)c & 0x0F);
                 }
             }
         };

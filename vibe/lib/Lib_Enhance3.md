@@ -20,8 +20,31 @@ number-literal escape parsing, hex-color parsing).
 
 **Status legend:** ✅ done · ⏳ partial · ❌ proposed (not yet done) · ⛔ deferred
 
-Everything below is **❌ proposed** unless noted — this document is the plan, no
-code has been changed yet. Items are ordered by impact.
+> **Implementation status (shipped).** Items **1–6 are now implemented** and
+> verified (lambda baseline 835/837 — the 2 failures are pre-existing PDF tests
+> unrelated to this work; input parsers 2105/2105; radiant baseline unchanged).
+> Summary of what landed:
+> - §1 ✅ `lib/base64` gained `base64_encode`/`base64_encode_alloc`/
+>   `base64_encoded_len` + `BASE64_URL` variant + `base64_decode_variant`; all 8
+>   hand-rolled encoders and the 2 duplicate serve decoders now call lib.
+> - §2 ✅ `lib/url` gained `url_decode_form`, `url_decode_inplace`,
+>   `url_encode_with_table`; serve/ + `js_url_module` + `js_querystring` migrated.
+> - §3 ✅ `lib/url` gained `url_from_local_path`; all 6 `file://` builders migrated.
+> - §4 ✅ residual hex-nibble tables → `hex_encode_nibble_upper`; pdf asciihex
+>   digit step → `hex_decode_byte`.
+> - §5 ✅ bash `utf8_encode` deleted, now uses `lib/utf.h`.
+> - §6 ⏳ the trivially-matching parts done; the `hex_scan`/`octal_scan` helper
+>   itself is still open (carried into round 4's deferred list).
+> - §7 (hex-color) was deferred here but **shipped in round 4** — see
+>   [`Lib_Enhance4.md`](Lib_Enhance4.md) (the 4th caller materialized).
+> - §8 (`numparse`), §9 (whitespace) remain deferred.
+>
+> New gtests: `test/lib/test_base64_gtest.cpp` (9) + URL helper cases added to
+> `test_url_extra_gtest.cpp`. Round 4 continues in
+> [`Lib_Enhance4.md`](Lib_Enhance4.md).
+
+Everything below was the **original plan** (written before any code changed);
+statuses above the line reflect what actually shipped. Items are ordered by impact.
 
 ---
 

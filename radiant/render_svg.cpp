@@ -21,6 +21,7 @@
 #include "../lambda/mark_reader.hpp"
 extern "C" {
 #include "../lib/url.h"
+#include "../lib/base64.h"
 #include "../lib/memtrack.h"
 }
 #include "../lib/strbuf.h"
@@ -202,29 +203,11 @@ static StrBuf* svg_encode_surface_png(ImageSurface* surface) {
 }
 
 static void svg_append_base64(StrBuf* out, const uint8_t* data, size_t len) {
-    static const char table[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     if (!out || !data) return;
-    size_t i = 0;
-    while (i + 2 < len) {
-        uint32_t v = ((uint32_t)data[i] << 16) |
-                     ((uint32_t)data[i + 1] << 8) |
-                     (uint32_t)data[i + 2];
-        strbuf_append_char(out, table[(v >> 18) & 0x3f]);
-        strbuf_append_char(out, table[(v >> 12) & 0x3f]);
-        strbuf_append_char(out, table[(v >> 6) & 0x3f]);
-        strbuf_append_char(out, table[v & 0x3f]);
-        i += 3;
-    }
-    if (i < len) {
-        uint32_t v = (uint32_t)data[i] << 16;
-        bool two = i + 1 < len;
-        if (two) v |= (uint32_t)data[i + 1] << 8;
-        strbuf_append_char(out, table[(v >> 18) & 0x3f]);
-        strbuf_append_char(out, table[(v >> 12) & 0x3f]);
-        strbuf_append_char(out, two ? table[(v >> 6) & 0x3f] : '=');
-        strbuf_append_char(out, '=');
-    }
+    char* b64 = base64_encode_alloc(data, len, BASE64_STD);
+    if (!b64) return;
+    strbuf_append_str(out, b64);
+    mem_free(b64);
 }
 
 static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,

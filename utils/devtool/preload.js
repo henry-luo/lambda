@@ -41,8 +41,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Render test APIs
   loadRenderTests: () => ipcRenderer.invoke('load-render-tests'),
-  runRenderTest: (testName, renderDir) => ipcRenderer.invoke('run-render-test', testName, renderDir),
-  getRenderTestImages: (testName, renderDir) => ipcRenderer.invoke('get-render-test-images', testName, renderDir),
+  runRenderTest: (testName, renderDir, outputFormat) =>
+    ipcRenderer.invoke('run-render-test', testName, renderDir, outputFormat),
+  getRenderTestImages: (testName, renderDir, outputFormat) =>
+    ipcRenderer.invoke('get-render-test-images', testName, renderDir, outputFormat),
 
   // PDF render test APIs
   loadPdfRenderTests: () => ipcRenderer.invoke('load-pdf-render-tests'),

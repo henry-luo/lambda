@@ -1,6 +1,7 @@
 #include "css_style.hpp"
 #include <string.h>
 #include "../../../lib/mem.h"
+#include "../../../lib/color.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -1204,35 +1205,9 @@ bool css_parse_length(const char* value_str, CssLength* length) {
 }
 
 bool css_parse_hex_to_rgba(const char* hex_str, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a) {
+    // require the leading '#'; digit-count handling lives in lib/color.h
     if (!hex_str || hex_str[0] != '#') return false;
-    size_t len = strlen(hex_str);
-    unsigned int hex_val = 0;
-
-    if (len == 7) { // #rrggbb
-        if (sscanf(hex_str + 1, "%6x", &hex_val) != 1) return false;
-        *r = (hex_val >> 16) & 0xFF;
-        *g = (hex_val >> 8)  & 0xFF;
-        *b = hex_val & 0xFF;
-        *a = 255;
-    } else if (len == 4) { // #rgb → expand
-        if (sscanf(hex_str + 1, "%3x", &hex_val) != 1) return false;
-        unsigned int rv = (hex_val >> 8) & 0xF, gv = (hex_val >> 4) & 0xF, bv = hex_val & 0xF;
-        *r = (rv << 4) | rv; *g = (gv << 4) | gv; *b = (bv << 4) | bv; *a = 255;
-    } else if (len == 9) { // #rrggbbaa
-        if (sscanf(hex_str + 1, "%8x", &hex_val) != 1) return false;
-        *r = (hex_val >> 24) & 0xFF;
-        *g = (hex_val >> 16) & 0xFF;
-        *b = (hex_val >> 8)  & 0xFF;
-        *a = hex_val & 0xFF;
-    } else if (len == 5) { // #rgba → expand
-        if (sscanf(hex_str + 1, "%4x", &hex_val) != 1) return false;
-        unsigned int rv = (hex_val >> 12) & 0xF, gv = (hex_val >> 8) & 0xF;
-        unsigned int bv = (hex_val >> 4) & 0xF, av = hex_val & 0xF;
-        *r = (rv << 4) | rv; *g = (gv << 4) | gv; *b = (bv << 4) | bv; *a = (av << 4) | av;
-    } else {
-        return false;
-    }
-    return true;
+    return color_parse_hex(hex_str, r, g, b, a);
 }
 
 bool css_parse_color(const char* value_str, CssColor* color) {

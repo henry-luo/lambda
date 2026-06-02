@@ -145,8 +145,8 @@ class LayoutDevTool {
     });
 
     // Run a render test (re-capture radiant snapshot + compute diff)
-    ipcMain.handle('run-render-test', async (event, testName, renderDir) => {
-      return await this.runRenderTest(testName, renderDir);
+    ipcMain.handle('run-render-test', async (event, testName, renderDir, outputFormat) => {
+      return await this.runRenderTest(testName, renderDir, outputFormat);
     });
 
     // Render a selected PDF through Radiant
@@ -155,8 +155,8 @@ class LayoutDevTool {
     });
 
     // Get render test images (reference, output, diff)
-    ipcMain.handle('get-render-test-images', async (event, testName, renderDir) => {
-      return await this.getRenderTestImages(testName, renderDir);
+    ipcMain.handle('get-render-test-images', async (event, testName, renderDir, outputFormat) => {
+      return await this.getRenderTestImages(testName, renderDir, outputFormat);
     });
   }
 
@@ -628,23 +628,33 @@ class LayoutDevTool {
     }
   }
 
-  async getRenderTestImages(testName, renderDir = 'page') {
-    const result = { reference: null, output: null, diff: null };
+  normalizeRenderOutputFormat(outputFormat) {
+    const format = String(outputFormat || 'png').toLowerCase();
+    return ['png', 'svg', 'pdf'].includes(format) ? format : 'png';
+  }
+
+  async getRenderTestImages(testName, renderDir = 'page', outputFormat = 'png') {
+    const format = this.normalizeRenderOutputFormat(outputFormat);
+    const result = { reference: null, output: null, diff: null, format };
     const renderRoot = path.join(this.projectRoot, 'test/render');
     const refPath = path.join(renderRoot, 'reference', `${testName}.png`);
-    const outPath = path.join(renderRoot, 'output', `${testName}.png`);
+    const outPath = path.join(renderRoot, 'output', `${testName}.${format}`);
     const diffPath = path.join(renderRoot, 'diff', `${testName}.png`);
     const ts = Date.now();
     try { await fs.access(refPath); result.reference = `file://${refPath}?t=${ts}`; } catch {}
     try { await fs.access(outPath); result.output = `file://${outPath}?t=${ts}`; } catch {}
-    try { await fs.access(diffPath); result.diff = `file://${diffPath}?t=${ts}`; } catch {}
+    if (format === 'png') {
+      try { await fs.access(diffPath); result.diff = `file://${diffPath}?t=${ts}`; } catch {}
+    }
     return result;
   }
 
-  async runRenderTest(testName, renderDir = 'page') {
+  async runRenderTest(testName, renderDir = 'page', outputFormat = 'png') {
+    const format = this.normalizeRenderOutputFormat(outputFormat);
     const renderRoot = path.join(this.projectRoot, 'test/render');
     const htmlFile = path.join(renderRoot, renderDir, `${testName}.html`);
-    const outputPng = path.join(renderRoot, 'output', `${testName}.png`);
+    const outputFile = path.join(renderRoot, 'output', `${testName}.${format}`);
+    const outputPng = outputFile;
     const refPng = path.join(renderRoot, 'reference', `${testName}.png`);
     const diffPng = path.join(renderRoot, 'diff', `${testName}.png`);
 
@@ -661,8 +671,8 @@ class LayoutDevTool {
     } catch {}
 
     // Render with lambda.exe
-    const renderResult = await new Promise((resolve, reject) => {
-      const args = ['render', htmlFile, '-o', outputPng,
+    await new Promise((resolve, reject) => {
+      const args = ['render', htmlFile, '-o', outputFile,
         '-vw', String(viewportWidth), '-vh', String(viewportHeight), '--pixel-ratio', '1'];
       const proc = spawn(this.lambdaExe, args, { cwd: this.projectRoot });
       let stderr = '';
@@ -679,6 +689,29 @@ class LayoutDevTool {
       });
       proc.on('error', reject);
     });
+
+    try {
+      await fs.access(outputFile);
+    } catch {
+      throw new Error(`Render output was not created: ${outputFile}`);
+    }
+
+    const ts = Date.now();
+
+    let hasVectorRef = false;
+    try {
+      await fs.access(refPng);
+      hasVectorRef = true;
+    } catch {}
+
+    if (format !== 'png') {
+      return {
+        format,
+        reference: hasVectorRef ? `file://${refPng}?t=${ts}` : null,
+        output: `file://${outputFile}?t=${ts}`,
+        outputFile
+      };
+    }
 
     // Compute diff using pixelmatch
     let mismatchPercent = 0;
@@ -715,14 +748,15 @@ class LayoutDevTool {
       }
     }
 
-    const ts = Date.now();
     return {
+      format,
       mismatchPercent,
       mismatchedPixels,
       totalPixels,
       reference: hasRef ? `file://${refPng}?t=${ts}` : null,
-      output: `file://${outputPng}?t=${ts}`,
-      diff: hasRef ? `file://${diffPng}?t=${ts}` : null
+      output: `file://${outputFile}?t=${ts}`,
+      diff: hasRef ? `file://${diffPng}?t=${ts}` : null,
+      outputFile
     };
   }
 

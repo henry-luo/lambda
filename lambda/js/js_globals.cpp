@@ -38,6 +38,8 @@ extern double js_get_number(Item value);
 #include "../format/format.h"
 #include "../../lib/log.h"
 #include "../../lib/url.h"
+#include "../../lib/base64.h"
+#include "../../lib/hex.h"
 #include "../../lib/file.h"
 #include "../../lib/mem.h"
 #include <cstring>
@@ -9698,11 +9700,10 @@ extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     }
     uint32_t byte = n & 0xFF;
     if (cached[byte].item) return cached[byte];
-    static const char hex[] = "0123456789ABCDEF";
     char buf[3];
     buf[0] = '%';
-    buf[1] = hex[(byte >> 4) & 0xF];
-    buf[2] = hex[byte & 0xF];
+    buf[1] = hex_encode_nibble_upper((byte >> 4) & 0xF);
+    buf[2] = hex_encode_nibble_upper(byte & 0xF);
     cached[byte] = js_make_small_string(buf, 3, true);
     return cached[byte];
 }
@@ -9778,7 +9779,6 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
         }
     }
 
-    static const char hex[] = "0123456789ABCDEF";
     uint32_t byte = n & 0xFF;
     int64_t left_len = left->len;
     String* result = (String*)heap_alloc(sizeof(String) + left_len + 4, LMD_TYPE_STRING);
@@ -9786,8 +9786,8 @@ extern "C" Item js_test262_concat_percent_hex(Item left_item, Item n_item) {
     result->is_ascii = left->is_ascii;
     memcpy(result->chars, left->chars, left_len);
     result->chars[left_len] = '%';
-    result->chars[left_len + 1] = hex[(byte >> 4) & 0xF];
-    result->chars[left_len + 2] = hex[byte & 0xF];
+    result->chars[left_len + 1] = hex_encode_nibble_upper((byte >> 4) & 0xF);
+    result->chars[left_len + 2] = hex_encode_nibble_upper(byte & 0xF);
     result->chars[left_len + 3] = '\0';
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
@@ -13209,8 +13209,6 @@ extern "C" Item js_atob(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
-static const char b64_encode_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 extern "C" Item js_btoa(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -13227,26 +13225,13 @@ extern "C" Item js_btoa(Item str_item) {
                 "The string to be encoded contains characters outside of the Latin1 range.");
         }
     }
-    int out_len = ((src_len + 2) / 3) * 4;
+    size_t out_len = base64_encoded_len((size_t)src_len, BASE64_STD);
     char* buf = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
     if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
 
-    int out = 0;
-    int i = 0;
-    while (i < src_len) {
-        unsigned int b0 = src[i];
-        unsigned int b1 = (i + 1 < src_len) ? src[i + 1] : 0;
-        unsigned int b2 = (i + 2 < src_len) ? src[i + 2] : 0;
-        int remaining = src_len - i;
-        unsigned int triple = (b0 << 16) | (b1 << 8) | b2;
-        buf[out++] = b64_encode_table[(triple >> 18) & 0x3F];
-        buf[out++] = b64_encode_table[(triple >> 12) & 0x3F];
-        buf[out++] = (remaining > 1) ? b64_encode_table[(triple >> 6) & 0x3F] : '=';
-        buf[out++] = (remaining > 2) ? b64_encode_table[triple & 0x3F] : '=';
-        i += 3;
-    }
+    size_t out = base64_encode(src, (size_t)src_len, buf, BASE64_STD);
 
-    String* result = heap_create_name(buf, out);
+    String* result = heap_create_name(buf, (int)out);
     mem_free(buf);
     return (Item){.item = s2it(result)};
 }

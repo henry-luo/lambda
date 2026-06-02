@@ -15,6 +15,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
+#include "../../lib/base64.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -837,27 +838,11 @@ extern "C" Item js_buffer_toString(Item buf, Item encoding, Item start_item, Ite
     }
 
     if (strcmp(enc_buf, "base64") == 0 || strcmp(enc_buf, "base64url") == 0) {
-        static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        static const char b64url[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        bool is_url = (strcmp(enc_buf, "base64url") == 0);
-        const char* table = is_url ? b64url : b64;
-        int out_len = 4 * ((slice_len + 2) / 3);
+        Base64Variant variant = (strcmp(enc_buf, "base64url") == 0) ? BASE64_URL : BASE64_STD;
+        size_t out_len = base64_encoded_len((size_t)slice_len, variant);
         char* b64_str = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
-        int j = 0;
-        for (int i = 0; i < slice_len; i += 3) {
-            uint32_t a = slice[i];
-            uint32_t b_val = (i + 1 < slice_len) ? slice[i + 1] : 0;
-            uint32_t c = (i + 2 < slice_len) ? slice[i + 2] : 0;
-            uint32_t triple = (a << 16) | (b_val << 8) | c;
-            b64_str[j++] = table[(triple >> 18) & 0x3F];
-            b64_str[j++] = table[(triple >> 12) & 0x3F];
-            if (i + 1 < slice_len) b64_str[j++] = table[(triple >> 6) & 0x3F];
-            else if (!is_url) b64_str[j++] = '=';
-            if (i + 2 < slice_len) b64_str[j++] = table[triple & 0x3F];
-            else if (!is_url) b64_str[j++] = '=';
-        }
-        b64_str[j] = '\0';
-        Item result = make_string_item(b64_str, j);
+        size_t j = base64_encode(slice, (size_t)slice_len, b64_str, variant);
+        Item result = make_string_item(b64_str, (int)j);
         mem_free(b64_str);
         return result;
     }

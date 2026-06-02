@@ -9,70 +9,9 @@
 #include "../../lib/log.h"
 
 #include "../../lib/mem.h"
+#include "../../lib/base64.h"
 #include <cstring>
 #include <cstdio>
-
-// ── base64 ──
-
-static const char b64_chars[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static char* b64_encode(const char* data, size_t len) {
-    size_t out_len = 4 * ((len + 2) / 3) + 1;
-    char* out = (char*)mem_alloc(out_len, MEM_CAT_SERVE);
-    if (!out) return nullptr;
-    size_t i = 0, j = 0;
-
-    while (i < len) {
-        unsigned int a = (i < len) ? (unsigned char)data[i++] : 0;
-        unsigned int b = (i < len) ? (unsigned char)data[i++] : 0;
-        unsigned int c = (i < len) ? (unsigned char)data[i++] : 0;
-        unsigned int triple = (a << 16) | (b << 8) | c;
-
-        out[j++] = b64_chars[(triple >> 18) & 0x3F];
-        out[j++] = b64_chars[(triple >> 12) & 0x3F];
-        out[j++] = (i > len + 1) ? '=' : b64_chars[(triple >> 6) & 0x3F];
-        out[j++] = (i > len) ? '=' : b64_chars[triple & 0x3F];
-    }
-    out[j] = '\0';
-    return out;
-}
-
-static int b64_decode_char(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-static char* b64_decode(const char* data, size_t* out_len) {
-    size_t in_len = strlen(data);
-    size_t alloc = 3 * in_len / 4 + 1;
-    char* out = (char*)mem_alloc(alloc, MEM_CAT_SERVE);
-    if (!out) { if (out_len) *out_len = 0; return nullptr; }
-    size_t i = 0, j = 0;
-
-    while (i < in_len) {
-        int a = (i < in_len) ? b64_decode_char(data[i++]) : 0;
-        int b = (i < in_len) ? b64_decode_char(data[i++]) : 0;
-        int c = (i < in_len) ? b64_decode_char(data[i++]) : 0;
-        int d = (i < in_len) ? b64_decode_char(data[i++]) : 0;
-
-        if (a < 0) a = 0;
-        if (b < 0) b = 0;
-        if (c < 0) c = 0;
-        if (d < 0) d = 0;
-
-        unsigned int triple = (a << 18) | (b << 12) | (c << 6) | d;
-        out[j++] = (triple >> 16) & 0xFF;
-        out[j++] = (triple >> 8) & 0xFF;
-        out[j++] = triple & 0xFF;
-    }
-    if (out_len) *out_len = j;
-    return out;
-}
 
 // ── JSON string escaping ──
 
@@ -124,7 +63,7 @@ char* ipc_build_request(HttpRequest* req, int request_id) {
     // body (base64-encoded)
     strbuf_append_str(buf, ",\"body\":\"");
     if (req->body && req->body_len > 0) {
-        char* b64 = b64_encode(req->body, req->body_len);
+        char* b64 = base64_encode_alloc(req->body, req->body_len, BASE64_STD);
         if (b64) {
             strbuf_append_str(buf, b64);
             mem_free(b64);
@@ -215,7 +154,7 @@ void ipc_parse_response(const char* json, int json_len, HttpResponse* resp) {
                 b64[b64_len] = '\0';
 
                 size_t decoded_len = 0;
-                char* decoded = b64_decode(b64, &decoded_len);
+                char* decoded = (char*)base64_decode(b64, 0, &decoded_len);
                 mem_free(b64);
 
                 if (decoded) {

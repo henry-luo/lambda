@@ -864,15 +864,10 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         // Directory case already handled by target_is_dir check above
 
         log_debug("input_from_target: reading file from path: %s", pathname);
-        // Create URL from file path for the input
-        StrBuf* url_buf = strbuf_new();
-        strbuf_append_str(url_buf, "file://");
-        #ifdef _WIN32
-        if (pathname[0] != '/') strbuf_append_char(url_buf, '/');
-        #endif
-        strbuf_append_str(url_buf, pathname);
-        Url* file_url = url_parse(url_buf->str);
-        strbuf_free(url_buf);
+        // Create file:// URL from file path (percent-encoded, cross-platform)
+        char* file_url_str = url_from_local_path(pathname);
+        Url* file_url = file_url_str ? url_parse(file_url_str) : NULL;
+        if (file_url_str) mem_free(file_url_str);
 
         Input* input = input_from_local_path(pathname, file_url, type, flavor);
         strbuf_free(path_buf);

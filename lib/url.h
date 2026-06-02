@@ -166,6 +166,12 @@ Url* parse_url(Url *base, const char* doc_url);
 // Returns NULL if the URL is not a valid file:// URL
 char* url_to_local_path(const Url* url);
 
+// Build a file:// URL from an absolute local file system path.
+// Percent-encodes path segments, handles Windows drive letters and backslashes,
+// and emits the "file:///" form on Windows / "file://" + abs path on POSIX.
+// Returns a newly allocated string that must be freed by the caller, or NULL.
+char* url_from_local_path(const char* abs_path);
+
 // Percent-encode a string per ECMAScript encodeURIComponent rules.
 // Unreserved chars (not encoded): A-Z a-z 0-9 - _ . ~ ! ' ( ) *
 // Returns a newly allocated string. Caller must free.
@@ -175,6 +181,21 @@ char* url_encode_component(const char* str, size_t len);
 // Returns a newly allocated string. Caller must free.
 // If out_len is non-NULL, stores the decoded length.
 char* url_decode_component(const char* str, size_t len, size_t* out_len);
+
+// Like url_decode_component but also maps '+' → ' '
+// (application/x-www-form-urlencoded). Returns a newly allocated string.
+// Caller must free. If out_len is non-NULL, stores the decoded length.
+char* url_decode_form(const char* str, size_t len, size_t* out_len);
+
+// Percent-decode in place into `buf` (NUL-terminated), returning the new length.
+// Decodes %XX and, if form is true, maps '+' → ' '. Never grows the string, so
+// it is safe to decode a buffer onto itself (zero-alloc request parsing).
+size_t url_decode_inplace(char* buf, bool form);
+
+// Percent-encode `str[0..len)` using a caller-supplied 256-entry "keep" table:
+// table[c] != 0 means byte c is emitted literally; otherwise it is %XX-encoded
+// (uppercase hex). Returns a newly allocated string. Caller must free.
+char* url_encode_with_table(const char* str, size_t len, const uint8_t keep[256]);
 
 // Percent-encode a string per ECMAScript encodeURI rules.
 // Preserves URI-structural chars: ; , / ? : @ & = + $ # and unreserved chars.

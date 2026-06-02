@@ -551,6 +551,30 @@ static DomDocument* event_context_target_document(EventContext* evcon) {
         : (evcon->ui_context ? evcon->ui_context->document : NULL);
 }
 
+static void clear_document_interaction_state_before_detach(DomDocument* doc) {
+    if (!doc || !doc->state) return;
+
+    DocState* state = doc->state;
+    log_debug("[IFRAME_DETACH_STATE] clearing transient interaction state for %p", (void*)doc);
+
+    focus_clear(state);
+    caret_clear(state);
+    selection_clear(state);
+    selection_press_in_range_clear(state);
+    editing_interaction_clear_autoscroll(state);
+    editing_interaction_set_active_surface(state, NULL);
+    doc_state_set_hover_target(state, NULL);
+    doc_state_set_active_target(state, NULL);
+    doc_state_set_drag_state(state, NULL, false);
+    doc_state_clear_drag_drop(state);
+
+    state->open_dropdown = NULL;
+    state->context_menu_target = NULL;
+    state->context_menu_hover = -1;
+    state->active_text_control = NULL;
+    state->last_focused_text_control = NULL;
+}
+
 static DocState* event_view_owner_state(View* view) {
     if (!view || !view->is_element()) return NULL;
     DomElement* elem = lam::dom_require_element(view);
@@ -1180,6 +1204,10 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
     for (int i = 0; i < stack_size; i++) {
         log_debug("fire event to view no. %d", i);
         View* view = static_cast<View*>(target_list->data[i]);
+        if (!view || !view->view_type) {
+            log_debug("[EVENT_SKIP_NIL_VIEW] skipping uninitialized event stack entry");
+            continue;
+        }
         if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
             view->view_type == RDT_VIEW_LIST_ITEM) {
             fire_block_event(evcon, lam::view_require_block(view));
@@ -6878,6 +6906,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 update_scroller(block, block->content_width, block->content_height);
                             }
                         }
+                        clear_document_interaction_state_before_detach(old_doc);
                         free_document(old_doc);
                         doc_state_mark_dirty(uicon->document->state);
                     }
