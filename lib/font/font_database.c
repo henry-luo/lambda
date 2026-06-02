@@ -133,14 +133,10 @@ static const struct {
 // Byte-order helpers
 // ============================================================================
 
-static uint32_t be32toh_local(uint32_t v) {
-    return ((v & 0xFF000000) >> 24) | ((v & 0x00FF0000) >> 8) |
-           ((v & 0x0000FF00) << 8)  | ((v & 0x000000FF) << 24);
-}
-
-static uint16_t be16toh_local(uint16_t v) {
-    return (uint16_t)(((v & 0xFF00) >> 8) | ((v & 0x00FF) << 8));
-}
+// big-endian → host byte order (LE host) — centralized in lib/endian.h
+#include "../endian.h"
+#define be32toh_local bswap32
+#define be16toh_local bswap16
 
 // ============================================================================
 // Hashmap callbacks

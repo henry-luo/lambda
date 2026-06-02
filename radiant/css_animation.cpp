@@ -6,6 +6,7 @@
 extern "C" {
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/color.h"
 #include "../lib/avl_tree.h"
 }
 
@@ -64,46 +65,21 @@ static float parse_float(const char** s) {
 static bool parse_color_value(const char* val, Color* out) {
     val = skip_ws(val);
 
-    // hex color
+    // hex color — count the hex-digit run (tolerates trailing content) and let
+    // lib/color.h handle the digit-count expansion.
     if (val[0] == '#') {
-        unsigned int hex = 0;
-        int len = 0;
         const char* p = val + 1;
+        int len = 0;
         while (isxdigit((unsigned char)p[len])) len++;
-
-        if (len == 3 || len == 4) {
-            for (int i = 0; i < len; i++) {
-                unsigned int c;
-                if (p[i] >= '0' && p[i] <= '9') c = p[i] - '0';
-                else if (p[i] >= 'a' && p[i] <= 'f') c = p[i] - 'a' + 10;
-                else c = p[i] - 'A' + 10;
-                hex = (hex << 8) | (c << 4) | c;
+        if (len == 3 || len == 4 || len == 6 || len == 8) {
+            char tmp[9];
+            memcpy(tmp, p, (size_t)len);
+            tmp[len] = '\0';
+            uint8_t r, g, b, a;
+            if (color_parse_hex(tmp, &r, &g, &b, &a)) {
+                out->r = r; out->g = g; out->b = b; out->a = a;
+                return true;
             }
-            out->r = (hex >> 16) & 0xFF;
-            out->g = (hex >> 8) & 0xFF;
-            out->b = hex & 0xFF;
-            out->a = (len == 4) ? ((hex >> 24) & 0xFF) : 255;
-            return true;
-        } else if (len == 6 || len == 8) {
-            for (int i = 0; i < len; i++) {
-                unsigned int c;
-                if (p[i] >= '0' && p[i] <= '9') c = p[i] - '0';
-                else if (p[i] >= 'a' && p[i] <= 'f') c = p[i] - 'a' + 10;
-                else c = p[i] - 'A' + 10;
-                hex = (hex << 4) | c;
-            }
-            if (len == 6) {
-                out->r = (hex >> 16) & 0xFF;
-                out->g = (hex >> 8) & 0xFF;
-                out->b = hex & 0xFF;
-                out->a = 255;
-            } else {
-                out->r = (hex >> 24) & 0xFF;
-                out->g = (hex >> 16) & 0xFF;
-                out->b = (hex >> 8) & 0xFF;
-                out->a = hex & 0xFF;
-            }
-            return true;
         }
         return false;
     }

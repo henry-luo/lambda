@@ -321,6 +321,7 @@
                 "lib/datetime.c",
                 "lib/url.c",
                 "lib/url_parser.c",
+                "lib/base64.c",
                 "lib/log.c",
                 "lib/cmdedit.c",
                 "lib/cmdedit_utf8.c",
@@ -1690,6 +1691,56 @@
                         ],
                         "binary": "test_hex_gtest.exe",
                         "icon": "🔢"
+                    },
+                    {
+                        "source": "lib/test_endian_gtest.cpp",
+                        "name": "Endian Helpers Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_endian_gtest.exe",
+                        "icon": "🔀"
+                    },
+                    {
+                        "source": "lib/test_uuid_gtest.cpp",
+                        "name": "UUID Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_uuid_gtest.exe",
+                        "icon": "🆔"
+                    },
+                    {
+                        "source": "lib/test_color_gtest.cpp",
+                        "name": "Color Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_color_gtest.exe",
+                        "icon": "🎨"
+                    },
+                    {
+                        "source": "lib/test_base64_gtest.cpp",
+                        "name": "Base64 Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_base64_gtest.exe",
+                        "icon": "🅱️"
                     },
                     {
                         "source": "lib/test_time_util_gtest.cpp",

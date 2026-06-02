@@ -247,19 +247,10 @@ typedef struct FontCacheEntry {
 // Utility Functions
 // ============================================================================
 
-// Convert big-endian 32-bit value to host byte order
-static uint32_t be32toh_local(uint32_t big_endian_32bits) {
-    return ((big_endian_32bits & 0xFF000000) >> 24) |
-           ((big_endian_32bits & 0x00FF0000) >> 8)  |
-           ((big_endian_32bits & 0x0000FF00) << 8)  |
-           ((big_endian_32bits & 0x000000FF) << 24);
-}
-
-// Convert big-endian 16-bit value to host byte order
-static uint16_t be16toh_local(uint16_t big_endian_16bits) {
-    return ((big_endian_16bits & 0xFF00) >> 8) |
-           ((big_endian_16bits & 0x00FF) << 8);
-}
+// big-endian → host byte order (LE host) — centralized in lib/endian.h
+#include "../endian.h"
+#define be32toh_local bswap32
+#define be16toh_local bswap16
 
 // Hash function for font entries (for hashmap)
 static uint64_t font_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {

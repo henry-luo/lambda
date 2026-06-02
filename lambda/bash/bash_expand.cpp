@@ -8,6 +8,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
+#include "../../lib/utf.h"
 
 #include <string.h>
 #include <ctype.h>
@@ -225,34 +226,6 @@ static int parse_octal(const char* s, int max_digits, int* consumed) {
     }
     *consumed = i;
     return val;
-}
-
-// encode a Unicode codepoint as UTF-8 into buf, returns number of bytes written
-static int utf8_encode(int codepoint, char* buf) {
-    if (codepoint < 0) return 0;
-    if (codepoint < 0x80) {
-        buf[0] = (char)codepoint;
-        return 1;
-    }
-    if (codepoint < 0x800) {
-        buf[0] = (char)(0xC0 | (codepoint >> 6));
-        buf[1] = (char)(0x80 | (codepoint & 0x3F));
-        return 2;
-    }
-    if (codepoint < 0x10000) {
-        buf[0] = (char)(0xE0 | (codepoint >> 12));
-        buf[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[2] = (char)(0x80 | (codepoint & 0x3F));
-        return 3;
-    }
-    if (codepoint < 0x110000) {
-        buf[0] = (char)(0xF0 | (codepoint >> 18));
-        buf[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        buf[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        buf[3] = (char)(0x80 | (codepoint & 0x3F));
-        return 4;
-    }
-    return 0; // invalid codepoint
 }
 
 extern "C" Item bash_process_ansi_escapes(Item str) {

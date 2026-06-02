@@ -7,6 +7,7 @@
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/memtrack.h"
+#include "../lib/color.h"
 #include "../lib/tagged.hpp"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
@@ -52,28 +53,10 @@ static Color parse_html_color(const char* color_str) {
     result.r = 0; result.g = 0; result.b = 0; result.a = 255;  // default black, opaque
     if (!color_str || !*color_str) return result;
 
-    // Skip leading # if present
-    if (*color_str == '#') color_str++;
-
-    size_t len = strlen(color_str);
-    if (len == 6) {
-        // Parse #rrggbb format
-        char hex[3] = {0};
-        hex[0] = color_str[0]; hex[1] = color_str[1];
-        result.r = (uint8_t)strtol(hex, NULL, 16);
-        hex[0] = color_str[2]; hex[1] = color_str[3];
-        result.g = (uint8_t)strtol(hex, NULL, 16);
-        hex[0] = color_str[4]; hex[1] = color_str[5];
-        result.b = (uint8_t)strtol(hex, NULL, 16);
-    } else if (len == 3) {
-        // Parse #rgb shorthand (e.g., #f60 -> #ff6600)
-        char hex[3] = {0};
-        hex[0] = color_str[0]; hex[1] = color_str[0];
-        result.r = (uint8_t)strtol(hex, NULL, 16);
-        hex[0] = color_str[1]; hex[1] = color_str[1];
-        result.g = (uint8_t)strtol(hex, NULL, 16);
-        hex[0] = color_str[2]; hex[1] = color_str[2];
-        result.b = (uint8_t)strtol(hex, NULL, 16);
+    // hex form (with or without leading '#'); digit handling lives in lib/color.h
+    uint8_t r, g, b, a;
+    if (color_parse_hex(color_str, &r, &g, &b, &a)) {
+        result.r = r; result.g = g; result.b = b; result.a = a;
     }
     // TODO: add named color support (red, blue, green, etc.)
     return result;

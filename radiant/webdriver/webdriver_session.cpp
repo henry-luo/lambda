@@ -11,6 +11,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
+#include "../../lib/uuid.h"
 #include "../../lambda/input/css/dom_element.hpp"
 #include <cstring>
 #include <cstdlib>
@@ -21,29 +22,18 @@
 // ============================================================================
 
 static void generate_uuid(char* buf) {
-    // Simple UUID v4 generation
+    // Non-cryptographic v4 UUID (session/element IDs); rand() entropy is fine here.
     static bool seeded = false;
     if (!seeded) {
         srand((unsigned int)time(NULL));
         seeded = true;
     }
-    
-    unsigned char bytes[16];
+
+    uint8_t bytes[16];
     for (int i = 0; i < 16; i++) {
-        bytes[i] = rand() & 0xFF;
+        bytes[i] = (uint8_t)(rand() & 0xFF);
     }
-    
-    // Set version (4) and variant bits
-    bytes[6] = (bytes[6] & 0x0F) | 0x40;
-    bytes[8] = (bytes[8] & 0x3F) | 0x80;
-    
-    snprintf(buf, WD_ELEMENT_ID_LEN,
-             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             bytes[0], bytes[1], bytes[2], bytes[3],
-             bytes[4], bytes[5],
-             bytes[6], bytes[7],
-             bytes[8], bytes[9],
-             bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
+    uuid_v4_format(bytes, buf); // WD_ELEMENT_ID_LEN == UUID_STR_LEN == 37
 }
 
 // ============================================================================

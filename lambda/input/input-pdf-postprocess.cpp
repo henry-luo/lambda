@@ -25,6 +25,7 @@
 #include "../mark_reader.hpp"
 #include "lib/log.h"
 #include "lib/mem.h"
+#include "lib/base64.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1484,31 +1485,12 @@ static bool encode_png_rgba(const uint8_t* pixels, int width, int height,
 }
 
 // Base64 encoder (no line breaks) — RFC 4648. Returns mem_alloc'd
-// nul-terminated string; caller mem_free()s.
+// nul-terminated string in the PDF category; caller mem_free()s.
 static char* base64_alloc(const uint8_t* src, size_t n) {
-    static const char tbl[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    size_t out_len = ((n + 2) / 3) * 4;
+    size_t out_len = base64_encoded_len(n, BASE64_STD);
     char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_INPUT_PDF);
     if (!out) return nullptr;
-    size_t i = 0, j = 0;
-    while (i + 2 < n) {
-        uint32_t v = ((uint32_t)src[i] << 16) | ((uint32_t)src[i+1] << 8) | src[i+2];
-        out[j++] = tbl[(v >> 18) & 0x3F];
-        out[j++] = tbl[(v >> 12) & 0x3F];
-        out[j++] = tbl[(v >>  6) & 0x3F];
-        out[j++] = tbl[ v        & 0x3F];
-        i += 3;
-    }
-    if (i < n) {
-        uint32_t v = (uint32_t)src[i] << 16;
-        if (i + 1 < n) v |= (uint32_t)src[i+1] << 8;
-        out[j++] = tbl[(v >> 18) & 0x3F];
-        out[j++] = tbl[(v >> 12) & 0x3F];
-        out[j++] = (i + 1 < n) ? tbl[(v >> 6) & 0x3F] : '=';
-        out[j++] = '=';
-    }
-    out[j] = '\0';
+    base64_encode(src, n, out, BASE64_STD);
     return out;
 }
 
