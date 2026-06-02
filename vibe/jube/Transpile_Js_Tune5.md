@@ -348,9 +348,100 @@ that located the actual cost.
 
 ## 6. Still outstanding
 
-- **`base64` (~34×), `matmul`/`collatz` (~1.5×)** — a different residual on
-  `push` / typed-array / float-heavy paths (not object literals; unaffected by the §5
-  fix). Needs its own profiling pass.
-- **Array read path** — `js_array_get_int` is now a runtime call where April used an
-  inline bounds-checked load; restoring a guarded inline read (skip when
-  `arr->extra != 0`) would recover the residual `sieve`/array-read delta.
+Ranked remaining regressions vs Apr-12 (current build, after §2 + §5 fixes):
+`base64` 47×, `mandelbrot/awfy` 13.8×, `ack` 13.3×, plus a broad ~1.6–2.2× on
+many benchmarks (`fib`, `tak`, `sum`, `mbrot`, `nqueens`, `primes`, `quicksort`…).
+
+### 6a. `base64` — `.push()` method-dispatch override-check (root-caused)
+
+Profiling `base64` (symbolicated debug `sample`) shows the hot path is **`parts.push()`
+method dispatch**, *not* arithmetic/string work. A micro-benchmark isolates it:
+`push` 1.3 M× = 9.3 s (debug) vs string-index 168 ms, typed-array-read 272 ms.
+
+Cause: `arr.push(x)` lowers to `js_array_method_direct` (`lambda/js/js_runtime.cpp`),
+which on **every call** runs an override-check before dispatching to the builtin:
+
+```c
+Item resolved = js_property_get(arr, "push");          // own + prototype-chain walk
+Item builtin  = js_lookup_builtin_method(ARRAY,"push"); // builtin function Item
+if (resolved != ItemNull && resolved != builtin) { ...call override... }
+return js_array_method(arr, "push", args, argc);        // common case: builtin
+```
+
+In the common (no-override) case this resolves to the builtin, compares equal, and
+falls through anyway — so the per-call `js_property_get` is wasted. Worse,
+`js_property_get` → `js_get_prototype_of(arr)`, which **re-interns `"Array"` and
+`"prototype"` into the name pool every call** (`heap_create_name` → `SIP64` /
+`find_string_by_content` — exactly what dominates the profile), then hashes `"push"`
+against `Array.prototype`'s large shape. The override-check was added in `a0849d62c`
+("js262: fix array method global leak") for spec correctness (honoring user-overridden
+array methods), so it cannot simply be removed — at Apr-12 `arr.push()` went straight
+to `js_array_method`.
+
+**Safe fix (deferred — needs careful js262 verification):** skip the override-check
+when no override is possible — i.e. `arr->extra == 0` (no own method override) **and**
+`Array.prototype` methods are pristine. The latter needs an
+`Array.prototype`-tamper flag set on the `js_property_set` *and*
+`js_object_define_property` prototype-write paths (cf. the existing
+`g_array_sym_iter_ever_set`). Missing any override path would silently break
+correctness, so this must land with a full 0-regression js262 run. A secondary, broadly
+useful win: cache the interned `"Array"`/`"prototype"`/`"constructor"` names in
+`js_get_prototype_of` (with an epoch-reset hook like `js_reset_proto_key`) to kill the
+per-call name re-interning that also feeds the broad ~2× regression.
+
+**Attempt 2 — per-epoch prototype cache (reverted, broke js262):** caching the
+resolved intrinsic prototypes (`Array.prototype`, `Object.prototype`, …) in
+`js_get_prototype_of`, keyed by `js_get_heap_epoch()`, sped base64 ~1.5× (3.14 s →
+2.06 s) but **regressed 169 test262 tests**. Cause: test262 creates **multiple realms**
+(`$262.createRealm`) and the batch runner executes several test scripts per process, so
+a *process-global* cache hands one realm's `Array.prototype` to another realm's objects;
+the heap-epoch counter doesn't change on realm/context boundaries. **Lesson: any
+intrinsic-prototype cache must be realm-scoped** (stored on the realm's intrinsics /
+global object), not a file-static. That's the correct-but-larger design for this win.
+Reverted to committed state.
+
+### 6b. Float-compute (`mandelbrot` 13.8×, `matmul`, `nbody`, `spectralnorm`)
+
+Float arithmetic in tight loops — almost certainly float boxing in the codegen
+(V8 uses unboxed `Float64Array`; LambdaJS boxes floats). Needs a codegen/profiling pass.
+
+### 6c. Broad ~2× on recursion / numeric functions (`fib` 2.2×, `tak`/`cpstak` 1.9×, `ack` 13×) — ROOT-CAUSED
+
+Clean-build bisect (with a 60s-timeout→skip guard — several merge commits in the window
+*hang* `ack`, a separate transient bug) → **first-bad `eff6ccb9` "fix js262 tests"
+(May 17)**. (Non-monotonic: an earlier regression was fixed by `66832b62b`
+"fix regression", then `eff6ccb9` re-introduced it.)
+
+Profiling `ack` shows boxed-arithmetic helpers dominating (`js_make_number`,
+`js_get_number`, `js_subtract`, `js_strict_equal`, `js_numeric_operand`,
+`js_is_symbol`/`js_is_bigint`) — `m-1`/`n-1`/`n===0` run through **boxed helpers
+instead of native MIR integer ops**. Apr-12 ≈ 12 ns/call (native) → now ≈ 208 ns/call
+(boxed).
+
+Cause: `eff6ccb9` made `+` type-inference conservative for string-concat correctness
+(`+` is overloaded numeric-add / string-concat in JS):
+
+- `jm_infer_walk` (param typing): removed `JS_OP_ADD` from `is_arith`, so a param used
+  in `x + y` is no longer inferred numeric;
+- `jm_infer_return_type_walk`: the `JS_OP_ADD` else-branch changed `LMD_TYPE_INT` →
+  `LMD_TYPE_ANY` ("param + param can still concatenate at runtime").
+
+So additive/recursive numeric functions lose native-int typing (`fib(n-1)+fib(n-2)`
+directly; `ack`/`tak`/`cpstak` via return-type → argument-type propagation through the
+recursive call) and their arithmetic boxes. The change was correct (assuming INT for
+`+` is unsound) but discarded INT inference for ADD *entirely*.
+
+**Safe fix (deferred — correctness-critical, needs full js262 run):** infer ADD as
+numeric only when **both operands are provably non-string** (numeric literals, results
+of `-`/`*`/`/`/`%`, or operands already inferred numeric), falling to `ANY` otherwise.
+This recovers `a - b + c`-style chains without resurrecting the string-concat
+unsoundness. It may not fully recover `fib`/`ack`, whose `+` operands are recursive
+*calls* (return type unresolvable to INT under self-recursion); those also need
+fixed-point return-type inference. Two js262 breaks this session (the `js_property_set`
+and proto-cache attempts) underline that this must land behind a 0-regression gate.
+
+### 6d. Array read path
+
+`js_array_get_int` is now a runtime call where April used an inline bounds-checked
+load; restoring a guarded inline read (skip when `arr->extra != 0`) would recover the
+residual `sieve`/array-read delta.
