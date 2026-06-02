@@ -1,6 +1,18 @@
 // fs module tests - Phase 4
 import fs from 'fs';
 
+// Clean up from any interrupted prior run.
+if (fs.existsSync("./temp/fs_test1.txt")) {
+    fs.unlinkSync("./temp/fs_test1.txt");
+}
+if (fs.existsSync("./temp/fs_testdir")) {
+    var staleFiles = fs.readdirSync("./temp/fs_testdir");
+    for (var i = 0; i < staleFiles.length; i++) {
+        fs.unlinkSync("./temp/fs_testdir/" + staleFiles[i]);
+    }
+    fs.rmdirSync("./temp/fs_testdir");
+}
+
 // Test 1: writeFileSync + readFileSync
 fs.writeFileSync("./temp/fs_test1.txt", "hello world");
 var content = fs.readFileSync("./temp/fs_test1.txt");
