@@ -17,6 +17,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
+#include "../lambda/js/js_event_loop.h"
 #include "../radiant/script_runner.h"  // For script_runner_cleanup_js_state
 
 void fontface_cleanup(UiContext* uicon);
@@ -227,6 +228,8 @@ static void destroy_video_resources(ViewTree* tree) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
+
+    js_event_loop_cancel_document_timers(doc);
 
     // Clean up retained JS state (MIR context, event registry, runtime heap)
     // before destroying the document that owns the pointers.

@@ -235,6 +235,8 @@ typedef struct JsTimerHandle {
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
+    bool       roots_registered;
+    bool       closing;
 } JsTimerHandle;
 
 #define MAX_TIMER_HANDLES 1024
@@ -311,10 +313,15 @@ static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     }
 }
 
-static void timer_close_cb(uv_handle_t *handle) {
-    JsTimerHandle *th = (JsTimerHandle *)handle->data;
-    // unregister GC roots before freeing
+static void timer_unregister_gc_roots(JsTimerHandle *th) {
+    if (!th || !th->roots_registered) return;
     extern void heap_unregister_gc_root(uint64_t* slot);
+
+    // timer roots belong to the captured heap. they do not need the captured
+    // document, and re-entering a detached document can rebuild DOM globals on
+    // a runtime that is being torn down.
+    void* saved_doc = th->runtime_doc;
+    th->runtime_doc = nullptr;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
         heap_unregister_gc_root(&th->callback.item);
@@ -323,6 +330,13 @@ static void timer_close_cb(uv_handle_t *handle) {
         }
         timer_runtime_exit(&scope);
     }
+    th->runtime_doc = saved_doc;
+    th->roots_registered = false;
+}
+
+static void timer_close_cb(uv_handle_t *handle) {
+    JsTimerHandle *th = (JsTimerHandle *)handle->data;
+    timer_unregister_gc_roots(th);
     // remove from tracking array
     for (int i = 0; i < timer_handle_count; i++) {
         if (timer_handles[i] == th) {
@@ -345,6 +359,14 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
         heap_register_gc_root(&th->extra_args[j].item);
     }
     timer_runtime_exit(&scope);
+    th->roots_registered = true;
+}
+
+static void timer_close_handle(JsTimerHandle *th) {
+    if (!th || th->closing) return;
+    th->closing = true;
+    uv_timer_stop(&th->timer);
+    uv_close((uv_handle_t *)&th->timer, timer_close_cb);
 }
 
 static void timer_fire_cb(uv_timer_t *handle) {
@@ -363,8 +385,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         log_error("event_loop: timer fired without captured JS runtime");
     }
     if (!th->is_interval) {
-        uv_timer_stop(&th->timer);
-        uv_close((uv_handle_t *)&th->timer, timer_close_cb);
+        timer_close_handle(th);
     }
 }
 static double item_to_ms(Item delay) {
@@ -896,8 +917,7 @@ extern "C" void js_clearTimeout(Item timer_id) {
     for (int i = 0; i < timer_handle_count; i++) {
         if (timer_handles[i]->id == id) {
             JsTimerHandle *th = timer_handles[i];
-            uv_timer_stop(&th->timer);
-            uv_close((uv_handle_t *)&th->timer, timer_close_cb);
+            timer_close_handle(th);
             return;
         }
     }
@@ -905,6 +925,26 @@ extern "C" void js_clearTimeout(Item timer_id) {
 
 extern "C" void js_clearInterval(Item timer_id) {
     js_clearTimeout(timer_id);
+}
+
+extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
+    if (!dom_doc) return;
+
+    for (int i = 0; i < timer_handle_count; i++) {
+        JsTimerHandle *th = timer_handles[i];
+        if (!th || th->runtime_doc != dom_doc) continue;
+
+        log_debug("[JS_TIMER_DETACH] canceling timer %lld for document %p",
+                  (long long)th->id, dom_doc);
+        th->runtime_doc = nullptr;
+        timer_unregister_gc_roots(th);
+        th->callback = ItemNull;
+        for (int j = 0; j < th->extra_count; j++) {
+            th->extra_args[j] = ItemNull;
+        }
+        th->extra_count = 0;
+        timer_close_handle(th);
+    }
 }
 
 // =============================================================================
