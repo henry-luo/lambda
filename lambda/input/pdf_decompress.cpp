@@ -3,6 +3,7 @@
 #include <string.h>
 #include <zlib.h>
 #include "lib/log.h"
+#include "lib/hex.h"
 
 /**
  * PDF Stream Decompression Implementation
@@ -398,22 +399,11 @@ char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_
 
     while (in < in_end) {
         char c = *in++;
-        int digit = -1;
+        if (c == '>') break; // end marker
 
-        if (c >= '0' && c <= '9') {
-            digit = c - '0';
-        } else if (c >= 'A' && c <= 'F') {
-            digit = c - 'A' + 10;
-        } else if (c >= 'a' && c <= 'f') {
-            digit = c - 'a' + 10;
-        } else if (c == '>') {
-            // end marker
-            break;
-        } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            // skip whitespace
-            continue;
-        } else {
-            // invalid character - skip
+        int digit = hex_decode_byte(c);
+        if (digit < 0) {
+            // skip whitespace and any other invalid character
             continue;
         }
 

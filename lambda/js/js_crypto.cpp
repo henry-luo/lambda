@@ -19,6 +19,8 @@ extern "C" Item js_get_current_this(void);
 #include <cstring>
 #include "../../lib/mem.h"
 #include "../../lib/hex.h"
+#include "../../lib/base64.h"
+#include "../../lib/uuid.h"
 #include "../../lib/digest.h"
 
 #ifdef _WIN32
@@ -240,18 +242,8 @@ extern "C" Item js_crypto_randomUUID(Item options) {
         log_error("crypto: randomUUID: entropy source failed");
         return ItemNull;
     }
-    // set version 4 and variant 1
-    bytes[6] = (bytes[6] & 0x0F) | 0x40;
-    bytes[8] = (bytes[8] & 0x3F) | 0x80;
-
-    char uuid[37];
-    int p = 0;
-    for (int i = 0; i < 16; i++) {
-        if (i == 4 || i == 6 || i == 8 || i == 10) uuid[p++] = '-';
-        uuid[p++] = hex_encode_nibble(bytes[i] >> 4);
-        uuid[p++] = hex_encode_nibble(bytes[i] & 0x0F);
-    }
-    uuid[p] = '\0';
+    char uuid[UUID_STR_LEN];
+    uuid_v4_format(bytes, uuid);
     return make_string_item_crypto(uuid);
 }
 
@@ -309,20 +301,9 @@ static Item bytes_to_hex_string(const uint8_t* bytes, int len) {
 }
 
 static Item bytes_to_base64_string(const uint8_t* bytes, int len) {
-    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int out_len = ((len + 2) / 3) * 4;
-    char* out = (char*)mem_alloc((size_t)(out_len + 1), MEM_CAT_JS_RUNTIME);
-    int j = 0;
-    for (int i = 0; i < len; i += 3) {
-        uint32_t n = ((uint32_t)bytes[i]) << 16;
-        if (i + 1 < len) n |= ((uint32_t)bytes[i+1]) << 8;
-        if (i + 2 < len) n |= bytes[i+2];
-        out[j++] = b64[(n >> 18) & 0x3F];
-        out[j++] = b64[(n >> 12) & 0x3F];
-        out[j++] = (i + 1 < len) ? b64[(n >> 6) & 0x3F] : '=';
-        out[j++] = (i + 2 < len) ? b64[n & 0x3F] : '=';
-    }
-    out[j] = '\0';
+    size_t out_len = base64_encoded_len((size_t)len, BASE64_STD);
+    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_JS_RUNTIME);
+    base64_encode(bytes, (size_t)len, out, BASE64_STD);
     Item result = make_string_item_crypto(out);
     mem_free(out);
     return result;

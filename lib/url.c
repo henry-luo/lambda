@@ -12,6 +12,7 @@
 #include "url.h"
 #include "log.h"
 #include "str.h"
+#include "hex.h"
 
 // String allocation helper
 String* url_create_string(const char* value) {
@@ -897,6 +898,118 @@ char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
     decoded[j] = '\0';
     if (out_len) *out_len = j;
     return decoded;
+}
+
+// Percent-encode using a caller-supplied 256-entry "keep" table.
+char* url_encode_with_table(const char* str, size_t len, const uint8_t keep[256]) {
+    if (!str || !keep) return NULL;
+    char* encoded = mem_alloc(len * 3 + 1, MEM_CAT_TEMP);
+    if (!encoded) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if (keep[c]) {
+            encoded[j++] = (char)c;
+        } else {
+            encoded[j++] = '%';
+            encoded[j++] = hex_encode_nibble_upper(c >> 4);
+            encoded[j++] = hex_encode_nibble_upper(c & 0x0F);
+        }
+    }
+    encoded[j] = '\0';
+    return encoded;
+}
+
+// Percent-decode with application/x-www-form-urlencoded semantics: %XX -> byte,
+// '+' -> ' '. Lenient: a malformed '%' sequence is copied through literally.
+char* url_decode_form(const char* str, size_t len, size_t* out_len) {
+    if (!str) return NULL;
+    char* decoded = mem_alloc(len + 1, MEM_CAT_TEMP);
+    if (!decoded) return NULL;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        char c = str[i];
+        if (c == '%' && i + 2 < len) {
+            int high = url_hex_to_int(str[i + 1]);
+            int low  = url_hex_to_int(str[i + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded[j++] = (char)((high << 4) | low);
+                i += 3;
+                continue;
+            }
+        }
+        if (c == '+') { decoded[j++] = ' '; i++; }
+        else          { decoded[j++] = c;   i++; }
+    }
+    decoded[j] = '\0';
+    if (out_len) *out_len = j;
+    return decoded;
+}
+
+// In-place percent-decode of a NUL-terminated buffer. Lenient (malformed '%'
+// copied through). Decodes onto the same buffer; never grows. Returns new length.
+size_t url_decode_inplace(char* buf, bool form) {
+    if (!buf) return 0;
+    char* src = buf;
+    char* dst = buf;
+    while (*src) {
+        if (*src == '%' && src[1] && src[2]) {
+            int hi = url_hex_to_int(src[1]);
+            int lo = url_hex_to_int(src[2]);
+            if (hi >= 0 && lo >= 0) {
+                *dst++ = (char)((hi << 4) | lo);
+                src += 3;
+                continue;
+            }
+        }
+        if (form && *src == '+') { *dst++ = ' '; src++; }
+        else                     { *dst++ = *src++; }
+    }
+    *dst = '\0';
+    return (size_t)(dst - buf);
+}
+
+// Build a file:// URL from an absolute local file system path.
+char* url_from_local_path(const char* abs_path) {
+    if (!abs_path) return NULL;
+
+    // path-safe "keep" set: unreserved chars plus '/' (separators) and ':' (drive).
+    uint8_t keep[256];
+    memset(keep, 0, sizeof(keep));
+    for (int c = 'A'; c <= 'Z'; c++) keep[c] = 1;
+    for (int c = 'a'; c <= 'z'; c++) keep[c] = 1;
+    for (int c = '0'; c <= '9'; c++) keep[c] = 1;
+    keep[(unsigned char)'-'] = 1;
+    keep[(unsigned char)'_'] = 1;
+    keep[(unsigned char)'.'] = 1;
+    keep[(unsigned char)'~'] = 1;
+    keep[(unsigned char)'/'] = 1;
+    keep[(unsigned char)':'] = 1;
+
+    size_t plen = strlen(abs_path);
+    char* norm = mem_alloc(plen + 1, MEM_CAT_TEMP);
+    if (!norm) return NULL;
+    memcpy(norm, abs_path, plen + 1);
+#ifdef _WIN32
+    // Windows: normalize backslashes to forward slashes for the URL form.
+    for (char* p = norm; *p; p++) {
+        if (*p == '\\') *p = '/';
+    }
+#endif
+
+    char* enc = url_encode_with_table(norm, strlen(norm), keep);
+    mem_free(norm);
+    if (!enc) return NULL;
+
+    // emit file:// + path; prepend a '/' if the encoded path is not rooted (e.g.
+    // a Windows drive path "C:/...") so we always produce the file:/// form.
+    bool need_slash = (enc[0] != '/');
+    size_t rlen = 7 + (need_slash ? 1 : 0) + strlen(enc) + 1; // "file://" + path + NUL
+    char* result = mem_alloc(rlen, MEM_CAT_TEMP);
+    if (!result) { mem_free(enc); return NULL; }
+    snprintf(result, rlen, "file://%s%s", need_slash ? "/" : "", enc);
+    mem_free(enc);
+    return result;
 }
 
 // Percent-decode a string: %XX -> byte.

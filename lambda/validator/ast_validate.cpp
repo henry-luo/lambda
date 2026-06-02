@@ -16,6 +16,7 @@
 #include "../../lib/file.h"
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
+#include "../../lib/url.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -328,12 +329,16 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             return nullptr;
         }
 
-        char file_url[1200];
+        char abs_data_path[1200];
         if (data_file[0] == '/') {
-            snprintf(file_url, sizeof(file_url), "file://%s", data_file);
+            snprintf(abs_data_path, sizeof(abs_data_path), "%s", data_file);
         } else {
-            snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, data_file);
+            snprintf(abs_data_path, sizeof(abs_data_path), "%s/%s", cwd_path, data_file);
         }
+        char file_url[1200];
+        char* furl = url_from_local_path(abs_data_path);
+        snprintf(file_url, sizeof(file_url), "%s", furl ? furl : "");
+        if (furl) mem_free(furl);
 
         String* url_string = (String*)mem_alloc(sizeof(String) + strlen(file_url) + 1, MEM_CAT_SYSTEM);
         String* type_string = nullptr;

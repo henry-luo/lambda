@@ -17,6 +17,7 @@
 #include "../../lambda/input/css/dom_element.hpp"
 #include <cstring>
 #include "../../lib/mem.h"
+#include "../../lib/base64.h"
 #include <GLFW/glfw3.h>
 
 // Event handling from radiant (reusing existing infrastructure)
@@ -382,40 +383,8 @@ bool webdriver_element_is_selected(WebDriverSession* session, View* element) {
 // Screenshots
 // ============================================================================
 
-// Simple base64 encoding table
-static const char base64_chars[] = 
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 static char* base64_encode_data(const unsigned char* data, size_t len) {
-    size_t out_len = 4 * ((len + 2) / 3);
-    char* result = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
-    if (!result) return NULL;
-    
-    size_t i = 0, j = 0;
-    while (i < len) {
-        uint32_t octet_a = i < len ? data[i++] : 0;
-        uint32_t octet_b = i < len ? data[i++] : 0;
-        uint32_t octet_c = i < len ? data[i++] : 0;
-        
-        uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
-        
-        result[j++] = base64_chars[(triple >> 18) & 0x3F];
-        result[j++] = base64_chars[(triple >> 12) & 0x3F];
-        result[j++] = base64_chars[(triple >> 6) & 0x3F];
-        result[j++] = base64_chars[triple & 0x3F];
-    }
-    
-    // Add padding
-    size_t mod = len % 3;
-    if (mod == 1) {
-        result[out_len - 2] = '=';
-        result[out_len - 1] = '=';
-    } else if (mod == 2) {
-        result[out_len - 1] = '=';
-    }
-    
-    result[out_len] = '\0';
-    return result;
+    return base64_encode_alloc(data, len, BASE64_STD);
 }
 
 char* webdriver_screenshot(WebDriverSession* session) {

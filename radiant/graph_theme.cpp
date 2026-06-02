@@ -1,6 +1,7 @@
 #include "graph_theme.hpp"
 #include "../lib/str.h"
 #include "../lib/mem.h"
+#include "../lib/color.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -27,19 +28,9 @@ const ThemeMixRatios DEFAULT_MIX_RATIOS = {
 
 bool parse_hex_color(const char* hex, int* r, int* g, int* b) {
     if (!hex || !r || !g || !b) return false;
-
-    // skip leading # if present
-    if (hex[0] == '#') hex++;
-
-    // must be 6 hex digits
-    if (strlen(hex) != 6) return false;
-
-    unsigned int rgb;
-    if (sscanf(hex, "%06x", &rgb) != 1) return false;
-
-    *r = (rgb >> 16) & 0xFF;
-    *g = (rgb >> 8) & 0xFF;
-    *b = rgb & 0xFF;
+    uint8_t rr, gg, bb, aa;
+    if (!color_parse_hex(hex, &rr, &gg, &bb, &aa)) return false;
+    *r = rr; *g = gg; *b = bb;
     return true;
 }
 
@@ -50,7 +41,7 @@ char* format_hex_color(int r, int g, int b) {
     if (b < 0) b = 0; if (b > 255) b = 255;
 
     char* result = (char*)mem_alloc(8, MEM_CAT_STYLE);  // "#RRGGBB\0"
-    snprintf(result, 8, "#%02x%02x%02x", r, g, b);
+    color_format_hex((uint8_t)r, (uint8_t)g, (uint8_t)b, result);
     return result;
 }
 

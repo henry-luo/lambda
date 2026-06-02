@@ -33,7 +33,9 @@
       "Bash(./test/test_display_list_gtest.exe --gtest_filter='PaintIrParityTest.*')",
       "Bash(./test/test_display_list_gtest.exe)",
       "Bash(./lambda.exe render *)",
-      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 400 node test_radiant_render.js --strip-parity)"
+      "Bash(LAMBDA_ROOT=/Users/henryluo/Projects/lambda timeout 400 node test_radiant_render.js --strip-parity)",
+      "Bash(clang -std=c11 -fsyntax-only -I lib lib/base64.c)",
+      "Bash(clang -std=c11 -fsyntax-only -I lib lib/url.c)"
     ]
   }
 }

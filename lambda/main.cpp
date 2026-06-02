@@ -757,16 +757,19 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-    // Create file URL
-    char file_url[PATH_MAX + 8];
+    // Create file URL (percent-encoded, cross-platform) from an absolute path
+    char abs_path[PATH_MAX + 8];
     if (input_file[0] == '/') {
-        // Absolute path
-        snprintf(file_url, sizeof(file_url), "file://%s", input_file);
+        snprintf(abs_path, sizeof(abs_path), "%s", input_file);
     } else {
-        // Relative path
-        snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, input_file);
+        snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd_path, input_file);
     }
     mem_free(cwd_path);
+
+    char file_url[PATH_MAX + 8];
+    char* furl = url_from_local_path(abs_path);
+    snprintf(file_url, sizeof(file_url), "%s", furl ? furl : "");
+    if (furl) mem_free(furl);
 
     // Create URL string
     String* url_string = create_string(temp_pool, file_url);

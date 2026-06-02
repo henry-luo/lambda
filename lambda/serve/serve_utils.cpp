@@ -8,6 +8,7 @@
 #include "serve_utils.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/url.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -109,36 +110,8 @@ char* serve_strtrim(char *str) {
 }
 
 size_t serve_url_decode(char *str) {
-    if (!str) return 0;
-    char *src = str;
-    char *dst = str;
-
-    while (*src) {
-        if (*src == '%' && src[1] && src[2]) {
-            int hi = -1, lo = -1;
-            char c1 = src[1], c2 = src[2];
-            if (c1 >= '0' && c1 <= '9') hi = c1 - '0';
-            else if (c1 >= 'a' && c1 <= 'f') hi = c1 - 'a' + 10;
-            else if (c1 >= 'A' && c1 <= 'F') hi = c1 - 'A' + 10;
-            if (c2 >= '0' && c2 <= '9') lo = c2 - '0';
-            else if (c2 >= 'a' && c2 <= 'f') lo = c2 - 'a' + 10;
-            else if (c2 >= 'A' && c2 <= 'F') lo = c2 - 'A' + 10;
-
-            if (hi >= 0 && lo >= 0) {
-                *dst++ = (char)((hi << 4) | lo);
-                src += 3;
-                continue;
-            }
-        }
-        if (*src == '+') {
-            *dst++ = ' ';
-            src++;
-        } else {
-            *dst++ = *src++;
-        }
-    }
-    *dst = '\0';
-    return (size_t)(dst - str);
+    // application/x-www-form-urlencoded in-place decode (%XX and '+' -> ' ')
+    return url_decode_inplace(str, true);
 }
 
 const char* serve_get_file_extension(const char *path) {
