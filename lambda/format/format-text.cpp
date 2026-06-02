@@ -34,7 +34,7 @@ static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item)
     }
     else if (item.isString()) {
         String* str = item.asString();
-        if (str && str->chars && str->len > 0) {
+        if (str && str->len > 0) {
             // Output string content without quotes
             ctx.write_text(str);
         }

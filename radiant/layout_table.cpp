@@ -2713,27 +2713,21 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
 
         // Parse vertical-align: check resolved in_line property first (set by apply_element_default_style),
         // then check CSS declarations for overrides
-        bool valign_resolved = false;
-
         // First, check the resolved in_line->vertical_align (set by HTML default styles in resolve_htm_style.cpp)
         // This handles the CSS 2.1 default: vertical-align: middle for td/th
         if (cell->in_line && cell->in_line->vertical_align) {
             CssEnum valign_value = cell->in_line->vertical_align;
             if (valign_value == CSS_VALUE_TOP) {
                 cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
-                valign_resolved = true;
                 log_debug("Cell vertical-align from in_line: top");
             } else if (valign_value == CSS_VALUE_MIDDLE) {
                 cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
-                valign_resolved = true;
                 log_debug("Cell vertical-align from in_line: middle");
             } else if (valign_value == CSS_VALUE_BOTTOM) {
                 cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
-                valign_resolved = true;
                 log_debug("Cell vertical-align from in_line: bottom");
             } else if (valign_value == CSS_VALUE_BASELINE) {
                 cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
-                valign_resolved = true;
                 log_debug("Cell vertical-align from in_line: baseline");
             }
         }
@@ -2807,11 +2801,6 @@ static inline bool is_row_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW;
 }
 
-// Helper: Check if a display value is a table type
-static inline bool is_table_display(CssEnum display) {
-    return display == CSS_VALUE_TABLE || display == CSS_VALUE_INLINE_TABLE;
-}
-
 // Helper: Check if a display value is a column type
 static inline bool is_column_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_COLUMN || display == CSS_VALUE_TABLE_COLUMN_GROUP;
@@ -2820,28 +2809,6 @@ static inline bool is_column_display(CssEnum display) {
 // Helper: Check if a display value is a caption type
 static inline bool is_caption_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_CAPTION;
-}
-
-// Helper: Check if a child is a "proper table child" per CSS 2.1 Section 17.2.1
-// A proper table child is: table-row-group, table-header-group, table-footer-group,
-// table-row, table-column-group, table-column, or table-caption
-static inline bool is_proper_table_child(CssEnum display) {
-    return is_row_group_display(display) ||
-           is_row_display(display) ||
-           is_column_display(display) ||
-           is_caption_display(display);
-}
-
-// Helper: Check if a child is a "proper row group child" per CSS 2.1
-// A proper row group child is: table-row
-static inline bool is_proper_row_group_child(CssEnum display) {
-    return is_row_display(display);
-}
-
-// Helper: Check if a child is a "proper row child" per CSS 2.1
-// A proper row child is: table-cell
-static inline bool is_proper_row_child(CssEnum display) {
-    return is_cell_display(display);
 }
 
 // =============================================================================
@@ -2983,26 +2950,6 @@ static void append_child_to_element(DomElement* parent, DomElement* child) {
 }
 
 /**
- * Insert a child element at the beginning of parent's child list
- */
-static void prepend_child_to_element(DomElement* parent, DomElement* child) {
-    if (!parent || !child) return;
-
-    child->parent = parent;
-    child->prev_sibling = nullptr;
-
-    if (parent->first_child) {
-        parent->first_child->prev_sibling = child;
-        child->next_sibling = parent->first_child;
-        parent->first_child = child;
-    } else {
-        parent->first_child = child;
-        parent->last_child = child;
-        child->next_sibling = nullptr;
-    }
-}
-
-/**
  * Move a node from its current parent to a new parent
  * Removes from old parent and appends to new parent
  */
@@ -3072,98 +3019,10 @@ static void insert_node_before(DomElement* parent, DomNode* new_node, DomNode* r
     ref_node->prev_sibling = new_node;
 }
 
-/**
- * Collect consecutive runs of children that need to be wrapped together.
- * Returns the first child after the run ends (or nullptr if at end).
- */
-static DomNode* collect_consecutive_run(DomNode* start, DomElement* parent,
-                                        bool (*should_include)(DomNode*, uintptr_t),
-                                        ArrayList* run) {
-    arraylist_clear(run);
-    DomNode* child = start;
-
-    while (child) {
-        if (!child->is_element()) {
-            // Text nodes are included if adjacent to other included elements
-            if (run->length > 0) {
-                arraylist_append(run, child);
-            }
-            child = child->next_sibling;
-            continue;
-        }
-
-        uintptr_t tag = child->tag();
-        if (should_include(child, tag)) {
-            arraylist_append(run, child);
-            child = child->next_sibling;
-        } else {
-            break;
-        }
-    }
-
-    // Trim trailing non-element nodes
-    while (run->length > 0 && !static_cast<DomNode*>(run->data[run->length - 1])->is_element()) {
-        run->length--;
-    }
-
-    return child;
-}
-
-/**
- * CSS 2.1 Section 17.2.1: Generate anonymous table boxes.
- *
- * This implements the full CSS 2.1 anonymous table box generation algorithm:
- *
- * 1. If a child of a table-row is not a table-cell, wrap it in anonymous table-cell
- * 2. If a child of a table-row-group is not a table-row, wrap consecutive cells in anonymous table-row
-/**
- * Helper to check if an element is floated or absolutely positioned.
- * CSS 2.1 Section 17.2.1: Such elements should NOT be wrapped in anonymous table boxes.
- */
-static bool is_float_or_positioned(DomElement* elem) {
-    if (!elem) return false;
-
-    // Check resolved position prop first (if styles already resolved)
-    if (elem->position) {
-        if (elem->position->float_prop != CSS_VALUE_NONE ||
-            elem->position->position == CSS_VALUE_ABSOLUTE ||
-            elem->position->position == CSS_VALUE_FIXED) {
-            return true;
-        }
-    }
-
-    // Check specified_style (CSS cascade result before full resolution)
-    if (elem->specified_style && elem->specified_style->tree) {
-        // Check float property
-        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
-        if (float_node) {
-            StyleNode* style_node = (StyleNode*)float_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
-                    (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
-                    return true;
-                }
-            }
-        }
-
-        // Check position property
-        AvlNode* pos_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_POSITION);
-        if (pos_node) {
-            StyleNode* style_node = (StyleNode*)pos_node->declaration;
-            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                CssValue* val = style_node->winning_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
-                    (val->data.keyword == CSS_VALUE_ABSOLUTE || val->data.keyword == CSS_VALUE_FIXED)) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
+// CSS 2.1 Section 17.2.1: Generate anonymous table boxes.
+// This implements the full CSS 2.1 anonymous table box generation algorithm:
+// 1. If a child of a table-row is not a table-cell, wrap it in anonymous table-cell
+// 2. If a child of a table-row-group is not a table-row, wrap consecutive cells in anonymous table-row
 /**
  * Helper to check if an element is absolutely positioned or fixed.
  * CSS 2.1 §9.7: Such elements are completely out of flow and should NOT
@@ -3228,31 +3087,6 @@ static bool is_floated_element(DomElement* elem) {
     }
 
     return false;
-}
-
-/**
- * Helper function to wrap a node in an anonymous table-cell if needed.
- * If the node is already a cell, just reparent it.
- * Otherwise, wrap it in a new anonymous cell.
- */
-static void wrap_node_in_cell_if_needed(LayoutContext* lycon, DomNode* node, DomElement* parent_row) {
-    bool is_already_cell = false;
-    if (node->is_element()) {
-        DisplayValue disp = resolve_display_value(node);
-        is_already_cell = is_cell_display(disp.inner);
-    }
-
-    if (is_already_cell) {
-        // Already a cell, just reparent
-        reparent_node(node, parent_row);
-    } else {
-        // Need to wrap in anonymous cell (text nodes or non-cell elements)
-        DomElement* anon_td = create_anonymous_table_element(lycon, parent_row,
-            CSS_VALUE_TABLE_CELL, "::anon-td");
-        reparent_node(node, anon_td);
-        append_child_to_element(parent_row, anon_td);
-        log_debug("%s [ANON-TABLE] Wrapped node in anonymous cell", node->source_loc());
-    }
 }
 
 /**
@@ -3559,8 +3393,6 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         }
 
         ArrayList* cell_run = arraylist_new(8);
-        DomNode* first_cell_position = nullptr;
-
         for (int j = 0; j < group_children->length; j++) {
             DomNode* gchild = static_cast<DomNode*>(group_children->data[j]);
 
@@ -3581,9 +3413,6 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                         }
                     }
                     if (has_content) {
-                        if (cell_run->length == 0) {
-                            first_cell_position = gchild;
-                        }
                         arraylist_append(cell_run, gchild);
                         log_debug("%s [ANON-TABLE] Phase 2: Text node with content added to cell run", table->source_loc());
                     }
@@ -3600,7 +3429,6 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     wrap_run_in_cells(lycon, cell_run, anon_tr);
                     insert_node_before(row_group, static_cast<DomNode*>(anon_tr), gchild);
                     arraylist_clear(cell_run);
-                    first_cell_position = nullptr;
                 }
                 continue;
             }
@@ -3623,23 +3451,16 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
                     insert_node_before(row_group, static_cast<DomNode*>(anon_tr), gchild);
                     arraylist_clear(cell_run);
-                    first_cell_position = nullptr;
                 }
                 continue;
             }
 
             if (is_cell) {
-                if (cell_run->length == 0) {
-                    first_cell_position = gchild;
-                }
                 arraylist_append(cell_run, gchild);
                 continue;
             }
 
             // Non-row, non-cell content - treat as content to wrap in cell then row
-            if (cell_run->length == 0) {
-                first_cell_position = gchild;
-            }
             arraylist_append(cell_run, gchild);
         }
 
@@ -4267,42 +4088,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     log_debug("%s Table structure built successfully", tableNode->source_loc());
     return table;
-}
-
-// Calculate proper height distribution for rowspan cells
-// Uses navigation helpers for proper anonymous box support
-static void calculate_rowspan_heights(ViewTable* table, TableMetadata* meta, float* row_heights) {
-    if (!table || !meta || !row_heights) return;
-
-    // Iterate all rows and cells using navigation helpers
-    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
-        for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
-            if (cell->td->row_span > 1) {
-                // Calculate total height needed for spanned rows
-                int start_row = cell->td->row_index;
-                int end_row = start_row + cell->td->row_span;
-
-                // Get current total height of spanned rows
-                float current_total = 0;
-                for (int r = start_row; r < end_row && r < meta->row_count; r++) {
-                    current_total += row_heights[r];
-                }
-
-                // If cell needs more height, distribute the extra
-                if (cell->height > current_total) {
-                    float extra_needed = cell->height - current_total;
-                    float extra_per_row = extra_needed / cell->td->row_span;
-
-                    for (int r = start_row; r < end_row && r < meta->row_count; r++) {
-                        row_heights[r] += extra_per_row;
-                    }
-
-                    log_debug("Enhanced rowspan: cell height=%.1f distributed across %d rows (extra=%.1f)",
-                             cell->height, cell->td->row_span, extra_needed);
-                }
-            }
-        }
-    }
 }
 
 // Apply CSS vertical-align positioning to cell content
@@ -8330,7 +8115,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (eligible_row_count > 0) {
                     // Distribute extra height equally among eligible body rows only
                     float height_per_row = extra_for_body / eligible_row_count;
-                    int distributed_count = 0;
 
                     // First pass: update meta->row_heights for eligible body rows
                     for (View* child_view = table->first_child; child_view; child_view = child_view->next_sibling) {
@@ -8355,7 +8139,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                             meta->row_heights[row_idx] += row_extra;
                                             log_debug("%s     Body row %d: natural=%.1f + extra=%.1f = %.1f", table->source_loc(),
                                                      row_idx, meta->row_heights[row_idx] - row_extra, row_extra, meta->row_heights[row_idx]);
-                                            distributed_count++;
                                             break;  // Found row index
                                         }
                                     }

@@ -74,7 +74,7 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
         strbuf_append_format(strbuf, "m%d.", import->script->index);
     }
     strbuf_append_char(strbuf, '_');
-    if (fn_node->name && fn_node->name->chars) {
+    if (fn_node->name) {
         strbuf_append_str_n(strbuf, fn_node->name->chars, fn_node->name->len);
     } else {
         strbuf_append_char(strbuf, 'f');

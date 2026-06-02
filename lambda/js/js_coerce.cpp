@@ -28,9 +28,6 @@ static inline Item k_value_of(void) {
 static inline Item k_to_string(void) {
     return (Item){.item = s2it(heap_create_name("toString", 8))};
 }
-static inline Item k_primitive_value(void) {
-    return (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
-}
 
 static inline bool is_object_type(TypeId t) {
     return t == LMD_TYPE_MAP || t == LMD_TYPE_ARRAY ||

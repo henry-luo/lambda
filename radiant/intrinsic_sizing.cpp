@@ -678,7 +678,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float current_word = 0.0f;
     float longest_word = 0.0f;
 
-    uint32_t prev_glyph = 0;
     uint32_t prev_codepoint = 0;
     const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
     bool has_kerning = fm ? fm->has_kerning : false;
@@ -697,7 +696,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             // Zero-width space is a break opportunity
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
-            prev_glyph = 0;
             i += 3;  // Skip all bytes of zero-width space
             is_word_start = true;  // Next character starts a new word
             continue;
@@ -707,7 +705,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // This has zero width and is NOT a break opportunity
         if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
             // Zero width, no break, just skip
-            prev_glyph = 0;
             i += 3;
             // Don't set is_word_start - this is not a word boundary
             continue;
@@ -718,16 +715,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
             // ZWJ: only trigger composition if preceded by a valid base
             if (str[i+2] == 0x8D && prev_is_zwj_base) after_zwj = true;
-            prev_glyph = 0;
             i += 3;
             continue;
         }
 
         // Word boundary detection (whitespace breaks words)
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-            // Get space glyph for kerning continuity (matching layout_text.cpp)
-            uint32_t space_glyph = font_get_glyph_index(lycon->font.font_handle, ch);
-
             // Apply kerning between prev character and space (matching layout_text.cpp)
             float kerning_adj = 0.0f;
             if (has_kerning && prev_codepoint) {
@@ -761,8 +754,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
             total_width += kerning_adj + space_width;
 
-            // Keep tracking glyph/codepoint for kerning continuity (layout_text.cpp doesn't reset)
-            prev_glyph = space_glyph;
+            // Keep tracking codepoint for kerning continuity (layout_text.cpp doesn't reset)
             prev_codepoint = (uint32_t)ch;
             prev_is_zwj_base = false;
             is_word_start = true;  // Next character starts a new word
@@ -777,7 +769,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             // Invalid UTF-8, skip byte - use 11.0 to match font fallback
             current_word += 11.0f;
             total_width += 11.0f;
-            prev_glyph = 0;
             i++;
             is_word_start = false;
             if (break_anywhere) {
@@ -812,7 +803,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if ((codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) ||  // skin tone modifiers
             codepoint == 0xFE0E || codepoint == 0xFE0F ||       // variation selectors
             codepoint == 0x20E3) {                               // combining keycap
-            prev_glyph = 0;
             i += bytes;
             continue;
         }
@@ -824,7 +814,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             after_zwj = false;
             if (is_emoji_for_zwj(codepoint)) {
                 prev_is_zwj_base = is_zwj_composition_base(codepoint);
-                prev_glyph = 0;
                 i += bytes;
                 continue;
             }
@@ -874,7 +863,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 current_word += 11.0f;
                 total_width += 11.0f;
             }
-            prev_glyph = 0;
             i += bytes;
             if (break_anywhere) {
                 longest_word = fmax(longest_word, current_word);
@@ -923,7 +911,6 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             total_width += 11.0f;
         }
 
-        prev_glyph = glyph_index;
         prev_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
@@ -981,7 +968,6 @@ float compute_text_height_at_width(LayoutContext* lycon,
     const FontMetrics* fm2 = has_font ? font_get_metrics(lycon->font.font_handle) : NULL;
     bool has_kerning = fm2 ? fm2->has_kerning : false;
     if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
-    uint32_t prev_glyph = 0;
     uint32_t prev_codepoint = 0;
     bool is_word_start = true;
 
@@ -1000,7 +986,6 @@ float compute_text_height_at_width(LayoutContext* lycon,
                 current_line_width += current_word_width;
             }
             current_word_width = 0;
-            prev_glyph = 0;
             is_word_start = true;
             i += 3;
             continue;
@@ -1008,10 +993,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
         // Skip ZWNBSP (U+FEFF), ZWNJ (U+200C), ZWJ (U+200D) - zero width, no break
         if (ch == 0xEF && i + 2 < length && str[i+1] == 0xBB && str[i+2] == 0xBF) {
-            prev_glyph = 0; i += 3; continue;
+            i += 3; continue;
         }
         if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
-            prev_glyph = 0; i += 3; continue;
+            i += 3; continue;
         }
 
         // Regular space/whitespace - break opportunity
@@ -1030,7 +1015,6 @@ float compute_text_height_at_width(LayoutContext* lycon,
                 space_width += lycon->font.style->word_spacing;
             }
             current_line_width += space_width;
-            prev_glyph = has_font ? font_get_glyph_index(lycon->font.font_handle, ch) : 0;
             prev_codepoint = (uint32_t)ch;
             is_word_start = true;
             i++;
@@ -1042,7 +1026,6 @@ float compute_text_height_at_width(LayoutContext* lycon,
         int bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
         if (bytes <= 0) {
             current_word_width += has_font ? 11.0f : 11.0f;
-            prev_glyph = 0;
             i++;
             is_word_start = false;
             continue;
@@ -1101,7 +1084,6 @@ float compute_text_height_at_width(LayoutContext* lycon,
             if (lycon->font.style) {
                 advance += lycon->font.style->letter_spacing;
             }
-            prev_glyph = font_get_glyph_index(lycon->font.font_handle, codepoint);
             prev_codepoint = codepoint;
         } else {
             advance = 11.0f;

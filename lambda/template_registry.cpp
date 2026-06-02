@@ -267,7 +267,7 @@ Item fn_apply2(Item target, Item options) {
         Item tmpl_item = item_attr(options, "template");
         if (get_type_id(tmpl_item) == LMD_TYPE_STRING) {
             String* tmpl_str = tmpl_item.get_string();
-            if (tmpl_str && tmpl_str->chars) {
+            if (tmpl_str) {
                 template_name = tmpl_str->chars;
             }
         }

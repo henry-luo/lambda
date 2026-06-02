@@ -13,10 +13,6 @@
 
 #include <cstring>
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
     String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));

@@ -565,7 +565,7 @@ extern const JsBuiltinMethodSpec JS_DATAVIEW_ACCESSOR_SPECS[];
 
 
 Item _map_read_field(ShapeEntry* field, void* map_data);
-Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
 bool js_runtime_trace_enabled();
 void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len);

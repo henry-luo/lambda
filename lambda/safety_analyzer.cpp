@@ -184,7 +184,7 @@ bool should_use_tco(AstFuncNode* func_node) {
     if (!func_node) return false;
 
     // Must have a name (for self-reference)
-    if (!func_node->name || !func_node->name->chars) {
+    if (!func_node->name) {
         log_debug("TCO: skip anonymous function");
         return false;
     }

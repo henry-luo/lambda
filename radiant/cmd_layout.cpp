@@ -182,7 +182,7 @@ static bool resolve_layout_support_resource_path(const char* href, const char* b
 // Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
-void log_root_item(Item item, char* indent="  ");
+void log_root_item(Item item, const char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
@@ -1860,23 +1860,6 @@ struct IndexedRule {
     int rule_index;         // Original position for source order
 };
 
-// Hash and compare functions for string-keyed hashmap
-static uint64_t string_key_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const char* key = *(const char**)item;
-    if (!key) return 0;
-    return hashmap_xxhash3(key, strlen(key), seed0, seed1);
-}
-
-static int string_key_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const char* ka = *(const char**)a;
-    const char* kb = *(const char**)b;
-    if (!ka && !kb) return 0;
-    if (!ka) return -1;
-    if (!kb) return 1;
-    return strcmp(ka, kb);
-}
-
 // Rule list entry for hashmap: key string + ArrayList of IndexedRule
 struct RuleListEntry {
     const char* key;        // hash key (tag/class/id name)
@@ -2536,8 +2519,7 @@ const char* detect_html_charset(const char* html, size_t len) {
         p++;
         while (*p == ' ' || *p == '\t') p++;
         // skip optional quote
-        char quote = 0;
-        if (*p == '"' || *p == '\'') { quote = *p; p++; }
+        if (*p == '"' || *p == '\'') p++;
 
         // extract charset value
         const char* start = p;

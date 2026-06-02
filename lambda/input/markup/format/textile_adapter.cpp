@@ -145,34 +145,6 @@ static bool is_textile_definition_list(const char* line) {
     return false;
 }
 
-/**
- * is_textile_comment - Check if line starts a comment block
- *
- * Textile comments: ###. or ###..
- */
-static bool is_textile_comment(const char* line) {
-    return line && strncmp(line, "###", 3) == 0 &&
-           (line[3] == '.' || (line[3] == '.' && line[4] == '.'));
-}
-
-/**
- * is_textile_footnote_def - Check if line is a footnote definition
- *
- * Textile footnotes: fn1. Footnote text
- */
-static bool is_textile_footnote_def(const char* line) {
-    if (!line || line[0] != 'f' || line[1] != 'n') return false;
-
-    const char* p = line + 2;
-    // Must have at least one digit
-    if (!isdigit((unsigned char)*p)) return false;
-    while (isdigit((unsigned char)*p)) p++;
-
-    // May have modifiers, then must have .
-    while (*p && *p != '.' && *p != '\n') p++;
-    return *p == '.';
-}
-
 class TextileAdapter : public FormatAdapter {
 public:
     Format format() const override { return Format::TEXTILE; }
@@ -538,4 +510,3 @@ FormatAdapter* getTextileAdapter() {
 
 } // namespace markup
 } // namespace lambda
-

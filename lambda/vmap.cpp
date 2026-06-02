@@ -143,25 +143,6 @@ static Item stabilize_value(HashMapData* hd, Item value) {
     return value;
 }
 
-// deep copy: creates a new HashMapData with the same entries
-static HashMapData* hashmap_data_copy(HashMapData* src) {
-    HashMapData* dst = hashmap_data_new();
-    // iterate through entries in insertion order, stabilizing numeric values
-    for (int i = 0; i < src->key_order->length; i++) {
-        Item key = *(Item*)&src->key_order->data[i];
-        HashMapEntry probe = { .key = key };
-        const HashMapEntry* found = (const HashMapEntry*)hashmap_get(src->table, &probe);
-        if (found) {
-            Item value = stabilize_value(dst, found->value);
-            HashMapEntry entry = { .key = found->key, .value = value };
-            hashmap_set(dst->table, &entry);
-            arraylist_append(dst->key_order, (void*)key.item);
-            dst->count++;
-        }
-    }
-    return dst;
-}
-
 // insert or update an entry (in-place mutation)
 static void hashmap_data_set(HashMapData* hd, Item key, Item value) {
     value = stabilize_value(hd, value);

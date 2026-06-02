@@ -196,7 +196,6 @@ static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) 
     // build array of row maps
     ArrayBuilder arr = builder.array();
 
-    int64_t row_count = 0;
     int rc;
     while ((rc = rdb_step(stmt)) == RDB_ROW) {
         MapBuilder row = builder.map();
@@ -206,7 +205,6 @@ static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) 
             row.put(tbl->columns[c].name, item);
         }
         arr.append(row.final());
-        row_count++;
     }
 
     rdb_finalize(stmt);

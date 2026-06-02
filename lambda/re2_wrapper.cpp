@@ -21,7 +21,7 @@ extern "C" {
     void list_push(List *list, Item item);
     void* heap_calloc(size_t size, TypeId type_id);
     void* heap_data_calloc(size_t size);
-    String* heap_strcpy(char* src, int64_t len);
+    String* heap_strcpy(const char* src, int64_t len);
 }
 extern void* heap_alloc(int size, TypeId type_id);
 extern __thread EvalContext* context;
@@ -90,7 +90,7 @@ static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
 
 // Escape regex metacharacters in a literal string
 void escape_regex_literal(StrBuf* regex, String* str) {
-    if (!str || !str->chars) return;
+    if (!str) return;
 
     for (size_t i = 0; i < str->len; i++) {
         char c = str->chars[i];

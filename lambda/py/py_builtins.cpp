@@ -31,7 +31,7 @@ static int py_item_lt_cmp(const void* a, const void* b, void* udata) {
 extern Input* py_input;
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
-extern Item _map_get(TypeMap* map_type, void* map_data, char* key, bool* is_found);
+extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
 
 // Forward declarations from py_runtime.cpp
 extern "C" Item py_to_str(Item value);

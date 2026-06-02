@@ -188,14 +188,12 @@ Item parse_image(MarkupParser* parser, const char** text) {
         const char* src_end = nullptr;
         const char* title_start = nullptr;
         const char* title_end = nullptr;
-        bool angle_bracket_url = false;
 
         // Skip leading whitespace
         while (*pos == ' ' || *pos == '\t') pos++;
 
         // Check for angle-bracketed URL: <url>
         if (*pos == '<') {
-            angle_bracket_url = true;
             pos++; // Skip <
             src_start = pos;
 

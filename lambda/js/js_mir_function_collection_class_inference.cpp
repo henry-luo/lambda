@@ -303,7 +303,7 @@ void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t fu
 void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler* mt) {
     StrBuf* sb = strbuf_new_cap(64);
     strbuf_append_str(sb, "_js_");
-    if (fn->name && fn->name->chars) {
+    if (fn->name) {
         strbuf_append_str_n(sb, fn->name->chars, fn->name->len);
     } else {
         strbuf_append_str(sb, "anon");
@@ -2051,7 +2051,7 @@ void jm_infer_param_types(JsFuncCollected* fc) {
 
     // Build self-name for recursive call detection
     char self_name[128] = {0};
-    if (fn->name && fn->name->chars) {
+    if (fn->name) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
 
@@ -2326,7 +2326,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
     }
 
     char self_name[128] = {0};
-    if (fn->name && fn->name->chars) {
+    if (fn->name) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
 

@@ -95,7 +95,7 @@ typedef struct EvalContext : Context {
 
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
-    char* name;  // name of the type
+    const char* name;  // name of the type
     Type* type;  // literal type
     Type* lit_type;  // literal type_type
     // char* c_type;  // C type of the type

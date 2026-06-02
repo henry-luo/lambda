@@ -208,7 +208,7 @@ void format_html_string_safe(StringBuf* sb, String* str, bool is_attribute) {
         return;
     }
 
-    if (!str->chars || str->len == 0) return;
+    if (str->len == 0) return;
 
     const char* s = str->chars;
     size_t len = str->len;

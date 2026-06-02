@@ -1045,38 +1045,6 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     return pseudo;
 }
 
-/**
- * Layout a pseudo-element using the existing inline layout infrastructure
- *
- * Per CSS spec: pseudo-element is child of defining element, with display: inline.
- * We use layout_inline to handle the pseudo-element which will recursively
- * lay out its text child.
- *
- * @param lycon Layout context
- * @param pseudo_elem The pseudo-element DomElement (created by create_pseudo_element)
- */
-static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem) {
-    if (!pseudo_elem) return;
-
-    log_debug("%s [PSEUDO] Laying out %s content", pseudo_elem->source_loc(), pseudo_elem->tag_name);
-
-    // Resolve CSS styles for the pseudo-element BEFORE layout.
-    // IMPORTANT: Set lycon->view to the pseudo-element so that CSS property
-    // callbacks apply properties to the
-    // pseudo-element itself, not the parent element.
-    View* saved_view = lycon->view;
-    lycon->view = static_cast<View*>(pseudo_elem);
-    dom_node_resolve_style(pseudo_elem, lycon);
-    lycon->view = saved_view;
-
-    // Layout the pseudo-element as inline (it will lay out its text child)
-    layout_inline(lycon, pseudo_elem, pseudo_elem->display);
-}
-
-// ============================================================================
-// End of Pseudo-element Layout Support
-// ============================================================================
-
 // ============================================================================
 // ::first-letter Pseudo-element Support (CSS 2.1 §5.12.2)
 // ============================================================================

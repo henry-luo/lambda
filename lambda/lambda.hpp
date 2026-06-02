@@ -270,6 +270,7 @@ struct ConstItem {
     };
 
     explicit ConstItem(): item(0) {}
+    ConstItem(const ConstItem &) = default;
     // ConstItem& operator=(ConstItem&&) = default;
     ConstItem& operator=(const ConstItem &) = default;
 

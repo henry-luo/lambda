@@ -33,7 +33,6 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
 static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 static void calculate_line_cross_sizes(FlexContainerLayout* flex_layout);
 static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayout* flex_layout);
-static void determine_container_cross_size(FlexContainerLayout* flex_layout, ViewBlock* container);
 extern bool is_only_whitespace(const char* str);
 
 static bool has_flex_item_prop(ViewElement* item) {
@@ -122,49 +121,6 @@ static float get_effective_flex_base(ViewElement* item, float basis, FlexContain
 // ============================================================================
 
 // Check if an element has intrinsic width available
-static bool has_item_intrinsic_width(ViewElement* item) {
-    if (!item) return false;
-    if (has_flex_item_prop(item) && item->fi->has_intrinsic_width) return true;
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->intrinsic_width > 0;
-    }
-    return false;
-}
-
-// Check if an element has intrinsic height available
-static bool has_item_intrinsic_height(ViewElement* item) {
-    if (!item) return false;
-    if (has_flex_item_prop(item) && item->fi->has_intrinsic_height) return true;
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->intrinsic_height > 0;
-    }
-    return false;
-}
-
-// Get intrinsic width (max-content) for flex item or form control
-static float get_item_intrinsic_width(ViewElement* item) {
-    if (!item) return 0;
-    if (has_flex_item_prop(item) && item->fi->has_intrinsic_width) {
-        return item->fi->intrinsic_width.max_content;
-    }
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->intrinsic_width;
-    }
-    return 0;
-}
-
-// Get intrinsic height (max-content) for flex item or form control
-static float get_item_intrinsic_height(ViewElement* item) {
-    if (!item) return 0;
-    if (has_flex_item_prop(item) && item->fi->has_intrinsic_height) {
-        return item->fi->intrinsic_height.max_content;
-    }
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->intrinsic_height;
-    }
-    return 0;
-}
-
 // Check if a view element is an empty flex container (no children)
 // Used to determine if a flex item should get 0 height or minimum height
 // Note: Called during init_flex_container when tree may not be fully linked,
@@ -5535,20 +5491,6 @@ float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool
 }
 
 // Helper: Check if an item has a definite cross-axis size
-static bool item_has_definite_cross_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    if (!item || !item->blk) return false;
-
-    if (is_main_axis_horizontal(flex_layout)) {
-        // Cross-axis is height for row direction
-        // given_height >= 0 means explicit height (-1 means auto)
-        return item->blk->given_height >= 0;
-    } else {
-        // Cross-axis is width for column direction
-        // given_width >= 0 means explicit width (-1 means auto)
-        return item->blk->given_width >= 0;
-    }
-}
-
 // Helper: Check if an item will be stretched in cross-axis
 static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!has_flex_item_prop(item)) return false;
@@ -6198,112 +6140,3 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
 // ============================================================================
 // Per the spec: If the flex container has a definite cross size, use that.
 // Otherwise, use the sum of the flex lines' cross sizes plus gaps and padding/border.
-static void determine_container_cross_size(FlexContainerLayout* flex_layout, ViewBlock* container) {
-    if (!flex_layout || !container) return;
-
-    bool is_horizontal = is_main_axis_horizontal(flex_layout);
-    log_debug("%s CONTAINER_CROSS: Determining cross size, is_horizontal=%d", container->source_loc(), is_horizontal);
-
-    // check if container has definite cross size
-    bool has_definite_cross = false;
-    float definite_cross = 0;
-
-    if (is_horizontal) {
-        // cross-axis is height
-        if (container->blk && container->blk->given_height >= 0) {
-            has_definite_cross = true;
-            definite_cross = container->blk->given_height;
-            log_debug("%s CONTAINER_CROSS: Container has definite height=%.1f", container->source_loc(), definite_cross);
-        }
-    } else {
-        // cross-axis is width
-        if (container->blk && container->blk->given_width >= 0) {
-            has_definite_cross = true;
-            definite_cross = container->blk->given_width;
-            log_debug("%s CONTAINER_CROSS: Container has definite width=%.1f", container->source_loc(), definite_cross);
-        }
-    }
-
-    // Also check if this container is a flex item whose cross-size was set by parent flex
-    // In that case, we should NOT override it
-    if (!has_definite_cross && has_flex_item_prop(container) && flex_layout->has_definite_cross_size) {
-        // If the container is a flex item and already has a cross-size set,
-        // check if it came from parent flex sizing (not auto)
-        float current_cross = is_horizontal ? container->height : container->width;
-        if (current_cross > 0) {
-            // The container already has a cross size - likely set by parent flex
-            // Don't override it
-            has_definite_cross = true;
-            definite_cross = current_cross;
-            log_debug("%s CONTAINER_CROSS: Container is flex item with cross size from parent=%.1f", container->source_loc(),
-                      definite_cross);
-        }
-    }
-
-    if (has_definite_cross) {
-        // use the definite size
-        flex_layout->cross_axis_size = definite_cross;
-        if (is_horizontal) {
-            container->height = definite_cross;
-        } else {
-            container->width = definite_cross;
-        }
-        log_debug("%s CONTAINER_CROSS: Using definite cross size=%.1f", container->source_loc(), definite_cross);
-        return;
-    }
-
-    // sum the cross sizes of all lines
-    float total_cross = 0;
-    for (int i = 0; i < flex_layout->line_count; i++) {
-        total_cross += flex_layout->lines[i].cross_size;
-    }
-
-    // add gaps between lines
-    if (flex_layout->line_count > 1) {
-        // row-gap for wrapping row flex (vertical gaps between lines)
-        // column-gap for wrapping column flex (horizontal gaps between lines)
-        float gap = is_horizontal ? flex_layout->row_gap : flex_layout->column_gap;
-        total_cross += gap * (flex_layout->line_count - 1);
-    }
-
-    // add padding to total cross
-    if (container->bound) {
-        if (is_horizontal) {
-            total_cross += container->bound->padding.top + container->bound->padding.bottom;
-        } else {
-            total_cross += container->bound->padding.left + container->bound->padding.right;
-        }
-    }
-
-    // apply min/max constraints
-    if (container->blk) {
-        float min_cross = is_horizontal ?
-            container->blk->given_min_height : container->blk->given_min_width;
-        float max_cross = is_horizontal ?
-            container->blk->given_max_height : container->blk->given_max_width;
-
-        if (min_cross > 0 && total_cross < min_cross) {
-            total_cross = min_cross;
-            log_debug("%s CONTAINER_CROSS: Applied min constraint, now=%.1f", container->source_loc(), total_cross);
-        }
-        if (max_cross > 0 && total_cross > max_cross) {
-            total_cross = max_cross;
-            log_debug("%s CONTAINER_CROSS: Applied max constraint, now=%.1f", container->source_loc(), total_cross);
-        }
-    }
-
-    // Only update if we computed a non-zero total
-    if (total_cross > 0) {
-        flex_layout->cross_axis_size = total_cross;
-        if (is_horizontal) {
-            container->height = total_cross;
-        } else {
-            container->width = total_cross;
-        }
-        log_debug("%s CONTAINER_CROSS: Final cross_axis_size=%.1f (lines=%d)", container->source_loc(),
-                  total_cross, flex_layout->line_count);
-    } else {
-        log_debug("%s CONTAINER_CROSS: No cross size computed, keeping existing=%.1f", container->source_loc(),
-                  flex_layout->cross_axis_size);
-    }
-}

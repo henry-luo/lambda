@@ -42,11 +42,6 @@ static inline bool is_vector_type(TypeId type) {
            type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE;
 }
 
-// check if type is a homogeneous numeric array
-static inline bool is_homogeneous_array(TypeId type) {
-    return type == LMD_TYPE_ARRAY_NUM;
-}
-
 // check if type is any array type (homogeneous or heterogeneous)
 static inline bool is_array_type(TypeId type) {
     return type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY;
@@ -1572,13 +1567,6 @@ Item fn_math_log1p(Item item) {
         return push_d(log1p(val));
     }
     return vec_unary_math(item, log1p, "fn_math_log1p");
-}
-
-// sign helper
-static double sign_func(double x) {
-    if (x > 0) return 1.0;
-    if (x < 0) return -1.0;
-    return 0.0;
 }
 
 // sign(vec) - element-wise sign (-1, 0, 1)

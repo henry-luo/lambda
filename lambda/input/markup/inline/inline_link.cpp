@@ -24,11 +24,6 @@ static inline Element* create_element(MarkupParser* parser, const char* tag) {
     return parser->builder.element(tag).final().element;
 }
 
-// Helper: Create string from parser
-static inline String* create_string(MarkupParser* parser, const char* text) {
-    return parser->builder.createString(text);
-}
-
 // Helper: Increment element content length
 static inline void increment_element_content_length(Element* elem) {
     TypeElmt* elmt_type = (TypeElmt*)elem->type;

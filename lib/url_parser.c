@@ -493,19 +493,19 @@ UrlError url_parse_into(const char* input, Url* url) {
         char href_buf[4096];
         int pos = 0;
         // protocol
-        if (url->protocol && url->protocol->chars) {
+        if (url->protocol) {
             int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->protocol->chars);
             if (n > 0) pos += n;
         }
         // authority
-        if (url->hostname && url->hostname->chars && url->hostname->chars[0]) {
+        if (url->hostname && url->hostname->len > 0) {
             int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "//");
             if (n > 0) pos += n;
             // credentials
-            if (url->username && url->username->chars && url->username->chars[0]) {
+            if (url->username && url->username->len > 0) {
                 n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->username->chars);
                 if (n > 0) pos += n;
-                if (url->password && url->password->chars && url->password->chars[0]) {
+                if (url->password && url->password->len > 0) {
                     n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->password->chars);
                     if (n > 0) pos += n;
                 }
@@ -515,7 +515,7 @@ UrlError url_parse_into(const char* input, Url* url) {
             n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hostname->chars);
             if (n > 0) pos += n;
             // port (only if non-default)
-            if (url->port && url->port->chars && url->port->chars[0]) {
+            if (url->port && url->port->len > 0) {
                 uint16_t default_port = url_default_port_for_scheme(url->scheme);
                 if (url->port_number != default_port) {
                     n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->port->chars);
@@ -524,17 +524,17 @@ UrlError url_parse_into(const char* input, Url* url) {
             }
         }
         // pathname
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->pathname->chars);
             if (n > 0) pos += n;
         }
         // search
-        if (url->search && url->search->chars) {
+        if (url->search) {
             int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->search->chars);
             if (n > 0) pos += n;
         }
         // hash
-        if (url->hash && url->hash->chars) {
+        if (url->hash) {
             int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hash->chars);
             if (n > 0) pos += n;
         }
@@ -1229,7 +1229,7 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
     // Validate that base_url has essential components for relative resolution
     // File URLs can have NULL or empty hostnames, so be more flexible
     if (base_url->scheme != URL_SCHEME_FILE &&
-        (!base_url->hostname || !base_url->hostname->chars[0])) {
+        (!base_url->hostname || base_url->hostname->len <= 0)) {
         return URL_ERROR_INVALID_INPUT;
     }
 

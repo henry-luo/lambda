@@ -1136,8 +1136,6 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
 
     ViewBlock* child = containing_block->position->first_abs_child;
     while (child) {
-        bool changed = false;
-
         // Re-resolve percentage height
         if (child->blk && !isnan(child->blk->given_height_percent) && child->blk->given_height <= 0) {
             float new_given_height = child->blk->given_height_percent * cb_height / 100.0f;
@@ -1156,7 +1154,6 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             } else {
                 child->height = content_height;
             }
-            changed = true;
             log_debug("[ABS RE-RESOLVE] height for %s: %.1f%% of %.1f = %.1f, block->height=%.1f",
                 child->node_name(), child->blk->given_height_percent, cb_height, new_given_height, child->height);
         }
@@ -1167,7 +1164,6 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             child->position->top = child->position->top_percent * cb_height / 100.0f;
             if (child->position->top != old_top) {
                 child->y = cb.padding_y + child->position->top + (child->bound ? child->bound->margin.top : 0);
-                changed = true;
                 log_debug("[ABS RE-RESOLVE] top for %s: %.1f%% of %.1f = %.1f, y=%.1f",
                     child->node_name(), child->position->top_percent, cb_height, child->position->top, child->y);
             }

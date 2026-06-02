@@ -31,11 +31,11 @@ public:
     // Constructor without source text (empty tracker)
     explicit InputContext(Input* input)
         : input_(input)
-        , builder(input)
         , errors_(100)  // Default max 100 errors
         , owned_source_(nullptr)
         , owned_source_len_(0)
         , msg_buf_(strbuf_new_cap(256))
+        , builder(input)
         , tracker("", 0)
         , sb(stringbuf_new(input->pool))
     {}
@@ -43,11 +43,11 @@ public:
     // Constructor with source text and explicit length
     InputContext(Input* input, const char* source, size_t len)
         : input_(input)
-        , builder(input)
         , errors_(100)
         , owned_source_((char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER))
         , owned_source_len_(len)
         , msg_buf_(strbuf_new_cap(256))
+        , builder(input)
         , tracker(owned_source_, len)
         , sb(stringbuf_new(input->pool))
     {

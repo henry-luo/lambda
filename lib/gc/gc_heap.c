@@ -830,7 +830,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Walk ShapeEntry linked list
         // ShapeEntry: { name*(8), type*(8), byte_offset(8), next*(8), ns*(8), default_value*(8) }
         uint8_t* shape = (uint8_t*)shape_ptr;
-        int field_idx = 0;
         while (shape) {
             void* field_type = *(void**)(shape + 8);   // ShapeEntry.type (Type*)
             int64_t byte_offset = *(int64_t*)(shape + 16);  // ShapeEntry.byte_offset
@@ -898,7 +897,6 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
                     }
                 }
             }
-            field_idx++;
             shape = (uint8_t*)next_shape;
         }
         gc_trace_data_words(gc, data_ptr, byte_size);

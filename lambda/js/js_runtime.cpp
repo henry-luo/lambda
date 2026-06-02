@@ -18678,22 +18678,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
 }
 
 // =============================================================================
-// Helper: convert a JS number arg (typically float from push_d) to an int Item
-// Lambda fn_substring requires LMD_TYPE_INT, but JS literals arrive as floats.
-// =============================================================================
-static Item js_arg_to_int(Item arg) {
-    TypeId tid = get_type_id(arg);
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) return arg;
-    if (tid == LMD_TYPE_FLOAT) {
-        double d = arg.get_double();
-        return (Item){.item = i2it((int64_t)d)};
-    }
-    // fallback: try js_get_number
-    double d = js_get_number(arg);
-    return (Item){.item = i2it((int64_t)d)};
-}
-
-// =============================================================================
 // JS Unicode whitespace helper (ES spec WhiteSpace + LineTerminator)
 // =============================================================================
 
@@ -24478,10 +24462,6 @@ static Item js_262_agent_get_report() {
     return report;
 }
 
-static Item js_262_agent_noop() {
-    return make_js_undefined();
-}
-
 static Item js_262_agent_leaving() {
     js_atomics_agent_leaving(js_262_agent_current_slot);
     return make_js_undefined();
@@ -25823,18 +25803,6 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
     js_mark_non_writable(proto, tag_key);
     js_mark_non_enumerable(proto, tag_key);
     // configurable: true is the default (don't set __nc_)
-    *cache = proto;
-    return proto;
-}
-
-// Returns the direct prototype of generator instances (depth-1). Its __proto__ is the shared depth-2 proto.
-static Item js_get_generator_instance_proto(bool is_async) {
-    Item* cache = is_async ? &js_async_generator_proto_depth1_cache : &js_generator_proto_depth1_cache;
-    if (cache->item != 0 && get_type_id(*cache) == LMD_TYPE_MAP) return *cache;
-    Item proto = js_new_object();
-    // Set __proto__ to the shared %AsyncGeneratorPrototype% (depth-2)
-    Item shared = js_get_generator_shared_proto(is_async);
-    js_set_prototype(proto, shared);
     *cache = proto;
     return proto;
 }
@@ -27351,18 +27319,6 @@ static JsPromise* js_alloc_promise() {
     p->wrapper = ItemNull;
     p->wrapper_created = false;
     return p;
-}
-
-// Wrapper functions for Promise.prototype.then/catch/finally
-// First arg is the bound promise (via js_bind_function), remaining are user args
-static Item js_promise_then_bound(Item promise, Item on_fulfilled, Item on_rejected) {
-    return js_promise_then(promise, on_fulfilled, on_rejected);
-}
-static Item js_promise_catch_bound(Item promise, Item on_rejected) {
-    return js_promise_catch(promise, on_rejected);
-}
-static Item js_promise_finally_bound(Item promise, Item on_finally) {
-    return js_promise_finally(promise, on_finally);
 }
 
 static Item js_promise_to_item(JsPromise* p) {

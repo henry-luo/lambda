@@ -216,9 +216,7 @@ Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line) {
 
         const char* term_end = p;
 
-        // Count colons for nesting level
-        int colons = 0;
-        while (*p == ':') { colons++; p++; }
+        while (*p == ':') p++;
 
         // Skip whitespace after colons
         while (*p == ' ' || *p == '\t') p++;

@@ -388,7 +388,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     // Print comprehensive results using sophisticated error reporting
     printf("\n=== Validation Results ===\n");
     String* report = generate_validation_report(validation_result, pool);
-    if (report && report->chars) {
+    if (report) {
         printf("%s", report->chars);
     } else {
         // Fallback to basic reporting

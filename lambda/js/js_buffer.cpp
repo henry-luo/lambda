@@ -935,7 +935,7 @@ static int coerce_copy_offset(Item item, int default_val) {
     }
     if (tid == LMD_TYPE_STRING) {
         String* str = it2s(item);
-        if (str && str->chars) {
+        if (str) {
             char* end = nullptr;
             long val = strtol(str->chars, &end, 10);
             if (end == str->chars) return 0; // non-numeric string → 0
@@ -1095,9 +1095,8 @@ static int encode_string_bytes(const char* str, int str_len, const char* enc,
             ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63,
             ['-']=62,['_']=63 // base64url variants
         };
-        int pad = 0;
         int in_len = str_len;
-        while (in_len > 0 && str[in_len - 1] == '=') { pad++; in_len--; }
+        while (in_len > 0 && str[in_len - 1] == '=') in_len--;
         int out_len = (in_len * 3) / 4;
         if (out_len > max_out) out_len = max_out;
         int j = 0;

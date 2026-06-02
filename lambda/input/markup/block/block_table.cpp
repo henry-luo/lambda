@@ -568,8 +568,6 @@ Item parse_table(MarkupParser* parser, const char* line) {
     } else {
         // Non-GFM table (AsciiDoc or simple table without header)
         // Fall back to original behavior
-        bool first_row = true;
-
         while (parser->current_line < parser->line_count) {
             const char* current = parser->lines[parser->current_line];
 
@@ -610,7 +608,6 @@ Item parse_table(MarkupParser* parser, const char* line) {
 
             list_push((List*)table, row_item);
             increment_element_content_length(table);
-            first_row = false;
         }
     }
 

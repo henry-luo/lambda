@@ -29,17 +29,29 @@ char* load_font_path(FontContext *font_ctx, const char* font_name);
 extern "C" void radiant_ime_mac_attach(UiContext* uicon);
 extern "C" void radiant_ime_win_attach(UiContext* uicon);
 
+static char fallback_font_noto_color_emoji[] = "Noto Color Emoji";
+static char fallback_font_apple_color_emoji[] = "Apple Color Emoji";
+static char fallback_font_segoe_ui_emoji[] = "Segoe UI Emoji";
+static char fallback_font_pingfang_sc[] = "PingFang SC";
+static char fallback_font_heiti_sc[] = "Heiti SC";
+static char fallback_font_hiragino_sans[] = "Hiragino Sans";
+static char fallback_font_helvetica_neue[] = "Helvetica Neue";
+static char fallback_font_arial_unicode_ms[] = "Arial Unicode MS";
+static char fallback_font_times_new_roman[] = "Times New Roman";
+static char default_font_times_new_roman[] = "Times New Roman";
+static char default_font_times[] = "Times";
+
 char *fallback_fonts[] = {
-    "Noto Color Emoji",  // Emoji — Linux / cross-platform (before text fonts
-                         // so emoji codepoints get color glyphs, not mono outlines)
-    "Apple Color Emoji", // Emoji — macOS native
-    "Segoe UI Emoji",    // Emoji — Windows
-    "PingFang SC", // Chinese (Simplified), partial Japanese and Korean - macOS native
-    "Heiti SC", // Chinese (Simplified) additional fallback
-    "Hiragino Sans", // Japanese font with good Unicode coverage
-    "Helvetica Neue", // Latin, Cyrillic, Greek, Vietnamese, Turkish
-    "Arial Unicode MS", // Broad Unicode coverage including checkmarks, crosses, etc. (late fallback)
-    "Times New Roman", // for Arabic
+    fallback_font_noto_color_emoji,  // Emoji — Linux / cross-platform (before text fonts
+                                     // so emoji codepoints get color glyphs, not mono outlines)
+    fallback_font_apple_color_emoji, // Emoji — macOS native
+    fallback_font_segoe_ui_emoji,    // Emoji — Windows
+    fallback_font_pingfang_sc, // Chinese (Simplified), partial Japanese and Korean - macOS native
+    fallback_font_heiti_sc, // Chinese (Simplified) additional fallback
+    fallback_font_hiragino_sans, // Japanese font with good Unicode coverage
+    fallback_font_helvetica_neue, // Latin, Cyrillic, Greek, Vietnamese, Turkish
+    fallback_font_arial_unicode_ms, // Broad Unicode coverage including checkmarks, crosses, etc. (late fallback)
+    fallback_font_times_new_roman, // for Arabic
     NULL
 };
 
@@ -153,10 +165,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
-    uicon->default_font = (FontProp){"Times New Roman", 16.0f, // 16px (CSS logical pixels)
+    uicon->default_font = (FontProp){default_font_times_new_roman, 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->default_font.font_size_from_medium = true;
-    uicon->legacy_default_font = (FontProp){"Times", 16.0f, // 16px (CSS logical pixels)
+    uicon->legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->legacy_default_font.font_size_from_medium = true;
     uicon->fallback_fonts = fallback_fonts;

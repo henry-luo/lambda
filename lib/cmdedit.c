@@ -1613,14 +1613,6 @@ static bool is_word_char(char c) {
            c == '_';
 }
 
-static size_t find_word_start(const char *buffer, size_t pos, size_t len) {
-    return cmdedit_utf8_find_word_start(buffer, len, pos);
-}
-
-static size_t find_word_end(const char *buffer, size_t pos, size_t len) {
-    return cmdedit_utf8_find_word_end(buffer, len, pos);
-}
-
 static size_t find_next_word_start(const char *buffer, size_t pos, size_t len) {
     // Skip current word
     while (pos < len && is_word_char(buffer[pos])) {
@@ -1704,7 +1696,7 @@ static void kill_ring_cleanup(void) {
 #ifdef CMDEDIT_TESTING
 int handle_word_forward(struct line_editor *ed, int key, int count) {
 #else
-static int handle_word_forward(struct line_editor *ed, int key, int count) {
+static int __attribute__((unused)) handle_word_forward(struct line_editor *ed, int key, int count) {
 #endif
     (void)key;
     if (count <= 0) count = 1;
@@ -1721,7 +1713,7 @@ static int handle_word_forward(struct line_editor *ed, int key, int count) {
 #ifdef CMDEDIT_TESTING
 int handle_word_backward(struct line_editor *ed, int key, int count) {
 #else
-static int handle_word_backward(struct line_editor *ed, int key, int count) {
+static int __attribute__((unused)) handle_word_backward(struct line_editor *ed, int key, int count) {
 #endif
     (void)key;
     if (count <= 0) count = 1;
@@ -1787,7 +1779,7 @@ static int handle_kill_whole_line(struct line_editor *ed, int key, int count) {
 #ifdef CMDEDIT_TESTING
 int handle_kill_word(struct line_editor *ed, int key, int count) {
 #else
-static int handle_kill_word(struct line_editor *ed, int key, int count) {
+static int __attribute__((unused)) handle_kill_word(struct line_editor *ed, int key, int count) {
 #endif
     (void)key;
     if (count <= 0) count = 1;

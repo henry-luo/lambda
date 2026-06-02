@@ -3,7 +3,7 @@
  *
  * Implements the MarkupParser class methods for construction, configuration,
  * and error reporting. The actual block/inline parsing is delegated to
- * the shared parsers in block/*.cpp and inline/*.cpp.
+ * the shared parsers in the block and inline parser sources.
  *
  * This file also provides the entry point that bridges the old API
  * (input-markup.cpp) to the new modular architecture.

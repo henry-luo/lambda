@@ -516,7 +516,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
         }
         else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
-            const char* markup_flavor = (flavor && flavor->chars) ? flavor->chars : "markdown";
+            const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
             log_debug("input_from_source markup: flavor='%s'", markup_flavor);
             if (strcmp(markup_flavor, "rst") == 0) {
                 input->root = input_markup_with_format(input, source, MARKUP_RST);
@@ -601,7 +601,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
             input->root = input_mdx(input, source);
         }
         else if (strcmp(effective_type, "math") == 0) {
-            const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
+            const char* math_flavor = (flavor) ? flavor->chars : "latex";
             // Both ASCII and LaTeX math use the unified tree-sitter parser
             parse_math(input, source, math_flavor);
         }
@@ -619,7 +619,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
             input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "graph") == 0) {
-            const char* graph_flavor = (flavor && flavor->chars) ? flavor->chars : "dot";
+            const char* graph_flavor = (flavor) ? flavor->chars : "dot";
             parse_graph(input, source, graph_flavor);
         }
         else {
@@ -637,25 +637,13 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     return input_from_source_n(source, source ? strlen(source) : 0, abs_url, type, flavor);
 }
 
-// Helper function to read text file from file:// URL
-static char* read_file_from_url(Url* url) {
-    if (!url || url->scheme != URL_SCHEME_FILE) {
-        log_error("Only file:// URLs are supported for file reading");
-        return NULL;
-    }
-    const char* pathname = url_get_pathname(url);
-    if (!pathname) return NULL;
-    log_debug("Reading file from path: %s", pathname);
-    return read_text_file(pathname);
-}
-
 // Read a local file and parse it via input_from_source_n. Detects binary
 // formats (currently PDF) and reads them with read_binary_file so that null
 // bytes in the payload are preserved and the parser receives an accurate
 // byte length instead of strlen() which would truncate at the first null.
 static Input* input_from_local_path(const char* pathname, Url* abs_url, String* type, String* flavor) {
     bool is_binary_pdf = false;
-    if (type && type->chars && strcmp(type->chars, "pdf") == 0) {
+    if (type && strcmp(type->chars, "pdf") == 0) {
         is_binary_pdf = true;
     } else if (pathname) {
         size_t plen = strlen(pathname);

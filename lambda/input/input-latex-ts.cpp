@@ -172,7 +172,6 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
 static Item convert_text_node(InputContext& ctx, TSNode node, const char* source);
 static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source);
 static String* extract_text(InputContext& ctx, TSNode node, const char* source);
-static String* normalize_latex_text(InputContext& ctx, const char* text, size_t len);
 
 // ============================================================================
 // Math AST Conversion (tree-sitter-latex-math)
@@ -1350,33 +1349,6 @@ static bool should_skip_comment_and_space(TSNode parent, uint32_t child_index) {
     return should_skip;
 }
 
-// Helper: Check if previous sibling was a line_comment
-// Used to strip leading whitespace from text nodes following comments
-static bool prev_sibling_is_comment(TSNode parent, uint32_t child_index) {
-    if (child_index == 0) {
-        return false;
-    }
-
-    TSNode prev = ts_node_child(parent, child_index - 1);
-    const char* prev_type = ts_node_type(prev);
-
-    // Check if previous sibling is a line_comment
-    if (strcmp(prev_type, "line_comment") == 0) {
-        return true;
-    }
-
-    // Also check if previous-previous was comment (and previous was skipped space)
-    if (child_index >= 2) {
-        TSNode prev_prev = ts_node_child(parent, child_index - 2);
-        const char* prev_prev_type = ts_node_type(prev_prev);
-        if (strcmp(prev_prev_type, "line_comment") == 0 && strcmp(prev_type, "space") == 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // Extract text from a tree-sitter node
 static String* extract_text(InputContext& ctx, TSNode node, const char* source) {
     uint32_t start = ts_node_start_byte(node);
@@ -1417,41 +1389,6 @@ static String* extract_text_strip_leading(InputContext& ctx, TSNode node, const 
     }
 
     return ctx.builder.createString(text, len);
-}
-
-// Normalize LaTeX whitespace according to LaTeX rules
-static String* normalize_latex_text(InputContext& ctx, const char* text, size_t len) {
-    // Apply LaTeX whitespace rules:
-    // 1. Multiple spaces/tabs → single space
-    // 2. Newlines in text → spaces
-    // 3. Preserve leading/trailing space significance (for now)
-    // 4. Trim trailing newlines only
-
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    bool in_whitespace = false;
-    for (size_t i = 0; i < len; i++) {
-        char c = text[i];
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            if (!in_whitespace) {
-                stringbuf_append_char(sb, ' ');
-                in_whitespace = true;
-            }
-        } else {
-            stringbuf_append_char(sb, c);
-            in_whitespace = false;
-        }
-    }
-
-    // Trim trailing newlines/spaces
-    while (sb->length > 0 && (sb->str->chars[sb->length-1] == ' ' ||
-                               sb->str->chars[sb->length-1] == '\n' ||
-                               sb->str->chars[sb->length-1] == '\r')) {
-        sb->length--;
-    }
-
-    return ctx.builder.createString(sb->str->chars, sb->length);
 }
 
 // Convert leaf node to Symbol

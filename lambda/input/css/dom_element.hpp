@@ -320,8 +320,9 @@ struct DomElement : DomNode {
     bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
 
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, first_child(nullptr), last_child(nullptr), native_element(nullptr),
-        tag_name(nullptr), tag_id(0), id(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, native_element(nullptr),
+        tag_name(nullptr), first_child(nullptr), last_child(nullptr),
+        tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
         marker_styles(nullptr), placeholder_styles(nullptr),

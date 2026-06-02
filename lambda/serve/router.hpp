@@ -6,7 +6,7 @@
  *   - Exact paths:       /api/health
  *   - Named params:      /users/:id          → params["id"] = "42"
  *   - Optional params:   /users/:id?         → matches /users and /users/42
- *   - Wildcard (catch-all): /files/*path     → params["path"] = "a/b/c"
+ *   - Wildcard (catch-all): /files/{path}    → params["path"] = "a/b/c"
  *   - Method-specific:   GET /users vs POST /users
  *   - Sub-routers with shared prefix (mount)
  *

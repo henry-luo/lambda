@@ -988,7 +988,7 @@ typedef struct MarkerProp {
 
 /**
  * PseudoContentProp - Stores dynamically created ::before and ::after pseudo-elements
-/*
+ *
  * Instead of storing content strings and layout bounds, we create actual DomElement
  * and DomText nodes for pseudo-elements. This allows reusing the existing layout
  * infrastructure for text and inline content.

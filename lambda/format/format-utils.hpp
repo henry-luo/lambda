@@ -62,7 +62,7 @@ public:
     }
 
     inline void write_text(String* str) {
-        if (output_ && str && str->chars && str->len > 0) {
+        if (output_ && str && str->len > 0) {
             stringbuf_append_str_n(output_, str->chars, str->len);
         }
     }

@@ -1037,14 +1037,12 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 // modern space-separated syntax
                 const CssValue* list = func->args[0];
                 int num_idx = 0;
-                bool found_slash = false;
 
                 for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
                     const CssValue* v = list->data.list.values[i];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
                         strcmp(v->data.custom_property.name, "/") == 0) {
-                        found_slash = true;
                         continue;
                     }
                     if (v->type == CSS_VALUE_TYPE_FUNCTION || v->type == CSS_VALUE_TYPE_VAR) continue;

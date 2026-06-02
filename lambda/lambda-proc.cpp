@@ -27,67 +27,10 @@ bool g_dry_run = false;
 // are still exercised during fuzzy testing.
 // ============================================================================
 
-// Fabricated JSON content for input() in dry-run mode
-static const char* DRY_RUN_JSON = "{\"name\": \"dry-run\", \"version\": \"1.0\", \"items\": [1, 2, 3], \"active\": true}";
-// Fabricated text content for file reads
-static const char* DRY_RUN_TEXT = "Dry-run fabricated content.\nLine 2 of mock data.\nLine 3 with numbers: 42, 3.14\n";
-// Fabricated HTML content
-static const char* DRY_RUN_HTML = "<html><head><title>Mock</title></head><body><p>Dry-run content</p></body></html>";
 // Fabricated HTTP response body
 static const char* DRY_RUN_HTTP_BODY = "{\"status\": \"ok\", \"data\": {\"id\": 1, \"message\": \"dry-run response\"}, \"timestamp\": 1700000000}";
 // Fabricated command output
 static const char* DRY_RUN_CMD_OUTPUT = "dry-run-output";
-
-static Item dry_run_fabricated_input(Item target_item, Item type) {
-    log_debug("dry-run: fabricated input() call");
-
-    // determine what kind of data to fabricate based on type hint or file extension
-    const char* content = DRY_RUN_JSON;
-    const char* type_hint = NULL;
-
-    TypeId type_id = get_type_id(type);
-    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
-        String* ts = fn_string(type);
-        if (ts) type_hint = ts->chars;
-    }
-
-    // choose content based on type hint
-    if (type_hint) {
-        if (strcmp(type_hint, "html") == 0) content = DRY_RUN_HTML;
-        else if (strcmp(type_hint, "text") == 0 || strcmp(type_hint, "txt") == 0) content = DRY_RUN_TEXT;
-        else if (strcmp(type_hint, "json") == 0) content = DRY_RUN_JSON;
-        else if (strcmp(type_hint, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
-        else if (strcmp(type_hint, "yaml") == 0 || strcmp(type_hint, "yml") == 0) content = "name: dry-run\nversion: 1\nitems:\n  - one\n  - two\n";
-        else if (strcmp(type_hint, "xml") == 0) content = "<root><item id=\"1\">mock</item><item id=\"2\">data</item></root>";
-        else if (strcmp(type_hint, "markdown") == 0 || strcmp(type_hint, "md") == 0) content = "# Mock\n\nDry-run content.\n\n- item 1\n- item 2\n";
-        else if (strcmp(type_hint, "toml") == 0) content = "[package]\nname = \"mock\"\nversion = \"1.0\"\n";
-        else if (strcmp(type_hint, "ini") == 0) content = "[section]\nkey1 = value1\nkey2 = value2\n";
-    } else {
-        // try to infer from file extension
-        TypeId target_type_id = get_type_id(target_item);
-        if (target_type_id == LMD_TYPE_STRING || target_type_id == LMD_TYPE_SYMBOL) {
-            const char* path = target_item.get_chars();
-            if (path) {
-                const char* dot = strrchr(path, '.');
-                if (dot) {
-                    const char* ext = dot + 1;
-                    if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) content = DRY_RUN_HTML;
-                    else if (strcmp(ext, "txt") == 0) content = DRY_RUN_TEXT;
-                    else if (strcmp(ext, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
-                    else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) content = "name: dry-run\nversion: 1\n";
-                    else if (strcmp(ext, "xml") == 0) content = "<root><item>mock</item></root>";
-                    else if (strcmp(ext, "md") == 0) content = "# Mock\n\nDry-run.\n";
-                    // json is default anyway
-                }
-            }
-        }
-    }
-
-    // parse the fabricated content through the actual input pipeline
-    // so downstream code gets properly typed Lambda data structures
-    String* content_str = heap_strcpy((char*)content, strlen(content));
-    return {.item = s2it(content_str)};
-}
 
 static Item dry_run_fabricated_output() {
     log_debug("dry-run: fabricated output() call");
@@ -107,10 +50,6 @@ static Item dry_run_fabricated_cmd() {
     return {.item = s2it(output)};
 }
 
-static Bool dry_run_fabricated_exists() {
-    log_debug("dry-run: fabricated exists() call");
-    return BOOL_FALSE;
-}
 // ============================================================================
 
 Item pn_print(Item item) {
@@ -472,7 +411,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         log_debug("pn_output_internal: wrote %zu bytes (mark) to %s", written, file_path);
         strbuf_free(content_buf);
     } else {
-        if (!formatted || !formatted->chars) {
+        if (!formatted) {
             log_error("pn_output_internal: formatting failed");
             fclose(f);
             pool_destroy(temp_pool);
@@ -1049,13 +988,13 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
         size_t written = 0;
         if (result_type == LMD_TYPE_STRING) {
             String* str = it2s(fetch_result);
-            if (str && str->chars) {
+            if (str) {
                 wr = write_binary_file(dst_path, str->chars, str->len);
                 if (wr == 0) written = str->len;
             }
         } else if (result_type == LMD_TYPE_BINARY) {
             Binary* bin = (Binary*)it2s(fetch_result);
-            if (bin && bin->chars) {
+            if (bin) {
                 wr = write_binary_file(dst_path, bin->chars, bin->len);
                 if (wr == 0) written = bin->len;
             }
@@ -1274,7 +1213,7 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
         mode = (int)it2l(mode_item);
     } else if (mode_type == LMD_TYPE_STRING) {
         String* mode_str = mode_item.get_string();
-        if (mode_str && mode_str->chars) {
+        if (mode_str) {
             // Parse octal string like "755"
             mode = (int)strtol(mode_str->chars, NULL, 8);
         }

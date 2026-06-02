@@ -719,7 +719,6 @@ void parse_xml(Input* input, const char* xml_string) {
     // Create a document root element to contain all top-level elements
     ElementBuilder doc_element = builder.element("document");
 
-    int actual_element_count = 0;  // Count only actual XML elements (not PIs, comments, etc.)
     Item actual_root_element = {.item = ITEM_ERROR};
 
     // Parse all top-level elements (including XML declaration, comments, PIs, and the main element)
@@ -743,7 +742,6 @@ void parse_xml(Input* input, const char* xml_string) {
                         elmt_type->name.str[0] != '?' &&
                         elmt_type->name.str[0] != '!' &&
                         !(elmt_type->name.length >= 3 && strncmp(elmt_type->name.str, "!--", 3) == 0)) {
-                        actual_element_count++;
                         actual_root_element = element;
                     }
                 }

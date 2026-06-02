@@ -8,7 +8,7 @@
  * builtins). This file introduces a typed alternative:
  *
  *   - `JsClass`: uint8_t enum covering every class name currently written via
- *     `__class_name__` across `lambda/js/*.cpp` (snapshot from A3-T1
+ *     `__class_name__` across `lambda/js/` sources (snapshot from A3-T1
  *     reconnaissance — 50 distinct names).
  *   - `js_class` byte on `TypeMap` (declared in `lambda-data.hpp`) carries
  *     the class for any Map whose TypeMap is the per-Map private clone (A2-T1).

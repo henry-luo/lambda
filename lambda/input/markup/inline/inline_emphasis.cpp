@@ -28,11 +28,6 @@ static inline Element* create_element(MarkupParser* parser, const char* tag) {
     return parser->builder.element(tag).final().element;
 }
 
-// Helper: Create string from parser
-static inline String* create_string(MarkupParser* parser, const char* text, size_t len) {
-    return parser->builder.createString(text, len);
-}
-
 // Helper: Increment element content length
 static inline void increment_element_content_length(Element* elem) {
     TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -386,12 +381,10 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
             const char* tag_start = pos;
             pos++;
             // Check for autolink first (starts with scheme: or is email-like)
-            bool is_autolink = false;
             const char* scan = pos;
             // Simple check: if we see `:` or `@` before `>`, treat as autolink
             while (*scan && *scan != '>' && *scan != ' ' && *scan != '\t' && *scan != '\n') {
                 if (*scan == ':' || *scan == '@') {
-                    is_autolink = true;
                     break;
                 }
                 scan++;

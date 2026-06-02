@@ -85,23 +85,6 @@ static Url* get_cwd_url(void) {
 }
 
 /**
- * Determine scheme from URL string prefix.
- */
-static TargetScheme scheme_from_url_string(const char* url_str) {
-    if (!url_str) return TARGET_SCHEME_UNKNOWN;
-
-    if (strncmp(url_str, "file://", 7) == 0) return TARGET_SCHEME_FILE;
-    if (strncmp(url_str, "http://", 7) == 0) return TARGET_SCHEME_HTTP;
-    if (strncmp(url_str, "https://", 8) == 0) return TARGET_SCHEME_HTTPS;
-    if (strncmp(url_str, "sys://", 6) == 0) return TARGET_SCHEME_SYS;
-    if (strncmp(url_str, "ftp://", 6) == 0) return TARGET_SCHEME_FTP;
-    if (strncmp(url_str, "data:", 5) == 0) return TARGET_SCHEME_DATA;
-
-    // No explicit scheme - treat as relative file path
-    return TARGET_SCHEME_FILE;
-}
-
-/**
  * Determine scheme from parsed Url.
  */
 static TargetScheme scheme_from_url(Url* url) {
@@ -189,7 +172,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         const char* url_str;
         if (type_id == LMD_TYPE_SYMBOL) {
             Symbol* sym = (Symbol*)(item & 0x00FFFFFFFFFFFFFFULL);
-            if (!sym || !sym->chars) {
+            if (!sym) {
                 log_error("item_to_target: symbol is null");
                 mem_free(target);
                 return NULL;
@@ -197,7 +180,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             url_str = sym->chars;
         } else {
             String* str = (String*)(item & 0x00FFFFFFFFFFFFFFULL);
-            if (!str || !str->chars) {
+            if (!str) {
                 log_error("item_to_target: string is null");
                 mem_free(target);
                 return NULL;

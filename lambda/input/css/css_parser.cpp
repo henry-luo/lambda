@@ -2704,10 +2704,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         // parsing remaining nested rules (e.g., @page inside @media).
                         // Look for the next rule boundary (closing brace or semicolon).
                         int brace_depth = 0;
-                        bool found_block = false;
                         while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
                             if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-                                found_block = true;
                                 brace_depth = 1;
                                 pos++;
                                 while (pos < token_count && brace_depth > 0) {
@@ -2722,8 +2720,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                             }
                             pos++;
                         }
-                        // if we stopped at a RIGHT_BRACE without finding a block/semicolon,
-                        // that's the parent @media's closing brace — don't consume it
+                        // if we stopped at a RIGHT_BRACE, that's the parent @media's
+                        // closing brace — don't consume it
                     }
                 }
 

@@ -26,7 +26,7 @@ static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
         format_latex_element(ctx, value.asElement(), 0);
     } else if (value.isString()) {
         String* str = value.asString();
-        if (str && str->chars && str->len > 0 && str->len < 65536) {
+        if (str && str->len > 0 && str->len < 65536) {
             stringbuf_append_str_n(ctx.output(), str->chars, str->len);
         }
     } else if (value.isArray()) {
@@ -43,7 +43,7 @@ static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
         format_number(ctx.output(), value.item());
     } else if (value.isSymbol()) {
         String* str = value.asString();
-        if (str && str->chars && str->len > 0 && str->len < 65536) {
+        if (str && str->len > 0 && str->len < 65536) {
             stringbuf_append_str_n(ctx.output(), str->chars, str->len);
         }
     } else {

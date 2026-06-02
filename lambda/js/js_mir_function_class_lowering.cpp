@@ -61,7 +61,7 @@ static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, con
     for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
         if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
         JsFunctionNode* decl = (JsFunctionNode*)stmt;
-        if (!decl->name || !decl->name->chars) continue;
+        if (!decl->name) continue;
         char name[128];
         snprintf(name, sizeof(name), "_js_%.*s",
             (int)decl->name->len, decl->name->chars);
@@ -199,7 +199,7 @@ static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         JsClassNode* cls = (JsClassNode*)node;
-        if (cls->name && cls->name->chars) {
+        if (cls->name) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
             jm_name_set_add(names, name);
@@ -267,7 +267,7 @@ static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, 
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* cur = &mt->func_entries[idx];
         JsFunctionNode* fn = cur->node;
-        if (fn && fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name && fn->name->chars) {
+        if (fn && fn->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name) {
             char self_name[128];
             snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
             if (strcmp(name, self_name) == 0) return true;
@@ -839,7 +839,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Default parameter expressions can create closures that reference outer
         // captures or the named generator expression's private self binding.
         char gen_self_capture_name[128] = {0};
-        if (fn->name && fn->name->chars) {
+        if (fn->name) {
             snprintf(gen_self_capture_name, sizeof(gen_self_capture_name), "_js_%.*s",
                 (int)fn->name->len, fn->name->chars);
         }
@@ -1441,7 +1441,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Build self-capture name for detecting self-references
             char async_self_capture_name[128] = {0};
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 snprintf(async_self_capture_name, sizeof(async_self_capture_name), "_js_%.*s",
                     (int)fn->name->len, fn->name->chars);
             }
@@ -1716,7 +1716,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, reject_result)));
             }
 
-        async_sm_finish:
             jm_pop_scope(mt);
             MIR_finish_func(mt->ctx);
 
@@ -1986,7 +1985,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (has_captures) {
                 MIR_reg_t wrapper_env = MIR_reg(mt->ctx, "_js_env", func);
                 char wrapper_self_capture_name[128] = {0};
-                if (fn->name && fn->name->chars) {
+                if (fn->name) {
                     snprintf(wrapper_self_capture_name, sizeof(wrapper_self_capture_name), "_js_%.*s",
                         (int)fn->name->len, fn->name->chars);
                 }
@@ -2319,7 +2318,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t env_reg = 0;
         // Build self-capture name for detecting self-references
         char self_capture_name[128] = {0};
-        if (fn->name && fn->name->chars) {
+        if (fn->name) {
             snprintf(self_capture_name, sizeof(self_capture_name), "_js_%.*s",
                 (int)fn->name->len, fn->name->chars);
         }

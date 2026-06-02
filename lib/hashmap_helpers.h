@@ -26,6 +26,12 @@
 extern "C" {
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define HASHMAP_HELPER_UNUSED __attribute__((unused))
+#else
+#define HASHMAP_HELPER_UNUSED
+#endif
+
 // --- generic offset-based callbacks ----------------------------------------
 // These read the key from a fixed byte offset within the struct. Useful when a
 // macro emit is overkill (e.g. when computing the offset dynamically).
@@ -61,11 +67,11 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         (void)udata; \
         return strcmp(name##_key(a), name##_key(b)); \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     } \
-    static inline struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, elfree, NULL); \
     }
@@ -83,7 +89,7 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         if (ea->key_field == eb->key_field) return 0; \
         return ea->key_field < eb->key_field ? -1 : 1; \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     }
@@ -103,11 +109,11 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         if (ea->key_field == eb->key_field) return 0; \
         return ea->key_field < eb->key_field ? -1 : 1; \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     } \
-    static inline struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, elfree, NULL); \
     }
@@ -136,11 +142,11 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         if (ea->len_field == 0) return 0; \
         return memcmp(ea->str_field, eb->str_field, ea->len_field); \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     } \
-    static inline struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new_with_free(size_t cap, void (*elfree)(void*)) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, elfree, NULL); \
     }
@@ -162,7 +168,7 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         if (ea->field2 != eb->field2) return ea->field2 < eb->field2 ? -1 : 1; \
         return 0; \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     }
@@ -186,7 +192,7 @@ int hashmap_cmp_int_at(const void* a, const void* b, size_t off);
         if (ea->field3 != eb->field3) return ea->field3 < eb->field3 ? -1 : 1; \
         return 0; \
     } \
-    static inline struct hashmap* name##_new(size_t cap) { \
+    static inline HASHMAP_HELPER_UNUSED struct hashmap* name##_new(size_t cap) { \
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     }

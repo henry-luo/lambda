@@ -1459,21 +1459,10 @@ static bool tokens_need_comment(CssTokenClass left, CssTokenClass right) {
     return false;
 }
 
-// strip exterior comments from a var()-substituted value
-// interior comments (within original token text) are preserved,
-// but comments at the boundary of a substituted var() are replaced with /**/
-static const char* strip_exterior_comments(const char* text, size_t len, Pool* pool) {
-    // find and remove /* ... */ comments at boundaries
-    // for now, if the text has comments, we check if they're at the very
-    // start or end (from var() boundary) and collapse them to /**/
-    // Interior comments are preserved as-is
-    return text;  // simplification: handled during var() substitution
-}
-
 /**
  * Resolve a custom property value, substituting var() references.
  * Returns a pool-allocated string with all var() references resolved.
- * Inserts /**​/ comments between ambiguous consecutive tokens per CSS spec §9.2.
+ * Inserts empty CSS comments between ambiguous consecutive tokens per CSS spec §9.2.
  *
  * @param elem     The element context for variable lookup
  * @param val_text The raw value text to resolve
@@ -1638,7 +1627,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
                 if (fmt) {
                     css_format_value(fmt, var_decl->value);
                     String* s = stringbuf_to_string(fmt->output);
-                    if (s && s->chars) {
+                    if (s) {
                         resolved = s->chars;
                         resolved_len = s->len;
                     }
@@ -1776,7 +1765,7 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
     }
 
     String* final_str = stringbuf_to_string(result);
-    return (final_str && final_str->chars) ? final_str->chars : "";
+    return (final_str) ? final_str->chars : "";
 }
 
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) {
@@ -1828,7 +1817,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
                     if (!fmt) return (Item){.item = s2it(heap_create_name(""))};
                     css_format_value(fmt, decl->value);
                     String* result = stringbuf_to_string(fmt->output);
-                    val = (result && result->chars) ? result->chars : "";
+                    val = result ? result->chars : "";
                 } else if (decl->value_text && decl->value_text_len > 0) {
                     val = decl->value_text;
                 }
@@ -3277,11 +3266,6 @@ static const char* _elem_current_value(DomElement* elem) {
         return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
     }
     return "";
-}
-
-// Check if the element's value is empty for constraint validation purposes.
-static bool _elem_value_is_empty(DomElement* elem) {
-    return _elem_current_value(elem)[0] == '\0';
 }
 
 // Build and return a ValidityState plain JS object for the given element.
@@ -7885,26 +7869,6 @@ static void camel_to_data_attr(const char* camel, char* buf, size_t buf_size) {
             buf[pos++] = (char)tolower((unsigned char)*p);
         } else {
             buf[pos++] = *p;
-        }
-    }
-    buf[pos] = '\0';
-}
-
-// Helper: convert data-kebab-case attribute name to camelCase
-// e.g., "data-foo-bar" → "fooBar"
-static void data_attr_to_camel(const char* attr, char* buf, size_t buf_size) {
-    // skip "data-" prefix
-    const char* src = attr;
-    if (strncmp(src, "data-", 5) == 0) src += 5;
-
-    size_t pos = 0;
-    bool next_upper = false;
-    for (; *src && pos < buf_size - 1; src++) {
-        if (*src == '-') {
-            next_upper = true;
-        } else {
-            buf[pos++] = next_upper ? (char)toupper((unsigned char)*src) : *src;
-            next_upper = false;
         }
     }
     buf[pos] = '\0';

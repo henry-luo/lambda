@@ -36,7 +36,7 @@ void js_strict_throw_property_error(const char* reason, const char* prop_name, i
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
-Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 extern "C" void js_mark_non_enumerable(Item object, Item name);
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" void js_set_prototype(Item object, Item prototype);

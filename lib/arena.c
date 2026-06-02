@@ -73,25 +73,6 @@ static inline int _arena_get_bin(size_t size) {
     return 7;  // 2048+ goes to last bin
 }
 
-// Helper: remove a specific free block from its bin
-// Returns true if the block was found and removed
-static bool _arena_remove_free_block(Arena* arena, ArenaFreeBlock* target) {
-    int bin = _arena_get_bin(target->size);
-    ArenaFreeBlock** prev_ptr = &arena->free_lists[bin];
-    ArenaFreeBlock* block = arena->free_lists[bin];
-
-    while (block) {
-        if (block == target) {
-            *prev_ptr = block->next;
-            arena->free_bytes -= block->size;
-            return true;
-        }
-        prev_ptr = &block->next;
-        block = block->next;
-    }
-    return false;
-}
-
 // Helper: find and remove a free block adjacent to [addr, addr+size)
 // Scans all bins for a block whose end touches addr (left neighbor)
 // or whose start is at addr+size (right neighbor).

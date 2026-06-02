@@ -81,7 +81,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     if (!type) return NULL;
 
     const char* t = type->chars;
-    const char* f = (flavor && flavor->chars && strlen(flavor->chars) > 0) ? flavor->chars : NULL;
+    const char* f = (flavor && flavor->len > 0) ? flavor->chars : NULL;
 
     log_debug("Formatting with type: %s%s%s", t, f ? "-" : "", f ? f : "");
 

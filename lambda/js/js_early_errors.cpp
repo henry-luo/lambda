@@ -352,12 +352,6 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
 
 // ---- Phase 3: destructuring pattern validation -----------------------------
 
-static void check_rest_element(EarlyErrorCtx* ctx, JsAstNode* node) {
-    // rest element must be last in a pattern, must not have initializer
-    // The AST builder puts rest as JS_AST_NODE_REST_ELEMENT in array patterns
-    // We check at the array pattern parent level
-}
-
 static void check_array_pattern(EarlyErrorCtx* ctx, JsAstNode* node) {
     if (!node || node->node_type != JS_AST_NODE_ARRAY_PATTERN) return;
     JsArrayPatternNode* pat = (JsArrayPatternNode*)node;

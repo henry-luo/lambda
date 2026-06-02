@@ -305,7 +305,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                                     css_format_value(formatter, arg->data.list.values[j]);
                                     String* formatted_str = stringbuf_to_string(formatter->output);
                                     formatter->output = temp;
-                                    if (formatted_str && formatted_str->chars) {
+                                    if (formatted_str) {
                                         stringbuf_append_str(formatter->output, formatted_str->chars);
                                     }
                                 }
@@ -317,7 +317,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                             css_format_value(formatter, arg);
                             String* formatted_str = stringbuf_to_string(formatter->output);
                             formatter->output = temp;
-                            if (formatted_str && formatted_str->chars) {
+                            if (formatted_str) {
                                 stringbuf_append_str(formatter->output, formatted_str->chars);
                             }
                         }
@@ -347,7 +347,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                         css_format_value_with_property(formatter, value->data.list.values[i], property_id);
                         String* formatted_str = stringbuf_to_string(formatter->output);
                         formatter->output = temp;
-                        if (formatted_str && formatted_str->chars) {
+                        if (formatted_str) {
                             stringbuf_append_str(formatter->output, formatted_str->chars);
                         }
                     }
@@ -415,11 +415,11 @@ const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration*
     String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 
-    if (value_str && value_str->chars) {
+    if (value_str) {
         stringbuf_append_str(formatter->output, value_str->chars);
     }
     String* result = stringbuf_to_string(formatter->output);
-    return (result && result->chars) ? result->chars : "";
+    return result ? result->chars : "";
 }
 
 // Legacy function for backward compatibility
@@ -445,10 +445,10 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
     String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 
-    if (value_str && value_str->chars) {
+    if (value_str) {
         stringbuf_append_str(formatter->output, value_str->chars);
     }    String* result = stringbuf_to_string(formatter->output);
-    return (result && result->chars) ? result->chars : "";
+    return result ? result->chars : "";
 }
 
 // ============================================================================
@@ -696,7 +696,7 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
     }
 
     String* result = stringbuf_to_string(formatter->output);
-    return (result && result->chars) ? result->chars : "";
+    return result ? result->chars : "";
 }
 
 // ============================================================================
@@ -882,8 +882,8 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
 
     String* result = stringbuf_to_string(formatter->output);
     log_debug("[CSS Formatter] Returning from css_format_rule (rule type %d), buffer='%.80s...'",
-        rule ? rule->type : -1, result->chars ? result->chars : "(null)");
-    return (result && result->chars) ? result->chars : "";
+        rule ? rule->type : -1, result ? result->chars : "(null)");
+    return result ? result->chars : "";
 }
 
 // ============================================================================
@@ -928,7 +928,7 @@ const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* styles
     }
 
     String* result = stringbuf_to_string(formatter->output);
-    return (result && result->chars) ? result->chars : "";
+    return result ? result->chars : "";
 }
 // ============================================================================
 // Convenience functions

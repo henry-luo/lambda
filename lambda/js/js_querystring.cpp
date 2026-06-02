@@ -18,16 +18,6 @@ static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
-static const char* item_to_cstr(Item value, char* buf, int buf_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return NULL;
-    String* s = it2s(value);
-    int len = (int)s->len;
-    if (len >= buf_size) len = buf_size - 1;
-    memcpy(buf, s->chars, len);
-    buf[len] = '\0';
-    return buf;
-}
-
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;
     String* s = heap_create_name(str, (size_t)len);

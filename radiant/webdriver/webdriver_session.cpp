@@ -265,7 +265,7 @@ const char* webdriver_session_get_url(WebDriverSession* session) {
         return "";
     }
     String* url_str = url_serialize(session->document->url);
-    if (!url_str || !url_str->chars) {
+    if (!url_str) {
         return "";
     }
     return url_str->chars;

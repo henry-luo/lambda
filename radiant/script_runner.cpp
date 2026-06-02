@@ -172,7 +172,7 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_STRING) {
             String* s = it2s(child);
-            if (s && s->chars && s->len > 0) {
+            if (s && s->len > 0) {
                 const char* start = s->chars;
                 int len = s->len;
                 // strip XHTML CDATA markers: <![CDATA[ ... ]]>

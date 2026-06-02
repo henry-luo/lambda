@@ -18,56 +18,10 @@ namespace lambda {
 namespace markup {
 
 /**
- * expand_tabs_in_string - Expand tabs to spaces based on 4-character tab stops
- *
- * CommonMark: Tabs in lines are expanded to spaces with a tab stop of 4 characters.
- * The column position is tracked to properly align tabs.
- *
- * @param str The input string (may contain tabs)
- * @param sb The StringBuf to append expanded content to
- * @param start_column The starting column position (for continuation lines)
- */
-static void expand_tabs_in_string(const char* str, StringBuf* sb, int start_column = 0) {
-    int col = start_column;
-    for (const char* p = str; *p && *p != '\n' && *p != '\r'; p++) {
-        if (*p == '\t') {
-            // Expand tab to spaces (tab stop every 4 characters)
-            int spaces_to_add = 4 - (col % 4);
-            for (int i = 0; i < spaces_to_add; i++) {
-                stringbuf_append_char(sb, ' ');
-            }
-            col += spaces_to_add;
-        } else {
-            stringbuf_append_char(sb, *p);
-            col++;
-        }
-    }
-}
-
-/**
  * is_escapable_punctuation - Check if character is escapable in CommonMark
  */
 static inline bool is_escapable_punctuation(char c) {
     return c && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c) != nullptr;
-}
-
-/**
- * process_backslash_escapes - Process backslash escapes in a string
- * Returns new length after processing
- */
-static size_t process_backslash_escapes(char* str, size_t len) {
-    size_t read = 0, write = 0;
-    while (read < len) {
-        if (str[read] == '\\' && read + 1 < len && is_escapable_punctuation(str[read + 1])) {
-            // Skip backslash, keep the escaped character
-            read++;
-            str[write++] = str[read++];
-        } else {
-            str[write++] = str[read++];
-        }
-    }
-    str[write] = '\0';
-    return write;
 }
 
 /**

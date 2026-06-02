@@ -758,45 +758,6 @@ static inline bool is_line_break_ex_is_sy(uint32_t cp) {
 
 
 /**
- * Classify a codepoint into a semantic break kind (CSS Text 3 §4–5 + UAX #14).
- * Called early in the layout loop so each codepoint is classified once.
- * The collapse_spaces / collapse_newlines flags come from the white-space property.
- */
-static BreakKind classify_break(uint32_t cp, bool collapse_spaces, bool collapse_newlines) {
-    // whitespace (CSS Text 3 §4)
-    if (cp == 0x0020) return collapse_spaces ? BRK_SPACE : BRK_PRESERVED_SPACE;
-    if (cp == '\t')   return collapse_spaces ? BRK_SPACE : BRK_TAB;
-    if (cp == '\n' || cp == '\r') return collapse_newlines ? BRK_SPACE : BRK_HARD_BREAK;
-
-    // non-breaking glue
-    if (cp == 0x00A0 || cp == 0x202F) return BRK_GLUE;         // visible NBSP / NNBSP
-    if (cp == 0x2060 || cp == 0xFEFF) return BRK_GLUE_ZW;      // zero-width WJ / ZWNBSP
-    if (cp == 0x200D) return BRK_ZWJ;                           // zero-width joiner
-
-    // break opportunities
-    if (cp == 0x200B) return BRK_ZERO_WIDTH_BREAK;              // ZWSP
-    if (cp == 0x00AD) return BRK_SOFT_HYPHEN;                   // SHY
-    if (cp == 0x002D || cp == 0x2010) return BRK_HYPHEN;        // hyphen-minus / hyphen
-    if (cp == 0x2013 || cp == 0x2014) return BRK_HYPHEN;        // en-dash / em-dash
-
-    // ideographic space
-    if (cp == 0x3000) return BRK_IDEOGRAPHIC_SPACE;
-
-    // UAX#14 ID class (CJK, emoji, Yi, etc.) — break-after unless keep-all
-    if (has_id_line_break_class(cp)) return BRK_CJK;
-
-    // UAX #14 line break classes
-    if (is_line_break_op(cp)) return BRK_OP;
-    if (is_line_break_cl(cp)) return BRK_CL;
-    if (is_line_break_cj(cp)) return BRK_CJ;
-    if (is_line_break_ns(cp)) return BRK_NS;
-    if (is_line_break_ex_is_sy(cp)) return BRK_EX_IS_SY;
-
-    return BRK_TEXT;
-}
-
-
-/**
  * Peek at the next Unicode codepoint without advancing the string pointer.
  * Returns 0 if at end of string.
  */
@@ -1171,46 +1132,11 @@ CssEnum get_white_space_value(DomNode* node) {
 // ============================================================================
 
 /**
- * Check if layout is in min-content measurement mode.
- * In min-content mode, break at every opportunity (every word boundary).
- */
-static inline bool is_min_content_mode(LayoutContext* lycon) {
-    return lycon->available_space.width.is_min_content();
-}
-
-/**
  * Check if layout is in max-content measurement mode.
  * In max-content mode, never break lines - measure full unwrapped width.
  */
 static inline bool is_max_content_mode(LayoutContext* lycon) {
     return lycon->available_space.width.is_max_content();
-}
-
-/**
- * Check if line should break based on intrinsic sizing mode.
- * Returns true if line is full and should break.
- *
- * In min-content mode: always break at word boundaries
- * In max-content mode: never break (infinite available width)
- * In normal mode: break when line is full
- */
-static inline bool should_break_line(LayoutContext* lycon, float current_x, float width) {
-    if (is_max_content_mode(lycon)) {
-        // Never break in max-content mode
-        return false;
-    }
-    // Use effective_right which accounts for float intrusions
-    // effective_right is adjusted per-line based on floats at current Y
-    float line_right = lycon->line.has_float_intrusion ?
-                       lycon->line.effective_right : lycon->line.right;
-    // CSS 2.1 §16.1: RTL text-indent narrows the wrap boundary from the right
-    line_right -= lycon->line.text_indent_offset;
-    if (is_min_content_mode(lycon)) {
-        // In min-content mode, we break at every opportunity
-        return current_x + width > line_right;
-    }
-    // Normal mode: check if line is full
-    return current_x + width > line_right;
 }
 
 // ============================================================================

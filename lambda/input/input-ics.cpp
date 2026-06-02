@@ -288,7 +288,7 @@ void parse_ics(Input* input, const char* ics_string) {
 
         // Parse property name
         String* property_name = parse_property_name(ctx, &ics);
-        if (!property_name || !property_name->chars) {
+        if (!property_name) {
             skip_to_newline(&ics);
             continue;
         }
@@ -304,7 +304,7 @@ void parse_ics(Input* input, const char* ics_string) {
 
         // Parse property value
         String* property_value = parse_property_value(ctx, &ics);
-        if (!property_value || !property_value->chars) {
+        if (!property_value) {
             continue;
         }
 

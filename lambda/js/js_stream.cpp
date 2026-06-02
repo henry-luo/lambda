@@ -94,13 +94,6 @@ static void ensure_keys() {
 // EventEmitter-like helpers for stream objects
 // =============================================================================
 
-static Item stream_get_listener_array(Item self, const char* event) {
-    Item listeners_map = js_property_get(self, key_listeners);
-    if (get_type_id(listeners_map) != LMD_TYPE_MAP) return ItemNull;
-    Item event_key = make_string_item(event);
-    return js_property_get(listeners_map, event_key);
-}
-
 static void stream_emit(Item self, const char* event, Item* args, int argc) {
     Item listeners_map = js_property_get(self, key_listeners);
     if (get_type_id(listeners_map) != LMD_TYPE_MAP) return;

@@ -249,7 +249,7 @@ void print_module_item(MIR_item_t mitem) {
 }
 
 // compile MIR code to native code
-void* jit_gen_func(MIR_context_t ctx, char *func_name) {
+void* jit_gen_func(MIR_context_t ctx, const char *func_name) {
     log_debug("finding and to load module: %s", func_name);
     MIR_item_t mir_func = NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;

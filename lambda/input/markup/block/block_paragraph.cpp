@@ -436,13 +436,10 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
     }
 
     // RST: Check if paragraph ends with :: for literal block introduction
-    bool rst_literal_intro = false;
     if (parser->config.format == Format::RST && sb->length >= 2) {
         // Check if ends with ::
         const char* end = sb->str->chars + sb->length;
         if (end[-1] == ':' && end[-2] == ':') {
-            rst_literal_intro = true;
-
             // Trim trailing whitespace before ::
             size_t len = sb->length - 2;
             while (len > 0 && (sb->str->chars[len-1] == ' ' || sb->str->chars[len-1] == '\t' ||
@@ -590,10 +587,8 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
     const char* p = line;
     while (*p == ' ') p++; // skip leading whitespace
 
-    bool is_figure = false;
     if (strncmp(p, ".. figure::", 11) == 0) {
         p += 11;
-        is_figure = true;
     } else if (strncmp(p, ".. image::", 10) == 0) {
         p += 10;
     } else {

@@ -678,7 +678,7 @@ static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
 }
 
 static bool js_eval_source_assigns_immutable_binding(String* code_str) {
-    if (!code_str || !code_str->chars) return false;
+    if (!code_str) return false;
     extern int64_t js_eval_local_has_immutable_binding(Item key);
     const char* source = code_str->chars;
     size_t len = code_str->len;
@@ -726,7 +726,7 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
 }
 
 static bool js_eval_strict_assigns_restricted_name(String* code_str) {
-    if (!code_str || !code_str->chars) return false;
+    if (!code_str) return false;
     const char* source = code_str->chars;
     size_t len = code_str->len;
     size_t pos = 0;

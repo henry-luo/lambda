@@ -26,17 +26,7 @@ static Item read_compact_elem(ArrayNum* arr, int i) {
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
-void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, char* indent);
-
-// Static memory pool for DateTime formatting
-static Pool* datetime_format_pool = NULL;
-
-// Initialize datetime formatting pool if needed
-static void init_datetime_format_pool() {
-    if (!datetime_format_pool) {
-        datetime_format_pool = pool_create(); // Small pool for formatting strings
-    }
-}
+void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, const char* indent);
 
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
@@ -189,7 +179,7 @@ void write_type(StrBuf* code_buf, Type *type) {
     }
 }
 
-void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, char* indent = NULL, bool is_attrs = false);
+void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, const char* indent = NULL, bool is_attrs = false);
 
 void print_double(StrBuf *strbuf, double num) {
     // Handle special cases: NaN should always be printed as "nan" (never "-nan")
@@ -235,7 +225,7 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     decimal_free_string(decimal_str);
 }
 
-void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, char* indent, bool is_attrs) {
+void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, const char* indent, bool is_attrs) {
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!map_type) { strbuf_append_str(strbuf, "[null map_type]");  return; }
@@ -337,7 +327,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             }
             case LMD_TYPE_STRING: {
                 String *string = *(String**)data;
-                if (string && string->chars) {
+                if (string) {
                     strbuf_append_format(strbuf, "\"%s\"", string->chars);
                 } else {
                     strbuf_append_str(strbuf, "\"\"");
@@ -346,7 +336,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             }
             case LMD_TYPE_SYMBOL: {
                 Symbol *symbol = *(Symbol**)data;
-                if (symbol && symbol->chars) {
+                if (symbol) {
                     strbuf_append_format(strbuf, "'%s'", symbol->chars);
                 } else {
                     strbuf_append_str(strbuf, "''");
@@ -355,7 +345,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             }
             case LMD_TYPE_BINARY: {
                 String *bin = *(String**)data;
-                if (bin && bin->chars) {
+                if (bin) {
                     strbuf_append_format(strbuf, "b'%s'", bin->chars);
                 } else {
                     strbuf_append_str(strbuf, "b''");
@@ -386,7 +376,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
     }
 }
 
-void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) {
+void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* indent) {
     if (depth > MAX_DEPTH) {
         strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
         return;
@@ -437,21 +427,21 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         print_decimal(strbuf, titem->decimal);
         break;
     case LMD_TYPE_STRING:
-        if (titem->string && titem->string->chars) {
+        if (titem->string) {
             strbuf_append_format(strbuf, "\"%s\"", titem->string->chars);
         } else {
             strbuf_append_str(strbuf, "\"\"");
         }
         break;
     case LMD_TYPE_SYMBOL:
-        if (titem->symbol && titem->symbol->chars) {
+        if (titem->symbol) {
             strbuf_append_format(strbuf, "'%s'", titem->symbol->chars);
         } else {
             strbuf_append_str(strbuf, "''");
         }
         break;
     case LMD_TYPE_BINARY:
-        if (titem->string && titem->string->chars) {
+        if (titem->string) {
             strbuf_append_format(strbuf, "0x%s", titem->string->chars);
         } else {
             strbuf_append_str(strbuf, "0x");
@@ -479,7 +469,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
 struct PrintItemVisitor {
     StrBuf* strbuf;
     int depth;
-    char* indent;
+    const char* indent;
 
     void unknown(TypeId type_id) const {
         strbuf_append_format(strbuf, "[unknown type %s!!]", get_type_name(type_id));
@@ -532,7 +522,7 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_STRING> item) const {
         String* string = item.ptr();
-        if (string && string->chars) {
+        if (string) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
             if (actual_len != string->len) {
@@ -550,7 +540,7 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_SYMBOL> item) const {
         Symbol* symbol = item.ptr();
-        if (symbol && symbol->chars) {
+        if (symbol) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(symbol->chars);
             if (actual_len != symbol->len) {
@@ -580,7 +570,7 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_BINARY> item) const {
         String* string = item.ptr();
-        if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
+        if (string) strbuf_append_format(strbuf, "b'%s'", string->chars);
         else strbuf_append_str(strbuf, "b''");
     }
 
@@ -714,7 +704,7 @@ struct PrintItemVisitor {
             strbuf_append_str(strbuf, "type");
             return;
         }
-        char* type_name = type_info[type->type->type_id].name;
+        const char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
             strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
@@ -756,7 +746,7 @@ struct PrintItemVisitor {
     }
 };
 
-void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
+void print_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!item.item) {
@@ -769,7 +759,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     lam::visit(item, visitor);
 }
 
-void print_root_item(StrBuf *strbuf, Item item, char* indent) {
+void print_root_item(StrBuf *strbuf, Item item, const char* indent) {
     // top-level content block (is_content flag) prints items one per line without brackets
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY && item.array->is_content) {
@@ -810,14 +800,14 @@ void print_root_item(StrBuf *strbuf, Item item, char* indent) {
     strbuf_append_char(strbuf, '\n');
 }
 
-void log_root_item(Item item, char* indent) {
+void log_root_item(Item item, const char* indent) {
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, item, indent);
     log_debug("%s", output->str);
     strbuf_free(output);
 }
 
-extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
+extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent) {
     print_item(strbuf, item, depth, indent);
 }
 
@@ -830,7 +820,7 @@ void print_item(Item item, int depth) {
 }
 
 // print the type of the AST node
-char* format_type(Type *type) {
+const char* format_type(Type *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
     switch (type_id) {
@@ -904,7 +894,7 @@ void print_label(int indent, const char *label) {
 }
 
 void print_const(Script *script, Type* type) {
-    char* type_name = type_info[type->type_id].name;
+    const char* type_name = type_info[type->type_id].name;
     if (type->type_id == LMD_TYPE_NULL || type->type_id == LMD_TYPE_BOOL || type->type_id == LMD_TYPE_INT
         || type->type_id == LMD_TYPE_NUM_SIZED) {
         log_debug("[const: %s]", type_name);  return;
@@ -1203,7 +1193,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     case AST_NODE_TYPE: {
         TypeType* actual_type = (TypeType*)node->type;
         assert(node->type->type_id == LMD_TYPE_TYPE && actual_type->type);
-        char* actual_type_name = type_info[actual_type->type->type_id].name;
+        const char* actual_type_name = type_info[actual_type->type->type_id].name;
         log_debug("[%s: %s]", type_name, actual_type_name);
         break;
     }

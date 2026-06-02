@@ -58,7 +58,7 @@ extern "C" bool path_is_absolute(Path* path);
 extern "C" void* heap_data_alloc(size_t size);
 extern "C" void* heap_data_calloc(size_t size);
 
-Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
 // =============================================================================
 // Runtime Error Helper
@@ -128,7 +128,7 @@ Item fn_error(Item message) {
     const char* msg = "Error";
     if (get_type_id(message) == LMD_TYPE_STRING) {
         String* str = it2s(message);
-        if (str && str->chars) {
+        if (str) {
             msg = str->chars;
         }
     }
@@ -1007,38 +1007,6 @@ static Bool vmap_eq(VMap* a, VMap* b, int depth) {
         Item val_b = b->vtable->get(b->data, key);
         // if key not found in B, val_b will be null but val_a shouldn't be
         Bool r = fn_eq_depth(val_a, val_b, depth + 1);
-        if (r == BOOL_ERROR) return BOOL_ERROR;
-        if (r == BOOL_FALSE) return BOOL_FALSE;
-    }
-    return BOOL_TRUE;
-}
-
-// helper: cross-type array equality (e.g. array[int] vs array[float])
-// promotes each element via fn_eq_depth to leverage numeric promotion
-static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
-    // get lengths for both array types
-    int64_t len_a = 0, len_b = 0;
-    TypeId a_tid = get_type_id(a_item);
-    TypeId b_tid = get_type_id(b_item);
-
-    if (a_tid == LMD_TYPE_ARRAY)       len_a = a_item.array->length;
-    else if (a_tid == LMD_TYPE_ARRAY_NUM)   len_a = a_item.array_num->length;
-
-    if (b_tid == LMD_TYPE_ARRAY)       len_b = b_item.array->length;
-    else if (b_tid == LMD_TYPE_ARRAY_NUM)   len_b = b_item.array_num->length;
-
-    if (len_a != len_b) return BOOL_FALSE;
-
-    for (int64_t i = 0; i < len_a; i++) {
-        Item elem_a, elem_b;
-        // extract element from a
-        if (a_tid == LMD_TYPE_ARRAY)       elem_a = a_item.array->items[i];
-        else                               elem_a = array_num_get(a_item.array_num, i);
-        // extract element from b
-        if (b_tid == LMD_TYPE_ARRAY)       elem_b = b_item.array->items[i];
-        else                               elem_b = array_num_get(b_item.array_num, i);
-
-        Bool r = fn_eq_depth(elem_a, elem_b, depth + 1);
         if (r == BOOL_ERROR) return BOOL_ERROR;
         if (r == BOOL_FALSE) return BOOL_FALSE;
     }
@@ -2086,7 +2054,7 @@ RetItem fn_input2(Item target_item, Item type) {
         TypeId tid = get_type_id(type);
         if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_SYMBOL) {
             String* ts = fn_string(type);
-            if (ts && ts->chars) {
+            if (ts) {
                 if (strcmp(ts->chars, "html") == 0) content = "<html><head><title>Mock</title></head><body><p>Dry-run</p></body></html>";
                 else if (strcmp(ts->chars, "text") == 0 || strcmp(ts->chars, "txt") == 0) content = "Dry-run fabricated content.\nLine 2.\nLine 3: 42, 3.14\n";
                 else if (strcmp(ts->chars, "csv") == 0) content = "name,age,city\nAlice,30,NYC\nBob,25,LA\n";
@@ -2207,7 +2175,7 @@ RetItem fn_parse2(Item str_item, Item type) {
         return item_to_ri(ItemError);
     }
     String* str = str_item.get_safe_string();
-    if (!str || !str->chars) return ri_ok(ItemNull);
+    if (!str) return ri_ok(ItemNull);
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
@@ -2270,7 +2238,7 @@ Item fn_parse_html_fragment1(Item str_item) {
     }
 
     String* str = str_item.get_safe_string();
-    if (!str || !str->chars) return ItemNull;
+    if (!str) return ItemNull;
 
     Url* dummy_url = url_parse("parse://html-fragment");
     Input* input = InputManager::create_input(dummy_url);

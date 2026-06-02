@@ -249,12 +249,6 @@ int dir_walk(const char* dir_path, FileWalkCallback cb, void* user_data) {
 // dir_delete — recursive delete (rm -rf)
 // ---------------------------------------------------------------------------
 
-static bool dir_delete_cb(const char* path, bool is_dir, void* user_data) {
-    (void)user_data;
-    // return true to descend into subdirectories (handled in post-order below)
-    return true;
-}
-
 int dir_delete(const char* dir_path) {
     if (!dir_path) {
         log_error("dir_delete: NULL path");

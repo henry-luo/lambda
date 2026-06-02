@@ -373,14 +373,14 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
         if (span->in_line->cursor) {
-            char* cursor;
+            const char* cursor;
             switch (span->in_line->cursor) {
             case CSS_VALUE_POINTER:
                 cursor = "pointer";  break;
             case CSS_VALUE_TEXT:
                 cursor = "text";  break;
             default:
-                cursor = (char*)css_enum_info(span->in_line->cursor)->name;
+                cursor = css_enum_info(span->in_line->cursor)->name;
             }
             strbuf_append_format(buf, "cursor:%s ", cursor);
         }
@@ -718,7 +718,7 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
     if (!output_path) {
 #ifndef NDEBUG
         char vfile[1024];  const char *last_slash;
-        if (url && url->pathname && url->pathname->chars) {
+        if (url && url->pathname) {
             last_slash = strrchr((const char*)url->pathname->chars, '/');
             snprintf(vfile, sizeof(vfile), "./test_output/view_tree_%s.txt", last_slash + 1);
             write_string_to_file(vfile, buf->str);
@@ -2257,7 +2257,6 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     if (!text_has_visible_rect(text)) return;
 
     NEXT_RECT:
-    bool is_last_char_space = false;
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 
@@ -2280,8 +2279,6 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
         int len = min(sizeof(content) - 1, rect->length);
         strncpy(content, (char*)(text_data + rect->start_index), len);
         content[len] = '\0';
-        unsigned char last_char = content[len - 1];  // todo: this is not unicode-safe
-        is_last_char_space = is_space(last_char);
         append_json_string(buf, content);
     } else {
         append_json_string(buf, "[empty]");
@@ -2624,7 +2621,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     // Write to file in ./test_output/ only when no explicit output_path is given
 #ifndef NDEBUG
     char buf[1024];  const char *last_slash;
-    if (!output_path && url && url->pathname && url->pathname->chars) {
+    if (!output_path && url && url->pathname) {
         last_slash = strrchr((const char*)url->pathname->chars, '/');
         snprintf(buf, sizeof(buf), "./test_output/view_tree_%s.json", last_slash + 1);
         log_debug("Writing JSON layout data to: %s", buf);

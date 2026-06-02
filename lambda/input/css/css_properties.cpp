@@ -13,7 +13,6 @@ static bool validate_color(const char* value_str, void** parsed_value, Pool* poo
 static bool validate_keyword(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_number(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_integer(const char* value_str, void** parsed_value, Pool* pool);
-static bool validate_percentage(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_url(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_string(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_time(const char* value_str, void** parsed_value, Pool* pool);
@@ -628,7 +627,6 @@ static bool validate_color(const char* value_str, void** parsed_value, Pool* poo
 static bool validate_keyword(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_number(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_integer(const char* value_str, void** parsed_value, Pool* pool);
-static bool validate_percentage(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_url(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_string(const char* value_str, void** parsed_value, Pool* pool);
 
@@ -1073,29 +1071,6 @@ static bool validate_integer(const char* value_str, void** parsed_value, Pool* p
 
     *integer = (int)value;
     *parsed_value = integer;
-    return true;
-}
-
-static bool validate_percentage(const char* value_str, void** parsed_value, Pool* pool) {
-    if (!value_str || !parsed_value) return false;
-
-    size_t len = strlen(value_str);
-    if (len == 0 || value_str[len - 1] != '%') return false;
-
-    char* temp = (char*)pool_calloc(pool, len);
-    strncpy(temp, value_str, len - 1);
-    temp[len - 1] = '\0';
-
-    char* endptr;
-    double value = strtod(temp, &endptr);
-
-    if (endptr == temp) return false;
-
-    double* percentage = (double*)pool_calloc(pool, sizeof(double));
-    if (!percentage) return false;
-
-    *percentage = value;
-    *parsed_value = percentage;
     return true;
 }
 

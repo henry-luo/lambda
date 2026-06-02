@@ -1258,11 +1258,9 @@ static Item parse_flow_mapping(YamlParser* p) {
         if (at_end(p)) break;
         if (peek(p) == '}') { advance(p); break; }
 
-        bool explicit_key = false;
         if (peek(p) == '?') {
             char next = peek_at(p, 1);
             if (next == ' ' || next == '\t' || next == '\n') {
-                explicit_key = true;
                 advance(p);
                 skip_spaces(p);
                 while (!at_end(p) && peek(p) == '\n') { advance(p); skip_spaces(p); }
@@ -2096,11 +2094,11 @@ static Item parse_inline_block_node(YamlParser* p, int parent_indent) {
                 advance_n(p, ni);
                 // parse single mapping entry inline
                 const char* ka = parse_node_properties(p);
-                bool expk = false;
                 if (peek(p) == '?') {
                     char nn = peek_at(p, 1);
                     if (nn == ' ' || nn == '\t' || nn == '\n' || nn == '\0') {
-                        expk = true; advance(p); skip_spaces(p);
+                        advance(p);
+                        skip_spaces(p);
                     }
                 }
                 Item ki;
@@ -2360,9 +2358,7 @@ static Item parse_document(YamlParser* p, bool* has_content) {
         return p->ctx->builder.createNull();
     }
 
-    bool had_start = false;
     if (is_doc_start(p)) {
-        had_start = true;
         advance_n(p, 3);
         skip_spaces(p);
 
@@ -2370,12 +2366,10 @@ static Item parse_document(YamlParser* p, bool* has_content) {
             *has_content = true;
             // content on same line as ---
             const char* anchor = NULL;
-            int tag = TAG_NONE;
 
             // parse node properties
             if (peek(p) == '!' || peek(p) == '&') {
                 anchor = parse_node_properties(p);
-                tag = p->tag;
                 skip_spaces(p);
                 if (at_end(p) || peek(p) == '\n' || peek(p) == '#') {
                     skip_spaces_and_comments(p);

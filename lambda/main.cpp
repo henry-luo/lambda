@@ -567,46 +567,6 @@ static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tm
     return true;
 }
 
-static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
-                                      const char* temp_html, const char* opts_expr,
-                                      const char* log_prefix) {
-    if (!write_pdf_to_html_bridge_script(pdf_file, tmp_script_path, opts_expr, log_prefix)) {
-        return nullptr;
-    }
-
-    Runtime pdf_runtime;
-    runtime_init(&pdf_runtime);
-    pdf_runtime.current_dir = const_cast<char*>("./");
-    pdf_runtime.import_base_dir = "./";
-
-    Input* script_result = run_script_mir(&pdf_runtime, nullptr,
-                                           (char*)tmp_script_path, false);
-
-    bool ok = (script_result && get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
-    char* result_path = nullptr;
-    if (ok) {
-        String* html_str = format_html(script_result->pool, script_result->root);
-        if (html_str && html_str->chars) {
-            write_binary_file(temp_html, html_str->chars, html_str->len);
-            result_path = mem_strdup(temp_html, MEM_CAT_TEMP);
-            log_info("[%s] PDF rendered to %s (%u bytes)",
-                     log_prefix, temp_html, html_str->len);
-        } else {
-            log_error("[%s] PDF package: format_html returned null", log_prefix);
-            ok = false;
-        }
-    } else {
-        log_error("[%s] PDF package pipeline failed for %s", log_prefix, pdf_file);
-        if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-            LambdaError* le = get_persistent_last_error();
-            if (le) { err_print(le); clear_persistent_last_error(); }
-        }
-    }
-
-    runtime_cleanup(&pdf_runtime);
-    return ok ? result_path : nullptr;
-}
-
 void run_assertions() {
 #ifdef __cplusplus
     static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -3026,8 +2986,6 @@ int main(int argc, char *argv[]) {
         const char *host = "0.0.0.0";
         const char *static_dir = NULL;
         const char *handler_file = NULL;
-        const char *ssl_cert = NULL;
-        const char *ssl_key = NULL;
         int ssl_port = 0;
         int workers = 4;
         bool enable_cors = false;
@@ -3042,9 +3000,9 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "--ssl-port") == 0 && i + 1 < argc) {
                 ssl_port = atoi(argv[++i]);
             } else if (strcmp(argv[i], "--ssl-cert") == 0 && i + 1 < argc) {
-                ssl_cert = argv[++i];
+                i++;
             } else if (strcmp(argv[i], "--ssl-key") == 0 && i + 1 < argc) {
-                ssl_key = argv[++i];
+                i++;
             } else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) {
                 workers = atoi(argv[++i]);
             } else if (strcmp(argv[i], "--cors") == 0) {

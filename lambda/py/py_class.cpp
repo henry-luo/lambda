@@ -22,7 +22,7 @@
 
 extern Input* py_input;
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
-extern Item _map_get(TypeMap* map_type, void* map_data, char* key, bool* is_found);
+extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
 extern TypeMap EmptyMap;
 
 // py_getattr / py_setattr / py_list_* / py_dict_* / py_eq / py_is_truthy
