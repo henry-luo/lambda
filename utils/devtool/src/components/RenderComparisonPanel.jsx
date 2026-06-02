@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 
-const RenderComparisonPanel = forwardRef(({ test, isRunning }, ref) => {
+const RenderComparisonPanel = forwardRef(({ test, isRunning, outputFormat = 'png' }, ref) => {
   const [images, setImages] = useState({ reference: null, output: null });
   const [splitPos, setSplitPos] = useState(50);
   const isDragging = useRef(false);
@@ -10,26 +10,43 @@ const RenderComparisonPanel = forwardRef(({ test, isRunning }, ref) => {
     handleRunResult: (result) => {
       setImages({
         reference: result.reference,
-        output: result.output
+        output: result.output,
+        format: result.format || outputFormat
       });
     }
   }));
 
   useEffect(() => {
     if (test && test.testType === 'render') {
-      loadImages(test.testFile, test.renderDir);
+      loadImages(test.testFile, test.renderDir, outputFormat);
     } else {
       setImages({ reference: null, output: null });
     }
-  }, [test]);
+  }, [test, outputFormat]);
 
-  async function loadImages(testName, renderDir) {
+  async function loadImages(testName, renderDir, format) {
     try {
-      const imgs = await window.electronAPI.getRenderTestImages(testName, renderDir);
-      setImages({ reference: imgs.reference, output: imgs.output });
+      const imgs = await window.electronAPI.getRenderTestImages(testName, renderDir, format);
+      setImages({ reference: imgs.reference, output: imgs.output, format: imgs.format || format });
     } catch (error) {
       console.error('Failed to load render test images:', error);
     }
+  }
+
+  function renderOutputPreview() {
+    if (!images.output) {
+      return <div className="empty-state"><p>{isRunning ? 'Rendering...' : 'Run test to see output'}</p></div>;
+    }
+    if ((images.format || outputFormat) === 'pdf') {
+      return (
+        <embed
+          src={images.output}
+          type="application/pdf"
+          className="render-document"
+        />
+      );
+    }
+    return <img src={images.output} alt="Radiant Output" className="render-image" />;
   }
 
   function handleMouseDown(e) {
@@ -82,15 +99,11 @@ const RenderComparisonPanel = forwardRef(({ test, isRunning }, ref) => {
         <div className="panel-header">
           <span>Radiant Output</span>
           <span className="panel-info">
-            {isRunning ? 'Rendering...' : 'lambda.exe render'}
+            {isRunning ? 'Rendering...' : `lambda.exe render (${outputFormat.toUpperCase()})`}
           </span>
         </div>
         <div className="panel-content render-image-container">
-          {images.output ? (
-            <img src={images.output} alt="Radiant Output" className="render-image" />
-          ) : (
-            <div className="empty-state"><p>{isRunning ? 'Rendering...' : 'Run test to see output'}</p></div>
-          )}
+          {renderOutputPreview()}
         </div>
       </div>
     </div>

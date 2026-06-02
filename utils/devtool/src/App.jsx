@@ -15,6 +15,7 @@ function App() {
   const [recentTests, setRecentTests] = useState([]);
   const [showRecentTests, setShowRecentTests] = useState(false);
   const [viewportPreset, setViewportPreset] = useState('desktop');
+  const [renderOutputFormat, setRenderOutputFormat] = useState('png');
   const terminalRef = useRef(null);
   const comparisonPanelRef = useRef(null);
   const renderPanelRef = useRef(null);
@@ -113,9 +114,14 @@ function App() {
       setIsRunning(true);
       terminalRef.current?.clear();
       terminalRef.current?.writeln(`Running render test: ${selectedTest.testFile}`);
+      terminalRef.current?.writeln(`Output format: ${renderOutputFormat.toUpperCase()}`);
       terminalRef.current?.writeln('');
       try {
-        const result = await window.electronAPI.runRenderTest(selectedTest.testFile, selectedTest.renderDir);
+        const result = await window.electronAPI.runRenderTest(
+          selectedTest.testFile,
+          selectedTest.renderDir,
+          renderOutputFormat
+        );
         terminalRef.current?.writeln('');
         if (result.mismatchPercent !== undefined) {
           const pct = result.mismatchPercent.toFixed(2);
@@ -129,8 +135,13 @@ function App() {
         if (renderPanelRef.current?.handleRunResult) {
           renderPanelRef.current.handleRunResult(result);
         }
-        terminalRef.current?.updatePixelDiff(result);
-        terminalRef.current?.showPixelDiff();
+        if (result.format === 'png') {
+          terminalRef.current?.updatePixelDiff(result);
+          terminalRef.current?.showPixelDiff();
+        } else {
+          terminalRef.current?.writeln(`\x1b[32m✓ Render completed: ${result.outputFile}\x1b[0m`);
+          terminalRef.current?.showTerminal?.();
+        }
       } catch (error) {
         console.error('Render test error:', error);
         terminalRef.current?.writeln(`\x1b[31mError: ${error.message}\x1b[0m`);
@@ -316,6 +327,20 @@ function App() {
             </select>
           </div>
           )}
+          {selectedTest?.testType === 'render' && (
+          <div className="render-format-control">
+            <select
+              value={renderOutputFormat}
+              onChange={(e) => setRenderOutputFormat(e.target.value)}
+              disabled={isRunning}
+              title="Render output format"
+            >
+              <option value="png">PNG</option>
+              <option value="svg">SVG</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+          )}
           <button
             className="btn btn-primary"
             onClick={handleRunTest}
@@ -384,6 +409,7 @@ function App() {
                 ref={renderPanelRef}
                 test={selectedTest}
                 isRunning={isRunning}
+                outputFormat={renderOutputFormat}
               />
             ) : (
               <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} lambdaPixelRatio={lambdaPixelRatio} />

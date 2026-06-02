@@ -69,7 +69,24 @@ body.resizing object {
 
 .toolbar {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.render-format-control select {
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid #c7c7c7;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #333333;
+  font-size: 13px;
+}
+
+.render-format-control select:disabled {
+  background: #eeeeee;
+  color: #888888;
+  cursor: not-allowed;
 }
 
 /* Buttons */
