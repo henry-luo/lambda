@@ -559,6 +559,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     runtime.dom_doc = (void*)dom_doc;
     // create fresh mmap pool for this JS execution
     runtime.reuse_pool = pool_create_mmap();
+    EvalContext* saved_js_context = context;
+    Context* saved_input_context = input_context;
+    void* saved_js_document = js_dom_get_document();
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
@@ -627,6 +630,14 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 #else
     }
 #endif
+
+    context = saved_js_context;
+    input_context = saved_input_context;
+    if (saved_js_context && saved_js_context->heap && saved_js_context->name_pool) {
+        js_dom_set_document(saved_js_document);
+    } else {
+        js_dom_set_document(NULL);
+    }
 
     TypeId result_type = get_type_id(result);
     if (result_type == LMD_TYPE_ERROR) {
