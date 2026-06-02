@@ -1,0 +1,356 @@
+# Transpile JS Tune5 — Array-Write Regression Diagnosis & Fix
+
+Date: 2026-06-02
+Status: closed (fix committed `352a1b4ae` "js performance regression fix")
+Platform: Apple Silicon, macOS 15.7.1, release build (`make release`, `-O2`, stripped)
+
+## Goal
+
+Earlier Tune passes (Tune…Tune4) found broad cost centers and added narrow
+generic fast paths. This pass is different: it started from the observation that
+**current LambdaJS performance had regressed badly versus the last recorded
+benchmark numbers**. The objective was to (1) confirm the regression against a
+known-good baseline, (2) bisect it to a specific commit, (3) fix the root cause
+without re-introducing the correctness behaviour the offending commit added, and
+(4) prove zero js262 regression.
+
+This pass deliberately avoids any test-specific shortcut: the fix is a generic
+fast path gated on properties that the ES spec itself uses to short-circuit, with
+a full fallback to the existing slow path.
+
+---
+
+## 1. How the Diagnosis Was Carried Out
+
+### 1.1 Establishing the baseline to compare against
+
+The LambdaJS benchmark driver is `test/benchmark/run_benchmarks.py`, engine key
+`lambdajs` (runs `./lambda.exe js <file>`, median of 3, self-reported
+`__TIMING__` exec time, excludes startup/JIT).
+
+Two historical records exist:
+
+- `test/benchmark/Overall_Result6.md` — the R6/R7 LambdaJS report (2026-03-24).
+  Its absolute numbers use a different methodology (sub-millisecond figures that
+  in several cases reflect partially-broken / early-exiting runs), so it is not a
+  reliable absolute baseline.
+- `test/benchmark/benchmark_results_v3.json` — a full saved run dated 2026-04-12,
+  produced by the **same** `run_benchmarks.py` driver. This is the correct
+  apples-to-apples "last recorded result".
+
+### 1.2 First measurement vs. the v3 baseline
+
+A clean LambdaJS run on current `master` (62222b8c3) showed a broad slowdown,
+with extreme outliers. Crucially, before trusting it, two confounders were ruled
+out:
+
+- **CPU contention** — the first run was accidentally launched alongside a
+  parallel `make build-test`; the contaminated numbers were discarded and the run
+  was repeated on an idle machine.
+- **Changed workloads** — `git` confirmed that no benchmark `.js` source under
+  `test/benchmark/{r7rs,awfy,…}` had changed since the v3 run, so identical work
+  was being measured on both sides.
+
+### 1.3 Confirming the regression is real (not v3 noise)
+
+To remove any doubt that the v3 JSON values were themselves valid, the Apr-12
+commit `262176731` was checked out and rebuilt (`make release`). A six-benchmark
+subset (`temp/measure_subset.sh`) was measured on the **same machine**, after
+confirming via `git diff` that all six workloads were byte-identical between
+Apr-12 and master:
+
+| Benchmark | Apr-12 (`262176731`) | master (pre-fix) | Slowdown |
+| --- | ---: | ---: | ---: |
+| fib | 18.6 ms | 29.1 ms | 1.6× |
+| tak | 1.41 ms | 2.84 ms | 2.0× |
+| **sieve** | **0.27 ms** | **93.1 ms** | **≈350×** |
+| base64 | 82 ms | 2,780 ms | 34× |
+| deriv | 210 ms | 3,690 ms | 17.6× |
+| gcbench | 2,343 ms | 41,530 ms | 18× |
+
+This proved the regression was real, severe, and **not uniform** — array/loop
+work (`sieve`) was hit hardest, allocation/object work (`gcbench`, `deriv`)
+heavily, and pure recursion (`fib`) only mildly. That non-uniformity signalled
+**more than one independent regression**.
+
+### 1.4 Git bisect on `sieve`
+
+`sieve` was chosen as the bisect signal: it is the most sensitive (≈350×) and the
+fastest to measure (sub-ms when healthy). A `git bisect run` script
+(`temp/bisect_sieve.sh`) built each candidate (`make build`, debug is sufficient
+because the 350× cliff dwarfs the debug/release factor) and classified
+`good` (<5 ms) / `bad` (≥5 ms) on the median of 3 runs.
+
+Range: `262176731` (good) … `62222b8c3` (bad), 1572 commits, ~11 steps.
+
+**First-bad commit: `060fa3251` "fixing es2020 tests" (2026-04-30).**
+
+### 1.5 Root cause
+
+`060fa3251` added an ES `OrdinarySet` inherited-accessor walk to the array-write
+runtime helpers `js_array_set_int` and `js_property_set`. On **every** indexed
+write it executed:
+
+```
+snprintf(idx_buf, …, index)            // stringify the index
+js_get_prototype_of(array)             // allocates "Array"/"prototype" names,
+                                       //   does property lookups — not cheap
+js_find_accessor_pair_inheritable(...) // walk the prototype chain for a
+                                       //   numeric-index accessor
+```
+
+For a tight array loop like `sieve` (`flags[k-1] = false` millions of times) this
+is catastrophic. master had since added an `own_index_present` guard that skips
+the *walk* for existing dense slots, but the `snprintf` and the per-write
+`js_array_ta_proto_numeric_set()` call (which itself calls `js_has_own_property`
++ `js_get_prototype_of`) still ran on every write.
+
+The change was also a **latent spec bug**: per ES `OrdinarySet`, when the index is
+an existing **own writable data property**, the value is written directly and the
+prototype chain is *not* consulted. The added code performed the inherited-accessor
+walk before honouring the own data property, so an own element could be shadowed by
+an inherited accessor.
+
+---
+
+## 2. What Was Changed / Tuned
+
+Commit `352a1b4ae`, single file `lambda/js/js_runtime.cpp` (+29 lines).
+
+A shared fast-path helper short-circuits the common case — writing an existing own
+dense data element of a plain array — before any accessor / prototype / typed-array
+work:
+
+```c
+// Fast path for writing an existing own dense data element of a plain Array.
+// Per ES OrdinarySet, an own writable data property is written directly without
+// consulting accessors, the prototype chain, or typed-array proto exotics.
+// arr->extra==0 guarantees the array carries no indexed accessor / non-writable /
+// sparse descriptors (those all live in the companion map), and is_content!=1
+// excludes the arguments-exotic object, so every present dense slot is a plain
+// writable data property.
+static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item value) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
+    Array* arr = object.array;
+    if (arr->extra != 0 || arr->is_content == 1) return false;
+    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
+    arr->items[index] = value;
+    return true;
+}
+```
+
+Wired into both write entry points so every lowering path benefits:
+
+- **`js_array_set_int`** — used by the non-strict `arr[i] = v` lowering. The
+  helper is called immediately after `arr` is obtained, before
+  `js_array_ta_proto_numeric_set` and the accessor walk.
+- **`js_property_set`** — used by the strict-mode `[[Set]]` path (class-method
+  bodies are strict, e.g. `sieve`'s inner loop). A guard at the very top handles a
+  non-negative `LMD_TYPE_INT` key on a plain array, bypassing the
+  symbol/marker/`js_ta_proto_chain_set` preamble, which is all no-op for such a
+  key.
+
+### Why it is correct
+
+- `arr->extra == 0` ⇒ the array has **no** companion map, hence no indexed
+  accessor, non-writable (`__nw_<i>`) or sparse descriptors. Every present dense
+  slot is therefore a plain writable data property.
+- `is_content != 1` excludes the arguments-exotic object (mapped-parameter
+  aliasing keeps its own path).
+- A present dense slot (`index < length`, `index < capacity`, not the deleted
+  sentinel) is an **own data property**, which by `OrdinarySet` is written
+  directly and never consults the prototype chain. So skipping the accessor/proto
+  work is not merely an optimisation — it is what the spec requires, and it also
+  removes the latent shadowing bug.
+- Any case the fast path does not handle (sparse, accessors, length extension,
+  typed arrays, holes, negative/symbol keys) returns `false` and falls through to
+  the unchanged slow path.
+
+---
+
+## 3. Performance Result (Before → After)
+
+Release build, median of 3, exec ms. "Apr-12" from `benchmark_results_v3.json`.
+
+### Benchmarks the fix targets (array index writes)
+
+| Benchmark | Apr-12 | master pre-fix | master + fix | Recovery |
+| --- | ---: | ---: | ---: | --- |
+| sieve | 0.17 ms | 93.1 ms | **0.82 ms** | **114× faster**, baseline restored |
+| puzzle | 20.2 ms | 1,770 ms | **38.3 ms** | **46× faster** |
+| permute | 37.1 ms | 222 ms | **51.6 ms** | **4.3× faster** |
+| queens | 22.7 ms | 99.6 ms | **34.5 ms** | **2.9× faster** |
+| towers | 69.1 ms | 238 ms | **96.6 ms** | **2.5× faster** |
+
+(`sieve` does not fully return to 0.17 ms because the **read** path is now a
+runtime `js_array_get_int` call rather than the inline load it had in April — a
+separate, smaller delta — but the 350× write cliff is gone.)
+
+### Benchmarks unaffected by this fix (confirm scope / no second cause touched)
+
+| Benchmark | master pre-fix | master + fix |
+| --- | ---: | ---: |
+| base64 | 2,780 ms | 2,780 ms |
+| deriv | 3,690 ms | 3,630 ms |
+| gcbench | 42,030 ms | 41,530 ms |
+| matmul | 4,480 ms | 4,510 ms |
+| fib | 29.1 ms | 28.8 ms |
+
+These are object/allocation/float-heavy and do not exercise dense array index
+writes — they belong to the outstanding second regression (§5).
+
+### Correctness — js262 baseline
+
+`make`-equivalent run of `test/test_js_test262_gtest.exe --baseline-only
+--batch-only --run-async`:
+
+```
+Fully passed: 39258 / 39258
+Regressions:  0   (pass → fail)
+Improvements: 0
+```
+
+Run twice (once on the verification build, once on the final committed binary);
+both showed **0 regressions**. The single transient "non-fully-passing" entry
+(`language_literals_regexp_S7_8_5_A2_1_T2_js`) is a pre-existing batch-timing
+flake on a regexp-literal test that passed on retry and cannot be affected by an
+array-write change.
+
+---
+
+## 4. Reproduction
+
+```bash
+# baseline rebuild for comparison
+git checkout 262176731 && make release
+bash temp/measure_subset.sh          # Apr-12 numbers
+
+# current + fix
+git checkout master && make release
+python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3 --no-save \
+    -s r7rs,awfy,beng,kostya,larceny
+
+# correctness
+make -C build/premake config=debug_native test_js_test262_gtest -j8 \
+    CC="ccache gcc" CXX="ccache g++"
+./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async \
+    --async-list=test/js262/test262_baseline.txt
+```
+
+---
+
+## 5. Second Regression — object-literal `CreateDataProperty` (FIXED)
+
+A **separate, independent** regression hit object/tree-allocation benchmarks. It is
+**not** the array-write path (commit `060fa3251` did not touch it; the §2 fix left
+these numbers unchanged):
+
+| Benchmark | Apr-12 | pre-fix master | Slowdown |
+| --- | ---: | ---: | ---: |
+| gcbench | 1,957 ms | 41,530 ms | ~21× |
+| deriv | 169 ms | 3,630 ms | ~17× |
+| binarytrees | 86 ms | 1,730 ms | ~20× |
+
+(`base64` ~34× and `matmul`/`collatz` ~1.5× are a *different* residual — `push` /
+typed-array / float paths, not object literals — see §6.)
+
+### Root cause (identified via profiling)
+
+`sample` on a symbolicated debug build running `deriv` shows the hot path is
+dominated by **string-key interning/hashing during object creation**:
+`hash_fnv1a_32` (798) + `SIP64` (647, the name-pool hash) + `js_map_get_fast` (444)
++ `typemap_hash_lookup` (219), plus `__bzero`/`rpmalloc_heap_calloc` (object alloc).
+
+The cause: **object-literal fields changed from `js_property_set` (Apr-12) to
+`js_create_data_property` (master)**. The current `js_create_data_property` runs the
+full `Object.defineProperty` machinery **per field**:
+
+1. `js_new_object()` — allocates a throwaway descriptor object;
+2. four `js_property_set(desc, "value"/"writable"/"enumerable"/"configurable", …)`
+   — each `heap_create_name(...)` re-interns a constant string into the name pool
+   (the `SIP64`/`find_string_by_content` cost);
+3. `js_object_define_property(obj, name, desc)` — re-parses the descriptor.
+
+So `{t:2, l:X, r:Y}` does 3 × (descriptor alloc + 4 interns + define-property). This
+is the object-creation regression for `deriv`/`gcbench`/`binarytrees`.
+
+The deriv regression is also **non-monotonic**: a clean-build bisect found a severe
+~28 s spike at the May-9 merge `53fca1a10` (both parents ~640 ms — a genuine
+cross-branch interaction, reproduced with clean builds, *not* a staleness artifact)
+that was **later mostly fixed**, leaving the residual ~6–17× at master. A single
+bisect over this range is therefore unreliable; the profiling root cause above is
+the actionable lead.
+
+### False start — `js_property_set` (reverted)
+
+A first attempt delegated the common object-literal case to `js_property_set`. It
+cut `deriv` 3.6 s → 1.2 s and `gcbench` 41.5 s → 13.5 s (≈3×) but **regressed 2704
+test262 tests** and was reverted. Reason: `js_property_set` implements `[[Set]]`,
+which is *not* equivalent to `CreateDataProperty`'s `[[DefineOwnProperty]]` —
+`[[Set]]` honours inherited non-writable/accessor properties on the prototype chain,
+whereas `CreateDataProperty` defines the own property unconditionally. The lesson:
+the fast path must use a primitive that **does not consult the prototype at all**.
+
+### The fix
+
+A fast path in `js_create_data_property` (`lambda/js/js_globals.cpp`) that performs a
+direct `[[DefineOwnProperty]]` via the **raw own-field store `map_put`** — the same
+install the slow path ultimately performs for an ordinary default data descriptor,
+but with no descriptor object, no attribute-name interning, and (crucially) **no
+prototype consultation**:
+
+```c
+if (js_input && get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
+    Map* m = obj.map;
+    JsClass cls = js_class_id(obj);
+    if (m && m->map_kind == MAP_KIND_PLAIN && (cls == JS_CLASS_NONE || cls == JS_CLASS_OBJECT)) {
+        String* nm = it2s(name);
+        if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
+            bool key_exists = false;
+            js_map_get_fast_ext(m, nm->chars, (int)nm->len, &key_exists);
+            if (!key_exists && js_is_truthy(js_object_is_extensible(obj))) {
+                map_put(m, nm, value, js_input);
+                return obj;
+            }
+        }
+    }
+}
+```
+
+Guards keep it strictly equivalent to the slow descriptor path: ordinary plain
+object (`MAP_KIND_PLAIN`, class `OBJECT`/`NONE`) excludes proxies / typed arrays /
+String·Array·Date exotics; the `__`-prefix exclusion covers `__proto__`, symbol
+(`__sym_*`), private (`__private_*`) and attribute-marker keys; `key_exists` (which
+`js_map_get_fast_ext` reports even for deleted-sentinel entries) means `map_put`
+never duplicates a shape entry and existing-property redefinition keeps its
+spec-correct path; and the target must be extensible.
+
+**Result (release, median of 3):**
+
+| Benchmark | Apr-12 | pre-fix | with fix | Recovery |
+| --- | ---: | ---: | ---: | --- |
+| deriv | 169 ms | 3,630 ms | **194 ms** | **~18×**, back to baseline |
+| gcbench | 1,957 ms | 41,530 ms | **2,219 ms** | **~19×**, back to baseline |
+| binarytrees | 86 ms | 1,730 ms | (≈baseline) | recovered |
+
+**js262: 39258 / 39258, 0 regressions.** (The earlier `js_property_set` attempt
+showed 2704 regressions on this same gate — the contrast confirms the `map_put`
+primitive is the semantically correct one.)
+
+### Note: non-monotonic history
+
+A clean-build bisect on `deriv` also surfaced a severe ~28 s spike at the May-9 merge
+`53fca1a10` (both parents ~640 ms — a genuine cross-branch interaction, reproduced
+with clean builds, not a staleness artifact) that was later mostly fixed. This made
+single-benchmark bisecting unreliable; **profiling** (above) was the decisive tool
+that located the actual cost.
+
+## 6. Still outstanding
+
+- **`base64` (~34×), `matmul`/`collatz` (~1.5×)** — a different residual on
+  `push` / typed-array / float-heavy paths (not object literals; unaffected by the §5
+  fix). Needs its own profiling pass.
+- **Array read path** — `js_array_get_int` is now a runtime call where April used an
+  inline bounds-checked load; restoring a guarded inline read (skip when
+  `arr->extra != 0`) would recover the residual `sieve`/array-read delta.

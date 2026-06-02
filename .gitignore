@@ -82,6 +82,7 @@ lambda/vsce/dist/
 !.vscode/c_cpp_properties.json
 .idea/
 .claude/worktrees
+.claude/scheduled_tasks.lock
 *.iml
 *.swp
 *.swo
