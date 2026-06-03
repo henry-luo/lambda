@@ -243,23 +243,26 @@ char* mem_strdup(const char* str, MemCategory category);
 char* mem_strndup(const char* str, size_t max_len, MemCategory category);
 
 // ============================================================================
-// Debug Allocation API (with source location)
+// Debug Allocation API (with source line)
 // ============================================================================
 
-#ifdef MEMTRACK_DEBUG_LOCATIONS
+void* mem_alloc_loc(size_t size, MemCategory category, int line);
+void* mem_calloc_loc(size_t count, size_t size, MemCategory category, int line);
+void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, int line);
+void mem_free_loc(void* ptr, int line);
+char* mem_strdup_loc(const char* str, MemCategory category, int line);
+char* mem_strndup_loc(const char* str, size_t max_len, MemCategory category, int line);
 
-void* mem_alloc_loc(size_t size, MemCategory category, const char* file, int line);
-void* mem_calloc_loc(size_t count, size_t size, MemCategory category, const char* file, int line);
-void* mem_realloc_loc(void* ptr, size_t new_size, MemCategory category, const char* file, int line);
-void mem_free_loc(void* ptr, const char* file, int line);
+#ifndef MEMTRACK_NO_LOCATION_MACROS
 
-#define mem_alloc(size, cat)           mem_alloc_loc(size, cat, __FILE__, __LINE__)
-#define mem_calloc(count, size, cat)   mem_calloc_loc(count, size, cat, __FILE__, __LINE__)
-#define mem_realloc(ptr, size, cat)    mem_realloc_loc(ptr, size, cat, __FILE__, __LINE__)
-#define mem_free(ptr)                  mem_free_loc(ptr, __FILE__, __LINE__)
+#define mem_alloc(size, cat)           mem_alloc_loc(size, cat, __LINE__)
+#define mem_calloc(count, size, cat)   mem_calloc_loc(count, size, cat, __LINE__)
+#define mem_realloc(ptr, size, cat)    mem_realloc_loc(ptr, size, cat, __LINE__)
+#define mem_free(ptr)                  mem_free_loc(ptr, __LINE__)
+#define mem_strdup(str, cat)           mem_strdup_loc(str, cat, __LINE__)
+#define mem_strndup(str, max_len, cat) mem_strndup_loc(str, max_len, cat, __LINE__)
 
 #endif
-
 // ============================================================================
 // Typed Allocation API (with TypeMeta)
 // ============================================================================

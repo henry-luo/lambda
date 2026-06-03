@@ -3019,6 +3019,15 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
     return track_size;
 }
 
+static GridTrackList* replace_grid_track_list(GridTrackList** track_list_ptr, int initial_capacity) {
+    if (!track_list_ptr) return NULL;
+    if (*track_list_ptr) {
+        destroy_grid_track_list(*track_list_ptr);
+    }
+    *track_list_ptr = create_grid_track_list(initial_capacity);
+    return *track_list_ptr;
+}
+
 // Parse grid track list from CSS value list, handling repeat() functions
 // The list may contain: lengths, percentages, keywords, or repeat(count, track-size)
 // Parse grid track list from CSS value list
@@ -3088,13 +3097,13 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
         return;
     }
 
-    // Create or resize track list
-    if (!*track_list_ptr) {
-        *track_list_ptr = create_grid_track_list(total_tracks);
-    } else {
-        (*track_list_ptr)->track_count = 0;
-    }
+    // Replace previous tracks. CSS can be resolved repeatedly for the same DOM
+    // during GUI reflow, so resetting track_count would leak old track objects.
+    *track_list_ptr = replace_grid_track_list(track_list_ptr, total_tracks);
     GridTrackList* track_list = *track_list_ptr;
+    if (!track_list) {
+        return;
+    }
 
     log_debug("[CSS] Parsing %d values into %d allocated tracks", count, total_tracks);
 
@@ -3397,6 +3406,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
             *placeholder_font = *base_font;
+            placeholder_font->owns_font_handle = false;
         }
     } else {
         form->placeholder_font = nullptr;
@@ -3540,9 +3550,15 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
 
     FontProp* parent_font_style = lycon->font.style;
+#ifndef NDEBUG
     int font_processed = 0;
+#endif
     if (has_any_font_prop) {
+#ifndef NDEBUG
         font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+#else
+        avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+#endif
     }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
@@ -3590,7 +3606,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+#ifndef NDEBUG
     int other_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+#else
+    avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+#endif
     log_debug("[Lambda CSS] Second pass - processed %d other properties", other_processed);
 
     // Handle CSS inheritance for inheritable properties not explicitly set
@@ -10076,10 +10096,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] grid-template-columns: handling single KEYWORD value");
                 GridTrackSize* ts = parse_css_value_to_track_size(value);
                 if (ts) {
+                    grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
                     if (!grid->grid_template_columns) {
-                        grid->grid_template_columns = create_grid_track_list(1);
-                    } else {
-                        grid->grid_template_columns->track_count = 0;
+                        destroy_grid_track_size(ts);
+                        break;
                     }
                     grid->grid_template_columns->tracks[0] = ts;
                     grid->grid_template_columns->track_count = 1;
@@ -10105,23 +10125,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         int total = ts->repeat_count * ts->repeat_track_count;
                         log_debug("[CSS] grid-template-columns: expanding fixed repeat(%d, ...) -> %d tracks",
                                   ts->repeat_count, total);
-                        if (!grid->grid_template_columns || grid->grid_template_columns->allocated_tracks < total) {
-                            if (grid->grid_template_columns) destroy_grid_track_list(grid->grid_template_columns);
-                            grid->grid_template_columns = create_grid_track_list(total);
-                        } else {
-                            grid->grid_template_columns->track_count = 0;
+                        grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, total);
+                        if (!grid->grid_template_columns) {
+                            destroy_grid_track_size(ts);
+                            break;
                         }
                         for (int r = 0; r < ts->repeat_count; r++) {
                             for (int t = 0; t < ts->repeat_track_count; t++) {
-                                grid->grid_template_columns->tracks[grid->grid_template_columns->track_count++] = ts->repeat_tracks[t];
+                                GridTrackSize* repeated_track = clone_grid_track_size(ts->repeat_tracks[t]);
+                                if (repeated_track) {
+                                    grid->grid_template_columns->tracks[grid->grid_template_columns->track_count++] = repeated_track;
+                                }
                             }
                         }
+                        destroy_grid_track_size(ts);
                     } else {
                         // auto-fill/auto-fit or other function - store as single track for layout-time expansion
+                        grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
                         if (!grid->grid_template_columns) {
-                            grid->grid_template_columns = create_grid_track_list(1);
-                        } else {
-                            grid->grid_template_columns->track_count = 0;
+                            destroy_grid_track_size(ts);
+                            break;
                         }
                         grid->grid_template_columns->tracks[0] = ts;
                         grid->grid_template_columns->track_count = 1;
@@ -10138,10 +10161,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] grid-template-columns: handling single LENGTH/PERCENTAGE value");
                 GridTrackSize* ts = parse_css_value_to_track_size(value);
                 if (ts) {
+                    grid->grid_template_columns = replace_grid_track_list(&grid->grid_template_columns, 1);
                     if (!grid->grid_template_columns) {
-                        grid->grid_template_columns = create_grid_track_list(1);
-                    } else {
-                        grid->grid_template_columns->track_count = 0;
+                        destroy_grid_track_size(ts);
+                        break;
                     }
                     grid->grid_template_columns->tracks[0] = ts;
                     grid->grid_template_columns->track_count = 1;
@@ -10177,10 +10200,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] grid-template-rows: handling single KEYWORD value");
                 GridTrackSize* ts = parse_css_value_to_track_size(value);
                 if (ts) {
+                    grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
                     if (!grid->grid_template_rows) {
-                        grid->grid_template_rows = create_grid_track_list(1);
-                    } else {
-                        grid->grid_template_rows->track_count = 0;
+                        destroy_grid_track_size(ts);
+                        break;
                     }
                     grid->grid_template_rows->tracks[0] = ts;
                     grid->grid_template_rows->track_count = 1;
@@ -10201,10 +10224,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] grid-template-rows: handling single LENGTH/PERCENTAGE value");
                 GridTrackSize* ts = parse_css_value_to_track_size(value);
                 if (ts) {
+                    grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
                     if (!grid->grid_template_rows) {
-                        grid->grid_template_rows = create_grid_track_list(1);
-                    } else {
-                        grid->grid_template_rows->track_count = 0;
+                        destroy_grid_track_size(ts);
+                        break;
                     }
                     grid->grid_template_rows->tracks[0] = ts;
                     grid->grid_template_rows->track_count = 1;
@@ -10222,23 +10245,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         int total = ts->repeat_count * ts->repeat_track_count;
                         log_debug("[CSS] grid-template-rows: expanding fixed repeat(%d, ...) -> %d tracks",
                                   ts->repeat_count, total);
-                        if (!grid->grid_template_rows || grid->grid_template_rows->allocated_tracks < total) {
-                            if (grid->grid_template_rows) destroy_grid_track_list(grid->grid_template_rows);
-                            grid->grid_template_rows = create_grid_track_list(total);
-                        } else {
-                            grid->grid_template_rows->track_count = 0;
+                        grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, total);
+                        if (!grid->grid_template_rows) {
+                            destroy_grid_track_size(ts);
+                            break;
                         }
                         for (int r = 0; r < ts->repeat_count; r++) {
                             for (int t = 0; t < ts->repeat_track_count; t++) {
-                                grid->grid_template_rows->tracks[grid->grid_template_rows->track_count++] = ts->repeat_tracks[t];
+                                GridTrackSize* repeated_track = clone_grid_track_size(ts->repeat_tracks[t]);
+                                if (repeated_track) {
+                                    grid->grid_template_rows->tracks[grid->grid_template_rows->track_count++] = repeated_track;
+                                }
                             }
                         }
+                        destroy_grid_track_size(ts);
                     } else {
                         // auto-fill/auto-fit or other function
+                        grid->grid_template_rows = replace_grid_track_list(&grid->grid_template_rows, 1);
                         if (!grid->grid_template_rows) {
-                            grid->grid_template_rows = create_grid_track_list(1);
-                        } else {
-                            grid->grid_template_rows->track_count = 0;
+                            destroy_grid_track_size(ts);
+                            break;
                         }
                         grid->grid_template_rows->tracks[0] = ts;
                         grid->grid_template_rows->track_count = 1;
@@ -10912,12 +10938,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle single length/fr value (e.g., "100px" or "1fr")
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                if (!grid->grid_auto_rows) {
-                    grid->grid_auto_rows = create_grid_track_list(1);
-                }
                 // Use parse_css_value_to_track_size to properly handle fr units
                 GridTrackSize* track_size = parse_css_value_to_track_size(value);
                 if (track_size) {
+                    grid->grid_auto_rows = replace_grid_track_list(&grid->grid_auto_rows, 1);
+                    if (!grid->grid_auto_rows) {
+                        destroy_grid_track_size(track_size);
+                        break;
+                    }
                     grid->grid_auto_rows->tracks[0] = track_size;
                     grid->grid_auto_rows->track_count = 1;
                     log_debug("[CSS] grid-auto-rows: single track size set (type=%d, value=%d)",
@@ -10958,12 +10986,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Handle single length/fr value (e.g., "100px" or "1fr")
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                if (!grid->grid_auto_columns) {
-                    grid->grid_auto_columns = create_grid_track_list(1);
-                }
                 // Use parse_css_value_to_track_size to properly handle fr units
                 GridTrackSize* track_size = parse_css_value_to_track_size(value);
                 if (track_size) {
+                    grid->grid_auto_columns = replace_grid_track_list(&grid->grid_auto_columns, 1);
+                    if (!grid->grid_auto_columns) {
+                        destroy_grid_track_size(track_size);
+                        break;
+                    }
                     grid->grid_auto_columns->tracks[0] = track_size;
                     grid->grid_auto_columns->track_count = 1;
                     log_debug("[CSS] grid-auto-columns: single track size set (type=%d, value=%d)",

@@ -192,9 +192,6 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     log_debug("Parsing CSS rules from %d tokens", token_count);
 
     int token_index = 0;
-    int rules_parsed = 0;
-    int rules_skipped = 0;
-
     while (token_index < token_count) {
         // Skip whitespace between rules
         while (token_index < token_count &&
@@ -233,7 +230,6 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                     }
                     token_index++;
                 }
-                rules_skipped++;
                 continue;
             }
         }
@@ -247,7 +243,6 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
             token_index += tokens_consumed;
 
             if (rule) {
-                rules_parsed++;
                 // Add rule to stylesheet
                 if (stylesheet->rule_count >= stylesheet->rule_capacity) {
                     // Expand capacity
@@ -266,8 +261,6 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                     // Update feature usage flags
                     css_enhanced_detect_features_in_rule(stylesheet, rule);
                 }
-            } else {
-                rules_skipped++;
             }
         } else {
             // Failed to parse, skip to next rule
@@ -304,12 +297,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                     token_index++;
                 }
             }
-
-            rules_skipped++;
         }
     }
 
-    log_debug("Parsed %d CSS rules (%d skipped)", rules_parsed, rules_skipped);
+    log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
     clock_t end_time = clock();
     stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;

@@ -459,6 +459,11 @@ void radiant_document_destroy_state(DomDocument* document);
 void radiant_state_destroy(DocState* state);
 
 /**
+ * Free process-global interned state-name strings at shutdown.
+ */
+void radiant_state_cleanup_interned_names(void);
+
+/**
  * Reset state store, clearing all states but keeping allocation
  */
 void radiant_state_reset(DocState* state);

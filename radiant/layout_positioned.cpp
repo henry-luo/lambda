@@ -660,8 +660,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // get containing block dimensions
     LayoutContainingBlock cb = layout_absolute_containing_block(lycon, containing_block);
+#ifndef NDEBUG
     float cb_x = containing_block->x + cb.padding_x;
     float cb_y = containing_block->y + cb.padding_y;
+#endif
     float cb_width = cb.padding_width;
     float cb_height = cb.padding_height;
     float border_offset_x = cb.padding_x;
@@ -673,8 +675,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // It is NOT the root element's padding box — the root element's borders must not be subtracted.
     bool is_icb = layout_is_initial_containing_block(lycon, containing_block);
     if (is_icb) {
+#ifndef NDEBUG
         cb_x = 0.0f;
         cb_y = 0.0f;
+#endif
         border_offset_x = 0.0f;
         border_offset_y = 0.0f;
         log_debug("[ABS POS] Using viewport as ICB: (0, 0) size (%.1f, %.1f)", cb_width, cb_height);
@@ -2108,16 +2112,22 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     // Get the IMMEDIATE PARENT's content area offset (border + padding)
     ViewElement* parent_view = block->parent_view();
     float content_offset_x = 0;
+#ifndef NDEBUG
     float content_offset_y = 0;
+#endif
     if (parent_view && parent_view->is_block()) {
         ViewBlock* parent_block = lam::view_require_block(parent_view);
         if (parent_block->bound) {
             if (parent_block->bound->border) {
                 content_offset_x += parent_block->bound->border->width.left;
+#ifndef NDEBUG
                 content_offset_y += parent_block->bound->border->width.top;
+#endif
             }
             content_offset_x += parent_block->bound->padding.left;
+#ifndef NDEBUG
             content_offset_y += parent_block->bound->padding.top;
+#endif
         }
     }
     log_debug("[FLOAT_LAYOUT] Float parent: %s, content_offset=(%.1f, %.1f)",

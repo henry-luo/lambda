@@ -1049,7 +1049,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         span->in_line->cursor = CSS_VALUE_POINTER;
         span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
         span->in_line->has_color = true;
-        span->font = alloc_font_prop(lycon);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->text_deco = CSS_VALUE_UNDERLINE;
         break;
     }

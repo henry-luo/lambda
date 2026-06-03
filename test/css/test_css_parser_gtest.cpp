@@ -145,6 +145,27 @@ TEST_F(CssEngineParserTest, ParseInvalidCSS) {
     ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL even with invalid CSS";
 }
 
+TEST_F(CssEngineParserTest, ParseImportUrlWithQueryAndPlus) {
+    const char* css =
+        "@import url(http://fonts.googleapis.com/css?family=Open+Sans:400,700,600);"
+        "@import url(http://fonts.googleapis.com/css?family=Fjalla+One);";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
+    ASSERT_EQ(stylesheet->rule_count, 2) << "Both @import rules should parse";
+
+    ASSERT_NE(stylesheet->rules[0], nullptr);
+    ASSERT_NE(stylesheet->rules[1], nullptr);
+    EXPECT_EQ(stylesheet->rules[0]->type, CSS_RULE_IMPORT);
+    EXPECT_EQ(stylesheet->rules[1]->type, CSS_RULE_IMPORT);
+    ASSERT_NE(stylesheet->rules[0]->data.import_rule.url, nullptr);
+    ASSERT_NE(stylesheet->rules[1]->data.import_rule.url, nullptr);
+    EXPECT_STREQ(stylesheet->rules[0]->data.import_rule.url,
+                 "http://fonts.googleapis.com/css?family=Open+Sans:400,700,600");
+    EXPECT_STREQ(stylesheet->rules[1]->data.import_rule.url,
+                 "http://fonts.googleapis.com/css?family=Fjalla+One");
+}
+
 // Regression: a nested qualified rule that itself contains another nested
 // qualified rule used to cause `css_parse_declaration_from_tokens` to stall
 // on the inner '}' (token type CSS_TOKEN_RIGHT_BRACE), spinning forever in

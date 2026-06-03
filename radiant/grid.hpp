@@ -148,6 +148,7 @@ typedef struct GridContainerLayout : GridProp {
     bool owns_template_columns;
     bool owns_auto_rows;
     bool owns_auto_columns;
+    bool owns_grid_areas;
 } GridContainerLayout;
 
 #ifdef __cplusplus
@@ -162,6 +163,7 @@ void cleanup_grid_container(LayoutContext* lycon);
 GridTrackList* create_grid_track_list(int initial_capacity);
 void destroy_grid_track_list(GridTrackList* track_list);
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
+GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
 void destroy_grid_track_size(GridTrackSize* track_size);
 
 // Grid area functions

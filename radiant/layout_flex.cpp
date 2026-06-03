@@ -5819,12 +5819,14 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                             cross += item->bound->border->width.left + item->bound->border->width.right;
                     }
                 }
+#ifndef NDEBUG
                 float margin_sum = 0;
                 if (item->bound) {
                     margin_sum = is_horizontal
                         ? item->bound->margin.top + item->bound->margin.bottom
                         : item->bound->margin.left + item->bound->margin.right;
                 }
+#endif
                 if (is_horizontal) {
                     item->height = cross;
                 } else {

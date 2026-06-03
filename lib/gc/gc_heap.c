@@ -1067,7 +1067,9 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
 // copy the data to tenured and update the object's pointer.
 static void gc_compact_data(gc_heap_t* gc) {
     gc_header_t* current = gc->all_objects;
+#ifndef NDEBUG
     size_t compacted = 0;
+#endif
 
     while (current) {
         if (!current->marked || (current->gc_flags & GC_FLAG_FREED)) {
@@ -1098,7 +1100,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                         gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items,
                                                    dense_count, capacity);
                     }
+#ifndef NDEBUG
                     compacted++;
+#endif
                 }
             }
             break;
@@ -1112,7 +1116,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;
+#ifndef NDEBUG
                     compacted++;
+#endif
                 }
             }
             break;
@@ -1128,7 +1134,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
                     if (new_data) {
                         *data_slot = new_data;
+#ifndef NDEBUG
                         compacted++;
+#endif
                     }
                 }
             }
@@ -1153,7 +1161,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                         gc_fixup_embedded_pointers(old_elmt_items, (uint64_t*)new_items,
                                                    dense_count, elmt_capacity);
                     }
+#ifndef NDEBUG
                     compacted++;
+#endif
                 }
             }
             // compact data
@@ -1165,7 +1175,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                     void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, byte_size);
                     if (new_data) {
                         *data_slot = new_data;
+#ifndef NDEBUG
                         compacted++;
+#endif
                     }
                 }
             }
@@ -1180,7 +1192,9 @@ static void gc_compact_data(gc_heap_t* gc) {
                 void* new_env = gc_data_zone_copy(gc->tenured_data, *env_slot, size);
                 if (new_env) {
                     *env_slot = new_env;
+#ifndef NDEBUG
                     compacted++;
+#endif
                 }
             }
             break;
@@ -1304,12 +1318,16 @@ static void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_c
     // scan from current SP up to stack base (stack grows downward)
     uintptr_t* scan_start = (uintptr_t*)stack_current;
     uintptr_t* scan_end = (uintptr_t*)stack_base;
+#ifndef NDEBUG
     int scanned = 0;
     int marked = 0;
+#endif
 
     for (uintptr_t* p = scan_start; p < scan_end; p++) {
         uint64_t val = (uint64_t)*p;
+#ifndef NDEBUG
         scanned++;
+#endif
         // try to interpret as a tagged Item
         void* ptr = item_to_ptr(val);
         if (!ptr) continue;
@@ -1319,7 +1337,9 @@ static void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_c
             if (header && !header->marked && !(header->gc_flags & GC_FLAG_FREED)) {
                 header->marked = 1;
                 mark_stack_push(gc, header);
+#ifndef NDEBUG
                 marked++;
+#endif
             }
         }
     }
@@ -1373,11 +1393,15 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
     gc_scan_stack(gc, stack_base, stack_current);
 
     // Phase 1d: Process mark stack (trace gray objects until empty)
+#ifndef NDEBUG
     int traced_count = 0;
+#endif
     while (gc->mark_top > 0) {
         gc_header_t* obj = mark_stack_pop(gc);
         gc_trace_object(gc, obj);
+#ifndef NDEBUG
         traced_count++;
+#endif
         // tracing may have pushed more objects; continue until empty
     }
     log_debug("gc_collect: traced %d objects total", traced_count);

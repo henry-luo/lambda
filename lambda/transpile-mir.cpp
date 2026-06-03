@@ -3243,6 +3243,8 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
+    emit_call_void_1(mt, "symbol_key_list_free",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
 
     // Post-processing: ORDER BY, then OFFSET, then LIMIT
     MIR_reg_t final_reg;
@@ -7318,6 +7320,8 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
+    emit_call_void_1(mt, "symbol_key_list_free",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
 
     // Finalize array — array_end returns Item
     MIR_reg_t final = emit_call_1(mt, "array_end", MIR_T_I64,
@@ -12366,11 +12370,19 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         if (!output) {
             log_error("Failed to create output Input");
             if (output_pool) pool_destroy(output_pool);
+            if (runner.context.cwd) {
+                url_destroy((Url*)runner.context.cwd);
+                runner.context.cwd = NULL;
+            }
             runner.script->jit_context = NULL;
             jit_cleanup(ctx);
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
+        if (runner.context.cwd) {
+            url_destroy((Url*)runner.context.cwd);
+            runner.context.cwd = NULL;
+        }
 
         // Return result directly on the GC heap — no deep_copy needed.
         // With GC-managed memory the heap is retained across the session;

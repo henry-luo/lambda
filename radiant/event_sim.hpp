@@ -40,6 +40,7 @@
  *     {"type": "set_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
  *     {"type": "assert_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
  *     {"type": "assert_editing_value", "target": {"selector": "#editor"}, "equals": "abc"},
+ *     {"type": "assert_pixel", "target": {"selector": "#editor", "offset_x": 10, "offset_y": 30}, "min_b": 180},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
@@ -131,6 +132,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_EDITING_EVENT, // structured editing event-state log assertion
     SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
     SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
+    SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
     SIM_EVENT_ASSERT_SNAPSHOT,   // pixel-compare rendered surface against browser reference PNG
     // Mutation helpers
     SIM_EVENT_SCROLL_TO,         // scroll to absolute position or element
@@ -290,6 +292,10 @@ struct SimEvent {
     float snapshot_threshold;    // max mismatch %, default 1.0
     char* snapshot_diff_path;    // optional: save diff image on failure
     char* snapshot_actual_path;  // optional: save actual image for debugging
+    // assert_pixel fields. Values < 0 mean "do not check this bound".
+    int pixel_min_r, pixel_min_g, pixel_min_b, pixel_min_a;
+    int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;
+    bool pixel_force_render;
     // Phase 7: advance_time fields
     int advance_steps;           // number of tick steps (0 = auto from ms/16)
     // Phase 7: assert_style animated flag

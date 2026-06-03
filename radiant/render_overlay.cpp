@@ -3,14 +3,17 @@
 #include "context_menu.hpp"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
+#include "editing_geometry.hpp"
 #include "form_control.hpp"
 #include "render_form.hpp"
 #include "source_pos_bridge.hpp"
 #include "state_store.hpp"
+#include "text_control.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
 #include <math.h>
+#include <string.h>
 
 typedef struct SelectionPaintCtx {
     RenderContext* rdcon;
@@ -19,6 +22,11 @@ typedef struct SelectionPaintCtx {
     float          iframe_offset_x;
     float          iframe_offset_y;
 } SelectionPaintCtx;
+
+typedef struct TextControlSelectionOverlayCtx {
+    SelectionPaintCtx base;
+    ViewBlock* block;
+} TextControlSelectionOverlayCtx;
 
 static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     View* focused = focus_get_visible(state);
@@ -186,6 +194,52 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
 }
 
+static void text_control_selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
+    TextControlSelectionOverlayCtx* tc_ctx = (TextControlSelectionOverlayCtx*)ud;
+    if (!tc_ctx || !tc_ctx->block || w <= 0 || h <= 0) return;
+
+    float ax = x;
+    float ay = y;
+    if (tc_ctx->block->form) {
+        ax -= tc_ctx->block->form->scroll_x;
+        ay -= tc_ctx->block->form->scroll_y;
+    }
+    for (View* parent = tc_ctx->block->parent; parent; parent = parent->parent) {
+        if (parent->view_type == RDT_VIEW_BLOCK ||
+            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+            parent->view_type == RDT_VIEW_LIST_ITEM) {
+            ViewBlock* pblock = lam::view_require_block(parent);
+            ax += pblock->x;
+            ay += pblock->y;
+        }
+    }
+
+    selection_paint_rect_cb(ax, ay, w, h, &tc_ctx->base);
+}
+
+static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
+                                          SelectionPaintCtx* paint) {
+    if (!rdcon || !range || !paint) return false;
+    if (!range->start.node || range->start.node != range->end.node) return false;
+    if (!range->start.node->is_element()) return false;
+
+    DomElement* elem = lam::dom_require_element(range->start.node);
+    if (!tc_is_text_control(elem)) return false;
+    if (range->start.offset == range->end.offset) return true;
+
+    TextControlSelectionOverlayCtx tc_ctx;
+    memset(&tc_ctx, 0, sizeof(tc_ctx));
+    tc_ctx.base = *paint;
+    tc_ctx.block = lam::view_require_block(static_cast<View*>(elem));
+    bool ok = editing_geometry_text_control_for_each_selection_rect(
+        rdcon->ui_context, elem, range->start.offset, range->end.offset,
+        text_control_selection_paint_rect_cb, &tc_ctx);
+    if (!ok) {
+        log_debug("[SELECTION] skipped text-control overlay; geometry unavailable");
+    }
+    return true;
+}
+
 static bool render_dom_node_is_in_current_tree(DomNode* root, DomNode* node) {
     if (!root || !node) return false;
     for (DomNode* cur = node; cur; cur = cur->parent) {
@@ -253,18 +307,23 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
     DomRange* r = ds->ranges[0];
     if (!r) return;
 
-    DomRange paint_range;
-    r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
-    if (!dom_range_resolve_layout(r)) {
-        log_debug("[SELECTION] dom_range_resolve_layout failed");
-        return;
-    }
-
     SelectionPaintCtx ctx;
     ctx.rdcon = rdcon;
     ctx.scale = rdcon->scale;
     selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
+
+    DomRange paint_range;
+    r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
+    if (render_text_control_selection(rdcon, r, &ctx)) {
+        log_debug("[SELECTION] Rendered text-control DomSelection range via editing geometry");
+        return;
+    }
+
+    if (!dom_range_resolve_layout(r)) {
+        log_debug("[SELECTION] dom_range_resolve_layout failed");
+        return;
+    }
 
     dom_range_for_each_rect(r, rdcon->ui_context, selection_paint_rect_cb, &ctx);
     log_debug("[SELECTION] Rendered DomSelection range via dom_range_for_each_rect");

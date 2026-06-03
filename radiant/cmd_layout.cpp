@@ -22,6 +22,7 @@
 #include <string.h>
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
+#include "../lib/uv_loop.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
@@ -3405,15 +3406,15 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         return NULL;
     }
 
+    DomDocument* doc = nullptr;
+
     // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
-        return load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
-    }
-
+        doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    } else {
     // Detect file type by extension (local files only)
     const char* ext = strrchr(doc_url, '.');
-    DomDocument* doc = nullptr;
 
     if (ext && strcmp(ext, ".ls") == 0) {
         // Load Lambda script: evaluate script → wrap result → layout
@@ -3458,6 +3459,12 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    }
+    }
+
+    if (!doc) {
+        url_destroy(full_url);
+        pool_destroy(pool);
     }
 
     return doc;
@@ -3649,7 +3656,18 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    char* text_filepath = url_to_local_path(text_url);
+    struct TextTempPathGuard {
+        char* path;
+        ~TextTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    TextTempPathGuard text_path_guard = { url_to_local_path(text_url) };
+    char* text_filepath = text_path_guard.path;
+    if (!text_filepath) {
+        log_error("load_text_doc: failed to resolve text file URL");
+        return nullptr;
+    }
     log_info("[TIMING] Loading text document: %s", text_filepath);
 
     // Step 1: Read text file content
@@ -3764,10 +3782,16 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     auto step4_start = std::chrono::high_resolution_clock::now();
 
     String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
+    if (!type_str) {
+        log_error("Failed to allocate HTML type string for text file wrapper");
+        mem_free(html_content);
+        return nullptr;
+    }
     type_str->len = 4;
     str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
     Input* input = input_from_source(html_content, text_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(html_content);
 
     if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
@@ -3877,6 +3901,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     char* markdown_content = read_text_file(markdown_filepath);
     if (!markdown_content) {
         log_error("Failed to read markdown file: %s", markdown_filepath);
+        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
     }
 
@@ -3887,11 +3912,17 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Parse markdown to Lambda Element tree
     Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(markdown_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse markdown file: %s", markdown_filepath);
+        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
+    }
+    if (markdown_filepath) {
+        mem_free(markdown_filepath);
+        markdown_filepath = nullptr;
     }
 
     // Get root element from parsed markdown
@@ -4282,7 +4313,18 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    char* wiki_filepath = url_to_local_path(wiki_url);
+    struct WikiTempPathGuard {
+        char* path;
+        ~WikiTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    WikiTempPathGuard wiki_path_guard = { url_to_local_path(wiki_url) };
+    char* wiki_filepath = wiki_path_guard.path;
+    if (!wiki_filepath) {
+        log_error("load_wiki_doc: failed to resolve wiki file URL");
+        return nullptr;
+    }
     log_info("[TIMING] Loading wiki document: %s", wiki_filepath);
 
     // Step 1: Parse wiki with Lambda parser
@@ -4300,6 +4342,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Parse wiki to Lambda Element tree
     Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(wiki_content);  // from read_text_file, uses stdlib
 
     if (!input) {
@@ -4436,7 +4479,18 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    char* latex_filepath = url_to_local_path(latex_url);
+    struct LatexTempPathGuard {
+        char* path;
+        ~LatexTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    LatexTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
+    char* latex_filepath = latex_path_guard.path;
+    if (!latex_filepath) {
+        log_error("load_latex_doc: failed to resolve LaTeX file URL");
+        return nullptr;
+    }
     log_info("[Lambda LaTeX] Loading LaTeX document via Lambda package pipeline: %s", latex_filepath);
 
     // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
@@ -4697,7 +4751,18 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    char* xml_filepath = url_to_local_path(xml_url);
+    struct XmlTempPathGuard {
+        char* path;
+        ~XmlTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    XmlTempPathGuard xml_path_guard = { url_to_local_path(xml_url) };
+    char* xml_filepath = xml_path_guard.path;
+    if (!xml_filepath) {
+        log_error("[Lambda XML] Failed to resolve XML file URL");
+        return nullptr;
+    }
     log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
 
     // Step 1: Read XML file
@@ -4944,7 +5009,18 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    char* script_filepath = url_to_local_path(script_url);
+    struct ScriptTempPathGuard {
+        char* path;
+        ~ScriptTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    ScriptTempPathGuard script_path_guard = { url_to_local_path(script_url) };
+    char* script_filepath = script_path_guard.path;
+    if (!script_filepath) {
+        log_error("load_lambda_script_doc: failed to resolve Lambda script URL");
+        return nullptr;
+    }
     log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
@@ -5029,6 +5105,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         runtime_cleanup(runtime);
         mem_free(runtime);
         pool_destroy(result_pool);
+        url_destroy(script_url);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -5065,6 +5142,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             runtime_cleanup(runtime);
             mem_free(runtime);
             pool_destroy(result_pool);
+            url_destroy(script_url);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
@@ -6219,6 +6297,8 @@ static bool layout_single_file(
             ui_context->document = nullptr;
         }
     }
+    source_pos_bridge_reset();
+    render_map_destroy();
 
     if (event_log) {
         event_state_log_document(event_log, "unload_complete");
@@ -6246,6 +6326,7 @@ static bool layout_single_file(
         // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
         script_runner_cleanup_heap();
     }
+    lambda_uv_cleanup();
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     font_context_reset_document_fonts(ui_context->font_ctx);

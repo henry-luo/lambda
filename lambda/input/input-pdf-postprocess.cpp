@@ -748,7 +748,9 @@ static void process_font_dict(Input* input, MarkBuilder& builder, Map* font,
 static void walk_fonts(Input* input, MarkBuilder& builder,
                        Array* objects, ObjTable* table) {
     if (!objects) return;
+#ifndef NDEBUG
     int processed = 0;
+#endif
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
         if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
@@ -761,7 +763,9 @@ static void walk_fonts(Input* input, MarkBuilder& builder,
         String* ts = item_as_string(ty);
         if (ts && str_eq(ts, "Font")) {
             process_font_dict(input, builder, m, table);
+#ifndef NDEBUG
             processed++;
+#endif
             continue;
         }
 
@@ -911,7 +915,9 @@ static void add_text_data_to_stream(Input* input, MarkBuilder& builder, Map* sm)
 }
 
 static void decompress_streams(Input* input, MarkBuilder& builder, Array* objects) {    if (!objects) return;
+#ifndef NDEBUG
     int decoded_count = 0;
+#endif
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
         if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
@@ -949,7 +955,9 @@ static void decompress_streams(Input* input, MarkBuilder& builder, Array* object
 
         replace_string_field(sm, "data", new_data);
         add_text_data_to_stream(input, builder, sm);
+#ifndef NDEBUG
         decoded_count++;
+#endif
     }
     log_info("pdf_postprocess: decompressed %d stream(s)", decoded_count);
 }
@@ -1306,13 +1314,19 @@ static int expand_object_stream(Input* input, MarkBuilder& builder, Array* objec
 static void expand_object_streams(Input* input, MarkBuilder& builder, Array* objects, ObjTable* table) {
     if (!objects || !table) return;
     int original_len = objects->length;
+#ifndef NDEBUG
     int expanded = 0;
+#endif
     for (int i = 0; i < original_len; i++) {
         Map* iobj = item_as_map(objects->items[i]);
         if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
         Map* sm = item_as_map(map_lookup(iobj, "content"));
         if (!sm || !map_has_type(sm, "stream")) continue;
+#ifndef NDEBUG
         expanded += expand_object_stream(input, builder, objects, table, sm);
+#else
+        expand_object_stream(input, builder, objects, table, sm);
+#endif
     }
     log_info("pdf_postprocess: expanded %d object-stream object(s)", expanded);
 }
@@ -1634,7 +1648,9 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
 static void encode_image_xobjects(Input* input, MarkBuilder& builder,
                                   Array* objects, ObjTable* table) {
     if (!objects) return;
+#ifndef NDEBUG
     int encoded = 0;
+#endif
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
         if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
@@ -1656,7 +1672,9 @@ static void encode_image_xobjects(Input* input, MarkBuilder& builder,
         if (!uri) continue;
         builder.putToMap(lam::gc_borrow(sm), builder.createString("data_uri"),
                          {.item = s2it(uri)});
+#ifndef NDEBUG
         encoded++;
+#endif
     }
     log_info("pdf_postprocess: encoded %d Image XObject(s) to data URI", encoded);
 }
@@ -1691,7 +1709,9 @@ static String* font_stream_to_data_uri(Input* input, Map* sm,
 static void encode_embedded_fonts(Input* input, MarkBuilder& builder,
                                   Array* objects, ObjTable* table) {
     if (!objects) return;
+#ifndef NDEBUG
     int encoded = 0;
+#endif
     for (int i = 0; i < objects->length; i++) {
         Map* iobj = item_as_map(objects->items[i]);
         if (!iobj || !map_has_type(iobj, "indirect_object")) continue;
@@ -1744,7 +1764,9 @@ static void encode_embedded_fonts(Input* input, MarkBuilder& builder,
                          {.item = s2it(uri)});
         builder.putToMap(lam::gc_borrow(fd), builder.createString("font_format"),
                          {.item = s2it(builder.createString(fmt))});
+#ifndef NDEBUG
         encoded++;
+#endif
     }
     log_info("pdf_postprocess: encoded %d embedded font(s) to data URI",
              encoded);

@@ -916,7 +916,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     // Resolve compiled function pointers via find_func_prefix in the handler MIR context
+#ifndef NDEBUG
     int resolved = 0;
+#endif
     size_t iter = 0;
     void* item;
     while (hashmap_iter(registry->element_map, &iter, &item)) {
@@ -928,11 +930,13 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
             char prefix[128];
             snprintf(prefix, sizeof(prefix), "_js_%s_", h->handler_source);
             void* fn_ptr = find_func_prefix(handler_mir_ctx, prefix);
-            if (fn_ptr) {
-                h->compiled_func = fn_ptr;
-                resolved++;
-                log_debug("collect_and_compile_event_handlers: resolved %s → %p",
-                          h->handler_source, fn_ptr);
+        if (fn_ptr) {
+            h->compiled_func = fn_ptr;
+#ifndef NDEBUG
+            resolved++;
+#endif
+            log_debug("collect_and_compile_event_handlers: resolved %s → %p",
+                      h->handler_source, fn_ptr);
             } else {
                 log_error("collect_and_compile_event_handlers: failed to resolve %s",
                           h->handler_source);

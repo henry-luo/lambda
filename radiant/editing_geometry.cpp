@@ -3,6 +3,7 @@
 #include "dom_range_resolver.hpp"
 #include "editing_target_range.hpp"
 #include "form_control.hpp"
+#include "state_store.hpp"
 #include "text_control.hpp"
 #include "view.hpp"
 #include "../lib/tagged.hpp"
@@ -57,12 +58,28 @@ static bool editing_geometry_range_intersects_text_control_descendant(
     return false;
 }
 
-static void editing_geometry_view_abs_xy(View* view, float* out_x, float* out_y) {
+static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y) {
     float x = 0.0f, y = 0.0f;
+    View* origin = view;
     View* p = view;
     while (p) {
         x += p->x;
         y += p->y;
+        if (p != origin &&
+            (p->view_type == RDT_VIEW_BLOCK ||
+             p->view_type == RDT_VIEW_INLINE_BLOCK ||
+             p->view_type == RDT_VIEW_LIST_ITEM)) {
+            ViewBlock* block = lam::view_require_block(p);
+            if (block->scroller && block->scroller->pane) {
+                float scroll_x = 0.0f;
+                float scroll_y = 0.0f;
+                DocState* state = block->doc ? block->doc->state : NULL;
+                scroll_state_get_position_for_view(state, static_cast<View*>(block),
+                    block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                x -= scroll_x;
+                y -= scroll_y;
+            }
+        }
         p = static_cast<View*>(p->parent);
     }
     if (out_x) *out_x = x;
@@ -377,7 +394,7 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     uint32_t value_len = editing_geometry_text_len(elem);
 
     float abs_x = 0.0f, abs_y = 0.0f;
-    editing_geometry_view_abs_xy(static_cast<View*>(block), &abs_x, &abs_y);
+    editing_geometry_viewport_xy(static_cast<View*>(block), &abs_x, &abs_y);
     float doc_x = 0.0f, doc_y = 0.0f;
     editing_geometry_document_viewport_offset(uicon, elem->doc, &doc_x, &doc_y);
     abs_x += doc_x;

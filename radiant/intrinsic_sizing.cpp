@@ -1278,6 +1278,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
     // rather than inheriting from parent context.
     FontBox saved_font = lycon->font;  // Save parent font context
+    struct TempIntrinsicFontGuard {
+        LayoutContext* lycon;
+        FontBox saved_font;
+        FontProp* prop_a;
+        FontProp* prop_b;
+        TempIntrinsicFontGuard(LayoutContext* lycon, FontBox saved_font)
+            : lycon(lycon), saved_font(saved_font), prop_a(nullptr), prop_b(nullptr) {}
+        ~TempIntrinsicFontGuard() {
+            font_prop_release_handle(prop_a);
+            font_prop_release_handle(prop_b);
+            lycon->font = saved_font;
+        }
+    } temp_font_guard(lycon, saved_font);
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
@@ -1289,6 +1302,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // Element has CSS styles but font not yet resolved - check font shorthand
         // and individual font properties. Either alone should trigger font setup.
         FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
+        temp_font_guard.prop_a = temp_font_prop;
         bool need_font_setup = false;
         const char* css_family = NULL;
 
@@ -1578,16 +1592,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         FontProp* ua_font = nullptr;
         if (tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) {
             ua_font = alloc_font_prop(lycon);
+            temp_font_guard.prop_b = ua_font;
             ua_font->font_weight = CSS_VALUE_BOLD;
             ua_font->font_weight_numeric = 700;
         } else if (tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
                    tag == HTM_TAG_DFN || tag == HTM_TAG_VAR) {
             ua_font = alloc_font_prop(lycon);
+            temp_font_guard.prop_b = ua_font;
             ua_font->font_style = CSS_VALUE_ITALIC;
         } else if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP ||
                    tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
                    tag == HTM_TAG_XMP) {
             ua_font = alloc_font_prop(lycon);
+            temp_font_guard.prop_b = ua_font;
             radiant_retain_font_family(ua_font, lam::GcPtr<char>((char*)"monospace"));
         }
         if (ua_font) {
@@ -2669,10 +2686,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int flex_child_count = 0;  // Count of flex children for gap calculation
     ViewBlock* view_block = lam::unsafe_view_block_element_storage(element);
 
-    // Check if this is a grid container with explicit height
-    // Grid children with percentage heights should resolve against this height
+    // Check if this is a grid container.
     bool is_grid_container = false;
-    float grid_explicit_height = -1;
     if (view_block->display.inner == CSS_VALUE_GRID) {
         is_grid_container = true;
     }
@@ -2688,18 +2703,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     if (is_grid_container) {
-        // Get explicit height from view or CSS
-        if (view_block->blk && view_block->blk->given_height > 0) {
-            grid_explicit_height = view_block->blk->given_height;
-        } else if (element->specified_style) {
-            CssDeclaration* height_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_HEIGHT);
-            if (height_decl && height_decl->value &&
-                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                grid_explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-            }
-        }
-        log_debug("measure_element_intrinsic_widths: grid container with explicit height=%.1f", grid_explicit_height);
+        log_debug("measure_element_intrinsic_widths: grid container");
 
         // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
         // For a grid with N explicit columns, the max-content width = sum of column max-contents
@@ -4440,6 +4444,17 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // child text nodes inherit lycon->font, so we must set the element's font
     // before processing children (mirrors the logic in measure_element_intrinsic_widths).
     FontBox saved_font_h = lycon->font;
+    struct TempHeightFontGuard {
+        LayoutContext* lycon;
+        FontBox saved_font;
+        FontProp* prop;
+        TempHeightFontGuard(LayoutContext* lycon, FontBox saved_font)
+            : lycon(lycon), saved_font(saved_font), prop(nullptr) {}
+        ~TempHeightFontGuard() {
+            font_prop_release_handle(prop);
+            lycon->font = saved_font;
+        }
+    } temp_height_font_guard(lycon, saved_font_h);
     bool height_font_changed = false;
     if (view->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view->font);
@@ -4454,6 +4469,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (resolved_size > 0 && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
+                    temp_height_font_guard.prop = tfp;
                     if (lycon->font.style) {
                         radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
                     }

@@ -1071,6 +1071,7 @@ JitImport jit_runtime_imports[] = {
     {"push_k_safe", FPTR(push_k_safe)},
     {"push_c", FPTR(push_c)},
     {"item_keys", FPTR(item_keys)},
+    {"symbol_key_list_free", FPTR(symbol_key_list_free)},
     {"item_attr", FPTR(item_attr)},
     {"item_type_id", FPTR(item_type_id)},
     {"item_at", FPTR(item_at)},

@@ -31,10 +31,15 @@
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
+#include "../lambda/input/input.hpp"
 #include "../lambda/js/js_event_loop.h"
 extern "C" {
 #include "../lib/url.h"
 }
+
+extern "C" void js_batch_reset(void);
+extern "C" void js_dom_batch_reset(void);
+extern "C" void js_globals_batch_reset(void);
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -80,6 +85,16 @@ static void view_wake_glfw(void* user_data) {
 
 static void network_wake_glfw(void* user_data) {
     view_wake_glfw(user_data);
+}
+
+static void view_cleanup_js_batch_state(void) {
+    if (!script_runner_js_batch_cleanup_unsafe()) {
+        js_batch_reset();
+        js_dom_batch_reset();
+        js_globals_batch_reset();
+        script_runner_cleanup_heap();
+    }
+    InputManager::destroy_global();
 }
 
 static double view_min_timeout(double current, double candidate) {
@@ -1143,6 +1158,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         network_downloader_cleanup_shared();
         view_close_event_log();
         ui_context_cleanup(&ui_context);
+        view_cleanup_js_batch_state();
+        lambda_uv_cleanup();
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
     }
@@ -1313,6 +1330,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     network_downloader_cleanup_shared();
     view_close_event_log();
     ui_context_cleanup(&ui_context);
+    view_cleanup_js_batch_state();
+    lambda_uv_cleanup();
     log_cleanup();
 
     // Return non-zero if simulation had failures

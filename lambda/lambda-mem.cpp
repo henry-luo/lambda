@@ -631,6 +631,7 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
 }
 
 void print_heap_entries() {
+#ifndef NDEBUG
     gc_heap_t *gc = context->heap->gc;
     log_debug("after exec gc objects: %zu", gc->object_count);
     gc_header_t *header = gc->all_objects;
@@ -643,11 +644,14 @@ void print_heap_entries() {
         header = header->next;
         idx++;
     }
+#endif
 }
 
 void check_memory_leak() {
+#ifndef NDEBUG
     gc_heap_t *gc = context->heap->gc;
     log_debug("gc objects at shutdown: %zu (all freed by pool_destroy)", gc->object_count);
+#endif
 }
 
 // free_item / free_container / free_map_item are no longer called.

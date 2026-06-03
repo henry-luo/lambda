@@ -986,18 +986,24 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
         // Write the fetched data to destination
         TypeId result_type = get_type_id(fetch_result);
         int wr = -1;
+#ifndef NDEBUG
         size_t written = 0;
+#endif
         if (result_type == LMD_TYPE_STRING) {
             String* str = it2s(fetch_result);
             if (str) {
                 wr = write_binary_file(dst_path, str->chars, str->len);
+#ifndef NDEBUG
                 if (wr == 0) written = str->len;
+#endif
             }
         } else if (result_type == LMD_TYPE_BINARY) {
             Binary* bin = (Binary*)it2s(fetch_result);
             if (bin) {
                 wr = write_binary_file(dst_path, bin->chars, bin->len);
+#ifndef NDEBUG
                 if (wr == 0) written = bin->len;
+#endif
             }
         }
 

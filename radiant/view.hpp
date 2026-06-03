@@ -418,6 +418,7 @@ struct FontProp {
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
     struct FontHandle* font_handle; // unified font handle (populated by setup_font)
+    bool owns_font_handle; // true when this FontProp owns a retained font_handle ref
     TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
@@ -1503,6 +1504,7 @@ typedef struct UiContext {
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
+extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 #endif // LAMBDA_HEADLESS
 

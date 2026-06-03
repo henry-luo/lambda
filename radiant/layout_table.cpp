@@ -265,6 +265,45 @@ static bool table_width_value_has_nonzero_length_term(const CssValue* value) {
     return false;
 }
 
+static bool table_direct_float_overlaps_y(ViewBlock* floating, ViewTable* table, float y) {
+    if (!floating || !table) return false;
+    float rel_y = floating->y - table->y;
+    float margin_bottom = floating->bound ? floating->bound->margin.bottom : 0.0f;
+    return y >= rel_y && y < rel_y + floating->height + margin_bottom;
+}
+
+static float table_direct_left_float_intrusion(ViewTable* table, float y, float table_width) {
+    if (!table) return 0.0f;
+    float intrusion = 0.0f;
+    for (View* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_block()) continue;
+        ViewBlock* floating = lam::view_require_block(child);
+        if (!floating->position || floating->position->float_prop != CSS_VALUE_LEFT) continue;
+        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+
+        float rel_x = floating->x - table->x;
+        float margin_right = floating->bound ? floating->bound->margin.right : 0.0f;
+        float right = rel_x + floating->width + margin_right;
+        if (table_width > 0.0f && right > table_width) right = table_width;
+        if (right > intrusion) intrusion = right;
+    }
+    return intrusion;
+}
+
+static bool table_has_direct_float(ViewTable* table) {
+    if (!table) return false;
+    for (View* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_block()) continue;
+        ViewBlock* floating = lam::view_require_block(child);
+        if (floating->position &&
+            (floating->position->float_prop == CSS_VALUE_LEFT ||
+             floating->position->float_prop == CSS_VALUE_RIGHT)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool table_cell_calc_width_is_indefinite_constraint(const CssValue* value) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
     CssFunction* func = value->data.function;
@@ -2380,12 +2419,16 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
 
         if (total_content > 0) {
             // Proportional distribution based on current row heights
+#ifndef NDEBUG
             float distributed = 0;
+#endif
             for (int r = rsc->start_row; r < rsc->end_row; r++) {
                 float proportion = meta->row_heights[r] / total_content;
                 float amount = excess * proportion;
                 meta->row_heights[r] += amount;
+#ifndef NDEBUG
                 distributed += amount;
+#endif
                 log_debug("  Row %d: height %.1fpx + %.1fpx (%.1f%% of excess) = %.1fpx",
                          r, meta->row_heights[r] - amount, amount, proportion * 100, meta->row_heights[r]);
             }
@@ -5563,6 +5606,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table layout mode: %s", table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
     log_debug("Table border-spacing: %fpx %fpx, border-collapse: %s",
         table->tb->border_spacing_h, table->tb->border_spacing_v, table->tb->border_collapse ? "true" : "false");
+    bool has_direct_float = table_has_direct_float(table);
 
     // CRITICAL FIX: Handle caption positioning first
     // CSS 2.1 §17.4: A table may have multiple captions; all are rendered.
@@ -6586,7 +6630,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     float min_table_width = min_table_content_width + border_spacing_total;
     float pref_table_width = pref_table_content_width + border_spacing_total;
-
     // CSS 2.1 §17.5.2.1: Table width must be at least as wide as the caption.
     // Consider both explicit CSS width and intrinsic content width of the caption.
     float caption_width_contribution = 0;
@@ -6803,6 +6846,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     float used_table_width;
+    bool direct_float_expanded_auto_width = false;
     if (has_explicit_table_width) {
         // CSS 2.1: Table has explicit width - use content area (but not less than minimum)
         used_table_width = explicit_content_area > min_table_width ? explicit_content_area : min_table_width;
@@ -6810,11 +6854,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     } else {
         // CSS 2.1: Table width is auto - use preferred width
         used_table_width = pref_table_width;
+        if (has_direct_float && table->display.outer == CSS_VALUE_BLOCK &&
+            max_available_width > used_table_width) {
+            // Direct floated children establish float intrusions inside the table
+            // formatting context. A block-level auto-width table must leave room
+            // for both the float and following row content instead of shrink-
+            // wrapping only the row grid.
+            used_table_width = max_available_width;
+            direct_float_expanded_auto_width = true;
+        }
         log_debug("CSS 2.1: Using preferred table width: %.1fpx (table width: auto)", used_table_width);
     }
 
     // Calculate available content width for column distribution
     float available_content_width = used_table_width - border_spacing_total;
+    if (direct_float_expanded_auto_width) {
+        available_content_width = pref_table_content_width;
+    }
 
     // In border-collapse mode, col_max_widths and col_min_widths already include
     // per-cell border halves (added during measurement). No additional subtraction needed.
@@ -7389,28 +7445,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Global row index for tracking row positions across all row groups
     int global_row_index = 0;
 
-    // CSS 2.1 §9.4.1: Tables establish a BFC. Floated children (blockified per
-    // §9.7) are out of flow but occupy space in the BFC. Table row groups must
-    // be positioned below any floated siblings so they don't overlap.
-    {
-        float max_float_bottom = 0;
-        for (View* child = table->first_child; child; child = child->next_sibling) {
-            if (!child->is_block()) continue;
-            ViewBlock* vb = lam::view_require_block(child);
-            if (vb->position && (vb->position->float_prop == CSS_VALUE_LEFT ||
-                                 vb->position->float_prop == CSS_VALUE_RIGHT)) {
-                float bottom = vb->y + vb->height;
-                if (bottom > max_float_bottom)
-                    max_float_bottom = bottom;
-            }
-        }
-        if (max_float_bottom > current_y) {
-            log_debug("Table float offset: current_y %.1f -> %.1f for floated children",
-                      current_y, max_float_bottom);
-            current_y = max_float_bottom;
-        }
-    }
-
     // =========================================================================
     // CSS 2.1 Section 17.2: Visual ordering of row groups
     // Only the FIRST table-header-group acts as header (rendered at top).
@@ -7493,16 +7527,25 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 log_debug("%s No columns: using table->width %.1f for tbody_content_width", table->source_loc(), table->width);
             }
 
+            float float_shift_x = 0.0f;
+            if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
+                float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
+                float max_shift = table->width - tbody_content_width;
+                if (max_shift < 0.0f) max_shift = 0.0f;
+                if (left_intrusion > max_shift) left_intrusion = max_shift;
+                float_shift_x = left_intrusion;
+            }
+
             // Position tbody based on border-collapse mode
             if (table->tb->border_collapse) {
                 // Border-collapse: tbody starts at half the outer collapsed border
-                child->x = meta->collapsed_border_left / 2.0f;
+                child->x = meta->collapsed_border_left / 2.0f + float_shift_x;
                 child->y = current_y; // Use current_y to stack row groups
                 child->width = tbody_content_width;
             } else {
                 // Border-separate: tbody starts after table padding and left border-spacing
                 // col_x_positions[0] already includes table padding + border-spacing
-                child->x = (float)col_x_positions[0];
+                child->x = (float)col_x_positions[0] + float_shift_x;
                 child->y = current_y;
                 child->width = tbody_content_width;
             }

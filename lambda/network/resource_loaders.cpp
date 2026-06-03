@@ -90,6 +90,7 @@ static void resolve_css_value_urls(CssValue* value, const Url* base_url, Pool* p
                 if (href) {
                     value->data.url = pool_strdup(pool, href);
                 }
+                url_destroy(resolved);
             }
         }
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
@@ -130,6 +131,7 @@ static void resolve_stylesheet_urls(CssStylesheet* sheet) {
             }
         }
     }
+    url_destroy(base_url);
 }
 
 void process_css_resource(NetworkResource* res, struct DomDocument* doc) {

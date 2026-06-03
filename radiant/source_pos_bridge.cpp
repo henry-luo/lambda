@@ -155,9 +155,13 @@ void render_map_record_path(Item source_item, const char* template_ref,
             e.path.depth = depth;
         }
     }
-    // hashmap_set returns the prior entry's storage; the registered
-    // free-callback releases its `path.indices` automatically.
-    hashmap_set(m, &e);
+    // hashmap_set returns the replaced entry from map->spare; it does not run
+    // the element-free callback on replacement.
+    const PathTableEntry* old_entry = (const PathTableEntry*)hashmap_set(m, &e);
+    if (old_entry) {
+        SourcePathC old_path = old_entry->path;
+        source_path_free(&old_path);
+    }
 }
 
 // Internal helper: lookup path by (source_item, template_ref). Returns a

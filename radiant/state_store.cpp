@@ -53,6 +53,7 @@ static void view_state_release_all_payloads(HashMap* view_state_map) {
 // These pointers are used for fast pointer comparison
 static const char* s_interned_names[64] = {0};
 static int s_interned_count = 0;
+static bool s_interned_initialized = false;
 
 static const char* intern_state_name(const char* name) {
     if (!name) return NULL;
@@ -78,9 +79,8 @@ static const char* intern_state_name(const char* name) {
 
 // Initialize common state names at startup
 static void init_interned_names(void) {
-    static bool initialized = false;
-    if (initialized) return;
-    initialized = true;
+    if (s_interned_initialized) return;
+    s_interned_initialized = true;
 
     // Pre-intern all common state names
     intern_state_name(STATE_HOVER);
@@ -115,6 +115,17 @@ static void init_interned_names(void) {
     intern_state_name(STATE_FOCUS_LINE);
     intern_state_name(STATE_SCROLL_X);
     intern_state_name(STATE_SCROLL_Y);
+}
+
+void radiant_state_cleanup_interned_names(void) {
+    for (int i = 0; i < s_interned_count; i++) {
+        if (s_interned_names[i]) {
+            mem_free((void*)s_interned_names[i]);
+            s_interned_names[i] = NULL;
+        }
+    }
+    s_interned_count = 0;
+    s_interned_initialized = false;
 }
 
 // ============================================================================
@@ -414,7 +425,7 @@ extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
 }
 
 // View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
-// Convert (View*, byte_offset) → DomBoundary (UTF-16 offset for text nodes).
+// Convert (View*, byte_offset) → DomBoundary.
 static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
     DomBoundary b = { NULL, 0 };
     if (!view) return b;
@@ -424,9 +435,17 @@ static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
         uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
         b.node = n;
         b.offset = dom_text_utf8_to_utf16(t, bo);
+    } else if (selection_is_text_control_view(view)) {
+        DomElement* elem = lam::dom_require_element(view);
+        tc_ensure_init(elem);
+        FormControlProp* form = elem->form;
+        uint32_t value_len = form && form->current_value ? form->current_value_len : 0;
+        uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
+        if (bo > value_len) bo = value_len;
+        b.node = n;
+        b.offset = bo;
     } else {
-        // Element view: legacy callers don't reach here for selection but
-        // be safe — clamp offset to child count.
+        // Element view: clamp offset to child count.
         b.node = n;
         uint32_t lim = dom_node_boundary_length(n);
         b.offset = byte_offset < 0 ? 0 :

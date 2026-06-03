@@ -77,6 +77,9 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->allocated_areas = 4;
         grid->grid_areas = (GridArea*)mem_calloc(grid->allocated_areas, sizeof(GridArea), MEM_CAT_LAYOUT);
         grid->area_count = 0;  // Reset if we allocated new
+        grid->owns_grid_areas = true;
+    } else {
+        grid->owns_grid_areas = false;
     }
     // If grid_areas was copied from embed->grid, keep it as-is
     log_debug("%s Grid areas after init: area_count=%d, grid_areas=%p", container->source_loc(), grid->area_count, (void*)grid->grid_areas);
@@ -157,11 +160,13 @@ void cleanup_grid_container(LayoutContext* lycon) {
         mem_free(grid->computed_columns);
     }
 
-    // Free grid areas
-    for (int i = 0; i < grid->area_count; i++) {
-        destroy_grid_area(&grid->grid_areas[i]);
+    // Free grid areas only if this layout state allocated them locally.
+    if (grid->owns_grid_areas) {
+        for (int i = 0; i < grid->area_count; i++) {
+            destroy_grid_area(&grid->grid_areas[i]);
+        }
+        mem_free(grid->grid_areas);
     }
-    mem_free(grid->grid_areas);
 
     // Free line names
     for (int i = 0; i < grid->line_name_count; i++) {
@@ -866,6 +871,35 @@ static int calculate_track_pattern_min_size(GridTrackSize** tracks, int track_co
     return pattern_size;
 }
 
+static void destroy_grid_track_entries(GridTrackSize** tracks, int track_count) {
+    if (!tracks) return;
+    for (int i = 0; i < track_count; i++) {
+        destroy_grid_track_size(tracks[i]);
+        tracks[i] = nullptr;
+    }
+}
+
+static void free_grid_line_name_slots(GridTrackList* list) {
+    if (!list || !list->line_names) return;
+    int slot_count = list->allocated_tracks + 1;
+    for (int i = 0; i < slot_count; i++) {
+        mem_free(list->line_names[i]);
+        list->line_names[i] = nullptr;
+    }
+    mem_free(list->line_names);
+    list->line_names = nullptr;
+    list->line_name_count = 0;
+}
+
+static bool append_cloned_grid_track(GridTrackSize** tracks, int* dest, GridTrackSize* source) {
+    if (!tracks || !dest || !source) return false;
+    GridTrackSize* copy = clone_grid_track_size(source);
+    if (!copy) return false;
+    tracks[*dest] = copy;
+    (*dest)++;
+    return true;
+}
+
 // CSS Grid §7.2.3.2: Collapse empty auto-fit tracks after item placement.
 // Empty auto-fit tracks are treated as having a fixed track sizing function of 0px,
 // and their gutters are also collapsed.
@@ -893,6 +927,8 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
                 grid_layout->auto_fit_columns[c] && !col_occupied[c]) {
                 // Replace with a 0px fixed track
                 GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
+                if (!zero_track) continue;
+                destroy_grid_track_size(cols->tracks[c]);
                 cols->tracks[c] = zero_track;
                 log_debug("GRID: auto-fit collapse column %d (empty)", c);
             }
@@ -916,6 +952,8 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
             if (r < grid_layout->auto_fit_row_count &&
                 grid_layout->auto_fit_rows[r] && !row_occupied[r]) {
                 GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
+                if (!zero_track) continue;
+                destroy_grid_track_size(rows->tracks[r]);
                 rows->tracks[r] = zero_track;
                 log_debug("GRID: auto-fit collapse row %d (empty)", r);
             }
@@ -999,20 +1037,31 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             int dest = 0;
             // Copy tracks before the repeat
             for (int j = 0; j < i; j++) {
-                new_tracks[dest++] = cols->tracks[j];
+                if (!append_cloned_grid_track(new_tracks, &dest, cols->tracks[j])) {
+                    destroy_grid_track_entries(new_tracks, dest);
+                    mem_free(new_tracks);
+                    return;
+                }
             }
             // Expand repeat tracks (mark auto-fit indices)
             int auto_fit_start = dest;
             for (int r = 0; r < repeat_count; r++) {
                 for (int t = 0; t < ts->repeat_track_count; t++) {
-                    // Share the track size (don't duplicate)
-                    new_tracks[dest++] = ts->repeat_tracks[t];
+                    if (!append_cloned_grid_track(new_tracks, &dest, ts->repeat_tracks[t])) {
+                        destroy_grid_track_entries(new_tracks, dest);
+                        mem_free(new_tracks);
+                        return;
+                    }
                 }
             }
             int auto_fit_end = dest;
             // Copy tracks after the repeat
             for (int j = i + 1; j < cols->track_count; j++) {
-                new_tracks[dest++] = cols->tracks[j];
+                if (!append_cloned_grid_track(new_tracks, &dest, cols->tracks[j])) {
+                    destroy_grid_track_entries(new_tracks, dest);
+                    mem_free(new_tracks);
+                    return;
+                }
             }
 
             // Record auto-fit column indices for post-placement collapsing
@@ -1023,24 +1072,33 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
                 grid_layout->auto_fit_col_count = new_track_count;
             }
 
-            // Replace track list (but don't free old one if shared)
             if (grid_layout->owns_template_columns) {
+                destroy_grid_track_entries(cols->tracks, cols->track_count);
                 mem_free(cols->tracks);
-            }
-            cols->tracks = new_tracks;
-            cols->track_count = new_track_count;
-            cols->allocated_tracks = new_track_count;
-            cols->is_repeat = false; // No longer has unexpanded repeat
+                cols->tracks = new_tracks;
+                cols->track_count = new_track_count;
+                cols->allocated_tracks = new_track_count;
+                cols->is_repeat = false; // No longer has unexpanded repeat
 
-            // Reallocate line_names to match the new track count.
-            // The old line_names was sized for the original (unexpanded) track count;
-            // iterating up to new track_count without reallocation causes an
-            // out-of-bounds read, returning a garbage non-null pointer that
-            // is then passed to mem_strdup/strlen, producing an infinite loop.
-            if (grid_layout->owns_template_columns) {
-                mem_free(cols->line_names);
+                // Reallocate line_names to match the new track count.
+                // The old line_names was sized for the original (unexpanded) track count.
+                free_grid_line_name_slots(cols);
+                cols->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
+            } else {
+                GridTrackList* expanded_cols = create_grid_track_list(new_track_count);
+                if (!expanded_cols) {
+                    destroy_grid_track_entries(new_tracks, new_track_count);
+                    mem_free(new_tracks);
+                    return;
+                }
+                mem_free(expanded_cols->tracks);
+                expanded_cols->tracks = new_tracks;
+                expanded_cols->track_count = new_track_count;
+                expanded_cols->allocated_tracks = new_track_count;
+                expanded_cols->is_repeat = false;
+                grid_layout->grid_template_columns = expanded_cols;
+                grid_layout->owns_template_columns = true;
             }
-            cols->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
 
             log_debug("GRID: Expanded to %d column tracks", new_track_count);
             break; // Only one auto-repeat per axis allowed
@@ -1096,17 +1154,29 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
 
             int dest = 0;
             for (int j = 0; j < i; j++) {
-                new_tracks[dest++] = rows->tracks[j];
+                if (!append_cloned_grid_track(new_tracks, &dest, rows->tracks[j])) {
+                    destroy_grid_track_entries(new_tracks, dest);
+                    mem_free(new_tracks);
+                    return;
+                }
             }
             int auto_fit_row_start = dest;
             for (int r = 0; r < repeat_count; r++) {
                 for (int t = 0; t < ts->repeat_track_count; t++) {
-                    new_tracks[dest++] = ts->repeat_tracks[t];
+                    if (!append_cloned_grid_track(new_tracks, &dest, ts->repeat_tracks[t])) {
+                        destroy_grid_track_entries(new_tracks, dest);
+                        mem_free(new_tracks);
+                        return;
+                    }
                 }
             }
             int auto_fit_row_end = dest;
             for (int j = i + 1; j < rows->track_count; j++) {
-                new_tracks[dest++] = rows->tracks[j];
+                if (!append_cloned_grid_track(new_tracks, &dest, rows->tracks[j])) {
+                    destroy_grid_track_entries(new_tracks, dest);
+                    mem_free(new_tracks);
+                    return;
+                }
             }
 
             // Record auto-fit row indices for post-placement collapsing
@@ -1118,18 +1188,31 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             }
 
             if (grid_layout->owns_template_rows) {
+                destroy_grid_track_entries(rows->tracks, rows->track_count);
                 mem_free(rows->tracks);
-            }
-            rows->tracks = new_tracks;
-            rows->track_count = new_track_count;
-            rows->allocated_tracks = new_track_count;
-            rows->is_repeat = false;
+                rows->tracks = new_tracks;
+                rows->track_count = new_track_count;
+                rows->allocated_tracks = new_track_count;
+                rows->is_repeat = false;
 
-            // Reallocate line_names to match the new track count (same fix as columns).
-            if (grid_layout->owns_template_rows) {
-                mem_free(rows->line_names);
+                // Reallocate line_names to match the new track count (same fix as columns).
+                free_grid_line_name_slots(rows);
+                rows->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
+            } else {
+                GridTrackList* expanded_rows = create_grid_track_list(new_track_count);
+                if (!expanded_rows) {
+                    destroy_grid_track_entries(new_tracks, new_track_count);
+                    mem_free(new_tracks);
+                    return;
+                }
+                mem_free(expanded_rows->tracks);
+                expanded_rows->tracks = new_tracks;
+                expanded_rows->track_count = new_track_count;
+                expanded_rows->allocated_tracks = new_track_count;
+                expanded_rows->is_repeat = false;
+                grid_layout->grid_template_rows = expanded_rows;
+                grid_layout->owns_template_rows = true;
             }
-            rows->line_names = (char**)mem_calloc(new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
 
             log_debug("GRID: Expanded to %d row tracks", new_track_count);
             break;

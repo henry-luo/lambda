@@ -47,6 +47,7 @@ static uint32_t category_from_token(const char* token, int len) {
     return LAYOUT_DEBUG_NONE;
 }
 
+#ifndef NDEBUG
 static const char* category_name(LayoutDebugCategory category) {
     switch (category) {
         case LAYOUT_DEBUG_BOX: return "LAYOUT_BOX";
@@ -60,6 +61,7 @@ static const char* category_name(LayoutDebugCategory category) {
         default: return "LAYOUT";
     }
 }
+#endif
 
 static const char* bucket_name(LayoutProfileBucket bucket) {
     switch (bucket) {

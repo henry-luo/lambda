@@ -490,7 +490,9 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
     StackFrame* result = NULL;
     StackFrame** tail = &result;
     int depth = 0;
+#ifndef NDEBUG
     int total_frames_found = 0;
+#endif
     
     void** frame_ptr = (void**)fp;
     
@@ -538,7 +540,9 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
             
             *tail = frame;
             tail = &frame->next;
+#ifndef NDEBUG
             total_frames_found++;
+#endif
             depth++;
         }
 #if defined(__APPLE__) || defined(__linux__)
@@ -576,7 +580,9 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
                     
                     *tail = frame;
                     tail = &frame->next;
+#ifndef NDEBUG
                     total_frames_found++;
+#endif
                     depth++;
                 } else {
                     log_debug("err_capture_stack_trace: skipping C func '%s' at %p",

@@ -1312,11 +1312,19 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!output) {
         log_error("Failed to create output Input");
         if (output_pool) pool_destroy(output_pool);
+        if (runner->context.cwd) {
+            url_destroy(runner->context.cwd);
+            runner->context.cwd = NULL;
+        }
         return nullptr;
     }
 
     // Resolve all sys:// paths in result (while context is still valid)
     resolve_sys_paths_recursive(result);
+    if (runner->context.cwd) {
+        url_destroy(runner->context.cwd);
+        runner->context.cwd = NULL;
+    }
 
     // Return result directly on the GC heap — no deep_copy needed.
     // With GC-managed memory the heap is retained across the session;
@@ -1422,6 +1430,7 @@ void runtime_cleanup(Runtime* runtime) {
     profile_dump_to_file();
 
     module_registry_cleanup();
+    template_registry_destroy(g_template_registry);
     js_eval_preamble_cache_reset();
     css_property_system_cleanup();
     lambda_uv_cleanup();
@@ -1458,7 +1467,9 @@ void runtime_cleanup(Runtime* runtime) {
     if (runtime->scripts) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];
+            if (script->reference) mem_free((void*)script->reference);
             if (script->source) mem_free((void*)script->source);
+            if (script->directory) mem_free((void*)script->directory);
             if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
             if (script->pool) pool_destroy(script->pool);
             if (script->type_list) arraylist_free(script->type_list);
@@ -1468,5 +1479,6 @@ void runtime_cleanup(Runtime* runtime) {
             mem_free(script);
         }
         arraylist_free(runtime->scripts);
+        runtime->scripts = NULL;
     }
 }

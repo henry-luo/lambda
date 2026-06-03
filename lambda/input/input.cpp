@@ -937,6 +937,10 @@ InputManager::~InputManager() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
+            if (input && input->url) {
+                url_destroy((Url*)input->url);
+                input->url = nullptr;
+            }
             if (input && input->type_list) {
                 arraylist_free(input->type_list);
             }

@@ -255,8 +255,10 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
 
     // try each source in order
     FontHandle* fallback_handle = NULL;  // last successfully loaded font (may lack Latin chars)
+#ifndef NDEBUG
     int fallback_source_idx = -1;
     const char* fallback_src_path = NULL;
+#endif
     for (int i = 0; i < desc->source_count; i++) {
         const char* src_path = desc->sources[i].path;
         if (!src_path) continue;
@@ -304,8 +306,10 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
                           i, desc->family);
                 if (fallback_handle) font_handle_release(fallback_handle);
                 fallback_handle = handle;
+#ifndef NDEBUG
                 fallback_source_idx = i;
                 fallback_src_path = src_path;
+#endif
                 continue;
             }
 

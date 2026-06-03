@@ -88,6 +88,34 @@ GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
     return track_size;
 }
 
+GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
+    if (!track_size) return nullptr;
+
+    GridTrackSize* copy = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
+    if (!copy) return nullptr;
+
+    *copy = *track_size;
+    copy->min_size = clone_grid_track_size(track_size->min_size);
+    copy->max_size = clone_grid_track_size(track_size->max_size);
+    copy->repeat_tracks = nullptr;
+    copy->repeat_track_count = 0;
+
+    if (track_size->repeat_tracks && track_size->repeat_track_count > 0) {
+        copy->repeat_tracks = (GridTrackSize**)mem_calloc(
+            track_size->repeat_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+        if (!copy->repeat_tracks) {
+            destroy_grid_track_size(copy);
+            return nullptr;
+        }
+        copy->repeat_track_count = track_size->repeat_track_count;
+        for (int i = 0; i < track_size->repeat_track_count; i++) {
+            copy->repeat_tracks[i] = clone_grid_track_size(track_size->repeat_tracks[i]);
+        }
+    }
+
+    return copy;
+}
+
 // Destroy a grid track size
 void destroy_grid_track_size(GridTrackSize* track_size) {
     if (!track_size) return;
@@ -97,6 +125,12 @@ void destroy_grid_track_size(GridTrackSize* track_size) {
     }
     if (track_size->max_size) {
         destroy_grid_track_size(track_size->max_size);
+    }
+    if (track_size->repeat_tracks) {
+        for (int i = 0; i < track_size->repeat_track_count; i++) {
+            destroy_grid_track_size(track_size->repeat_tracks[i]);
+        }
+        mem_free(track_size->repeat_tracks);
     }
 
     mem_free(track_size);
