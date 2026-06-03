@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../lib/mem.h"
+#include "../lib/uv_loop.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
 #include <signal.h>
@@ -3404,15 +3405,15 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         return NULL;
     }
 
+    DomDocument* doc = nullptr;
+
     // For HTTP/HTTPS URLs, always route to HTML loader (it handles downloading)
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
-        return load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
-    }
-
+        doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    } else {
     // Detect file type by extension (local files only)
     const char* ext = strrchr(doc_url, '.');
-    DomDocument* doc = nullptr;
 
     if (ext && strcmp(ext, ".ls") == 0) {
         // Load Lambda script: evaluate script → wrap result → layout
@@ -3457,6 +3458,12 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     } else {
         // Load HTML document with Lambda CSS system
         doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
+    }
+    }
+
+    if (!doc) {
+        url_destroy(full_url);
+        pool_destroy(pool);
     }
 
     return doc;
@@ -3648,7 +3655,18 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    char* text_filepath = url_to_local_path(text_url);
+    struct TextTempPathGuard {
+        char* path;
+        ~TextTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    TextTempPathGuard text_path_guard = { url_to_local_path(text_url) };
+    char* text_filepath = text_path_guard.path;
+    if (!text_filepath) {
+        log_error("load_text_doc: failed to resolve text file URL");
+        return nullptr;
+    }
     log_info("[TIMING] Loading text document: %s", text_filepath);
 
     // Step 1: Read text file content
@@ -3763,10 +3781,16 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
     auto step4_start = std::chrono::high_resolution_clock::now();
 
     String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
+    if (!type_str) {
+        log_error("Failed to allocate HTML type string for text file wrapper");
+        mem_free(html_content);
+        return nullptr;
+    }
     type_str->len = 4;
     str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
     Input* input = input_from_source(html_content, text_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(html_content);
 
     if (!input || !input->root.item || input->root.item == ITEM_ERROR) {
@@ -4696,7 +4720,18 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    char* xml_filepath = url_to_local_path(xml_url);
+    struct XmlTempPathGuard {
+        char* path;
+        ~XmlTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    XmlTempPathGuard xml_path_guard = { url_to_local_path(xml_url) };
+    char* xml_filepath = xml_path_guard.path;
+    if (!xml_filepath) {
+        log_error("[Lambda XML] Failed to resolve XML file URL");
+        return nullptr;
+    }
     log_info("[Lambda XML] Loading XML file: %s", xml_filepath);
 
     // Step 1: Read XML file
@@ -6218,6 +6253,8 @@ static bool layout_single_file(
             ui_context->document = nullptr;
         }
     }
+    source_pos_bridge_reset();
+    render_map_reset();
 
     if (event_log) {
         event_state_log_document(event_log, "unload_complete");
@@ -6245,6 +6282,7 @@ static bool layout_single_file(
         // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
         script_runner_cleanup_heap();
     }
+    lambda_uv_cleanup();
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     font_context_reset_document_fonts(ui_context->font_ctx);

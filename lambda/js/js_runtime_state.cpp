@@ -368,6 +368,8 @@ extern "C" void js_batch_reset() {
     js_assert_reset();
     extern void js_node_test_reset(void);
     js_node_test_reset();
+    js_eval_preamble_cache_reset();
+    js_array_runtime_items_cleanup_all();
     // v95: reset Array.prototype[Symbol.iterator] override flag
     g_array_sym_iter_ever_set = 0;
     js_assert_batch_runtime_state_clear("js_batch_reset", true);

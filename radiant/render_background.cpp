@@ -581,10 +581,11 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
 
     // Clip to border-radius if present (using the ThorVG clip path, works in DL mode)
     bool pushed_clip = false;
+    RdtPath* clip_path = nullptr;
     if (view->bound && view->bound->border && corner_has_radius(&view->bound->border->radius)) {
         Corner radius = view->bound->border->radius;
         constrain_corner_radii(&radius, rect.width, rect.height);
-        RdtPath* clip_path = render_path_create_rounded_rect(rect, &radius);
+        clip_path = render_path_create_rounded_rect(rect, &radius);
         rc_push_clip(rdcon, clip_path, NULL);
         pushed_clip = true;
     }
@@ -595,6 +596,7 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
 
     if (pushed_clip) {
         rc_pop_clip(rdcon);
+        rdt_path_free(clip_path);
     }
 
     mem_free(pixels);

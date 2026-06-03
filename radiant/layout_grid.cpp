@@ -77,6 +77,9 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->allocated_areas = 4;
         grid->grid_areas = (GridArea*)mem_calloc(grid->allocated_areas, sizeof(GridArea), MEM_CAT_LAYOUT);
         grid->area_count = 0;  // Reset if we allocated new
+        grid->owns_grid_areas = true;
+    } else {
+        grid->owns_grid_areas = false;
     }
     // If grid_areas was copied from embed->grid, keep it as-is
     log_debug("%s Grid areas after init: area_count=%d, grid_areas=%p", container->source_loc(), grid->area_count, (void*)grid->grid_areas);
@@ -157,11 +160,13 @@ void cleanup_grid_container(LayoutContext* lycon) {
         mem_free(grid->computed_columns);
     }
 
-    // Free grid areas
-    for (int i = 0; i < grid->area_count; i++) {
-        destroy_grid_area(&grid->grid_areas[i]);
+    // Free grid areas only if this layout state allocated them locally.
+    if (grid->owns_grid_areas) {
+        for (int i = 0; i < grid->area_count; i++) {
+            destroy_grid_area(&grid->grid_areas[i]);
+        }
+        mem_free(grid->grid_areas);
     }
-    mem_free(grid->grid_areas);
 
     // Free line names
     for (int i = 0; i < grid->line_name_count; i++) {

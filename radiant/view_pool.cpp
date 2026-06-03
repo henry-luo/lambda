@@ -197,6 +197,49 @@ static void release_form_control_prop(DomElement* elem) {
     elem->item_prop_type = DomElement::ITEM_PROP_NONE;
 }
 
+static void release_embedded_document(DomElement* elem) {
+    if (!elem || !elem->embed || !elem->embed->doc) {
+        return;
+    }
+
+    DomDocument* embedded_doc = elem->embed->doc;
+    elem->embed->doc = nullptr;
+    free_document(embedded_doc);
+}
+
+static void release_grid_prop(GridProp* grid) {
+    if (!grid) {
+        return;
+    }
+
+    destroy_grid_track_list(grid->grid_template_rows);
+    grid->grid_template_rows = nullptr;
+    destroy_grid_track_list(grid->grid_template_columns);
+    grid->grid_template_columns = nullptr;
+    destroy_grid_track_list(grid->grid_auto_rows);
+    grid->grid_auto_rows = nullptr;
+    destroy_grid_track_list(grid->grid_auto_columns);
+    grid->grid_auto_columns = nullptr;
+    if (grid->grid_areas) {
+        for (int i = 0; i < grid->area_count; i++) {
+            destroy_grid_area(&grid->grid_areas[i]);
+        }
+        mem_free(grid->grid_areas);
+        grid->grid_areas = nullptr;
+        grid->area_count = 0;
+        grid->allocated_areas = 0;
+    }
+}
+
+static void release_embed_prop(DomElement* elem) {
+    if (!elem || !elem->embed) {
+        return;
+    }
+
+    release_embedded_document(elem);
+    release_grid_prop(elem->embed->grid);
+}
+
 static void release_view_owned_resources_in_node(DomNode* node) {
     if (!node) {
         return;
@@ -214,6 +257,7 @@ static void release_view_owned_resources_in_node(DomNode* node) {
         if (elem->font) {
             font_prop_release_handle(elem->font);
         }
+        release_embed_prop(elem);
         release_form_control_prop(elem);
         return;
     }
