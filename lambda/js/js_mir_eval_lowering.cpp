@@ -5,6 +5,13 @@ JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 
+extern "C" void js_eval_preamble_cache_reset(void) {
+    mem_free(g_eval_preamble_entries);
+    g_eval_preamble_entries = NULL;
+    g_eval_preamble_entry_count = 0;
+    g_eval_preamble_var_count = 0;
+}
+
 static uint64_t js_eval_template_site_counter = 0;
 
 static bool js_source_contains_import_meta(const char* source, size_t len);

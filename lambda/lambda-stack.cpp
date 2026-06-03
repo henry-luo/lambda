@@ -54,6 +54,10 @@ __thread volatile bool _lambda_stack_overflow_flag = false;
 // Track whether signal handler has been installed (process-wide, only once)
 static volatile bool _signal_handler_installed = false;
 
+#if defined(__APPLE__) || defined(__linux__)
+static void* _lambda_alt_stack_mem = NULL;
+#endif
+
 // ============================================================================
 // Stack bounds initialization (platform-specific)
 // ============================================================================
@@ -196,6 +200,7 @@ static void install_signal_handler(void) {
         mem_free(alt_stack_mem);
         return;
     }
+    _lambda_alt_stack_mem = alt_stack_mem;
 
     // 2. Install SIGSEGV handler on the alternate stack
     struct sigaction sa;
@@ -205,6 +210,12 @@ static void install_signal_handler(void) {
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGSEGV, &sa, NULL) != 0) {
         log_error("stack init: sigaction(SIGSEGV) failed");
+        stack_t disabled;
+        memset(&disabled, 0, sizeof(disabled));
+        disabled.ss_flags = SS_DISABLE;
+        sigaltstack(&disabled, NULL);
+        mem_free(_lambda_alt_stack_mem);
+        _lambda_alt_stack_mem = NULL;
         return;
     }
 
@@ -260,6 +271,42 @@ void lambda_stack_init(void) {
 
     // Install signal/exception handler (process-wide, once)
     install_signal_handler();
+}
+
+void lambda_stack_cleanup(void) {
+#if defined(__APPLE__) || defined(__linux__)
+    if (!_signal_handler_installed && !_lambda_alt_stack_mem) return;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+#if defined(__linux__)
+    sigaction(SIGBUS, &sa, NULL);
+#endif
+
+    stack_t disabled;
+    memset(&disabled, 0, sizeof(disabled));
+    disabled.ss_sp = _lambda_alt_stack_mem;
+    disabled.ss_size = LAMBDA_ALT_STACK_SIZE;
+    disabled.ss_flags = SS_DISABLE;
+    if (sigaltstack(&disabled, NULL) != 0) {
+        log_error("stack cleanup: sigaltstack disable failed");
+    }
+
+    if (_lambda_alt_stack_mem) {
+        mem_free(_lambda_alt_stack_mem);
+        _lambda_alt_stack_mem = NULL;
+    }
+    _signal_handler_installed = false;
+    log_debug("stack cleanup: signal-based overflow handler released");
+#elif defined(_WIN32)
+    if (_signal_handler_installed) {
+        SetUnhandledExceptionFilter(NULL);
+        _signal_handler_installed = false;
+    }
+#endif
 }
 
 extern "C" void lambda_stack_overflow_error(const char* func_name) {

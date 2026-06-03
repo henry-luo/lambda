@@ -523,6 +523,7 @@ void js_runtime_set_input(void* input);
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
+void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
 
 /**
@@ -888,6 +889,8 @@ Item js_canvas_measure_text(Item ctx_obj, Item text);
 bool js_canvas_method_dispatch(Item obj, Item method_name, Item* args, int argc, Item* result);
 bool js_canvas_property_set_intercept(Item obj, Item key, Item value);
 void js_canvas_cleanup(void);
+bool js_array_runtime_items_release(Item* items);
+void js_array_runtime_items_cleanup_all(void);
 
 #ifdef __cplusplus
 }
