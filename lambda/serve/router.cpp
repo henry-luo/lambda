@@ -5,7 +5,7 @@
  * Supports Express-style route patterns:
  *   /users/:id          → named parameter
  *   /users/:id?         → optional parameter
- *   /files/*path        → wildcard catch-all
+ *   /files/<wildcard>   → wildcard catch-all
  *   /api/health         → exact match
  */
 

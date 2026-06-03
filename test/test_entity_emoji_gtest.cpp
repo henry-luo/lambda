@@ -314,7 +314,7 @@ TEST_F(MarkdownFormatterEmojiTest, EmojiRoundtrip) {
     ASSERT_NE(output, nullptr);
 
     // Output should contain :smile:
-    if (output->chars) {
+    if (output->len > 0) {
         printf("Markdown roundtrip output: %s\n", output->chars);
         // Note: exact matching depends on paragraph wrapping etc.
         EXPECT_GT(output->len, 0);

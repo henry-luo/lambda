@@ -3210,7 +3210,7 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
     float device_scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
     FontStyleDesc style = {};
     style.family = font_family ? font_family : "Arial";
-    style.size_px = font_size * (rotated_text ? 1.0f : sy) / device_scale;
+    style.size_px = font_size * sy / device_scale;
     style.weight = (FontWeight)font_weight;
     style.slant = font_slant;
     FontHandle* handle = font_resolve(ctx->font_ctx, &style);
@@ -3241,14 +3241,26 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
         if (glyph) natural_width += glyph->advance_x;
     }
 
-    float advance_scale = sx;
-    float glyph_scale_x = sx;
+    // Glyph bitmaps and advances are already loaded in physical pixels for
+    // font_size * sy. Only apply the residual x/y transform ratio here; using
+    // sx directly double-scales text on HiDPI displays where sx == sy == DPR.
+    float base_x_scale = sx / sy;
+    float advance_scale = base_x_scale;
+    float glyph_scale_x = base_x_scale;
+    float local_advance_scale = 1.0f;
+    float local_glyph_scale_x = 1.0f;
     if (text_length > 0.0f && natural_width > 0.0f) {
-        float target_width = rotated_text ? text_length : text_length * sx;
-        advance_scale = target_width / natural_width;
-        if (scale_glyphs_x) glyph_scale_x = advance_scale;
+        if (rotated_text) {
+            local_advance_scale = text_length * sy / natural_width;
+            local_glyph_scale_x = scale_glyphs_x ? local_advance_scale : 1.0f;
+        } else {
+            float target_width = text_length * sx;
+            advance_scale = target_width / natural_width;
+            glyph_scale_x = scale_glyphs_x ? advance_scale : base_x_scale;
+        }
         log_debug("[SVG] Radiant textLength fit: '%s' target=%.3f measured=%.3f advance_scale=%.3f",
-                  text, target_width, natural_width, advance_scale);
+                  text, rotated_text ? text_length * sy : text_length * sx, natural_width,
+                  rotated_text ? local_advance_scale : advance_scale);
     }
 
     float pen_x = matrix->e11 * base_x + matrix->e12 * base_y + matrix->e13;
@@ -3284,11 +3296,13 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
             continue;
         }
         if (rotated_text) {
-            float gx = local_pen_x + drawn_glyph->bitmap.bearing_x * glyph_scale_x / oversample;
-            float gy = base_y - drawn_glyph->bitmap.bearing_y / oversample;
+            float local_scale_x = local_glyph_scale_x / (sy * oversample);
+            float local_scale_y = 1.0f / (sy * oversample);
+            float gx = local_pen_x + drawn_glyph->bitmap.bearing_x * local_scale_x;
+            float gy = base_y - drawn_glyph->bitmap.bearing_y * local_scale_y;
             RdtMatrix glyph_scale = {
-                glyph_scale_x / oversample, 0, gx - (glyph_scale_x / oversample) * gx,
-                0, 1.0f / oversample, gy - (1.0f / oversample) * gy,
+                local_scale_x, 0, gx - local_scale_x * gx,
+                0, local_scale_y, gy - local_scale_y * gy,
                 0, 0, 1
             };
             RdtMatrix final_transform = rdt_matrix_multiply(matrix, &glyph_scale);
@@ -3303,7 +3317,9 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
                       1.0f / oversample);
         }
         pen_x += glyph_advance * advance_scale;
-        local_pen_x += glyph_advance * advance_scale;
+        local_pen_x += rotated_text
+            ? (glyph_advance / sy) * local_advance_scale
+            : glyph_advance * advance_scale;
     }
 
     rdcon->has_transform = saved_has_transform;

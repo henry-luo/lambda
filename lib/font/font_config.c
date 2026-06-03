@@ -252,28 +252,6 @@ typedef struct FontCacheEntry {
 #define be32toh_local bswap32
 #define be16toh_local bswap16
 
-// Hash function for font entries (for hashmap)
-static uint64_t font_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const FontEntry *font = (const FontEntry*)item;
-    if (!font || !font->file_path) return 0;
-    return hashmap_xxhash3(font->file_path, strlen(font->file_path), seed0, seed1);
-}
-
-// Comparison function for font entries (for hashmap)
-static int font_entry_compare(const void *a, const void *b, void *udata) {
-    (void)udata;  // Suppress unused parameter warning
-    const FontEntry *fa = (const FontEntry*)a;
-    const FontEntry *fb = (const FontEntry*)b;
-
-    // Handle NULL pointers
-    if (!fa || !fb) return 0;
-    if (!fa->file_path && !fb->file_path) return 0;
-    if (!fa->file_path) return -1;
-    if (!fb->file_path) return 1;
-
-    return strcmp(fa->file_path, fb->file_path);
-}
-
 // Hash function for font entry pointers (for hashmaps storing FontEntry*)
 static uint64_t font_entry_ptr_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontEntry **font_ptr = (const FontEntry**)item;
@@ -542,17 +520,6 @@ static void scan_windows_registry_fonts(FontDatabase *db) {
     }
 
     RegCloseKey(hkey);
-}
-#else
-// Stub functions for non-Windows platforms
-static void add_windows_font_directories(ArrayList *directories) {
-    // No-op on non-Windows platforms
-    (void)directories;
-}
-
-static void scan_windows_registry_fonts(FontDatabase *db) {
-    // No-op on non-Windows platforms
-    (void)db;
 }
 #endif
 
@@ -1769,7 +1736,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
     }
 
     // Language support bonus (5 points max)
-    if (criteria->language && font_supports_language(font, criteria->language)) {
+    if (criteria->language[0] && font_supports_language(font, criteria->language)) {
         score += 5.0f;
     }
 
@@ -1803,7 +1770,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
 FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseCriteria* criteria) {
     FontDatabaseResult result = {0};
 
-    if (!db || !criteria || !criteria->family_name) {
+    if (!db || !criteria || !criteria->family_name[0]) {
         return result;
     }
 
@@ -1822,7 +1789,9 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
         #endif
 
         // Parse ALL placeholder fonts matching the requested family to get all variants
+        #ifdef FONT_DEBUG_VERBOSE
         int parsed_count = 0;
+        #endif
         bool found_any = false;
         for (size_t i = 0; i < db->all_fonts->length; i++) {
             FontEntry* placeholder = (FontEntry*)db->all_fonts->data[i];
@@ -1844,12 +1813,16 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
                     FontEntry* loaded = lazy_load_font(db, placeholder->file_path);
                     if (loaded) {
                         found_any = true;
+                        #ifdef FONT_DEBUG_VERBOSE
                         parsed_count += 5;  // Count as multiple fonts
+                        #endif
                     }
                 } else {
                     // For single-font files, parse in-place
                     if (parse_placeholder_font(placeholder, db->string_arena)) {
+                        #ifdef FONT_DEBUG_VERBOSE
                         parsed_count++;
+                        #endif
                         found_any = true;
                     }
                 }

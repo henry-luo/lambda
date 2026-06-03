@@ -16,7 +16,7 @@ extern "C" {
 // stub, so sys_func_defs[] compiles without linking the full runtime.
 // ============================================================================
 #ifdef LAMBDA_STATIC
-    static void* _sys_func_dummy(void) { return (void*)0; }
+    static void* __attribute__((unused)) _sys_func_dummy(void) { return (void*)0; }
     #define FPTR(x)  (fn_ptr) _sys_func_dummy  // stub for func_ptr
     #define NPTR(x)  (fn_ptr) _sys_func_dummy  // stub for native_func_ptr
 #else

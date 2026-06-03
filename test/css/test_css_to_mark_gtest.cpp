@@ -629,8 +629,6 @@ protected:
 
         bool has_selectors = false;
         bool has_properties = false;
-        bool has_values = false;
-        bool has_functions = false;
 
         for (size_t i = 0; i < token_count; i++) {
             CSSToken token = tokens[i];
@@ -645,14 +643,12 @@ protected:
                     }
                     break;
                 case CSS_TOKEN_FUNCTION:
-                    has_functions = true;
                     break;
                 case CSS_TOKEN_STRING:
                 case CSS_TOKEN_NUMBER:
                 case CSS_TOKEN_DIMENSION:
                 case CSS_TOKEN_PERCENTAGE:
                 case CSS_TOKEN_HASH:
-                    has_values = true;
                     break;
                 default:
                     break;
@@ -707,7 +703,7 @@ protected:
                 printf("🔄 Formatting parsed CSS...\n");
                 String* formatted_css = format_data(parsed_input->root, css_type, nullptr, css_pool);
 
-                if (!formatted_css || !formatted_css->chars) {
+                if (!formatted_css) {
                     printf("❌ CSS formatting failed for: %s\n", file_name);
                 } else {
                     printf("✅ CSS formatting succeeded for: %s (formatted length: %u)\n",
@@ -1197,7 +1193,7 @@ TEST_F(CssAllFilesTest, ParseCssFunctionsSampleFile) {
             if (parsed_input && parsed_input->root.item != ITEM_ERROR && parsed_input->root.item != ITEM_NULL) {
                 String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
 
-                if (formatted && formatted->chars) {
+                if (formatted) {
                     printf("✅ CSS functions formatted (%d chars)\n", formatted->len);
 
                     // Verify CSS functions are properly formatted
@@ -1354,7 +1350,7 @@ body, html {
         String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
         EXPECT_NE(formatted, nullptr) << "Should format comprehensive CSS";
 
-        if (formatted && formatted->chars) {
+        if (formatted) {
             printf("✅ Formatted CSS (%d chars):\n%.200s%s\n",
                    formatted->len, formatted->chars,
                    formatted->len > 200 ? "..." : "");
@@ -1428,7 +1424,7 @@ TEST_F(CssAllFilesTest, MultipleRoundTripStability) {
 
         String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
 
-        if (!formatted || !formatted->chars) {
+        if (!formatted) {
             printf("❌ Formatting failed at iteration %d\n", iteration + 1);
             FAIL() << "Formatting should succeed at iteration " << iteration + 1;
             break;
@@ -1528,7 +1524,7 @@ TEST_F(CssAllFilesTest, CssFunctionParameterPreservation) {
         String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
         EXPECT_NE(formatted, nullptr) << "Should format CSS with functions";
 
-        if (formatted && formatted->chars) {
+        if (formatted) {
             printf("✅ Formatted CSS with functions (%d chars):\n%.300s%s\n",
                    formatted->len, formatted->chars,
                    formatted->len > 300 ? "..." : "");
