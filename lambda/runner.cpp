@@ -1385,6 +1385,11 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
     return execute_script_and_create_output(&runner, run_main);
 }
 
+// Installs runtime_cleanup into the DOM layer's hook so dom_document_destroy()
+// can clean up a document's reactive lambda_runtime without dom_element.cpp
+// hard-linking runner.cpp (keeps input/DOM unit tests free of the runtime).
+extern "C" void dom_set_runtime_cleanup_hook(void (*fn)(Runtime*));
+
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
     runtime->parser = lambda_parser();
@@ -1394,6 +1399,7 @@ void runtime_init(Runtime* runtime) {
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
     module_registry_init();
+    dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
 // Reset the retained heap, nursery, and name_pool on a Runtime.
