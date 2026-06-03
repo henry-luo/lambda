@@ -9,8 +9,10 @@ struct TableMetadata {
     int row_count;
     bool* grid_occupied;
     float* col_widths;
+    float* col_single_min_widths;
     float* col_min_widths;
     float* col_max_widths;
+    float* col_percent_widths;
     float* row_heights;
     float* row_y_positions;
     bool* row_collapsed;

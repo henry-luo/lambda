@@ -2065,9 +2065,18 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
         CssRule* rule = stylesheet->rules[rule_idx];
         if (!rule) continue;
 
-        // Collect media rules separately for runtime evaluation
+        // Keep media rules in the same source-ordered candidate stream as
+        // normal rules. CSS cascade order is based on the @media rule's
+        // position in the stylesheet; applying media rules after all normal
+        // candidates reverses equal-specificity ties.
         if (rule->type == CSS_RULE_MEDIA) {
-            arraylist_append(index->media_rules, rule);
+            IndexedRule* entry = (IndexedRule*)pool_calloc(pool, sizeof(IndexedRule));
+            if (entry) {
+                entry->rule = rule;
+                entry->selector = nullptr;
+                entry->rule_index = (int)rule_idx;
+                arraylist_append(index->universal, entry);
+            }
             continue;
         }
 
@@ -2488,12 +2497,6 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
         apply_rule_to_dom_element(root, entry->rule, matcher, pool, engine);
     }
     arraylist_free(candidates);
-
-    // Also process media rules (need runtime evaluation for each element)
-    for (unsigned int i = 0; i < index->media_rules->length; i++) {
-        CssRule* media_rule = (CssRule*)index->media_rules->data[i];
-        apply_rule_to_dom_element(root, media_rule, matcher, pool, engine);
-    }
 
     // Recursively apply to children (only element children)
     DomNode* child = root->first_child;
@@ -6276,11 +6279,7 @@ static bool layout_single_file(
         event_state_log_document(event_log, "unload_start");
     }
 
-    bool needs_js_batch_cleanup = false;
     if (doc) {
-        needs_js_batch_cleanup = doc->js_runtime_heap || doc->js_runtime_pool ||
-            doc->js_runtime_nursery || doc->js_preamble_state || doc->js_event_registry;
-
         // Clean up retained JS state (MIR context, event registry, runtime heap)
         // before destroying the document that owns the pointers.
         script_runner_cleanup_js_state(doc);
@@ -6314,7 +6313,7 @@ static bool layout_single_file(
 
     pool_destroy(pool);
 
-    if (needs_js_batch_cleanup && !script_runner_js_batch_cleanup_unsafe()) {
+    if (!script_runner_js_batch_cleanup_unsafe()) {
         // Reset JS runtime state to avoid cross-document leakage in batch mode.
         // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
         // global Items (js_input, js_exception_value, etc.) that reference the
