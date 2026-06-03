@@ -1027,7 +1027,8 @@ static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float
     }
 }
 
-void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr, bool trailing_comma = false) {
+void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr,
+        bool trailing_comma = false, bool is_root = false) {
     // CSS Display Level 3: display:contents elements don't generate a box
     // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
     if (view->is_element()) {
@@ -1063,7 +1064,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // For the root <html> element with auto height, viewport clamping sets height
     // to viewport size but browsers report the full content height.
     // Only use content_height when the root has no explicit CSS height (CSS 2.1 §10.6.4).
-    if (!rect && view->is_element() && !view->parent) {
+    if (!rect && is_root && view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
         bool has_explicit_height = (elem->blk && elem->blk->given_height >= 0);
         if (!has_explicit_height && elem->content_height > css_height) {
@@ -1390,7 +1391,7 @@ static bool is_anonymous_element(ViewBlock* block) {
 }
 
 // Forward declaration for recursive calls
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root);
 void print_br_json(View* br, StrBuf* buf, int indent);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 
@@ -1656,7 +1657,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
 }
 
 // Recursive JSON generation for view blocks
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     if (!block) {
         strbuf_append_str(buf, "null");
         return;
@@ -1778,7 +1779,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "\"layout\": {\n");
     DomElement* block_elem = lam::dom_require_element(block);
     bool has_fragments = block_elem->layout_fragments && block_elem->layout_fragment_count > 0;
-    print_bounds_json(block, buf, indent, nullptr, has_fragments);
+    print_bounds_json(block, buf, indent, nullptr, has_fragments, is_root);
     if (has_fragments) {
         print_layout_fragments_json(block, buf, indent);
     }
@@ -2612,7 +2613,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
 
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {
-        print_block_json(lam::view_require_block(view_root), json_buf, 2);
+        print_block_json(lam::view_require_block(view_root), json_buf, 2, true);
     } else {
         strbuf_append_str(json_buf, "null");
     }

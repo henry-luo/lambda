@@ -2513,8 +2513,11 @@ test-layout:
 		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		UPDATE_BASELINE_VAR="$(or $(update),$(UPDATE),$(update-baseline),$(UPDATE_BASELINE))"; \
+		CONCURRENCY_VAR="$(or $(layout_concurrency),$(LAYOUT_CONCURRENCY),$(concurrency),$(CONCURRENCY))"; \
 		UPDATE_BASELINE_FLAG=""; \
+		CONCURRENCY_FLAG=""; \
 		if [ -n "$$UPDATE_BASELINE_VAR" ]; then UPDATE_BASELINE_FLAG="--update-baseline"; fi; \
+		if [ -n "$$CONCURRENCY_VAR" ]; then CONCURRENCY_FLAG="-j $$CONCURRENCY_VAR"; fi; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
 				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
@@ -2552,13 +2555,13 @@ test-layout:
 			node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR -j 5; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR -j 5 $$UPDATE_BASELINE_FLAG; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css -j 5 $$UPDATE_BASELINE_FLAG; \
+			node test/layout/test_radiant_layout.js --engine lambda-css $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \

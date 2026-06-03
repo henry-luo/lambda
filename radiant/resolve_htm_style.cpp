@@ -117,6 +117,79 @@ static float get_parent_table_cellpadding(DomNode* elmt) {
     return -1;
 }
 
+static float html_font_size_for_level(int level) {
+    if (level < 1) level = 1;
+    if (level > 7) level = 7;
+    switch (level) {
+        case 1: return 10.0f;
+        case 2: return 13.0f;
+        case 3: return 16.0f;
+        case 4: return 18.0f;
+        case 5: return 24.0f;
+        case 6: return 32.0f;
+        case 7: return 48.0f;
+    }
+    return 16.0f;
+}
+
+static int html_font_level_for_size(float current) {
+    if (current <= 10.0f) return 1;
+    if (current <= 13.0f) return 2;
+    if (current <= 16.0f) return 3;
+    if (current <= 18.0f) return 4;
+    if (current <= 24.0f) return 5;
+    if (current <= 32.0f) return 6;
+    return 7;
+}
+
+static void apply_table_cell_width_attribute(DomElement* elmt, ViewBlock* block) {
+    if (!elmt || !block) return;
+    const char* width_attr = elmt->get_attribute("width");
+    if (!width_attr) return;
+
+    size_t value_len = strlen(width_attr);
+    if (value_len == 0) return;
+    if (!block->blk) return;
+
+    if (width_attr[value_len - 1] == '%') {
+        StrView width_view = strview_init(width_attr, value_len - 1);
+        float percent = (float)strview_to_int(&width_view);
+        if (percent >= 0.0f) {
+            block->blk->given_width = -1.0f;
+            block->blk->given_width_percent = percent;
+            log_debug("[HTML] TABLE CELL width attribute: %.0f%%", percent);
+        }
+    } else if (width_attr[0] >= '0' && width_attr[0] <= '9') {
+        StrView width_view = strview_init(width_attr, value_len);
+        float width = (float)strview_to_int(&width_view);
+        if (width >= 0.0f) {
+            block->blk->given_width = width;
+            block->blk->given_width_percent = NAN;
+            log_debug("[HTML] TABLE CELL width attribute: %.0fpx", width);
+        }
+    }
+}
+
+static void apply_table_cell_height_attribute(DomElement* elmt, ViewBlock* block) {
+    if (!elmt || !block) return;
+    const char* height_attr = elmt->get_attribute("height");
+    if (!height_attr) return;
+
+    size_t value_len = strlen(height_attr);
+    if (value_len == 0) return;
+    if (!block->blk) return;
+
+    if (height_attr[0] >= '0' && height_attr[0] <= '9') {
+        StrView height_view = strview_init(height_attr, value_len);
+        float height = (float)strview_to_int(&height_view);
+        if (height >= 0.0f) {
+            block->blk->given_height = height;
+            block->blk->given_height_percent = NAN;
+            log_debug("[HTML] TABLE CELL height attribute: %.0fpx", height);
+        }
+    }
+}
+
 // Get the rules attribute from the parent TABLE element.
 // HTML rules presentational hints affect table border conflict resolution and
 // per-cell borders (e.g. rules="cols" creates vertical cell rules).
@@ -303,6 +376,48 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->background->color = bg_color;
             log_debug("[HTML] BODY bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
         }
+        // Legacy HTML body margin attributes are still honored by browsers.
+        // marginwidth controls left/right; marginheight controls top/bottom.
+        const char* marginwidth_attr = elmt->get_attribute("marginwidth");
+        if (marginwidth_attr && marginwidth_attr[0] >= '0' && marginwidth_attr[0] <= '9') {
+            StrView margin_view = strview_init(marginwidth_attr, strlen(marginwidth_attr));
+            float margin = (float)strview_to_int(&margin_view);
+            if (margin >= 0.0f) {
+                block->bound->margin.left = block->bound->margin.right = margin;
+                block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
+                log_debug("[HTML] BODY marginwidth attribute: %.0fpx", margin);
+            }
+        }
+        const char* marginheight_attr = elmt->get_attribute("marginheight");
+        if (marginheight_attr && marginheight_attr[0] >= '0' && marginheight_attr[0] <= '9') {
+            StrView margin_view = strview_init(marginheight_attr, strlen(marginheight_attr));
+            float margin = (float)strview_to_int(&margin_view);
+            if (margin >= 0.0f) {
+                block->bound->margin.top = block->bound->margin.bottom = margin;
+                block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+                log_debug("[HTML] BODY marginheight attribute: %.0fpx", margin);
+            }
+        }
+        const char* leftmargin_attr = elmt->get_attribute("leftmargin");
+        if (leftmargin_attr && leftmargin_attr[0] >= '0' && leftmargin_attr[0] <= '9') {
+            StrView margin_view = strview_init(leftmargin_attr, strlen(leftmargin_attr));
+            float margin = (float)strview_to_int(&margin_view);
+            if (margin >= 0.0f) {
+                block->bound->margin.left = margin;
+                block->bound->margin.left_specificity = -1;
+                log_debug("[HTML] BODY leftmargin attribute: %.0fpx", margin);
+            }
+        }
+        const char* topmargin_attr = elmt->get_attribute("topmargin");
+        if (topmargin_attr && topmargin_attr[0] >= '0' && topmargin_attr[0] <= '9') {
+            StrView margin_view = strview_init(topmargin_attr, strlen(topmargin_attr));
+            float margin = (float)strview_to_int(&margin_view);
+            if (margin >= 0.0f) {
+                block->bound->margin.top = margin;
+                block->bound->margin.top_specificity = -1;
+                log_debug("[HTML] BODY topmargin attribute: %.0fpx", margin);
+            }
+        }
         // overflow: visible (CSS default - no special overflow handling for body)
         break;
     }
@@ -442,10 +557,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             size_t alen = strlen(align_attr);
             if (str_ieq_const(align_attr, alen, "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
+                block->blk->legacy_block_align = CSS_VALUE_LEFT;
             } else if (str_ieq_const(align_attr, alen, "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
+                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
             } else if (str_ieq_const(align_attr, alen, "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
+                block->blk->legacy_align_center_blocks = true;
+                block->blk->legacy_block_align = CSS_VALUE_CENTER;
             } else if (str_ieq_const(align_attr, alen, "justify")) {
                 block->blk->text_align = CSS_VALUE_JUSTIFY;
             }
@@ -461,9 +580,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML attribute width="50%" — percentage of containing block
                 StrView width_view = strview_init(value, value_len - 1);
                 float percent = strview_to_int(&width_view);
-                if (percent > 0) {
+                if (percent >= 0) {
                     if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                     block->blk->given_width_percent = percent;
+                    block->blk->given_width = -1.0f;
                     // resolve against container width at layout time
                     float container_width = lycon->block.content_width > 0
                         ? lycon->block.content_width : 0;
@@ -476,7 +596,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
                 StrView width_view = strview_init(value, value_len);
                 float width = strview_to_int(&width_view);
-                if (width >= 0) lycon->block.given_width = width;  // CSS logical pixels
+                if (width >= 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    lycon->block.given_width = width;  // CSS logical pixels
+                    block->blk->given_width = width;
+                    block->blk->given_width_percent = NAN;
+                }
             }
         }
         value = elmt->get_attribute("height");
@@ -486,9 +611,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML attribute height="50%" — percentage of containing block
                 StrView height_view = strview_init(value, value_len - 1);
                 float percent = strview_to_int(&height_view);
-                if (percent > 0) {
+                if (percent >= 0) {
                     if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                     block->blk->given_height_percent = percent;
+                    block->blk->given_height = -1.0f;
                     float container_height = lycon->block.content_height > 0
                         ? lycon->block.content_height : 0;
                     if (container_height > 0) {
@@ -500,7 +626,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
                 StrView height_view = strview_init(value, value_len);
                 float height = strview_to_int(&height_view);
-                if (height >= 0) lycon->block.given_height = height;  // CSS logical pixels
+                if (height >= 0) {
+                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                    lycon->block.given_height = height;  // CSS logical pixels
+                    block->blk->given_height = height;
+                    block->blk->given_height_percent = NAN;
+                }
             }
         }
         // HTML spec §14.3.3: <img align="left|right"> maps to float: left|right
@@ -828,6 +959,32 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->margin.right_type = CSS_VALUE_AUTO;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
+        {
+            const char* width_attr = elmt->get_attribute("width");
+            if (width_attr) {
+                size_t value_len = strlen(width_attr);
+                if (value_len > 0 && width_attr[value_len - 1] == '%') {
+                    StrView width_view = strview_init(width_attr, value_len - 1);
+                    float percent = (float)strview_to_int(&width_view);
+                    if (percent >= 0.0f) {
+                        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                        block->blk->given_width = -1.0f;
+                        block->blk->given_width_percent = percent;
+                        log_debug("[HTML] HR width attribute: %.0f%%", percent);
+                    }
+                } else if (width_attr[0] >= '0' && width_attr[0] <= '9') {
+                    StrView width_view = strview_init(width_attr, value_len);
+                    float width = (float)strview_to_int(&width_view);
+                    if (width >= 0.0f) {
+                        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                        lycon->block.given_width = width;
+                        block->blk->given_width = width;
+                        block->blk->given_width_percent = NAN;
+                        log_debug("[HTML] HR width attribute: %.0fpx", width);
+                    }
+                }
+            }
+        }
         break;
     case HTM_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -862,48 +1019,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // size="4" = large (18px), size="5" = x-large (24px), size="6" = xx-large (32px), size="7" = 48px
         const char* size_attr = span->get_attribute("size");
         if (size_attr) {
+            bool relative_size = size_attr[0] == '+' || size_attr[0] == '-';
             int size_value = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
-            float font_size = 16;  // default medium
-            // CSS absolute-size keywords mapped to pixels (based on 16px base)
-            switch (size_value) {
-                case 1: font_size = 10; break;  // x-small
-                case 2: font_size = 13; break;  // small
-                case 3: font_size = 16; break;  // medium (default)
-                case 4: font_size = 18; break;  // large
-                case 5: font_size = 24; break;  // x-large
-                case 6: font_size = 32; break;  // xx-large
-                case 7: font_size = 48; break;  // xxx-large
-                default:
-                    // Handle relative sizes: +1, -1, etc.
-                    if (size_attr[0] == '+' || size_attr[0] == '-') {
-                        int delta = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
-                        // Map current font size to approximate level and apply delta
-                        float current = lycon->font.style->font_size;
-                        int level = 3;  // assume medium
-                        if (current <= 10) level = 1;
-                        else if (current <= 13) level = 2;
-                        else if (current <= 16) level = 3;
-                        else if (current <= 18) level = 4;
-                        else if (current <= 24) level = 5;
-                        else if (current <= 32) level = 6;
-                        else level = 7;
-                        level += delta;
-                        if (level < 1) level = 1;
-                        if (level > 7) level = 7;
-                        switch (level) {
-                            case 1: font_size = 10; break;
-                            case 2: font_size = 13; break;
-                            case 3: font_size = 16; break;
-                            case 4: font_size = 18; break;
-                            case 5: font_size = 24; break;
-                            case 6: font_size = 32; break;
-                            case 7: font_size = 48; break;
-                        }
-                    }
-                    break;
+            float font_size = 16.0f;  // default medium
+            if (relative_size) {
+                int level = html_font_level_for_size(lycon->font.style->font_size);
+                level += size_value;
+                font_size = html_font_size_for_level(level);
+            } else {
+                font_size = html_font_size_for_level(size_value);
             }
             if (!span->font) { span->font = alloc_font_prop(lycon); }
             span->font->font_size = font_size;  // CSS logical pixels
+            span->font->font_size_from_medium = false;
             log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->font->font_size);
         }
         // Handle font face attribute
@@ -1223,6 +1351,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->font->font_weight_numeric = 700;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
+        apply_table_cell_width_attribute(elmt->as_element(), block);
+        apply_table_cell_height_attribute(elmt->as_element(), block);
         if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
@@ -1250,10 +1380,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (align_attr) {
             if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
+                block->blk->legacy_block_align = CSS_VALUE_LEFT;
             } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
+                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
             } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
+                block->blk->legacy_align_center_blocks = true;
+                block->blk->legacy_block_align = CSS_VALUE_CENTER;
             }
         }
         // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")
@@ -1319,6 +1453,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Set default text-align to left (start) - table cells don't inherit text-align from outside
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_LEFT;  // Default for TD
+        apply_table_cell_width_attribute(elmt->as_element(), block);
+        apply_table_cell_height_attribute(elmt->as_element(), block);
 
         // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
         // However, the cellpadding attribute on the parent TABLE overrides this default
@@ -1345,10 +1481,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (align_attr) {
             if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
+                block->blk->legacy_block_align = CSS_VALUE_LEFT;
             } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
+                block->blk->legacy_block_align = CSS_VALUE_RIGHT;
             } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
+                block->blk->legacy_align_center_blocks = true;
+                block->blk->legacy_block_align = CSS_VALUE_CENTER;
             }
         }
         // Handle HTML valign attribute (e.g., valign="top", valign="middle", valign="bottom")

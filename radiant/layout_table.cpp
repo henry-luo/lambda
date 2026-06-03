@@ -208,38 +208,129 @@ static ViewTable* get_parent_table(ViewTableCell* cell) {
 // Forward declaration for layout_table_cell_content (defined later in the file)
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table = nullptr);
 
+static float resolve_table_relative_width(LayoutContext* lycon, const CssValue* value, float table_content_width) {
+    if (!value) return 0.0f;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return table_content_width > 0.0f ?
+            (float)(value->data.percentage.value / 100.0) * table_content_width : 0.0f;
+    }
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
+    }
+    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        BlockContext percentage_base = {};
+        percentage_base.content_width = table_content_width;
+        BlockContext* saved_parent = lycon->block.parent;
+        lycon->block.parent = &percentage_base;
+        float resolved = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
+        lycon->block.parent = saved_parent;
+        return isnan(resolved) ? 0.0f : resolved;
+    }
+    return 0.0f;
+}
+
+static bool table_width_value_is_relative(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (table_width_value_is_relative(value->data.list.values[i])) return true;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        CssFunction* func = value->data.function;
+        for (int i = 0; i < func->arg_count; i++) {
+            if (table_width_value_is_relative(func->args[i])) return true;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_CALC) {
+        return true;
+    }
+    return false;
+}
+
+static bool table_width_value_has_nonzero_length_term(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return fabs(value->data.length.value) > 0.0001;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (table_width_value_has_nonzero_length_term(value->data.list.values[i])) return true;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+        CssFunction* func = value->data.function;
+        for (int i = 0; i < func->arg_count; i++) {
+            if (table_width_value_has_nonzero_length_term(func->args[i])) return true;
+        }
+    }
+    return false;
+}
+
+static bool table_cell_calc_width_is_indefinite_constraint(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
+    CssFunction* func = value->data.function;
+    if (!func->name || strcmp(func->name, "calc") != 0) return false;
+
+    // CSS table auto layout treats percentages as column constraints. A calc()
+    // that mixes that circular percentage basis with a non-zero length term has
+    // no definite preferred column width during intrinsic column measurement.
+    return table_width_value_is_relative(value) &&
+        table_width_value_has_nonzero_length_term(value);
+}
+
 // Get CSS width from a cell element, handling percentage and length values
 // Returns 0 if no explicit width is set
 // border_collapse: if true, don't add cell border to width (CSS 2.1 border-collapse model)
-static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, float table_content_width, bool border_collapse = false) {
+static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, float table_content_width, bool border_collapse = false, bool* is_table_relative = nullptr) {
     if (tcell->node_type != DOM_NODE_ELEMENT) return 0.0f;
+    if (is_table_relative) *is_table_relative = false;
 
     DomElement* dom_elem = tcell->as_element();
-    if (!dom_elem || !dom_elem->specified_style) return 0.0f;
+    if (!dom_elem) return 0.0f;
 
-    CssDeclaration* width_decl = style_tree_get_declaration(
-        dom_elem->specified_style, CSS_PROPERTY_WIDTH);
-    if (!width_decl || !width_decl->value) return 0.0f;
+    CssDeclaration* width_decl = dom_elem->specified_style
+        ? style_tree_get_declaration(dom_elem->specified_style, CSS_PROPERTY_WIDTH)
+        : nullptr;
 
     float cell_width = 0.0f;
     float css_content_width = 0.0f;
+    bool html_width_hint = false;
 
-    if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && table_content_width > 0) {
-        double percentage = width_decl->value->data.percentage.value;
-        css_content_width = table_content_width * (float)(percentage / 100.0);
+    if (width_decl && width_decl->value &&
+        table_cell_calc_width_is_indefinite_constraint(width_decl->value)) {
+        cell_width = 0.0f;
+        if (is_table_relative) *is_table_relative = true;
+    } else if (width_decl && width_decl->value &&
+        (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+         width_decl->value->type == CSS_VALUE_TYPE_LENGTH ||
+         width_decl->value->type == CSS_VALUE_TYPE_FUNCTION)) {
+        css_content_width = resolve_table_relative_width(lycon, width_decl->value, table_content_width);
         cell_width = css_content_width;
-    } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-        float resolved = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-        css_content_width = resolved;
-        if (css_content_width > 0) {
-            cell_width = css_content_width;
-        }
+        if (is_table_relative) *is_table_relative = table_width_value_is_relative(width_decl->value);
+    } else if (width_decl && width_decl->value &&
+               width_decl->value->type == CSS_VALUE_TYPE_CALC) {
+        cell_width = 0.0f;
+        if (is_table_relative) *is_table_relative = true;
+    } else if (tcell->blk && !isnan(tcell->blk->given_width_percent) &&
+               table_content_width > 0.0f) {
+        css_content_width = table_content_width * tcell->blk->given_width_percent / 100.0f;
+        cell_width = css_content_width;
+        if (is_table_relative) *is_table_relative = true;
+        html_width_hint = true;
+        log_debug("%s table cell width hint: %.1f%% of %.1fpx = %.1fpx",
+                  tcell->source_loc(), tcell->blk->given_width_percent,
+                  table_content_width, cell_width);
+    } else if (tcell->blk && tcell->blk->given_width >= 0.0f) {
+        css_content_width = tcell->blk->given_width;
+        cell_width = css_content_width;
+        html_width_hint = true;
+        log_debug("%s table cell width hint: %.1fpx", tcell->source_loc(), cell_width);
     }
 
     if (cell_width <= 0) return 0.0f;
 
     // Check box-sizing model
-    bool is_border_box = (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+    bool is_border_box = html_width_hint ||
+        (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
 
     if (is_border_box) {
         // CSS width already includes padding and border — cell_width is the border-box width
@@ -855,6 +946,7 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
                 // Shift all children down
                 for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
                     if (!child->view_type) continue;
+                    if (table_cell_vertical_align_skips_child(child)) continue;
                     child->y += shift;
                     // Also update TextRect positions for ViewText nodes
                     if (child->view_type == RDT_VIEW_TEXT) {
@@ -4317,6 +4409,36 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
 
 // Layout cell content with correct parent width (after cell dimensions are set)
 // This is the ONLY place where cell content gets laid out (single pass)
+static void table_shift_view_x(View* view, float delta_x) {
+    if (!view || delta_x == 0.0f) return;
+    view->x += delta_x;
+}
+
+static void align_table_cell_block_child(ViewTableCell* cell, ViewBlock* child,
+                                         float content_start_x, float content_width) {
+    if (!cell || !child || !cell->blk || content_width <= 0.0f) return;
+    CssEnum align = cell->blk->legacy_block_align;
+    if (align != CSS_VALUE_CENTER && align != CSS_VALUE_RIGHT) return;
+    if (child->position && (child->position->position == CSS_VALUE_ABSOLUTE ||
+                            child->position->position == CSS_VALUE_FIXED)) {
+        return;
+    }
+    if (element_has_float(child)) return;
+    if (child->width >= content_width) return;
+
+    float target_x = content_start_x;
+    if (align == CSS_VALUE_RIGHT) {
+        target_x = content_start_x + content_width - child->width;
+    } else {
+        target_x = content_start_x + (content_width - child->width) / 2.0f;
+    }
+
+    float delta_x = target_x - child->x;
+    if (fabsf(delta_x) <= 0.01f) return;
+    table_shift_view_x(static_cast<View*>(child), delta_x);
+    log_debug("%s table-cell legacy block align shifted child by %.1f", child->source_loc(), delta_x);
+}
+
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, ViewBlock* table) {
     ViewTableCell* tcell = lam::view_require<RDT_VIEW_TABLE_CELL>(cell);
     if (!tcell) return;
@@ -4582,6 +4704,13 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
                 log_debug("%s [TABLE CELL IMG] Found IMG child in table cell, calling layout_flow_node: %s", cell->source_loc(), cc->node_name());
             }
             layout_flow_node(lycon, cc);
+            if (cc->is_element()) {
+                ViewBlock* child_block = lam::view_as_block(static_cast<View*>(cc->as_element()));
+                if (child_block && (child_block->display.outer == CSS_VALUE_BLOCK ||
+                                    child_block->display.inner == CSS_VALUE_TABLE)) {
+                    align_table_cell_block_child(tcell, child_block, content_start_x, content_width);
+                }
+            }
         }
     }
 
@@ -5863,7 +5992,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (tcell->font) {
                 setup_font(lycon->ui_context, &lycon->font, tcell->font);
             }
-            float cell_width = get_cell_css_width(lycon, tcell, table_content_width, table->tb->border_collapse);
+            bool cell_width_is_table_relative = false;
+            float cell_width = get_cell_css_width(lycon, tcell, table_content_width,
+                table->tb->border_collapse, &cell_width_is_table_relative);
 
             // Track columns with explicit CSS width for distribution
             if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
@@ -5893,10 +6024,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             } else {
                 // Separate borders with explicit CSS width
                 pref_width = cell_width;
-                // CSS Tables §4.1: min_width must be at least the content's MCW
-                // so the table never shrinks below its content's minimum size.
+                // CSS Tables §4.1: percentage/calc widths on cells are
+                // distribution constraints relative to the table width, not
+                // unbreakable minimum content. Absolute widths still floor MCW.
                 CellWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
-                min_width = widths.min_width > cell_width ? widths.min_width : cell_width;
+                min_width = cell_width_is_table_relative ?
+                    widths.min_width : (widths.min_width > cell_width ? widths.min_width : cell_width);
             }
 
             // CSS 2.1 §17.5.2.2: When white-space: nowrap/pre prevents soft wrap

@@ -671,12 +671,12 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // the initial containing block (ICB - i.e., the root element with no positioned ancestors),
     // the ICB is the viewport rectangle at (0,0) with viewport dimensions.
     // It is NOT the root element's padding box — the root element's borders must not be subtracted.
-    bool is_icb = (containing_block->parent_view() == nullptr);
-    if (is_icb && lycon->ui_context) {
-        cb_x = 0;
-        cb_y = 0;
-        border_offset_x = 0;
-        border_offset_y = 0;
+    bool is_icb = layout_is_initial_containing_block(lycon, containing_block);
+    if (is_icb) {
+        cb_x = 0.0f;
+        cb_y = 0.0f;
+        border_offset_x = 0.0f;
+        border_offset_y = 0.0f;
         log_debug("[ABS POS] Using viewport as ICB: (0, 0) size (%.1f, %.1f)", cb_width, cb_height);
     }
 
@@ -1911,17 +1911,9 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         // CRITICAL: Recalculate Y position when has_bottom without has_top and height is auto
         // The initial y was calculated with content_height=0, now we have the actual height
         if (block->position->has_bottom && !block->position->has_top) {
-            // Recalculate cb_height (must use same logic as calculate_absolute_position)
-            float cb_height = cb->height;
-            bool is_icb = (cb->parent_view() == nullptr);
-            if (is_icb && lycon->ui_context && lycon->ui_context->viewport_height > 0) {
-                cb_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
-            }
-            // Adjust for containing block's border (padding box)
-            if (cb->bound && cb->bound->border) {
-                cb_height -= (cb->bound->border->width.top + cb->bound->border->width.bottom);
-            }
-            float border_offset_y = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
+            LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
+            float cb_height = used_cb.padding_height;
+            float border_offset_y = used_cb.padding_y;
             float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
 
             float new_y = border_offset_y + cb_height - block->position->bottom - margin_bottom - block->height;

@@ -3731,6 +3731,17 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // computed font-size unless author CSS explicitly set font-size.
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
                 uintptr_t tag = dom_elem->tag();
+                if (tag == HTM_TAG_TABLE && lycon->doc && lycon->doc->view_tree &&
+                    is_quirks_mode(lycon->doc->view_tree->html_version)) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (!span->font) {
+                        span->font = alloc_font_prop(lycon);
+                    }
+                    span->font->font_size = 16.0f;
+                    span->font->font_size_from_medium = true;
+                    log_debug("[FONT INHERIT] Quirks table keeps initial medium font-size");
+                    continue;
+                }
                 if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
                     tag == HTM_TAG_SAMP || tag == HTM_TAG_TT) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
@@ -3866,6 +3877,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 log_debug("[FONT INHERIT] Found computed font-size in parent <%s>: %.1f",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->font_size);
                 ViewSpan* span = lam::view_require_element(lycon->view);
+                if (span->font && span->font->font_size > 0.0f) {
+                    log_debug("[FONT INHERIT] Keeping existing element font-size: %.1f",
+                        span->font->font_size);
+                    continue;
+                }
                 if (!span->font) {
                     span->font = alloc_font_prop(lycon);
                 }

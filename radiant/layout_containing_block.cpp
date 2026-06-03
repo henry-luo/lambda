@@ -53,14 +53,18 @@ LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {
 
 LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon) {
     LayoutContainingBlock cb = {};
-    if (!lycon || !lycon->ui_context) return cb;
+    if (!lycon) return cb;
 
-    cb.border_width = lycon->ui_context->viewport_width > 0
-        ? lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio
-        : 0.0f;
-    cb.border_height = lycon->ui_context->viewport_height > 0
-        ? lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio
-        : 0.0f;
+    if (lycon->ui_context) {
+        cb.border_width = lycon->ui_context->viewport_width > 0
+            ? lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio
+            : 0.0f;
+        cb.border_height = lycon->ui_context->viewport_height > 0
+            ? lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio
+            : 0.0f;
+    }
+    if (cb.border_width <= 0.0f) cb.border_width = lycon->width;
+    if (cb.border_height <= 0.0f) cb.border_height = lycon->height;
 
     cb.padding_width = cb.border_width;
     cb.padding_height = cb.border_height;
@@ -71,21 +75,24 @@ LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon) {
     return cb;
 }
 
+bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block) {
+    if (!block) return false;
+    if (lycon && lycon->doc && lycon->doc->view_tree &&
+        lycon->doc->view_tree->root == (View*)block) {
+        return true;
+    }
+    return block->parent_view() == nullptr;
+}
+
 LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return layout_initial_containing_block(lycon);
 
-    bool is_icb = (block->parent_view() == nullptr);
-    if (is_icb && lycon && lycon->ui_context) {
+    bool is_icb = layout_is_initial_containing_block(lycon, block);
+    if (is_icb) {
         return layout_initial_containing_block(lycon);
     }
 
     LayoutContainingBlock cb = layout_containing_block_for_view(block);
-    if (is_icb) {
-        cb.padding_x = 0.0f;
-        cb.padding_y = 0.0f;
-        cb.padding_width = cb.border_width;
-        cb.padding_height = cb.border_height;
-    }
     return cb;
 }
 

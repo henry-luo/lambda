@@ -649,7 +649,9 @@ void cookie_jar_save(CookieJar* jar) {
     fprintf(f, "# domain\tpath\tsecure\texpires\tname\tvalue\thttponly\tsamesite\n");
 
     time_t now = time(NULL);
+#ifndef NDEBUG
     int saved = 0;
+#endif
     for (int i = 0; i < jar->count; i++) {
         CookieEntry* e = jar->entries[i];
         // skip session cookies and expired
@@ -665,13 +667,17 @@ void cookie_jar_save(CookieJar* jar) {
                 e->value ? e->value : "",
                 e->http_only ? 1 : 0,
                 (int)e->same_site);
+#ifndef NDEBUG
         saved++;
+#endif
     }
 
     fclose(f);
     pthread_mutex_unlock(&jar->lock);
 
+#ifndef NDEBUG
     log_debug("cookie_jar: saved %d persistent cookies to %s", saved, jar->storage_path);
+#endif
 }
 
 void cookie_jar_load(CookieJar* jar) {
