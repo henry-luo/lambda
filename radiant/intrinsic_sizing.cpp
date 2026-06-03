@@ -2686,10 +2686,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int flex_child_count = 0;  // Count of flex children for gap calculation
     ViewBlock* view_block = lam::unsafe_view_block_element_storage(element);
 
-    // Check if this is a grid container with explicit height
-    // Grid children with percentage heights should resolve against this height
+    // Check if this is a grid container.
     bool is_grid_container = false;
-    float grid_explicit_height = -1;
     if (view_block->display.inner == CSS_VALUE_GRID) {
         is_grid_container = true;
     }
@@ -2705,18 +2703,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
     if (is_grid_container) {
-        // Get explicit height from view or CSS
-        if (view_block->blk && view_block->blk->given_height > 0) {
-            grid_explicit_height = view_block->blk->given_height;
-        } else if (element->specified_style) {
-            CssDeclaration* height_decl = style_tree_get_declaration(
-                element->specified_style, CSS_PROPERTY_HEIGHT);
-            if (height_decl && height_decl->value &&
-                height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                grid_explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-            }
-        }
-        log_debug("measure_element_intrinsic_widths: grid container with explicit height=%.1f", grid_explicit_height);
+        log_debug("measure_element_intrinsic_widths: grid container");
 
         // CSS Grid §10.1: Grid container intrinsic widths are computed column-by-column.
         // For a grid with N explicit columns, the max-content width = sum of column max-contents

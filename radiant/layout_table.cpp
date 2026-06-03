@@ -2380,12 +2380,16 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
 
         if (total_content > 0) {
             // Proportional distribution based on current row heights
+#ifndef NDEBUG
             float distributed = 0;
+#endif
             for (int r = rsc->start_row; r < rsc->end_row; r++) {
                 float proportion = meta->row_heights[r] / total_content;
                 float amount = excess * proportion;
                 meta->row_heights[r] += amount;
+#ifndef NDEBUG
                 distributed += amount;
+#endif
                 log_debug("  Row %d: height %.1fpx + %.1fpx (%.1f%% of excess) = %.1fpx",
                          r, meta->row_heights[r] - amount, amount, proportion * 100, meta->row_heights[r]);
             }

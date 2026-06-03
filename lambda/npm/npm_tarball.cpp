@@ -146,8 +146,10 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
 
     // process tar entries
     size_t offset = 0;
+#ifndef NDEBUG
     int file_count = 0;
     int dir_count = 0;
+#endif
 
     while (offset + 512 <= tar_len) {
         const char* block = tar_data + offset;
@@ -177,7 +179,9 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
             case '5':  // directory
             case 'D': {
                 file_ensure_dir(full_path);
+#ifndef NDEBUG
                 dir_count++;
+#endif
                 break;
             }
             case '\0':  // regular file (old-style)
@@ -199,7 +203,9 @@ int npm_extract_tarball(const char* tgz_path, const char* dest_dir) {
                 if (wret < 0) {
                     log_error("npm tarball: failed to write '%s'", full_path);
                 } else {
+#ifndef NDEBUG
                     file_count++;
+#endif
                 }
                 break;
             }

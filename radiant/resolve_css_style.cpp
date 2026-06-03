@@ -3550,9 +3550,15 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                               avl_tree_search(style_tree->tree, CSS_PROPERTY_LINE_HEIGHT) != nullptr);
 
     FontProp* parent_font_style = lycon->font.style;
+#ifndef NDEBUG
     int font_processed = 0;
+#endif
     if (has_any_font_prop) {
+#ifndef NDEBUG
         font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+#else
+        avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+#endif
     }
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
@@ -3600,7 +3606,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
+#ifndef NDEBUG
     int other_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+#else
+    avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+#endif
     log_debug("[Lambda CSS] Second pass - processed %d other properties", other_processed);
 
     // Handle CSS inheritance for inheritable properties not explicitly set

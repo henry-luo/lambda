@@ -5492,7 +5492,9 @@ int jm_compute_depth(JsImportGraphNode* nodes, int idx) {
 // Returns true if safe to link, false if NULL labels found (would crash MIR_link).
 bool jm_validate_mir_labels(MIR_context_t ctx) {
     bool safe = true;
+#ifndef NDEBUG
     int func_count = 0, insn_count = 0;
+#endif
     bool trace_validation = getenv("JS_MIR_VALIDATE_TRACE") != NULL;
     for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
          m = DLIST_NEXT(MIR_module_t, m)) {
@@ -5500,10 +5502,14 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
              item = DLIST_NEXT(MIR_item_t, item)) {
             if (item->item_type != MIR_func_item) continue;
             MIR_func_t func = item->u.func;
+#ifndef NDEBUG
             func_count++;
+#endif
             for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn != NULL;
                  insn = DLIST_NEXT(MIR_insn_t, insn)) {
+#ifndef NDEBUG
                 insn_count++;
+#endif
                 for (size_t i = 0; i < insn->nops; i++) {
                     if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
                         log_error("js-mir: NULL label in func '%s' insn code=%d op=%zu - aborting link",

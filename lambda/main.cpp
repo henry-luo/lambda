@@ -2965,7 +2965,8 @@ int main(int argc, char *argv[]) {
         //   server_start(srv, port);
         //   server_run(srv);
 
-        fprintf(stderr, "Error: 'serve' command not yet fully implemented.\n");
+        fprintf(stderr, "Error: 'serve' command not yet fully implemented (host=%s port=%d workers=%d).\n",
+                host, port, workers);
         fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
         return lambda_main_finish(1);
     }

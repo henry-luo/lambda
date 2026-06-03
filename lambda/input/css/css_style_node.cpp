@@ -8,7 +8,9 @@
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);
+#ifndef NDEBUG
 static bool print_tree_callback(StyleNode* node, void* context);
+#endif
 static bool validate_tree_callback(StyleNode* node, void* context);
 static bool merge_tree_callback(StyleNode* node, void* context);
 static bool clone_tree_callback(StyleNode* node, void* context);
@@ -828,6 +830,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     return true;
 }
 
+#ifndef NDEBUG
 static bool print_tree_callback(StyleNode* node, void* context) {
     printf("  Property %lu: ", node->base.property_id);
 
@@ -853,6 +856,7 @@ static bool print_tree_callback(StyleNode* node, void* context) {
     printf("\n");
     return true;
 }
+#endif
 
 static bool validate_tree_callback(StyleNode* node, void* context) {
     int* total_weak = (int*)context;

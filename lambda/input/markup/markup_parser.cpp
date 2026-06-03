@@ -378,6 +378,7 @@ Item MarkupParser::parseContent(const char* content) {
 // Error Reporting
 // ============================================================================
 
+#ifndef NDEBUG
 static const char* severity_name(ParseErrorSeverity sev) {
     switch (sev) {
         case ParseErrorSeverity::ERROR: return "error";
@@ -386,6 +387,7 @@ static const char* severity_name(ParseErrorSeverity sev) {
         default: return "unknown";
     }
 }
+#endif
 
 void MarkupParser::addMarkupError(MarkupErrorCategory category,
                                    const char* message,

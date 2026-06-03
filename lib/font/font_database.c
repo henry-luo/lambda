@@ -1113,7 +1113,9 @@ bool font_database_scan_internal(FontDatabase* db) {
     if (db->scanned) return true;
 
     log_info("font_database_scan: starting 3-phase scan");
+#ifndef NDEBUG
     time_t start = time(NULL);
+#endif
 
     // Phase 1: Build font file inventory (no parsing, just placeholders)
     log_info("font_database_scan: Phase 1 — discovering font files");
@@ -1127,7 +1129,9 @@ bool font_database_scan_internal(FontDatabase* db) {
 
     // Phase 2: Parse priority fonts (web-safe fonts for fast startup)
     log_info("font_database_scan: Phase 2 — parsing priority fonts");
+#ifndef NDEBUG
     int priority_parsed = 0;
+#endif
     for (int i = 0; i < db->all_fonts->length; i++) {
         FontEntry* e = (FontEntry*)db->all_fonts->data[i];
         if (!e || !e->is_placeholder || !e->family_name) continue;
@@ -1139,7 +1143,9 @@ bool font_database_scan_internal(FontDatabase* db) {
             } else {
                 parse_placeholder_font(e, db->arena);
             }
+#ifndef NDEBUG
             priority_parsed++;
+#endif
         }
     }
 

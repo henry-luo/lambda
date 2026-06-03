@@ -537,7 +537,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     rdt_vector_set_tile_offset_x(vec, tile_x);
     rdt_vector_set_tile_offset_y(vec, tile_y);
 
+#ifndef NDEBUG
     int items_drawn = 0;
+#endif
     const RenderBackendCaps* caps = render_backend_get_caps(vec);
 
     rdt_vector_begin_batch(vec);
@@ -606,14 +608,18 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_FILL_RECT: {
             DlFillRect* r = &item->fill_rect;
             rdt_fill_rect(vec, r->x, r->y, r->w, r->h, r->color);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
         case DL_FILL_ROUNDED_RECT: {
             DlFillRoundedRect* r = &item->fill_rounded_rect;
             rdt_fill_rounded_rect(vec, r->x, r->y, r->w, r->h, r->rx, r->ry, r->color);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -621,7 +627,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             DlFillPath* r = &item->fill_path;
             rdt_fill_path(vec, r->path, r->color, r->rule,
                           r->has_transform ? &r->transform : nullptr);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -630,7 +638,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             rdt_stroke_path(vec, r->path, r->color, r->width, r->cap, r->join,
                             r->dash_array, r->dash_count, r->dash_phase,
                             r->has_transform ? &r->transform : nullptr);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -639,7 +649,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             rdt_fill_linear_gradient(vec, r->path, r->x1, r->y1, r->x2, r->y2,
                                      r->stops, r->stop_count, r->rule,
                                      r->has_transform ? &r->transform : nullptr);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -648,7 +660,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             rdt_fill_radial_gradient(vec, r->path, r->cx, r->cy, r->r,
                                      r->stops, r->stop_count, r->rule,
                                      r->has_transform ? &r->transform : nullptr);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -658,7 +672,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
                            r->has_transform ? &r->transform : nullptr,
                            r->resource_generation);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -667,7 +683,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
         case DL_DRAW_GLYPH: {
             rdt_vector_flush_batch(vec);
             replay_tile_glyph(tile_surface, &item->draw_glyph, tile_x, tile_y);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -677,7 +695,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             // intact for other tiles (rdt_picture_draw would consume it)
             rdt_picture_draw_dup(vec, r->picture, r->opacity,
                                  r->has_transform ? &r->transform : nullptr);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -711,7 +731,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             RasterPaintContext raster = {tile_surface, &bound, shape_ptrs, clip_depth};
             raster_fill_rect(&raster, &rect, r->color);
             scratch_restore(scratch, clip_mark);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -733,7 +755,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
             raster_blit_surface_scaled(&raster, (ImageSurface*)r->src_surface, nullptr,
                                        &dst_rect, (ScaleMode)r->scale_mode, r->opacity);
             scratch_restore(scratch, clip_mark);
+#ifndef NDEBUG
             items_drawn++;
+#endif
             break;
         }
 
@@ -1041,7 +1065,9 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                 bound.bottom = std::min((float)tile_surface->height, r->clip.bottom - tile_y);
                 RasterPaintContext raster = {tile_surface, &bound, nullptr, 0};
                 raster_blit_surface_scaled(&raster, src, nullptr, &dst_rect, SCALE_MODE_LINEAR);
+#ifndef NDEBUG
                 items_drawn++;
+#endif
             }
             break;
         }

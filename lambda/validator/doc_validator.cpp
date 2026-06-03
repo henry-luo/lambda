@@ -223,7 +223,6 @@ int SchemaValidator::load_schema(const char* source, const char* root_type) {
             child = content->item;
         }
 
-        int type_count = 0;
         while (child) {
             if (child->node_type == AST_NODE_TYPE_STAM) {
                 // Type statement: type Name = TypeExpr
@@ -290,15 +289,13 @@ int SchemaValidator::load_schema(const char* source, const char* root_type) {
                     log_debug("Registered type: %.*s (type_id=%d)",
                         (int)def->name.length, def->name.str,
                         actual_type->type_id);
-                    type_count++;
-
                     declare_node = declare_node->next;
                 }
             }
             child = child->next;
         }
 
-        log_info("Registered %d type definitions", type_count);
+        log_info("Registered schema type definitions");
         return 0;
     }
 
@@ -400,7 +397,6 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
 
     // Copy message
     if (message) {
-        size_t msg_len = strlen(message) + 1;
         if (pool) {
             error->message = create_string(pool, message);
         } else {

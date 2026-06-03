@@ -363,7 +363,9 @@ extern void heap_register_gc_root(uint64_t* slot);
 void register_bss_gc_roots(void* mir_ctx) {
     if (!mir_ctx) return;
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
+#ifndef NDEBUG
     int count = 0;
+#endif
 
     for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
          module != NULL;
@@ -374,7 +376,9 @@ void register_bss_gc_roots(void* mir_ctx) {
             if (item->item_type == MIR_bss_item && item->u.bss->name && item->addr &&
                 strncmp(item->u.bss->name, "_gvar_", 6) == 0) {
                 heap_register_gc_root((uint64_t*)item->addr);
+#ifndef NDEBUG
                 count++;
+#endif
             }
         }
     }

@@ -1735,7 +1735,9 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 
     // walk up from target through DomNode ancestry
     DomNode* node = static_cast<DomNode*>(target);
+#ifndef NDEBUG
     int depth = 0;
+#endif
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* dom_elem = lam::dom_require_element(node);
@@ -1887,7 +1889,9 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
             }
         }
         node = node->parent;
+#ifndef NDEBUG
         depth++;
+#endif
     }
 
     log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
@@ -6256,6 +6260,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 caret_project_visual_from_block(state, static_cast<View*>(text), caret_x, caret_y, caret_height,
                                                 evcon.block.x, evcon.block.y);
+#ifndef NDEBUG
                 float caret_iframe_offset_x = 0, caret_iframe_offset_y = 0;
                 if (caret_get_visual_snapshot(state, NULL, NULL, NULL,
                         &caret_iframe_offset_x, &caret_iframe_offset_y)) {
@@ -6279,6 +6284,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
                         rect->x, rect->y, rect->width, rect->height);
                 }
+#endif
 
                 // Start new selection if shift not pressed, otherwise extend
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
