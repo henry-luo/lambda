@@ -414,6 +414,12 @@ static void image_surface_apply_orientation_metadata(ImageSurface* surface, int 
     }
 }
 
+static void load_image_cleanup_failed(Url* abs_url, char* file_path, unsigned char* downloaded_data) {
+    if (downloaded_data) mem_free(downloaded_data);
+    if (file_path) mem_free(file_path);
+    if (abs_url) url_destroy(abs_url);
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->document == NULL || uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
@@ -583,7 +589,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path);
             mem_free(surface);
-            if (downloaded_data) mem_free(downloaded_data);
+            load_image_cleanup_failed(abs_url, file_path, downloaded_data);
             return NULL;
         }
         float svg_w, svg_h;
@@ -636,7 +642,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             }
         }
         if (downloaded_data) mem_free(downloaded_data);
-        if (!surface) return NULL;
+        downloaded_data = nullptr;
+        if (!surface) {
+            load_image_cleanup_failed(abs_url, file_path, nullptr);
+            return NULL;
+        }
         image_surface_apply_orientation_metadata(surface, 1);
     }
     else {
@@ -659,12 +669,18 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 int channels;
                 unsigned char *data = image_load_from_memory(downloaded_data, downloaded_size, &width, &height, &channels);
                 mem_free(downloaded_data);
+                downloaded_data = nullptr;
                 if (!data) {
                     log_debug("failed to load image: %s", file_path);
+                    load_image_cleanup_failed(abs_url, file_path, nullptr);
                     return NULL;
                 }
                 surface = image_surface_create_from(width, height, data);
-                if (!surface) { image_free(data); return NULL; }
+                if (!surface) {
+                    image_free(data);
+                    load_image_cleanup_failed(abs_url, file_path, nullptr);
+                    return NULL;
+                }
             }
         } else {
             // Local files: read dimensions from file header only
@@ -684,10 +700,15 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 unsigned char *data = image_load(file_path, &width, &height, &channels, 4);
                 if (!data) {
                     log_debug("failed to load image: %s", file_path);
+                    load_image_cleanup_failed(abs_url, file_path, nullptr);
                     return NULL;
                 }
                 surface = image_surface_create_from(width, height, data);
-                if (!surface) { image_free(data); return NULL; }
+                if (!surface) {
+                    image_free(data);
+                    load_image_cleanup_failed(abs_url, file_path, nullptr);
+                    return NULL;
+                }
             }
         }
         if (slen > 5 && strcmp(file_path + slen - 5, ".jpeg") == 0) {

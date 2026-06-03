@@ -30,6 +30,7 @@
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
+#include "../lambda/input/input.hpp"
 #include "../lambda/js/js_event_loop.h"
 extern "C" {
 #include "../lib/url.h"
@@ -93,6 +94,7 @@ static void view_cleanup_js_batch_state(void) {
     js_dom_batch_reset();
     js_globals_batch_reset();
     script_runner_cleanup_heap();
+    InputManager::destroy_global();
 }
 
 static double view_min_timeout(double current, double candidate) {

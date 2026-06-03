@@ -24,6 +24,28 @@ TemplateRegistry* template_registry_new(void) {
     return reg;
 }
 
+void template_registry_destroy(TemplateRegistry* registry) {
+    if (!registry) return;
+
+    TemplateEntry* entry = registry->first;
+    while (entry) {
+        TemplateEntry* next_entry = entry->next;
+        TemplateHandlerEntry* handler = entry->handlers;
+        while (handler) {
+            TemplateHandlerEntry* next_handler = handler->next;
+            mem_free(handler);
+            handler = next_handler;
+        }
+        mem_free(entry);
+        entry = next_entry;
+    }
+
+    if (g_template_registry == registry) {
+        g_template_registry = NULL;
+    }
+    mem_free(registry);
+}
+
 void template_registry_add(TemplateRegistry* registry,
                            const char* name, bool is_edit,
                            fn_ptr body_func,

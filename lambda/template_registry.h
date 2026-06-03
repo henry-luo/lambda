@@ -66,6 +66,9 @@ typedef struct TemplateRegistry {
 // Initialize a new template registry
 TemplateRegistry* template_registry_new(void);
 
+// Destroy a template registry and clear its entries
+void template_registry_destroy(TemplateRegistry* registry);
+
 // Register a template entry in the registry
 void template_registry_add(TemplateRegistry* registry,
                            const char* name, bool is_edit,

@@ -266,7 +266,11 @@ void free_document(DomDocument* doc) {
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
     if (doc->url) {
+        if (doc->input && doc->input->url == doc->url) {
+            doc->input->url = nullptr;
+        }
         url_destroy(doc->url);
+        doc->url = nullptr;
     }
 
     // Free DomDocument via dom_document_destroy (handles arena and pool)

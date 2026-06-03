@@ -30,6 +30,8 @@ extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(El
     (void)root;
 }
 
+void runtime_cleanup(Runtime* runtime);
+
 // Timing accumulators for cascade profiling
 static thread_local int64_t g_apply_decl_count = 0;
 
@@ -142,6 +144,12 @@ void dom_document_destroy(DomDocument* document) {
     if (document->pending_navigation_url) {
         mem_free(document->pending_navigation_url);
         document->pending_navigation_url = nullptr;
+    }
+
+    if (document->lambda_runtime) {
+        runtime_cleanup(document->lambda_runtime);
+        mem_free(document->lambda_runtime);
+        document->lambda_runtime = nullptr;
     }
 
     // Note: root and all DOM nodes are allocated from arena,

@@ -12365,11 +12365,19 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         if (!output) {
             log_error("Failed to create output Input");
             if (output_pool) pool_destroy(output_pool);
+            if (runner.context.cwd) {
+                url_destroy((Url*)runner.context.cwd);
+                runner.context.cwd = NULL;
+            }
             runner.script->jit_context = NULL;
             jit_cleanup(ctx);
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
+        if (runner.context.cwd) {
+            url_destroy((Url*)runner.context.cwd);
+            runner.context.cwd = NULL;
+        }
 
         // Return result directly on the GC heap — no deep_copy needed.
         // With GC-managed memory the heap is retained across the session;

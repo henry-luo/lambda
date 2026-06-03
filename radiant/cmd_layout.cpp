@@ -3900,6 +3900,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     char* markdown_content = read_text_file(markdown_filepath);
     if (!markdown_content) {
         log_error("Failed to read markdown file: %s", markdown_filepath);
+        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
     }
 
@@ -3910,11 +3911,17 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
     // Parse markdown to Lambda Element tree
     Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(markdown_content);  // from read_text_file, uses stdlib
 
     if (!input) {
         log_error("Failed to parse markdown file: %s", markdown_filepath);
+        if (markdown_filepath) mem_free(markdown_filepath);
         return nullptr;
+    }
+    if (markdown_filepath) {
+        mem_free(markdown_filepath);
+        markdown_filepath = nullptr;
     }
 
     // Get root element from parsed markdown
@@ -4305,7 +4312,18 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         return nullptr;
     }
 
-    char* wiki_filepath = url_to_local_path(wiki_url);
+    struct WikiTempPathGuard {
+        char* path;
+        ~WikiTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    WikiTempPathGuard wiki_path_guard = { url_to_local_path(wiki_url) };
+    char* wiki_filepath = wiki_path_guard.path;
+    if (!wiki_filepath) {
+        log_error("load_wiki_doc: failed to resolve wiki file URL");
+        return nullptr;
+    }
     log_info("[TIMING] Loading wiki document: %s", wiki_filepath);
 
     // Step 1: Parse wiki with Lambda parser
@@ -4323,6 +4341,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
 
     // Parse wiki to Lambda Element tree
     Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
+    mem_free(type_str);
     mem_free(wiki_content);  // from read_text_file, uses stdlib
 
     if (!input) {
@@ -4459,7 +4478,18 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
 
-    char* latex_filepath = url_to_local_path(latex_url);
+    struct LatexTempPathGuard {
+        char* path;
+        ~LatexTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    LatexTempPathGuard latex_path_guard = { url_to_local_path(latex_url) };
+    char* latex_filepath = latex_path_guard.path;
+    if (!latex_filepath) {
+        log_error("load_latex_doc: failed to resolve LaTeX file URL");
+        return nullptr;
+    }
     log_info("[Lambda LaTeX] Loading LaTeX document via Lambda package pipeline: %s", latex_filepath);
 
     // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
