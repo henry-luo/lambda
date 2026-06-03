@@ -5042,6 +5042,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (!block->embed->img) {
                 log_debug("%s Failed to load image", block->source_loc());
                 // todo: use a placeholder
+            } else {
+                block->embed->broken_alt_fallback = false;
             }
         }
         if (block->embed && block->embed->img) {
@@ -5137,17 +5139,51 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                       block->source_loc(), lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            // HTML dimension attributes and CSS width/height still specify the
-            // replaced element box even when the image resource is unavailable.
-            // Only synthesize the broken-image icon size for auto dimensions.
-            if (lycon->block.given_width < 0.0f) {
-                lycon->block.given_width = 16;
+            const char* alt_text = block->get_attribute("alt");
+            CssDeclaration* css_width_decl = block->specified_style ?
+                style_tree_get_declaration(block->specified_style, CSS_PROPERTY_WIDTH) : nullptr;
+            CssDeclaration* css_height_decl = block->specified_style ?
+                style_tree_get_declaration(block->specified_style, CSS_PROPERTY_HEIGHT) : nullptr;
+            bool has_css_width = css_width_decl && css_width_decl->value &&
+                !(css_width_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                  css_width_decl->value->data.keyword == CSS_VALUE_AUTO);
+            bool has_css_height = css_height_decl && css_height_decl->value &&
+                !(css_height_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                  css_height_decl->value->data.keyword == CSS_VALUE_AUTO);
+            if (alt_text && alt_text[0] != '\0' && !has_css_width && !has_css_height) {
+                if (!block->embed) {
+                    block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                }
+                block->embed->broken_alt_fallback = true;
+                TextIntrinsicWidths alt_widths = measure_text_intrinsic_widths(
+                    lycon, alt_text, strlen(alt_text),
+                    get_element_text_transform(block->as_element()),
+                    get_element_font_variant(block->as_element()));
+                float line_height = lycon->block.line_height;
+                if (line_height <= 0.0f) {
+                    line_height = lycon->font.current_font_size > 0.0f ?
+                        lycon->font.current_font_size * 1.2f : 16.0f;
+                }
+                lycon->block.given_width = 16.0f + alt_widths.max_content;
+                lycon->block.given_height = max(16.0f, line_height);
+                log_debug("%s broken image with alt fallback: alt_width=%.1f, given_width=%.1f, given_height=%.1f",
+                    block->source_loc(), alt_widths.max_content,
+                    lycon->block.given_width, lycon->block.given_height);
+            } else {
+                if (block->embed) {
+                    block->embed->broken_alt_fallback = false;
+                }
+                // Empty or absent alt text keeps the explicit image dimensions when
+                // present; otherwise synthesize the broken-image icon size.
+                if (lycon->block.given_width < 0.0f) {
+                    lycon->block.given_width = 16.0f;
+                }
+                if (lycon->block.given_height < 0.0f) {
+                    lycon->block.given_height = 16.0f;
+                }
+                log_debug("%s broken image: used specified or fallback dimensions, given_width=%.1f, given_height=%.1f", block->source_loc(),
+                    lycon->block.given_width, lycon->block.given_height);
             }
-            if (lycon->block.given_height < 0.0f) {
-                lycon->block.given_height = 16;
-            }
-            log_debug("%s broken image: used specified or fallback dimensions, given_width=%.1f, given_height=%.1f", block->source_loc(),
-                lycon->block.given_width, lycon->block.given_height);
         }
     }
 
@@ -6780,6 +6816,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
             block->tag() == HTM_TAG_TEXTAREA ||
             block->tag() == HTM_TAG_SELECT);
+        bool is_broken_alt_image = block->tag() == HTM_TAG_IMG &&
+            block->embed && block->embed->broken_alt_fallback;
+        if (is_broken_alt_image) {
+            is_replaced = false;
+        }
         if (is_replaced) {
             content_has_line_boxes = false;
         }
@@ -7034,7 +7075,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // inline-level boxes. This is what lets inline-table baselines
                 // participate in the parent line box instead of falling back to
                 // the block strut.
-                if (valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
+                if (!is_broken_alt_image && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
                     float asc_contribution, desc_contribution;
                     if (valign == CSS_VALUE_MIDDLE) {
                         // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with
@@ -7168,7 +7209,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } // !is_containing_block
             }
 
-            lycon->line.has_replaced_content = true;  // inline-block contributes to line box
+            if (!is_broken_alt_image) {
+                lycon->line.has_replaced_content = true;  // inline-block contributes to line box
+            }
             // update baseline
             // CSS 2.1 §10.8.1: vertical-align defaults to 'baseline' (CSS_VALUE__UNDEF=0 also means baseline).
             // Only treat as non-baseline if an explicit non-baseline value is set.
@@ -7223,7 +7266,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     effective_baseline = table_baseline;
                 }
 
-                if (uses_content_baseline) {
+                if (is_broken_alt_image) {
+                    // Broken images with non-empty alt text render as fallback
+                    // inline content in browsers. They occupy inline advance but
+                    // the line box is governed by the parent text strut.
+                } else if (uses_content_baseline) {
                     // Non-replaced inline-block with text content and overflow:visible,
                     // or inline-table with first-row baseline
                     // Distance above parent baseline = effective_baseline

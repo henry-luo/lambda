@@ -1241,6 +1241,7 @@ typedef struct EmbedProp {
     bool object_position_x_is_percent;
     bool object_position_y_is_percent;
     bool has_controls;       // true if <video controls> attribute present
+    bool broken_alt_fallback; // true when an unloaded <img> is rendered as alt text
 } EmbedProp;
 
 struct ViewBlock : ViewSpan {
