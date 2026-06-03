@@ -31,7 +31,14 @@ extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(El
     (void)root;
 }
 
-void runtime_cleanup(Runtime* runtime);
+// Runtime-cleanup hook: the full runtime layer (lambda/runner.cpp's
+// runtime_init) installs this so the input/css layer doesn't hard-depend on
+// runner.cpp's runtime_cleanup. NULL in input-only unit-test builds — safe
+// because those builds never create a document->lambda_runtime.
+static void (*g_runtime_cleanup_hook)(Runtime*) = nullptr;
+extern "C" void dom_set_runtime_cleanup_hook(void (*fn)(Runtime*)) {
+    g_runtime_cleanup_hook = fn;
+}
 
 // Timing accumulators for cascade profiling
 static thread_local int64_t g_apply_decl_count = 0;
@@ -154,7 +161,7 @@ void dom_document_destroy(DomDocument* document) {
     }
 
     if (document->lambda_runtime) {
-        runtime_cleanup(document->lambda_runtime);
+        if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(document->lambda_runtime);
         mem_free(document->lambda_runtime);
         document->lambda_runtime = nullptr;
     }

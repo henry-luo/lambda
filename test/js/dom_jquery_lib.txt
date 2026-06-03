@@ -14,7 +14,7 @@ find #app: 1
 find .item: 3
 matchesSelector: true
 1
-0
+3
 Hello jQuery
 true
 1
@@ -30,7 +30,7 @@ undefined
 text
 hello
 value123
-css-error
+true
 1
 2
 Item 1
