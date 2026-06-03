@@ -30,7 +30,10 @@ extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(El
     (void)root;
 }
 
-void runtime_cleanup(Runtime* runtime);
+void __attribute__((weak)) runtime_cleanup(Runtime* runtime) {
+    (void)runtime;
+    log_error("dom_element_runtime_cleanup_fallback: runtime_cleanup implementation is not linked");
+}
 
 // Timing accumulators for cascade profiling
 static thread_local int64_t g_apply_decl_count = 0;
