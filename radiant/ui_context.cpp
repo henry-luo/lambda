@@ -288,6 +288,8 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up font resources");
     fontface_cleanup(uicon);  // free font cache
+    font_prop_release_handle(&uicon->default_font);
+    font_prop_release_handle(&uicon->legacy_default_font);
     if (uicon->font_ctx) {
         font_context_destroy(uicon->font_ctx);
         uicon->font_ctx = NULL;

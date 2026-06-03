@@ -468,7 +468,7 @@ static void memtrack_log_live_line_stats(void) {
                 continue;
             }
             if (shown < MAX_LINE_STATS_REPORT) {
-                memtrack_report_warn("memtrack:     %s line %d: %zu allocs, %zu bytes",
+                memtrack_report_error("memtrack:     %s line %d: %zu allocs, %zu bytes",
                         memtrack_category_names[slot->category], slot->line,
                         slot->current_count, slot->current_bytes);
                 shown++;
@@ -479,12 +479,12 @@ static void memtrack_log_live_line_stats(void) {
     }
 
     if (g_memtrack.line_stats_overflow_count > 0) {
-        memtrack_report_warn("memtrack:     unknown line: %zu allocs, %zu bytes",
+        memtrack_report_error("memtrack:     unknown line: %zu allocs, %zu bytes",
                 g_memtrack.line_stats_overflow_count,
                 g_memtrack.line_stats_overflow_bytes);
     }
     if (hidden > 0) {
-        memtrack_report_warn("memtrack:     ... %zu more allocation line(s)", hidden);
+        memtrack_report_error("memtrack:     ... %zu more allocation line(s)", hidden);
     }
 }
 
@@ -516,23 +516,23 @@ size_t memtrack_shutdown(void) {
     // Report leaks WITHOUT holding lock to avoid deadlock if logging allocates
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         if (leak_count > 0) {
-            memtrack_report_warn("memtrack: %zu memory leaks detected!", leak_count);
+            memtrack_report_error("memtrack: %zu memory leaks detected!", leak_count);
             memtrack_log_allocations();
         } else {
             log_info("memtrack: no memory leaks detected");
         }
     } else if (g_memtrack.mode == MEMTRACK_MODE_STATS && current_count > 0) {
-        memtrack_report_warn("memtrack: LEAK — %zu allocations (%zu bytes) still live at shutdown",
+        memtrack_report_error("memtrack: LEAK — %zu allocations (%zu bytes) still live at shutdown",
                  current_count, current_bytes);
         // log per-category breakdown
         for (int i = 0; i < MEM_CAT_COUNT; i++) {
             MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
             if (cs->current_count > 0) {
-                memtrack_report_warn("memtrack:   %s: %zu allocs, %zu bytes",
+                memtrack_report_error("memtrack:   %s: %zu allocs, %zu bytes",
                          memtrack_category_names[i], cs->current_count, cs->current_bytes);
             }
         }
-        memtrack_report_warn("memtrack:   allocation sites:");
+        memtrack_report_error("memtrack:   allocation sites:");
         memtrack_log_live_line_stats();
     }
 
@@ -1063,12 +1063,12 @@ static bool log_alloc_iter(const void* item, void* udata) {
 
     if (ctx->count < ctx->max_show) {
         if (info->line > 0) {
-            memtrack_report_warn("memtrack: leak #%d: %p, %zu bytes, category=%s, alloc line %d",
+            memtrack_report_error("memtrack: leak #%d: %p, %zu bytes, category=%s, alloc line %d",
                     ctx->count + 1, info->ptr, info->size,
                     memtrack_category_names[info->category],
                     info->line);
         } else {
-            memtrack_report_warn("memtrack: leak #%d: %p, %zu bytes, category=%s",
+            memtrack_report_error("memtrack: leak #%d: %p, %zu bytes, category=%s",
                     ctx->count + 1, info->ptr, info->size,
                     memtrack_category_names[info->category]);
         }

@@ -5,6 +5,7 @@
 #include "grid.hpp"
 #include "transform.hpp"
 #include "state_store.hpp"
+#include "form_control.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include <time.h>
@@ -139,6 +140,7 @@ void free_view(ViewTree* tree, View* view) {
         ViewSpan* span = lam::view_require_element(view);
         if (span->font) {
             log_debug("free font prop");
+            font_prop_release_handle(span->font);
             // font-family could be static and not from the pool
             if (span->font->family) {
                 pool_free(tree->pool, span->font->family);
@@ -172,6 +174,56 @@ void free_view(ViewTree* tree, View* view) {
         log_debug("free text/br view");
     }
     pool_free(tree->pool, view);
+}
+
+static void release_form_control_prop(DomElement* elem) {
+    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
+        return;
+    }
+
+    FormControlProp* form = elem->form;
+    if (form->placeholder_font) {
+        font_prop_release_handle(form->placeholder_font);
+        form->placeholder_font = nullptr;
+    }
+
+    if (form->heap_allocated) {
+        delete form;
+    }
+    else {
+        form->~FormControlProp();
+    }
+    elem->form = nullptr;
+    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+}
+
+static void release_view_owned_resources_in_node(DomNode* node) {
+    if (!node) {
+        return;
+    }
+
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        DomNode* child = elem->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            release_view_owned_resources_in_node(child);
+            child = next;
+        }
+
+        if (elem->font) {
+            font_prop_release_handle(elem->font);
+        }
+        release_form_control_prop(elem);
+        return;
+    }
+
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (text->font) {
+            font_prop_release_handle(text->font);
+        }
+    }
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
@@ -228,6 +280,7 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     // inherit parent font styles
     *prop = *lycon->font.style;  // including font family, size, weight, style, etc.
+    prop->owns_font_handle = false;
     assert(prop->font_size >= 0);  // CSS allows font-size: 0
     return prop;
 }
@@ -360,6 +413,10 @@ void view_pool_init(ViewTree* tree) {
 }
 
 void view_pool_destroy(ViewTree* tree) {
+    if (tree->root) {
+        release_view_owned_resources_in_node(tree->root);
+        tree->root = NULL;
+    }
     Arena* arena = tree->arena;
     Pool* pool = tree->pool;
     tree->arena = NULL;

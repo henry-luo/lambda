@@ -39,6 +39,51 @@ static float resolved_space_width(UiContext* uicon, FontHandle* handle, const Fo
     return 0.0f;
 }
 
+void font_prop_release_handle(FontProp* fprop) {
+    if (!fprop) return;
+    if (fprop->owns_font_handle && fprop->font_handle) {
+        font_handle_release(fprop->font_handle);
+    }
+    fprop->font_handle = NULL;
+    fprop->owns_font_handle = false;
+}
+
+static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
+                                     FontWeight weight, FontSlant slant) {
+    if (!handle || !fprop || !fprop->family) return false;
+    const char* handle_family = NULL;
+    float handle_size = 0.0f;
+    FontWeight handle_weight = FONT_WEIGHT_NORMAL;
+    FontSlant handle_slant = FONT_SLANT_NORMAL;
+    if (!font_handle_get_style(handle, &handle_family, &handle_size,
+                               &handle_weight, &handle_slant)) {
+        return false;
+    }
+    return handle_family && strcmp(handle_family, fprop->family) == 0 &&
+        handle_size == fprop->font_size &&
+        handle_weight == weight &&
+        handle_slant == slant;
+}
+
+static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
+                                       FontHandle* handle,
+                                       const FontStyleDesc* style) {
+    if (!fprop || !handle || !style) return;
+    const FontMetrics* m = font_get_metrics(handle);
+    if (!m) return;
+
+    fprop->space_width = resolved_space_width(uicon, handle, style);
+    float lh_asc, lh_desc;
+    font_get_normal_lh_split(handle, &lh_asc, &lh_desc);
+    fprop->ascender = lh_asc;
+    fprop->descender = lh_desc;
+    fprop->font_height = m->hhea_line_height;
+    fprop->has_kerning = m->has_kerning;
+    if (fprop->font_kerning == CSS_VALUE_NONE) {
+        fprop->has_kerning = false;
+    }
+}
+
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style = fprop;
     fbox->current_font_size = fprop->font_size;
@@ -65,51 +110,19 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
     else if (fprop->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
 
-    // Font5 §4.1: If the parent fbox already has a handle with identical font
-    // properties, reuse it directly — skip font_resolve() entirely.
-    FontHandle* parent_handle = fbox->font_handle;
-    if (parent_handle && fprop->family) {
-        const char* ph_family = NULL;
-        float ph_size = 0;
-        FontWeight ph_weight = FONT_WEIGHT_NORMAL;
-        FontSlant ph_slant = FONT_SLANT_NORMAL;
-        if (font_handle_get_style(parent_handle, &ph_family, &ph_size, &ph_weight, &ph_slant)) {
-            if (ph_family && strcmp(ph_family, fprop->family) == 0 &&
-                ph_size == fprop->font_size &&
-                ph_weight == fw &&
-                ph_slant == fs) {
-                // identical font — reuse parent handle
-                font_handle_retain(parent_handle);
-                fbox->font_handle = parent_handle;
-                fprop->font_handle = parent_handle;
-                const FontMetrics* m = font_get_metrics(parent_handle);
-                if (m) {
-                    FontStyleDesc parent_style = {};
-                    parent_style.family = fprop->family;
-                    parent_style.size_px = fprop->font_size;
-                    parent_style.weight = fw;
-                    parent_style.slant = fs;
-                    fprop->space_width = resolved_space_width(uicon, parent_handle, &parent_style);
-                    float _lh_asc, _lh_desc;
-                    font_get_normal_lh_split(parent_handle, &_lh_asc, &_lh_desc);
-                    fprop->ascender    = _lh_asc;
-                    fprop->descender   = _lh_desc;
-                    fprop->font_height = m->hhea_line_height;
-                    fprop->has_kerning = m->has_kerning;
-                    if (fprop->font_kerning == CSS_VALUE_NONE) {
-                        fprop->has_kerning = false;
-                    }
-                }
-                return;
-            }
-        }
-    }
-
     FontStyleDesc style = {};
     style.family  = fprop->family;
     style.size_px = fprop->font_size;
     style.weight  = fw;
     style.slant   = fs;
+
+    if (font_handle_matches_prop(fprop->font_handle, fprop, fw, fs)) {
+        fbox->font_handle = fprop->font_handle;
+        populate_font_prop_metrics(uicon, fprop, fprop->font_handle, &style);
+        return;
+    }
+
+    font_prop_release_handle(fprop);
 
     // font_resolve handles everything: @font-face descriptors, generic families,
     // database lookup, platform fallback, and fallback font chain — all with caching.
@@ -117,28 +130,10 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (handle) {
         fbox->font_handle = handle;
         fprop->font_handle = handle;
+        fprop->owns_font_handle = true;
 
         // populate FontProp derived fields from unified metrics
-        const FontMetrics* m = font_get_metrics(handle);
-        if (m) {
-            fprop->space_width = resolved_space_width(uicon, handle, &style);
-            // Use normal line-height split (platform-based with half-leading) for
-            // ascender/descender.  This ensures font->ascender == init_ascender used
-            // by the layout engine's strut baseline, which is critical for correct
-            // vertical alignment: when the inline font matches the block font the
-            // vertical-align pass is skipped and the text baseline falls at
-            // text_rect.y + font->ascender, which must equal init_ascender + lead_y.
-            float _lh_asc, _lh_desc;
-            font_get_normal_lh_split(handle, &_lh_asc, &_lh_desc);
-            fprop->ascender    = _lh_asc;
-            fprop->descender   = _lh_desc;
-            fprop->font_height = m->hhea_line_height;
-            fprop->has_kerning = m->has_kerning;
-            // CSS font-kerning: none disables kerning regardless of font capability
-            if (fprop->font_kerning == CSS_VALUE_NONE) {
-                fprop->has_kerning = false;
-            }
-        }
+        populate_font_prop_metrics(uicon, fprop, handle, &style);
         return;
     }
 

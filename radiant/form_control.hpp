@@ -164,6 +164,7 @@ struct FormControlProp {
     float placeholder_opacity;
     uint8_t placeholder_has_color : 1;
     uint8_t placeholder_has_opacity : 1;
+    uint8_t heap_allocated : 1;
 
     // Flex item properties (when form control is a flex item)
     // These are needed because form controls use FormControlProp instead of FlexItemProp
@@ -262,6 +263,7 @@ struct FormControlProp {
         placeholder_font(nullptr), placeholder_color_r(0), placeholder_color_g(0),
         placeholder_color_b(0), placeholder_color_a(0),
         placeholder_opacity(1.0f), placeholder_has_color(0), placeholder_has_opacity(0),
+        heap_allocated(0),
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0),
         current_value(nullptr), current_value_len(0), current_value_u16_len(0),
         selection_start(0), selection_end(0), selection_direction(0),

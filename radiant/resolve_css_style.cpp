@@ -3397,6 +3397,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
             *placeholder_font = *base_font;
+            placeholder_font->owns_font_handle = false;
         }
     } else {
         form->placeholder_font = nullptr;

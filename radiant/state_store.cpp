@@ -52,6 +52,7 @@ static void view_state_release_all_payloads(HashMap* view_state_map) {
 // These pointers are used for fast pointer comparison
 static const char* s_interned_names[64] = {0};
 static int s_interned_count = 0;
+static bool s_interned_initialized = false;
 
 static const char* intern_state_name(const char* name) {
     if (!name) return NULL;
@@ -77,9 +78,8 @@ static const char* intern_state_name(const char* name) {
 
 // Initialize common state names at startup
 static void init_interned_names(void) {
-    static bool initialized = false;
-    if (initialized) return;
-    initialized = true;
+    if (s_interned_initialized) return;
+    s_interned_initialized = true;
 
     // Pre-intern all common state names
     intern_state_name(STATE_HOVER);
@@ -114,6 +114,17 @@ static void init_interned_names(void) {
     intern_state_name(STATE_FOCUS_LINE);
     intern_state_name(STATE_SCROLL_X);
     intern_state_name(STATE_SCROLL_Y);
+}
+
+void radiant_state_cleanup_interned_names(void) {
+    for (int i = 0; i < s_interned_count; i++) {
+        if (s_interned_names[i]) {
+            mem_free((void*)s_interned_names[i]);
+            s_interned_names[i] = NULL;
+        }
+    }
+    s_interned_count = 0;
+    s_interned_initialized = false;
 }
 
 // ============================================================================

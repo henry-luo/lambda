@@ -71,6 +71,7 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
     if (elem->form && elem->item_prop_type == DomElement::ITEM_PROP_FORM)
         return elem->form;
     FormControlProp* f = new FormControlProp();
+    f->heap_allocated = 1;
     f->state_ref = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
         f->control_type = FORM_CONTROL_TEXTAREA;

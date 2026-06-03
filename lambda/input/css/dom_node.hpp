@@ -231,7 +231,8 @@ struct DomText : public DomNode {
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr), color({0}) {}
+        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr),
+        font(nullptr), color({0}) {}
 
     // Check if this is a symbol node
     bool is_symbol() const { return content_type == DOM_TEXT_SYMBOL; }
