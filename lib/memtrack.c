@@ -15,7 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <pthread.h>
+#include <unistd.h>
 
 // ============================================================================
 // Configuration
@@ -173,6 +175,48 @@ static __thread bool tls_tracking_enabled = true;
 // Internal Helpers
 // ============================================================================
 
+static void memtrack_console_report(const char* level, const char* fmt, ...) {
+    char body[1024];
+    va_list args;
+    va_start(args, fmt);
+    int body_len = vsnprintf(body, sizeof(body), fmt, args);
+    va_end(args);
+
+    if (body_len < 0) {
+        return;
+    }
+    if (body_len >= (int)sizeof(body)) {
+        body_len = (int)sizeof(body) - 1;
+        body[body_len] = '\0';
+    }
+
+    char line[1200];
+    int line_len = snprintf(line, sizeof(line), "memtrack-console: %s %s\n", level, body);
+    if (line_len < 0) {
+        return;
+    }
+    if (line_len >= (int)sizeof(line)) {
+        line_len = (int)sizeof(line) - 1;
+        line[line_len - 1] = '\n';
+        line[line_len] = '\0';
+    }
+
+    ssize_t ignored = write(STDERR_FILENO, line, (size_t)line_len);
+    (void)ignored;
+}
+
+#define memtrack_report_error(...) \
+    do { \
+        log_error(__VA_ARGS__); \
+        memtrack_console_report("ERR!", __VA_ARGS__); \
+    } while (0)
+
+#define memtrack_report_warn(...) \
+    do { \
+        log_warn(__VA_ARGS__); \
+        memtrack_console_report("WARN", __VA_ARGS__); \
+    } while (0)
+
 static inline void lock_tracker(void) {
     pthread_mutex_lock(&g_memtrack.lock);
 }
@@ -286,7 +330,7 @@ static void trigger_pressure_callbacks(MemPressureLevel level, size_t target) {
 
 bool memtrack_init(MemtrackMode mode) {
     if (g_memtrack.initialized) {
-        log_warn("memtrack: already initialized");
+        memtrack_report_warn("memtrack: already initialized");
         return true;
     }
 
@@ -316,7 +360,7 @@ bool memtrack_init(MemtrackMode mode) {
             NULL                 // No user data
         );
         if (!g_memtrack.alloc_map) {
-            log_error("memtrack: failed to create allocation map");
+            memtrack_report_error("memtrack: failed to create allocation map");
             return false;
         }
     }
@@ -357,29 +401,29 @@ size_t memtrack_shutdown(void) {
     // Report leaks WITHOUT holding lock to avoid deadlock if logging allocates
     if (g_memtrack.mode == MEMTRACK_MODE_DEBUG && g_memtrack.alloc_map) {
         if (leak_count > 0) {
-            log_warn("memtrack: %zu memory leaks detected!", leak_count);
+            memtrack_report_warn("memtrack: %zu memory leaks detected!", leak_count);
             memtrack_log_allocations();
         } else {
             log_info("memtrack: no memory leaks detected");
         }
     } else if (g_memtrack.mode == MEMTRACK_MODE_STATS && current_count > 0) {
-        log_warn("memtrack: LEAK — %zu allocations (%zu bytes) still live at shutdown",
+        memtrack_report_warn("memtrack: LEAK — %zu allocations (%zu bytes) still live at shutdown",
                  current_count, current_bytes);
         // log per-category breakdown
         for (int i = 0; i < MEM_CAT_COUNT; i++) {
             MemtrackCategoryStats* cs = &g_memtrack.stats.categories[i];
             if (cs->current_count > 0) {
-                log_warn("memtrack:   %s: %zu allocs, %zu bytes",
+                memtrack_report_warn("memtrack:   %s: %zu allocs, %zu bytes",
                          memtrack_category_names[i], cs->current_count, cs->current_bytes);
             }
         }
     }
 
     if (pool_count > 0) {
-        log_warn("memtrack: %d pool(s) not destroyed at shutdown", pool_count);
+        memtrack_report_warn("memtrack: %d pool(s) not destroyed at shutdown", pool_count);
     }
     if (arena_count > 0) {
-        log_warn("memtrack: %d arena(s) not destroyed at shutdown", arena_count);
+        memtrack_report_warn("memtrack: %d arena(s) not destroyed at shutdown", arena_count);
     }
 
     // Log final stats WITHOUT holding lock
@@ -635,9 +679,9 @@ void mem_free(void* ptr)
         if (!info) {
             g_memtrack.stats.invalid_frees++;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-            log_error("memtrack: invalid free at %s:%d - pointer %p not tracked", file, line, ptr);
+            memtrack_report_error("memtrack: invalid free at %s:%d - pointer %p not tracked", file, line, ptr);
 #else
-            log_error("memtrack: invalid free - pointer %p not tracked", ptr);
+            memtrack_report_error("memtrack: invalid free - pointer %p not tracked", ptr);
 #endif
             unlock_tracker();
             return;  // Don't free unknown pointer
@@ -651,12 +695,12 @@ void mem_free(void* ptr)
         if (!head_ok || !tail_ok) {
             g_memtrack.stats.guard_violations++;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-            log_error("memtrack: buffer overflow detected at %s:%d for allocation %p "
+            memtrack_report_error("memtrack: buffer overflow detected at %s:%d for allocation %p "
                      "(alloc'd at %s:%d, size=%zu, category=%s)",
                      file, line, ptr, info->file, info->line, info->size,
                      memtrack_category_names[info->category]);
 #else
-            log_error("memtrack: buffer overflow detected for allocation %p (size=%zu, category=%s)",
+            memtrack_report_error("memtrack: buffer overflow detected for allocation %p (size=%zu, category=%s)",
                      ptr, info->size, memtrack_category_names[info->category]);
 #endif
         }
@@ -689,7 +733,7 @@ void mem_free(void* ptr)
             g_memtrack.stats.current_count--;
             g_memtrack.stats.total_frees++;
             g_memtrack.stats.invalid_frees++;
-            log_error("memtrack: stats-mode free of untracked pointer %p (bad magic 0x%04X)", ptr, hdr->magic);
+            memtrack_report_error("memtrack: stats-mode free of untracked pointer %p (bad magic 0x%04X)", ptr, hdr->magic);
             // cannot safely free — we don't know the real base pointer
         }
     }
@@ -799,7 +843,7 @@ uint32_t memtrack_register_pressure_callback(
     }
 
     unlock_tracker();
-    log_error("memtrack: max pressure callbacks reached");
+    memtrack_report_error("memtrack: max pressure callbacks reached");
     return 0;
 }
 
@@ -899,12 +943,12 @@ static bool log_alloc_iter(const void* item, void* udata) {
 
     if (ctx->count < ctx->max_show) {
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-        log_warn("memtrack: leak #%d: %p, %zu bytes, category=%s, alloc'd at %s:%d",
+        memtrack_report_warn("memtrack: leak #%d: %p, %zu bytes, category=%s, alloc'd at %s:%d",
                 ctx->count + 1, info->ptr, info->size,
                 memtrack_category_names[info->category],
                 info->file, info->line);
 #else
-        log_warn("memtrack: leak #%d: %p, %zu bytes, category=%s",
+        memtrack_report_warn("memtrack: leak #%d: %p, %zu bytes, category=%s",
                 ctx->count + 1, info->ptr, info->size,
                 memtrack_category_names[info->category]);
 #endif
@@ -915,7 +959,7 @@ static bool log_alloc_iter(const void* item, void* udata) {
 
 void memtrack_log_allocations(void) {
     if (g_memtrack.mode != MEMTRACK_MODE_DEBUG) {
-        log_warn("memtrack: detailed allocation logging requires DEBUG mode");
+        memtrack_report_warn("memtrack: detailed allocation logging requires DEBUG mode");
         return;
     }
 
@@ -966,10 +1010,10 @@ static bool verify_guards_iter(const void* item, void* udata) {
     if (!head_ok || !tail_ok) {
         (*violations)++;
 #ifdef MEMTRACK_DEBUG_LOCATIONS
-        log_error("memtrack: guard violation at %p (alloc'd at %s:%d)",
+        memtrack_report_error("memtrack: guard violation at %p (alloc'd at %s:%d)",
                  info->ptr, info->file, info->line);
 #else
-        log_error("memtrack: guard violation at %p", info->ptr);
+        memtrack_report_error("memtrack: guard violation at %p", info->ptr);
 #endif
     }
 
@@ -1003,7 +1047,7 @@ uint32_t memtrack_snapshot(void) {
     }
 
     unlock_tracker();
-    log_error("memtrack: max snapshots reached");
+    memtrack_report_error("memtrack: max snapshots reached");
     return 0;
 }
 
@@ -1021,7 +1065,7 @@ void memtrack_compare_snapshot(uint32_t snapshot_handle) {
 
     if (!snap) {
         unlock_tracker();
-        log_error("memtrack: snapshot %u not found", snapshot_handle);
+        memtrack_report_error("memtrack: snapshot %u not found", snapshot_handle);
         return;
     }
 
