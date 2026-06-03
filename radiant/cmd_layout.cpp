@@ -5008,7 +5008,18 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         return nullptr;
     }
 
-    char* script_filepath = url_to_local_path(script_url);
+    struct ScriptTempPathGuard {
+        char* path;
+        ~ScriptTempPathGuard() {
+            if (path) mem_free(path);
+        }
+    };
+    ScriptTempPathGuard script_path_guard = { url_to_local_path(script_url) };
+    char* script_filepath = script_path_guard.path;
+    if (!script_filepath) {
+        log_error("load_lambda_script_doc: failed to resolve Lambda script URL");
+        return nullptr;
+    }
     log_info("[Lambda Script] Loading Lambda script: %s", script_filepath);
 
     // Step 1: Initialize Runtime and evaluate the Lambda script
@@ -5093,6 +5104,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         runtime_cleanup(runtime);
         mem_free(runtime);
         pool_destroy(result_pool);
+        url_destroy(script_url);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -5129,6 +5141,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             runtime_cleanup(runtime);
             mem_free(runtime);
             pool_destroy(result_pool);
+            url_destroy(script_url);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
@@ -6284,7 +6297,7 @@ static bool layout_single_file(
         }
     }
     source_pos_bridge_reset();
-    render_map_reset();
+    render_map_destroy();
 
     if (event_log) {
         event_state_log_document(event_log, "unload_complete");

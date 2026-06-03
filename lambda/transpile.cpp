@@ -2393,6 +2393,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_ARRAY;
             bool is_known_keyed = (expr_type->type_id == LMD_TYPE_MAP || expr_type->type_id == LMD_TYPE_OBJECT ||
                                    expr_type->type_id == LMD_TYPE_VMAP);
+            bool uses_attr_keys = is_known_keyed && key_filter != LOOP_KEY_INT;
+            bool uses_iter_keys = !is_known_indexed && !uses_attr_keys;
 
             // SYMBOL filter on known indexed type -> empty iteration
             if (key_filter == LOOP_KEY_SYMBOL && is_known_indexed) {
@@ -2594,6 +2596,11 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_char(tp->code_buf, '}');
             }
             strbuf_append_str(tp->code_buf, " }\n");
+            if (uses_attr_keys) {
+                strbuf_append_str(tp->code_buf, " symbol_key_list_free(attr_keys);\n");
+            } else if (uses_iter_keys) {
+                strbuf_append_str(tp->code_buf, " symbol_key_list_free(iter_keys);\n");
+            }
             } // end !needs_empty
         }
 

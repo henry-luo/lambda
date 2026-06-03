@@ -3242,6 +3242,8 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
+    emit_call_void_1(mt, "symbol_key_list_free",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
 
     // Post-processing: ORDER BY, then OFFSET, then LIMIT
     MIR_reg_t final_reg;
@@ -7317,6 +7319,8 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
 
     emit_label(mt, l_end);
+    emit_call_void_1(mt, "symbol_key_list_free",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
 
     // Finalize array — array_end returns Item
     MIR_reg_t final = emit_call_1(mt, "array_end", MIR_T_I64,
