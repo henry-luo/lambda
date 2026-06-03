@@ -145,6 +145,7 @@ static void lambda_main_memtrack_atexit(void) {
 }
 
 static int lambda_main_finish(int ret_code) {
+    css_property_system_cleanup();
     log_finish();
     lambda_main_memtrack_shutdown_once();
     return ret_code;

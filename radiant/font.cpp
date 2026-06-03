@@ -146,6 +146,27 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 }
 
 void fontface_cleanup(UiContext* uicon) {
-    // font faces are now managed by FontContext — no separate cache to clean up
-    (void)uicon;
+    if (!uicon) return;
+
+    for (int i = 0; i < uicon->font_face_count; i++) {
+        FontFaceDescriptor* descriptor = uicon->font_faces ? uicon->font_faces[i] : NULL;
+        if (!descriptor) continue;
+
+        if (descriptor->family_name) mem_free(descriptor->family_name);
+        if (descriptor->src_local_path) mem_free(descriptor->src_local_path);
+        if (descriptor->src_local_name) mem_free(descriptor->src_local_name);
+        if (descriptor->src_entries) {
+            for (int j = 0; j < descriptor->src_count; j++) {
+                if (descriptor->src_entries[j].path) mem_free(descriptor->src_entries[j].path);
+                if (descriptor->src_entries[j].format) mem_free(descriptor->src_entries[j].format);
+            }
+            mem_free(descriptor->src_entries);
+        }
+        mem_free(descriptor);
+    }
+
+    if (uicon->font_faces) mem_free(uicon->font_faces);
+    uicon->font_faces = NULL;
+    uicon->font_face_count = 0;
+    uicon->font_face_capacity = 0;
 }

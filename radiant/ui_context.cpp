@@ -254,17 +254,14 @@ void free_document(DomDocument* doc) {
         // (RdtVideo* and poster ImageSurface* are heap-allocated, not pool-allocated)
         destroy_video_resources(doc->view_tree);
 
-        // Note: view_pool_destroy destroys the pool that contains all view allocations
-        // including the ViewTree itself (if it was pool-allocated).
-        // Do NOT call free(doc->view_tree) after this - it would double-free.
-
         // Check if doc->pool is the same as view_tree->pool to avoid double-free
         if (doc->pool == doc->view_tree->pool) {
             doc->pool = nullptr;  // Pool will be destroyed by view_pool_destroy
         }
 
         view_pool_destroy(doc->view_tree);
-        // Don't free view_tree - it was allocated from the pool that was just destroyed
+        mem_free(doc->view_tree);
+        doc->view_tree = nullptr;
     }
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here

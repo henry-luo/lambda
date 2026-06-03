@@ -123,7 +123,7 @@ static void xhr_free_state(XhrState* xhr) {
     xhr->in_use = false;
 }
 
-static char* mem_strdup(const char* s) {
+static char* xhr_mem_strdup(const char* s) {
     if (!s) return nullptr;
     size_t len = strlen(s);
     char* dup = (char*)mem_calloc(1, len + 1, MEM_CAT_JS_RUNTIME);
@@ -264,8 +264,8 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     }
     xhr->req_header_count = 0;
 
-    xhr->method = mem_strdup(method);
-    xhr->url = mem_strdup(url);
+    xhr->method = xhr_mem_strdup(method);
+    xhr->url = xhr_mem_strdup(url);
     xhr->async_flag = true; // default true, ignored
     xhr->status = 0;
     xhr->response_size = 0;
@@ -295,8 +295,8 @@ extern "C" Item js_xhr_set_request_header(Item name_arg, Item value_arg) {
         return make_js_undef();
     }
 
-    xhr->req_headers[xhr->req_header_count].name = mem_strdup(name);
-    xhr->req_headers[xhr->req_header_count].value = mem_strdup(value);
+    xhr->req_headers[xhr->req_header_count].name = xhr_mem_strdup(name);
+    xhr->req_headers[xhr->req_header_count].value = xhr_mem_strdup(value);
     xhr->req_header_count++;
 
     return make_js_undef();
@@ -364,7 +364,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
 
     if (resp) {
         xhr->status = resp->status_code;
-        xhr->status_text = mem_strdup(status_text_for_code(resp->status_code));
+        xhr->status_text = xhr_mem_strdup(status_text_for_code(resp->status_code));
         if (resp->data && resp->size > 0) {
             xhr->response_text = (char*)mem_calloc(1, resp->size + 1, MEM_CAT_JS_RUNTIME);
             memcpy(xhr->response_text, resp->data, resp->size);
@@ -416,7 +416,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
         if (resp->response_header_count > 0 && resp->response_headers) {
             char** copied = (char**)mem_calloc(resp->response_header_count, sizeof(char*), MEM_CAT_JS_RUNTIME);
             for (int i = 0; i < resp->response_header_count; i++) {
-                copied[i] = mem_strdup(resp->response_headers[i]);
+                copied[i] = xhr_mem_strdup(resp->response_headers[i]);
             }
             xhr->resp_headers = copied;
             xhr->resp_header_count = resp->response_header_count;
@@ -428,7 +428,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     } else {
         // Network error
         xhr->status = 0;
-        xhr->status_text = mem_strdup("");
+        xhr->status_text = xhr_mem_strdup("");
         xhr->ready_state = 4;
         xhr_set_int(xhr->js_object, "readyState", 4);
         xhr_set_int(xhr->js_object, "status", 0);
