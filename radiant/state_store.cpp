@@ -413,7 +413,7 @@ extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
 }
 
 // View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
-// Convert (View*, byte_offset) → DomBoundary (UTF-16 offset for text nodes).
+// Convert (View*, byte_offset) → DomBoundary.
 static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
     DomBoundary b = { NULL, 0 };
     if (!view) return b;
@@ -423,9 +423,17 @@ static DomBoundary boundary_from_legacy(View* view, int byte_offset) {
         uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
         b.node = n;
         b.offset = dom_text_utf8_to_utf16(t, bo);
+    } else if (selection_is_text_control_view(view)) {
+        DomElement* elem = lam::dom_require_element(view);
+        tc_ensure_init(elem);
+        FormControlProp* form = elem->form;
+        uint32_t value_len = form && form->current_value ? form->current_value_len : 0;
+        uint32_t bo = byte_offset < 0 ? 0 : (uint32_t)byte_offset;
+        if (bo > value_len) bo = value_len;
+        b.node = n;
+        b.offset = bo;
     } else {
-        // Element view: legacy callers don't reach here for selection but
-        // be safe — clamp offset to child count.
+        // Element view: clamp offset to child count.
         b.node = n;
         uint32_t lim = dom_node_boundary_length(n);
         b.offset = byte_offset < 0 ? 0 :

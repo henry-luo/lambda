@@ -1709,6 +1709,23 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         const char* actual = reader.get("save_actual").cstring();
         if (actual) ev->snapshot_actual_path = mem_strdup(actual, MEM_CAT_LAYOUT);
     }
+    else if (strcmp(type_str, "assert_pixel") == 0) {
+        ev->type = SIM_EVENT_ASSERT_PIXEL;
+        parse_target(reader, ev);
+        if (reader.has("x")) ev->x = reader.get("x").asInt32();
+        if (reader.has("y")) ev->y = reader.get("y").asInt32();
+        ev->pixel_min_r = ev->pixel_min_g = ev->pixel_min_b = ev->pixel_min_a = -1;
+        ev->pixel_max_r = ev->pixel_max_g = ev->pixel_max_b = ev->pixel_max_a = -1;
+        ev->pixel_force_render = reader.has("force_render") ? reader.get("force_render").asBool() : true;
+        if (reader.has("min_r")) ev->pixel_min_r = reader.get("min_r").asInt32();
+        if (reader.has("min_g")) ev->pixel_min_g = reader.get("min_g").asInt32();
+        if (reader.has("min_b")) ev->pixel_min_b = reader.get("min_b").asInt32();
+        if (reader.has("min_a")) ev->pixel_min_a = reader.get("min_a").asInt32();
+        if (reader.has("max_r")) ev->pixel_max_r = reader.get("max_r").asInt32();
+        if (reader.has("max_g")) ev->pixel_max_g = reader.get("max_g").asInt32();
+        if (reader.has("max_b")) ev->pixel_max_b = reader.get("max_b").asInt32();
+        if (reader.has("max_a")) ev->pixel_max_a = reader.get("max_a").asInt32();
+    }
     else if (strcmp(type_str, "scroll_to") == 0) {
         ev->type = SIM_EVENT_SCROLL_TO;
         parse_target(reader, ev);
@@ -2684,6 +2701,67 @@ static void force_render_surface(UiContext* uicon) {
     }
 }
 
+static bool pixel_component_in_range(const char* name, int value, int min_value, int max_value) {
+    if (min_value >= 0 && value < min_value) {
+        log_error("event_sim: assert_pixel FAIL - %s=%d below min %d", name, value, min_value);
+        return false;
+    }
+    if (max_value >= 0 && value > max_value) {
+        log_error("event_sim: assert_pixel FAIL - %s=%d above max %d", name, value, max_value);
+        return false;
+    }
+    return true;
+}
+
+static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    DomDocument* doc = uicon ? uicon->document : NULL;
+    if (ev->pixel_force_render && uicon) force_render_surface(uicon);
+
+    ImageSurface* actual = uicon ? uicon->surface : NULL;
+    if (!actual || !actual->pixels) {
+        log_error("event_sim: assert_pixel FAIL - no rendered surface");
+        ctx->fail_count++;
+        return;
+    }
+
+    int x = 0, y = 0;
+    if (!resolve_target(ev, doc, &x, &y)) {
+        log_error("event_sim: assert_pixel FAIL - could not resolve target");
+        ctx->fail_count++;
+        return;
+    }
+    if (x < 0 || y < 0 || x >= actual->width || y >= actual->height) {
+        log_error("event_sim: assert_pixel FAIL - coordinate (%d,%d) outside surface %dx%d",
+                  x, y, actual->width, actual->height);
+        ctx->fail_count++;
+        return;
+    }
+
+    int stride = actual->pitch / 4; // INT_CAST_OK: pitch is bytes, pixel rows are uint32_t
+    uint32_t* pixels = (uint32_t*)actual->pixels;
+    uint32_t px = pixels[y * stride + x];
+    int r = px & 0xFF;
+    int g = (px >> 8) & 0xFF;
+    int b = (px >> 16) & 0xFF;
+    int a = (px >> 24) & 0xFF;
+
+    bool ok = true;
+    ok = pixel_component_in_range("r", r, ev->pixel_min_r, ev->pixel_max_r) && ok;
+    ok = pixel_component_in_range("g", g, ev->pixel_min_g, ev->pixel_max_g) && ok;
+    ok = pixel_component_in_range("b", b, ev->pixel_min_b, ev->pixel_max_b) && ok;
+    ok = pixel_component_in_range("a", a, ev->pixel_min_a, ev->pixel_max_a) && ok;
+
+    if (ok) {
+        log_info("event_sim: assert_pixel PASS at (%d,%d) rgba=(%d,%d,%d,%d)",
+                 x, y, r, g, b, a);
+        ctx->pass_count++;
+    } else {
+        log_error("event_sim: assert_pixel FAIL at (%d,%d) rgba=(%d,%d,%d,%d)",
+                  x, y, r, g, b, a);
+        ctx->fail_count++;
+    }
+}
+
 // YIQ-based perceptual color distance (same algorithm as pixelmatch)
 static float pixel_yiq_distance(uint32_t rgba1, uint32_t rgba2) {
     float r1 = (rgba1 & 0xFF) / 255.0f;
@@ -3549,6 +3627,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: assert_editing_selection start=%d end=%d",
                      ev->expected_char_offset, ev->expected_selection_end);
             assert_editing_selection(ctx, uicon, ev);
+            break;
+
+        case SIM_EVENT_ASSERT_PIXEL:
+            log_info("event_sim: assert_pixel");
+            assert_pixel_impl(ctx, uicon, ev);
             break;
 
         case SIM_EVENT_ASSERT_PREEDIT: {
