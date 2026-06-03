@@ -117,6 +117,10 @@ struct DomDocument {
     // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
     int js_mutation_count;
 
+    // JS/meta requested document navigation. The loader follows this after
+    // load-time scripts and refresh metadata have been processed.
+    char* pending_navigation_url;
+
     // CSS @keyframes registry (parsed from stylesheets on first animation use)
     void* keyframe_registry;        // KeyframeRegistry* (void* to avoid header dep)
 
@@ -156,6 +160,7 @@ struct DomDocument {
                     skip_style_reset(false),
                     incremental_layout(false),
                     js_mutation_count(0),
+                    pending_navigation_url(nullptr),
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),

@@ -46,6 +46,93 @@ int64_t g_text_layout_count = 0;
 int64_t g_block_layout_count = 0;
 int64_t g_inline_layout_count = 0;
 
+static inline float collapse_root_margins(float a, float b) {
+    if (a >= 0.0f && b >= 0.0f) return max(a, b);
+    if (a < 0.0f && b < 0.0f) return min(a, b);
+    return a + b;
+}
+
+static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
+    if (!block || block->height > 0.0f) return false;
+    if (block->view_type == RDT_VIEW_TABLE ||
+        block->view_type == RDT_VIEW_TABLE_ROW ||
+        block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+        block->view_type == RDT_VIEW_TABLE_CELL ||
+        block->view_type == RDT_VIEW_INLINE_BLOCK) {
+        return false;
+    }
+
+    float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0.0f;
+    float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0.0f;
+    float padding_top = block->bound ? block->bound->padding.top : 0.0f;
+    float padding_bottom = block->bound ? block->bound->padding.bottom : 0.0f;
+    if (border_top > 0.0f || border_bottom > 0.0f ||
+        padding_top > 0.0f || padding_bottom > 0.0f) {
+        return false;
+    }
+
+    bool creates_bfc = block->scroller &&
+        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
+         block->scroller->overflow_y != CSS_VALUE_VISIBLE);
+    if (creates_bfc) return false;
+    if (block->position && element_has_float(block)) return false;
+    if (block->display.inner == CSS_VALUE_FLOW_ROOT ||
+        block->display.inner == CSS_VALUE_FLEX ||
+        block->display.inner == CSS_VALUE_GRID) {
+        return false;
+    }
+
+    for (View* child = lam::view_require_element(block)->first_placed_child(); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (!child->view_type) continue;
+        if (child->is_block()) {
+            ViewBlock* child_block = lam::view_require_block(child);
+            bool abs_or_fixed = child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED);
+            if (abs_or_fixed) continue;
+            if (child_block->position && element_has_float(child_block)) return false;
+            if (!root_child_margins_are_self_collapsing(child_block)) return false;
+        } else if (child->height > 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static float root_child_float_only_extent(ViewBlock* block, bool* has_float, bool* has_in_flow_content) {
+    float extent = 0.0f;
+    if (!block || !has_float || !has_in_flow_content) return extent;
+
+    for (View* child = lam::view_require_element(block)->first_placed_child(); child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (!child->view_type) continue;
+        if (child->is_block()) {
+            ViewBlock* child_block = lam::view_require_block(child);
+            bool abs_or_fixed = child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED);
+            if (abs_or_fixed) continue;
+            if (child_block->position && element_has_float(child_block)) {
+                *has_float = true;
+                float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+                float child_extent = child_block->y + child_block->height + margin_bottom;
+                if (child_extent > extent) extent = child_extent;
+                continue;
+            }
+            if (child_block->height > 0.0f) {
+                *has_in_flow_content = true;
+            } else {
+                float nested_extent = root_child_float_only_extent(child_block, has_float, has_in_flow_content);
+                if (nested_extent > extent) extent = nested_extent;
+            }
+        } else if (child->height > 0.0f) {
+            *has_in_flow_content = true;
+        }
+    }
+    return extent;
+}
+
 static void reset_non_inherited_style_cache(ViewSpan* view) {
     if (!view || !view->bound) return;
 
@@ -2174,11 +2261,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
-    if (!root_has_explicit_width && !root_has_explicit_height &&
-        html->embed && html->embed->flex &&
+    bool root_uses_vertical_writing = html->embed && html->embed->flex &&
         (html->embed->flex->writing_mode == WM_VERTICAL_LR ||
-         html->embed->flex->writing_mode == WM_VERTICAL_RL) &&
-        body_view) {
+         html->embed->flex->writing_mode == WM_VERTICAL_RL);
+    if (!root_has_explicit_width && !root_has_explicit_height &&
+        root_uses_vertical_writing && body_view) {
         float body_margin_left = body_view->bound ? body_view->bound->margin.left : 0.0f;
         float body_margin_right = body_view->bound ? body_view->bound->margin.right : 0.0f;
         float body_margin_bottom = body_view->bound ? body_view->bound->margin.bottom : 0.0f;
@@ -2199,6 +2286,59 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         html->content_width = html->width;
         html->height = physical_height;
         html->content_height = physical_height;
+    }
+
+    if (!root_has_explicit_height && !root_uses_vertical_writing) {
+        float root_content_extent = max(html->height, html->content_height);
+        float collapsed_root_content_extent = 0.0f;
+        bool has_root_content_extent = false;
+        bool all_root_children_self_collapsing = true;
+        View* root_child = html->first_placed_child();
+        while (root_child) {
+            if (root_child->is_block()) {
+                ViewBlock* child_block = lam::view_require_block(root_child);
+                bool out_of_flow = child_block->position &&
+                    (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+	                     child_block->position->position == CSS_VALUE_FIXED);
+                if (!out_of_flow) {
+                    float margin_top = child_block->bound ? child_block->bound->margin.top : 0.0f;
+                    float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+                    float child_extent = child_block->y + child_block->height + margin_bottom;
+                    if (root_child_margins_are_self_collapsing(child_block)) {
+                        float collapsed_margin = collapse_root_margins(margin_top, margin_bottom);
+                        float collapsed_child_extent = child_block->y - margin_top + collapsed_margin;
+                        if (collapsed_child_extent > collapsed_root_content_extent) {
+                            collapsed_root_content_extent = collapsed_child_extent;
+                        }
+                    } else {
+                        bool has_float = false;
+                        bool has_in_flow_content = false;
+                        float float_extent = root_child_float_only_extent(child_block,
+                            &has_float, &has_in_flow_content);
+                        if (child_block->height <= 0.0f && has_float && !has_in_flow_content) {
+                            float root_float_extent = child_block->y + float_extent;
+                            if (root_float_extent > collapsed_root_content_extent) {
+                                collapsed_root_content_extent = root_float_extent;
+                            }
+                        } else {
+                            all_root_children_self_collapsing = false;
+                        }
+                    }
+                    if (child_extent > root_content_extent) {
+                        root_content_extent = child_extent;
+                    }
+                    has_root_content_extent = true;
+                }
+            }
+            root_child = root_child->next();
+        }
+        if (has_root_content_extent && all_root_children_self_collapsing) {
+            html->height = collapsed_root_content_extent;
+            html->content_height = collapsed_root_content_extent;
+        } else {
+            if (root_content_extent > html->height) html->height = root_content_extent;
+            if (root_content_extent > html->content_height) html->content_height = root_content_extent;
+        }
     }
 
     // Quirks mode behavior: html/body stretch to at least viewport height.

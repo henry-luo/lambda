@@ -25,6 +25,8 @@
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arena.h"
+#include "../../lib/str.h"
 #include "../../lib/url.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
@@ -69,6 +71,17 @@ static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
+static String* js_dom_create_document_string(DomDocument* doc, const char* str, size_t len) {
+    if (!doc || !doc->arena || !str) return nullptr;
+    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + len + 1);
+    if (!s) return nullptr;
+    s->len = (uint32_t)len;
+    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
+    if (len > 0) memcpy(s->chars, str, len);
+    s->chars[len] = '\0';
+    return s;
+}
+
 // ============================================================================
 // Unique type marker for DOM-wrapped Maps
 // ============================================================================
@@ -80,6 +93,10 @@ static TypeMap js_dom_type_marker = {};
 // Sentinel used in Map::type to distinguish computed style wrappers.
 // Map::data stores the DomElement*, Map::data_cap stores pseudo-element type (0=none, 1=before, 2=after).
 static TypeMap js_computed_style_marker = {};
+
+// Sentinel used in Map::type to distinguish element.style wrappers.
+// Map::data stores the owning DomElement*.
+static TypeMap js_inline_style_marker = {};
 
 // Sentinel used in Map::type to distinguish document proxy objects.
 // Map::data is unused (the document is accessed via _js_current_document).
@@ -727,6 +744,18 @@ extern "C" Item js_document_proxy_get_property(Item prop_name) {
 extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
+        if (s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) {
+            const char* next_url = fn_to_cstr(value);
+            DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
+            if (doc && next_url && next_url[0]) {
+                if (doc->pending_navigation_url) {
+                    mem_free(doc->pending_navigation_url);
+                }
+                doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
+                log_info("js_location_set_href: pending navigation to %s", next_url);
+            }
+            return value;
+        }
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
             // Store title as a static value (proxy map lacks TypeMap for map_put)
             js_document_title_value = value;
@@ -876,7 +905,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     if (head_dom && title_dom) {
         head_dom->append_child(title_dom);
         if (title && *title) {
-            String* tstr = heap_create_name(title);
+            String* tstr = js_dom_create_document_string(fd, title, strlen(title));
             DomText* tnode = dom_text_create_detached(tstr, fd);
             if (tnode) title_dom->append_child(tnode);
         }
@@ -1213,6 +1242,46 @@ static bool js_is_computed_style(Item item) {
 extern "C" bool js_is_computed_style_item(Item item) {
     return js_is_computed_style(item);
 }
+
+extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name);
+extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value);
+
+static bool js_is_inline_style(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_MAP) return false;
+    Map* m = item.map;
+    return m->type == (void*)&js_inline_style_marker;
+}
+
+static DomElement* js_inline_style_owner(Item item) {
+    if (!js_is_inline_style(item)) return nullptr;
+    return (DomElement*)item.map->data;
+}
+
+static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
+    if (!elem) return ItemNull;
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    if (exp_map.item != ITEM_NULL) {
+        Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
+        Item cached = js_property_get(exp_map, key);
+        if (js_is_inline_style(cached)) return cached;
+    }
+
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->map_kind = MAP_KIND_DOM;
+    wrapper->type = (void*)&js_inline_style_marker;
+    wrapper->data = elem;
+    wrapper->data_cap = 0;
+
+    Item wrapped = (Item){.map = wrapper};
+    if (exp_map.item != ITEM_NULL) {
+        Item key = (Item){.item = s2it(heap_create_name("__styleWrapper"))};
+        js_property_set(exp_map, key, wrapped);
+    }
+    return wrapped;
+}
+
 // Helper: serialize a CssValue to a string Item
 static Item css_value_to_string_item(CssValue* val) {
     if (!val) return (Item){.item = s2it(heap_create_name(""))};
@@ -2169,14 +2238,52 @@ static void dom_find_by_class(DomElement* root, const char* cls, Array* arr) {
 
 static void dom_find_by_tag(DomElement* root, const char* tag, Array* arr) {
     if (!root || !tag) return;
-    // case-insensitive comparison for HTML tags
-    if (root->tag_name && strcasecmp(root->tag_name, tag) == 0) {
+    // case-insensitive comparison for HTML tags; "*" matches all elements.
+    if (root->tag_name && ((tag[0] == '*' && tag[1] == '\0') ||
+            strcasecmp(root->tag_name, tag) == 0)) {
         array_push(arr, js_dom_wrap_element(root));
     }
     DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
             dom_find_by_tag(child->as_element(), tag, arr);
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void dom_find_descendants_by_tag(DomElement* root, const char* tag, Array* arr) {
+    if (!root || !tag) return;
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            dom_find_by_tag(child->as_element(), tag, arr);
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void dom_find_descendants_by_class(DomElement* root, const char* cls, Array* arr) {
+    if (!root || !cls) return;
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            dom_find_by_class(child->as_element(), cls, arr);
+        }
+        child = child->next_sibling;
+    }
+}
+
+static void dom_find_by_name(DomElement* root, const char* name, Array* arr) {
+    if (!root || !name) return;
+    const char* attr = dom_element_get_attribute(root, "name");
+    if (attr && strcmp(attr, name) == 0) {
+        array_push(arr, js_dom_wrap_element(root));
+    }
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            dom_find_by_name(child->as_element(), name, arr);
         }
         child = child->next_sibling;
     }
@@ -2332,6 +2439,23 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
     log_debug("js_document_method: '%s' with %d args", method, argc);
 
+    // Location methods on document.location/window.location proxy.
+    if (strcmp(method, "assign") == 0 || strcmp(method, "replace") == 0) {
+        if (argc < 1) return make_js_undefined();
+        const char* next_url = fn_to_cstr(args[0]);
+        if (next_url && next_url[0]) {
+            if (doc->pending_navigation_url) {
+                mem_free(doc->pending_navigation_url);
+            }
+            doc->pending_navigation_url = mem_strdup(next_url, MEM_CAT_DOM);
+            log_info("js_location_%s: pending navigation to %s", method, next_url);
+        }
+        return make_js_undefined();
+    }
+    if (strcmp(method, "reload") == 0) {
+        return make_js_undefined();
+    }
+
     // getElementById(id)
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) return ItemNull;
@@ -2366,6 +2490,20 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         arr->length = 0;
         arr->capacity = 0;
         dom_find_by_tag(root, tag, arr);
+        return (Item){.array = arr};
+    }
+
+    // getElementsByName(name)
+    if (strcmp(method, "getElementsByName") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* name = fn_to_cstr(args[0]);
+        if (!name) return ItemNull;
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        dom_find_by_name(root, name, arr);
         return (Item){.array = arr};
     }
 
@@ -2462,7 +2600,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (!text) return ItemNull;
 
         // create a detached String-backed DomText node (no parent yet)
-        String* str = heap_create_name(text);
+        String* str = js_dom_create_document_string(doc, text, strlen(text));
         DomText* text_node = dom_text_create_detached(str, doc);
         if (!text_node) {
             log_error("js_document_method: createTextNode failed for '%s'", text);
@@ -2509,7 +2647,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
 
         // create a text node and append to body
-        String* str = heap_create_name(text);
+        String* str = js_dom_create_document_string(doc, text, strlen(text));
         DomText* text_node = dom_text_create_detached(str, doc);
         if (text_node) {
             ((DomNode*)body)->append_child((DomNode*)text_node);
@@ -4384,6 +4522,13 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     if (js_dom_item_is_selection(elem_item))
         return js_dom_selection_get_property(elem_item, prop_name);
 
+    if (js_is_inline_style(elem_item)) {
+        DomElement* owner = js_inline_style_owner(elem_item);
+        if (!owner) return ItemNull;
+        Item owner_item = js_dom_wrap_element(owner);
+        return js_dom_get_style_property(owner_item, prop_name);
+    }
+
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     const char* prop = fn_to_cstr(prop_name);
     if (!node) {
@@ -4585,6 +4730,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         String* result = heap_create_name(sb->str ? sb->str : "");
         strbuf_free(sb);
         return (Item){.item = s2it(result)};
+    }
+
+    // style — live CSSStyleDeclaration-like wrapper for inline style.
+    if (strcmp(prop, "style") == 0) {
+        return js_dom_get_inline_style_wrapper(elem);
     }
 
     // textContent (recursive text extraction)
@@ -5713,6 +5863,13 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     if (js_dom_item_is_range(elem_item) || js_dom_item_is_selection(elem_item))
         return value;
 
+    if (js_is_inline_style(elem_item)) {
+        DomElement* owner = js_inline_style_owner(elem_item);
+        if (!owner) return ItemNull;
+        Item owner_item = js_dom_wrap_element(owner);
+        return js_dom_set_style_property(owner_item, prop_name, value);
+    }
+
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
     if (!node) {
         log_debug("js_dom_set_property: not a DOM node");
@@ -5729,7 +5886,13 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
             size_t len = strlen(new_text);
-            String* s = heap_strcpy((char*)new_text, len);
+            DomElement* owner = nullptr;
+            DomNode* parent = text_node->parent;
+            while (parent && !parent->is_element()) parent = parent->parent;
+            if (parent) owner = parent->as_element();
+            DomDocument* doc = owner ? owner->doc : _js_current_document;
+            String* s = js_dom_create_document_string(doc, new_text, len);
+            if (!s) return value;
             text_node->native_string = s;
             text_node->text = s->chars;
             text_node->length = len;
@@ -5863,7 +6026,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             elem->first_child = nullptr;
             elem->last_child = nullptr;
             // create a text node with the new content
-            String* s = heap_create_name(text_str);
+            String* s = js_dom_create_document_string(elem->doc, text_str, strlen(text_str));
             DomText* text_node = dom_text_create(s, elem);
             if (text_node) {
                 ((DomNode*)text_node)->parent = (DomNode*)elem;
@@ -6151,7 +6314,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             elem->first_child = nullptr;
             elem->last_child = nullptr;
-            String* str = heap_create_name(sv);
+            String* str = js_dom_create_document_string(elem->doc, sv, strlen(sv));
             DomText* tn = dom_text_create(str, elem);
             if (tn) {
                 tn->parent = elem;
@@ -6264,7 +6427,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 elem->first_child = nullptr;
                 elem->last_child = nullptr;
                 if (*s) {
-                    String* str = heap_create_name(s);
+                    String* str = js_dom_create_document_string(elem->doc, s, strlen(s));
                     DomText* tn = dom_text_create(str, elem);
                     if (tn) {
                         tn->parent = elem;
@@ -6715,6 +6878,34 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return ItemNull;
     }
 
+    // getElementsByTagName(tagName) — descendants of this element
+    if (strcmp(method, "getElementsByTagName") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* tag = fn_to_cstr(args[0]);
+        if (!tag) return ItemNull;
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        dom_find_descendants_by_tag(elem, tag, arr);
+        return (Item){.array = arr};
+    }
+
+    // getElementsByClassName(className) — descendants of this element
+    if (strcmp(method, "getElementsByClassName") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* cls = fn_to_cstr(args[0]);
+        if (!cls) return ItemNull;
+        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+        arr->type_id = LMD_TYPE_ARRAY;
+        arr->items = nullptr;
+        arr->length = 0;
+        arr->capacity = 0;
+        dom_find_descendants_by_class(elem, cls, arr);
+        return (Item){.array = arr};
+    }
+
     // querySelector(selector) — from this element
     if (strcmp(method, "querySelector") == 0) {
         if (argc < 1) return ItemNull;
@@ -6925,7 +7116,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                         memcpy(combined + text->length, next_text->text, next_text->length);
                     combined[new_len] = '\0';
                     // update main text node
-                    String* s = heap_strcpy(combined, new_len);
+                    String* s = js_dom_create_document_string(elem->doc, combined, new_len);
+                    if (!s) break;
                     text->native_string = s;
                     text->text = s->chars;
                     text->length = new_len;
@@ -7325,7 +7517,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 // string arg → create text node
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = heap_create_name(text);
+                    String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
                     DomText* tn = dom_text_create(s, elem);
                     if (tn) ((DomNode*)elem)->append_child(tn);
                 }
@@ -7347,7 +7539,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             } else {
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = heap_create_name(text);
+                    String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
                     DomText* tn = dom_text_create(s, elem);
                     if (tn) ((DomNode*)elem)->insert_before(tn, ref);
                 }
@@ -8216,7 +8408,7 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     if (text_arg.item != ITEM_NULL && !is_js_undefined(text_arg)) {
         const char* t = fn_to_cstr(text_arg);
         if (t && *t) {
-            String* str = heap_create_name(t);
+            String* str = js_dom_create_document_string(doc, t, strlen(t));
             DomText* tn = dom_text_create(str, opt);
             if (tn) {
                 tn->parent = opt;

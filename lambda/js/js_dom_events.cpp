@@ -1406,10 +1406,17 @@ extern "C" void js_restore_window_event_for_legacy(Item prev) {
 // build propagation path from target to root
 static int build_path(Item target, void** path, int max_path) {
     int count = 0;
+    void* key = get_event_target_key(target);
 
-    // Document proxy: target is the sentinel; walk to window only.
-    if (js_is_document_proxy(target)) {
+    // Non-element document/window targets use the same canonical keys as
+    // addEventListener(), so dispatchEvent() finds listeners registered on
+    // document/window even when the JS object is a proxy/wrapper.
+    if (key == (void*)&_document_sentinel) {
         if (count < max_path) path[count++] = (void*)&_document_sentinel;
+        if (count < max_path) path[count++] = (void*)&_window_sentinel;
+        return count;
+    }
+    if (key == (void*)&_window_sentinel) {
         if (count < max_path) path[count++] = (void*)&_window_sentinel;
         return count;
     }
@@ -1417,8 +1424,8 @@ static int build_path(Item target, void** path, int max_path) {
     // start from target's DOM node
     void* node_ptr = js_dom_unwrap_element(target);
     if (!node_ptr) {
-        // non-DOM target (window or document)
-        path[count++] = get_event_target_key(target);
+        // plain JS-object EventTarget
+        path[count++] = key;
         return count;
     }
 

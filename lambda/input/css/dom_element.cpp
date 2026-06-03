@@ -139,6 +139,11 @@ void dom_document_destroy(DomDocument* document) {
         svg_unregister_image_resolvers_for_tree(document->html_root);
     }
 
+    if (document->pending_navigation_url) {
+        mem_free(document->pending_navigation_url);
+        document->pending_navigation_url = nullptr;
+    }
+
     // Note: root and all DOM nodes are allocated from arena,
     // so they will be freed when arena is destroyed
     if (document->arena) {

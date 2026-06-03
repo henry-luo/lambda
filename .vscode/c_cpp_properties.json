@@ -3,7 +3,7 @@
         {
             "name": "Mac",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}",
                 "${workspaceFolder}/lambda/tree-sitter/lib/include",
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
                 "${workspaceFolder}/mac-deps/curl-8.10.1/include",
@@ -45,7 +45,6 @@
             ],
             "browse": {
                 "path": [
-                    "${workspaceFolder}",
                     "${workspaceFolder}/lambda",
                     "${workspaceFolder}/lib",
                     "${workspaceFolder}/test",
@@ -61,7 +60,7 @@
         {
             "name": "Debug",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}",
                 "${workspaceFolder}/lib/mem-pool/include",
                 "${workspaceFolder}/lambda/tree-sitter/lib/include",
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
@@ -108,7 +107,6 @@
             ],
             "browse": {
                 "path": [
-                    "${workspaceFolder}",
                     "${workspaceFolder}/lambda",
                     "${workspaceFolder}/lib",
                     "${workspaceFolder}/typeset",
@@ -125,7 +123,7 @@
         {
             "name": "Release",
             "includePath": [
-                "${workspaceFolder}/**",
+                "${workspaceFolder}",
                 "${workspaceFolder}/lib/mem-pool/include",
                 "${workspaceFolder}/lambda/tree-sitter/lib/include",
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
@@ -170,7 +168,6 @@
             ],
             "browse": {
                 "path": [
-                    "${workspaceFolder}",
                     "${workspaceFolder}/lambda",
                     "${workspaceFolder}/lib",
                     "${workspaceFolder}/typeset",

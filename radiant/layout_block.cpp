@@ -660,6 +660,10 @@ static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
 }
 
+static inline bool is_root_element_block(ViewBlock* block) {
+    return block && block->tag_id == HTM_TAG_HTML;
+}
+
 // Quirks mode: check if an element has "quirky" block-start margin.
 // In quirks mode, certain HTML elements have their UA default margins ignored
 // when collapsing with a quirky container (body, table cell). This matches
@@ -696,7 +700,9 @@ static inline bool has_quirky_margin_bottom(ViewBlock* block) {
 static inline bool is_quirky_container(ViewBlock* block, LayoutContext* lycon) {
     if (!block || !lycon->doc || !lycon->doc->view_tree) return false;
     if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
-    return block->tag_id == HTM_TAG_BODY;
+    return block->tag_id == HTM_TAG_BODY ||
+           block->tag_id == HTM_TAG_TD ||
+           block->tag_id == HTM_TAG_TH;
 }
 
 // CSS 2.1 §10.6.4: When an ancestor block's y changes after its absolutely positioned
@@ -5131,20 +5137,29 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                       block->source_loc(), lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            // CSS Images 3 + browser behavior: when an image fails to load,
-            // browsers ignore the HTML width/height presentational hints and
-            // render a small broken-image icon (Chrome uses 16×16).
-            // Only preserve dimensions that were explicitly set by CSS (not HTML attrs).
-            // blk->given_width >= 0 means CSS explicitly set the width property;
-            // if blk is null or blk->given_width < 0, the width came from HTML attrs only.
-            if (!(block->blk && block->blk->given_width >= 0)) {
+            // HTML dimension attributes and CSS width/height still specify the
+            // replaced element box even when the image resource is unavailable.
+            // Only synthesize the broken-image icon size for auto dimensions.
+            if (lycon->block.given_width < 0.0f) {
                 lycon->block.given_width = 16;
             }
-            if (!(block->blk && block->blk->given_height >= 0)) {
+            if (lycon->block.given_height < 0.0f) {
                 lycon->block.given_height = 16;
             }
-            log_debug("%s broken image: cleared presentational hints, given_width=%.1f, given_height=%.1f", block->source_loc(),
+            log_debug("%s broken image: used specified or fallback dimensions, given_width=%.1f, given_height=%.1f", block->source_loc(),
                 lycon->block.given_width, lycon->block.given_height);
+        }
+    }
+
+    if (block->blk && lycon->block.given_width < 0.0f &&
+        !isnan(block->blk->given_width_percent)) {
+        float container_width = pa_block->content_width;
+        if (container_width > 0.0f) {
+            lycon->block.given_width = container_width * block->blk->given_width_percent / 100.0f;
+            block->blk->given_width = lycon->block.given_width;
+            log_debug("%s resolved percentage width %.0f%% against containing block %.1f -> %.1f",
+                      block->source_loc(), block->blk->given_width_percent,
+                      container_width, lycon->block.given_width);
         }
     }
 
@@ -5372,18 +5387,54 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
 
-        // CSS behavior for <center> element: block children should be horizontally centered
-        // This is achieved by applying margin:auto to block children
-        // Note: <center> is deprecated HTML but still widely used
-        if (block->parent && block->parent->is_element() && block->parent->tag() == HTM_TAG_CENTER) {
-            // Only apply centering to blocks that don't already have explicit margin values
+        CssEnum parent_legacy_block_align = CSS_VALUE__UNDEF;
+        for (View* ancestor = block->parent; ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
+            uintptr_t ancestor_tag = ancestor->tag();
+            ViewBlock* ancestor_block = ancestor->is_block()
+                ? lam::view_require_block(ancestor) : nullptr;
+            if (ancestor_tag == HTM_TAG_CENTER) {
+                parent_legacy_block_align = CSS_VALUE_CENTER;
+                break;
+            }
+            if (ancestor_block && ancestor_block->blk) {
+                if (ancestor_block->blk->legacy_block_align == CSS_VALUE_CENTER ||
+                    ancestor_block->blk->legacy_block_align == CSS_VALUE_RIGHT) {
+                    parent_legacy_block_align = ancestor_block->blk->legacy_block_align;
+                    break;
+                }
+                if (ancestor_block->blk->legacy_align_center_blocks) {
+                    parent_legacy_block_align = CSS_VALUE_CENTER;
+                    break;
+                }
+            }
+            if (ancestor->is_element()) {
+                DomElement* ancestor_elem = ancestor->as_element();
+                CssDeclaration* text_align_decl = ancestor_elem && ancestor_elem->specified_style
+                    ? style_tree_get_declaration(ancestor_elem->specified_style, CSS_PROPERTY_TEXT_ALIGN)
+                    : nullptr;
+                if (text_align_decl && text_align_decl->value &&
+                    !(text_align_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                      text_align_decl->value->data.keyword == CSS_VALUE_INHERIT)) {
+                    break;
+                }
+            }
+            if (ancestor_tag == HTM_TAG_TD || ancestor_tag == HTM_TAG_TH) break;
+        }
+
+        // Legacy HTML alignment maps align=center/right to -webkit-center/right,
+        // which also aligns block/table descendants unlike pure CSS text-align.
+        if (parent_legacy_block_align == CSS_VALUE_CENTER ||
+            parent_legacy_block_align == CSS_VALUE_RIGHT) {
+            // Only apply alignment to blocks that don't already have explicit margin values
             // and that are not full-width (i.e., have a defined width less than parent)
             if (block->width < pa_block->content_width &&
                 block->bound->margin.left_type != CSS_VALUE_AUTO &&
                 block->bound->margin.right_type != CSS_VALUE_AUTO) {
                 block->bound->margin.left_type = CSS_VALUE_AUTO;
-                block->bound->margin.right_type = CSS_VALUE_AUTO;
-                log_debug("%s applied margin:auto centering for block inside <center>", block->source_loc());
+                if (parent_legacy_block_align == CSS_VALUE_CENTER) {
+                    block->bound->margin.right_type = CSS_VALUE_AUTO;
+                }
+                log_debug("%s legacy block align applied: %d", block->source_loc(), parent_legacy_block_align);
             }
         }
 
@@ -5420,6 +5471,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // margin-trim — parent trims children's margins (CSS Box 4 §3.1)
         if (block->parent && block->parent->is_block()) {
             ViewBlock* mt_pa = lam::view_require_block(static_cast<View*>(block->parent));
+            if (is_quirky_container(mt_pa, lycon) &&
+                (mt_pa->tag_id == HTM_TAG_TD || mt_pa->tag_id == HTM_TAG_TH) &&
+                has_quirky_margin_top(block)) {
+                View* first = mt_pa->first_placed_child();
+                if (first == static_cast<View*>(block)) {
+                    log_debug("%s [QUIRKS] table cell trims first child UA margin.top=%f",
+                              block->source_loc(), block->bound->margin.top);
+                    block->bound->margin.top = 0;
+                }
+            }
             if (mt_pa->blk && mt_pa->blk->margin_trim) {
                 // CSS Box 4 §3.1: margin-trim:inline on a block container only
                 // trims the inline-start/end margins of the first/last line boxes,
@@ -7453,7 +7514,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // during parent-child margin collapse. Non-quirky margins
                         // (author-specified) still collapse normally.
                         bool quirky_container = is_quirky_container(parent, lycon);
-                        if (parent && parent->parent && !parent_creates_bfc &&
+                        if (parent && parent->parent && !is_root_element_block(parent) && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // Effective child margin-top for collapse: 0 if quirky in quirky container
                             float child_mt = (quirky_container && has_quirky_margin_top(block))

@@ -194,6 +194,8 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
+static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
+    int viewport_width, int viewport_height, float pixel_ratio);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -715,6 +717,74 @@ void extract_viewport_meta(Element* elem, DomDocument* doc) {
     }
 }
 
+static char* find_refresh_url_in_content(const char* content) {
+    if (!content) return nullptr;
+
+    const char* p = content;
+    while (*p) {
+        while (*p && (*p == ' ' || *p == '\t' || *p == ';')) p++;
+        if (strncasecmp(p, "url", 3) == 0) {
+            const char* q = p + 3;
+            while (*q && (*q == ' ' || *q == '\t')) q++;
+            if (*q == '=') {
+                q++;
+                while (*q && (*q == ' ' || *q == '\t')) q++;
+                char quote = 0;
+                if (*q == '\'' || *q == '"') {
+                    quote = *q;
+                    q++;
+                }
+                const char* end = q;
+                while (*end && ((quote && *end != quote) || (!quote && *end != ';'))) end++;
+                while (end > q && (end[-1] == ' ' || end[-1] == '\t')) end--;
+                size_t len = (size_t)(end - q);
+                if (len == 0) return nullptr;
+                char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
+                if (!out) return nullptr;
+                memcpy(out, q, len);
+                out[len] = '\0';
+                return out;
+            }
+        }
+        while (*p && *p != ';') p++;
+    }
+    return nullptr;
+}
+
+static char* find_meta_refresh_url(Element* elem) {
+    if (!elem) return nullptr;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return nullptr;
+
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "meta")) {
+        const char* http_equiv = extract_element_attribute(elem, "http-equiv", nullptr);
+        if (!http_equiv) http_equiv = extract_element_attribute(elem, "http_equiv", nullptr);
+        if (!http_equiv) http_equiv = extract_element_attribute(elem, "httpEquiv", nullptr);
+        if (http_equiv && str_ieq_const(http_equiv, strlen(http_equiv), "refresh")) {
+            const char* content = extract_element_attribute(elem, "content", nullptr);
+            char* refresh_url = find_refresh_url_in_content(content);
+            if (refresh_url && refresh_url[0]) {
+                return refresh_url;
+            }
+        }
+        return nullptr;
+    }
+
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "body")) {
+        return nullptr;
+    }
+
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            char* result = find_meta_refresh_url(child_item.element);
+            if (result) return result;
+        }
+    }
+    return nullptr;
+}
+
 /**
  * Extract <base href="..."> from the HTML document and return the URL
  * This is used to properly resolve relative URLs when loading remote HTML
@@ -778,12 +848,14 @@ float extract_transform_scale(CssDeclaration* transform_decl) {
                 CssValue* arg = func->args[0];
                 if (arg->type == CSS_VALUE_TYPE_NUMBER) {
                     float scale_x = (float)arg->data.number.value;
+#ifndef NDEBUG
                     float scale_y = scale_x;  // uniform scale
                     if (func->arg_count >= 2 && func->args[1] && func->args[1]->type == CSS_VALUE_TYPE_NUMBER) {
                         scale_y = (float)func->args[1]->data.number.value;
                     }
-                    // Return uniform scale (use x as primary)
                     log_info("[transform] Found scale(%.3f, %.3f)", scale_x, scale_y);
+#endif
+                    // Return uniform scale (use x as primary)
                     return scale_x;
                 }
             }
@@ -3075,6 +3147,16 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     execute_document_scripts(html_root, dom_doc, pool, html_url);
     log_mem_stage("load_html: after_scripts");
 
+    if (!dom_doc->pending_navigation_url) {
+        char* refresh_url = find_meta_refresh_url(html_root);
+        if (refresh_url && refresh_url[0]) {
+            dom_doc->pending_navigation_url = refresh_url;
+            log_info("meta_refresh_navigation: pending navigation to %s", refresh_url);
+        } else if (refresh_url) {
+            mem_free(refresh_url);
+        }
+    }
+
     auto t_scripts = high_resolution_clock::now();
 
     // Log JS DOM mutations — cascade will pick these up since it runs after scripts
@@ -3311,7 +3393,7 @@ static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
     return doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
+static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -3378,6 +3460,51 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
     }
 
     return doc;
+}
+
+DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
+    const int max_redirects = 8;
+    Url* current_base = base;
+    char* current_doc_url = doc_url;
+    char* owned_doc_url = nullptr;
+
+    for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
+        DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
+            viewport_width, viewport_height, pixel_ratio);
+        if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
+            if (owned_doc_url) mem_free(owned_doc_url);
+            return doc;
+        }
+
+        Url* resolved = doc->url
+            ? url_parse_with_base(doc->pending_navigation_url, doc->url)
+            : url_parse(doc->pending_navigation_url);
+        if (!resolved || !url_is_valid(resolved)) {
+            log_error("load_html_doc: invalid pending navigation URL: %s", doc->pending_navigation_url);
+            if (resolved) url_destroy(resolved);
+            if (owned_doc_url) mem_free(owned_doc_url);
+            return doc;
+        }
+
+        const char* href = url_get_href(resolved);
+        char* next_doc_url = href ? mem_strdup(href, MEM_CAT_LAYOUT) : nullptr;
+        url_destroy(resolved);
+        if (!next_doc_url) {
+            if (owned_doc_url) mem_free(owned_doc_url);
+            return doc;
+        }
+
+        log_info("load_html_doc: following document navigation to %s", next_doc_url);
+        free_document(doc);
+        if (owned_doc_url) mem_free(owned_doc_url);
+        owned_doc_url = next_doc_url;
+        current_base = nullptr;
+        current_doc_url = owned_doc_url;
+    }
+
+    log_error("load_html_doc: too many document redirects from %s", doc_url ? doc_url : "(null)");
+    if (owned_doc_url) mem_free(owned_doc_url);
+    return nullptr;
 }
 
 static char* escape_image_document_html_attr(const char* value) {
@@ -5923,8 +6050,42 @@ static bool layout_single_file(
         log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
         doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
     } else {
-        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool,
-                                   nullptr, track_source_lines);
+        const int max_redirects = 8;
+        for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
+            // layout CLI only needs load-time DOM mutations; event dispatch is not used
+            script_runner_set_retain_js_state(false);
+            script_runner_set_execute_external_scripts(true);
+            doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool,
+                                       nullptr, track_source_lines);
+            if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
+                break;
+            }
+
+            Url* next_url = doc->url
+                ? url_parse_with_base(doc->pending_navigation_url, doc->url)
+                : url_parse(doc->pending_navigation_url);
+            if (!next_url || !url_is_valid(next_url)) {
+                log_error("[Layout] Invalid pending navigation URL: %s", doc->pending_navigation_url);
+                if (next_url) url_destroy(next_url);
+                break;
+            }
+
+            const char* next_href = url_get_href(next_url);
+            log_info("[Layout] Following document navigation to %s", next_href ? next_href : "(null)");
+            script_runner_cleanup_js_state(doc);
+            dom_document_destroy(doc);
+            doc = nullptr;
+            if (input_url) url_destroy(input_url);
+            pool_destroy(pool);
+
+            input_url = next_url;
+            pool = pool_create();
+            if (!pool) {
+                log_error("Failed to create memory pool for redirected document: %s",
+                          next_href ? next_href : "(null)");
+                break;
+            }
+        }
     }
 
     if (!doc) {
