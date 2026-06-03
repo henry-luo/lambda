@@ -5924,11 +5924,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 (is_inline_block_auto_width ? "inline-block" : "float")),
                 fit_content, block->width, available);
 
-            // Update block width to shrink-to-fit size
-            // Round up to next 0.5px to prevent text wrapping due to floating-point precision issues
-            // while avoiding larger additions that prevent adjacent content from fitting
-            float rounded_width = ceilf(fit_content * 2.0f) / 2.0f;
-            block->width = rounded_width;
+            // Update block width to shrink-to-fit size.
+            // Inline-block max-content contributions are accumulated at subpixel
+            // precision by intrinsic sizing. Rounding each child upward here can
+            // make a shrink-wrapped parent immediately wrap content that measured
+            // as fitting, so keep inline-block widths exact.
+            float used_fit_width = is_inline_block_auto_width
+                ? fit_content
+                : ceilf(fit_content * 2.0f) / 2.0f;
+            block->width = used_fit_width;
 
             // CSS 2.1 §10.4: Apply min-width/max-width constraints to the
             // shrink-to-fit width. Elements with max-width (e.g., table with

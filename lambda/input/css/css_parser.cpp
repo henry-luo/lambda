@@ -2763,15 +2763,46 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         }
                         if (tokens[ti].type == CSS_TOKEN_FUNCTION && tokens[ti].value &&
                             strcmp(tokens[ti].value, "url(") == 0) {
-                            // @import url('file.css') — FUNCTION + STRING + RIGHT_PAREN
-                            for (int tj = ti + 1; tj < pos; tj++) {
-                                if (tokens[tj].type == CSS_TOKEN_WHITESPACE) continue;
-                                if (tokens[tj].type == CSS_TOKEN_STRING ||
-                                    tokens[tj].type == CSS_TOKEN_IDENT) {
-                                    import_url = tokens[tj].value;
+                            // @import url(...) may contain punctuation that is tokenized
+                            // as delimiters, e.g. http://host/css?family=Foo+Bar.
+                            int arg_start = ti + 1;
+                            while (arg_start < pos && tokens[arg_start].type == CSS_TOKEN_WHITESPACE) {
+                                arg_start++;
+                            }
+                            if (arg_start < pos && tokens[arg_start].type == CSS_TOKEN_STRING) {
+                                import_url = tokens[arg_start].value;
+                                break;
+                            }
+
+                            const char* raw_start = tokens[ti].start + tokens[ti].length;
+                            const char* raw_end = nullptr;
+                            for (int tj = arg_start; tj < pos; tj++) {
+                                if (tokens[tj].type == CSS_TOKEN_RIGHT_PAREN) {
+                                    raw_end = tokens[tj].start;
                                     break;
                                 }
-                                break;
+                            }
+                            if (!raw_end && pos > arg_start) {
+                                raw_end = tokens[pos - 1].start + tokens[pos - 1].length;
+                            }
+                            while (raw_start && raw_end && raw_start < raw_end &&
+                                   (*raw_start == ' ' || *raw_start == '\t' || *raw_start == '\n' ||
+                                    *raw_start == '\r' || *raw_start == '\f')) {
+                                raw_start++;
+                            }
+                            while (raw_start && raw_end && raw_end > raw_start &&
+                                   (raw_end[-1] == ' ' || raw_end[-1] == '\t' || raw_end[-1] == '\n' ||
+                                    raw_end[-1] == '\r' || raw_end[-1] == '\f')) {
+                                raw_end--;
+                            }
+                            if (raw_start && raw_end && raw_end > raw_start) {
+                                size_t raw_len = (size_t)(raw_end - raw_start);
+                                char* url_buf = (char*)pool_calloc(pool, raw_len + 1);
+                                if (url_buf) {
+                                    memcpy(url_buf, raw_start, raw_len);
+                                    url_buf[raw_len] = '\0';
+                                    import_url = url_buf;
+                                }
                             }
                             break;
                         }
