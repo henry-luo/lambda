@@ -267,6 +267,40 @@ inline bool is_hole_sentinel(Item raw) {
     return HoleSentinel::is(raw);
 }
 
+template<class Ret>
+class [[nodiscard]] ItemOrError {
+    Ret ret_;
+
+public:
+    explicit ItemOrError(Ret ret) : ret_(ret) {}
+
+    bool ok() const {
+        return ret_.err == nullptr;
+    }
+
+    bool has_error() const {
+        return ret_.err != nullptr;
+    }
+
+    LambdaError* error() const {
+        return ret_.err;
+    }
+
+    auto value() const {
+        assert(!ret_.err);
+        return ret_.value;
+    }
+
+    Ret raw() const {
+        return ret_;
+    }
+};
+
+template<class Ret>
+ItemOrError<Ret> item_or_error(Ret ret) {
+    return ItemOrError<Ret>(ret);
+}
+
 typedef GcPtr<ShapeEntry> ShapeRef;
 typedef GcPtr<const ShapeEntry> ConstShapeRef;
 

@@ -3785,6 +3785,22 @@ int main(int argc, char *argv[]) {
         if (hot_reload) {
             context = &batch_context;
             js_batch_reset();
+            if (batch_context.name_pool) {
+                name_pool_release(batch_context.name_pool);
+                batch_context.name_pool = NULL;
+            }
+            if (batch_context.heap) {
+                heap_destroy();
+                batch_context.heap = NULL;
+            }
+            if (batch_context.nursery) {
+                gc_nursery_destroy(batch_context.nursery);
+                batch_context.nursery = NULL;
+            }
+            if (batch_context.type_list) {
+                arraylist_free((ArrayList*)batch_context.type_list);
+                batch_context.type_list = NULL;
+            }
             context = NULL;
         }
 
@@ -4029,6 +4045,8 @@ int main(int argc, char *argv[]) {
 
     // Clean up runtime (dumps profiling data if LAMBDA_PROFILE=1)
     runtime_cleanup(&runtime);
+
+    lambda_stack_cleanup();
 
     // Note: memtrack_shutdown is called via atexit handler
 

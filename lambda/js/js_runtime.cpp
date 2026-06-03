@@ -30,6 +30,62 @@ extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int 
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
+static ArrayList* g_js_array_runtime_item_buffers = NULL;
+
+static bool js_array_runtime_items_forget(Item* items) {
+    if (!g_js_array_runtime_item_buffers || !items) return false;
+    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
+        if (g_js_array_runtime_item_buffers->data[i] == items) {
+            g_js_array_runtime_item_buffers->data[i] =
+                g_js_array_runtime_item_buffers->data[g_js_array_runtime_item_buffers->length - 1];
+            g_js_array_runtime_item_buffers->length--;
+            if (g_js_array_runtime_item_buffers->length == 0) {
+                arraylist_free(g_js_array_runtime_item_buffers);
+                g_js_array_runtime_item_buffers = NULL;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+static void js_array_runtime_items_register(Item* items) {
+    if (!items) return;
+    if (!g_js_array_runtime_item_buffers) {
+        g_js_array_runtime_item_buffers = arraylist_new(32);
+        if (!g_js_array_runtime_item_buffers) return;
+    }
+    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
+        if (g_js_array_runtime_item_buffers->data[i] == items) return;
+    }
+    arraylist_append(g_js_array_runtime_item_buffers, items);
+}
+
+extern "C" bool js_array_runtime_items_release(Item* items) {
+    if (!js_array_runtime_items_forget(items)) return false;
+    mem_free(items);
+    return true;
+}
+
+extern "C" void js_array_runtime_items_cleanup_all(void) {
+    if (!g_js_array_runtime_item_buffers) return;
+    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
+        if (g_js_array_runtime_item_buffers->data[i]) {
+            mem_free(g_js_array_runtime_item_buffers->data[i]);
+        }
+    }
+    arraylist_free(g_js_array_runtime_item_buffers);
+    g_js_array_runtime_item_buffers = NULL;
+}
+
+static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capacity) {
+    if (!arr) return;
+    if (arr->items) js_array_runtime_items_release(arr->items);
+    arr->items = items;
+    arr->capacity = capacity;
+    js_array_runtime_items_register(items);
+}
+
 // =============================================================================
 // Object Functions
 // =============================================================================
@@ -4803,7 +4859,7 @@ static Item js_array_numeric_key_to_property_key(Item key) {
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
 }
 
-static void js_array_delete_sparse_indices_from(Array* arr, int64_t new_len) {
+static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t new_len) {
     if (!arr || arr->extra == 0) return;
     Map* pm = (Map*)(uintptr_t)arr->extra;
     if (!pm || !pm->type) return;
@@ -5008,8 +5064,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                             if (arr->items && arr->length > 0) {
                                 memcpy(new_items, arr->items, arr->length * sizeof(Item));
                             }
-                            arr->items = new_items;
-                            arr->capacity = new_cap;
+                            js_array_install_runtime_items(arr, new_items, new_cap);
                         }
                         // Fill new slots with holes (deleted sentinel)
                         Item hole = lam::hole_sentinel_item();
@@ -5019,7 +5074,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                         arr->length = new_len;
                     } else if (new_len < arr->length) {
                         // Truncate
-                        js_array_delete_sparse_indices_from(arr, new_len);
+                        js_array_delete_sparse_indices_from(lam::gc_borrow(arr), new_len);
                         arr->length = new_len;
                     }
                 }
@@ -6569,7 +6624,8 @@ static Item js_array_new_sparse_length(int64_t length) {
     if (length <= SPARSE_GAP_MAX) {
         // Allocate items array directly
         arr->capacity = length + 4;
-        arr->items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_JS_RUNTIME);
+        Item* items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_JS_RUNTIME);
+        js_array_install_runtime_items(arr, items, arr->capacity);
         // Initialize all slots to holes (deleted sentinel) per ES spec.
         // new Array(n) creates a sparse array — slots are holes, not undefined.
         // js_array_get_int returns undefined when reading a hole.
@@ -21294,8 +21350,7 @@ static Item js_array_species_create(Item original_array, int64_t length) {
                     if (a->items && a->length > 0) {
                         memcpy(new_items, a->items, a->length * sizeof(Item));
                     }
-                    a->items = new_items;
-                    a->capacity = cap;
+                    js_array_install_runtime_items(a, new_items, cap);
                 }
             }
             return result;
@@ -21352,7 +21407,7 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
 // If the array slot is a sentinel (hole), checks own accessors first,
 // then walks the prototype chain only if check_proto is true.
 // When present=true, *out receives the value (from prototype if needed).
-static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, bool check_proto) {
+static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Item* out, bool check_proto) {
     if (idx >= 0 && idx < a->length && idx < a->capacity &&
         a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
         // Own element — fast path
@@ -21413,7 +21468,7 @@ static bool js_array_has_element(Item arr, Array* a, int64_t idx, Item* out, boo
 // true holes by finding the next own dense or companion-map index. The caller
 // still refreshes the prototype check after each callback; if user code installs
 // numeric prototype keys, iteration falls back to the sequential HasProperty path.
-static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, int64_t len,
+static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_t start, int64_t len,
         int64_t* out_index, Item* out_elem) {
     if (!a) return false;
     if (start < 0) start = 0;
@@ -21454,7 +21509,7 @@ static bool js_array_find_next_own_element(Item arr, Array* a, int64_t start, in
     return true;
 }
 
-static bool js_array_has_numeric_own_accessors(Array* a) {
+static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
     if (!a || a->extra == 0) return false;
     Map* props = (Map*)(uintptr_t)a->extra;
     if (!props || !props->type) return false;
@@ -21468,7 +21523,7 @@ static bool js_array_has_numeric_own_accessors(Array* a) {
     return false;
 }
 
-static bool js_array_find_prev_own_element(Item arr, Array* a, int64_t start,
+static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_t start,
         int64_t* out_index, Item* out_elem) {
     if (!a) return false;
     if (start >= a->length) start = a->length - 1;
@@ -21518,10 +21573,10 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     Item search_val = (Item){.item = i2it((int)search)};
     bool check_proto = false;
     bool checked_proto = false;
-    if (array->extra != 0 && !js_array_has_numeric_own_accessors(array) && !js_proto_chain_has_numeric_keys(arr)) {
+    if (array->extra != 0 && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_proto_chain_has_numeric_keys(arr)) {
         int64_t idx = 0;
         Item elem = ItemNull;
-        while (js_array_find_next_own_element(arr, array, idx, array->length, &idx, &elem)) {
+        while (js_array_find_next_own_element(arr, lam::gc_borrow(array), idx, array->length, &idx, &elem)) {
             if (elem.item == search_val.item) return (Item){.item = i2it((int)idx)};
             if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
                 return (Item){.item = i2it((int)idx)};
@@ -21549,7 +21604,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
                     checked_proto = true;
                 }
                 if (!check_proto) continue;
-                if (!js_array_has_element(arr, array, (int)int_idx, &elem, true)) continue;
+                if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, true)) continue;
             }
             if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
             if (get_type_id(elem) == LMD_TYPE_INT) continue;
@@ -21560,7 +21615,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     check_proto = js_proto_chain_has_numeric_keys(arr);
     for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
         Item elem;
-        if (!js_array_has_element(arr, array, (int)int_idx, &elem, check_proto)) continue;
+        if (!js_array_has_element(arr, lam::gc_borrow(array), (int)int_idx, &elem, check_proto)) continue;
         if (elem.item == search_val.item) return (Item){.item = i2it((int)int_idx)};
         if (get_type_id(elem) == LMD_TYPE_INT) continue;
         if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it((int)int_idx)};
@@ -22336,7 +22391,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             }
         }
         if (get_type_id(object) == LMD_TYPE_ARRAY &&
-                !js_array_has_numeric_own_accessors(object.array) &&
+                !js_array_has_numeric_own_accessors(lam::gc_borrow(object.array)) &&
                 !js_proto_chain_has_numeric_keys(object)) {
             Array* a = object.array;
             int64_t own_idx = k;
@@ -22346,7 +22401,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                 // tables.  Avoid routing every integer slot through generic
                 // strict equality; non-integer slots still need the full path
                 // for ES semantics such as Number-vs-BigInt/object mismatch.
-                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
                     if (elem.item == search_val.item) {
                         return (Item){.item = i2it(own_idx)};
                     }
@@ -22356,7 +22411,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                     own_idx++;
                 }
             } else {
-                while (js_array_find_next_own_element(object, a, own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
                     if (it2b(js_strict_equal(elem, search_val))) {
                         return (Item){.item = i2it(own_idx)};
                     }
@@ -22397,7 +22452,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
         k = len - 1;
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY &&
-            !js_array_has_numeric_own_accessors(object.array) &&
+            !js_array_has_numeric_own_accessors(lam::gc_borrow(object.array)) &&
             !js_proto_chain_has_numeric_keys(object)) {
         Array* a = object.array;
         int64_t own_idx = k;
@@ -22406,7 +22461,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             // Mirror the forward indexOf fast path for lastIndexOf(int): keep
             // the common dense-int scan branch-free while preserving generic
             // strict equality for non-integer elements.
-            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
                 if (elem.item == search_val.item) {
                     return (Item){.item = i2it(own_idx)};
                 }
@@ -22416,7 +22471,7 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
                 own_idx--;
             }
         } else {
-            while (js_array_find_prev_own_element(object, a, own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
                 if (it2b(js_strict_equal(elem, search_val))) {
                     return (Item){.item = i2it(own_idx)};
                 }
@@ -22623,11 +22678,11 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         bool present = false;
         if (object_is_array) {
             if (!check_proto) {
-                present = js_array_find_next_own_element(object, object_array, k, len, &idx, &elem);
+                present = js_array_find_next_own_element(object, lam::gc_borrow(object_array), k, len, &idx, &elem);
                 if (!present) break;
             } else {
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(object, object_array, idx, &elem, true)) {
+                    if (js_array_has_element(object, lam::gc_borrow(object_array), idx, &elem, true)) {
                         present = true;
                         break;
                     }
@@ -23068,7 +23123,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                     }
                     if (!check_proto) continue;
                     int i = (int)i64;
-                    if (!js_array_has_element(arr, a, i, &elem, true)) continue;
+                    if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, true)) continue;
                 }
                 if (elem.item == search_val.item) {
                     return (Item){.item = i2it((int)i64)};
@@ -23083,7 +23138,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             // v37: ES spec — use HasProperty (checks prototype chain for holes)
             Item elem;
             int i = (int)i64;
-            if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, check_proto)) continue;
             if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -23224,7 +23279,7 @@ includes_slow_path:
                     // hole: check prototype chain to find value (Array.prototype or Object.prototype)
                     if (src_has_proto) {
                         Item proto_elem = ItemNull;
-                        bool found = js_array_has_element(arr, src, start + i, &proto_elem, true);
+                        bool found = js_array_has_element(arr, lam::gc_borrow(src), start + i, &proto_elem, true);
                         if (found && proto_elem.item != ItemNull.item) elem = proto_elem;
                     } else {
                         // still check Array.prototype directly (may have numeric properties
@@ -23351,7 +23406,7 @@ includes_slow_path:
         for (int i = 0; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes) — preserve holes in result
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) {
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) {
                 if (dst) dst->items[i] = lam::hole_sentinel_item();
                 continue;
             }
@@ -23391,7 +23446,7 @@ includes_slow_path:
         for (int i = 0; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
@@ -23429,7 +23484,7 @@ includes_slow_path:
             bool found = false;
             for (; k < src->length; k++) {
                 Item elem;
-                if (js_array_has_element(arr, src, k, &elem, check_proto)) {
+                if (js_array_has_element(arr, lam::gc_borrow(src), k, &elem, check_proto)) {
                     accumulator = elem;
                     found = true;
                     break;
@@ -23449,7 +23504,7 @@ includes_slow_path:
         for (int i = start_idx; i < len; i++) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;
@@ -23476,11 +23531,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23596,11 +23651,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23636,11 +23691,11 @@ includes_slow_path:
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, src, i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
-                    if (js_array_has_element(arr, src, idx, &elem, true)) {
+                    if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, true)) {
                         found = true;
                         break;
                     }
@@ -23781,12 +23836,11 @@ includes_slow_path:
             if (new_len + 4 > a->capacity) {
                 int new_cap = new_len + 4;
                 Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                if (a->items && a->length > 0) {
-                    memcpy(new_items, a->items, a->length * sizeof(Item));
+                    if (a->items && a->length > 0) {
+                        memcpy(new_items, a->items, a->length * sizeof(Item));
+                    }
+                    js_array_install_runtime_items(a, new_items, new_cap);
                 }
-                a->items = new_items;
-                a->capacity = new_cap;
-            }
             // move elements after delete region to their new positions
             int elements_to_move = old_len - start - delete_count;
             if (elements_to_move > 0) {
@@ -23886,7 +23940,7 @@ includes_slow_path:
         for (int64_t i = dense_from; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, a, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(a), i, &elem, check_proto)) continue;
             if (it2b(js_strict_equal(elem, search_val))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -23914,7 +23968,7 @@ includes_slow_path:
             bool found = false;
             for (; k >= 0; k--) {
                 Item elem;
-                if (js_array_has_element(arr, src, k, &elem, check_proto)) {
+                if (js_array_has_element(arr, lam::gc_borrow(src), k, &elem, check_proto)) {
                     accumulator = elem;
                     found = true;
                     break;
@@ -23933,7 +23987,7 @@ includes_slow_path:
         for (int i = start_idx; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
-            if (!js_array_has_element(arr, src, i, &elem, check_proto)) continue;
+            if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, 4);
             if (js_exception_pending) break;

@@ -67,6 +67,12 @@ extern __thread volatile bool _lambda_stack_overflow_flag;
 void lambda_stack_init(void);
 
 /**
+ * Release process-wide stack overflow protection resources.
+ * Intended for orderly process shutdown after all script execution is done.
+ */
+void lambda_stack_cleanup(void);
+
+/**
  * Report stack overflow error and set runtime error state.
  * Called from the recovery path after siglongjmp (not from the signal handler).
  *

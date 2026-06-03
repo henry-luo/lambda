@@ -498,5 +498,11 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
             mt->var_scopes[i] = NULL;
         }
     }
+    for (int i = 0; i < mt->class_count && i < 512; i++) {
+        if (mt->class_entries[i].shape_cache_ptr) {
+            mem_free(mt->class_entries[i].shape_cache_ptr);
+            mt->class_entries[i].shape_cache_ptr = NULL;
+        }
+    }
     jm_free_scope_env_names(mt->func_entries, mt->func_count);
 }
