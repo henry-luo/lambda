@@ -25,11 +25,11 @@ TEST_F(UrlTest, BasicUrlParsing) {
     EXPECT_NE(url, nullptr) << "url_parse should handle absolute URLs";
     EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
 
-    if (url->hostname && url->hostname->chars) {
+    if (url->hostname) {
         EXPECT_STREQ(url->hostname->chars, "example.com") << "Host should be correct";
     }
 
-    if (url->pathname && url->pathname->chars) {
+    if (url->pathname) {
         EXPECT_STREQ(url->pathname->chars, "/path") << "Path should be correct";
     }
 
@@ -42,7 +42,7 @@ TEST_F(UrlTest, HttpUrlParsing) {
     EXPECT_NE(url, nullptr) << "HTTP URL should parse successfully";
     EXPECT_EQ(url->scheme, URL_SCHEME_HTTP) << "Scheme should be HTTP";
 
-    if (url->hostname && url->hostname->chars) {
+    if (url->hostname) {
         EXPECT_STREQ(url->hostname->chars, "example.com") << "Host should be correct";
     }
 
@@ -55,7 +55,7 @@ TEST_F(UrlTest, UrlWithoutPath) {
     EXPECT_NE(url, nullptr) << "URL without path should parse";
     EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
 
-    if (url->hostname && url->hostname->chars) {
+    if (url->hostname) {
         EXPECT_STREQ(url->hostname->chars, "example.com") << "Host should be correct";
     }
 
@@ -97,7 +97,7 @@ TEST_F(UrlTest, EdgeCases) {
     url = url_parse("http://example.com/");
     EXPECT_NE(url, nullptr) << "URL with trailing slash should parse";
 
-    if (url && url->pathname && url->pathname->chars) {
+    if (url && url->pathname) {
         EXPECT_STREQ(url->pathname->chars, "/") << "Path should be /";
     }
     if (url) url_destroy(url);
@@ -142,11 +142,11 @@ TEST_F(UrlTest, UrlComponents) {
         EXPECT_EQ(url->port_number, 9443) << "Custom port should be parsed";
 
         // Check that components exist (they may be NULL if not supported)
-        if (url->hostname && url->hostname->chars) {
+        if (url->hostname) {
             EXPECT_STREQ(url->hostname->chars, "example.com") << "Host should be correct";
         }
 
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/deep/path") << "Path should be correct";
         }
 
@@ -175,16 +175,16 @@ TEST_F(UrlTest, RelativeUrlFragmentOnly) {
     EXPECT_NE(url, nullptr) << "Fragment-only relative URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
         }
-        if (url->search && url->search->chars) {
+        if (url->search) {
             EXPECT_STREQ(url->search->chars, "?query=value") << "Query should be preserved";
         }
-        if (url->hash && url->hash->chars) {
+        if (url->hash) {
             EXPECT_STREQ(url->hash->chars, "#newfragment") << "Fragment should be updated";
         }
         url_destroy(url);
@@ -203,13 +203,13 @@ TEST_F(UrlTest, RelativeUrlQueryOnly) {
     EXPECT_NE(url, nullptr) << "Query-only relative URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
         }
-        if (url->search && url->search->chars) {
+        if (url->search) {
             EXPECT_STREQ(url->search->chars, "?newquery=newvalue") << "Query should be updated";
         }
         // Fragment should be removed in query-only resolution
@@ -229,10 +229,10 @@ TEST_F(UrlTest, RelativeUrlAbsolutePath) {
     EXPECT_NE(url, nullptr) << "Absolute path relative URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/new/absolute/path") << "Path should be updated";
         }
         // Query and fragment should be removed
@@ -264,10 +264,10 @@ TEST_F(UrlTest, RelativeUrlQueryWithFragment) {
     EXPECT_NE(url, nullptr) << "Query with fragment URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
         }
         url_destroy(url);
@@ -286,10 +286,10 @@ TEST_F(UrlTest, RelativeUrlAuthorityRelative) {
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be preserved";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "newhost.com") << "Host should be updated";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/newpath") << "Path should be updated";
         }
         url_destroy(url);
@@ -307,7 +307,7 @@ TEST_F(UrlTest, RelativeUrlPathRelative) {
     EXPECT_NE(url, nullptr) << "Path-relative URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
         // Path resolution should handle .. segments
@@ -326,7 +326,7 @@ TEST_F(UrlTest, RelativeUrlPathWithSubdirectory) {
     EXPECT_NE(url, nullptr) << "Relative file URL should resolve";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
         }
         // Should resolve relative to directory containing base
@@ -371,7 +371,7 @@ TEST_F(UrlTest, RelativeUrlDotSegmentsBeyondRoot) {
     EXPECT_NE(url, nullptr) << "Should handle excessive .. segments";
     if (url) {
         EXPECT_TRUE(url->is_valid) << "URL should still be valid";
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             // Should not go beyond root
             EXPECT_EQ(url->pathname->chars[0], '/') << "Path should start with /";
         }
@@ -407,7 +407,7 @@ TEST_F(UrlTest, RelativeUrlEmptyInput) {
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
         // Should be identical to base
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "example.com") << "Host should match base";
         }
         url_destroy(url);
@@ -441,7 +441,7 @@ TEST_F(UrlTest, RelativeUrlAbsoluteUrlInput) {
     if (url) {
         EXPECT_TRUE(url->is_valid) << "Absolute URL should be valid";
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTP) << "Should use new scheme, not base";
-        if (url->host && url->host->chars) {
+        if (url->host) {
             EXPECT_STREQ(url->host->chars, "other.com") << "Should use new host, not base";
         }
         url_destroy(url);

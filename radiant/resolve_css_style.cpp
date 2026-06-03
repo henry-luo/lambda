@@ -1037,14 +1037,12 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 // modern space-separated syntax
                 const CssValue* list = func->args[0];
                 int num_idx = 0;
-                bool found_slash = false;
 
                 for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
                     const CssValue* v = list->data.list.values[i];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
                         strcmp(v->data.custom_property.name, "/") == 0) {
-                        found_slash = true;
                         continue;
                     }
                     if (v->type == CSS_VALUE_TYPE_FUNCTION || v->type == CSS_VALUE_TYPE_VAR) continue;
@@ -3733,6 +3731,17 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // computed font-size unless author CSS explicitly set font-size.
             if (prop_id == CSS_PROPERTY_FONT_SIZE) {
                 uintptr_t tag = dom_elem->tag();
+                if (tag == HTM_TAG_TABLE && lycon->doc && lycon->doc->view_tree &&
+                    is_quirks_mode(lycon->doc->view_tree->html_version)) {
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    if (!span->font) {
+                        span->font = alloc_font_prop(lycon);
+                    }
+                    span->font->font_size = 16.0f;
+                    span->font->font_size_from_medium = true;
+                    log_debug("[FONT INHERIT] Quirks table keeps initial medium font-size");
+                    continue;
+                }
                 if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD ||
                     tag == HTM_TAG_SAMP || tag == HTM_TAG_TT) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
@@ -3868,6 +3877,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 log_debug("[FONT INHERIT] Found computed font-size in parent <%s>: %.1f",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->font_size);
                 ViewSpan* span = lam::view_require_element(lycon->view);
+                if (span->font && span->font->font_size > 0.0f) {
+                    log_debug("[FONT INHERIT] Keeping existing element font-size: %.1f",
+                        span->font->font_size);
+                    continue;
+                }
                 if (!span->font) {
                     span->font = alloc_font_prop(lycon);
                 }

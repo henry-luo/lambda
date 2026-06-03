@@ -8,10 +8,8 @@
 // Forward declarations for callback functions
 static bool collect_nodes_callback(AvlNode* avl_node, void* context);
 static bool collect_computed_callback(AvlNode* avl_node, void* context);
-static bool print_cascade_callback(AvlNode* avl_node, void* context);
 static bool print_tree_callback(StyleNode* node, void* context);
 static bool validate_tree_callback(StyleNode* node, void* context);
-static bool collect_selectors_callback(StyleNode* node, void* context);
 static bool merge_tree_callback(StyleNode* node, void* context);
 static bool clone_tree_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
@@ -830,23 +828,6 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
     return true;
 }
 
-static bool print_cascade_callback(AvlNode* avl_node, void* context) {
-    StyleNode* node = (StyleNode*)avl_node->declaration;
-    CssPropertyId property_id = static_cast<CssPropertyId>(avl_node->property_id);
-    const char* property_name = css_property_get_name(property_id);
-
-    printf("    %s: ", property_name ? property_name : "unknown");
-
-    if (node->winning_decl) {
-        printf("(declaration present, specificity: %u, source: %d)\n",
-               css_specificity_to_value(node->winning_decl->specificity),
-               node->winning_decl->source_order);
-    } else {
-        printf("(no value)\n");
-    }
-    return true;
-}
-
 static bool print_tree_callback(StyleNode* node, void* context) {
     printf("  Property %lu: ", node->base.property_id);
 
@@ -882,19 +863,6 @@ static bool validate_tree_callback(StyleNode* node, void* context) {
         weak = weak->next;
     }
 
-    return true;
-}
-
-static bool collect_selectors_callback(StyleNode* node, void* context) {
-    struct CollectSelectorsContext* ctx = (struct CollectSelectorsContext*)context;
-
-    // Simplified - we don't have selector_str in our structure
-    if (node->winning_decl) {
-        if (ctx->count && *(ctx->count) < ctx->capacity) {
-            ctx->selectors[*(ctx->count)] = (char*)"<selector>";
-            (*(ctx->count))++;
-        }
-    }
     return true;
 }
 

@@ -642,11 +642,6 @@ static Item js_ee_static_getEventListeners(Item emitter, Item event_name) {
     return js_ee_listeners(emitter, event_name);
 }
 
-// static EventEmitter.listenerCount(emitter, eventName)
-static Item js_ee_static_listenerCount(Item emitter, Item event_name) {
-    return js_ee_listenerCount(emitter, event_name, ItemNull);
-}
-
 static Item events_namespace = {0};
 
 static void ee_set_method(Item ns, const char* name, void* func_ptr, int param_count) {

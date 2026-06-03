@@ -29,6 +29,7 @@ typedef struct LayoutContainingBlock {
 
 bool layout_view_is_abs_or_fixed(ViewBlock* block);
 ViewBlock* layout_nearest_block_ancestor(ViewElement* view);
+bool layout_is_initial_containing_block(LayoutContext* lycon, ViewBlock* block);
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block);
 LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon);

@@ -53,10 +53,7 @@ const int FLAG_WE_HAVE_INSTRUCTIONS = 1 << 8;
 // glyf flags
 const int FLAG_OVERLAP_SIMPLE_BITMAP = 1 << 0;
 
-const size_t kCheckSumAdjustmentOffset = 8;
-
 const size_t kEndPtsOfContoursOffset = 10;
-const size_t kCompositeGlyphBegin = 10;
 
 // 98% of Google Fonts have no glyph above 5k bytes
 // Largest glyph ever observed was 72k bytes

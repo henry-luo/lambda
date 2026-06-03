@@ -59,7 +59,7 @@ static Target* test_item_to_target(uint64_t raw, Url* cwd) {
             default: target->scheme = TARGET_SCHEME_UNKNOWN; break;
         }
         // compute hash from href string using hashmap_sip (matching target.cpp)
-        if (url->href && url->href->chars) {
+        if (url->href) {
             target->url_hash = hashmap_sip(url->href->chars, strlen(url->href->chars),
                                            0x12AE406AB1E59A3CULL, 0x7F4A519D3E2B8C01ULL);
         }

@@ -8,8 +8,6 @@ using namespace lambda;
 
 static const int RTF_MAX_DEPTH = 512;
 
-static Item parse_rtf_content(InputContext& ctx, const char **rtf, int depth = 0);
-
 // RTF color table entry
 typedef struct {
     int red;
@@ -30,21 +28,6 @@ typedef struct {
     int parameter;
     bool has_parameter;
 } RTFControlWord;
-
-static void skip_to_brace(const char **rtf, char target_brace) {
-    int brace_count = 0;
-    while (**rtf) {
-        if (**rtf == '{') {
-            brace_count++;
-        } else if (**rtf == '}') {
-            brace_count--;
-            if (brace_count == 0 && target_brace == '}') {
-                break;
-            }
-        }
-        (*rtf)++;
-    }
-}
 
 static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimiter) {
     MarkBuilder& builder = ctx.builder;
@@ -264,31 +247,6 @@ static Array* parse_font_table(InputContext& ctx, const char **rtf) {
     return fonts;
 }
 
-static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
-    Input* input = ctx.input();
-    Map* props = map_pooled(input->pool);
-    if (!props) return NULL;
-
-    while (**rtf && **rtf != '}') {
-        if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(ctx, rtf);
-            if (cw.keyword) {
-                Item value;
-
-                if (cw.has_parameter) {
-                    value = ctx.builder.createFloat((double)cw.parameter);
-                } else {
-                    value = {.item = b2it(true)};
-                }
-                ctx.builder.putToMap(lam::gc_borrow(props), cw.keyword, value);
-            }
-        } else {
-            (*rtf)++;
-        }
-    }
-    return props;
-}
-
 static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) {
     Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder;
@@ -378,16 +336,6 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
         ctx.builder.putToMap(lam::gc_borrow(group), format_key, format_item);
     }
     return {.item = (uint64_t)group};
-}
-
-static Item parse_rtf_content(InputContext& ctx, const char **rtf, int depth) {
-    skip_whitespace(rtf);
-
-    if (**rtf == '{') {
-        return parse_rtf_group(ctx, rtf, depth);
-    }
-
-    return {.item = ITEM_ERROR};
 }
 
 void parse_rtf(Input* input, const char* rtf_string) {

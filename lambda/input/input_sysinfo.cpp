@@ -356,7 +356,7 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     // Parse URL components from host and pathname
 
     // Check if pathname is null
-    if (!url->pathname || !url->pathname->chars) {
+    if (!url->pathname) {
         log_error("URL pathname is null or empty");
         return nullptr;
     }

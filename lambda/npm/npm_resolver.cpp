@@ -19,17 +19,6 @@ typedef struct {
     char* range;
 } ResolveTask;
 
-// check if a package@version is already resolved
-static bool is_resolved(NpmResolutionResult* result, const char* name, const char* version) {
-    for (int i = 0; i < result->count; i++) {
-        if (strcmp(result->packages[i].name, name) == 0 &&
-            strcmp(result->packages[i].version, version) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // check if a package name is already resolved (any version)
 static bool has_package(NpmResolutionResult* result, const char* name) {
     for (int i = 0; i < result->count; i++) {

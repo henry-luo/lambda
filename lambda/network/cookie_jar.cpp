@@ -135,7 +135,7 @@ static bool path_matches(const char* request_path, const char* cookie_path) {
 // RFC 6265 §5.1.4: compute default-path from request URI
 static char* default_path_from_url(const char* url) {
     Url* parsed = parse_url(NULL, url);
-    if (!parsed || !parsed->pathname || !parsed->pathname->chars) {
+    if (!parsed || !parsed->pathname) {
         if (parsed) url_destroy(parsed);
         return jar_strdup("/");
     }
@@ -164,22 +164,17 @@ static char* host_from_url(const char* url) {
     Url* parsed = parse_url(NULL, url);
     if (!parsed) return nullptr;
     char* host = nullptr;
-    if (parsed->host && parsed->host->chars) {
+    if (parsed->host) {
         host = jar_strdup(parsed->host->chars);
     }
     url_destroy(parsed);
     return host;
 }
 
-// Check if URL is secure (HTTPS)
-static bool url_is_secure(const char* url) {
-    return (strncasecmp(url, "https://", 8) == 0);
-}
-
 // Extract path from URL
 static char* path_from_url(const char* url) {
     Url* parsed = parse_url(NULL, url);
-    if (!parsed || !parsed->pathname || !parsed->pathname->chars) {
+    if (!parsed || !parsed->pathname) {
         if (parsed) url_destroy(parsed);
         return jar_strdup("/");
     }
@@ -654,7 +649,9 @@ void cookie_jar_save(CookieJar* jar) {
     fprintf(f, "# domain\tpath\tsecure\texpires\tname\tvalue\thttponly\tsamesite\n");
 
     time_t now = time(NULL);
+#ifndef NDEBUG
     int saved = 0;
+#endif
     for (int i = 0; i < jar->count; i++) {
         CookieEntry* e = jar->entries[i];
         // skip session cookies and expired
@@ -670,13 +667,17 @@ void cookie_jar_save(CookieJar* jar) {
                 e->value ? e->value : "",
                 e->http_only ? 1 : 0,
                 (int)e->same_site);
+#ifndef NDEBUG
         saved++;
+#endif
     }
 
     fclose(f);
     pthread_mutex_unlock(&jar->lock);
 
+#ifndef NDEBUG
     log_debug("cookie_jar: saved %d persistent cookies to %s", saved, jar->storage_path);
+#endif
 }
 
 void cookie_jar_load(CookieJar* jar) {

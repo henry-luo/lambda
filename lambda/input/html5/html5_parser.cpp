@@ -984,7 +984,7 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
     // Get comment data - might be empty or null
     const char* comment_data = "";
     size_t comment_len = 0;
-    if (token->data && token->data->chars) {
+    if (token->data) {
         comment_data = token->data->chars;
         comment_len = token->data->len;
     }

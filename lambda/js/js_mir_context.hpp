@@ -247,7 +247,7 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
 }
 
 // Ensure captures array has room for at least one more entry
-static void jm_ensure_captures_capacity(JsFuncCollected* fc) {
+static void __attribute__((unused)) jm_ensure_captures_capacity(JsFuncCollected* fc) {
     if (fc->capture_count >= fc->captures_capacity) {
         int new_cap = fc->captures_capacity == 0 ? 16 : fc->captures_capacity * 2;
         JsCaptureEntry* new_arr = (JsCaptureEntry*)mem_calloc(new_cap, sizeof(JsCaptureEntry), MEM_CAT_JS_RUNTIME);
@@ -474,7 +474,7 @@ struct JsMirTranspiler {
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 };
 
-static void jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
+static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
     if (mt->import_cache) {
         hashmap_free(mt->import_cache);
@@ -496,6 +496,12 @@ static void jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
         if (mt->var_scopes[i]) {
             hashmap_free(mt->var_scopes[i]);
             mt->var_scopes[i] = NULL;
+        }
+    }
+    for (int i = 0; i < mt->class_count && i < 512; i++) {
+        if (mt->class_entries[i].shape_cache_ptr) {
+            mem_free(mt->class_entries[i].shape_cache_ptr);
+            mt->class_entries[i].shape_cache_ptr = NULL;
         }
     }
     jm_free_scope_env_names(mt->func_entries, mt->func_count);

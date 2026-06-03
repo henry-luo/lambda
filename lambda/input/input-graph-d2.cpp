@@ -303,26 +303,23 @@ void parse_graph_d2(Input* input, const char* d2_string) {
 
         skip_whitespace_and_comments_d2(tracker);
 
-        bool parsed = false;
-
         // try different D2 statement types
         if (!tracker.atEnd()) {
             if (tracker.current() == '.') {
                 // node property assignment: node.property: value
-                parsed = parse_d2_property_assignment(ctx, graph, first_id->chars);
+                parse_d2_property_assignment(ctx, graph, first_id->chars);
             } else if (tracker.remaining() >= 2 && tracker.current() == '-' && tracker.peek(1) == '>') {
                 // edge: node1 -> node2 [: label]
-                parsed = parse_d2_edge(ctx, graph, first_id->chars);
+                parse_d2_edge(ctx, graph, first_id->chars);
             } else if (tracker.current() == ':') {
                 // node with attributes block: node: { ... }
-                parsed = parse_d2_node_with_block(ctx, graph, first_id->chars);
+                parse_d2_node_with_block(ctx, graph, first_id->chars);
             } else {
                 // simple node declaration
                 Element* node = create_node_element(input, first_id->chars, nullptr);
                 if (node) {
                     add_node_to_graph(input, graph, node);
                 }
-                parsed = true;
             }
         }
 

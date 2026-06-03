@@ -28,7 +28,7 @@ static const char* get_type_name_str(TypeId type_id) {
 }
 
 static void stringbuf_append_string(StringBuf* sb, String* str) {
-    if (str && str->chars) {
+    if (str) {
         stringbuf_append_str_n(sb, str->chars, str->len);
     }
 }
@@ -96,7 +96,7 @@ String* format_error_with_context(ValidationError* error, Pool* pool) {
     if (error->path) {
         stringbuf_append_str(sb, " at ");
         String* path_str = format_validation_path(error->path, pool);
-        if (path_str && path_str->chars) {
+        if (path_str) {
             stringbuf_append_str(sb, path_str->chars);
         }
     }
@@ -125,7 +125,7 @@ String* format_error_with_context(ValidationError* error, Pool* pool) {
             ConstItem suggestion_item = error->suggestions->get(i);
             if (suggestion_item.type_id() == LMD_TYPE_STRING) {
                 String* suggestion = suggestion_item.string();
-                if (suggestion && suggestion->chars) {
+                if (suggestion) {
                     stringbuf_append_format(sb, "\n      - %s", suggestion->chars);
                 }
             }

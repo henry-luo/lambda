@@ -497,12 +497,6 @@ static CssRule* unwrap_rule(Item item) {
     return (CssRule*)item.map->data;
 }
 
-static Pool* unwrap_rule_pool(Item item) {
-    CssRule* rule = unwrap_rule(item);
-    if (!rule) return nullptr;
-    return rule->pool ? rule->pool : get_document_pool();
-}
-
 // =============================================================================
 // CSSStyleDeclaration (rule declarations) Wrapper
 // =============================================================================
@@ -596,7 +590,7 @@ static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool)
             fmt->options.quote_urls = !is_custom;
             css_format_value(fmt, decl->value);
             String* result = stringbuf_to_string(fmt->output);
-            if (result && result->chars && result->chars[0] != '\0') {
+            if (result && result->len > 0 != '\0') {
                 return result->chars;
             }
         }
@@ -987,7 +981,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
                 stringbuf_reset(fmt->output);
                 css_format_value(fmt, d->value);
                 String* val_str = stringbuf_to_string(fmt->output);
-                if (val_str && val_str->chars) {
+                if (val_str) {
                     stringbuf_append_str(buf, val_str->chars);
                 }
                 if (d->important) {
@@ -997,7 +991,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
             }
         }
         String* result = stringbuf_to_string(buf);
-        return make_string_item(result && result->chars ? result->chars : "");
+        return make_string_item(result ? result->chars : "");
     }
 
     // convert camelCase to CSS property

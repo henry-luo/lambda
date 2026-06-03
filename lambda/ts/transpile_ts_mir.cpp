@@ -73,14 +73,6 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
     obj->base.type = &TYPE_MAP;
 
     JsAstNode* prev_prop = NULL;
-    int numeric_count = 0; // count numeric members for reverse mappings
-
-    // first pass: count numeric members for allocation
-    for (int i = 0; i < enum_decl->member_count; i++) {
-        TsEnumMemberNode* em = (TsEnumMemberNode*)enum_decl->members[i];
-        if (em->auto_value >= 0) numeric_count++;
-    }
-
     // forward mappings: Name → value
     for (int i = 0; i < enum_decl->member_count; i++) {
         TsEnumMemberNode* em = (TsEnumMemberNode*)enum_decl->members[i];

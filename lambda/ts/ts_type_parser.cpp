@@ -1085,13 +1085,12 @@ struct TsTypeParser {
             // if 'get'/'set' is followed by an identifier, '(' or '[' => modifier
             // otherwise => property name
             int save = pos;
-            bool consumed_accessor = false;
             if (is_keyword("get") || is_keyword("set")) {
                 int klen = is_keyword("get") ? 3 : 3;
                 pos += klen;
                 skip_ws();
                 if (is_ident_start(ch()) || check_char('[') || check_char('(')) {
-                    consumed_accessor = true; // it's a modifier, continue to name
+                    // accessor modifier, continue to name
                 } else {
                     pos = save; // it's actually the property name "get"/"set"
                 }

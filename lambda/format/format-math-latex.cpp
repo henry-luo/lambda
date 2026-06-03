@@ -631,7 +631,7 @@ static void format_rule_command(StringBuf* sb, const ElementReader& elem, int de
 
 // format_symbol_impl: emit LaTeX symbol representation
 static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
-    if (!sym || !sym->chars) return;
+    if (!sym) return;
     // Symbols: row_sep → \\, col_sep → &
     if (strcmp(sym->chars, "row_sep") == 0) { stringbuf_append_str(sb, " \\\\ "); }
     else if (strcmp(sym->chars, "col_sep") == 0) { stringbuf_append_str(sb, " & "); }

@@ -18,8 +18,6 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
 static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf);
 static Item parse_pdf_trailer(InputContext& ctx, const char **pdf);
 static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length);
-static Item parse_pdf_font_descriptor(Input *input, Map* font_dict);
-static Item extract_pdf_page_info(Input *input, Map* page_dict);
 static bool is_valid_pdf_header(const char *pdf_content);
 static void advance_safely(const char **pdf, int max_advance);
 extern __thread EvalContext* context;
@@ -326,7 +324,7 @@ extern "C" Item pdf_parse_content_stream(Item bytes_item) {
     String* bytes = bytes_item.get_safe_string();
     if (!bytes) bytes = bytes_item.get_safe_binary();
     if (!bytes) return ItemNull;
-    if (!bytes || !bytes->chars || !context || !context->pool) return ItemNull;
+    if (!bytes || !context || !context->pool) return ItemNull;
 
     Input* input = Input::create(context->pool, nullptr, nullptr);
     if (!input) return ItemNull;
@@ -1263,62 +1261,6 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         }
     }
     return {.item = (uint64_t)analysis_map};
-}
-
-// Analyze font information from font dictionaries
-static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
-    if (!font_dict) return {.item = ITEM_NULL};
-
-    Map* font_analysis = map_pooled(input->pool);
-    if (!font_analysis) return {.item = ITEM_NULL};
-
-    MarkBuilder builder(input);
-
-    // Extract font information from the dictionary
-    String* type_key = builder.createName("type");
-    if (type_key) {
-        String* type_value = builder.createString("font_analysis");
-        if (type_value) {
-            Item type_item = {.item = s2it(type_value)};
-            builder.putToMap(lam::gc_borrow(font_analysis), type_key, type_item);
-        }
-    }
-
-    // Copy relevant font properties (Type, Subtype, BaseFont, etc.)
-    String* original_key = builder.createString("original");
-    if (original_key) {
-        Item original_item = {.item = (uint64_t)font_dict};
-        builder.putToMap(lam::gc_borrow(font_analysis), original_key, original_item);
-    }
-    return {.item = (uint64_t)font_analysis};
-}
-
-// Extract basic page information
-static Item extract_pdf_page_info(Input *input, Map* page_dict) {
-    if (!page_dict) return {.item = ITEM_NULL};
-
-    Map* page_analysis = map_pooled(input->pool);
-    if (!page_analysis) return {.item = ITEM_NULL};
-
-    MarkBuilder builder(input);
-
-    // Store type
-    String* type_key = builder.createName("type");
-    if (type_key) {
-        String* type_value = builder.createString("page_analysis");
-        if (type_value) {
-            Item type_item = {.item = s2it(type_value)};
-            builder.putToMap(lam::gc_borrow(page_analysis), type_key, type_item);
-        }
-    }
-
-    // Copy the original page dictionary for reference
-    String* original_key = builder.createString("original");
-    if (original_key) {
-        Item original_item = {.item = (uint64_t)page_dict};
-        builder.putToMap(lam::gc_borrow(page_analysis), original_key, original_item);
-    }
-    return {.item = (uint64_t)page_analysis};
 }
 
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {

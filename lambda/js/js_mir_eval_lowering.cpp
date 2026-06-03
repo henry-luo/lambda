@@ -5,6 +5,13 @@ JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 
+extern "C" void js_eval_preamble_cache_reset(void) {
+    mem_free(g_eval_preamble_entries);
+    g_eval_preamble_entries = NULL;
+    g_eval_preamble_entry_count = 0;
+    g_eval_preamble_var_count = 0;
+}
+
 static uint64_t js_eval_template_site_counter = 0;
 
 static bool js_source_contains_import_meta(const char* source, size_t len);
@@ -678,7 +685,7 @@ static bool js_eval_var_conflicts_lexical_program(JsAstNode* ast) {
 }
 
 static bool js_eval_source_assigns_immutable_binding(String* code_str) {
-    if (!code_str || !code_str->chars) return false;
+    if (!code_str) return false;
     extern int64_t js_eval_local_has_immutable_binding(Item key);
     const char* source = code_str->chars;
     size_t len = code_str->len;
@@ -726,7 +733,7 @@ static bool js_eval_source_assigns_immutable_binding(String* code_str) {
 }
 
 static bool js_eval_strict_assigns_restricted_name(String* code_str) {
-    if (!code_str || !code_str->chars) return false;
+    if (!code_str) return false;
     const char* source = code_str->chars;
     size_t len = code_str->len;
     size_t pos = 0;

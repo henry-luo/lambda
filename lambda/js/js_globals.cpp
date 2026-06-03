@@ -183,25 +183,6 @@ static Item js_defprop_get_marker(Item obj, const char* key, int keylen, bool* f
 extern "C" Item js_strict_equal(Item left, Item right);
 extern "C" Item js_object_is(Item left, Item right);
 
-// ES2020: Descriptor type helpers
-static bool is_data_descriptor(Item desc) {
-    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    Item value_k = (Item){.item = s2it(heap_create_name("value", 5))};
-    Item writable_k = (Item){.item = s2it(heap_create_name("writable", 8))};
-    return it2b(js_in(value_k, desc)) || it2b(js_in(writable_k, desc));
-}
-
-static bool is_accessor_descriptor(Item desc) {
-    if (get_type_id(desc) != LMD_TYPE_MAP) return false;
-    Item get_k = (Item){.item = s2it(heap_create_name("get", 3))};
-    Item set_k = (Item){.item = s2it(heap_create_name("set", 3))};
-    return it2b(js_in(get_k, desc)) || it2b(js_in(set_k, desc));
-}
-
-static bool is_generic_descriptor(Item desc) {
-    return get_type_id(desc) == LMD_TYPE_MAP && !is_data_descriptor(desc) && !is_accessor_descriptor(desc);
-}
-
 static bool js_array_key_to_index(const char* name, int name_len, int64_t* out_index) {
     if (!name || name_len <= 0 || name_len > 10) return false;
     if (name_len > 1 && name[0] == '0') return false;
@@ -8690,15 +8671,6 @@ static int64_t js_parse_array_index(const char* s, int len) {
     return val;
 }
 
-// v20: comparison function for sorting index keys
-static int js_index_entry_cmp(const void* a, const void* b) {
-    int64_t ia = *(const int64_t*)a;
-    int64_t ib = *(const int64_t*)b;
-    if (ia < ib) return -1;
-    if (ia > ib) return 1;
-    return 0;
-}
-
 static bool js_shape_name_seen_before(ShapeEntry* first, ShapeEntry* current,
         const char* name, int name_len) {
     ShapeEntry* entry = first;
@@ -13497,13 +13469,6 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
-static inline int js_uri_hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
     if (s->chars[0] != '%' || s->chars[3] != '%' ||
@@ -13854,9 +13819,6 @@ extern "C" void js_globals_batch_reset() {
 
 static Item make_string_item(const char* str) {
     return (Item){.item = s2it(heap_create_name(str, strlen(str)))};
-}
-static Item make_string_item(const char* str, int len) {
-    return (Item){.item = s2it(heap_create_name(str, len))};
 }
 
 // AbortSignal constructor — creates an AbortSignal object
@@ -16056,19 +16018,6 @@ extern "C" Item js_get_typed_array_base() {
     // concrete TypedArray prototype chain is set up (e.g., Object.getPrototypeOf(Int8Array).prototype)
     js_get_typed_array_base_proto();
     return js_typed_array_base;
-}
-
-// Helper: create a named function stub (bypasses func_ptr cache).
-// For prototype method stubs that just need .name and .length properties.
-static Item js_create_func_stub(const char* name, int name_len, int param_count) {
-    JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->func_ptr = NULL;
-    fn->param_count = param_count;
-    fn->formal_length = -1;
-    fn->builtin_id = 0;
-    fn->name = heap_create_name(name, name_len);
-    return (Item){.function = (Function*)fn};
 }
 
 // Defined in js_runtime.cpp — populates %TypedArray%.prototype with proper Array builtins

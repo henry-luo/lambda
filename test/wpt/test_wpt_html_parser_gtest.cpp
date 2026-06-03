@@ -2,8 +2,8 @@
  * WPT (Web Platform Tests) HTML Parser Tests
  *
  * Tests Lambda's HTML parser against the official Web Platform Tests html5lib test suite.
- * Test data is extracted from test/wpt/html/syntax/parsing/*.html files and converted
- * to JSON fixtures in test/html/wpt/*.json.
+ * Test data is extracted from HTML files in test/wpt/html/syntax/parsing and converted
+ * to JSON fixtures in test/html/wpt.
  *
  * This test suite validates HTML parsing conformance by:
  * 1. Loading test cases from JSON fixtures
@@ -221,7 +221,7 @@ void serialize_element_wpt(Item item, std::string& output, int depth) {
             std::string data;
             if (elem.has_attr("data")) {
                 String* str = elem.get_string_attr("data");
-                if (str && str->chars) {
+                if (str) {
                     // Check for "lambda.nil" sentinel which represents empty string
                     if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
                         // Empty comment

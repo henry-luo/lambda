@@ -843,57 +843,6 @@ static bool parse_placeholder_font(FontEntry* entry, Arena* arena) {
     return ok;
 }
 
-// on-demand font loading
-static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
-    // check if already loaded
-    FontEntry search = {.file_path = (char*)file_path};
-    FontEntry* existing = (FontEntry*)hashmap_get(db->file_paths, &search);
-    if (existing && !existing->is_placeholder) return existing;
-
-    FontFormat format = font_detect_format_ext(file_path);
-
-    if (format == FONT_FORMAT_TTC) {
-        parse_ttc_font_metadata(file_path, db, db->arena);
-        // find first entry from this file
-        for (int i = 0; i < db->all_fonts->length; i++) {
-            FontEntry* e = (FontEntry*)db->all_fonts->data[i];
-            if (e->file_path && strcmp(e->file_path, file_path) == 0 && !e->is_placeholder) {
-                return e;
-            }
-        }
-        return NULL;
-    }
-
-    // single font file
-    FontEntry* entry = (FontEntry*)pool_calloc(db->pool, sizeof(FontEntry));
-    entry->file_path = arena_strdup(db->arena, file_path);
-    entry->weight = 400;
-    entry->style = FONT_SLANT_NORMAL;
-    entry->format = format;
-
-    if (format == FONT_FORMAT_WOFF || format == FONT_FORMAT_WOFF2) {
-        // WOFF/WOFF2: use filename as family name; actual parsing on load
-        const char* base = strrchr(file_path, '/');
-        if (!base) base = strrchr(file_path, '\\');
-        if (base) base++; else base = file_path;
-        char buf[256];
-        strncpy(buf, base, sizeof(buf) - 1);
-        buf[sizeof(buf) - 1] = '\0';
-        char* dot = strrchr(buf, '.');
-        if (dot) *dot = '\0';
-        entry->family_name = arena_strdup(db->arena, buf);
-    } else {
-        parse_font_metadata(file_path, entry, db->arena);
-    }
-
-    if (entry->family_name) {
-        arraylist_append(db->all_fonts, entry);
-        return entry;
-    }
-
-    return NULL;
-}
-
 // ============================================================================
 // Organize fonts into families
 // ============================================================================

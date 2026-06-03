@@ -36,17 +36,10 @@ static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
         ctx.emit("%b", value.asBool());
     } else if (value.isSymbol()) {
         Symbol* sym = value.asSymbol();
-        if (sym && sym->chars) {
+        if (sym) {
             stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);
         }
     }
-}
-
-// Helper function to check if a type is simple (can be output as HTML attribute)
-static bool is_simple_type(TypeId type) {
-    return type == LMD_TYPE_STRING || type == LMD_TYPE_INT ||
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
-           type == LMD_TYPE_BOOL;
 }
 
 String* format_html(Pool* pool, Item root_item) {
@@ -180,7 +173,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ItemReader name_attr = elem.get_attr("name");
         if (name_attr.isString()) {
             String* str = name_attr.asString();
-            if (str && str->chars) {
+            if (str) {
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         } else {
@@ -199,7 +192,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ItemReader data_attr = elem.get_attr("data");
         if (data_attr.isString()) {
             String* str = data_attr.asString();
-            if (str && str->chars) {
+            if (str) {
                 // output comment content as-is (no escaping)
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
@@ -217,7 +210,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
             String* str = first_child.asString();
-            if (str && str->chars) {
+            if (str) {
                 // output comment content as-is (no escaping)
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
@@ -239,7 +232,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
             String* str = first_child.asString();
-            if (str && str->chars) {
+            if (str) {
                 // output DOCTYPE content as-is (no escaping)
                 stringbuf_append_char(ctx.output(), ' ');
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
@@ -256,7 +249,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
             String* str = first_child.asString();
-            if (str && str->chars) {
+            if (str) {
                 // output XML declaration as-is
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
@@ -275,7 +268,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 ItemReader first_child = elem.childAt(0);
                 if (first_child.isString()) {
                     String* str = first_child.asString();
-                    if (str && str->chars) {
+                    if (str) {
                         stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
                     }
                 }
@@ -395,7 +388,7 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         // Use resolve_symbol() which checks emoji first (higher priority),
         // then HTML entities — avoids conflicts like "smile" (emoji vs math entity).
         Symbol* sym = item.asSymbol();
-        if (sym && sym->chars) {
+        if (sym) {
             SymbolResolution res = resolve_symbol(sym->chars, sym->len);
             if (res.type == SYMBOL_EMOJI && res.utf8) {
                 stringbuf_append_str(ctx.output(), res.utf8);

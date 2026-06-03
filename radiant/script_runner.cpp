@@ -40,6 +40,7 @@ extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.
 
 #include <cstring>
 #include <cctype>
+#include <cstdlib>
 #include <signal.h>
 #include <setjmp.h>
 #ifndef _WIN32
@@ -56,15 +57,16 @@ static volatile sig_atomic_t js_exec_guarded = 0;
 static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
 
-// Per-script timeout: SIGALRM handler for 5s execution limit
+// Per-document script timeout: covers parse/transpile plus execution.
 static struct sigaction js_exec_old_alrm;
-#define JS_EXEC_TIMEOUT_SECONDS 5
+#define JS_EXEC_TIMEOUT_BASE_SECONDS 5
+#define JS_EXEC_TIMEOUT_MAX_SECONDS 30
 static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
 
 static void js_exec_timeout_handler(int sig) {
     if (js_exec_guarded) {
         js_exec_timed_out = 1;
-        const char* msg = "execute_document_scripts: JS execution timed out (5s limit)\n";
+        const char* msg = "execute_document_scripts: JS execution timed out by watchdog\n";
         write(STDERR_FILENO, msg, strlen(msg));
         js_exec_guarded = 0;
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
@@ -96,6 +98,25 @@ static void js_exec_crash_handler(int sig, siginfo_t* info, void* ctx) {
         signal(sig, SIG_DFL);
         raise(sig);
     }
+}
+
+static int js_exec_timeout_seconds(size_t source_len) {
+    const char* env = getenv("LAMBDA_JS_EXEC_TIMEOUT_SECONDS");
+    if (env && env[0]) {
+        char* end = nullptr;
+        long parsed = strtol(env, &end, 10);
+        if (end != env && parsed > 0) {
+            if (parsed > JS_EXEC_TIMEOUT_MAX_SECONDS) return JS_EXEC_TIMEOUT_MAX_SECONDS;
+            return (int)parsed;
+        }
+    }
+
+    int seconds = JS_EXEC_TIMEOUT_BASE_SECONDS;
+    if (source_len > 65536) {
+        seconds += (int)(source_len / 65536) * JS_EXEC_TIMEOUT_BASE_SECONDS;
+    }
+    if (seconds > JS_EXEC_TIMEOUT_MAX_SECONDS) seconds = JS_EXEC_TIMEOUT_MAX_SECONDS;
+    return seconds;
 }
 #endif  // !_WIN32
 
@@ -172,7 +193,7 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_STRING) {
             String* s = it2s(child);
-            if (s && s->chars && s->len > 0) {
+            if (s && s->len > 0) {
                 const char* start = s->chars;
                 int len = s->len;
                 // strip XHTML CDATA markers: <![CDATA[ ... ]]>
@@ -206,6 +227,17 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
             }
         }
     }
+}
+
+static void append_browser_global_sync(StrBuf* buf) {
+    strbuf_append_str(buf,
+        "\nif (typeof window !== 'undefined') {\n"
+        "  if (typeof window.jQuery !== 'undefined') jQuery = window.jQuery;\n"
+        "  if (typeof window.$ !== 'undefined') $ = window.$;\n"
+        "  else if (typeof jQuery !== 'undefined') $ = jQuery;\n"
+        "  if (typeof jQuery !== 'undefined' && typeof window.jQuery === 'undefined') window.jQuery = jQuery;\n"
+        "  if (typeof $ !== 'undefined' && typeof window.$ === 'undefined') window.$ = $;\n"
+        "}\n");
 }
 
 /**
@@ -372,6 +404,7 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
                 strbuf_append_str(script_buf, "try {\n");
                 strbuf_append_str(script_buf, content);
                 strbuf_append_str(script_buf, "\n} catch(_ext_err) {}\n");
+                append_browser_global_sync(script_buf);
                 mem_free(content);
                 loaded_external_scripts++;
             } else {
@@ -384,6 +417,7 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         strbuf_append_str(script_buf, "try {\n");
         extract_script_text(elem, script_buf);
         strbuf_append_str(script_buf, "\n} catch(_script_err) {}\n");
+        append_browser_global_sync(script_buf);
         return;  // don't recurse into script children
     }
 
@@ -447,6 +481,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // Preamble: provide browser globals and stub unsupported APIs
     strbuf_append_str(wrapped_buf,
         "var window = {};\n"
+        "var jQuery = undefined;\n"
+        "var $ = undefined;\n"
         "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
@@ -470,17 +506,14 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.MutationObserver = MutationObserver;\n"
         "window.IntersectionObserver = IntersectionObserver;\n"
         "window.ResizeObserver = ResizeObserver;\n"
-        // Stub console, performance, history, screen, location
+        // Stub console, performance, screen. Location/history are installed by
+        // the native DOM bridge so assignments can request document navigation.
         "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
         "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntriesByName: function(){ return []; }, timing: {}};\n"
-        "var history = {pushState: function(){}, replaceState: function(){}, back: function(){}, forward: function(){}, go: function(){}, length: 1};\n"
         "var screen = {width: 1920, height: 1080, availWidth: 1920, availHeight: 1080, colorDepth: 24, pixelDepth: 24};\n"
-        "var location = {href: '', protocol: 'https:', hostname: '', pathname: '/', search: '', hash: '', host: '', origin: '', reload: function(){}, assign: function(){}, replace: function(){}};\n"
         "window.console = console;\n"
         "window.performance = performance;\n"
-        "window.history = history;\n"
         "window.screen = screen;\n"
-        "window.location = location;\n"
         // XMLHttpRequest: native constructor via js_xhr_new() — transpiler intercepts `new XMLHttpRequest()`
         // Minimal stub so `typeof XMLHttpRequest !== 'undefined'` passes (jQuery feature detection).
         "function XMLHttpRequest() {}\n"
@@ -585,7 +618,12 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     sigaction(SIGALRM, &alrm_sa, &js_exec_old_alrm);
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
-    alarm(JS_EXEC_TIMEOUT_SECONDS);
+    int timeout_seconds = js_exec_timeout_seconds(script_buf->length);
+    if (timeout_seconds > JS_EXEC_TIMEOUT_BASE_SECONDS) {
+        log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
+                 script_buf->length, timeout_seconds);
+    }
+    alarm(timeout_seconds);
 #endif
 
     Item result;
@@ -618,7 +656,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
         sigaction(SIGALRM, &js_exec_old_alrm, NULL);
     } else if (jmp_val == 2) {
-        log_error("execute_document_scripts: JS execution timed out after %ds", JS_EXEC_TIMEOUT_SECONDS);
+        log_error("execute_document_scripts: JS execution timed out after %ds", timeout_seconds);
         result = ItemError;
         js_batch_cleanup_unsafe = 1;
         if (preamble) { mem_free(preamble); preamble = nullptr; }
@@ -673,6 +711,12 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     } else {
         // Fallback: no valid preamble — destroy as before
         if (preamble) { mem_free(preamble); }
+        if (!s_retain_js_state) {
+            // Transient document scripts still populate global/module state with
+            // heap-bound functions and DOM wrappers. Clear them before tearing
+            // down the per-document heap so the next batch file starts clean.
+            js_batch_reset();
+        }
         if (runtime.heap && runtime.heap->gc) {
             Pool* reuse_pool = runtime.heap->gc->pool;
             runtime.heap->gc->pool = NULL;

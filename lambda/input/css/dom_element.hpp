@@ -117,6 +117,10 @@ struct DomDocument {
     // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
     int js_mutation_count;
 
+    // JS/meta requested document navigation. The loader follows this after
+    // load-time scripts and refresh metadata have been processed.
+    char* pending_navigation_url;
+
     // CSS @keyframes registry (parsed from stylesheets on first animation use)
     void* keyframe_registry;        // KeyframeRegistry* (void* to avoid header dep)
 
@@ -156,6 +160,7 @@ struct DomDocument {
                     skip_style_reset(false),
                     incremental_layout(false),
                     js_mutation_count(0),
+                    pending_navigation_url(nullptr),
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
@@ -320,8 +325,9 @@ struct DomElement : DomNode {
     bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
 
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, first_child(nullptr), last_child(nullptr), native_element(nullptr),
-        tag_name(nullptr), tag_id(0), id(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, native_element(nullptr),
+        tag_name(nullptr), first_child(nullptr), last_child(nullptr),
+        tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
         marker_styles(nullptr), placeholder_styles(nullptr),

@@ -1009,7 +1009,6 @@ void parse_toml(Input* input, const char* toml_string) {
 
     // Current table context
     Map* current_table = root_map;
-    TypeMap* current_table_type = (TypeMap*)root_map->type;
 
     while (*toml) {
         skip_tab_pace_and_comments(&toml, &line_num);
@@ -1030,7 +1029,6 @@ void parse_toml(Input* input, const char* toml_string) {
                 Map* section_map = handle_nested_section(ctx, root_map, table_name);
                 if (section_map) {
                     current_table = section_map;
-                    current_table_type = (TypeMap*)section_map->type;
                 }
                 skip_line(&toml, &line_num);
                 continue;

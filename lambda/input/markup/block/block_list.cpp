@@ -251,36 +251,6 @@ static bool is_lazy_continuation(const char* line) {
 }
 
 /**
- * strip_indentation - Strip up to 'n' columns of indentation from a line
- *
- * Returns a pointer into the line at the stripped position.
- * Handles tabs as variable-width (to next column multiple of 4).
- */
-static const char* strip_indentation(const char* line, int n) {
-    if (!line) return nullptr;
-
-    const char* pos = line;
-    int col = 0;
-
-    while (*pos && col < n) {
-        if (*pos == ' ') {
-            col++;
-            pos++;
-        } else if (*pos == '\t') {
-            // Tab advances to next multiple of 4
-            int next_col = (col + 4) & ~3;
-            if (next_col > n) break;  // Tab would go past n
-            col = next_col;
-            pos++;
-        } else {
-            break;  // Non-whitespace
-        }
-    }
-
-    return pos;
-}
-
-/**
  * strip_indentation_with_tabs - Strip n columns from a line with proper tab expansion
  *
  * This function strips n columns from a line while properly handling tabs.
@@ -354,39 +324,6 @@ static char* strip_indentation_with_tabs(const char* line, int n) {
     *out = '\0';
 
     return result;
-}
-
-/**
- * strip_to_column - Strip line content to reach a specific column
- *
- * Unlike strip_indentation which only strips whitespace, this function
- * skips characters (including non-whitespace) until we reach the target column.
- * Used to strip list markers from the first line.
- *
- * Example: strip_to_column("1.     code", 3) -> "    code" (4 spaces + code)
- * - col 0-1: "1." (2 chars)
- * - col 2: first space
- * - col 3+: remaining "    code"
- */
-static const char* strip_to_column(const char* line, int target_col) {
-    if (!line) return nullptr;
-
-    const char* pos = line;
-    int col = 0;
-
-    while (*pos && col < target_col) {
-        if (*pos == '\t') {
-            // Tab advances to next multiple of 4
-            int next_col = (col + 4) & ~3;
-            if (next_col > target_col) break;  // Tab would go past target
-            col = next_col;
-        } else {
-            col++;
-        }
-        pos++;
-    }
-
-    return pos;
 }
 
 /**
@@ -623,7 +560,6 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     // Collect all lines belonging to this list item
     ArrayList* content_lines = arraylist_new(16);
     bool had_blank_line = false;
-    bool ends_with_blank = false;
 
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
@@ -634,7 +570,6 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             // Need to look ahead to see if list continues
             int next_line_idx = parser->current_line + 1;
             if (next_line_idx >= parser->line_count) {
-                ends_with_blank = true;
                 break;  // End of document
             }
 
@@ -644,19 +579,16 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             // Check if next line is part of this list item or starts new item/list
             if (is_empty_line(next)) {
                 // Multiple blank lines - end the item content
-                ends_with_blank = true;
                 break;
             }
 
             // If next line is at list indentation and starts a new list item
             if (is_list_item(next) && next_indent < content_column) {
-                ends_with_blank = true;
                 break;  // New sibling/parent list item
             }
 
             // If next line is indented less than content column, end item
             if (next_indent < content_column && !is_lazy_continuation(next)) {
-                ends_with_blank = true;
                 break;
             }
 
@@ -1160,7 +1092,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     // Track for loose list detection:
                     // We need to detect if there's a blank line in the content
                     int direct_block_count = 0;
-                    bool had_blank_in_content = false;
                     bool had_blank_before_block = false;
                     bool found_blank_between_direct_blocks = false;
 
@@ -1196,8 +1127,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         const char* content_line = parser->lines[parser->current_line];
 
                         if (is_empty_line(content_line)) {
-                            // Mark that we have a blank in the content
-                            had_blank_in_content = true;
                             // Mark that we have a blank before the next block
                             if (direct_block_count > 0) {
                                 had_blank_before_block = true;

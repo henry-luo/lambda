@@ -744,7 +744,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
 
 // Print caret state to view_tree.txt (appends caret info)
 void print_caret_state(DocState* state, const char* output_path = nullptr);
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root = false);
 void print_text_json(ViewText* text, StrBuf* buf, int indent);
 void print_br_json(View* br, StrBuf* buf, int indent);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);

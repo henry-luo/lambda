@@ -169,7 +169,7 @@ static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_ind
 }
 
 static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || !mt->class_entries) return;
+    if (!mt || !cls_obj || !ce || mt->class_count <= 0) return;
     int class_index = (int)(ce - mt->class_entries);
     jm_call_void_2(mt, "js_set_private_class_index",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
@@ -1732,7 +1732,7 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
 }
 
 static void jm_emit_evalscript_global_decl_check_name(JsMirTranspiler* mt, String* name, bool is_func) {
-    if (!name || !name->chars || name->len <= 0) return;
+    if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
     jm_call_void_1(mt,
         is_func ? "js_evalscript_check_global_function_decl" : "js_evalscript_check_global_var_decl",
@@ -1751,7 +1751,7 @@ static void jm_emit_evalscript_global_decl_check_prefixed(JsMirTranspiler* mt, c
 }
 
 static void jm_emit_evalscript_global_lex_decl_check_name(JsMirTranspiler* mt, String* name) {
-    if (!name || !name->chars || name->len <= 0) return;
+    if (!name || name->len <= 0) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, name->chars, (int)name->len);
     jm_call_void_1(mt, "js_evalscript_check_global_lex_decl",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
@@ -2419,12 +2419,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         for (int fi = 0; fi < mt->func_count; fi++) {
             JsFunctionNode* fn_a = mt->func_entries[fi].node;
-            if (!fn_a || !fn_a->name || !fn_a->name->chars) continue;
+            if (!fn_a || !fn_a->name) continue;
             if (mt->func_entries[fi].is_reassigned) continue;
             for (int fj = 0; fj < mt->func_count; fj++) {
                 if (fi == fj) continue;
                 JsFunctionNode* fn_b = mt->func_entries[fj].node;
-                if (!fn_b || !fn_b->name || !fn_b->name->chars) continue;
+                if (!fn_b || !fn_b->name) continue;
                 if (fn_b->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
                 if (fn_a->base.node_type != JS_AST_NODE_FUNCTION_DECLARATION) break;
                 if (mt->func_entries[fi].parent_index != mt->func_entries[fj].parent_index) continue;
@@ -2444,7 +2444,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         while (s) {
             if (s->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                 JsFunctionNode* fn = (JsFunctionNode*)s;
-                if (fn->name && fn->name->chars) {
+                if (fn->name) {
                     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                     if (fc) {
                         JsModuleConstEntry mce;
@@ -2496,14 +2496,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                 } else if (top->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                     JsFunctionNode* fn = (JsFunctionNode*)top;
-                    if (fn->name && fn->name->chars) {
+                    if (fn->name) {
                         char top_name[128];
                         snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                         if (strcmp(top_name, candidate) == 0) return true;
                     }
                 } else if (top->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                     JsClassNode* cls = (JsClassNode*)top;
-                    if (cls->name && cls->name->chars) {
+                    if (cls->name) {
                         char top_name[128];
                         snprintf(top_name, sizeof(top_name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
                         if (strcmp(top_name, candidate) == 0) return true;
@@ -2515,7 +2515,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         };
 
         auto register_fn_as_module_const = [&](JsFunctionNode* fn) {
-            if (!fn->name || !fn->name->chars) return;
+            if (!fn->name) return;
             JsFuncCollected* fc = jm_find_collected_func(mt, fn);
             if (!fc) return;
             JsModuleConstEntry mce;
@@ -2568,7 +2568,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (!iife_fn || !iife_fn->body) { stmt = stmt->next; continue; }
 
             bool self_referencing_named_iife = false;
-            if (iife_fn->name && iife_fn->name->chars) {
+            if (iife_fn->name) {
                 char self_name[128];
                 snprintf(self_name, sizeof(self_name), "_js_%.*s",
                     (int)iife_fn->name->len, iife_fn->name->chars);
@@ -2669,7 +2669,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // at runtime (needed for __publicField, passing classes as values, etc.)
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
-        if (ce->name && ce->name->chars) {
+        if (ce->name) {
             bool direct_program_class = ce->is_declaration &&
                 jm_is_direct_program_class_decl(program, ce->node);
             if (ce->is_declaration && !direct_program_class) {
@@ -2942,7 +2942,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     ap = ap->next;
                 }
                 // Add ancestor's function name (for recursive references)
-                if (afn->name && afn->name->chars) {
+                if (afn->name) {
                     char aname[128];
                     snprintf(aname, sizeof(aname), "_js_%.*s", (int)afn->name->len, afn->name->chars);
                     jm_name_set_add(ancestor_names, aname);
@@ -3117,7 +3117,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // Skip self-reference captures: a named function expression's name
                         // is only visible inside its own body (JS spec), not in the parent scope.
                         // Don't propagate it upward — the function resolves it from its own closure env.
-                        if (child->node && child->node->name && child->node->name->chars) {
+                        if (child->node && child->node->name) {
                             char child_self_name[128];
                             snprintf(child_self_name, sizeof(child_self_name), "_js_%.*s",
                                 (int)child->node->name->len, child->node->name->chars);
@@ -3145,7 +3145,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     JsFuncCollected* anc = &mt->func_entries[ai];
                                     if (!anc->node) break;
                                     // Check ancestor's function name (NFE self-reference)
-                                    if (anc->node->name && anc->node->name->chars) {
+                                    if (anc->node->name) {
                                         char aname[128];
                                         snprintf(aname, sizeof(aname), "_js_%.*s",
                                             (int)anc->node->name->len, anc->node->name->chars);
@@ -3213,7 +3213,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                         bool cap_is_parent_nfe = false;
                         if (parent->node && parent->node->base.node_type == JS_AST_NODE_FUNCTION_EXPRESSION &&
-                            parent->node->name && parent->node->name->chars) {
+                            parent->node->name) {
                             char parent_self_name[128];
                             snprintf(parent_self_name, sizeof(parent_self_name), "_js_%.*s",
                                 (int)parent->node->name->len, parent->node->name->chars);
@@ -3303,7 +3303,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                 // Determine child's NFE self-name (if any)
                 char child_self_name[128] = {0};
-                if (child->node && child->node->name && child->node->name->chars) {
+                if (child->node && child->node->name) {
                     snprintf(child_self_name, sizeof(child_self_name), "_js_%.*s",
                         (int)child->node->name->len, child->node->name->chars);
                 }
@@ -3342,7 +3342,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         if (child->capture_count == 0) continue;
 
                         char child_self_name2[128] = {0};
-                        if (child->node && child->node->name && child->node->name->chars) {
+                        if (child->node && child->node->name) {
                             snprintf(child_self_name2, sizeof(child_self_name2), "_js_%.*s",
                                 (int)child->node->name->len, child->node->name->chars);
                         }
@@ -3372,7 +3372,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 for (int ci = 0; ci < mt->func_count; ci++) {
                     JsFuncCollected* child = &mt->func_entries[ci];
                     if (child->parent_index != fi) continue;
-                    if (!child->node || !child->node->name || !child->node->name->chars) continue;
+                    if (!child->node || !child->node->name) continue;
                     char csn[128];
                     snprintf(csn, sizeof(csn), "_js_%.*s",
                         (int)child->node->name->len, child->node->name->chars);
@@ -3411,7 +3411,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
                         // Build child's NFE self-name to skip during remap
                         char child_self_remap[128] = {0};
-                        if (child->node && child->node->name && child->node->name->chars) {
+                        if (child->node && child->node->name) {
                             snprintf(child_self_remap, sizeof(child_self_remap), "_js_%.*s",
                                 (int)child->node->name->len, child->node->name->chars);
                         }
@@ -4104,7 +4104,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
         if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
             JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item && fc->capture_count == 0) {
                     // Non-capturing: hoist normally
@@ -4216,7 +4216,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // NOT leak a hoisted var into the surrounding scope.
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
-        if (ce->name && ce->name->chars) {
+        if (ce->name) {
             if (!ce->is_declaration || !jm_is_direct_program_class_decl(program, ce->node)) {
                 continue;
             }
@@ -4296,7 +4296,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
             JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item && fc->capture_count > 0) {
                     // Capturing function declaration: bind as closure at this position
@@ -4496,7 +4496,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // Create the class object and store it in the module var so it can be
             // accessed by closures/methods (e.g., __publicField(ClassName, ...))
             JsClassNode* cls_node = (JsClassNode*)actual_stmt;
-            if (cls_node->name && cls_node->name->chars) {
+            if (cls_node->name) {
                 JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
                 if (ce) {
                     // TDZ: class x extends x {} → throw ReferenceError

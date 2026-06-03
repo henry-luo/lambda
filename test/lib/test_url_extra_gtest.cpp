@@ -29,11 +29,11 @@ TEST_F(UrlExtraTest, ComplexUrlParsing) {
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
         EXPECT_EQ(url->port_number, 9443) << "Custom port should be parsed correctly";
         
-        if (url->hostname && url->hostname->chars) {
+        if (url->hostname) {
             EXPECT_STREQ(url->hostname->chars, "subdomain.example.com") << "Full hostname should be parsed";
         }
         
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/deep/path/file.html") << "Complex path should be parsed";
         }
         
@@ -69,7 +69,7 @@ TEST_F(UrlExtraTest, UrlWithQuery) {
     if (url) {
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
         
-        if (url->search && url->search->chars) {
+        if (url->search) {
             EXPECT_STREQ(url->search->chars, "?q=test&limit=10&offset=0") << "Query should be parsed correctly";
         }
         
@@ -84,7 +84,7 @@ TEST_F(UrlExtraTest, UrlWithFragment) {
     if (url) {
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
         
-        if (url->hash && url->hash->chars) {
+        if (url->hash) {
             EXPECT_STREQ(url->hash->chars, "#installation") << "Fragment should be parsed correctly";
         }
         
@@ -101,7 +101,7 @@ TEST_F(UrlExtraTest, LocalhostUrls) {
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTP) << "HTTP scheme should be detected";
         EXPECT_EQ(url->port_number, 3000) << "Custom port should be parsed";
         
-        if (url->hostname && url->hostname->chars) {
+        if (url->hostname) {
             EXPECT_STREQ(url->hostname->chars, "localhost") << "Localhost should be parsed";
         }
         
@@ -112,7 +112,7 @@ TEST_F(UrlExtraTest, LocalhostUrls) {
     url = url_parse("http://127.0.0.1:8080/");
     EXPECT_NE(url, nullptr) << "IP address URL should parse";
     if (url) {
-        if (url->hostname && url->hostname->chars) {
+        if (url->hostname) {
             EXPECT_STREQ(url->hostname->chars, "127.0.0.1") << "IP address should be parsed";
         }
         
@@ -156,7 +156,7 @@ TEST_F(UrlExtraTest, UrlPathHandling) {
     url = url_parse("https://example.com/");
     EXPECT_NE(url, nullptr) << "URL with root path should parse";
     if (url) {
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/") << "Root path should be /";
         }
         url_destroy(url);
@@ -171,7 +171,7 @@ TEST_F(UrlExtraTest, UrlPathHandling) {
     url = url_parse("https://example.com/a/b/c/d/e/file.html");
     EXPECT_NE(url, nullptr) << "URL with deep path should parse";
     if (url) {
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/a/b/c/d/e/file.html") << "Deep path should be preserved";
         }
         url_destroy(url);
@@ -361,10 +361,10 @@ TEST_F(UrlExtraTest, ComponentBasedConstruction) {
         
         // Verify components are set correctly
         EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be HTTPS";
-        if (url->hostname && url->hostname->chars) {
+        if (url->hostname) {
             EXPECT_STREQ(url->hostname->chars, "example.com") << "Hostname should be set";
         }
-        if (url->pathname && url->pathname->chars) {
+        if (url->pathname) {
             EXPECT_STREQ(url->pathname->chars, "/test/path") << "Pathname should be set";
         }
         EXPECT_EQ(url->port_number, 443) << "Port number should be 443";

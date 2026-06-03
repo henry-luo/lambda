@@ -2,8 +2,8 @@
  * WPT DOM Events Conformance GTest Runner
  *
  * Discovers WPT DOM-event test HTML files in ref/wpt/dom/events/, extracts
- * their <script> blocks (inlining locally-referenced helper JS files like
- * resources/*.js), prepends the shared testharness.js shim, and executes
+ * their <script> blocks (inlining locally-referenced helper JS files from
+ * the resources directory), prepends the shared testharness.js shim, and executes
  * via lambda.exe js with --document for DOM context.
  *
  * Each test file produces PASS/FAIL counts in the output. Individual

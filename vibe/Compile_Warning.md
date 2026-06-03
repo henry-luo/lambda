@@ -120,9 +120,9 @@ Low-risk improvements that can be batched per subsystem.
 |-------|--------|--------|
 | Phase 1 — Silence Category A | ✅ Done | Warnings: ~82,000 → 2,837 |
 | Phase 2 — Promote Category B to errors | ✅ Done (with one caveat — see below) | Warnings: 2,837 → **2,764**, 0 errors |
-| Phase 3 — `-Wpointer-bool-conversion` audit | ⏳ Pending | 166 sites remain |
-| Phase 4 — Dead code audit | ⏳ Pending | 165 `-Wunused-function` sites remain |
-| Phase 5 — Code-health waves | ⏳ Ongoing | ~2,500 Category C warnings remain |
+| Phase 3 — `-Wpointer-bool-conversion` audit | ✅ Done | Warnings: **0**; now promoted to error |
+| Phase 4 — Dead code audit | ✅ Done | 167 → **0** `-Wunused-function`; now promoted to error |
+| Phase 5 — Code-health waves | ⏳ Ongoing | `-Wdeprecated-copy`, tiny unused classes, `-Wreorder-ctor`, `-Wcomment`, `-Wwritable-strings`, and `-Wunused-but-set-variable` fixed and promoted |
 
 **Caveat (Phase 2):** `-Werror=undefined-bool-conversion` was **not** added. The 7 sites (all in `lambda/lambda-data.cpp`) use the `if (!this) return null_result;` defensive null-receiver pattern; fixing them properly requires moving null checks to every caller — a wider refactor than Phase 2 scope. The 7 warnings remain; treat as a separate task.
 
@@ -184,15 +184,48 @@ All 7 are in `lambda/lambda-data.cpp`: `Map::get`, `Element::get_attr`, `Element
 
 ### Phase 3 — Audit `-Wpointer-bool-conversion` (separate task)
 
-The 166 sites in this class are very likely real bugs — null checks against fields that decay from inline arrays and therefore are always non-null. Worth a dedicated pass per subsystem (start with `radiant/script_runner.cpp`).
+✅ **Done.** Audited and removed the stale null checks against inline array fields such as `String::chars`, `Symbol::chars`, `Binary::chars`, URL component strings, JS AST identifier names, and fixed MIR collection arrays. These checks now test the owning pointer and, where emptiness matters, `len > 0` / count fields.
+
+`-Werror=pointer-bool-conversion` is now enabled in `build_lambda_config.json`; a clean `make build` reports **0** `-Wpointer-bool-conversion` warnings.
 
 ### Phase 4 — Dead code audit (separate task)
 
-The 143 `-Wunused-function` sites are the best free signal for dead code. Cross-reference with a `cppcheck --enable=unusedFunction --project=compile_commands.json` pass to catch unused non-static functions across translation units that the compiler can't see.
+✅ **Done.** Cleaned dead local helpers across markup parsing, formatters, CSS helpers, URL/path/input utilities, JS runtime modules, Lambda vector/equality/proc helpers, logging, packaging, npm, target handling, vmap, TS preprocessing, MIR transpilation, font database, and Radiant layout/event/state/table/text code. Optional hashmap macro factory helpers are now marked intentionally unused at the macro source rather than at every expansion.
+
+Current clean-build result: `-Wunused-function` is **0** in `temp/compile_warning_deadcode_werror_clean_build.log` (from **167** at Phase 4 start). `-Werror=unused-function` is now enabled in `build_lambda_config.json`, and `-Wgcc-compat` remains **0** after moving the hashmap unused attribute placement.
 
 ### Phase 5 — Code-health waves (ongoing)
 
-`-Wdeprecated-copy`, `-Wwritable-strings`, `-Wreorder-ctor`, `-Wsign-compare`, `-Wcast-function-type-mismatch` — clean up per subsystem when touching the relevant code. Don't block on a single sweep.
+`-Wwritable-strings`, `-Wsign-compare`, `-Wcast-function-type-mismatch` — clean up per subsystem when touching the relevant code. Don't block on a single sweep.
+
+✅ **`-Wdeprecated-copy` done.** Added an explicit defaulted copy constructor for `ConstItem` in `lambda/lambda.hpp`, matching its existing defaulted copy assignment operator. Clean build result: `-Wdeprecated-copy` is **0** in `temp/compile_warning_deprecated_copy_werror_clean_build.log`; `-Werror=deprecated-copy` is now enabled in `build_lambda_config.json`.
+
+✅ **Tiny unused classes done.** Removed the last `-Wunused-const-variable` and `-Wunused-label` sites: an unused async-state-machine label, one stale sysinfo TTL constant, and two unused WOFF2 decoder constants. Clean build result: both warning classes are **0** in `temp/compile_warning_tiny_unused_werror_clean_build.log`; `-Werror=unused-const-variable` and `-Werror=unused-label` are now enabled in `build_lambda_config.json`.
+
+✅ **`-Wreorder-ctor` done.** Reordered initializer lists to match declaration order in `InputContext` and `DomElement`. Clean build result: `-Wreorder-ctor` is **0** in `temp/compile_warning_reorder_werror_clean_build.log`; `-Werror=reorder-ctor` is now enabled in `build_lambda_config.json`.
+
+✅ **`-Wcomment` done.** Fixed nested block-comment markers in repeated header comments and file docs (`radiant/view.hpp`, `lambda/js/js_class.h`, `lambda/js/js_dom.cpp`, `radiant/layout_table.cpp`, markup/PDF/router docs). Clean build result: `-Wcomment` is **0** in `temp/compile_warning_comment_werror_clean_build.log`; `-Werror=comment` is now enabled in `build_lambda_config.json`.
+
+✅ **`-Wwritable-strings` done.** Tightened const-correctness for literal-only APIs (`heap_strcpy`, `_map_get`, `jit_gen_func`, print indentation/type names) and gave Radiant default font-family literals writable static storage where the existing ownership field requires `char*`. Clean build result: `-Wwritable-strings` is **0** in `temp/compile_warning_writable_strings_werror_clean_build.log`; `-Werror=writable-strings` is now enabled in `build_lambda_config.json`.
+
+✅ **`-Wunused-but-set-variable` done.** Removed stale state/counter variables and assignment-only leftovers across markup parsers, CSS parsing, YAML/TOML/XML/RDB/D2 inputs, JS regex/path/buffer helpers, TS preprocessing/type parsing, logging/memtrack, and Radiant layout/table/intrinsic sizing. One warning exposed a real TypeScript preprocessing bug: `angle_depth` was tracked but not included in the nested-depth condition, so generic type expressions now stay inside the skipped type span. Clean build result: `-Wunused-but-set-variable` is **0** in `temp/compile_warning_unused_set_werror_clean_build.log`; `-Werror=unused-but-set-variable` is now enabled in `build_lambda_config.json`.
+
+Current clean-build warning inventory after this wave:
+
+| Count | Flag |
+|------:|------|
+| 995 | `-Wcast-function-type-mismatch` |
+| 165 | `-Wunused-variable` |
+| 120 | `-Wsign-compare` |
+| 47 | `-Wsingle-bit-bitfield-constant-conversion` |
+| 43 | `-Wdeprecated-declarations` |
+| 24 | `-Wc11-extensions` |
+| 17 | `-Wconstant-conversion` |
+| 7 | `-Wundefined-bool-conversion` |
+| 3 | `-Wmacro-redefined` |
+| 2 | `-Wparentheses` |
+| 2 | `-Wmicrosoft-redeclare-static` |
+| 1 each | `-Wzero-length-array`, `-Wtrigraphs`, `-Wgnu-conditional-omitted-operand` |
 
 ## Success Criteria
 

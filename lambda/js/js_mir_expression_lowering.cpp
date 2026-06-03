@@ -76,7 +76,7 @@ static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
-    if (!mt || mt->current_func_index < 0 || !mt->func_entries) return false;
+    if (!mt || mt->current_func_index < 0 || mt->func_count <= 0) return false;
     int idx = mt->current_func_index;
     while (idx >= 0 && idx < mt->func_count) {
         JsFuncCollected* fc = &mt->func_entries[idx];
@@ -391,7 +391,7 @@ static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_ind
 }
 
 static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || !mt->class_entries) return;
+    if (!mt || !cls_obj || !ce || mt->class_count <= 0) return;
     int class_index = (int)(ce - mt->class_entries);
     jm_call_void_2(mt, "js_set_private_class_index",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
@@ -2995,7 +2995,7 @@ static JsIdentifierNode* jm_destructure_binding_identifier_target(JsAstNode* tar
 static void jm_emit_destructure_pre_binding_probe(JsMirTranspiler* mt, JsAstNode* target) {
     if (!mt || mt->with_depth <= 0 || mt->destructure_assignment_mode) return;
     JsIdentifierNode* id = jm_destructure_binding_identifier_target(target);
-    if (!id || !id->name || !id->name->chars) return;
+    if (!id || !id->name) return;
     MIR_reg_t key = jm_box_string_literal(mt, id->name->chars, id->name->len);
     jm_call_1(mt, "js_probe_with_binding", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -3359,9 +3359,9 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
                 JsClassNode* cls = (JsClassNode*)ap->right;
                 is_anon_class = (cls->name == NULL);
             }
-            if (is_anon_func && id->name && id->name->chars) {
+            if (is_anon_func && id->name) {
                 jm_emit_set_function_name(mt, resolved, id->name->chars);
-            } else if (is_anon_class && id->name && id->name->chars) {
+            } else if (is_anon_class && id->name) {
                 MIR_reg_t name_val = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
                 jm_call_void_2(mt, "js_set_class_name",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
@@ -4121,7 +4121,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                             (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                              asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
-                            if (!fn_node->name && id->name && id->name->chars) {
+                            if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, rhs, id->name->chars);
                             }
                         }
@@ -4473,7 +4473,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             if (asgn->right && (asgn->right->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                 asgn->right->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
                 JsFunctionNode* fn_node = (JsFunctionNode*)asgn->right;
-                if (!fn_node->name && id->name && id->name->chars) {
+                if (!fn_node->name && id->name) {
                     jm_emit_set_function_name(mt, rhs, id->name->chars);
                 }
             }
@@ -11545,7 +11545,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // patch it to point to the closure itself.
             char self_vname[128] = {0};
             int self_ref_slot = -1;
-            if (fc->node && fc->node->name && fc->node->name->chars) {
+            if (fc->node && fc->node->name) {
                 snprintf(self_vname, sizeof(self_vname), "_js_%.*s",
                     (int)fc->node->name->len, fc->node->name->chars);
             }
@@ -11725,7 +11725,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             // includes the NFE name as a slot (from Phase 1.7), but the parent
             // never defines it — only the closure itself knows its own identity.
             // Without this, recursive calls via the NFE name find null in the env.
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 char nfe_self[128];
                 snprintf(nfe_self, sizeof(nfe_self), "_js_%.*s",
                     (int)fn->name->len, fn->name->chars);
@@ -11763,7 +11763,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             // e.g. var f = function myName() { return myName; }
             int self_ref_slot_fe = -1;
             char nfe_self_name[128] = {0};
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 snprintf(nfe_self_name, sizeof(nfe_self_name), "_js_%.*s",
                     (int)fn->name->len, fn->name->chars);
             }

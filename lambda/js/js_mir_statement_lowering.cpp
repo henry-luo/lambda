@@ -371,7 +371,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                         d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
                         JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
-                        if (!fn_node->name && id->name && id->name->chars) {
+                        if (!fn_node->name && id->name) {
                             jm_emit_set_function_name(mt, boxed_val, id->name->chars);
                         }
                     }
@@ -427,7 +427,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                             d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
-                            if (!fn_node->name && id->name && id->name->chars) {
+                            if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, boxed_val, id->name->chars);
                             }
                         }
@@ -501,7 +501,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             if (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                 d->init->node_type == JS_AST_NODE_ARROW_FUNCTION) {
                                 JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
-                                if (!fn_node->name && id->name && id->name->chars) {
+                                if (!fn_node->name && id->name) {
                                     jm_emit_set_function_name(mt, val, id->name->chars);
                                 }
                             }
@@ -644,7 +644,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         if (d->init && (d->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                                         d->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
                             JsFunctionNode* fn_node = (JsFunctionNode*)d->init;
-                            if (!fn_node->name && id->name && id->name->chars) {
+                            if (!fn_node->name && id->name) {
                                 jm_emit_set_function_name(mt, val, id->name->chars);
                             }
                         }
@@ -1052,7 +1052,7 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
 static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* stmt) {
     if (!stmt || stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) return;
     JsFunctionNode* fn = (JsFunctionNode*)stmt;
-    if (!fn->name || !fn->name->chars) return;
+    if (!fn->name) return;
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
     if (!fc || !fc->func_item) return;
     char vname[128];
@@ -2151,7 +2151,7 @@ static void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_it
 }
 
 static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || !mt->class_entries) return;
+    if (!mt || !cls_obj || !ce || mt->class_count <= 0) return;
     int class_index = (int)(ce - mt->class_entries);
     jm_call_void_2(mt, "js_set_private_class_index",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
@@ -4746,7 +4746,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // since Phase 3 only processes program->body, not function bodies.
         if (mt->module_consts) {
             JsClassNode* cls_node = (JsClassNode*)stmt;
-            if (cls_node->name && cls_node->name->chars) {
+            if (cls_node->name) {
                 JsClassEntry* ce = NULL;
                 for (int ci = 0; ci < mt->class_count; ci++) {
                     if (mt->class_entries[ci].node == cls_node) {

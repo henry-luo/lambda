@@ -192,3 +192,28 @@ TEST(LambdaTypedItem, HoleSentinelWrapsDeletedSlotPayload) {
     lam::HoleSentinel witness = lam::HoleSentinel::from_raw(hole);
     EXPECT_EQ(witness.raw().item, hole.item);
 }
+
+TEST(LambdaTypedItem, ItemOrErrorWrapsRetStructs) {
+    Map map;
+    map.type_id = LMD_TYPE_MAP;
+    map.type = nullptr;
+    map.data = nullptr;
+
+    RetMap map_ret = rm_ok(&map);
+    auto map_result = lam::item_or_error(map_ret);
+    static_assert(sizeof(map_result) == sizeof(RetMap),
+                  "ItemOrError must remain Ret* ABI sized");
+    EXPECT_TRUE(map_result.ok());
+    EXPECT_FALSE(map_result.has_error());
+    EXPECT_EQ(map_result.error(), nullptr);
+    EXPECT_EQ(map_result.value(), &map);
+    EXPECT_EQ(map_result.raw().value, &map);
+
+    LambdaError* err = (LambdaError*)0x1234;
+    RetArray array_ret = ra_err(err);
+    auto array_result = lam::item_or_error(array_ret);
+    EXPECT_FALSE(array_result.ok());
+    EXPECT_TRUE(array_result.has_error());
+    EXPECT_EQ(array_result.error(), err);
+    EXPECT_EQ(array_result.raw().value, nullptr);
+}

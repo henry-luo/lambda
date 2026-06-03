@@ -56,12 +56,12 @@ static inline bool is_lambda_nil(const char* str, size_t len) {
 
 // Helper to check if a String* has valid non-nil content
 static inline bool has_valid_content(String* str) {
-    return str && str->chars && str->len > 0 && !is_lambda_nil(str->chars, str->len);
+    return str && str->len > 0 && !is_lambda_nil(str->chars, str->len);
 }
 
 // Helper to check if a String* has non-whitespace content (for block context in list items)
 static inline bool has_non_whitespace_content(String* str) {
-    if (!str || !str->chars || str->len == 0) return false;
+    if (!str || str->len == 0) return false;
     if (is_lambda_nil(str->chars, str->len)) return false;
     for (size_t i = 0; i < str->len; i++) {
         char c = str->chars[i];
@@ -143,7 +143,7 @@ static void format_cm_text_children(CommonMarkHtmlContext& ctx, const ElementRea
         ItemReader child = elem.childAt(i);
         if (child.isString()) {
             String* str = child.asString();
-            if (str && str->chars) {
+            if (str) {
                 format_cm_text(ctx, str->chars, str->len);
             }
         } else if (child.isElement()) {
@@ -197,7 +197,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
             ItemReader child = elem.childAt(i);
             if (child.isString()) {
                 String* str = child.asString();
-                if (str && str->chars) {
+                if (str) {
                     format_cm_text(ctx, str->chars, str->len);
                 }
             }
@@ -227,7 +227,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                 ItemReader child = elem.childAt(i);
                 if (child.isString()) {
                     String* str = child.asString();
-                    if (str && str->chars) {
+                    if (str) {
                         format_cm_text(ctx, str->chars, str->len);
                     }
                 }
@@ -240,7 +240,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                 ItemReader child = elem.childAt(i);
                 if (child.isString()) {
                     String* str = child.asString();
-                    if (str && str->chars) {
+                    if (str) {
                         format_cm_text(ctx, str->chars, str->len);
                     }
                 }
@@ -281,7 +281,6 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 
         // Check if li contains only text/inline or block elements
         bool has_block = false;
-        bool first_is_text = false;
         int block_start_index = -1;
 
         // Helper to check if a tag is a block-level element
@@ -312,8 +311,6 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                     has_block = true;
                     if (block_start_index < 0) block_start_index = i;
                 }
-            } else if (child.isString() && i == 0) {
-                first_is_text = true;
             }
         }
 
@@ -513,7 +510,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
             format_cm_url(ctx, src->chars, src->len);
         }
         stringbuf_append_str(sb, "\" alt=\"");
-        if (alt && alt->chars && !is_lambda_nil(alt->chars, alt->len)) {
+        if (alt && !is_lambda_nil(alt->chars, alt->len)) {
             format_cm_text(ctx, alt->chars, alt->len);
         }
         stringbuf_append_str(sb, "\"");
@@ -548,7 +545,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
             ItemReader child = elem.childAt(i);
             if (child.isString()) {
                 String* str = child.asString();
-                if (str && str->chars) {
+                if (str) {
                     // Output raw HTML without escaping
                     format_cm_raw_text(ctx, str->chars, str->len);
                 }
@@ -562,7 +559,7 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
             ItemReader child = elem.childAt(i);
             if (child.isString()) {
                 String* str = child.asString();
-                if (str && str->chars) {
+                if (str) {
                     // Output raw HTML without escaping
                     format_cm_raw_text(ctx, str->chars, str->len);
                 }
@@ -588,7 +585,7 @@ static void format_cm_item(CommonMarkHtmlContext& ctx, const ItemReader& item) {
 
     if (item.isString()) {
         String* str = item.asString();
-        if (str && str->chars) {
+        if (str) {
             format_cm_text(ctx, str->chars, str->len);
         }
     }

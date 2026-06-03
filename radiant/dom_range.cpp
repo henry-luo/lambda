@@ -1051,15 +1051,6 @@ static DomDocument* node_doc(DomNode* n) {
     return nullptr;
 }
 
-// Compute UTF-16 length of an arbitrary UTF-8 byte buffer.
-static uint32_t utf16_length_of(const char* s, size_t len) {
-    DomText tmp;
-    memset(&tmp, 0, sizeof(tmp));
-    tmp.text = s;
-    tmp.length = len;
-    return dom_text_utf16_length(&tmp);
-}
-
 // Allocate a String* from doc->arena. Independent of the lambda runtime heap
 // so the same code paths work in unit tests and production.
 static String* arena_make_string(DomDocument* doc, const char* chars, size_t byte_len) {

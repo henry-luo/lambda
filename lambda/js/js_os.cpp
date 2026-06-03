@@ -49,11 +49,6 @@
 #endif
 #endif
 
-// Helper: make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // Helper: create a string Item from a C string
 static Item make_string_item(const char* str, int len) {
     if (!str) return ItemNull;

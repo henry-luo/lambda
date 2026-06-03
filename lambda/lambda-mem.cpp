@@ -2,7 +2,10 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "../lib/arraylist.h"
 #include "../lib/gc/gc_heap.h"
+#include "js/js_runtime.h"
+#include "js/js_typed_array.h"
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include <mpdecimal.h>
@@ -27,6 +30,87 @@ typedef struct JitGcRootFrame {
 static __thread JitGcRootFrame* jit_gc_root_frame_top = NULL;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
+
+static bool gc_finalize_seen_native(ArrayList* seen, void* ptr) {
+    if (!seen || !ptr) return true;
+    for (int i = 0; i < seen->length; i++) {
+        if (seen->data[i] == ptr) return true;
+    }
+    arraylist_append(seen, ptr);
+    return false;
+}
+
+static void gc_finalize_arraybuffer(JsArrayBuffer* ab, ArrayList* seen_native) {
+    if (!ab || gc_finalize_seen_native(seen_native, ab)) return;
+    if (ab->data) {
+        mem_free(ab->data);
+        ab->data = NULL;
+    }
+    mem_free(ab);
+}
+
+static void gc_finalize_typed_array(JsTypedArray* ta, ArrayList* seen_native) {
+    if (!ta || gc_finalize_seen_native(seen_native, ta)) return;
+    if (!ta->buffer && ta->data) {
+        mem_free(ta->data);
+        ta->data = NULL;
+    }
+    mem_free(ta);
+}
+
+static void gc_finalize_js_native_map(Map* map, ArrayList* seen_native) {
+    if (!map) return;
+    switch (map->map_kind) {
+    case MAP_KIND_TYPED_ARRAY: {
+        JsTypedArray* ta = NULL;
+        if (map->data_cap == 0) {
+            ta = (JsTypedArray*)map->data;
+        } else {
+            bool found = false;
+            Item ta_val = js_map_get_fast_ext(map, "__ta__", 6, &found);
+            if (found) ta = (JsTypedArray*)(uintptr_t)it2i(ta_val);
+        }
+        gc_finalize_typed_array(ta, seen_native);
+        map->data = NULL;
+        break;
+    }
+    case MAP_KIND_ARRAYBUFFER: {
+        JsArrayBuffer* ab = NULL;
+        if (map->data_cap == 0) {
+            ab = (JsArrayBuffer*)map->data;
+        } else {
+            bool found = false;
+            Item ab_val = js_map_get_fast_ext(map, "__ab__", 6, &found);
+            if (found) ab = (JsArrayBuffer*)(uintptr_t)it2i(ab_val);
+        }
+        gc_finalize_arraybuffer(ab, seen_native);
+        map->data = NULL;
+        break;
+    }
+    case MAP_KIND_DATAVIEW: {
+        JsDataView* dv = NULL;
+        if (map->data_cap == 0) {
+            dv = (JsDataView*)map->data;
+        } else {
+            bool found = false;
+            Item dv_val = js_map_get_fast_ext(map, "__dv__", 6, &found);
+            if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
+        }
+        if (dv && !gc_finalize_seen_native(seen_native, dv)) mem_free(dv);
+        map->data = NULL;
+        break;
+    }
+    case MAP_KIND_ITERATOR:
+    case MAP_KIND_PROXY:
+        if (map->data && !gc_finalize_seen_native(seen_native, map->data)) {
+            mem_free(map->data);
+        }
+        map->data = NULL;
+        break;
+    default:
+        break;
+    }
+}
 
 static void jit_gc_root_register_active_ranges(gc_heap_t* gc) {
     if (!gc) return;
@@ -76,6 +160,7 @@ static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void vmap_gc_destroy(void* data);
+Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
 // Pre-allocated table of 128 String objects for ASCII chars 0-127.
@@ -347,7 +432,7 @@ extern "C" void* heap_data_calloc(size_t size) {
 // create a content string by copying from source (NOT pooled - arena allocated)
 // use this for user content, text data, or any non-structural strings
 // declared extern "C" to allow calling from C code (path.c)
-extern "C" String* heap_strcpy(char* src, int64_t len) {
+extern "C" String* heap_strcpy(const char* src, int64_t len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination
@@ -492,6 +577,7 @@ void heap_destroy() {
             gc_finalize_all_objects(context->heap->gc);
             gc_heap_destroy(context->heap->gc);  // pool_destroy frees all pool memory
         }
+        js_array_runtime_items_cleanup_all();
         context->heap->pool = NULL;
         mem_free(context->heap);
     }
@@ -502,6 +588,7 @@ void heap_destroy() {
 // items[], data buffers, closure_env are in the data zone — no free needed.
 // Only external resources (mpd_t, VMap backing HashMap) need explicit cleanup.
 static void gc_finalize_all_objects(gc_heap_t *gc) {
+    ArrayList* seen_native = arraylist_new(32);
     gc_header_t *current = gc->all_objects;
     while (current) {
         if (current->gc_flags & GC_FLAG_FREED) {
@@ -525,10 +612,21 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
                 dec->dec_val = NULL;
             }
         }
+        else if (tag == LMD_TYPE_ARRAY) {
+            Array *arr = (Array*)obj;
+            if (arr->items && js_array_runtime_items_release(arr->items)) {
+                arr->items = NULL;
+                arr->capacity = 0;
+            }
+        }
+        else if (tag == LMD_TYPE_MAP) {
+            gc_finalize_js_native_map((Map*)obj, seen_native);
+        }
         // All other types: items[], data, closure_env are zone-managed (data zone or object zone)
         // and will be bulk-freed by zone/pool destruction. No individual free needed.
         current = current->next;
     }
+    arraylist_free(seen_native);
 }
 
 void print_heap_entries() {

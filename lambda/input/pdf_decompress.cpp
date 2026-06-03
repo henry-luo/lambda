@@ -7,7 +7,7 @@
 
 /**
  * PDF Stream Decompression Implementation
- * Based on pdf.js stream decoders (src/core/*_stream.js)
+ * Based on pdf.js stream decoders.
  */
 
 // Initialize decode params to defaults

@@ -988,7 +988,7 @@ typedef struct MarkerProp {
 
 /**
  * PseudoContentProp - Stores dynamically created ::before and ::after pseudo-elements
-/*
+ *
  * Instead of storing content strings and layout bounds, we create actual DomElement
  * and DomText nodes for pseudo-elements. This allows reusing the existing layout
  * infrastructure for text and inline content.
@@ -1031,6 +1031,8 @@ typedef struct PseudoContentProp {
 typedef struct BlockProp {
     CssEnum text_align;
     CssEnum text_align_last;  // CSS text-align-last (auto, start, end, left, right, center, justify)
+    bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
+    CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
     const CssValue* line_height;
@@ -1239,6 +1241,7 @@ typedef struct EmbedProp {
     bool object_position_x_is_percent;
     bool object_position_y_is_percent;
     bool has_controls;       // true if <video controls> attribute present
+    bool broken_alt_fallback; // true when an unloaded <img> is rendered as alt text
 } EmbedProp;
 
 struct ViewBlock : ViewSpan {

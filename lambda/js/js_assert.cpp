@@ -826,17 +826,6 @@ static struct MockSlot {
 } g_mock_slots[MAX_MOCK_SLOTS];
 static int g_mock_slot_count = 0;
 
-// Reset all mock slots (called between tests)
-static void mock_reset_all_slots(void) {
-    for (int i = 0; i < g_mock_slot_count; i++) {
-        g_mock_slots[i].in_use = false;
-        g_mock_slots[i].calls = (Item){0};
-        g_mock_slots[i].original = (Item){0};
-        g_mock_slots[i].call_count = 0;
-    }
-    g_mock_slot_count = 0;
-}
-
 static int mock_alloc_slot(void) {
     // first try to reuse
     for (int i = 0; i < g_mock_slot_count; i++) {

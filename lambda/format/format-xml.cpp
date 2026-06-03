@@ -316,7 +316,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                 } else if (child.isSymbol()) {
                     // Symbol items (named entities) - output as &name;
                     Symbol* sym = child.asSymbol();
-                    if (sym && sym->chars) {
+                    if (sym) {
                         ctx.emit("&%N;", sym->chars);
                     }
                 } else if (child.isArray()) {

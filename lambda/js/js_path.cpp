@@ -14,11 +14,6 @@
 #include <cstring>
 #include <cstdio>
 
-// Helper: make JS undefined value
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // Helper: get JS type name for error messages
 static const char* js_type_name_for_error(Item value) {
     TypeId tid = get_type_id(value);
@@ -80,10 +75,8 @@ static int normalize_path_buf(const char* path, char* result, int result_size) {
     const char* segments[256];
     int seg_count = 0;
     bool is_absolute = (path[0] == '/');
-    bool had_trailing_sep = false;
 
     int plen = (int)strlen(path);
-    if (plen > 0 && path[plen - 1] == '/') had_trailing_sep = true;
 
     // tokenize into a temp buffer (strtok modifies)
     char temp[4096];

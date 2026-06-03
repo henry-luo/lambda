@@ -1051,7 +1051,7 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
             // function declarations, not generator or async-generator declarations.
             break;
         }
-        if (fn->name && fn->name->chars) {
+        if (fn->name) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
             JsNameSetEntry e;
@@ -1066,7 +1066,7 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
     case JS_AST_NODE_CLASS_DECLARATION: {
         if (var_only) break;
         JsClassNode* cls = (JsClassNode*)node;
-        if (cls->name && cls->name->chars) {
+        if (cls->name) {
             char name[128];
             snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
             jm_name_set_add(locals, name);
@@ -1214,7 +1214,7 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
             }
         } else if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
             JsClassNode* c = (JsClassNode*)stmt;
-            if (c->name && c->name->chars) {
+            if (c->name) {
                 char name[128];
                 snprintf(name, sizeof(name), "_js_%.*s", (int)c->name->len, c->name->chars);
                 jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
@@ -1255,14 +1255,14 @@ void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* nam
                 }
             } else if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
                 JsClassNode* cls = (JsClassNode*)stmt;
-                if (cls->name && cls->name->chars) {
+                if (cls->name) {
                     char name[128];
                     snprintf(name, sizeof(name), "_js_%.*s", (int)cls->name->len, cls->name->chars);
                     jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
                 }
             } else if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
                 JsFunctionNode* fn = (JsFunctionNode*)stmt;
-                if (fn->name && fn->name->chars) {
+                if (fn->name) {
                     char name[128];
                     snprintf(name, sizeof(name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                     jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
@@ -1378,7 +1378,7 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
     case JS_AST_NODE_CLASS_DECLARATION: {
         // class X — class name is a lexical binding
         JsClassNode* c = (JsClassNode*)node;
-        if (c->name && c->name->chars) {
+        if (c->name) {
             char nm[128];
             snprintf(nm, sizeof(nm), "_js_%.*s", (int)c->name->len, c->name->chars);
             jm_name_set_add(names, nm);
@@ -1446,7 +1446,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
     while (stmt) {
         if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
             JsFunctionNode* fn = (JsFunctionNode*)stmt;
-            if (fn->name && fn->name->chars) {
+            if (fn->name) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item) {
                     char vname[128];
@@ -1513,7 +1513,7 @@ void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node) {
         for (JsAstNode* stmt = sc->consequent; stmt; stmt = stmt->next) {
             if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
             JsFunctionNode* fn = (JsFunctionNode*)stmt;
-            if (!fn->name || !fn->name->chars) continue;
+            if (!fn->name) continue;
             JsFuncCollected* fc = jm_find_collected_func(mt, fn);
             if (!fc || !fc->func_item) continue;
             char vname[128];
@@ -1674,7 +1674,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // becomes a closure), it also needs to capture itself for recursive calls.
     char self_name[128] = {0};
     bool has_self_ref = false;
-    if (fn->name && fn->name->chars) {
+    if (fn->name) {
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);

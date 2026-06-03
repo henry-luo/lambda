@@ -29,10 +29,6 @@ static Item make_string_item(const char* str) {
     return make_string_item(str, (int)strlen(str));
 }
 
-static inline Item make_js_undefined() {
-    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
 // helper: extract C string from Item into stack buffer
 static const char* item_to_cstr(Item val, char* buf, int buf_size) {
     if (get_type_id(val) != LMD_TYPE_STRING) return NULL;

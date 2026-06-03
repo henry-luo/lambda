@@ -130,6 +130,26 @@ extern "C" {
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
+static bool g_lambda_main_memtrack_shutdown_done = false;
+
+static size_t lambda_main_memtrack_shutdown_once(void) {
+    if (g_lambda_main_memtrack_shutdown_done) {
+        return 0;
+    }
+    g_lambda_main_memtrack_shutdown_done = true;
+    return memtrack_shutdown();
+}
+
+static void lambda_main_memtrack_atexit(void) {
+    lambda_main_memtrack_shutdown_once();
+}
+
+static int lambda_main_finish(int ret_code) {
+    log_finish();
+    lambda_main_memtrack_shutdown_once();
+    return ret_code;
+}
+
 // Thread-local context from runner.cpp (for error handling)
 extern __thread EvalContext* context;
 
@@ -565,46 +585,6 @@ static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tm
     write_text_file(tmp_script_path, script_buf);
     mem_free(script_buf);
     return true;
-}
-
-static char* convert_pdf_to_html_temp(const char* pdf_file, const char* tmp_script_path,
-                                      const char* temp_html, const char* opts_expr,
-                                      const char* log_prefix) {
-    if (!write_pdf_to_html_bridge_script(pdf_file, tmp_script_path, opts_expr, log_prefix)) {
-        return nullptr;
-    }
-
-    Runtime pdf_runtime;
-    runtime_init(&pdf_runtime);
-    pdf_runtime.current_dir = const_cast<char*>("./");
-    pdf_runtime.import_base_dir = "./";
-
-    Input* script_result = run_script_mir(&pdf_runtime, nullptr,
-                                           (char*)tmp_script_path, false);
-
-    bool ok = (script_result && get_type_id(script_result->root) == LMD_TYPE_ELEMENT);
-    char* result_path = nullptr;
-    if (ok) {
-        String* html_str = format_html(script_result->pool, script_result->root);
-        if (html_str && html_str->chars) {
-            write_binary_file(temp_html, html_str->chars, html_str->len);
-            result_path = mem_strdup(temp_html, MEM_CAT_TEMP);
-            log_info("[%s] PDF rendered to %s (%u bytes)",
-                     log_prefix, temp_html, html_str->len);
-        } else {
-            log_error("[%s] PDF package: format_html returned null", log_prefix);
-            ok = false;
-        }
-    } else {
-        log_error("[%s] PDF package pipeline failed for %s", log_prefix, pdf_file);
-        if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-            LambdaError* le = get_persistent_last_error();
-            if (le) { err_print(le); clear_persistent_last_error(); }
-        }
-    }
-
-    runtime_cleanup(&pdf_runtime);
-    return ok ? result_path : nullptr;
 }
 
 void run_assertions() {
@@ -1134,7 +1114,7 @@ int main(int argc, char *argv[]) {
         mode = MEMTRACK_MODE_OFF;
     }
     memtrack_init(mode);
-    atexit([]{ memtrack_shutdown(); });  // Ensure shutdown is called on exit
+    atexit(lambda_main_memtrack_atexit);  // fallback for exit() paths
     run_assertions();
     log_debug("Assertions completed");
 
@@ -1142,8 +1122,7 @@ int main(int argc, char *argv[]) {
     log_debug("Parsing command line arguments");
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
-        log_finish();  // Cleanup logging before exit
-        return 0;
+        return lambda_main_finish(0);
     }
 
     // Initialize runtime (needed for all operations)
@@ -1196,8 +1175,7 @@ int main(int argc, char *argv[]) {
             printf("  %s validate -f html -s schema.ls input.html\n", argv[0]);
             printf("  %s validate --strict --max-errors 5 document.json\n", argv[0]);
             printf("  %s validate --max-depth 50 --allow-unknown data.xml\n", argv[0]);
-            log_finish();  // Cleanup logging before exit
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Prepare arguments for exec_validation (skip the "validate" command)
@@ -1214,8 +1192,7 @@ int main(int argc, char *argv[]) {
         }
 
         log_debug("exec_validation completed with result: %d", exit_code);
-        log_finish();  // Cleanup logging before exit
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle Node.js package manager command
@@ -1243,8 +1220,7 @@ int main(int argc, char *argv[]) {
             printf("  %s node uninstall lodash     # Remove lodash\n", argv[0]);
             printf("  %s node task test            # Run 'test' script\n", argv[0]);
             printf("  %s node exec cowsay hello    # Run cowsay binary\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         const char* subcmd = argv[2];
@@ -1289,20 +1265,17 @@ int main(int argc, char *argv[]) {
             }
             npm_install_result_free(result);
             mem_free(cwd);
-            log_finish();
-            return exit_code;
+            return lambda_main_finish(exit_code);
 
         } else if (strcmp(subcmd, "uninstall") == 0) {
             if (argc < 4) {
                 fprintf(stderr, "Usage: %s node uninstall <package>\n", argv[0]);
                 mem_free(cwd);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
             int ret = npm_uninstall(cwd, argv[3]);
             mem_free(cwd);
-            log_finish();
-            return ret;
+            return lambda_main_finish(ret);
 
         } else if (strcmp(subcmd, "task") == 0) {
             // Run a script from package.json
@@ -1315,8 +1288,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "No package.json found in current directory\n");
                     if (pkg) npm_package_json_free(pkg);
                     mem_free(cwd);
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
                 if (pkg->script_count == 0) {
                     printf("No scripts defined in package.json\n");
@@ -1328,8 +1300,7 @@ int main(int argc, char *argv[]) {
                 }
                 npm_package_json_free(pkg);
                 mem_free(cwd);
-                log_finish();
-                return 0;
+                return lambda_main_finish(0);
             }
 
             const char* script_name = argv[3];
@@ -1340,8 +1311,7 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "No package.json found in current directory\n");
                 if (pkg) npm_package_json_free(pkg);
                 mem_free(cwd);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Find the script
@@ -1361,8 +1331,7 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "\n");
                 npm_package_json_free(pkg);
                 mem_free(cwd);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Prepend node_modules/.bin to PATH for script execution
@@ -1396,8 +1365,7 @@ int main(int argc, char *argv[]) {
                 shell_result_free(&result);
                 npm_package_json_free(pkg);
                 mem_free(cwd);
-                log_finish();
-                return exit_code;
+                return lambda_main_finish(exit_code);
             } else {
                 printf("> %s\n\n", script_cmd);
                 ShellResult result = shell_exec_line(script_cmd, &shell_opts);
@@ -1407,8 +1375,7 @@ int main(int argc, char *argv[]) {
                 shell_result_free(&result);
                 npm_package_json_free(pkg);
                 mem_free(cwd);
-                log_finish();
-                return exit_code;
+                return lambda_main_finish(exit_code);
             }
 
         } else if (strcmp(subcmd, "exec") == 0) {
@@ -1416,8 +1383,7 @@ int main(int argc, char *argv[]) {
             if (argc < 4) {
                 fprintf(stderr, "Usage: %s node exec <package> [args...]\n", argv[0]);
                 mem_free(cwd);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             const char* pkg_name = argv[3];
@@ -1437,8 +1403,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "\n");
                     npm_install_result_free(install_result);
                     mem_free(cwd);
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
                 npm_install_result_free(install_result);
             }
@@ -1446,8 +1411,7 @@ int main(int argc, char *argv[]) {
             if (!file_exists(bin_path)) {
                 fprintf(stderr, "No executable '%s' found in node_modules/.bin\n", pkg_name);
                 mem_free(cwd);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Build command line with remaining args
@@ -1465,15 +1429,13 @@ int main(int argc, char *argv[]) {
             int exit_code = result.exit_code;
             shell_result_free(&result);
             mem_free(cwd);
-            log_finish();
-            return exit_code;
+            return lambda_main_finish(exit_code);
 
         } else {
             fprintf(stderr, "Unknown node command: %s\n", subcmd);
             fprintf(stderr, "Run '%s node --help' for usage.\n", argv[0]);
             mem_free(cwd);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
     }
 
@@ -1498,8 +1460,7 @@ int main(int argc, char *argv[]) {
             printf("  %s js                             # Run built-in tests\n", argv[0]);
             printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
             printf("  %s js script.js --document page.html  # Run JS with DOM access\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         Runtime runtime;
@@ -1536,8 +1497,7 @@ int main(int argc, char *argv[]) {
             if (!js_source) {
                 printf("Error: Could not read file '%s'\n", js_file);
                 runtime_cleanup(&runtime);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // If --document is provided, load HTML and set up DOM context
@@ -1551,8 +1511,7 @@ int main(int argc, char *argv[]) {
                     printf("Error: Could not read HTML file '%s'\n", html_file);
                     mem_free(js_source);
                     runtime_cleanup(&runtime);
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
 
                 // Detect non-UTF-8 charset and convert HTML if needed
@@ -1655,8 +1614,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return js_had_error ? 1 : 0;
+        return lambda_main_finish(js_had_error ? 1 : 0);
     }
 
 #ifdef LAMBDA_PYTHON
@@ -1675,8 +1633,7 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help    Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s py script.py    # Transpile and run script.py\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         Runtime runtime;
@@ -1689,8 +1646,7 @@ int main(int argc, char *argv[]) {
             if (!py_source) {
                 printf("Error: Could not read file '%s'\n", py_file);
                 runtime_cleanup(&runtime);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             Item result = transpile_py_to_mir(&runtime, py_source, py_file);
@@ -1718,8 +1674,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return 0;
+        return lambda_main_finish(0);
     }
 #endif // LAMBDA_PYTHON
 
@@ -1739,8 +1694,7 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help    Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s rb script.rb    # Transpile and run script.rb\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         Runtime runtime;
@@ -1753,8 +1707,7 @@ int main(int argc, char *argv[]) {
             if (!rb_source) {
                 printf("Error: Could not read file '%s'\n", rb_file);
                 runtime_cleanup(&runtime);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             Item result = transpile_rb_to_mir(&runtime, rb_source, rb_file);
@@ -1782,8 +1735,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return 0;
+        return lambda_main_finish(0);
     }
 #endif // LAMBDA_RUBY
 
@@ -1826,8 +1778,7 @@ int main(int argc, char *argv[]) {
             printf("\nExamples:\n");
             printf("  %s bash script.sh          # Transpile and run script.sh\n", argv[0]);
             printf("  %s bash --posix script.sh  # Run in POSIX compatibility mode\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         Runtime runtime;
@@ -1921,8 +1872,7 @@ int main(int argc, char *argv[]) {
             if (!bash_source) {
                 printf("Error: Could not read file '%s'\n", bash_file);
                 runtime_cleanup(&runtime);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             Item result = transpile_bash_to_mir(&runtime, bash_source, bash_file);
@@ -1945,8 +1895,7 @@ int main(int argc, char *argv[]) {
 
         int bash_exit = bash_exit_code(bash_get_exit_code());
         runtime_cleanup(&runtime);
-        log_finish();
-        return bash_exit;
+        return lambda_main_finish(bash_exit);
     }
 #endif // LAMBDA_BASH
 
@@ -1966,8 +1915,7 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help    Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s ts script.ts    # Transpile and run script.ts\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         Runtime runtime;
@@ -1980,8 +1928,7 @@ int main(int argc, char *argv[]) {
             if (!ts_source) {
                 printf("Error: Could not read file '%s'\n", ts_file);
                 runtime_cleanup(&runtime);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file);
@@ -2009,8 +1956,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return 0;
+        return lambda_main_finish(0);
     }
 
     // Handle convert command
@@ -2041,8 +1987,7 @@ int main(int argc, char *argv[]) {
             printf("\nAuto-detection Examples:\n");
             printf("  %s convert document.md -t html -o output.html\n", argv[0]);
             printf("  %s convert -f markdown data.txt -t json -o data.json\n", argv[0]);
-            log_finish();  // Cleanup logging before exit
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Prepare arguments for exec_convert (skip the "convert" command)
@@ -2053,8 +1998,7 @@ int main(int argc, char *argv[]) {
         int exit_code = exec_convert(convert_argc, convert_argv);
 
         log_debug("exec_convert completed with result: %d", exit_code);
-        log_finish();  // Cleanup logging before exit
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle layout command
@@ -2105,8 +2049,7 @@ int main(int argc, char *argv[]) {
             printf("  - Multiple input files require --output-dir\n");
             printf("  - Output files are named {basename}.json in the output directory\n");
             printf("  - UiContext is initialized once and reused for all files (10x+ speedup)\n");
-            log_finish();  // Cleanup logging before exit
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Call the new Lambda CSS-based layout command
@@ -2114,8 +2057,7 @@ int main(int argc, char *argv[]) {
         int exit_code = cmd_layout(argc - 2, argv + 2);
 
         log_debug("layout command completed with result: %d", exit_code);
-        log_finish();  // Cleanup logging before exit
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle math command - moved to Lambda script
@@ -2123,15 +2065,13 @@ int main(int argc, char *argv[]) {
     if (argc >= 2 && strcmp(argv[1], "math") == 0) {
         printf("The 'math' command has been moved to Lambda script.\n");
         printf("Use: %s run <script.ls> to render math formulas.\n", argv[0]);
-        log_finish();
-        return 1;
+        return lambda_main_finish(1);
     }
 
     // Handle render-batch command (shared UiContext for all renders)
     if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
         int result = cmd_render_batch(argc - 2, argv + 2);
-        log_finish();
-        return result;
+        return lambda_main_finish(result);
     }
 
     // Handle render command
@@ -2183,8 +2123,7 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o out.png -s 2.0           # Render at 2x zoom\n", argv[0]);
             printf("  %s render index.html -o out.png --pixel-ratio 2  # Crisp text on Retina\n", argv[0]);
             printf("  %s render test/page.html -o result.svg           # Render with relative paths\n", argv[0]);
-            log_finish();  // Cleanup logging before exit
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Parse arguments
@@ -2202,8 +2141,7 @@ int main(int argc, char *argv[]) {
                     output_file = argv[++i];
                 } else {
                     printf("Error: -o option requires an output file argument\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
                 if (i + 1 < argc) {
@@ -2211,13 +2149,11 @@ int main(int argc, char *argv[]) {
                     viewport_width = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                     if (viewport_width <= 0) {
                         printf("Error: Invalid viewport width '%s'. Must be a positive integer.\n", argv[i]);
-                        log_finish();
-                        return 1;
+                        return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: -vw option requires a width value\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
                 if (i + 1 < argc) {
@@ -2225,13 +2161,11 @@ int main(int argc, char *argv[]) {
                     viewport_height = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                     if (viewport_height <= 0) {
                         printf("Error: Invalid viewport height '%s'. Must be a positive integer.\n", argv[i]);
-                        log_finish();
-                        return 1;
+                        return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: -vh option requires a height value\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--scale") == 0) {
                 if (i + 1 < argc) {
@@ -2239,13 +2173,11 @@ int main(int argc, char *argv[]) {
                     render_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
                     if (render_scale <= 0.0f) {
                         printf("Error: Invalid scale '%s'. Must be a positive number.\n", argv[i]);
-                        log_finish();
-                        return 1;
+                        return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: -s/--scale option requires a scale value\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (strcmp(argv[i], "--pixel-ratio") == 0) {
                 if (i + 1 < argc) {
@@ -2253,13 +2185,11 @@ int main(int argc, char *argv[]) {
                     pixel_ratio = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
                     if (pixel_ratio <= 0.0f) {
                         printf("Error: Invalid pixel-ratio '%s'. Must be a positive number.\n", argv[i]);
-                        log_finish();
-                        return 1;
+                        return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: --pixel-ratio option requires a value\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
                 if (i + 1 < argc) {
@@ -2269,8 +2199,7 @@ int main(int argc, char *argv[]) {
                     printf("Available themes: tokyo-night, nord, dracula, catppuccin-mocha, one-dark,\n");
                     printf("                  github-dark, github-light, solarized-light, catppuccin-latte,\n");
                     printf("                  zinc-dark, zinc-light, dark, light\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else if (argv[i][0] != '-') {
                 // This should be the HTML input file
@@ -2278,13 +2207,11 @@ int main(int argc, char *argv[]) {
                     html_file = argv[i];
                 } else {
                     printf("Error: Multiple input files not supported\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else {
                 printf("Error: Unknown render option '%s'\n", argv[i]);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
         }
 
@@ -2293,24 +2220,21 @@ int main(int argc, char *argv[]) {
             printf("Error: render command requires an input file\n");
             printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
             printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         // Check if HTML file exists (skip check for HTTP/HTTPS URLs)
         bool is_http_url = (strncmp(html_file, "http://", 7) == 0 || strncmp(html_file, "https://", 8) == 0);
         if (!is_http_url && !file_exists(html_file)) {
             printf("Error: Input file '%s' does not exist\n", html_file);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         // Detect if input is a graph format (Mermaid, D2, DOT)
@@ -2336,8 +2260,7 @@ int main(int argc, char *argv[]) {
             char* graph_content = read_text_file(html_file);
             if (!graph_content) {
                 printf("Error: Failed to read graph file '%s'\n", html_file);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Create input using InputManager directly (no URL needed for graph parsing)
@@ -2345,8 +2268,7 @@ int main(int argc, char *argv[]) {
             if (!input) {
                 printf("Error: Failed to create input for graph parsing\n");
                 mem_free(graph_content);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
             log_debug("Created input for graph parsing, parsing content...");
 
@@ -2366,16 +2288,14 @@ int main(int argc, char *argv[]) {
 
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to parse graph file '%s'\n", html_file);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Layout graph using Dagre
             GraphLayout* layout = layout_graph(input->root.element);
             if (!layout) {
                 printf("Error: Failed to compute graph layout\n");
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Generate SVG from layout with optional theme
@@ -2391,8 +2311,7 @@ int main(int argc, char *argv[]) {
             if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to generate SVG from graph\n");
                 free_graph_layout(layout);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Update input root to SVG
@@ -2411,8 +2330,7 @@ int main(int argc, char *argv[]) {
                     printf("Error: Failed to format SVG output\n");
                 }
                 free_graph_layout(layout);
-                log_finish();
-                return svg_str ? 0 : 1;
+                return lambda_main_finish(svg_str ? 0 : 1);
             } else {
                 // For other formats (PDF, PNG), save SVG temp file and render it
                 const char* temp_svg = "/tmp/lambda_graph_temp.svg";
@@ -2420,8 +2338,7 @@ int main(int argc, char *argv[]) {
                 if (!svg_str) {
                     printf("Error: Failed to format SVG output\n");
                     free_graph_layout(layout);
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
                 write_text_file(temp_svg, svg_str->chars);
 
@@ -2446,8 +2363,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 free_graph_layout(layout);
-                log_finish();
-                return exit_code;
+                return lambda_main_finish(exit_code);
             }
         }
 
@@ -2462,21 +2378,18 @@ int main(int argc, char *argv[]) {
                 } else {
                     printf("Error: Failed to write PDF output '%s'\n", output_file);
                 }
-                log_finish();
-                return copy_status == 0 ? 0 : 1;
+                return lambda_main_finish(copy_status == 0 ? 0 : 1);
             }
             log_info("[render] PDF detected — using Lambda PDF package in-memory element pipeline");
             char* render_pdf_bridge = file_temp_path("render_pdf_bridge", ".ls");
             if (!render_pdf_bridge) {
                 printf("Error: Failed to allocate PDF render bridge path\n");
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
             if (!write_pdf_to_html_bridge_script(html_file, render_pdf_bridge, "null", "render")) {
                 printf("Error: Failed to prepare PDF render bridge for '%s'\n", html_file);
                 mem_free(render_pdf_bridge);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
             render_pdf_temp_input = render_pdf_bridge;
             html_file = render_pdf_temp_input;
@@ -2492,8 +2405,7 @@ int main(int argc, char *argv[]) {
                 file_delete(render_pdf_temp_input);
                 mem_free(render_pdf_temp_input);
             }
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         } else if (ext && (strcmp(ext, ".pdf") == 0 ||
                            strcmp(ext, ".svg") == 0 ||
                            strcmp(ext, ".png") == 0 ||
@@ -2510,8 +2422,7 @@ int main(int argc, char *argv[]) {
                 file_delete(render_pdf_temp_input);
                 mem_free(render_pdf_temp_input);
             }
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         if (render_pdf_temp_input) {
@@ -2520,8 +2431,7 @@ int main(int argc, char *argv[]) {
         }
 
         log_debug("render completed with result: %d", exit_code);
-        log_finish();  // Cleanup logging before exit
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
 
@@ -2537,8 +2447,7 @@ int main(int argc, char *argv[]) {
             printf("  --headless                Run without creating a window (default)\n");
             printf("  --window                  Run with an interactive window\n");
             printf("  --font-dir <dir>          Add custom font scan directory\n");
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         const char* replay_log = NULL;
@@ -2570,13 +2479,11 @@ int main(int argc, char *argv[]) {
 
         if (!replay_log) {
             printf("Error: replay requires --event-log <events.jsonl>\n");
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
         if (!file_exists(replay_log)) {
             printf("Error: Event log '%s' does not exist\n", replay_log);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         char* replay_doc = NULL;
@@ -2587,8 +2494,7 @@ int main(int argc, char *argv[]) {
         if (!filename || !filename[0]) {
             printf("Error: Could not find session_start document.url in '%s'\n", replay_log);
             if (replay_doc) mem_free(replay_doc);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         event_sim_set_replay_assert_state(assert_state);
@@ -2597,7 +2503,7 @@ int main(int argc, char *argv[]) {
                                                        record_replay);
         if (replay_doc) mem_free(replay_doc);
         log_debug("replay command completed with result: %d", exit_code);
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle view command (open PDF or HTML in window)
@@ -2655,8 +2561,7 @@ int main(int argc, char *argv[]) {
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
             printf("  Q          Quit viewer\n");
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Parse arguments for view command
@@ -2695,8 +2600,7 @@ int main(int argc, char *argv[]) {
         bool is_http_url = (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0);
         if (!is_http_url && !file_exists(filename)) {
             printf("Error: File '%s' does not exist\n", filename);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         // For HTTP URLs, fetch content and determine type from Content-Type header
@@ -2714,8 +2618,7 @@ int main(int argc, char *argv[]) {
                 }
                 printf("\n");
                 if (response) free_fetch_response(response);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Use effective URL (after redirects) for base tag injection
@@ -2782,8 +2685,7 @@ int main(int argc, char *argv[]) {
             } else {
                 printf("Error: Failed to create temp file for HTTP content\n");
                 free_fetch_response(response);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
             free_fetch_response(response);
         }
@@ -2805,8 +2707,7 @@ int main(int argc, char *argv[]) {
             char* graph_content = read_text_file(filename);
             if (!graph_content) {
                 printf("Error: Failed to read graph file '%s'\n", filename);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Create input for graph parsing
@@ -2814,8 +2715,7 @@ int main(int argc, char *argv[]) {
             if (!input) {
                 printf("Error: Failed to create input for graph parsing\n");
                 mem_free(graph_content);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Parse graph content based on format
@@ -2833,16 +2733,14 @@ int main(int argc, char *argv[]) {
 
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to parse graph file '%s'\n", filename);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Layout graph using Dagre
             GraphLayout* layout = layout_graph(input->root.element);
             if (!layout) {
                 printf("Error: Failed to compute graph layout\n");
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Generate SVG from layout
@@ -2850,8 +2748,7 @@ int main(int argc, char *argv[]) {
             if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to generate SVG from graph\n");
                 free_graph_layout(layout);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // Format SVG and write to temp file
@@ -2859,8 +2756,7 @@ int main(int argc, char *argv[]) {
             if (!svg_str) {
                 printf("Error: Failed to format SVG output\n");
                 free_graph_layout(layout);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             const char* temp_svg = "./temp/lambda_graph_view.svg";
@@ -2879,8 +2775,7 @@ int main(int argc, char *argv[]) {
             file_delete(temp_svg);
 
             log_info("view command completed with result: %d", exit_code);
-            log_finish();
-            return exit_code;
+            return lambda_main_finish(exit_code);
         }
 
         // ============================================================
@@ -2898,8 +2793,7 @@ int main(int argc, char *argv[]) {
             if (!pdf_bridge_source) {
                 printf("Error: Failed to prepare PDF view bridge for '%s'\n", filename);
                 if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
 
             // The script returns the constructed <html>/<svg> element tree, so
@@ -2916,8 +2810,7 @@ int main(int argc, char *argv[]) {
             }
 
             log_info("view command completed with result: %d", exit_code);
-            log_finish();
-            return exit_code;
+            return lambda_main_finish(exit_code);
         }
 
         if (ext && (strcmp(ext, ".pdf") == 0 ||
@@ -2942,8 +2835,7 @@ int main(int argc, char *argv[]) {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) { file_delete(temp_file_path); mem_free(temp_file_path); }
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         // Cleanup temp file if we created one from HTTP URL
@@ -2992,8 +2884,7 @@ int main(int argc, char *argv[]) {
                 sleep(secs);
             }
         }
-        log_finish();
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle serve command (HTTP/HTTPS server)
@@ -3020,8 +2911,7 @@ int main(int argc, char *argv[]) {
             printf("  %s serve -p 8080 -d ./public            # Serve ./public on port 8080\n", argv[0]);
             printf("  %s serve handler.ls                     # Run Lambda script handler\n", argv[0]);
             printf("  %s serve -p 3000 --cors handler.ls      # With CORS enabled\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Parse serve command arguments
@@ -3029,8 +2919,6 @@ int main(int argc, char *argv[]) {
         const char *host = "0.0.0.0";
         const char *static_dir = NULL;
         const char *handler_file = NULL;
-        const char *ssl_cert = NULL;
-        const char *ssl_key = NULL;
         int ssl_port = 0;
         int workers = 4;
         bool enable_cors = false;
@@ -3045,9 +2933,9 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "--ssl-port") == 0 && i + 1 < argc) {
                 ssl_port = atoi(argv[++i]);
             } else if (strcmp(argv[i], "--ssl-cert") == 0 && i + 1 < argc) {
-                ssl_cert = argv[++i];
+                i++;
             } else if (strcmp(argv[i], "--ssl-key") == 0 && i + 1 < argc) {
-                ssl_key = argv[++i];
+                i++;
             } else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) {
                 workers = atoi(argv[++i]);
             } else if (strcmp(argv[i], "--cors") == 0) {
@@ -3076,8 +2964,7 @@ int main(int argc, char *argv[]) {
 
         fprintf(stderr, "Error: 'serve' command not yet fully implemented.\n");
         fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
-        log_finish();
-        return 1;
+        return lambda_main_finish(1);
     }
 
     // Handle webdriver command
@@ -3088,8 +2975,7 @@ int main(int argc, char *argv[]) {
         int exit_code = cmd_webdriver(argc - 2, argv + 2);
 
         log_debug("webdriver command completed with result: %d", exit_code);
-        log_finish();
-        return exit_code;
+        return lambda_main_finish(exit_code);
     }
 
     // Handle fetch command (network resource download)
@@ -3111,8 +2997,7 @@ int main(int argc, char *argv[]) {
             printf("  %s fetch https://example.com -o page.html       # Save to file\n", argv[0]);
             printf("  %s fetch https://httpbin.org/delay/2 -t 5000    # 5 second timeout\n", argv[0]);
             printf("  %s fetch https://httpbin.org/status/200 -v      # Verbose output\n", argv[0]);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Parse fetch command arguments
@@ -3134,21 +3019,18 @@ int main(int argc, char *argv[]) {
                     url = argv[i];
                 } else {
                     printf("Error: Multiple URLs not supported\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else {
                 printf("Error: Unknown option '%s'\n", argv[i]);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
         }
 
         if (!url) {
             printf("Error: No URL specified\n");
             printf("Usage: %s fetch <url> [options]\n", argv[0]);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         if (verbose) {
@@ -3193,14 +3075,12 @@ int main(int argc, char *argv[]) {
                     } else {
                         printf("Error: Failed to read cached content\n");
                         mem_free(res.url);
-                        log_finish();
-                        return 1;
+                        return lambda_main_finish(1);
                     }
                 } else {
                     printf("Error: No content available\n");
                     mem_free(res.url);
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else {
                 // Print to stdout
@@ -3214,8 +3094,7 @@ int main(int argc, char *argv[]) {
             }
 
             mem_free(res.url);
-            log_finish();
-            return 0;
+            return lambda_main_finish(0);
         } else {
             printf("❌ Download failed\n");
             printf("   URL: %s\n", url);
@@ -3227,8 +3106,7 @@ int main(int argc, char *argv[]) {
             printf("   Time: %.2f ms\n", elapsed_ms);
 
             mem_free(res.url);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
     }
 
@@ -3342,8 +3220,7 @@ int main(int argc, char *argv[]) {
         }
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return 0;
+        return lambda_main_finish(0);
     }
 
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
@@ -3827,6 +3704,22 @@ int main(int argc, char *argv[]) {
         if (hot_reload) {
             context = &batch_context;
             js_batch_reset();
+            if (batch_context.name_pool) {
+                name_pool_release(batch_context.name_pool);
+                batch_context.name_pool = NULL;
+            }
+            if (batch_context.heap) {
+                heap_destroy();
+                batch_context.heap = NULL;
+            }
+            if (batch_context.nursery) {
+                gc_nursery_destroy(batch_context.nursery);
+                batch_context.nursery = NULL;
+            }
+            if (batch_context.type_list) {
+                arraylist_free((ArrayList*)batch_context.type_list);
+                batch_context.type_list = NULL;
+            }
             context = NULL;
         }
 
@@ -3842,7 +3735,7 @@ int main(int argc, char *argv[]) {
         if (saved_harness_src) { mem_free(saved_harness_src); saved_harness_src = NULL; }
 
         runtime_cleanup(&runtime);
-        return 0;
+        return lambda_main_finish(0);
     }
 
     // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
@@ -3850,8 +3743,7 @@ int main(int argc, char *argv[]) {
         const char* sexpr_path = argv[2];
         log_debug("Emitting s-expressions for '%s'", sexpr_path);
         int result = emit_sexpr_file(sexpr_path);
-        log_finish();
-        return result;
+        return lambda_main_finish(result);
     }
 
     // Handle run command
@@ -3880,8 +3772,7 @@ int main(int argc, char *argv[]) {
 #ifdef LAMBDA_C2MIR
             printf("  %s run --c2mir script.ls         # Run script with C2MIR JIT compilation\n", argv[0]);
 #endif
-            log_finish();  // Cleanup logging before exit
-            return 0;
+            return lambda_main_finish(0);
         }
 
         // Parse run command arguments
@@ -3898,8 +3789,7 @@ int main(int argc, char *argv[]) {
                     use_mir = false;  // --transpile-dir is for C code inspection: force C2MIR
                 } else {
                     printf("Error: --transpile-dir requires a directory argument\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else
 #endif
@@ -3914,13 +3804,11 @@ int main(int argc, char *argv[]) {
                     script_file = argv[i];
                 } else {
                     printf("Error: Multiple script files not supported\n");
-                    log_finish();
-                    return 1;
+                    return lambda_main_finish(1);
                 }
             } else {
                 printf("Error: Unknown run option '%s'\n", argv[i]);
-                log_finish();
-                return 1;
+                return lambda_main_finish(1);
             }
         }
 
@@ -3931,15 +3819,13 @@ int main(int argc, char *argv[]) {
 #else
             printf("Usage: %s run <script>\n", argv[0]);
 #endif
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         // Check if script file exists
         if (!file_exists(script_file)) {
             printf("Error: Script file '%s' does not exist\n", script_file);
-            log_finish();
-            return 1;
+            return lambda_main_finish(1);
         }
 
         log_debug("Running script '%s' with run_main=true, use_mir=%s", script_file, use_mir ? "true" : "false");
@@ -3948,8 +3834,7 @@ int main(int argc, char *argv[]) {
         int result = run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
 
         runtime_cleanup(&runtime);
-        log_finish();
-        return result;
+        return lambda_main_finish(result);
     }
 
     bool use_mir = true;  // MIR Direct is default
@@ -4072,11 +3957,12 @@ int main(int argc, char *argv[]) {
     // Clean up runtime (dumps profiling data if LAMBDA_PROFILE=1)
     runtime_cleanup(&runtime);
 
-    // Note: memtrack_shutdown is called via atexit handler
+    lambda_stack_cleanup();
+
+    // memtrack_shutdown runs in lambda_main_finish after normal cleanup.
 
     // Clean up rpmalloc (release thread and global state)
     mempool_cleanup();
 
-    log_finish();
-    return ret_code;
+    return lambda_main_finish(ret_code);
 }

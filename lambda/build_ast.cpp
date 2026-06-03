@@ -3452,7 +3452,6 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
     AstMatchArm* last_arm = NULL;
     int arm_count = 0;
     TypeId result_type_id = LMD_TYPE_NULL;
-    bool has_default = false;
     bool need_any_type = false;
 
     uint32_t child_count = ts_node_child_count(match_node);
@@ -3473,7 +3472,6 @@ AstNode* build_match(Transpiler* tp, TSNode match_node) {
             arm->pattern = build_expr(tp, pattern_node);
         } else {
             arm->pattern = NULL;
-            has_default = true;
         }
 
         // create a new scope for the arm body (like if_stam branches)

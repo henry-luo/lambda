@@ -217,22 +217,6 @@ static const char* get_indentation_string(void) {
     return log_indent_buffer;
 }
 
-/* Helper function to sanitize text by replacing newlines with ^ */
-static void sanitize_text_for_logging(char *dest, size_t dest_size, const char *src) {
-    size_t i = 0;
-    const char *s = src;
-
-    while (*s && i < dest_size - 1) {
-        if (*s == '\n' || *s == '\r') {
-            dest[i++] = '^';
-        } else {
-            dest[i++] = *s;
-        }
-        s++;
-    }
-    dest[i] = '\0';
-}
-
 /* Helper function to format log message according to pattern */
 static void format_log_message(char *output, size_t output_size, log_format_t *format,
                               const char *timestamp, const char *level_str,
@@ -507,11 +491,10 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
 
             if (is_t_format) {
                 // %t format with optional modifiers - get width/precision and string, then sanitize
-                int width = 0;
                 int precision = -1;
 
                 if (has_star_width) {
-                    width = va_arg(args_copy, int);
+                    (void)va_arg(args_copy, int);
                 }
                 if (has_star_precision) {
                     precision = va_arg(args_copy, int);

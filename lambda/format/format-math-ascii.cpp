@@ -124,13 +124,6 @@ static const char* cmd_to_ascii(const char* cmd) {
     return nullptr;
 }
 
-// Check if a command is a big operator (uses limits notation: sum_(...)^...)
-static bool is_bigop_cmd(const char* cmd) {
-    if (!cmd) return false;
-    if (cmd[0] == '\\') cmd++;
-    return lookup_cmd(BIGOP_TABLE, cmd) != nullptr;
-}
-
 // Check if a command is a function (sin, cos, etc.)
 static bool is_func_cmd(const char* cmd) {
     if (!cmd) return false;
@@ -178,40 +171,6 @@ static bool is_single_letter_str(const ItemReader& item) {
     return s && s->len == 1 &&
            ((s->chars[0] >= 'a' && s->chars[0] <= 'z') ||
             (s->chars[0] >= 'A' && s->chars[0] <= 'Z'));
-}
-
-// Try to match a known word starting at index `start` in the children of elem.
-// Returns the length of the matched word (0 if no match).
-static int try_match_known_word(const ElementReader& elem, int64_t start, int64_t count,
-                                 char* out_word, int out_word_max) {
-    // Collect consecutive single-char string children
-    int run_len = 0;
-    char buf[64];
-    for (int64_t i = start; i < count && run_len < 63; i++) {
-        ItemReader child = elem.childAt(i);
-        if (!is_single_letter_str(child)) break;
-        buf[run_len++] = child.asString()->chars[0];
-    }
-    buf[run_len] = '\0';
-
-    if (run_len < 2) return 0;
-
-    // Try matching known words (longest first by checking full table)
-    int best_len = 0;
-    for (const char** w = KNOWN_WORDS; *w; w++) {
-        int wlen = (int)strlen(*w);
-        if (wlen <= run_len && wlen > best_len && strncmp(buf, *w, wlen) == 0) {
-            best_len = wlen;
-            // Don't break — table is sorted longest first so first match is longest
-            break; // Actually words are ordered by length desc, so first match IS longest
-        }
-    }
-
-    if (best_len > 0 && best_len < out_word_max) {
-        memcpy(out_word, buf, best_len);
-        out_word[best_len] = '\0';
-    }
-    return best_len;
 }
 
 // Check if a known word should be treated as a function (emits as name(arg))
@@ -301,19 +260,6 @@ static void format_subsup(StringBuf* sb, const ElementReader& elem, int depth) {
     ItemReader base = elem.get_attr("base");
     ItemReader sub = elem.get_attr("sub");
     ItemReader sup = elem.get_attr("sup");
-
-    // Check if base is a big operator
-    bool base_is_bigop = false;
-    if (!base.isNull() && base.isElement()) {
-        ElementReader base_elem = base.asElement();
-        const char* tag = base_elem.tagName();
-        if (tag && strcmp(tag, "command") == 0) {
-            ItemReader name = base_elem.get_attr("name");
-            if (!name.isNull() && name.isString()) {
-                base_is_bigop = is_bigop_cmd(name.asString()->chars);
-            }
-        }
-    }
 
     // Emit base
     if (!base.isNull()) {
@@ -533,7 +479,7 @@ static void format_space_command(StringBuf* sb, const ElementReader& elem) {
 
 // format_symbol_impl: emit ASCII math symbol representation
 static void format_symbol_impl(StringBuf* sb, Symbol* sym) {
-    if (!sym || !sym->chars) return;
+    if (!sym) return;
     // Symbols: row_sep → semicolon, col_sep → comma, other → cmd_to_ascii lookup
     if (strcmp(sym->chars, "row_sep") == 0) { stringbuf_append_str(sb, "; "); }
     else if (strcmp(sym->chars, "col_sep") == 0) { stringbuf_append_str(sb, ", "); }

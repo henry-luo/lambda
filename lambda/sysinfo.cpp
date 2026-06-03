@@ -84,7 +84,6 @@ struct SysinfoCache {
 static const int TTL_STATIC = 3600;   // 1 hour - static info (OS, CPU)
 static const int TTL_MEMORY = 1;      // 1 second - dynamic
 static const int TTL_PROC = 5;        // 5 seconds - semi-static
-static const int TTL_TIME = 0;        // always fresh
 
 static __thread SysinfoCache* g_cache = nullptr;
 

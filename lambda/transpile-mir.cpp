@@ -320,11 +320,6 @@ static MIR_type_t reg_type(MIR_type_t t) {
     return (t == MIR_T_P || t == MIR_T_F) ? MIR_T_I64 : t;
 }
 
-static MIR_type_t node_mir_type(AstNode* node) {
-    if (!node || !node->type) return MIR_T_I64;
-    return type_to_mir(node->type->type_id);
-}
-
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
     char name[64];
     snprintf(name, sizeof(name), "%s_%d", prefix, mt->reg_counter++);
@@ -601,75 +596,6 @@ static MirImportEntry* ensure_import(MirTranspiler* mt, const char* name,
 
     found = (ImportCacheEntry*)hashmap_get(mt->import_cache, &key);
     return &found->entry;
-}
-
-// Convenience: import a function with signature Item(Item, Item)
-static MirImportEntry* ensure_import_ii_i(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 2, args, 1);
-}
-
-// Item(Item)
-static MirImportEntry* ensure_import_i_i(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// Item(void) - no args
-static MirImportEntry* ensure_import_v_i(MirTranspiler* mt, const char* name) {
-    return ensure_import(mt, name, MIR_T_I64, 0, NULL, 1);
-}
-
-// void(void)
-static MirImportEntry* ensure_import_v_v(MirTranspiler* mt, const char* name) {
-    return ensure_import(mt, name, MIR_T_I64, 0, NULL, 0);
-}
-
-// int64_t(Item)
-static MirImportEntry* ensure_import_i_l(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// Item(double)
-static MirImportEntry* ensure_import_d_i(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_D, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// Item(int64_t)
-static MirImportEntry* ensure_import_l_i(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// Bool(Item)
-static MirImportEntry* ensure_import_i_b(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 1);
-}
-
-// ptr(void) - returns pointer
-static MirImportEntry* ensure_import_v_p(MirTranspiler* mt, const char* name) {
-    return ensure_import(mt, name, MIR_T_P, 0, NULL, 1);
-}
-
-// void(ptr)
-static MirImportEntry* ensure_import_p_v(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[1] = {{MIR_T_P, "a", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 1, args, 0);
-}
-
-// Item(ptr, Item)
-static MirImportEntry* ensure_import_pi_v(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[2] = {{MIR_T_P, "a", 0}, {MIR_T_I64, "b", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 2, args, 0);
-}
-
-// int64_t(Item, int)
-static MirImportEntry* ensure_import_ii_l(MirTranspiler* mt, const char* name) {
-    MIR_var_t args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-    return ensure_import(mt, name, MIR_T_I64, 2, args, 1);
 }
 
 // ============================================================================
@@ -1351,23 +1277,6 @@ static int64_t parse_int_literal(const char* source, TSNode node) {
     clean[ci] = '\0';
 
     return strtoll(clean, NULL, 10);
-}
-
-static double parse_float_literal(const char* source, TSNode node) {
-    int start = ts_node_start_byte(node);
-    int end = ts_node_end_byte(node);
-    const char* text = source + start;
-    int len = end - start;
-
-    char buf[128];
-    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
-    // Remove underscores
-    int ci = 0;
-    for (int i = 0; i < len && ci < (int)sizeof(buf) - 1; i++) {
-        if (text[i] != '_') buf[ci++] = text[i];
-    }
-    buf[ci] = '\0';
-    return strtod(buf, NULL);
 }
 
 static bool parse_bool_literal(const char* source, TSNode node) {
@@ -10168,7 +10077,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     register_local_func(mt, name_buf->str, func_item);
 
     // Also register by raw name for fallback lookup when ident->entry is NULL
-    if (fn_node->name && fn_node->name->chars) {
+    if (fn_node->name) {
         char raw_name[128];
         snprintf(raw_name, sizeof(raw_name), "%.*s", (int)fn_node->name->len, fn_node->name->chars);
         if (!find_local_func(mt, raw_name)) {
@@ -10689,7 +10598,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             register_local_func(mt, name_buf->str, fwd);
 
             // Also register by raw name for fallback lookup
-            if (fn_node->name && fn_node->name->chars) {
+            if (fn_node->name) {
                 char raw_name[128];
                 snprintf(raw_name, sizeof(raw_name), "%.*s",
                     (int)fn_node->name->len, fn_node->name->chars);

@@ -12,7 +12,6 @@ using namespace lambda;
 // Forward declarations for Mermaid parsing
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker);
 static String* parse_mermaid_identifier(InputContext& ctx);
-static String* parse_mermaid_label(InputContext& ctx);
 static void parse_mermaid_node_def(InputContext& ctx, Element* graph);
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id);
 static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
@@ -195,51 +194,6 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, 
 
     const char* label_text = sb->str->chars;
     return ctx.builder.createString(label_text);
-}
-
-// Parse Mermaid label in quotes or brackets
-static String* parse_mermaid_label(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-    skip_whitespace_and_comments_mermaid(tracker);
-
-    if (tracker.atEnd()) return nullptr;
-
-    char quote = tracker.current();
-    if (quote == '"') {
-        // double-quoted: use the shared handler (JSON-compatible escapes)
-        return parse_shared_quoted_string(ctx);
-    }
-    if (quote != '\'' && quote != '[') {
-        return nullptr;
-    }
-
-    char closing = (quote == '[') ? ']' : quote;
-    tracker.advance();
-
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    while (!tracker.atEnd() && tracker.current() != closing) {
-        char c = tracker.current();
-        if (c == '\\') {
-            tracker.advance();
-            if (!tracker.atEnd()) {
-                stringbuf_append_char(sb, tracker.current());
-                tracker.advance();
-            }
-        } else {
-            stringbuf_append_char(sb, c);
-            tracker.advance();
-        }
-    }
-
-    if (tracker.atEnd()) {
-        ctx.addError(tracker.location(), "Unterminated label, expected closing '%c'", closing);
-        return nullptr;
-    }
-
-    tracker.advance(); // skip closing
-    return ctx.builder.createString(sb->str->chars);
 }
 
 // Parse Mermaid node definition: nodeId[label] or nodeId(label) etc.

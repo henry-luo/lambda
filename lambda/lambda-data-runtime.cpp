@@ -782,7 +782,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
 }
 
 // last-writer-wins: scan all entries in declaration order, keep the last match
-Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     Item result = ItemNull;
     *is_found = false;
     ShapeEntry *field = map_type->shape;

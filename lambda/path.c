@@ -238,8 +238,6 @@ int path_depth(Path* path) {
 }
 
 // Forward declaration for segment display helper
-static const char* path_get_segment_display(Path* path);
-
 /**
  * Convert path to Lambda path string.
  * New syntax: "/.etc.hosts" for absolute, ".test.file" for relative.
@@ -614,21 +612,6 @@ bool path_has_wildcards(Path* path) {
 // Path to string conversion - updated for segment types
 // ============================================================================
 
-/**
- * Get segment display name for path_to_string.
- * Returns the segment name, or "*"/"**" for wildcards.
- */
-static const char* path_get_segment_display(Path* path) {
-    if (!path) return "";
-    LPathSegmentType seg_type = PATH_GET_SEG_TYPE(path);
-    switch (seg_type) {
-        case LPATH_SEG_WILDCARD: return "*";
-        case LPATH_SEG_WILDCARD_REC: return "**";
-        case LPATH_SEG_DYNAMIC: return "<dynamic>";
-        default: return path->name ? path->name : "";
-    }
-}
-
 // ============================================================================
 // Path iteration support - lazy loading for directories and files
 // ============================================================================
@@ -703,7 +686,7 @@ static Item resolve_file_content(Path* path, const char* file_path);
 static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive);
 
 // Extern declaration for heap_strcpy (defined in lambda-mem.cpp)
-extern String* heap_strcpy(char* src, int64_t len);
+extern String* heap_strcpy(const char* src, int64_t len);
 
 /**
  * Resolve path content for iteration.

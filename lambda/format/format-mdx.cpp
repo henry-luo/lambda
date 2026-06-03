@@ -16,7 +16,7 @@ static void format_mdx_element_reader(StringBuf* sb, const ElementReader& elem) 
         ItemReader content = elem.get_attr("content");
         if (content.isString()) {
             String* jsx_content = content.asString();
-            if (jsx_content && jsx_content->chars) {
+            if (jsx_content) {
                 stringbuf_append_str(sb, jsx_content->chars);
             }
         }

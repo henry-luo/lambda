@@ -99,3 +99,4 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
 void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan* span);
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* first_child);
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);
+void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* first_child);

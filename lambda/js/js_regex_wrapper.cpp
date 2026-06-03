@@ -515,8 +515,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     // Build rewritten pattern by processing assertions from right to left
     // (to preserve position indices)
     std::string result = original;
-    int added_groups = 0;
-
     // Track positions of synthetic '(' characters in the rewritten pattern
     // so we can build a proper group remap after all rewrites.
     struct SyntheticEntry {
@@ -555,8 +553,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                added_groups++;
-
                 // Adjust previously recorded synthetic positions (they're at higher positions)
                 for (int s = 0; s < synthetic_count; s++) {
                     if (synthetic[s].position > syn_pos) {
@@ -652,8 +648,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                added_groups++;
-
                 for (int s = 0; s < synthetic_count; s++) {
                     if (synthetic[s].position > syn_pos) {
                         synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
@@ -731,7 +725,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t syn_pos = info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                added_groups++;
                 for (int s = 0; s < synthetic_count; s++) {
                     if (synthetic[s].position > syn_pos) {
                         synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
@@ -760,8 +753,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                 size_t old_len = info.end_pos - info.start_pos;
                 result.replace(info.start_pos, old_len, replacement);
                 int delta = (int)replacement.size() - (int)old_len;
-                added_groups++;
-
                 for (int s = 0; s < synthetic_count; s++) {
                     if (synthetic[s].position > syn_pos) {
                         synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
@@ -889,7 +880,6 @@ static bool validate_unicode_strict(const std::string& pat) {
     int group_count = count_capture_groups(pat);
     size_t n = pat.size();
     bool in_class = false;
-    bool class_after_first = false; // for detecting char class shorthand in range
     char class_prev_was_shorthand = 0; // 'd','D','s','S','w','W','p','P'
 
     for (size_t i = 0; i < n; i++) {
@@ -988,7 +978,6 @@ static bool validate_unicode_strict(const std::string& pat) {
             }
             if (c == '[') {
                 in_class = true;
-                class_after_first = false;
                 class_prev_was_shorthand = 0;
                 continue;
             }
@@ -1045,7 +1034,7 @@ static bool validate_unicode_strict(const std::string& pat) {
                     size_t j = i + 3;
                     while (j < n && pat[j] != '}') j++;
                     if (j >= n) return false;
-                    class_prev_was_shorthand = 0; class_after_first = true;
+                    class_prev_was_shorthand = 0;
                     i = j; continue;
                 }
                 // similar escape validation as outside class (subset)
@@ -1059,14 +1048,14 @@ static bool validate_unicode_strict(const std::string& pat) {
                             j++;
                         }
                         if (j >= n) return false;
-                        i = j; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                        i = j; class_prev_was_shorthand = 0; continue;
                     }
                     if (i + 5 >= n) return false;
                     for (int kk = 2; kk <= 5; kk++) {
                         char h = pat[i + kk];
                         if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
                     }
-                    i += 5; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                    i += 5; class_prev_was_shorthand = 0; continue;
                 }
                 if (nx == 'x') {
                     if (i + 3 >= n) return false;
@@ -1074,33 +1063,33 @@ static bool validate_unicode_strict(const std::string& pat) {
                         char h = pat[i + kk];
                         if (!((h >= '0' && h <= '9') || (h >= 'a' && h <= 'f') || (h >= 'A' && h <= 'F'))) return false;
                     }
-                    i += 3; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                    i += 3; class_prev_was_shorthand = 0; continue;
                 }
                 if (nx == 'c') {
                     if (i + 2 >= n) return false;
                     char cc = pat[i + 2];
                     if (!((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z'))) return false;
-                    i += 2; class_prev_was_shorthand = 0; class_after_first = true; continue;
+                    i += 2; class_prev_was_shorthand = 0; continue;
                 }
                 // valid escapes inside class
                 if (nx == 'b' || nx == 'B' || nx == 'd' || nx == 'D' ||
                     nx == 's' || nx == 'S' || nx == 'w' || nx == 'W' ||
                     nx == 'f' || nx == 'n' || nx == 'r' || nx == 't' || nx == 'v') {
                     class_prev_was_shorthand = is_shorthand ? nx : 0;
-                    i++; class_after_first = true; continue;
+                    i++; continue;
                 }
                 if (nx == '0') {
                     // \0 only valid if not followed by another digit
                     if (i + 2 < n && pat[i + 2] >= '0' && pat[i + 2] <= '9') return false;
                     class_prev_was_shorthand = 0;
-                    i++; class_after_first = true; continue;
+                    i++; continue;
                 }
                 if (nx == '^' || nx == '$' || nx == '\\' || nx == '.' || nx == '*' ||
                     nx == '+' || nx == '?' || nx == '(' || nx == ')' || nx == '[' ||
                     nx == ']' || nx == '{' || nx == '}' || nx == '|' || nx == '/' ||
                     nx == '-') {
                     class_prev_was_shorthand = 0;
-                    i++; class_after_first = true; continue;
+                    i++; continue;
                 }
                 if (nx >= '1' && nx <= '9') return false; // octal escape in class under u
                 return false; // identity escape
@@ -1111,7 +1100,6 @@ static bool validate_unicode_strict(const std::string& pat) {
                 continue;
             }
             class_prev_was_shorthand = 0;
-            class_after_first = true;
         }
     }
     if (in_class) return false; // unterminated class

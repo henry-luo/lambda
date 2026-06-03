@@ -18,6 +18,7 @@
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
+#include "../../lib/lambda_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
@@ -565,7 +566,7 @@ extern const JsBuiltinMethodSpec JS_DATAVIEW_ACCESSOR_SPECS[];
 
 
 Item _map_read_field(ShapeEntry* field, void* map_data);
-Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 
 bool js_runtime_trace_enabled();
 void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len);
@@ -638,11 +639,11 @@ static inline Item make_js_undefined() {
 
 // Sentinel value for deleted properties.
 static inline Item make_js_deleted_sentinel() {
-    return (Item){.item = JS_DELETED_SENTINEL_VAL};
+    return lam::hole_sentinel_item();
 }
 
 static inline bool js_is_deleted_sentinel(Item val) {
-    return val.item == JS_DELETED_SENTINEL_VAL;
+    return lam::is_hole_sentinel(val);
 }
 
 static inline bool js_key_is_symbol(Item key) {

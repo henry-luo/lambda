@@ -50,7 +50,7 @@ static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
         format_element_impl(sb, item.asElement(), depth);
     } else if (item.isString()) {
         String* str = item.asString();
-        if (str && str->chars) stringbuf_append_str(sb, str->chars);
+        if (str) stringbuf_append_str(sb, str->chars);
     } else if (item.isSymbol()) {
         Symbol* sym = item.asSymbol();
         if (sym) format_symbol_impl(sb, sym);

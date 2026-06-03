@@ -442,7 +442,7 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
 }
 
 void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name) {
-    if (!asgn || asgn->lhs_is_parenthesized || !asgn->right || !name || !name->chars) return;
+    if (!asgn || asgn->lhs_is_parenthesized || !asgn->right || !name) return;
     if (asgn->op != JS_OP_ASSIGN) return;
     if (asgn->right->node_type != JS_AST_NODE_CLASS_EXPRESSION &&
         asgn->right->node_type != JS_AST_NODE_CLASS_DECLARATION) return;
@@ -1427,7 +1427,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                     if (p1_prop->name->len == 1 && p1_prop->name->chars[0] == 'R') {
                         log_error("TRACE P1 slot read .R: field_type=%d slot=%d offset=%d class='%s'",
                             (int)field_type, p1_slot, (int)byte_offset,
-                            p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name ?
+                            p1_ce->constructor && p1_ce->constructor->fc && p1_ce->constructor->fc->name[0] ?
                             p1_ce->constructor->fc->name : "anon");
                     }
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);

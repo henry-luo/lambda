@@ -715,7 +715,7 @@ void heap_jit_gc_root_frame_exit();
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
-String* heap_strcpy(char* src, int64_t len);
+String* heap_strcpy(const char* src, int64_t len);
 // Symbol creation for runtime symbols
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 #ifdef __cplusplus

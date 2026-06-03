@@ -34,6 +34,20 @@ typedef struct RenderWalkBlockDriver {
     RenderWalkBlockPhase phase;
 } RenderWalkBlockDriver;
 
+static bool render_walk_is_positive_z_positioned(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    return element && element->position &&
+        element->position->z_index > 0 &&
+        element->position->position != CSS_VALUE_STATIC;
+}
+
+static bool render_walk_is_out_of_flow_positioned(View* view) {
+    ViewElement* element = lam::view_as_element(view);
+    return element && element->position &&
+        (element->position->position == CSS_VALUE_ABSOLUTE ||
+         element->position->position == CSS_VALUE_FIXED);
+}
+
 static float render_walk_css_opacity(const InlineProp* in_line) {
     if (!in_line) return 1.0f;
     float opacity = in_line->opacity;
@@ -195,6 +209,11 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
 
         render_walk_children(backend, state, block->first_child);
 
+        if (block->position) {
+            render_walk_positioned_children(backend, state, block);
+        }
+        render_walk_positive_z_descendants(backend, state, block->first_child);
+
         if (backend->end_block_children) {
             backend->end_block_children(backend->ctx, block);
         }
@@ -293,53 +312,103 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
     state->color = pa_color;
 }
 
+static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view) {
+    if (!backend || !state || !view) return;
+
+    switch (view->view_type) {
+        case RDT_VIEW_BLOCK:
+        case RDT_VIEW_INLINE_BLOCK:
+        case RDT_VIEW_TABLE:
+        case RDT_VIEW_TABLE_ROW_GROUP:
+        case RDT_VIEW_TABLE_ROW:
+        case RDT_VIEW_TABLE_CELL:
+        case RDT_VIEW_LIST_ITEM:
+            if (backend->render_block) {
+                backend->render_block(backend->ctx, lam::view_require_block(view),
+                                      state->x, state->y, &state->font, state->color);
+            } else {
+                render_walk_block(backend, state, lam::view_require_block(view));
+            }
+            break;
+
+        case RDT_VIEW_INLINE:
+            if (backend->render_inline) {
+                backend->render_inline(backend->ctx, lam::view_require_element(view),
+                                       state->x, state->y, &state->font, state->color);
+            } else {
+                render_walk_inline(backend, state, lam::view_require_element(view));
+            }
+            break;
+
+        case RDT_VIEW_TEXT:
+            if (backend->render_text) {
+                backend->render_text(backend->ctx, lam::view_require_text(view),
+                                     state->x, state->y,
+                                     &state->font, state->color);
+            }
+            break;
+
+        case RDT_VIEW_MARKER:
+            if (backend->render_marker) {
+                backend->render_marker(backend->ctx, lam::view_require_element(view),
+                                       state->x, state->y,
+                                       &state->font, state->color);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
     while (view) {
-        switch (view->view_type) {
-            case RDT_VIEW_BLOCK:
-            case RDT_VIEW_INLINE_BLOCK:
-            case RDT_VIEW_TABLE:
-            case RDT_VIEW_TABLE_ROW_GROUP:
-            case RDT_VIEW_TABLE_ROW:
-            case RDT_VIEW_TABLE_CELL:
-            case RDT_VIEW_LIST_ITEM:
-                if (backend->render_block) {
-                    backend->render_block(backend->ctx, lam::view_require_block(view),
-                                          state->x, state->y, &state->font, state->color);
-                } else {
-                    render_walk_block(backend, state, lam::view_require_block(view));
-                }
-                break;
-
-            case RDT_VIEW_INLINE:
-                if (backend->render_inline) {
-                    backend->render_inline(backend->ctx, lam::view_require_element(view),
-                                           state->x, state->y, &state->font, state->color);
-                } else {
-                    render_walk_inline(backend, state, lam::view_require_element(view));
-                }
-                break;
-
-            case RDT_VIEW_TEXT:
-                if (backend->render_text) {
-                    backend->render_text(backend->ctx, lam::view_require_text(view),
-                                         state->x, state->y,
-                                         &state->font, state->color);
-                }
-                break;
-
-            case RDT_VIEW_MARKER:
-                if (backend->render_marker) {
-                    backend->render_marker(backend->ctx, lam::view_require_element(view),
-                                           state->x, state->y,
-                                           &state->font, state->color);
-                }
-                break;
-
-            default:
-                break;
+        if (!render_walk_is_positive_z_positioned(view) &&
+            !render_walk_is_out_of_flow_positioned(view)) {
+            render_walk_view(backend, state, view);
         }
         view = view->next();
+    }
+}
+
+static void render_walk_collect_positive_z_descendants(View* view, View** out_views,
+                                                       int* out_count, int max_count) {
+    while (view && *out_count < max_count) {
+        if (render_walk_is_positive_z_positioned(view)) {
+            out_views[(*out_count)++] = view;
+        } else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewElement* element = lam::view_require_element(view);
+            render_walk_collect_positive_z_descendants(element->first_child, out_views, out_count, max_count);
+        }
+        view = view->next();
+    }
+}
+
+void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* view) {
+    if (!backend || !state || !view) return;
+
+    View* positive_views[256];
+    int positive_count = 0;
+    render_walk_collect_positive_z_descendants(view, positive_views, &positive_count, 256);
+
+    for (int i = 1; i < positive_count; i++) {
+        View* key = positive_views[i];
+        int key_z = lam::view_require_element(key)->position->z_index;
+        int j = i - 1;
+        while (j >= 0) {
+            int j_z = lam::view_require_element(positive_views[j])->position->z_index;
+            if (j_z > key_z) {
+                positive_views[j + 1] = positive_views[j];
+                j--;
+            } else {
+                break;
+            }
+        }
+        positive_views[j + 1] = key;
+    }
+
+    for (int i = 0; i < positive_count; i++) {
+        render_walk_view(backend, state, positive_views[i]);
     }
 }
 

@@ -11,13 +11,16 @@
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
+#include "lambda-stack.h"
 #include "module_registry.h"
 #include "js/js_runtime.h"
+#include "input/css/css_style.hpp"
 #include "template_registry.h"
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
 #include "../lib/file_utils.h"
 #include "../lib/shell.h"
+#include "../lib/uv_loop.h"
 
 extern "C" Item js_property_get(Item object, Item key);
 
@@ -1418,6 +1421,10 @@ void runtime_cleanup(Runtime* runtime) {
     profile_dump_to_file();
 
     module_registry_cleanup();
+    js_eval_preamble_cache_reset();
+    css_property_system_cleanup();
+    lambda_uv_cleanup();
+    lambda_stack_cleanup();
 
     // Destroy retained execution state (heap, nursery, name_pool)
     if (runtime->heap) {

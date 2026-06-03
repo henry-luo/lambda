@@ -100,7 +100,7 @@ protected:
 
         printf("SUCCESS: %s completed (formatted length: %zu)\n", test_name, (size_t)formatted->len);
         printf("Formatted content (first 150 chars): %.150s\n",
-               formatted->chars ? formatted->chars : "(null)");
+               formatted->chars);
         if (formatted->len > 150) {
             printf("... (truncated)\n");
         }
@@ -144,8 +144,7 @@ TEST_F(MarkupRoundtripTest, SimpleTest) {
 
     // Print with length limit to avoid hanging
     printf("Simple test - JSON formatted (length %zu chars):\n", (size_t)formatted->len);
-    if (formatted->chars && formatted->len > 0) {
-        size_t print_len = formatted->len > 200 ? 200 : formatted->len;
+    if (formatted->len > 0) {
         printf("%.200s", formatted->chars);
         if (formatted->len > 200) {
             printf("... (truncated)\n");
@@ -185,7 +184,7 @@ TEST_F(MarkupRoundtripTest, EmptyTest) {
     ASSERT_NE(formatted, nullptr) << "Should format empty content to JSON";
 
     printf("Empty test - JSON formatted: '%s' (length: %zu)\n",
-           formatted->chars ? formatted->chars : "(null)", (size_t)formatted->len);
+           formatted->chars, (size_t)formatted->len);
 
     // Cleanup
     free(content_copy);
@@ -302,7 +301,7 @@ TEST_F(MarkupRoundtripTest, DISABLED_ComprehensiveMathTest) {
     String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
     ASSERT_NE(formatted, nullptr) << "Failed to format math content to Markdown";
     ASSERT_GT(formatted->len, 0) << "Formatted math Markdown should not be empty";
-    printf("Formatted math content (length %zu): %s\n", (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
+    printf("Formatted math content (length %zu): %s\n", (size_t)formatted->len, formatted->chars);
 
     // Cleanup
     free(math_content);
@@ -349,10 +348,10 @@ TEST_F(MarkupRoundtripTest, DISABLED_RstDirectivesTest) {
     ASSERT_NE(formatted, nullptr) << "Failed to format RST content to JSON";
     ASSERT_GT(formatted->len, 0) << "Formatted RST JSON should not be empty";
     printf("RST JSON structure (length %zu, first 200 chars): %.200s\n",
-           (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
+           (size_t)formatted->len, formatted->chars);
 
     // Check that RST-specific elements are present
-    if (formatted->chars) {
+    if (formatted->len > 0) {
         // Should contain directive elements
         ASSERT_NE(strstr(formatted->chars, "directive"), nullptr) << "RST JSON should contain 'directive' elements";
 
@@ -414,10 +413,10 @@ TEST_F(MarkupRoundtripTest, DISABLED_BasicRstTest) {
     ASSERT_GT(formatted->len, 0) << "Formatted basic RST JSON should not be empty";
 
     printf("Basic RST JSON (first 400 chars): %.400s\n",
-           formatted->chars ? formatted->chars : "(null)");
+           formatted->chars);
 
     // Verify RST-specific features are detected
-    if (formatted->chars) {
+    if (formatted->len > 0) {
         bool has_headers = strstr(formatted->chars, "h1") != NULL;
         bool has_paragraphs = strstr(formatted->chars, "\"$\":\"p\"") != NULL;
         bool has_directives = strstr(formatted->chars, "directive") != NULL;
@@ -515,7 +514,7 @@ TEST_F(MarkupRoundtripTest, DISABLED_RstExtendedFeatures) {
     String* formatted = format_data(input->root, json_type, NULL, input->pool);
     ASSERT_NE(formatted, nullptr) << "Failed to format extended RST to JSON";
 
-    if (formatted->chars) {
+    if (formatted->len > 0) {
         // Check for literal text (double backticks)
         bool has_literal = strstr(formatted->chars, "literal") != NULL ||
                           strstr(formatted->chars, "code") != NULL;
@@ -572,7 +571,7 @@ TEST_F(MarkupRoundtripTest, DISABLED_TextileRoundtripTest) {
     ASSERT_NE(json_formatted, nullptr) << "Failed to format Textile content to JSON";
     ASSERT_GT(json_formatted->len, 0) << "Formatted Textile JSON should not be empty";
     printf("Textile JSON structure (length %zu, first 300 chars): %.300s\n",
-           (size_t)json_formatted->len, json_formatted->chars ? json_formatted->chars : "(null)");
+           (size_t)json_formatted->len, json_formatted->chars);
 
     // Format back to Textile
     String* textile_type = create_lambda_string("textile");
@@ -580,13 +579,13 @@ TEST_F(MarkupRoundtripTest, DISABLED_TextileRoundtripTest) {
     ASSERT_NE(textile_formatted, nullptr) << "Failed to format back to Textile";
     ASSERT_GT(textile_formatted->len, 0) << "Formatted Textile should not be empty";
     printf("Roundtrip Textile output (length %zu, first 500 chars):\n%.500s\n",
-           (size_t)textile_formatted->len, textile_formatted->chars ? textile_formatted->chars : "(null)");
+           (size_t)textile_formatted->len, textile_formatted->chars);
     if (textile_formatted->len > 500) {
         printf("... (truncated)\n");
     }
 
     // Check for Textile-specific syntax elements in output
-    if (textile_formatted->chars) {
+    if (textile_formatted->len > 0) {
         bool has_heading = strstr(textile_formatted->chars, "h1.") != NULL ||
                           strstr(textile_formatted->chars, "h2.") != NULL;
         bool has_bold = strstr(textile_formatted->chars, "*") != NULL;
@@ -638,10 +637,10 @@ TEST_F(MarkupRoundtripTest, BasicTextileTest) {
     ASSERT_NE(textile_formatted, nullptr) << "Failed to format to Textile";
     ASSERT_GT(textile_formatted->len, 0) << "Formatted Textile should not be empty";
 
-    printf("Textile output:\n%s\n", textile_formatted->chars ? textile_formatted->chars : "(null)");
+    printf("Textile output:\n%s\n", textile_formatted->chars);
 
     // Verify Textile-specific features are in output
-    if (textile_formatted->chars) {
+    if (textile_formatted->len > 0) {
         bool has_h1 = strstr(textile_formatted->chars, "h1.") != NULL;
         bool has_heading_text = strstr(textile_formatted->chars, "Main Heading") != NULL;
         bool has_paragraph = strstr(textile_formatted->chars, "This is a paragraph") != NULL;
@@ -686,9 +685,9 @@ TEST_F(MarkupRoundtripTest, WikiFileTest) {
     ASSERT_GT(formatted->len, 0) << "Formatted wiki JSON should not be empty";
 
     printf("Wiki JSON structure (length %zu, first 300 chars): %.300s\n",
-           (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
+           (size_t)formatted->len, formatted->chars);
 
-    if (formatted->chars) {
+    if (formatted->len > 0) {
         // Should contain headers (wiki uses = Header =)
         bool has_headers = strstr(formatted->chars, "h1") != NULL ||
                           strstr(formatted->chars, "h2") != NULL;
@@ -744,9 +743,9 @@ TEST_F(MarkupRoundtripTest, BasicWikiTest) {
     ASSERT_GT(formatted->len, 0) << "Formatted basic wiki JSON should not be empty";
 
     printf("Basic Wiki JSON (first 400 chars): %.400s\n",
-           formatted->chars ? formatted->chars : "(null)");
+           formatted->chars);
 
-    if (formatted->chars) {
+    if (formatted->len > 0) {
         bool has_h1 = strstr(formatted->chars, "h1") != NULL;
         bool has_h2 = strstr(formatted->chars, "h2") != NULL;
         bool has_ul = strstr(formatted->chars, "ul") != NULL;

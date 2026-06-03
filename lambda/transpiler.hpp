@@ -16,7 +16,7 @@ void heap_init();
 void heap_init_with_pool(Pool* pool);  // reuse existing pool (batch mode)
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
-extern "C" String* heap_strcpy(char* src, int64_t len);  // callable from C code (path.c)
+extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
@@ -127,7 +127,7 @@ MIR_context_t jit_init(unsigned int optimize_level);
 #ifdef LAMBDA_C2MIR
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
 #endif
-void* jit_gen_func(MIR_context_t ctx, char *func_name);
+void* jit_gen_func(MIR_context_t ctx, const char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_func_prefix(MIR_context_t ctx, const char *prefix);

@@ -155,13 +155,15 @@ static size_t skip_type_expr(const char* src, size_t pos, size_t len) {
         char c = src[pos];
 
         // inside nested delimiters, keep going
-        if (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0) {
+        if (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0 || angle_depth > 0) {
             if (c == '(') paren_depth++;
             else if (c == ')') paren_depth--;
             else if (c == '[') bracket_depth++;
             else if (c == ']') bracket_depth--;
             else if (c == '{') brace_depth++;
             else if (c == '}') brace_depth--;
+            else if (c == '<') angle_depth++;
+            else if (c == '>') angle_depth--;
             else if (c == '\'' || c == '"') { pos = skip_string(src, pos, len); continue; }
             else if (c == '`') { pos = skip_template(src, pos, len); continue; }
             pos++;
@@ -233,20 +235,6 @@ static void blank_type_annotation(TsPreprocessor* pp, size_t colon_pos) {
     size_t after_colon = skip_ws(pp->src, colon_pos + 1, pp->len);
     size_t type_end = skip_type_annotation_end(pp->src, colon_pos, pp->len);
     blank(pp, colon_pos, type_end);
-}
-
-// check if a ':' at pos is a type annotation colon (not object literal or ternary)
-// we call this for colons found after identifiers in parameter lists, variable
-// declarations, and return types
-static bool is_type_annotation_colon(const char* src, size_t colon_pos, size_t len) {
-    // look ahead: type annotations are followed by type keywords/identifiers
-    size_t after = colon_pos + 1;
-    while (after < len && is_whitespace(src[after])) after++;
-    if (after >= len) return false;
-
-    char c = src[after];
-    // type names start with alpha, or special type syntax: ( for function types, { for object types, [ for tuple
-    return is_alpha(c) || c == '(' || c == '{' || c == '[' || c == '\'' || c == '"';
 }
 
 // ============================================================================

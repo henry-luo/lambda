@@ -149,20 +149,6 @@ static void skip_whitespace(const char** str) {
     while (**str && isspace(**str)) (*str)++;
 }
 
-/* Helper function to parse integer with specific width */
-static bool parse_int_small(const char** str, int width, int8_t* result) {
-    if (!str || !*str || !result) return false;
-
-    int temp = 0;
-    for (int i = 0; i < width; i++) {
-        if (!isdigit(**str)) return false;
-        temp = temp * 10 + (**str - '0');
-        (*str)++;
-    }
-    *result = (int8_t)temp;
-    return true;
-}
-
 /* Helper function to parse integer with specific width for int32_t */
 static bool parse_int(const char** str, int width, int32_t* result) {
     if (!str || !*str || !result) return false;
@@ -173,20 +159,6 @@ static bool parse_int(const char** str, int width, int32_t* result) {
         *result = *result * 10 + (**str - '0');
         (*str)++;
     }
-    return true;
-}
-
-/* Helper function to parse integer with specific width for int16_t */
-static bool parse_int_short(const char** str, int width, int16_t* result) {
-    if (!str || !*str || !result) return false;
-
-    int temp = 0;
-    for (int i = 0; i < width; i++) {
-        if (!isdigit(**str)) return false;
-        temp = temp * 10 + (**str - '0');
-        (*str)++;
-    }
-    *result = (int16_t)temp;
     return true;
 }
 

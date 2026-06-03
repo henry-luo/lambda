@@ -195,39 +195,6 @@ static int count_quote_depth(const char* line) {
 }
 
 /**
- * strip_quote_markers - Remove leading > markers and return content
- *
- * @param line Input line
- * @param depth Expected depth (number of > to remove)
- */
-static const char* strip_quote_markers(const char* line, int depth) {
-    if (!line) return nullptr;
-
-    const char* pos = line;
-    int removed = 0;
-
-    // Skip up to 3 leading spaces
-    int spaces = 0;
-    while (*pos == ' ' && spaces < 3) { spaces++; pos++; }
-
-    // Remove 'depth' number of > markers
-    while (removed < depth && *pos) {
-        while (*pos == ' ') pos++; // skip whitespace
-
-        if (*pos == '>') {
-            pos++;
-            removed++;
-            // Skip optional space after >
-            if (*pos == ' ') pos++;
-        } else {
-            break;
-        }
-    }
-
-    return pos;
-}
-
-/**
  * is_lazy_continuation - Check if a line is a lazy continuation
  *
  * CommonMark: A paragraph inside a blockquote can continue on a line without >

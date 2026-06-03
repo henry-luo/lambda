@@ -20,7 +20,6 @@ static const int JSX_MAX_DEPTH = 512;
 // Forward declarations
 static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end, int depth = 0);
 static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end, int depth = 0);
-static void parse_jsx_attributes(InputContext& ctx, Element* element, const char** jsx, const char* end);
 static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end);
 static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end);
 static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end);

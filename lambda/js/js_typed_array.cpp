@@ -143,24 +143,6 @@ static void js_dataview_link_prototype(Item view) {
     if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(view, proto);
 }
 
-// ValidateTypedArray: returns JsTypedArray* or NULL (throws TypeError)
-static JsTypedArray* validate_typed_array(Item ta_item) {
-    if (!js_is_typed_array(ta_item)) {
-        js_throw_type_error("not a typed array");
-        return NULL;
-    }
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-    if (!ta) {
-        js_throw_type_error("invalid typed array");
-        return NULL;
-    }
-    if (ta->buffer && ta->buffer->detached) {
-        js_throw_type_error("Cannot perform %TypedArray%.prototype method on a detached ArrayBuffer");
-        return NULL;
-    }
-    return ta;
-}
-
 // Sentinel markers for type identification
 static TypeMap js_typed_array_type_marker = {};
 static TypeMap js_arraybuffer_type_marker = {};

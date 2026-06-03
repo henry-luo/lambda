@@ -173,11 +173,6 @@ static int vm_commit(void* addr, size_t size) {
     return mprotect(addr, size, PROT_READ | PROT_WRITE) == 0;
 }
 
-static int vm_decommit(void* addr, size_t size) {
-    // Decommit memory but keep reservation
-    return mprotect(addr, size, PROT_NONE) == 0;
-}
-
 static void vm_release(void* addr, size_t size) {
     // Release virtual memory completely
     munmap(addr, size);
