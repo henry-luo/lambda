@@ -3,6 +3,7 @@
 #include <climits>
 #include <cstdint>
 #include "../../lib/hashmap.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
@@ -89,7 +90,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
     // Initialize memory pool if not already done
     if (!transpiler->pool) {
-        transpiler->pool = pool_create();
+        transpiler->pool = mem_pool_create(NULL, MEM_ROLE_VALIDATOR, "doc_validator");
     }
 
     // Initialize type and const lists if not already done

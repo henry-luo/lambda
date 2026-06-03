@@ -3,6 +3,8 @@
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_context.h"
+#include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
@@ -720,7 +722,7 @@ int exec_convert(int argc, char* argv[]) {
               input_file, from_format ? from_format : "auto", to_format, output_file);
 
     // Create a temporary memory pool for string creation
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "convert.temp");
     if (!temp_pool) {
         printf("Error: Failed to initialize temporary memory pool\n");
         return 1;
@@ -733,7 +735,7 @@ int exec_convert(int argc, char* argv[]) {
     char* cwd_path = file_getcwd();
     if (!cwd_path) {
         printf("Error: Failed to get current directory\n");
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         return 1;
     }
 
@@ -755,7 +757,7 @@ int exec_convert(int argc, char* argv[]) {
     String* url_string = create_string(temp_pool, file_url);
     if (!url_string) {
         printf("Error: Failed to create URL string\n");
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         return 1;
     }
 
@@ -782,7 +784,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (!type_string) {
         printf("Error: Failed to create type string\n");
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         return 1;
     }
 
@@ -790,14 +792,14 @@ int exec_convert(int argc, char* argv[]) {
         Input* input = input_from_url(url_string, type_string, flavor_string, NULL);
         if (!input) {
             printf("Error: Failed to parse input file\n");
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             return 1;
         }
 
         // Check if parsing was successful
         if (input->root.type_id() == LMD_TYPE_ERROR) {
             printf("Error: Failed to parse input file\n");
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             return 1;
         }
 
@@ -940,13 +942,13 @@ int exec_convert(int argc, char* argv[]) {
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
             printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             return 1;
         }
 
         if (!formatted_output && !full_doc_output) {
             printf("Error: Failed to format output\n");
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             return 1;
         }
 
@@ -965,7 +967,7 @@ int exec_convert(int argc, char* argv[]) {
     printf("Format: %s → %s\n", from_format ? from_format : "auto-detected", to_format);
 
     // Cleanup
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
     return 0;
 }
 
@@ -1066,6 +1068,22 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--no-log") == 0) {
             log_disable_all();
+            for (int j = i; j < argc - 1; j++) {
+                argv[j] = argv[j + 1];
+            }
+            argc--;
+            i--;
+        }
+    }
+
+    // Check for --mem-dump[=PATH] flag early; dump the memory context as JSON
+    // at process exit and log a leak report. Strip it from argv.
+    const char* mem_dump_path = nullptr;  // non-null => enabled
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mem-dump") == 0 ||
+            strncmp(argv[i], "--mem-dump=", 11) == 0) {
+            const char* eq = strchr(argv[i], '=');
+            mem_dump_path = (eq && eq[1]) ? eq + 1 : "./temp/mem_snapshot.json";
             for (int j = i; j < argc - 1; j++) {
                 argv[j] = argv[j + 1];
             }
@@ -1656,12 +1674,12 @@ int main(int argc, char *argv[]) {
                 TypeId result_type = get_type_id(result);
                 if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
                     || result_type == LMD_TYPE_ELEMENT) {
-                    Pool* fmt_pool = pool_create();
+                    Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
                     String* json = format_json(fmt_pool, result);
                     if (json) {
                         printf("%.*s\n", json->len, json->chars);
                     }
-                    pool_destroy(fmt_pool);
+                    mem_pool_destroy(fmt_pool);
                 } else {
                     StrBuf *output = strbuf_new_cap(256);
                     print_root_item(output, result);
@@ -1717,12 +1735,12 @@ int main(int argc, char *argv[]) {
                 TypeId result_type = get_type_id(result);
                 if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
                     || result_type == LMD_TYPE_ELEMENT) {
-                    Pool* fmt_pool = pool_create();
+                    Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
                     String* json = format_json(fmt_pool, result);
                     if (json) {
                         printf("%.*s\n", json->len, json->chars);
                     }
-                    pool_destroy(fmt_pool);
+                    mem_pool_destroy(fmt_pool);
                 } else {
                     StrBuf *output = strbuf_new_cap(256);
                     print_root_item(output, result);
@@ -1881,12 +1899,12 @@ int main(int argc, char *argv[]) {
                 TypeId result_type = get_type_id(result);
                 if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
                     || result_type == LMD_TYPE_ELEMENT) {
-                    Pool* fmt_pool = pool_create();
+                    Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
                     String* json = format_json(fmt_pool, result);
                     if (json) {
                         printf("%.*s\n", json->len, json->chars);
                     }
-                    pool_destroy(fmt_pool);
+                    mem_pool_destroy(fmt_pool);
                 }
             }
 
@@ -1938,12 +1956,12 @@ int main(int argc, char *argv[]) {
                 TypeId result_type = get_type_id(result);
                 if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
                     || result_type == LMD_TYPE_ELEMENT) {
-                    Pool* fmt_pool = pool_create();
+                    Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
                     String* json = format_json(fmt_pool, result);
                     if (json) {
                         printf("%.*s\n", json->len, json->chars);
                     }
-                    pool_destroy(fmt_pool);
+                    mem_pool_destroy(fmt_pool);
                 } else {
                     StrBuf *output = strbuf_new_cap(256);
                     print_root_item(output, result);
@@ -3281,7 +3299,7 @@ int main(int argc, char *argv[]) {
         memset(&batch_context, 0, sizeof(EvalContext));
         if (hot_reload) {
             context = &batch_context;
-            batch_context.nursery = gc_nursery_create(0);
+            batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
             heap_init();
             batch_context.pool = batch_context.heap->pool;
             batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
@@ -3605,7 +3623,7 @@ int main(int argc, char *argv[]) {
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;
-                    batch_context.nursery = gc_nursery_create(0);
+                    batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
                     heap_init();
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
@@ -3643,7 +3661,7 @@ int main(int argc, char *argv[]) {
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;
-                    batch_context.nursery = gc_nursery_create(0);
+                    batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
                     heap_init();
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
@@ -3960,6 +3978,13 @@ int main(int argc, char *argv[]) {
     lambda_stack_cleanup();
 
     // memtrack_shutdown runs in lambda_main_finish after normal cleanup.
+
+    // Memory-context dump / leak report (--mem-dump). After runtime teardown,
+    // before rpmalloc shutdown: any allocator still live here is a survivor.
+    if (mem_dump_path) {
+        mem_context_dump_json_file(NULL, mem_dump_path);
+        mem_context_report_leaks(NULL);
+    }
 
     // Clean up rpmalloc (release thread and global state)
     mempool_cleanup();

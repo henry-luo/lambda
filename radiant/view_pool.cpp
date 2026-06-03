@@ -7,6 +7,7 @@
 #include "state_store.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include <time.h>
 #include <cmath>  // for INFINITY
 
@@ -349,12 +350,12 @@ void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
 
 void view_pool_init(ViewTree* tree) {
     log_debug("init view pool");
-    tree->pool = pool_create();
+    tree->pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
     if (!tree->pool) {
         log_error("Failed to initialize view pool");
     }
     else {
-        tree->arena = arena_create_default(tree->pool);
+        tree->arena = mem_arena_create(NULL, tree->pool, MEM_ROLE_VIEW, "view_tree.arena");
         log_debug("view pool initialized");
     }
 }

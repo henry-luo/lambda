@@ -4,6 +4,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/log.h"
 #include <string.h>
 #include <ctype.h>
@@ -1243,13 +1244,13 @@ void format_markup(StringBuf* sb, Item root_item, const MarkupOutputRules* rules
     if (!sb || !rules) return;
     if (root_item.item == ITEM_NULL) return;
 
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.markup");
     MarkupEmitter emitter(rules, pool, sb);
 
     ItemReader root(root_item.to_const());
     emitter.format_item(root);
 
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 }
 
 String* format_markup_string(Pool* pool, Item root_item, const MarkupOutputRules* rules) {

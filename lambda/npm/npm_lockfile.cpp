@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_factory.h"
 #include "../lib/stringbuf.h"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
@@ -106,19 +107,19 @@ NpmLockFile* npm_lockfile_read(const char* path) {
     char* content = read_text_file(path);
     if (!content) return NULL;
 
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.lockfile");
     Input* input = Input::create(pool);
     Item root = parse_json_to_item(input, content);
     mem_free(content);
 
     if (root.item == ITEM_NULL) {
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
     ItemReader root_reader(root.to_const());
     if (!root_reader.isMap()) {
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -178,7 +179,7 @@ NpmLockFile* npm_lockfile_read(const char* path) {
         }
     }
 
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
     return lf;
 }
 
@@ -207,7 +208,7 @@ static void json_escape_string(StringBuf* sb, const char* s) {
 int npm_lockfile_write(const NpmLockFile* lockfile, const char* path) {
     if (!lockfile || !path) return -1;
 
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.lockfile");
     StringBuf* sb = stringbuf_new(pool);
 
     stringbuf_append_str(sb, "{\n");
@@ -259,6 +260,6 @@ int npm_lockfile_write(const NpmLockFile* lockfile, const char* path) {
     String* result = stringbuf_to_string(sb);
     int ret = write_text_file_atomic(path, result->chars);
 
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
     return ret;
 }

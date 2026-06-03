@@ -15,6 +15,7 @@
 #include "state_store.hpp"
 #include "font_face.h"
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
 #include "../lib/utf.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -1726,9 +1727,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_pool = pool_create();
+    ctx.page_backdrop_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop");
     if (ctx.page_backdrop_pool) {
-        ctx.page_backdrop_arena = arena_create_default(ctx.page_backdrop_pool);
+        ctx.page_backdrop_arena = mem_arena_create(NULL, ctx.page_backdrop_pool, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
         if (ctx.page_backdrop_arena) {
             dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
             ctx.page_backdrop_ready = true;
@@ -1825,7 +1826,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         dl_destroy(&ctx.page_backdrop_dl);
     }
     if (ctx.page_backdrop_pool) {
-        pool_destroy(ctx.page_backdrop_pool);
+        mem_pool_destroy(ctx.page_backdrop_pool);
     }
 
     return result;

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/file.h"
@@ -821,7 +822,7 @@ int run_layout(const char* html_file) {
     }
 
     // Create memory pool for document loading
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "window");
     if (!pool) {
         log_error("Error: Failed to create memory pool");
         url_destroy(cwd);
@@ -949,7 +950,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_debug("Loading document: %s", file_to_load);
 
         // Create memory pool for document loading
-        Pool* pool = pool_create();
+        Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "window");
         if (!pool) {
             log_error("Failed to create memory pool for document");
             url_destroy(cwd);

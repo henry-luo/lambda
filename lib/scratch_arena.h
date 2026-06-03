@@ -53,12 +53,17 @@ typedef struct ScratchHeader {
 typedef struct ScratchArena {
     Arena* arena;            // backing arena for actual memory
     ScratchHeader* head;     // most recent allocation (top of stack)
+    void* mem_node;          // MemContext registration node (NULL if untracked)
 } ScratchArena;
 
 // Mark for save/restore pattern
 typedef struct ScratchMark {
     ScratchHeader* head;     // saved head pointer
 } ScratchMark;
+
+// Install a hook called by scratch_release to release a registered scratch
+// arena's mem_node. Set by the allocator factory; NULL by default (no-op).
+void scratch_set_node_release_hook(void (*fn)(void* node));
 
 /**
  * Initialize a scratch arena on an existing backing arena

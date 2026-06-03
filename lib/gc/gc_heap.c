@@ -13,6 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Hook to release a memory-context node when a registered heap is destroyed.
+// Installed by the allocator factory (lambda/mem_factory_rt.cpp); NULL when unused.
+static void (*g_gc_heap_node_release)(void*) = NULL;
+void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release = fn; }
+
 // Initial mark stack capacity (grows if needed)
 #define GC_MARK_STACK_INITIAL 4096
 
@@ -289,6 +294,12 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
 
 void gc_heap_destroy(gc_heap_t* gc) {
     if (!gc) return;
+
+    // unlink from the memory context if registered (before freeing the struct)
+    if (gc->mem_node && g_gc_heap_node_release) {
+        g_gc_heap_node_release(gc->mem_node);
+        gc->mem_node = NULL;
+    }
 
     // free mark stack (C heap allocated)
     if (gc->mark_stack) {

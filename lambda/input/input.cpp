@@ -6,6 +6,8 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
+#include "../../lib/mem_factory.h"
+#include "../mem_factory_rt.h"
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
@@ -737,7 +739,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         log_debug("sys:// URL detected, using system information provider\n");
 
         // Create a variable pool for the input
-        Pool* pool = pool_create();
+        Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "input.sysinfo");
         if (pool == NULL) {
             log_debug("Failed to create variable pool for sys:// URL\n");
             url_destroy(abs_url);
@@ -824,7 +826,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         }
         else if (target->scheme == TARGET_SCHEME_SYS) {
             log_debug("input_from_target: sys:// URL detected");
-            Pool* pool = pool_create();
+            Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "input.sysinfo");
             if (!pool) {
                 log_error("input_from_target: failed to create pool for sys:// URL");
                 return NULL;
@@ -890,9 +892,22 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
         return NULL;
     }
     input->pool = pool;
-    input->arena = arena_create_default(pool);
-    input->name_pool = name_pool_create(pool, NULL);  // Initialize name pool for string interning
-    input->shape_pool = shape_pool_create(pool, input->arena, NULL);  // Initialize shape pool
+    // Per-document memory sub-context: registers the document URL and groups this
+    // input's arena/name-pool/shape-pool under it so snapshots attribute memory to
+    // the source document. The backing `pool` (often the shared InputManager
+    // global_pool) stays in the root context; these allocators carry the doc id.
+    MemContext* dctx = NULL;
+    if (abs_url && abs_url->href && abs_url->href->len > 0) {
+        uint32_t parent_doc = (parent && parent->mem_ctx)
+            ? mem_context_doc_id((MemContext*)parent->mem_ctx) : 0;
+        uint32_t doc_id = mem_doc_register(abs_url->href->chars, parent_doc);
+        dctx = mem_context_create(NULL, MEM_ROLE_INPUT, "input.doc");
+        mem_context_set_doc_id(dctx, doc_id);
+    }
+    input->mem_ctx = dctx;
+    input->arena = mem_arena_create(dctx, pool, MEM_ROLE_INPUT, "input.arena");
+    input->name_pool = mem_name_pool_create(dctx, pool, NULL, MEM_ROLE_INPUT, "input.name_pool");  // Initialize name pool for string interning
+    input->shape_pool = mem_shape_pool_create(dctx, pool, input->arena, NULL, "input.shape_pool");  // Initialize shape pool
     input->type_list = arraylist_new(16);
     input->url = abs_url;
     input->path = nullptr;
@@ -908,7 +923,7 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
 static InputManager* g_input_manager = nullptr;
 
 InputManager::InputManager() {
-    global_pool = pool_create();
+    global_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "input.global_pool");
     if (!global_pool) {
         log_error("InputManager: Failed to create global_pool");
     }
@@ -932,7 +947,7 @@ InputManager::~InputManager() {
     // Destroy the global pool (this frees all pool-allocated memory)
     if (global_pool) {
         log_debug("InputManager::~InputManager destroying global_pool=%p", (void*)global_pool);
-        pool_destroy(global_pool);
+        mem_pool_destroy(global_pool);
         global_pool = nullptr;
     }
 

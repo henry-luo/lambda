@@ -1,6 +1,7 @@
 #include "format.h"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include "../../lib/stringbuf.h"
+#include "../../lib/mem_factory.h"
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
@@ -345,7 +346,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 }
 
 String* format_xml(Pool* pool, Item root_item) {
-    Pool* ctx_pool = pool_create();
+    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.xml");
     StringBuf* sb = stringbuf_new(pool);
     XmlContext ctx(ctx_pool, sb);
 
@@ -385,7 +386,7 @@ String* format_xml(Pool* pool, Item root_item) {
                 }
             }
 
-            pool_destroy(ctx_pool);
+            mem_pool_destroy(ctx_pool);
             return stringbuf_to_string(sb);
         }
     }
@@ -405,15 +406,15 @@ String* format_xml(Pool* pool, Item root_item) {
 
     format_item_reader(ctx, reader, tag_name);
 
-    pool_destroy(ctx_pool);
+    mem_pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats XML to a provided StringBuf
 void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.xml");
     XmlContext ctx(pool, sb);
     ItemReader reader(root_item.to_const());
     format_item_reader(ctx, reader, "root");
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 }

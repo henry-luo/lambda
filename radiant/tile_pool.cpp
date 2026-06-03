@@ -12,6 +12,7 @@
 #include "render_raster.hpp"
 #include "clip_shape.h"
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "../lib/mem.h"
 #include "../lib/memtrack.h"
 #include <string.h>
@@ -186,9 +187,9 @@ static void worker_init_local(Tile* tile) {
     // which must happen before any malloc/new calls on this thread (rpmalloc
     // interposes on malloc; without per-thread init the shared fallback heap
     // is used, which is not thread-safe).
-    tl_worker.pool = pool_create();
-    tl_worker.arena = arena_create_default(tl_worker.pool);
-    scratch_init(&tl_worker.scratch, tl_worker.arena);
+    tl_worker.pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "tile.worker");
+    tl_worker.arena = mem_arena_create(NULL, tl_worker.pool, MEM_ROLE_RENDER, "tile.arena");
+    mem_scratch_init(NULL, &tl_worker.scratch, tl_worker.arena, MEM_ROLE_RENDER, "tile.scratch");
     // Now safe to create ThorVG canvas (internally uses malloc/new)
     rdt_vector_init(&tl_worker.vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
     tl_worker.initialized = true;

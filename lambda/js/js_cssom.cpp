@@ -13,6 +13,7 @@
 #include "../lambda.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/mempool.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
@@ -1375,7 +1376,7 @@ static Item js_css_supports(Item* args, int argc) {
     if (argc < 1) return (Item){.item = b2it(false)};
 
     Pool* pool = get_document_pool();
-    if (!pool) pool = pool_create();
+    if (!pool) pool = mem_pool_create(NULL, MEM_ROLE_CSS, "js.cssom");
     bool free_pool = (pool != get_document_pool());
 
     // ensure CSS property system is initialized so property lookups work
@@ -1388,7 +1389,7 @@ static Item js_css_supports(Item* args, int argc) {
         String* prop_s = it2s(args[0]);
         String* val_s = it2s(args[1]);
         if (!prop_s || !val_s) {
-            if (free_pool) pool_destroy(pool);
+            if (free_pool) mem_pool_destroy(pool);
             return (Item){.item = b2it(false)};
         }
 
@@ -1402,7 +1403,7 @@ static Item js_css_supports(Item* args, int argc) {
         if (!is_custom) {
             CssPropertyId pid = css_property_id_from_name(prop_buf);
             if (pid == CSS_PROPERTY_UNKNOWN || pid == 0) {
-                if (free_pool) pool_destroy(pool);
+                if (free_pool) mem_pool_destroy(pool);
                 return (Item){.item = b2it(false)};
             }
         }
@@ -1413,7 +1414,7 @@ static Item js_css_supports(Item* args, int argc) {
                          (int)prop_len, prop_buf,
                          (int)(val_s->len < 700 ? val_s->len : 700), val_s->chars);
         if (n <= 0 || n >= (int)sizeof(decl_text)) {
-            if (free_pool) pool_destroy(pool);
+            if (free_pool) mem_pool_destroy(pool);
             return (Item){.item = b2it(false)};
         }
 
@@ -1429,7 +1430,7 @@ static Item js_css_supports(Item* args, int argc) {
         // or CSS.supports("property: value")
         String* cond_s = it2s(args[0]);
         if (!cond_s) {
-            if (free_pool) pool_destroy(pool);
+            if (free_pool) mem_pool_destroy(pool);
             return (Item){.item = b2it(false)};
         }
 
@@ -1466,7 +1467,7 @@ static Item js_css_supports(Item* args, int argc) {
         }
     }
 
-    if (free_pool) pool_destroy(pool);
+    if (free_pool) mem_pool_destroy(pool);
     return (Item){.item = b2it(result)};
 }
 

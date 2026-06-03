@@ -5,6 +5,7 @@
 #include "transpiler.hpp"
 #include "shape_pool.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/mem_factory.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -207,7 +208,7 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     }
 
     // Create a Script with its own pool
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_AST, "module_registry");
     Script* script = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
     script->pool = pool;
     script->reference = mem_strdup(resolved_path, MEM_CAT_SYSTEM);

@@ -8,6 +8,7 @@
 
 #include "webdriver.hpp"
 #include "../../lib/tagged.hpp"
+#include "../../lib/mem_factory.h"
 #include "../../lambda/serve/serve_utils.hpp"
 #include "../../lambda/serve/http_request.hpp"
 #include "../../lambda/serve/http_response.hpp"
@@ -817,13 +818,13 @@ static void webdriver_register_routes(Server* srv, WebDriverServer* wd) {
 // ============================================================================
 
 WebDriverServer* webdriver_server_create(const char* host, int port) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "webdriver.server");
     if (!pool) {
         log_error("webdriver: failed to create memory pool");
         return NULL;
     }
 
-    Arena* arena = arena_create(pool, 64 * 1024, 256 * 1024);
+    Arena* arena = mem_arena_create_sized(NULL, pool, 64 * 1024, 256 * 1024, MEM_ROLE_TEMP, "webdriver.server.arena");
     if (!arena) {
         log_error("webdriver: failed to create arena");
         pool_destroy(pool);

@@ -176,6 +176,19 @@ bool arena_owns(Arena* arena, const void* ptr);
 Pool* arena_pool(Arena* arena);
 
 /**
+ * Memory-context registration node accessors (opaque void* to avoid a hard
+ * dependency on mem_context.h). Used by the allocator factory (mem_factory.c).
+ */
+void* arena_get_mem_node(Arena* arena);
+void  arena_set_mem_node(Arena* arena, void* node);
+
+/**
+ * Install a hook called by arena_destroy to release a registered arena's
+ * mem_node. Set by the allocator factory; NULL by default (no-op).
+ */
+void arena_set_node_release_hook(void (*fn)(void* node));
+
+/**
  * Reallocate memory in arena with free-list support
  * Similar to realloc() but works within arena memory management
  * - If ptr is NULL, allocates new memory (like arena_alloc)

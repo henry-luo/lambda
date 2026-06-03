@@ -76,9 +76,17 @@ struct Pool {
     // not frees, so this is a high-water-mark approximation).
     size_t alloc_bytes;     // total bytes ever allocated
     size_t alloc_count;     // total alloc calls
+    void* mem_node;         // MemContext registration node (NULL if untracked)
 };
 
 #define POOL_VALID_MARKER 0xDEADBEEF
+
+// Hook to release a memory-context node when a registered pool is destroyed.
+// Installed by the allocator factory (mem_factory.c). NULL when the memory
+// context isn't linked (e.g. lib-only unit tests) — such builds never create
+// factory pools, so pool->mem_node stays NULL and the hook is never needed.
+static void (*g_pool_node_release)(void*) = NULL;
+void pool_set_node_release_hook(void (*fn)(void*)) { g_pool_node_release = fn; }
 
 static unsigned next_pool_id = 1;
 static int rpmalloc_initialized = 0;
@@ -133,6 +141,7 @@ Pool* pool_create(void) {
     pool->limit = NULL;
     pool->alloc_bytes = 0;
     pool->alloc_count = 0;
+    pool->mem_node = NULL;
 
     // Optional one-line backtrace dump on each pool creation: POOL_TRACE=1
     static int trace_env_checked = 0;
@@ -189,6 +198,9 @@ Pool* pool_create_mmap(void) {
     pool->chunks = NULL;
     pool->cursor = NULL;
     pool->limit = NULL;
+    pool->alloc_bytes = 0;
+    pool->alloc_count = 0;
+    pool->mem_node = NULL;
     mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
     return pool;
 }
@@ -213,6 +225,14 @@ void pool_destroy(Pool* pool) {
     }
 
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
+
+    // unlink from the memory context if registered (factory-created pools).
+    // Done here so ANY pool_destroy path safely removes the node — no dangling
+    // node can outlive the pool, regardless of how it was created.
+    if (pool->mem_node && g_pool_node_release) {
+        g_pool_node_release(pool->mem_node);
+        pool->mem_node = NULL;
+    }
 
     // optional diagnostic dump: POOL_STATS=1 prints lifetime alloc bytes per pool.
     static int pool_stats_env_checked = 0;
@@ -243,6 +263,10 @@ void pool_destroy(Pool* pool) {
 
 void pool_drain(Pool* pool) {
     if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    if (pool->mem_node && g_pool_node_release) {
+        g_pool_node_release(pool->mem_node);
+        pool->mem_node = NULL;
+    }
     if (pool->heap) {
         rpmalloc_heap_free_all(pool->heap);
         rpmalloc_heap_release(pool->heap);
@@ -419,4 +443,35 @@ void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count) {
     }
     if (alloc_bytes) *alloc_bytes = pool->alloc_bytes;
     if (alloc_count) *alloc_count = pool->alloc_count;
+}
+
+void* pool_get_mem_node(Pool* pool) {
+    return pool ? pool->mem_node : NULL;
+}
+
+void pool_set_mem_node(Pool* pool, void* node) {
+    if (pool) pool->mem_node = node;
+}
+
+void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
+                        size_t* alloc_count, int* is_mmap) {
+    size_t rsv = 0, use = 0, cnt = 0;
+    int mmap_mode = 0;
+    if (pool && pool->valid == POOL_VALID_MARKER) {
+        use = pool->alloc_bytes;
+        cnt = pool->alloc_count;
+        if (pool->heap) {
+            // rpmalloc mode: true reserved bytes aren't cheaply available;
+            // alloc_bytes is a high-water upper bound (frees not subtracted).
+            rsv = pool->alloc_bytes;
+        } else {
+            // mmap mode: reserved is the sum of all mmap'd chunk sizes
+            mmap_mode = 1;
+            for (MmapChunk* c = pool->chunks; c; c = c->next) rsv += c->size;
+        }
+    }
+    if (reserved) *reserved = rsv;
+    if (in_use) *in_use = use;
+    if (alloc_count) *alloc_count = cnt;
+    if (is_mmap) *is_mmap = mmap_mode;
 }

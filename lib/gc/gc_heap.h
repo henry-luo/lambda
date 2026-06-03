@@ -161,6 +161,8 @@ typedef struct gc_heap {
 
     // Bump-pointer block chain (for cleanup and ownership registration)
     gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions
+
+    void* mem_node;                 // MemContext registration node (NULL if untracked)
 } gc_heap_t;
 
 /**
@@ -184,6 +186,12 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool);
  * @param gc heap to destroy
  */
 void gc_heap_destroy(gc_heap_t* gc);
+
+/**
+ * Install a hook called by gc_heap_destroy to release a registered heap's
+ * mem_node. Set by the allocator factory; NULL by default (no-op).
+ */
+void gc_heap_set_node_release_hook(void (*fn)(void* node));
 
 /**
  * Allocate memory from the GC heap with a prepended GCHeader.

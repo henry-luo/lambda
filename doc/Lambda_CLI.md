@@ -47,6 +47,50 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 
 ---
 
+## Diagnostic Flags (Global)
+
+These flags are recognized **before** any subcommand and stripped from the argument list, so they work in every mode (REPL, script, `run`, `convert`, `layout`, `render`, …).
+
+| Flag | Description |
+|------|-------------|
+| `--no-log` | Disable all logging for this invocation |
+| `--mem-dump[=PATH]` | On process exit, write a JSON snapshot of the memory context and log a leak report. `PATH` defaults to `./temp/mem_snapshot.json` |
+
+### Memory Dump (`--mem-dump`)
+
+Lambda centralizes pool/arena/heap allocation under a single rooted **memory context** (see [`vibe/Memory_Context.md`](../vibe/Memory_Context.md)). `--mem-dump` captures that context at process exit and produces:
+
+- **A JSON snapshot** — a flat array of allocator nodes, each with `id`, `parent_id` (its backing allocator), `doc_id`, `kind` (`pool` / `arena` / `heap` / `nursery` / `cache` / `jit` / …), `role` (`input` / `ast` / `view` / `render` / `font` / …), `label`, and `bytes_reserved` / `bytes_in_use` / `alloc_count`.
+- **A leak report** — logged to `./log.txt` with the `MEMCTX-LEAK:` prefix, listing every allocator still live at exit (with its role, label, and size).
+
+```bash
+lambda --mem-dump script.ls                          # dump to ./temp/mem_snapshot.json
+lambda --mem-dump=./temp/mem.json layout page.html   # dump to a custom path
+```
+
+Example snapshot:
+
+```json
+{
+  "captured_seq": 3, "count": 2,
+  "total_reserved": 60507, "total_in_use": 60507,
+  "nodes": [
+    { "id": 2, "parent_id": 0, "doc_id": 0, "kind": "pool", "role": "input",
+      "label": "input.global_pool", "bytes_reserved": 55835, "bytes_in_use": 55835, "alloc_count": 392 },
+    { "id": 3, "parent_id": 0, "doc_id": 0, "kind": "pool", "role": "ast",
+      "label": "script.result", "bytes_reserved": 4672, "bytes_in_use": 4672, "alloc_count": 5 }
+  ]
+}
+```
+
+**Notes:**
+
+- Place the flag **before** the subcommand — it is parsed globally and stripped from `argv`.
+- The snapshot reflects allocators still alive at the exit cleanup point; transient pools created and freed during the run are correctly **absent**.
+- The `convert` subcommand returns before the shared exit path, so its dump is empty (the conversion itself still completes normally). Script mode, `layout`, and `render` reach the exit hook.
+
+---
+
 ## Commands
 
 ### `run` — Run a Procedural Script
@@ -419,4 +463,7 @@ lambda fetch https://example.com -o page.html
 
 # Run JavaScript
 lambda js app.js
+
+# Dump the memory context as JSON at exit (+ leak report in log.txt)
+lambda --mem-dump script.ls
 ```

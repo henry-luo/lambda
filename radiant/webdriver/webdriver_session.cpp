@@ -8,6 +8,7 @@
 #include "../render_export_support.hpp"
 #include "../state_store.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/url.h"
@@ -113,13 +114,13 @@ void element_registry_clear(ElementRegistry* reg) {
 // ============================================================================
 
 WebDriverSession* webdriver_session_create(int width, int height, bool headless) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "webdriver.session");
     if (!pool) {
         log_error("webdriver: failed to create session pool");
         return NULL;
     }
     
-    Arena* arena = arena_create(pool, 64 * 1024, 256 * 1024);
+    Arena* arena = mem_arena_create_sized(NULL, pool, 64 * 1024, 256 * 1024, MEM_ROLE_TEMP, "webdriver.session.arena");
     if (!arena) {
         log_error("webdriver: failed to create session arena");
         pool_destroy(pool);

@@ -2,6 +2,7 @@
 #include "rb_transpiler.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
@@ -161,8 +162,8 @@ RbTranspiler* rb_transpiler_create(Runtime* runtime) {
     memset(tp, 0, sizeof(RbTranspiler));
 
     // initialize memory pools
-    tp->ast_pool = pool_create();
-    tp->ast_arena = arena_create_default(tp->ast_pool);
+    tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "rb.ast");
+    tp->ast_arena = mem_arena_create(NULL, tp->ast_pool, MEM_ROLE_AST, "rb.ast.arena");
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
     tp->error_buf = NULL;

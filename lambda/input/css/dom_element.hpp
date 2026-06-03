@@ -55,6 +55,7 @@ struct DomDocument {
     Input* input;                // Lambda Input context for MarkEditor operations
     Pool* pool;                  // Pool for arena chunks
     Arena* arena;                // Memory arena for all DOM node allocations
+    void* mem_ctx;               // per-document MemContext sub-context (nullable; memory attribution)
 
     // Document content
     Url* url;                    // Document URL

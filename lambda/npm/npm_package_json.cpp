@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_factory.h"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 // forward-declare JSON parser to avoid transitive input.hpp linkage issues
@@ -56,20 +57,20 @@ NpmPackageJson* npm_package_json_parse_string(const char* json_content) {
     if (!json_content || !*json_content) return NULL;
 
     // create a temporary pool + Input for JSON parsing
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.package_json");
     Input* input = Input::create(pool);
 
     Item root = parse_json_to_item(input, json_content);
     if (root.item == ITEM_NULL) {
         log_error("npm_package_json: failed to parse JSON");
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
     ItemReader root_reader(root.to_const());
     if (!root_reader.isMap()) {
         log_error("npm_package_json: root is not an object");
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -135,7 +136,7 @@ NpmPackageJson* npm_package_json_parse_string(const char* json_content) {
     // the pool lifetime matches the process. For short-lived usage, the
     // mem_strdup'd fields are the safe copies.
     // Actually, since extract_string uses mem_strdup, the pool can be freed:
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 
     return pkg;
 }

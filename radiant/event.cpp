@@ -21,6 +21,7 @@
 #include "editing_intent.hpp"
 #include "editing_target_range.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
@@ -1262,8 +1263,8 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
                                  nullptr, nullptr, nullptr);
     if (!surface_target) surface_target = caret_get_view(state);
 
-    Pool* temp_pool = pool_create();
-    Arena* temp_arena = arena_create_default(temp_pool);
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event.temp");
+    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_TEMP, "event.arena");
     char* text = extract_selected_text(state, temp_arena);
     char* html = extract_selected_html(state, temp_arena);
     bool copied = false;
@@ -1288,7 +1289,7 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
                                     html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
     return copied;
 }
 

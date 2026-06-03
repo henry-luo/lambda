@@ -3,6 +3,7 @@
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/mem_factory.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
@@ -638,13 +639,13 @@ void DomNode::print(StrBuf* buf, int indent) const {
 
                 bool has_props = false;
                 // Reuse one temp pool across all property formatting in this element.
-                Pool* fmt_pool = pool_create();
+                Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_CSS, "css.dom_node.format");
                 StylePrintContext ctx = { buf, &has_props, fmt_pool };
 
                 // Iterate through all properties in the style tree
                 style_tree_foreach(element->specified_style, print_style_property_callback, &ctx);
 
-                if (fmt_pool) pool_destroy(fmt_pool);
+                if (fmt_pool) mem_pool_destroy(fmt_pool);
                 strbuf_append_str(buf, "}");
             }
 

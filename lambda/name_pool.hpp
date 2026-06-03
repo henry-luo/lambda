@@ -10,6 +10,7 @@ typedef struct NamePool {
     struct hashmap* names;      // C hashmap for String* storage
     struct NamePool* parent;    // Parent name pool for hierarchical lookup
     uint32_t ref_count;         // Reference counting for pool lifecycle
+    void* mem_node;             // MemContext registration node (NULL if untracked)
 } NamePool;
 
 #ifdef __cplusplus
@@ -20,6 +21,10 @@ extern "C" {
 NamePool* name_pool_create(Pool* memory_pool, NamePool* parent);
 NamePool* name_pool_retain(NamePool* pool);
 void name_pool_release(NamePool* pool);
+
+// Install a hook called by name_pool_release (at ref_count 0) to release a
+// registered name pool's mem_node. Set by the factory; NULL by default (no-op).
+void name_pool_set_node_release_hook(void (*fn)(void* node));
 
 // Name management - all return String* with incremented ref_count
 String* name_pool_create_name(NamePool* pool, const char* name);

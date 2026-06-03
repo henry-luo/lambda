@@ -5,6 +5,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../lib/mem_factory.h"
 #include "../../radiant/symbol_resolver.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
@@ -47,7 +48,7 @@ String* format_html(Pool* pool, Item root_item) {
     if (!sb) return NULL;
 
     // Create HTML context
-    Pool* ctx_pool = pool_create();
+    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.html");
     HtmlContext ctx(ctx_pool, sb);
 
     // check if root is already an HTML element or #document, if so, format as-is
@@ -68,7 +69,7 @@ String* format_html(Pool* pool, Item root_item) {
                         stringbuf_append_char(ctx.output(), '\n');
                     }
                 }
-                pool_destroy(ctx_pool);
+                mem_pool_destroy(ctx_pool);
                 return stringbuf_to_string(sb);
             }
         }
@@ -93,7 +94,7 @@ String* format_html(Pool* pool, Item root_item) {
                             // format the element directly without wrapping
                             ItemReader first_reader(first_item.to_const());
                             format_item_reader(ctx, first_reader, 0, false);
-                            pool_destroy(ctx_pool);
+                            mem_pool_destroy(ctx_pool);
                             return stringbuf_to_string(sb);
                         }
                     }
@@ -111,7 +112,7 @@ String* format_html(Pool* pool, Item root_item) {
                     // format the element directly without wrapping
                     ItemReader root_reader(root_item.to_const());
                     format_item_reader(ctx, root_reader, 0, false);
-                    pool_destroy(ctx_pool);
+                    mem_pool_destroy(ctx_pool);
                     return stringbuf_to_string(sb);
                 }
             }
@@ -129,17 +130,17 @@ String* format_html(Pool* pool, Item root_item) {
 
     stringbuf_append_str(ctx.output(), "\n</body>\n</html>");
 
-    pool_destroy(ctx_pool);
+    mem_pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats HTML to a provided StringBuf
 void format_html_to_strbuf(StringBuf* sb, Item root_item) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.html");
     HtmlContext ctx(pool, sb);
     ItemReader reader(root_item.to_const());
     format_item_reader(ctx, reader, 0, false);
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 }
 
 // ===== MarkReader-based implementations =====

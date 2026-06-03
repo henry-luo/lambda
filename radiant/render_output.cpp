@@ -16,6 +16,7 @@
 #include "tile_pool.h"
 
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -160,7 +161,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
         rdcon->retained_dl_cache = uicon->document->state->retained_dl_cache;
     }
 
-    scratch_init(&rdcon->scratch, view_tree->arena);
+    mem_scratch_init(NULL, &rdcon->scratch, view_tree->arena, MEM_ROLE_RENDER, "render.scratch");
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
     rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);

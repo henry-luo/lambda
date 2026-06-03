@@ -10,6 +10,11 @@
 #define ARENA_VALID_MARKER 0xABCD4321
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
 
+// Hook to release a memory-context node when a registered arena is destroyed.
+// Installed by the allocator factory (mem_factory.c); NULL when unused.
+static void (*g_arena_node_release)(void*) = NULL;
+void arena_set_node_release_hook(void (*fn)(void*)) { g_arena_node_release = fn; }
+
 // Free-list configuration
 #define ARENA_FREE_LIST_BINS 8
 #define ARENA_MIN_FREE_BLOCK_SIZE sizeof(ArenaFreeBlock)
@@ -59,6 +64,8 @@ struct Arena {
     // Free-list for memory reuse
     ArenaFreeBlock* free_lists[ARENA_FREE_LIST_BINS];  // Free-list bins
     size_t free_bytes;          // Total bytes in free-lists
+
+    void* mem_node;             // MemContext registration node (NULL if untracked)
 };
 
 // Helper: get bin index for size (log2-based bins: 16, 32, 64, 128, 256, 512, 1024, 2048+)
@@ -160,6 +167,7 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
     arena->total_used = 0;
     arena->chunk_count = 0;
     arena->valid = ARENA_VALID_MARKER;
+    arena->mem_node = NULL;
 
     // Initialize free-lists
     for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
@@ -189,6 +197,12 @@ Arena* arena_create_default(Pool* pool) {
 void arena_destroy(Arena* arena) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) {
         return;
+    }
+
+    // unlink from the memory context if registered (factory-created arenas)
+    if (arena->mem_node && g_arena_node_release) {
+        g_arena_node_release(arena->mem_node);
+        arena->mem_node = NULL;
     }
 
     // Free all chunks
@@ -465,6 +479,14 @@ bool arena_owns(Arena* arena, const void* ptr) {
 Pool* arena_pool(Arena* arena) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) return NULL;
     return arena->pool;
+}
+
+void* arena_get_mem_node(Arena* arena) {
+    return (arena && arena->valid == ARENA_VALID_MARKER) ? arena->mem_node : NULL;
+}
+
+void arena_set_mem_node(Arena* arena, void* node) {
+    if (arena && arena->valid == ARENA_VALID_MARKER) arena->mem_node = node;
 }
 
 void arena_free(Arena* arena, void* ptr, size_t size) {
