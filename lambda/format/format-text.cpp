@@ -2,6 +2,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "../../lib/stringbuf.h"
+#include "../../lib/mem_factory.h"
 #include "../mark_reader.hpp"
 #include "format-utils.hpp"
 
@@ -162,14 +163,14 @@ void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
 
     // Create a temporary pool for context operations
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.text");
     TextContext ctx(temp_pool, sb);
 
     // use MarkReader API for type-safe traversal
     ItemReader root(root_item.to_const());
     format_item_text_reader(ctx, root);
 
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
 }
 
 // String variant that returns a String* allocated from the pool

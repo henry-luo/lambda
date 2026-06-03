@@ -17,6 +17,7 @@
 #include "input/css/css_style.hpp"
 #include "template_registry.h"
 #include "../lib/file.h"
+#include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/file_utils.h"
 #include "../lib/shell.h"
@@ -478,7 +479,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&start);
 
     // Initialize Input base class (Script extends Input)
-    Input* input_base = Input::create(pool_create(), nullptr);
+    Input* input_base = Input::create(mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
     if (!input_base) {
         log_error("Error: Failed to initialize Input base");
         return;
@@ -1196,7 +1197,7 @@ void runner_setup_context(Runner* runner) {
         context->pool = context->heap->pool;
     } else {
         // First evaluation on this Runtime — create fresh resources
-        context->nursery = gc_nursery_create(0);
+        context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "eval.nursery");
         context->name_pool = name_pool_create(context->pool, nullptr);
         if (!context->name_pool) {
             log_error("Failed to create runtime name_pool");
@@ -1249,7 +1250,7 @@ void resolve_sys_paths_recursive(Item item) {
 Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
-        Pool* error_pool = pool_create();
+        Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(error_pool, nullptr);
         if (!output) {
             log_error("Failed to create error output Input");
@@ -1306,7 +1307,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // Create output Input with its own pool (independent from Script's pool)
     // This allows safe cleanup of the execution context and heap
     log_debug("Creating output Input with independent pool");
-    Pool* output_pool = pool_create();
+    Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
     Input* output = Input::create(output_pool, nullptr);
     if (!output) {
         log_error("Failed to create output Input");
@@ -1341,7 +1342,7 @@ Input* run_script(Runtime *runtime, const char* source, char* script_path, bool 
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
         // Return Input with null item for transpile-only mode
-        Pool* null_pool = pool_create();
+        Pool* null_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(null_pool, nullptr);
         if (!output) {
             log_error("Failed to create transpile output Input");
@@ -1369,7 +1370,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
         // Return Input with null item for transpile-only mode
-        Pool* null_pool = pool_create();
+        Pool* null_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(null_pool, nullptr);
         if (!output) {
             log_error("Failed to create transpile output Input");

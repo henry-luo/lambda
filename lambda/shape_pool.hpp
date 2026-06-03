@@ -35,6 +35,7 @@ typedef struct ShapePool {
     struct hashmap* shapes;     // Hashmap: ShapeSignature → CachedShape
     struct ShapePool* parent;   // Parent pool for inheritance
     uint32_t ref_count;         // Reference counting
+    void* mem_node;             // MemContext registration node (NULL if untracked)
 } ShapePool;
 
 #ifdef __cplusplus
@@ -61,6 +62,10 @@ ShapePool* shape_pool_retain(ShapePool* pool);
  * Release a shape pool (decrement ref count, free if zero)
  */
 void shape_pool_release(ShapePool* pool);
+
+// Install a hook called by shape_pool_release (at ref_count 0) to release a
+// registered shape pool's mem_node. Set by the factory; NULL by default (no-op).
+void shape_pool_set_node_release_hook(void (*fn)(void* node));
 
 // ========== Shape Creation/Lookup ==========
 

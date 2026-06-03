@@ -4,6 +4,7 @@
 #include "css_style_node.hpp"
 #include "css_parser.hpp"
 #include "../../../lib/hashmap.h"
+#include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap_helpers.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
@@ -111,8 +112,14 @@ DomDocument* dom_document_create(Input* input) {
         return nullptr;
     }
 
+    // Reuse the input's per-document memory sub-context so the DOM pool/arena are
+    // attributed to the same document (URL) as the parsed source. The whole
+    // document subtree is reclaimed together at free_document() time.
+    MemContext* dctx = (input && input->mem_ctx) ? (MemContext*)input->mem_ctx : NULL;
+    document->mem_ctx = dctx;
+
     // Create pool for arena chunks
-    document->pool = pool_create();
+    document->pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document");
     if (!document->pool) {
         log_error("dom_document_create: failed to create pool");
         mem_free(document);
@@ -120,7 +127,7 @@ DomDocument* dom_document_create(Input* input) {
     }
 
     // Create arena for all DOM node allocations
-    document->arena = arena_create_default(document->pool);
+    document->arena = mem_arena_create(dctx, document->pool, MEM_ROLE_NODE, "dom.document.arena");
     if (!document->arena) {
         log_error("dom_document_create: failed to create arena");
         pool_destroy(document->pool);

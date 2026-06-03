@@ -5,6 +5,12 @@
 // alignment for scratch allocations (matches ARENA_DEFAULT_ALIGNMENT)
 #define SCRATCH_ALIGNMENT 16
 
+// Hook to release a memory-context node when a registered scratch arena is
+// released. Installed by the allocator factory (mem_factory.c); NULL when the
+// context isn't linked.
+static void (*g_scratch_node_release)(void*) = NULL;
+void scratch_set_node_release_hook(void (*fn)(void*)) { g_scratch_node_release = fn; }
+
 // compile-time check: ScratchHeader must be exactly 16 bytes for alignment
 _Static_assert(sizeof(ScratchHeader) == 16, "ScratchHeader must be 16 bytes");
 
@@ -31,6 +37,7 @@ void scratch_init(ScratchArena* sa, Arena* arena) {
     if (!sa || !arena) return;
     sa->arena = arena;
     sa->head = NULL;
+    sa->mem_node = NULL;
 }
 
 void* scratch_alloc(ScratchArena* sa, size_t size) {
@@ -128,6 +135,12 @@ void scratch_release(ScratchArena* sa) {
         ScratchHeader* hdr = sa->head;
         sa->head = hdr->prev;
         _scratch_arena_free_block(sa, hdr);
+    }
+
+    // unlink from the memory context if registered (factory-created scratch)
+    if (sa->mem_node && g_scratch_node_release) {
+        g_scratch_node_release(sa->mem_node);
+        sa->mem_node = NULL;
     }
 }
 

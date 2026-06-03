@@ -4,6 +4,7 @@
 #include "../lib/str.h"
 #include "../lib/arraylist.h"
 #include "../lib/gc/gc_heap.h"
+#include "mem_factory_rt.h"
 #include "js/js_runtime.h"
 #include "js/js_typed_array.h"
 #include "lambda-decimal.hpp"
@@ -192,7 +193,7 @@ extern "C" String* get_ascii_char_string(unsigned char ch) {
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
-    context->heap->gc = gc_heap_create();
+    context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
     context->heap->pool = context->heap->gc->pool;  // alias for compatibility
 
     // register context->result as a GC root slot
@@ -214,7 +215,7 @@ void heap_init() {
 void heap_init_with_pool(Pool* pool) {
     log_debug("heap init with pool: %p (pool=%p)", context, pool);
     context->heap = (Heap*)mem_calloc(1, sizeof(Heap), MEM_CAT_EVAL);
-    context->heap->gc = gc_heap_create_with_pool(pool);
+    context->heap->gc = mem_gc_heap_create_with_pool(NULL, pool, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
     context->heap->pool = context->heap->gc->pool;
 
     gc_register_root(context->heap->gc, &context->result.item);

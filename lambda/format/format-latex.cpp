@@ -2,6 +2,7 @@
 #include "format.h"
 #include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/mem_factory.h"
 #include "../mark_reader.hpp"
 #include <string.h>
 
@@ -179,7 +180,7 @@ String* format_latex(Pool* pool, Item item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    Pool* ctx_pool = pool_create();
+    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.latex");
     LaTeXContext ctx(ctx_pool, sb);
     ItemReader root(item.to_const());
 
@@ -207,7 +208,7 @@ String* format_latex(Pool* pool, Item item) {
         format_latex_value(ctx, root);
     }
 
-    pool_destroy(ctx_pool);
+    mem_pool_destroy(ctx_pool);
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
     return result;

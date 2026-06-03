@@ -4,6 +4,11 @@
 #include "../lib/string.h"
 #include <string.h>
 
+// Hook to release a memory-context node when a registered shape pool is freed
+// (ref_count reaches 0). Installed by the factory; NULL when unused.
+static void (*g_shape_pool_node_release)(void*) = nullptr;
+extern "C" void shape_pool_set_node_release_hook(void (*fn)(void*)) { g_shape_pool_node_release = fn; }
+
 // ========== Internal Structures ==========
 
 typedef struct ShapePoolEntry {
@@ -123,6 +128,10 @@ void shape_pool_release(ShapePool* pool) {
     log_debug("shape_pool_release: pool=%p, ref_count=%u", pool, pool->ref_count);
     
     if (pool->ref_count == 0) {
+        if (pool->mem_node && g_shape_pool_node_release) {
+            g_shape_pool_node_release(pool->mem_node);
+            pool->mem_node = nullptr;
+        }
         if (pool->parent) {
             shape_pool_release(pool->parent);
         }

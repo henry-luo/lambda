@@ -7,6 +7,7 @@
 #include "js/js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/mem_factory.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_helpers.h"
@@ -12275,7 +12276,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 
     if (!runner.script || !runner.script->ast_root) {
         log_error("Failed to parse script");
-        Pool* error_pool = pool_create();
+        Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(error_pool, nullptr);
         if (!output) {
             log_error("Failed to create error output Input");
@@ -12292,7 +12293,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 
     if (!runner.script->main_func) {
         log_error("MIR Direct: 'main' missing after compilation of '%s'", script_path);
-        Pool* error_pool = pool_create();
+        Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(error_pool, nullptr);
         if (output) output->root = ItemError;
         return output;
@@ -12364,7 +12365,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         }
 
         // Create output
-        Pool* output_pool = pool_create();
+        Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(output_pool, nullptr);
         if (!output) {
             log_error("Failed to create output Input");

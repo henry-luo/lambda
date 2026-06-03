@@ -5,6 +5,7 @@
 #include "dom_range_resolver.hpp"
 #include "source_pos_bridge.hpp"   // R7 step 3c — register path recorder
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -151,7 +152,7 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     state->zoom_level = 1.0f;
 
     // Create dedicated arena for state allocations
-    state->arena = arena_create_default(pool);
+    state->arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.arena");
     if (!state->arena) {
         log_error("radiant_state_create: failed to create arena");
         return NULL;
@@ -196,10 +197,10 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     }
 
     // Initialize dirty tracker arena
-    state->dirty_tracker.arena = arena_create_default(pool);
+    state->dirty_tracker.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.dirty");
 
     // Initialize reflow scheduler arena
-    state->reflow_scheduler.arena = arena_create_default(pool);
+    state->reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
 
     // Initialize template reactive state: create the map and inject it into
     // the global template state store so Lambda views use the same map.
@@ -245,7 +246,7 @@ StateStore* state_store_create(DomDocument* document) {
 
     store->document = document;
     store->pool = document->pool;
-    store->arena = arena_create_default(document->pool);
+    store->arena = mem_arena_create(NULL, document->pool, MEM_ROLE_VIEW, "state.store");
     if (!store->arena) {
         log_error("state_store_create: failed to create StateStore arena");
         return NULL;

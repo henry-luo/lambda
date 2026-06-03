@@ -6,6 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/mempool.h"
+#include "../lib/mem_factory.h"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../input/input.hpp"
@@ -75,14 +76,14 @@ NpmRegistryPackage* npm_registry_fetch_package(const char* package_name) {
     }
 
     // parse JSON response
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.registry");
     Input* input = Input::create(pool);
     Item root = parse_json_to_item(input, resp->data);
 
     if (root.item == ITEM_NULL) {
         log_error("npm registry: failed to parse JSON for %s", package_name);
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -90,7 +91,7 @@ NpmRegistryPackage* npm_registry_fetch_package(const char* package_name) {
     if (!root_reader.isMap()) {
         log_error("npm registry: unexpected response type for %s", package_name);
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -101,7 +102,7 @@ NpmRegistryPackage* npm_registry_fetch_package(const char* package_name) {
     if (!error_item.isNull()) {
         log_error("npm registry: %s — %s", package_name, error_item.cstring());
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -135,7 +136,7 @@ NpmRegistryPackage* npm_registry_fetch_package(const char* package_name) {
     }
 
     free_fetch_response(resp);
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
     return pkg;
 }
 
@@ -157,13 +158,13 @@ NpmRegistryVersion* npm_registry_resolve_version(const char* package_name, const
     }
 
     // parse JSON
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "npm.registry");
     Input* input = Input::create(pool);
     Item root = parse_json_to_item(input, resp->data);
 
     if (root.item == ITEM_NULL) {
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -173,7 +174,7 @@ NpmRegistryVersion* npm_registry_resolve_version(const char* package_name, const
     ItemReader versions_item = root_map.get("versions");
     if (!versions_item.isMap()) {
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
     MapReader versions_map = versions_item.asMap();
@@ -205,7 +206,7 @@ NpmRegistryVersion* npm_registry_resolve_version(const char* package_name, const
         mem_free(ver_keys);
         mem_free(semvers);
         free_fetch_response(resp);
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return NULL;
     }
 
@@ -271,7 +272,7 @@ NpmRegistryVersion* npm_registry_resolve_version(const char* package_name, const
     mem_free(ver_keys);
     mem_free(semvers);
     free_fetch_response(resp);
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 
     log_info("npm registry: resolved %s@%s → %s", package_name, range_str, result->version);
     return result;

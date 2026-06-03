@@ -5,6 +5,11 @@
 #include "gc_nursery.h"
 #include "../log.h"
 
+// Hook to release a memory-context node when a registered nursery is destroyed.
+// Installed by the allocator factory (mem_factory.c); NULL when unused.
+static void (*g_nursery_node_release)(void*) = NULL;
+void gc_nursery_set_node_release_hook(void (*fn)(void*)) { g_nursery_node_release = fn; }
+
 // allocate a new block with the given capacity
 static gc_nursery_block_t* gc_nursery_alloc_block(size_t capacity) {
     gc_nursery_block_t* block = (gc_nursery_block_t*)malloc(sizeof(gc_nursery_block_t));
@@ -41,6 +46,7 @@ gc_nursery_t* gc_nursery_create(size_t block_size) {
     nursery->current = first_block;
     nursery->block_size = block_size;
     nursery->total_allocated = 0;
+    nursery->mem_node = NULL;
 
     log_debug("gc nursery created: block_size=%zu, block_bytes=%zu",
               block_size, block_size * sizeof(gc_num_value_t));
@@ -50,6 +56,11 @@ gc_nursery_t* gc_nursery_create(size_t block_size) {
 // destroy the nursery and all its blocks
 void gc_nursery_destroy(gc_nursery_t* nursery) {
     if (!nursery) return;
+
+    if (nursery->mem_node && g_nursery_node_release) {
+        g_nursery_node_release(nursery->mem_node);
+        nursery->mem_node = NULL;
+    }
 
     gc_nursery_block_t* block = nursery->head;
     while (block) {

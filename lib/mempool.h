@@ -110,6 +110,32 @@ unsigned int pool_get_id(Pool* pool);
  */
 void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count);
 
+/**
+ * Memory-context registration node accessors (opaque void* to avoid a hard
+ * dependency on mem_context.h). Used by the allocator factory (mem_factory.c).
+ */
+void* pool_get_mem_node(Pool* pool);
+void  pool_set_mem_node(Pool* pool, void* node);
+
+/**
+ * Install a hook called by pool_destroy/pool_drain to release a registered
+ * pool's mem_node. Set by the allocator factory; keeps mempool decoupled from
+ * mem_context. NULL by default (no-op).
+ */
+void pool_set_node_release_hook(void (*fn)(void* node));
+
+/**
+ * Get memory-context stats for this pool.
+ * @param reserved    bytes reserved from the OS (mmap: sum of chunks;
+ *                    rpmalloc: high-water alloc_bytes upper bound)
+ * @param in_use      best-effort live bytes (alloc_bytes)
+ * @param alloc_count cumulative allocation calls
+ * @param is_mmap     set to 1 if mmap-backed, 0 if rpmalloc-backed
+ * Any out-param may be NULL.
+ */
+void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
+                        size_t* alloc_count, int* is_mmap);
+
 #ifdef __cplusplus
 }
 #endif

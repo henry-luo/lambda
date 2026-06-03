@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../lib/mem.h"
+#include "../lib/mem_factory.h"
 #include "../lib/uv_loop.h"
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
@@ -3395,7 +3396,7 @@ static DomDocument* load_pdf_bridge_doc(Url* pdf_url, int viewport_width,
 }
 
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width, int viewport_height, float pixel_ratio) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
     Url* full_url = parse_url(base, doc_url);
@@ -4508,7 +4509,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         "latex.render(ast, {standalone: true})\n",
         safe_path);
 
-    Pool* result_pool = pool_create();
+    Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!result_pool) {
         log_error("[Lambda LaTeX] Failed to create result pool");
         return nullptr;
@@ -4982,7 +4983,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
  * @return DomDocument ready for layout, or nullptr on failure
  */
 static DomDocument* load_html_string_doc(const char* html_source, int viewport_width, int viewport_height) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("load_html_string_doc: pool_create failed"); return nullptr; }
     Url* base_url = get_current_dir();
     if (!base_url) { log_error("load_html_string_doc: get_current_dir failed"); pool_destroy(pool); return nullptr; }
@@ -5030,7 +5031,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     // Phase 5: Create result Input with arena for unified DOM allocation.
     // Elements from JIT execution will be fat DomElements on this arena.
-    Pool* result_pool = pool_create();
+    Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     Input* result_input = Input::create(result_pool, script_url);
     result_input->ui_mode = true;
     runtime->ui_mode = true;
@@ -6039,7 +6040,7 @@ static bool layout_single_file(
     log_debug("[Layout] Processing file: %s", input_file);
 
     // Create memory pool for this file
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) {
         log_error("Failed to create memory pool for %s", input_file);
         return false;
@@ -6157,7 +6158,7 @@ static bool layout_single_file(
             pool_destroy(pool);
 
             input_url = next_url;
-            pool = pool_create();
+            pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
             if (!pool) {
                 log_error("Failed to create memory pool for redirected document: %s",
                           next_href ? next_href : "(null)");

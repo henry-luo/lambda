@@ -12,6 +12,7 @@
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
@@ -7415,10 +7416,10 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         context = old_context;
         reusing_context = true;
         if (!context->nursery) {
-            context->nursery = gc_nursery_create(0);
+            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
         }
     } else {
-        py_context.nursery = gc_nursery_create(0);
+        py_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
         context = &py_context;
         heap_init();
         context->pool = context->heap->pool;
@@ -7586,9 +7587,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     // ensure a heap context exists for module loading
     if (!context || !context->heap) {
         EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_PY_RUNTIME);
-        temp_ctx->pool = pool_create();
+        temp_ctx->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "py.runtime");
         temp_ctx->result = ItemNull;
-        temp_ctx->nursery = gc_nursery_create(0);
+        temp_ctx->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
         context = temp_ctx;
         heap_init();
         context->pool = context->heap->pool;

@@ -4,6 +4,7 @@
 
 #include "display_list.h"
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include <string.h>
 
@@ -92,7 +93,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
 
 void dl_init(DisplayList* dl, Arena* backing_arena) {
     memset(dl, 0, sizeof(DisplayList));
-    scratch_init(&dl->arena, backing_arena);
+    mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
 void dl_clear(DisplayList* dl) {

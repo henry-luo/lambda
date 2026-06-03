@@ -586,6 +586,7 @@ typedef struct Input {
     char* xml_stylesheet_href;  // href from <?xml-stylesheet?> processing instruction (nullable)
     int doc_count;              // number of YAML documents (0 or 1 = single doc, >1 = multi-doc array)
     bool ui_mode;               // true = allocate DomElement/DomText during parsing (layout/render/view commands)
+    void* mem_ctx;              // per-document MemContext sub-context (nullable; memory attribution)
     // StringBuf* sb;
 
     // member functions

@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/mem_factory.h"
 #include "../lib/file.h"
 #include "../lib/shell.h"
 #include "utf_string.h"
@@ -341,7 +342,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     log_debug("pn_output_internal: using format '%s'", effective_format);
 
     // format the data
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "proc.output.format");
     String* formatted = NULL;
     bool use_mark_format = false;
 
@@ -365,7 +366,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         use_mark_format = true;
     } else {
         log_error("pn_output_internal: unsupported format '%s'", effective_format);
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         strbuf_free(path_buf);
         return item_to_ri(ItemError);
     }
@@ -383,7 +384,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     FILE* f = fopen(write_path, mode);
     if (!f) {
         log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         if (temp_path_buf) strbuf_free(temp_path_buf);
         strbuf_free(path_buf);
         return item_to_ri(ItemError);
@@ -402,7 +403,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             log_error("pn_output_internal: failed to write to file %s", write_path);
             if (atomic) file_delete(write_path);  // clean up temp file on error
             strbuf_free(content_buf);
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -414,7 +415,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         if (!formatted) {
             log_error("pn_output_internal: formatting failed");
             fclose(f);
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -426,7 +427,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         if (written != strlen(formatted->chars)) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
             if (atomic) file_delete(write_path);  // clean up temp file on error
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -440,7 +441,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         if (atomic_rename(write_path, file_path) != 0) {
             log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
             file_delete(write_path);  // clean up temp file
-            pool_destroy(temp_pool);
+            mem_pool_destroy(temp_pool);
             strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -448,7 +449,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         strbuf_free(temp_path_buf);
     }
 
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
     strbuf_free(path_buf);
     return ri_ok({.item = i2it((int64_t)written)});
 }

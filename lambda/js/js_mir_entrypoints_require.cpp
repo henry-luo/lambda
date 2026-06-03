@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "../../lib/mem_factory.h"
 #ifndef _WIN32
 #include <sys/time.h>
 #else
@@ -57,10 +58,10 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         context = old_context;
         reusing_context = true;
         if (!context->nursery) {
-            context->nursery = gc_nursery_create(0);
+            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         }
     } else {
-        js_context.nursery = gc_nursery_create(0);
+        js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = &js_context;
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
@@ -449,10 +450,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         context = old_context;
         reusing_context = true;
         if (!context->nursery) {
-            context->nursery = gc_nursery_create(0);
+            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         }
     } else {
-        js_context.nursery = gc_nursery_create(0);
+        js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = &js_context;
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
@@ -931,9 +932,9 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
     // during Lambda→JS import, no context exists yet. Set up a persistent one.
     if (!context || !context->heap) {
         EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_JS_RUNTIME);
-        temp_ctx->pool = pool_create();
+        temp_ctx->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "js.runtime");
         temp_ctx->result = ItemNull;
-        temp_ctx->nursery = gc_nursery_create(0);
+        temp_ctx->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = temp_ctx;
         heap_init();
         context->pool = context->heap->pool;

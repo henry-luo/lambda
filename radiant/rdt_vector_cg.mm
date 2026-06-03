@@ -2,6 +2,7 @@
 #include "rdt_vector.hpp"
 #include "render_svg_inline.hpp"
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
 #include "../lambda/input/input.hpp"
@@ -884,7 +885,7 @@ static void cg_svg_shared_release(RdtSvgShared* shared) {
 static RdtPicture* cg_svg_picture_create(const char* data, int size, const char* source_path) {
     if (!data || size <= 0) return nullptr;
 
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_MEDIA, "rdt.vector.cg");
     if (!pool) {
         log_error("cg_svg_picture_create: pool_create failed");
         return nullptr;

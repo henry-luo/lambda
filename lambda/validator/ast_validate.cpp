@@ -9,6 +9,7 @@
 #include "../transpiler.hpp"
 #include "../ast.hpp"
 #include "../lambda-data.hpp"
+#include "../../lib/mem_factory.h"
 #include "../input/input.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
@@ -201,7 +202,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     }
 
     // Create memory pool for validation
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_VALIDATOR, "validator.ast");
     if (!pool) {
         printf("Error: Failed to create memory pool\n");
         return nullptr;
@@ -221,7 +222,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         char* schema_contents = read_text_file(schema_file);
         if (!schema_contents) {
             printf("Error: Could not read schema file '%s'\n", schema_file);
-            pool_destroy(pool);
+            mem_pool_destroy(pool);
             return nullptr;
         }
 
@@ -230,7 +231,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         if (!validator) {
             printf("Error: Failed to create schema validator\n");
             mem_free(schema_contents);
-            pool_destroy(pool);
+            mem_pool_destroy(pool);
             return nullptr;
         }
 
@@ -315,7 +316,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             printf("Error: Failed to load schema\n");
             schema_validator_destroy(validator);
             mem_free(schema_contents);
-            pool_destroy(pool);
+            mem_pool_destroy(pool);
             return nullptr;
         }
 
@@ -325,7 +326,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             printf("Error: Cannot get current working directory\n");
             schema_validator_destroy(validator);
             mem_free(schema_contents);
-            pool_destroy(pool);
+            mem_pool_destroy(pool);
             return nullptr;
         }
 
@@ -371,7 +372,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             printf("Error: Failed to parse data file\n");
             schema_validator_destroy(validator);
             mem_free(schema_contents);
-            pool_destroy(pool);
+            mem_pool_destroy(pool);
             return nullptr;
         }
 
@@ -386,7 +387,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 
     if (!validation_result) {
         printf("Error: Validation failed to run\n");
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return nullptr;
     }
 

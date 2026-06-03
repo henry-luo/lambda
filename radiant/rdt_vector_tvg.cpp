@@ -5,6 +5,7 @@
 #include "rdt_vector.hpp"
 #include "render_svg_inline.hpp"
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
@@ -1600,7 +1601,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 static RdtPicture* svg_picture_create(const char* data, int size, const char* source_path) {
     if (!data || size <= 0) return nullptr;
 
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_MEDIA, "rdt.vector.tvg");
     if (!pool) {
         log_error("svg_picture_create: pool_create failed");
         return nullptr;

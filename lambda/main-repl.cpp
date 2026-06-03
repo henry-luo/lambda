@@ -212,6 +212,9 @@ void print_help() {
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
     printf("  --dry-run                    - Skip real IO; return fabricated results for network/filesystem ops\n");
+    printf("\nDiagnostic Options (global; place before the subcommand):\n");
+    printf("  --mem-dump[=PATH]            - On exit, write the memory-context snapshot as JSON\n");
+    printf("                                 (default: ./temp/mem_snapshot.json) and log a MEMCTX leak report\n");
     printf("\nScript Commands:\n");
 #ifdef LAMBDA_C2MIR
     printf("  run [--c2mir] <script>       - Execute script with run_main enabled\n");

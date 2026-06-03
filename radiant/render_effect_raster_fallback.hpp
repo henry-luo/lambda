@@ -7,6 +7,7 @@
 #include "tile_pool.h"
 #include "view.hpp"
 #include "../lib/arena.h"
+#include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
 #include <math.h>
 #include <string.h>
@@ -86,14 +87,14 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
         render_effect_raster_fill_surface(surface, 0xffffffffu);
     }
 
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.effect.raster");
     if (!temp_pool) {
         image_surface_destroy(surface);
         return false;
     }
-    Arena* temp_arena = arena_create_default(temp_pool);
+    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.effect.arena");
     if (!temp_arena) {
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         image_surface_destroy(surface);
         return false;
     }
@@ -101,7 +102,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     DisplayList dl = {};
     ScratchArena scratch = {};
     dl_init(&dl, temp_arena);
-    scratch_init(&scratch, temp_arena);
+    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.effect.scratch");
 
     RdtVector vec = {};
     rdt_vector_init(&vec, (uint32_t*)surface->pixels, w, h, w);
@@ -116,7 +117,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
 
     scratch_release(&scratch);
     dl_clear(&dl);
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
 
     out->surface = surface;
     out->x = (float)x0;

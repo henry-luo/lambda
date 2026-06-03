@@ -1,6 +1,7 @@
 #include "format.h"
 #include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/datetime.h"
 #include "../../lib/strbuf.h"
 #include "../mark_reader.hpp"
@@ -224,20 +225,20 @@ String* format_json(Pool* pool, const Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    Pool* ctx_pool = pool_create();
+    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.json");
     JsonContext ctx(ctx_pool, sb);
     ItemReader reader(root_item.to_const());
     format_item_reader_with_indent(ctx, reader, 0);
-    pool_destroy(ctx_pool);
+    mem_pool_destroy(ctx_pool);
 
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats JSON to a provided StringBuf
 void format_json_to_strbuf(StringBuf* sb, Item root_item) {
-    Pool* pool = pool_create();
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.json");
     JsonContext ctx(pool, sb);
     ItemReader reader(root_item.to_const());
     format_item_reader_with_indent(ctx, reader, 0);
-    pool_destroy(pool);
+    mem_pool_destroy(pool);
 }

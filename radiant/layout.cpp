@@ -11,6 +11,7 @@
 #include "font_face.h"
 #include "retained_fields.hpp"
 #include "../lib/font/font.h"
+#include "../lib/mem_factory.h"
 #include "css_animation.h"
 #include "webview.h"
 #include "../lib/tagged.hpp"
@@ -2522,7 +2523,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 
     // Initialize scratch allocator for scoped temporary buffers
     lycon->pool = doc->view_tree->pool;
-    scratch_init(&lycon->scratch, doc->view_tree->arena);
+    mem_scratch_init((MemContext*)doc->mem_ctx, &lycon->scratch, doc->view_tree->arena, MEM_ROLE_LAYOUT, "layout.scratch");
 
     // BlockContext floats are already initialized to NULL in memset
 }
@@ -2564,6 +2565,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.)
     if (!doc->incremental_layout) {
         view_pool_init(doc->view_tree);
+        // attribute the view-tree pool/arena to this document for grouped reporting
+        if (doc->mem_ctx && doc->view_tree->pool) {
+            uint32_t did = mem_context_doc_id((MemContext*)doc->mem_ctx);
+            mem_node_set_doc((MemNode*)pool_get_mem_node(doc->view_tree->pool), did);
+            if (doc->view_tree->arena)
+                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->arena), did);
+        }
     }
     log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);

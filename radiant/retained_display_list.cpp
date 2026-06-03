@@ -3,6 +3,7 @@
 #include "display_list_bounds.hpp"
 #include "display_list_storage.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/mem_factory.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -211,7 +212,7 @@ RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
     if (!cache) return nullptr;
 
     cache->pool = pool;
-    cache->arena = arena_create_default(pool);
+    cache->arena = mem_arena_create(NULL, pool, MEM_ROLE_RENDER, "retained_dl.arena");
     cache->map = retained_dl_entry_new(128);
     if (!cache->arena || !cache->map) {
         retained_dl_cache_destroy(cache);

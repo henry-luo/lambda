@@ -303,6 +303,8 @@
                 "lib/hashmap.c",
                 "lib/arena.c",
                 "lib/scratch_arena.c",
+                "lib/mem_context.c",
+                "lib/mem_factory.c",
                 "lib/arraylist.c",
                 "lib/pdf_writer.c",
                 "lib/strbuf.c",
@@ -373,6 +375,7 @@
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
                 "lambda/shape_pool.cpp",
+                "lambda/mem_factory_rt.cpp",
                 "lambda/shape_builder.cpp",
                 "lambda/lambda-data.cpp",
                 "lambda/target.cpp",
@@ -2097,6 +2100,47 @@
                         ],
                         "binary": "test_scratch_arena_gtest.exe",
                         "icon": "📋"
+                    },
+                    {
+                        "source": "test_mem_context_gtest.cpp",
+                        "name": "Memory Context Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/mem_context.c",
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
+                        "binary": "test_mem_context_gtest.exe",
+                        "icon": "🧠"
+                    },
+                    {
+                        "source": "test_mem_factory_gtest.cpp",
+                        "name": "Memory Factory Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/mem_factory.c",
+                            "lib/mem_context.c",
+                            "lib/arena.c",
+                            "lib/scratch_arena.c",
+                            "lib/gc/gc_nursery.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
+                        "binary": "test_mem_factory_gtest.exe",
+                        "icon": "🏭"
                     },
                     {
                         "source": "test_shell_gtest.cpp",

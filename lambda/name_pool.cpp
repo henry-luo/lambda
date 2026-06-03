@@ -9,6 +9,11 @@ typedef struct NamePoolEntry {
     StrView view;               // StrView pointing to the String's chars for fast comparison
 } NamePoolEntry;
 
+// Hook to release a memory-context node when a registered name pool is freed
+// (ref_count reaches 0). Installed by the factory; NULL when unused.
+static void (*g_name_pool_node_release)(void*) = nullptr;
+extern "C" void name_pool_set_node_release_hook(void (*fn)(void*)) { g_name_pool_node_release = fn; }
+
 // Hash + compare via lib/hashmap_helpers — StrView (str, length) key shape.
 HASHMAP_DEFINE_LENSTRKEY(name_entry, NamePoolEntry, view.str, view.length)
 
@@ -67,6 +72,13 @@ void name_pool_release(NamePool* pool) {
 
     pool->ref_count--;
     if (pool->ref_count == 0) {
+        // unlink from the memory context if registered (struct memory itself is
+        // freed later when the backing Pool is destroyed)
+        if (pool->mem_node && g_name_pool_node_release) {
+            g_name_pool_node_release(pool->mem_node);
+            pool->mem_node = nullptr;
+        }
+
         // Release parent pool
         if (pool->parent) {
             name_pool_release(pool->parent);

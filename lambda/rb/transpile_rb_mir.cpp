@@ -9,6 +9,7 @@
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_helpers.h"
@@ -4706,10 +4707,10 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         context = old_context;
         reusing_context = true;
         if (!context->nursery) {
-            context->nursery = gc_nursery_create(0);
+            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "rb.nursery");
         }
     } else {
-        rb_context.nursery = gc_nursery_create(0);
+        rb_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "rb.nursery");
         context = &rb_context;
         heap_init();
         context->pool = context->heap->pool;

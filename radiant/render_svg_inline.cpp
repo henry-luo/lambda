@@ -16,6 +16,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
+#include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include "../lib/font/font.h"
@@ -5347,11 +5348,11 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                                                 DisplayList* dl) {
     if (!subscene || !subscene->svg_root || !dl) return;
 
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
     if (!temp_pool) return;
-    Arena* temp_arena = arena_create_default(temp_pool);
+    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.svg_inline.arena");
     if (!temp_arena) {
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         return;
     }
 
@@ -5386,7 +5387,7 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
 
     paint_list_destroy(&nested_paint);
     arena_destroy(temp_arena);
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
 }
 
 void render_svg_inline_register_paint_ir_lowerers(void) {
@@ -5445,11 +5446,11 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
         return;
     }
 
-    Pool* temp_pool = pool_create();
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
     if (!temp_pool) return;
-    Arena* temp_arena = arena_create_default(temp_pool);
+    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_RENDER, "render.svg_inline.arena");
     if (!temp_arena) {
-        pool_destroy(temp_pool);
+        mem_pool_destroy(temp_pool);
         return;
     }
 
@@ -5458,7 +5459,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     ScratchArena scratch = {};
     dl_init(&dl, temp_arena);
     paint_list_init(&paint_list, temp_arena);
-    scratch_init(&scratch, temp_arena);
+    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
                                pool, pixel_ratio, font_ctx, base_transform, &dl,
@@ -5492,7 +5493,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
     arena_destroy(temp_arena);
-    pool_destroy(temp_pool);
+    mem_pool_destroy(temp_pool);
 }
 
 // ============================================================================

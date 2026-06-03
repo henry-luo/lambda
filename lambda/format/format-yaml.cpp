@@ -5,6 +5,7 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/datetime.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
@@ -249,7 +250,7 @@ String* format_yaml(Pool* pool, Item root_item) {
     }
 
     // Create YAML context
-    Pool* ctx_pool = pool_create();
+    Pool* ctx_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "format.yaml");
     YamlContext ctx(ctx_pool, sb);
 
     ItemReader reader(root_item.to_const());
@@ -293,6 +294,6 @@ String* format_yaml(Pool* pool, Item root_item) {
         stringbuf_append_char(ctx.output(), '\n');
     }
 
-    pool_destroy(ctx_pool);
+    mem_pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }
