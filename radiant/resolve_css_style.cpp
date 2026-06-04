@@ -3897,7 +3897,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 log_debug("[FONT INHERIT] Found computed font-size in parent <%s>: %.1f",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->font_size);
                 ViewSpan* span = lam::view_require_element(lycon->view);
-                if (span->font && span->font->font_size > 0.0f) {
+                if (span->font && span->font->font_size > 0.0f &&
+                    !span->font->font_size_from_medium) {
                     log_debug("[FONT INHERIT] Keeping existing element font-size: %.1f",
                         span->font->font_size);
                     continue;
@@ -12460,6 +12461,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                     if (css_value_is_background_position_candidate(item)) {
                         CssValue* position_values[2] = {};
+                        CssValue position_list = {};
                         int position_count = 1;
                         position_values[0] = item;
                         if (i + 1 < value->data.list.count) {
@@ -12474,7 +12476,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         if (position_count == 1) {
                             position_decl.value = position_values[0];
                         } else {
-                            CssValue position_list = {};
                             position_list.type = CSS_VALUE_TYPE_LIST;
                             position_list.data.list.values = position_values;
                             position_list.data.list.count = position_count;
