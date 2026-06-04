@@ -12,6 +12,7 @@
 #include "../../lib/log.h"
 #include <cstring>
 #include <cstdlib>
+#include <limits.h>
 #include "../../lib/mem.h"
 #include <cmath>
 

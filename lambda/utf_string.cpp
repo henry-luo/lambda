@@ -14,38 +14,6 @@ void cleanup_utf8proc_support(void) {
     // utf8proc doesn't require explicit cleanup
 }
 
-bool is_ascii_string(const char* str, int len) {
-    if (!str) return false;
-
-    for (int i = 0; i < len; i++) {
-        if ((unsigned char)str[i] > 127) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool is_valid_utf8(const char* str, int len) {
-    if (!str) return false;
-
-    utf8proc_int32_t codepoint;
-    utf8proc_ssize_t bytes_read;
-    utf8proc_ssize_t pos = 0;
-
-    while (pos < len) {
-        bytes_read = utf8proc_iterate((const utf8proc_uint8_t*)(str + pos), len - pos, &codepoint);
-        if (bytes_read < 0) {
-            return false; // Invalid UTF-8
-        }
-        if (codepoint == -1) {
-            return false; // Invalid codepoint
-        }
-        pos += bytes_read;
-    }
-
-    return true;
-}
-
 char* normalize_utf8proc_nfc(const char* str, int len, int* out_len) {
     if (!str || len <= 0) {
         if (out_len) *out_len = 0;

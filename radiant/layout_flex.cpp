@@ -7,6 +7,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_alignment.hpp"
 #include "layout_axis.hpp"
+#include "../lib/checked_math.hpp"
 #include "layout_measure.hpp"
 #include "layout_box.hpp"
 extern "C" {
@@ -2068,12 +2069,19 @@ static bool should_skip_flex_item(ViewElement* item) {
 }
 
 // Helper: Ensure flex items array has enough capacity
-static void ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
+// Returns false on overflow/OOM, leaving flex->flex_items and allocated_items unchanged
+// (still valid) so the caller can stop collecting instead of writing past the buffer.
+static bool ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
     if (required > flex->allocated_items) {
-        flex->allocated_items = required * 2;
-        flex->flex_items = (View**)mem_realloc(flex->flex_items,
-                                           flex->allocated_items * sizeof(View*), MEM_CAT_LAYOUT);
+        int new_alloc = required * 2;
+        size_t bytes;
+        if (new_alloc < 0 || !lam::checked_mul((size_t)new_alloc, sizeof(View*), &bytes)) return false;
+        View** grown = (View**)mem_realloc(flex->flex_items, bytes, MEM_CAT_LAYOUT);
+        if (!grown) return false;
+        flex->flex_items = grown;
+        flex->allocated_items = new_alloc;
     }
+    return true;
 }
 
 // UNIFIED: Single-pass collection that combines measurement + View creation + collection
@@ -2469,7 +2477,10 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         }
 
         // Step 7: Add to flex items array
-        ensure_flex_items_capacity(flex_layout, item_count + 1);
+        if (!ensure_flex_items_capacity(flex_layout, item_count + 1)) {
+            // OOM/overflow growing the array — stop collecting; what we have stays valid.
+            break;
+        }
         flex_layout->flex_items[item_count] = child;
 
         log_debug("Added flex item %d: %s, size=%.1fx%.1f",
@@ -3929,8 +3940,9 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
 
     // Ensure we have space for lines
     if (flex_layout->allocated_lines == 0) {
+        flex_layout->lines = (FlexLineInfo*)mem_calloc(4, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
+        if (!flex_layout->lines) return 0;   // OOM — no lines
         flex_layout->allocated_lines = 4;
-        flex_layout->lines = (FlexLineInfo*)mem_calloc(flex_layout->allocated_lines, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
     }
 
     int line_count = 0;
@@ -3939,9 +3951,15 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
     while (current_item < item_count) {
         // Ensure we have space for another line
         if (line_count >= flex_layout->allocated_lines) {
-            flex_layout->allocated_lines *= 2;
-            flex_layout->lines = (FlexLineInfo*)mem_realloc(flex_layout->lines,
-                                                       flex_layout->allocated_lines * sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
+            int new_alloc = flex_layout->allocated_lines * 2;
+            size_t bytes;
+            if (new_alloc < 0 || !lam::checked_mul((size_t)new_alloc, sizeof(FlexLineInfo), &bytes)) {
+                return line_count;   // overflow — return lines collected so far
+            }
+            FlexLineInfo* grown = (FlexLineInfo*)mem_realloc(flex_layout->lines, bytes, MEM_CAT_LAYOUT);
+            if (!grown) return line_count;   // OOM — keep old buffer, return what we have
+            flex_layout->lines = grown;
+            flex_layout->allocated_lines = new_alloc;
         }
 
         FlexLineInfo* line = &flex_layout->lines[line_count];

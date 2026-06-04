@@ -490,6 +490,7 @@ DateTime* datetime_parse_lambda(Pool* pool, const char* lambda_str) {
         size_t len = strlen(content);
         if (len > 0 && content[len-1] == '\'') {
             char* temp = (char*)pool_calloc(pool, len);
+            if (!temp) return NULL;
             strncpy(temp, content, len-1);
             temp[len-1] = '\0';
             return datetime_parse(pool, temp, DATETIME_PARSE_LAMBDA, NULL);
@@ -516,10 +517,12 @@ DateTime* datetime_from_string(Pool* pool, const char* datetime_str) {
         size_t len = strlen(content);
         if (len > 0 && content[len-1] == '\'') {
             char* temp = (char*)pool_calloc(pool, len);
-            strncpy(temp, content, len-1);
-            temp[len-1] = '\0';
-            dt = datetime_parse(pool, temp, DATETIME_PARSE_LAMBDA, NULL);
-            if (dt) return dt;
+            if (temp) {
+                strncpy(temp, content, len-1);
+                temp[len-1] = '\0';
+                dt = datetime_parse(pool, temp, DATETIME_PARSE_LAMBDA, NULL);
+                if (dt) return dt;
+            }
         }
     }
 

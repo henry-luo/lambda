@@ -20,6 +20,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "arraylist.h"
 
@@ -83,7 +84,14 @@ static int arraylist_enlarge(ArrayList *arraylist)
 	/* Double the allocated size */
 
 	newsize = arraylist->_alloced * 2;
-	
+
+	/* Guard against int overflow in the doubling: _alloced is always >= 16, so
+	   newsize <= _alloced means the multiply wrapped (practically unreachable — needs
+	   ~1 billion entries — but otherwise a negative size reaches realloc). */
+	if (newsize <= arraylist->_alloced) {
+		return 0;
+	}
+
 	/* Reallocate the array to the new size */
 
 	data = realloc(arraylist->data, sizeof(ArrayListValue) * newsize);
@@ -289,7 +297,10 @@ int arraylist_reserve(ArrayList *arraylist, int capacity)
 	if (!arraylist) return 0;
 	if (capacity <= arraylist->_alloced) return 1;
 	int newsize = arraylist->_alloced > 0 ? arraylist->_alloced : 1;
-	while (newsize < capacity) newsize *= 2;
+	while (newsize < capacity) {
+		if (newsize > INT_MAX / 2) return 0;   /* next doubling would overflow / loop forever */
+		newsize *= 2;
+	}
 	ArrayListValue *data = realloc(arraylist->data, sizeof(ArrayListValue) * newsize);
 	if (!data) return 0;
 	arraylist->data = data;

@@ -49,6 +49,15 @@ static int raf_head = 0;
 static int raf_tail = 0;
 static int raf_count = 0;
 static int64_t next_raf_id = 1;
+static bool auto_close_mode = false;
+
+extern "C" void js_event_loop_set_auto_close_mode(bool enabled) {
+    auto_close_mode = enabled;
+}
+
+extern "C" bool js_event_loop_auto_close_mode(void) {
+    return auto_close_mode;
+}
 
 static void next_tick_push(Item cb) {
     if (next_tick_count >= MICROTASK_CAPACITY) {
@@ -203,6 +212,8 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
 }
 
 extern "C" int js_animation_frame_drain(int max_frames) {
+    // Auto-close cancels timers in js_event_loop_drain(); rAF draining is
+    // bounded and needed to settle headless layout/reftest-wait snapshots.
     if (max_frames <= 0) max_frames = 1;
     int frames = 0;
     int called = 0;
@@ -1041,12 +1052,31 @@ static void stop_all_interval_timers(void) {
     }
 }
 
+// Auto-close mode matches closing the page after load/onload: pending timers
+// must not keep the static layout pass alive, and their GC roots need normal
+// close-path cleanup before the transient JS heap is released.
+static void close_all_timer_handles(void) {
+    for (int i = timer_handle_count - 1; i >= 0; i--) {
+        JsTimerHandle* th = timer_handles[i];
+        if (th) {
+            timer_close_handle(th);
+        }
+    }
+}
+
 extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
+
+    if (auto_close_mode) {
+        close_all_timer_handles();
+        uv_run(loop, UV_RUN_NOWAIT);
+        js_microtask_flush();
+        return 0;
+    }
 
 #ifndef _WIN32
     // install crash guard for event loop drain

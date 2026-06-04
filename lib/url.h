@@ -136,7 +136,7 @@ Url* url_resolve_relative(const char* input, const Url* base_url);
 UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* result);
 
 // Path normalization and resolution functions
-void url_normalize_path(char* path);
+void url_normalize_path(char* path, size_t cap);
 char* url_resolve_path(const char* base_path, const char* relative_path);
 void url_normalize_path_segments(char** segments, int* segment_count);
 char* url_join_path_segments(char** segments, int segment_count);

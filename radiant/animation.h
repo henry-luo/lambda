@@ -168,6 +168,12 @@ void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance
 // Remove all animations targeting a specific view (e.g., when element is removed from DOM)
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
 
+// Remove all view-targeted animations (CSS animations + transitions). Call this when the
+// view tree is destroyed for a full relayout: those animations hold raw View* targets that
+// become dangling once the view pool is freed. Surface-targeted animations (GIF/Lottie) are
+// left intact, since their targets live in the image cache, not the view pool.
+void animation_scheduler_remove_views(AnimationScheduler* scheduler);
+
 // Create a new animation instance from the scheduler's pool
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
 

@@ -11,8 +11,14 @@
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
+#include "../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <algorithm>  // for std::max
+
+// Caps build_expr recursion so a pathologically nested source reports an error
+// instead of overflowing the stack (and tripping the SIGSEGV recovery). Well above
+// any real expression nesting; input-data nesting is already capped by the parsers.
+#define MAX_BUILD_DEPTH 1000
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
@@ -7305,6 +7311,13 @@ AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSy
 }
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
+    // depth guard: bail (NULL, the existing error convention) before the recursion
+    // can overflow the stack on deeply nested source.
+    lam::RecursionGuard depth_guard(&tp->build_depth, MAX_BUILD_DEPTH);
+    if (!depth_guard) {
+        log_error("build_expr: expression nesting too deep (>%d) — aborting build", MAX_BUILD_DEPTH);
+        return NULL;
+    }
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
     log_debug("build_expr: %s", ts_node_type(expr_node));

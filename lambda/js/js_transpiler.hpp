@@ -158,6 +158,7 @@ Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, 
                                         const JsPreambleState* preamble);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble);
+bool preamble_state_update_from_eval_snapshot(JsPreambleState* state);
 void preamble_state_destroy(JsPreambleState* state);
 
 // Clean up all deferred MIR contexts (call at batch end or after heap_destroy on crash)

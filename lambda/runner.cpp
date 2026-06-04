@@ -1285,14 +1285,17 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (0) {
 #endif
         // Stack overflow was caught — we land here after siglongjmp
+        _lambda_recovery_armed = 0;   // recovery consumed; disarm
         log_error("exec: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
         lambda_stack_overflow_error("<signal>");
         result = context->result = ItemError;
     } else {
         // Normal execution path — zero per-call overhead
+        _lambda_recovery_armed = 1;    // arm only for the duration of user code
         log_debug("exec main func");
         result = context->result = runner->script->main_func(context);
+        _lambda_recovery_armed = 0;
         log_debug("after main func, result type_id=%d", get_type_id(result));
     }
 
@@ -1422,6 +1425,10 @@ void runtime_reset_heap(Runtime* runtime) {
             name_pool_release(runtime->name_pool);
             runtime->name_pool = NULL;
         }
+        if (runtime->type_list) {
+            arraylist_free(runtime->type_list);
+            runtime->type_list = NULL;
+        }
 
         heap_destroy();
         if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
@@ -1462,6 +1469,10 @@ void runtime_cleanup(Runtime* runtime) {
         if (runtime->name_pool) {
             name_pool_release(runtime->name_pool);
             runtime->name_pool = NULL;
+        }
+        if (runtime->type_list) {
+            arraylist_free(runtime->type_list);
+            runtime->type_list = NULL;
         }
 
         heap_destroy();

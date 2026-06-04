@@ -22,6 +22,8 @@ extern "C" {
 
 void js_event_loop_init(void);
 int  js_event_loop_drain(void);
+void js_event_loop_set_auto_close_mode(bool enabled);
+bool js_event_loop_auto_close_mode(void);
 
 // =============================================================================
 // Microtask Queue

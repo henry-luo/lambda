@@ -253,4 +253,58 @@ T* unsafe_release(OwnedPtr<T, D>& p) {
     return p.release();
 }
 
+// ---------------------------------------------------------------------------
+// NonNull<T> — the infallible-allocation result type (Type-2 / arena path).
+// A pointer that is guaranteed non-null by construction. Pointer-sized, zero-cost,
+// decays to a raw T* at the C/MIR boundary. Its honesty rests on the allocator's
+// contract (the arena aborts/reclaims on chunk failure — see Memory_Context.md),
+// not on a per-call null check. See vibe/Memory_Safety_Template3.md §3.7.
+// ---------------------------------------------------------------------------
+
+template<class T>
+class NonNull {
+    T* p_;
+
+public:
+    explicit NonNull(T* p) : p_(p) { assert(p && "NonNull constructed from null"); }
+
+    T* get() const { return p_; }
+    T* operator->() const { return p_; }
+
+    // operator* and the borrow conversion are member templates so they are only
+    // instantiated when used — this keeps NonNull<void> (raw byte buffers) well-formed.
+    template<class U = T> U& operator*() const { return *p_; }
+    template<class U = T> operator BorrowedPtr<U, PoolDomain>() const {
+        return BorrowedPtr<U, PoolDomain>(p_);
+    }
+};
+
+// Type-2 infallible arena allocation. The C ABI `arena_alloc`/`arena_calloc` is unchanged;
+// these typed wrappers live on the C++ side only.
+
+template<class T>
+NonNull<T> arena_new(Arena* arena) {              // single zero-initialized object
+    return NonNull<T>(static_cast<T*>(arena_calloc(arena, sizeof(T))));
+}
+
+template<class T>
+NonNull<T> arena_new_sized(Arena* arena, size_t extra) {   // header + trailing payload (FAM)
+    return NonNull<T>(static_cast<T*>(arena_alloc(arena, sizeof(T) + extra)));
+}
+
+inline NonNull<void> arena_bytes(Arena* arena, size_t n) {
+    return NonNull<void>(arena_alloc(arena, n));
+}
+
+template<class T>
+T& arena_emplace(Arena* arena) {                  // reference sugar for the single-object case
+    return *arena_new<T>(arena).get();
+}
+
+// Type-1 fallible pool allocation companion (caller must check). See also checked_alloc.hpp.
+template<class T>
+T* pool_try_new(Pool* pool) {
+    return static_cast<T*>(pool_calloc(pool, sizeof(T)));
+}
+
 } // namespace lam

@@ -849,13 +849,13 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return {.array_num = new_arr};
     } else if constexpr (Tag == LMD_TYPE_ARRAY) {
         Array* arr = typed.ptr();
-        int length = arr->length;
-        int capacity = arr->capacity;
+        int64_t length = arr->length;       // arr->length is int64_t — do not truncate to int
+        int64_t capacity = arr->capacity;
         (void)capacity;
         uint8_t src_flags = arr->flags;
         ArrayBuilder arr_builder = array();
         ArrayReader reader(lam::gc_borrow(arr));
-        for (int i = 0; i < length; i++) {
+        for (int64_t i = 0; i < length; i++) {
             Item child = reader.get(i).item();
             Item copied_child = deep_copy_internal(child);
             arr_builder.append(copied_child);

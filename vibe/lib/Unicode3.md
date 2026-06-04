@@ -44,12 +44,13 @@ Unicode codepoint handling is duplicated across **20+ files** in the Lambda/Radi
 | `lambda/input/html5/html5_tokenizer.cpp:88` | Hoehrmann DFA `utf8_decode()` | DFA-based decoder for HTML5 spec compliance |
 | `lambda/input/html_entities.cpp:79` | `utf8_first_codepoint()` | Decode first codepoint only |
 
-### 3. UTF-8 Validation — **2 implementations**
+### 3. UTF-8 Validation — canonical implementation
 
 | File | Function | Notes |
 |------|----------|-------|
-| `lib/str.c:1061` | `str_utf8_valid()` | Manual validation with SWAR fast-path |
-| `lambda/utf_string.cpp:28` | `is_valid_utf8()` | Wraps `utf8proc_iterate` loop |
+| `lib/utf.c` + `lib/str.c` | `utf8_valid()` / `str_utf8_valid()` | Core validator plus string wrapper |
+
+The old `lambda/utf_string.cpp` `is_valid_utf8()` wrapper was removed as unused duplicate surface. Use `str_utf8_valid()` or `utf8_valid()` from `lib/utf.c`.
 
 ### 4. UTF-16 Surrogate Pair Decode — **8 sites**
 
@@ -99,7 +100,7 @@ if (codepoint <= 0xFFFF) {
 
 | File | Functions | Category |
 |------|-----------|----------|
-| `lambda/utf_string.cpp` | NFC/NFD/NFKC/NFKD normalization, casefold | Normalization |
+| `lambda/utf_string.cpp` | NFC/NFD/NFKC/NFKD normalization, casefold, Lambda string comparison wrappers | Normalization |
 | `radiant/layout_text.cpp` | `is_east_asian_fw()`, `is_hangul()`, `is_other_space_separator()`, `is_typographic_letter_unit()`, `get_unicode_space_width_em()` | Classification |
 | `radiant/layout_text.cpp` | `FullCaseMapping` table, `apply_text_transform_full()` | Case mapping |
 | `radiant/layout_text.cpp` | `is_line_break_op()`, `is_line_break_cl()`, `is_line_break_cj()`, `is_line_break_ns()`, `classify_break()` | Line breaking (UAX#14) |
@@ -256,7 +257,7 @@ These are **not** proposed for immediate migration but noted for completeness:
 
 | Component | Reason to Keep Separate |
 |-----------|------------------------|
-| `lambda/utf_string.cpp` (NFC/NFD/casefold) | Lambda-specific, depends on Lambda types |
+| `lambda/utf_string.cpp` (NFC/NFD/casefold) | utf8proc-specific; comparison wrappers depend on Lambda types |
 | `radiant/layout_text.cpp` (UAX#14 line break tables) | Large, CSS-layout-specific |
 | `radiant/layout_text.cpp` (FullCaseMapping tables) | CSS text-transform specific |
 | `radiant/resolve_htm_style.cpp` (BiDi classes) | HTML5 spec-specific |
@@ -278,7 +279,7 @@ These are **not** proposed for immediate migration but noted for completeness:
 | `lambda/input/input-utils.h` | `codepoint_to_utf8()` becomes wrapper → `utf8_encode_z()` |
 | `lambda/input/input-utils.cpp` | `codepoint_to_utf8()` / `decode_surrogate_pair()` become wrappers |
 | `lib/cmdedit_utf8.c` | No change (utf8proc-specific REPL code) |
-| `lambda/utf_string.cpp` | No change (normalization stays Lambda-specific) |
+| `lambda/utf_string.cpp` | Trim duplicate/stale declarations; normalization stays separate from dependency-free `lib/utf.c` |
 
 ## Build Integration
 

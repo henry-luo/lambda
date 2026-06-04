@@ -131,6 +131,7 @@ struct DomDocument {
     void* js_runtime_heap;          // Heap* — retained GC heap for JS objects
     void* js_runtime_nursery;       // gc_nursery_t* — retained nursery allocator
     void* js_runtime_name_pool;     // NamePool* — retained string interning pool
+    void* js_runtime_type_list;     // ArrayList* — retained dynamic map type registry
     void* js_runtime_pool;          // Pool* — retained mmap pool for JS code
     void* js_event_registry;        // JsEventRegistry* — compiled event handler registry
 
@@ -165,7 +166,8 @@ struct DomDocument {
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
                     js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
-                    js_runtime_name_pool(nullptr), js_runtime_pool(nullptr),
+                    js_runtime_name_pool(nullptr), js_runtime_type_list(nullptr),
+                    js_runtime_pool(nullptr),
                     js_event_registry(nullptr),
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f) {}

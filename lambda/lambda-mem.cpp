@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include <limits.h>
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -434,7 +435,11 @@ extern "C" void* heap_data_calloc(size_t size) {
 // use this for user content, text data, or any non-structural strings
 // declared extern "C" to allow calling from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len) {
-    String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
+    // guard against a negative length and against the size overflowing heap_alloc's int
+    // parameter (which would otherwise truncate to a small allocation + large memcpy).
+    if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
+    String *str = (String *)heap_alloc((int)(len + 1 + sizeof(String)), LMD_TYPE_STRING);
+    if (!str) return NULL;         // OOM — propagate instead of dereferencing NULL
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination
     str->len = len;

@@ -23,7 +23,7 @@
 
 static const char* serif_fonts[] = {
 #ifdef __APPLE__
-    "Times New Roman", "Times", "Liberation Serif", "Nimbus Roman",
+    "Times", "Times New Roman", "Liberation Serif", "Nimbus Roman",
 #else
     "Times New Roman", "Liberation Serif", "Times", "Nimbus Roman",
 #endif
@@ -115,14 +115,17 @@ static const struct {
     {NULL, {NULL, NULL, NULL, NULL}}
 };
 
+#ifndef __APPLE__
 static const char* times_browser_aliases[] = {"Times New Roman", NULL};
+#endif
 
 const char* const* font_get_browser_compat_aliases(const char* family) {
     if (!family) return NULL;
-    // Chromium on macOS serializes the default serif as "Times", but shapes it
-    // with Times New Roman-compatible metrics. Prefer that alias before an
-    // exact installed Apple Times face so CSS line wrapping follows the browser.
+#ifndef __APPLE__
+    // On platforms without an installed Times face, browsers commonly treat
+    // CSS "Times" as a Times New Roman-compatible family.
     if (str_ieq_const(family, strlen(family), "Times")) return times_browser_aliases;
+#endif
     return NULL;
 }
 

@@ -267,7 +267,7 @@ static bool table_width_value_has_nonzero_length_term(const CssValue* value) {
 
 static bool table_direct_float_overlaps_y(ViewBlock* floating, ViewTable* table, float y) {
     if (!floating || !table) return false;
-    float rel_y = floating->y - table->y;
+    float rel_y = floating->parent == table ? 0.0f : floating->y - table->y;
     float margin_bottom = floating->bound ? floating->bound->margin.bottom : 0.0f;
     return y >= rel_y && y < rel_y + floating->height + margin_bottom;
 }
@@ -288,6 +288,45 @@ static float table_direct_left_float_intrusion(ViewTable* table, float y, float 
         if (right > intrusion) intrusion = right;
     }
     return intrusion;
+}
+
+static float table_direct_right_float_intrusion(ViewTable* table, float y, float table_width) {
+    if (!table) return 0.0f;
+    float intrusion = 0.0f;
+    for (View* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_block()) continue;
+        ViewBlock* floating = lam::view_require_block(child);
+        if (!floating->position || floating->position->float_prop != CSS_VALUE_RIGHT) continue;
+        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+
+        float rel_x = floating->x - table->x;
+        if (rel_x < 0.0f) rel_x = 0.0f;
+        float left_edge = rel_x;
+        if (left_edge > table_width) left_edge = table_width;
+        float candidate = table_width - left_edge;
+        if (candidate > intrusion) intrusion = candidate;
+    }
+    return intrusion;
+}
+
+static float table_direct_float_next_clear_y(ViewTable* table, float y) {
+    if (!table) return y;
+    float next_y = y;
+    for (View* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_block()) continue;
+        ViewBlock* floating = lam::view_require_block(child);
+        if (!floating->position ||
+            (floating->position->float_prop != CSS_VALUE_LEFT &&
+             floating->position->float_prop != CSS_VALUE_RIGHT)) {
+            continue;
+        }
+        if (!table_direct_float_overlaps_y(floating, table, y)) continue;
+
+        float margin_bottom = floating->bound ? floating->bound->margin.bottom : 0.0f;
+        float candidate = floating->height + margin_bottom;
+        if (candidate > next_y) next_y = candidate;
+    }
+    return next_y;
 }
 
 static bool table_has_direct_float(ViewTable* table) {
@@ -314,6 +353,30 @@ static bool table_cell_calc_width_is_indefinite_constraint(const CssValue* value
     // no definite preferred column width during intrinsic column measurement.
     return table_width_value_is_relative(value) &&
         table_width_value_has_nonzero_length_term(value);
+}
+
+static float get_cell_css_width_percent(ViewTableCell* tcell) {
+    if (!tcell || tcell->node_type != DOM_NODE_ELEMENT) return 0.0f;
+
+    DomElement* dom_elem = tcell->as_element();
+    if (!dom_elem) return 0.0f;
+
+    CssDeclaration* width_decl = dom_elem->specified_style
+        ? style_tree_get_declaration(dom_elem->specified_style, CSS_PROPERTY_WIDTH)
+        : nullptr;
+
+    if (width_decl && width_decl->value &&
+        width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        float percent = (float)width_decl->value->data.percentage.value;
+        return percent > 0.0f ? percent : 0.0f;
+    }
+
+    if (tcell->blk && !isnan(tcell->blk->given_width_percent)) {
+        return tcell->blk->given_width_percent > 0.0f ?
+            tcell->blk->given_width_percent : 0.0f;
+    }
+
+    return 0.0f;
 }
 
 // Get CSS width from a cell element, handling percentage and length values
@@ -2380,7 +2443,8 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
             if (tcell->td->row_span > 1) {
                 int start_row = tcell->td->row_index;
                 int end_row = start_row + tcell->td->row_span;
-                if (end_row > rows) end_row = rows;
+                if (start_row < 0) start_row = 0;     // never index before row_heights[0]
+                if (end_row > rows) end_row = rows;    // never index past row_heights[rows-1]
 
                 // Calculate current spanned height
                 float current_total = 0;
@@ -5522,8 +5586,11 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 col++;
             }
 
-            // Assign indices
-            cell->td->col_index = col;
+            // Assign indices. An over-full row can leave col == columns; clamp the stored
+            // column index so it never indexes one past the columns-sized width arrays
+            // (col_widths/col_min_widths/col_max_widths). The grid-marking loop below uses
+            // the raw col and is already bounded by `c < columns`.
+            cell->td->col_index = (col < columns) ? col : (columns > 0 ? columns - 1 : 0);
             cell->td->row_index = current_row;
 
             // Mark grid as occupied
@@ -6039,6 +6106,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             bool cell_width_is_table_relative = false;
             float cell_width = get_cell_css_width(lycon, tcell, table_content_width,
                 table->tb->border_collapse, &cell_width_is_table_relative);
+            float cell_width_percent = get_cell_css_width_percent(tcell);
+            if (cell_width_percent > 0.0f && col >= 0 && col < meta->column_count) {
+                int span = tcell->td->col_span > 0 ? tcell->td->col_span : 1;
+                float percent_per_col = cell_width_percent / span;
+                for (int c = col; c < col + span && c < meta->column_count; c++) {
+                    if (percent_per_col > meta->col_percent_widths[c]) {
+                        meta->col_percent_widths[c] = percent_per_col;
+                    }
+                }
+            }
 
             // Track columns with explicit CSS width for distribution
             if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
@@ -6109,6 +6186,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (col >= 0 && col < meta->column_count) {
                     if (min_width > meta->col_min_widths[col]) {
                         meta->col_min_widths[col] = min_width;
+                    }
+                    if (min_width > meta->col_single_min_widths[col]) {
+                        meta->col_single_min_widths[col] = min_width;
                     }
                     if (pref_width > meta->col_max_widths[col]) {
                         meta->col_max_widths[col] = pref_width;
@@ -6621,6 +6701,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Column %d: MCW=%.1fpx, PCW=%.1fpx",
                  i, meta->col_min_widths[i], meta->col_max_widths[i]);
     }
+    float total_percent_col_width = 0.0f;
+    for (int i = 0; i < columns; i++) {
+        total_percent_col_width += meta->col_percent_widths[i];
+    }
 
     // Add border-spacing to table width calculation (CSS 2.1 requirement)
     float border_spacing_total = 0;
@@ -6863,6 +6947,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             used_table_width = max_available_width;
             direct_float_expanded_auto_width = true;
         }
+        if (total_percent_col_width >= 99.0f &&
+            max_available_width > used_table_width) {
+            // CSS Tables auto layout treats percentage cell widths as table
+            // width constraints. A near/full-width percentage column cannot be
+            // satisfied by the intrinsic shrink-wrap width when the containing
+            // block has a definite available width.
+            used_table_width = max_available_width;
+        }
         log_debug("CSS 2.1: Using preferred table width: %.1fpx (table width: auto)", used_table_width);
     }
 
@@ -6879,6 +6971,88 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                   available_content_width);
     }
 
+    bool used_percent_distribution = false;
+    if (total_percent_col_width > 0.0f &&
+        available_content_width > min_table_content_width) {
+        float assigned_total = 0.0f;
+        for (int i = 0; i < columns; i++) {
+            float percent = meta->col_percent_widths[i];
+            float min_floor = meta->col_single_min_widths[i] > 0.0f
+                ? meta->col_single_min_widths[i] : 0.0f;
+            float target = percent > 0.0f
+                ? available_content_width * percent / 100.0f
+                : min_floor;
+            if (target < min_floor) {
+                target = min_floor;
+            }
+            col_widths[i] = target;
+            assigned_total += target;
+        }
+
+        if (assigned_total > available_content_width) {
+            float excess = assigned_total - available_content_width;
+            while (excess > 0.01f) {
+                float shrink_capacity = 0.0f;
+                for (int i = 0; i < columns; i++) {
+                    if (col_widths[i] > meta->col_min_widths[i]) {
+                        shrink_capacity += col_widths[i] - meta->col_min_widths[i];
+                    }
+                }
+                if (shrink_capacity <= 0.01f) break;
+
+                float shrink_step = excess < shrink_capacity ? excess : shrink_capacity;
+                for (int i = 0; i < columns; i++) {
+                    float capacity = col_widths[i] - meta->col_min_widths[i];
+                    if (capacity <= 0.0f) continue;
+                    float amount = shrink_step * capacity / shrink_capacity;
+                    if (amount > capacity) amount = capacity;
+                    col_widths[i] -= amount;
+                }
+                excess -= shrink_step;
+            }
+        } else if (assigned_total < available_content_width) {
+            float extra = available_content_width - assigned_total;
+            float auto_grow_total = 0.0f;
+            int auto_grow_count = 0;
+            for (int i = 0; i < columns; i++) {
+                if (meta->col_percent_widths[i] <= 0.0f) {
+                    float capacity = meta->col_max_widths[i] - col_widths[i];
+                    if (capacity > 0.0f) auto_grow_total += capacity;
+                    auto_grow_count++;
+                }
+            }
+            if (auto_grow_count > 0) {
+                for (int i = 0; i < columns; i++) {
+                    if (meta->col_percent_widths[i] > 0.0f) continue;
+                    if (auto_grow_total > 0.0f) {
+                        float capacity = meta->col_max_widths[i] - col_widths[i];
+                        if (capacity > 0.0f) {
+                            col_widths[i] += extra * capacity / auto_grow_total;
+                        }
+                    } else {
+                        col_widths[i] += extra / auto_grow_count;
+                    }
+                }
+            } else {
+                float percent_total = 0.0f;
+                for (int i = 0; i < columns; i++) {
+                    if (meta->col_percent_widths[i] > 0.0f) {
+                        percent_total += meta->col_percent_widths[i];
+                    }
+                }
+                if (percent_total > 0.0f) {
+                    for (int i = 0; i < columns; i++) {
+                        if (meta->col_percent_widths[i] <= 0.0f) continue;
+                        col_widths[i] += extra * meta->col_percent_widths[i] / percent_total;
+                    }
+                }
+            }
+        }
+        used_percent_distribution = true;
+        log_debug("CSS table percent distribution: available=%.1fpx, percent_total=%.1f%%",
+                  available_content_width, total_percent_col_width);
+    }
+
     // Check for equal distribution case (CSS behavior for similar columns)
     bool use_equal_distribution = true;
     if (columns > 0) {
@@ -6893,7 +7067,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         use_equal_distribution = false; // No columns means no equal distribution
     }
 
-    if (use_equal_distribution && columns > 1 && !has_explicit_table_width) {
+    if (!used_percent_distribution &&
+        use_equal_distribution && columns > 1 && !has_explicit_table_width) {
         // Special case: columns have similar preferred widths and table width is auto
         // Use equal distribution (common browser optimization for balanced tables)
         float avg_width = used_table_width / columns;
@@ -6905,6 +7080,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // CSS 2.1 Column Width Distribution Algorithm (Section 17.5.2.2)
+    if (!used_percent_distribution) {
     if (fabsf(available_content_width - pref_table_content_width) < 0.01f) {
         // Case 1: Perfect fit - use preferred widths directly
         log_debug("CSS 2.1 Case 1: Perfect fit - using PCW directly");
@@ -6983,6 +7159,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 col_widths[i] = meta->col_min_widths[i];
             }
         }
+    }
     }
     } // End of auto layout algorithm guard
 
@@ -7527,6 +7704,20 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 log_debug("%s No columns: using table->width %.1f for tbody_content_width", table->source_loc(), table->width);
             }
 
+            if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
+                for (int guard = 0; guard < 32; guard++) {
+                    float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
+                    float right_intrusion = table_direct_right_float_intrusion(table, current_y, table->width);
+                    if (left_intrusion + tbody_content_width + right_intrusion <= table->width + 0.01f) {
+                        break;
+                    }
+                    float next_y = table_direct_float_next_clear_y(table, current_y);
+                    if (next_y <= current_y + 0.01f) break;
+                    current_y = next_y;
+                }
+            }
+            group_start_y = current_y;
+
             float float_shift_x = 0.0f;
             if (has_direct_float && table->width > 0.0f && tbody_content_width > 0.0f) {
                 float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
@@ -7640,7 +7831,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     row->x = 0;
                     row->y = current_y - group_start_y; // Relative to row group
                     row->width = child->width; // Match tbody width
-                    log_debug("%s Row positioned at x=%d, y=%d (relative to group), width=%d", table->source_loc(),
+                    log_debug("%s Row positioned at x=%.1f, y=%.1f (relative to group), width=%.1f", table->source_loc(),
                         row->x, row->y, row->width);
 
                     // Calculate row height and position cells
@@ -7858,9 +8049,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 continue;
             }
 
+            if (has_direct_float && table->width > 0.0f && table_width > 0.0f) {
+                for (int guard = 0; guard < 32; guard++) {
+                    float left_intrusion = table_direct_left_float_intrusion(table, current_y, table->width);
+                    float right_intrusion = table_direct_right_float_intrusion(table, current_y, table->width);
+                    if (left_intrusion + table_width + right_intrusion <= table->width + 0.01f) {
+                        break;
+                    }
+                    float next_y = table_direct_float_next_clear_y(table, current_y);
+                    if (next_y <= current_y + 0.01f) break;
+                    current_y = next_y;
+                }
+            }
+
             trow->x = 0;  trow->y = current_y; // Relative to table
             trow->width = table_width;
-            log_debug("%s Direct row positioned at x=%d, y=%d (relative to table), width=%d", table->source_loc(),
+            log_debug("%s Direct row positioned at x=%.1f, y=%.1f (relative to table), width=%.1f", table->source_loc(),
                    trow->x, trow->y, trow->width);
 
             float row_height = 0.0f;
@@ -8043,6 +8247,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         if (tcell->td->row_span > 1) {
                             int start_row = tcell->td->row_index;
                             int end_row = start_row + tcell->td->row_span;
+                            if (start_row < 0) start_row = 0;                       // guard negative index
                             if (end_row > meta->row_count) end_row = meta->row_count;
 
                             // Sum heights of spanned rows

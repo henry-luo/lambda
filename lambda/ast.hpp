@@ -675,6 +675,11 @@ typedef struct Transpiler : Script {
     int max_errors;            // threshold (default: 10)
     ArrayList* errors;         // list of LambdaError* (structured errors)
 
+    // AST build recursion-depth guard — caps build_expr nesting so a pathologically
+    // deep source (thousands of nested parens/brackets) reports an error instead of
+    // overflowing the stack. Zeroed by the memset that initializes the Transpiler.
+    int build_depth;
+
     // Namespace declarations (file-local)
     NamespaceEntry* namespaces;  // linked list of declared namespaces
 
