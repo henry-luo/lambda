@@ -6979,9 +6979,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             float percent = meta->col_percent_widths[i];
             float min_floor = meta->col_single_min_widths[i] > 0.0f
                 ? meta->col_single_min_widths[i] : 0.0f;
-            float target = percent > 0.0f
-                ? available_content_width * percent / 100.0f
-                : min_floor;
+            float target = 0.0f;
+            if (percent > 0.0f) {
+                target = available_content_width * percent / 100.0f;
+            } else {
+                target = meta->col_max_widths[i] > min_floor
+                    ? meta->col_max_widths[i] : min_floor;
+            }
             if (target < min_floor) {
                 target = min_floor;
             }
@@ -7012,23 +7016,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         } else if (assigned_total < available_content_width) {
             float extra = available_content_width - assigned_total;
-            float auto_grow_total = 0.0f;
+            float auto_grow_base_total = 0.0f;
             int auto_grow_count = 0;
             for (int i = 0; i < columns; i++) {
                 if (meta->col_percent_widths[i] <= 0.0f) {
-                    float capacity = meta->col_max_widths[i] - col_widths[i];
-                    if (capacity > 0.0f) auto_grow_total += capacity;
+                    auto_grow_base_total += col_widths[i];
                     auto_grow_count++;
                 }
             }
             if (auto_grow_count > 0) {
                 for (int i = 0; i < columns; i++) {
                     if (meta->col_percent_widths[i] > 0.0f) continue;
-                    if (auto_grow_total > 0.0f) {
-                        float capacity = meta->col_max_widths[i] - col_widths[i];
-                        if (capacity > 0.0f) {
-                            col_widths[i] += extra * capacity / auto_grow_total;
-                        }
+                    if (auto_grow_base_total > 0.0f) {
+                        col_widths[i] += extra * col_widths[i] / auto_grow_base_total;
                     } else {
                         col_widths[i] += extra / auto_grow_count;
                     }

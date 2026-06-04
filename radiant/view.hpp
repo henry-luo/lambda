@@ -1120,14 +1120,6 @@ typedef struct ViewMarker : DomElement {
 } ViewMarker;
 
 struct ViewElement : DomElement {
-    // CSS Text soft hyphen fragments can contribute to an inline element's
-    // border-box union without producing an additional DOM text rect.
-    bool has_inline_fragment_union;
-    float inline_fragment_min_x;
-    float inline_fragment_max_x;
-    float inline_fragment_min_y;
-    float inline_fragment_max_y;
-
     // exclude those skipped text nodes
     View* first_placed_child() {
         View* child = (View*)first_child;

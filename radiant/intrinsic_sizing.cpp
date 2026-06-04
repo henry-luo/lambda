@@ -339,6 +339,64 @@ static float measure_current_space_advance(LayoutContext* lycon, FontHandle* han
     return style->space_width;
 }
 
+static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+}
+
+static bool intrinsic_can_shape_simple_latin_run(LayoutContext* lycon,
+                                                 CssEnum text_transform,
+                                                 CssEnum font_variant,
+                                                 bool break_anywhere,
+                                                 bool break_word) {
+    if (!lycon || !lycon->font.style || !lycon->font.font_handle) return false;
+    if (text_transform != CSS_VALUE_NONE && text_transform != 0) return false;
+    if (font_variant == CSS_VALUE_SMALL_CAPS) return false;
+    if (break_anywhere) return false;
+    if (break_word) return false;
+    if (lycon->font.style->letter_spacing != 0.0f) return false;
+    return true;
+}
+
+static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
+                                                      const unsigned char* str,
+                                                      size_t remaining,
+                                                      CssEnum text_transform,
+                                                      CssEnum font_variant,
+                                                      bool break_anywhere,
+                                                      bool break_word,
+                                                      size_t* out_bytes,
+                                                      float* out_width,
+                                                      uint32_t* out_first_codepoint,
+                                                      uint32_t* out_last_codepoint) {
+    if (!str || remaining == 0 || !out_bytes || !out_width ||
+        !out_first_codepoint || !out_last_codepoint) {
+        return false;
+    }
+    if (!intrinsic_can_shape_simple_latin_run(lycon, text_transform,
+                                              font_variant, break_anywhere, break_word)) {
+        return false;
+    }
+    if (!intrinsic_is_simple_latin_shaping_byte(*str)) return false;
+
+    size_t run_len = 0;
+    while (run_len < remaining && intrinsic_is_simple_latin_shaping_byte(str[run_len])) {
+        GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, (uint32_t)str[run_len]);
+        if (ginfo.id == 0) return false;
+        run_len++;
+    }
+    if (run_len < 2) return false;
+
+    int byte_len = (int)run_len; // INT_CAST_OK: text byte count
+    TextExtents ext = font_measure_text(lycon->font.font_handle, (const char*)str, byte_len);
+    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
+
+    *out_bytes = run_len;
+    *out_width = ext.width;
+    *out_first_codepoint = (uint32_t)*str;
+    *out_last_codepoint = (uint32_t)str[run_len - 1];
+    return true;
+}
+
 static bool text_line_has_tab(const char* text, size_t length) {
     for (size_t i = 0; i < length; i++) {
         if (text[i] == '\t') return true;
@@ -621,6 +679,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     // CSS Text 3 §3.4: overflow-wrap: anywhere introduces soft wrap opportunities
     // at every typographic character unit for min-content sizing.
     bool break_anywhere = (overflow_wrap == CSS_VALUE_ANYWHERE);
+    bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD);
     // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class) have implicit
     // break opportunities between each pair under word-break: normal.
     // word-break: keep-all suppresses these breaks.
@@ -760,6 +819,31 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             is_word_start = true;  // Next character starts a new word
             i++;
             continue;
+        }
+
+        {
+            size_t shaped_bytes = 0;
+            float shaped_width = 0.0f;
+            uint32_t shaped_first_cp = 0;
+            uint32_t shaped_last_cp = 0;
+            if (intrinsic_measure_shaped_simple_latin_run(
+                    lycon, &str[i], length - i, text_transform, font_variant,
+                    break_anywhere, break_word, &shaped_bytes, &shaped_width,
+                    &shaped_first_cp, &shaped_last_cp)) {
+                float kerning = 0.0f;
+                if (has_kerning && prev_codepoint) {
+                    kerning = font_get_kerning(lycon->font.font_handle,
+                                               prev_codepoint, shaped_first_cp);
+                }
+                float advance = shaped_width + kerning;
+                current_word += advance;
+                total_width += advance;
+                prev_codepoint = shaped_last_cp;
+                prev_is_zwj_base = false;
+                is_word_start = false;
+                i += shaped_bytes;
+                continue;
+            }
         }
 
         // Decode UTF-8 codepoint

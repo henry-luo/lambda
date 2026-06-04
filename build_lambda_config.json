@@ -2003,6 +2003,11 @@
                         "dependencies": [
                             "lambda-input-full"
                         ],
+                        "additional_sources": [
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
                         "libraries": [
                             "gtest",
                             "gtest_main",
@@ -2016,6 +2021,13 @@
                         "name": "Checked Math, Alloc and NonNull Tests",
                         "dependencies": [
                             "lambda-input-full"
+                        ],
+                        "additional_sources": [
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/str.c",
+                            "lib/utf.c"
                         ],
                         "libraries": [
                             "gtest",

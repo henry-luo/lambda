@@ -22,6 +22,7 @@ struct ViewBlock;
  */
 
 // Core positioning functions
+void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 
 // Utility functions

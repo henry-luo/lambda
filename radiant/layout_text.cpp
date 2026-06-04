@@ -926,6 +926,61 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
     return lycon->font.current_font_size;
 }
 
+static inline bool is_simple_latin_shaping_byte(unsigned char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+}
+
+static bool can_shape_simple_latin_run(LayoutContext* lycon, CssEnum text_transform,
+                                       bool trim_cjk_spacing, bool break_all,
+                                       bool break_word) {
+    if (!lycon || !lycon->font.style) return false;
+    if (!lycon->font.font_handle && !lycon->font.style->font_handle) return false;
+    if (text_transform != CSS_VALUE_NONE) return false;
+    if (has_small_caps(lycon)) return false;
+    (void)trim_cjk_spacing;
+    if (break_all || break_word) return false;
+    if (lycon->font.style->letter_spacing != 0.0f) return false;
+    return true;
+}
+
+static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned char* str,
+                                            const unsigned char* text_end,
+                                            CssEnum text_transform,
+                                            bool trim_cjk_spacing, bool break_all,
+                                            bool break_word, int* out_bytes,
+                                            float* out_width,
+                                            uint32_t* out_first_codepoint,
+                                            uint32_t* out_last_codepoint) {
+    if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
+        !out_first_codepoint || !out_last_codepoint) {
+        return false;
+    }
+    if (!can_shape_simple_latin_run(lycon, text_transform, trim_cjk_spacing,
+                                    break_all, break_word)) {
+        return false;
+    }
+    if (!is_simple_latin_shaping_byte(*str)) return false;
+
+    FontHandle* handle = lycon->font.font_handle ? lycon->font.font_handle : lycon->font.style->font_handle;
+    const unsigned char* run_end = str;
+    while (run_end < text_end && is_simple_latin_shaping_byte(*run_end)) {
+        GlyphInfo ginfo = font_get_glyph(handle, (uint32_t)*run_end);
+        if (ginfo.id == 0) return false;
+        run_end++;
+    }
+    if (run_end - str < 2) return false;
+
+    int byte_len = (int)(run_end - str); // INT_CAST_OK: text byte count
+    TextExtents ext = font_measure_text(handle, (const char*)str, byte_len);
+    if (ext.glyph_count <= 0 && ext.width <= 0.0f) return false;
+
+    *out_bytes = byte_len;
+    *out_width = ext.width;
+    *out_first_codepoint = (uint32_t)*str;
+    *out_last_codepoint = (uint32_t)*(run_end - 1);
+    return true;
+}
+
 static void record_soft_hyphen_inline_fragment(DomNode* text_node, LayoutContext* lycon,
                                                float fragment_width, float fragment_height) {
     if (!text_node || !lycon || fragment_width <= 0.0f || fragment_height <= 0.0f) {
@@ -1399,27 +1454,167 @@ void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.vertical_align_offset = 0;
 }
 
+static bool fixup_view_is_out_of_flow(View* view) {
+    if (!view) return false;
+    DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(static_cast<DomNode*>(view));
+    if (!elem || !elem->position) return false;
+    return elem->position->position == CSS_VALUE_ABSOLUTE ||
+        elem->position->position == CSS_VALUE_FIXED ||
+        elem->position->float_prop == CSS_VALUE_LEFT ||
+        elem->position->float_prop == CSS_VALUE_RIGHT;
+}
+
+static bool fixup_span_children_have_no_line_content(ViewSpan* span);
+
+static bool fixup_view_has_line_content(View* view) {
+    if (!view || view->view_type == RDT_VIEW_NONE || fixup_view_is_out_of_flow(view)) {
+        return false;
+    }
+    if (view->view_type == RDT_VIEW_TEXT) {
+        return view->width > 0.0f && view->height > 0.0f;
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        return !fixup_span_children_have_no_line_content(lam::view_require<RDT_VIEW_INLINE>(view));
+    }
+    return true;
+}
+
+static bool fixup_span_children_have_no_line_content(ViewSpan* span) {
+    if (!span) return false;
+    if (!span->first_child) return true;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (fixup_view_has_line_content(child)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static float fixup_inline_vertical_decoration_height(ViewSpan* span) {
+    if (!span || !span->bound) return 0.0f;
+    float border_top = 0.0f, border_bottom = 0.0f;
+    if (span->bound->border) {
+        border_top = span->bound->border->width.top;
+        border_bottom = span->bound->border->width.bottom;
+    }
+    float padding_top = span->bound->padding.top > 0.0f ? span->bound->padding.top : 0.0f;
+    float padding_bottom = span->bound->padding.bottom > 0.0f ? span->bound->padding.bottom : 0.0f;
+    return border_top + padding_top + padding_bottom + border_bottom;
+}
+
+static FontProp* fixup_inline_effective_font(LayoutContext* lycon, ViewSpan* span) {
+    if (span && span->font) return span->font;
+    DomNode* node = span ? span->parent : nullptr;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
+            if (elem->font) return elem->font;
+        }
+        node = node->parent;
+    }
+    return lycon ? lycon->font.style : nullptr;
+}
+
+static float fixup_inline_content_area_height(LayoutContext* lycon, ViewSpan* span) {
+    if (!span) return 0.0f;
+    float content_height = 0.0f;
+    FontProp* font = fixup_inline_effective_font(lycon, span);
+    if (font) {
+        if (font->font_handle) {
+            content_height = font_get_cell_height(font->font_handle);
+        }
+        if (content_height <= 0.0f && font->font_height > 0.0f) {
+            content_height = font->font_height;
+        }
+        if (content_height <= 0.0f && (font->ascender > 0.0f || font->descender > 0.0f)) {
+            content_height = font->ascender + font->descender;
+        }
+    }
+    if (content_height <= 0.0f) {
+        content_height = span->content_height;
+    }
+    return content_height;
+}
+
+static float fixup_inline_dom_rect_height(LayoutContext* lycon, ViewSpan* span) {
+    if (!span) return 0.0f;
+    return fixup_inline_content_area_height(lycon, span) +
+        fixup_inline_vertical_decoration_height(span);
+}
+
+static void record_collapsed_line_fragment_for_inline_ancestors(
+    LayoutContext* lycon, ViewText* text_view, TextRect* rect) {
+    if (!lycon || !text_view || !rect || rect->height <= 0.0f) return;
+
+    // The collapsed text fragment should materialize an inline box only when it
+    // was on a line that already had other content. A line made solely from
+    // collapsible whitespace stays invisible.
+    if (!lycon->line.start_view || lycon->line.start_view == static_cast<View*>(text_view)) {
+        return;
+    }
+
+    float fragment_min_x = rect->x;
+    float fragment_max_x = rect->x + rect->width;
+    float fragment_min_y = rect->y;
+    float fragment_max_y = rect->y + rect->height;
+
+    DomNode* ancestor = text_view->parent;
+    while (ancestor && ancestor->is_element()) {
+        if (ancestor->view_type != RDT_VIEW_INLINE) break;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+        if (!span->has_collapsed_line_fragment_union) {
+            span->has_collapsed_line_fragment_union = true;
+            span->collapsed_line_fragment_min_x = fragment_min_x;
+            span->collapsed_line_fragment_max_x = fragment_max_x;
+            span->collapsed_line_fragment_min_y = fragment_min_y;
+            span->collapsed_line_fragment_max_y = fragment_max_y;
+        } else {
+            if (fragment_min_x < span->collapsed_line_fragment_min_x) {
+                span->collapsed_line_fragment_min_x = fragment_min_x;
+            }
+            if (fragment_max_x > span->collapsed_line_fragment_max_x) {
+                span->collapsed_line_fragment_max_x = fragment_max_x;
+            }
+            if (fragment_min_y < span->collapsed_line_fragment_min_y) {
+                span->collapsed_line_fragment_min_y = fragment_min_y;
+            }
+            if (fragment_max_y > span->collapsed_line_fragment_max_y) {
+                span->collapsed_line_fragment_max_y = fragment_max_y;
+            }
+        }
+        if (lycon->block.line_height > span->content_height) {
+            span->content_height = lycon->block.line_height;
+        }
+        ancestor = ancestor->parent;
+    }
+}
+
 /**
  * Recursively fix height of collapsed inline spans on a line with visible content.
- * CSS 2.1 §10.8.1: Empty inline elements should report height = line-height
- * when on a line that has visible content (the "strut" concept).
- * compute_span_bounding_box sets 0×0 for truly empty spans; this restores
- * their height from the pre-stored content_height (= block's line-height).
+ * Empty inline elements contribute their line-height strut to line layout, but
+ * browser DOMRects expose the inline content area plus vertical decorations.
+ * compute_span_bounding_box sets 0×0 for truly empty spans; this restores the
+ * visual border-box height after the line is known to contain real content.
  */
-static void fixup_collapsed_inline_spans(ViewSpan* span) {
+static void fixup_collapsed_inline_spans(LayoutContext* lycon, ViewSpan* span) {
     // recurse into children first (depth-first)
     View* child = span->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_INLINE) {
-            fixup_collapsed_inline_spans(lam::view_require<RDT_VIEW_INLINE>(child));
+            fixup_collapsed_inline_spans(lycon, lam::view_require<RDT_VIEW_INLINE>(child));
         }
         child = child->next();
     }
     // fix this span if collapsed
     if (span->height == 0) {
-        DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(span);
-        if (elem->content_height > 0) {
-            span->height = elem->content_height;
+        if (span->content_height > 0.0f) {
+            span->height = fixup_inline_dom_rect_height(lycon, span);
+        }
+    } else if (span->content_height > 0 &&
+               fixup_span_children_have_no_line_content(span)) {
+        float target_height = fixup_inline_dom_rect_height(lycon, span);
+        if (span->height < target_height) {
+            span->height = target_height;
         }
     }
 }
@@ -1432,6 +1627,10 @@ void line_break(LayoutContext* lycon) {
         lycon->line.last_text_rect->width -= trim_amount;
         lycon->line.advance_x -= trim_amount;
         lycon->line.trailing_space_width = 0;
+        if (lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
+            record_collapsed_line_fragment_for_inline_ancestors(
+                lycon, lycon->line.last_text_view, lycon->line.last_text_rect);
+        }
         // Update the ViewText bounds and parent ViewSpan bounding boxes
         if (lycon->line.last_text_view) {
             propagate_text_trim(lycon->line.last_text_view, trim_amount);
@@ -1449,6 +1648,12 @@ void line_break(LayoutContext* lycon) {
         float trim_amount = lycon->line.committed_trailing_space;
         lycon->line.committed_trailing_rect->width -= trim_amount;
         lycon->line.advance_x -= trim_amount;
+        if (lycon->line.committed_trailing_rect->width <= 0.01f &&
+            lycon->line.committed_trailing_view) {
+            record_collapsed_line_fragment_for_inline_ancestors(
+                lycon, lycon->line.committed_trailing_view,
+                lycon->line.committed_trailing_rect);
+        }
         // Update the ViewText bounds and parent ViewSpan bounding boxes
         if (lycon->line.committed_trailing_view) {
             propagate_text_trim(lycon->line.committed_trailing_view, trim_amount);
@@ -1538,7 +1743,6 @@ void line_break(LayoutContext* lycon) {
             lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size
                 : (lycon->block.init_ascender + lycon->block.init_descender);
             lycon->line.parent_font_handle = lycon->font.font_handle;
-            bool end_of_line = false;
             NEXT_VIEW:
             View * vw = view;
             do {
@@ -1684,7 +1888,7 @@ void line_break(LayoutContext* lycon) {
         DomNode* line_parent = v->parent;
         while (v) {
             if (v->view_type == RDT_VIEW_INLINE) {
-                fixup_collapsed_inline_spans(lam::view_require<RDT_VIEW_INLINE>(v));
+                fixup_collapsed_inline_spans(lycon, lam::view_require<RDT_VIEW_INLINE>(v));
             }
             DomNode* next = v->next_sibling;
             if (!next || v->parent != line_parent) break;
@@ -1765,6 +1969,21 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
     // Skip leading spaces — they are break opportunities, not part of the word
     while (*str && is_space(*str)) str++;
     if (!*str) return 0.0f;
+
+    {
+        int shaped_bytes = 0;
+        float shaped_width = 0.0f;
+        uint32_t first_cp = 0;
+        uint32_t last_cp = 0;
+        if (measure_shaped_simple_latin_run(lycon, str, text_end, text_transform,
+                                            false, false, false, &shaped_bytes,
+                                            &shaped_width, &first_cp, &last_cp)) {
+            const unsigned char* shaped_end = str + shaped_bytes;
+            if (shaped_end >= text_end || !*shaped_end || is_space(*shaped_end)) {
+                return shaped_width;
+            }
+        }
+    }
 
     while (str < text_end && *str && !is_space(*str)) {
         uint32_t codepoint = *str;
@@ -1848,6 +2067,28 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
+
+        {
+            int shaped_bytes = 0;
+            float shaped_width = 0.0f;
+            uint32_t first_cp = 0;
+            uint32_t last_cp = 0;
+            if (measure_shaped_simple_latin_run(lycon, str, text_end, text_transform,
+                                                trim_cjk_spacing, false, false,
+                                                &shaped_bytes, &shaped_width,
+                                                &first_cp, &last_cp)) {
+                text_width += shaped_width;
+                is_word_start = false;
+                str += shaped_bytes;
+
+                float line_right = lycon->line.has_float_intrusion ?
+                                   lycon->line.effective_right : lycon->line.right;
+                if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right) {
+                    return has_break_opportunity ? RDT_LINE_NOT_FILLED : RDT_LINE_FILLED;
+                }
+                continue;
+            }
+        }
 
         // Get the codepoint and apply text-transform
         uint32_t codepoint = *str;
@@ -2134,10 +2375,19 @@ static inline void skip_collapsible_space_sequence(unsigned char** str, bool col
     }
 }
 
+static inline bool line_is_at_collapsible_text_edge(LayoutContext* lycon) {
+    if (!lycon) return true;
+    if (lycon->line.is_line_start) return true;
+    return lycon->line.start_view && !lycon->line.last_text_rect &&
+        !lycon->line.has_replaced_content &&
+        !lycon->line.has_c1_control_text &&
+        !lycon->line.has_non_c1_text;
+}
+
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
     auto t_start = high_resolution_clock::now();
 
-    unsigned char* next_ch;  ViewText* text_view = null;  TextRect* prev_rect = NULL;
+    unsigned char* next_ch;  ViewText* text_view = null;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
@@ -2217,7 +2467,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
 
     // skip space at start of line (only if collapsing spaces)
-    if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
+    bool at_collapsible_text_edge = line_is_at_collapsible_text_edge(lycon);
+    if (collapse_spaces && (at_collapsible_text_edge || lycon->line.has_space) && is_space(*str)) {
         // When collapsing spaces, skip all whitespace (including newlines if collapse_newlines)
         skip_collapsible_space_sequence(&str, collapse_newlines);
         if (!*str) {
@@ -2230,7 +2481,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // a wrap point at the inter-element boundary.
             // Only set when not at line start — whitespace at line start has no
             // preceding content to break away from.
-            if (wrap_lines && !lycon->line.is_line_start) {
+            if (wrap_lines && !at_collapsible_text_edge) {
                 lycon->line.wrap_opportunity_before_nowrap = true;
             }
             return;
@@ -2241,7 +2492,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // are removed. The initial pre-label skip handles the first entry, but
     // internal wraps jump back here after line_break(); handle those too so
     // a boundary space does not become visible indentation on the new line.
-    if (collapse_spaces && lycon->line.is_line_start && is_space(*str)) {
+    at_collapsible_text_edge = line_is_at_collapsible_text_edge(lycon);
+    if (collapse_spaces && at_collapsible_text_edge && is_space(*str)) {
         skip_collapsible_space_sequence(&str, collapse_newlines);
         if (!*str) {
             if (!text_view) {
@@ -2363,8 +2615,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         rect->width = soft_hyphen_leading_width;
         soft_hyphen_leading_width = 0.0f;
     }
-    // font metrics are in physical pixels, divide by pixel_ratio for CSS pixels
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
     const FontMetrics* _fm = font_get_metrics(lycon->font.font_handle);
     float font_height = _fm ? _fm->hhea_line_height : 16.0f;
     rect->x = lycon->line.advance_x;
@@ -2412,6 +2662,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     do {
         float wd;
         uint32_t codepoint = *str;
+        bool shaped_latin_run = false;
+        uint32_t shaped_latin_first_codepoint = 0;
 
         // Handle newlines as forced line breaks when not collapsing newlines
         if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
@@ -2464,7 +2716,30 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else return;
         }
 
-        if (is_space(codepoint)) {
+        {
+            int shaped_bytes = 0;
+            float shaped_width = 0.0f;
+            uint32_t shaped_first_cp = 0;
+            uint32_t shaped_last_cp = 0;
+            if (measure_shaped_simple_latin_run(lycon, str, text_end, text_transform,
+                                                trim_cjk_spacing, break_all, break_word,
+                                                &shaped_bytes, &shaped_width,
+                                                &shaped_first_cp, &shaped_last_cp)) {
+                wd = shaped_width;
+                next_ch = str + shaped_bytes;
+                codepoint = shaped_last_cp;
+                shaped_latin_run = true;
+                shaped_latin_first_codepoint = shaped_first_cp;
+                is_word_start = false;
+                lycon->line.has_non_c1_text = true;
+                lycon->line.trailing_letter_spacing = 0.0f;
+            }
+        }
+
+        if (shaped_latin_run) {
+            // Width already includes shaping and internal kerning for this simple word run.
+        }
+        else if (is_space(codepoint)) {
             wd = measure_current_space_advance(lycon, lycon->font.font_handle, lycon->font.style);
             // Tab characters with preserved whitespace: use tab-size * space_width
             // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
@@ -2744,7 +3019,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // handle kerning
         if (lycon->font.style->has_kerning) {
             if (lycon->line.prev_codepoint) {
-                float kerning_css = font_get_kerning(lycon->font.font_handle, lycon->line.prev_codepoint, codepoint);
+                uint32_t kerning_codepoint = shaped_latin_run ? shaped_latin_first_codepoint : codepoint;
+                float kerning_css = font_get_kerning(lycon->font.font_handle, lycon->line.prev_codepoint, kerning_codepoint);
                 if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;

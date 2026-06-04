@@ -257,7 +257,8 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
 
             FontDatabaseResult result = font_database_find_best_match_internal(
                 ctx->database, &criteria);
-            if (result.font && result.font->file_path && result.match_score >= 0.5f) {
+            if (result.font && result.font->file_path &&
+                (result.match_score >= 0.5f || result.exact_family_match)) {
                 int face_index = result.font->is_collection ? result.font->collection_index : 0;
                 handle = font_load_face_internal(ctx, result.font->file_path, face_index,
                                                   style->size_px, physical_size,
