@@ -249,6 +249,21 @@ void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* t
     }
 }
 
+void animation_scheduler_remove_views(AnimationScheduler* scheduler) {
+    if (!scheduler) return;
+
+    AnimationInstance* anim = scheduler->first;
+    while (anim) {
+        AnimationInstance* next = anim->next;
+        // CSS animations/transitions hold a View* target in the (now-freed) view pool;
+        // GIF/Lottie target surfaces in the image cache and must be left running.
+        if (anim->type == ANIM_CSS_ANIMATION || anim->type == ANIM_CSS_TRANSITION) {
+            animation_scheduler_remove(scheduler, anim);
+        }
+        anim = next;
+    }
+}
+
 // ============================================================================
 // Animation Tick
 // ============================================================================

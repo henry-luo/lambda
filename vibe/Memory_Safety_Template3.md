@@ -775,8 +775,34 @@ at both the root cause and as defense-in-depth.
   SIGSEGV**); runtime non-tail recursion still recovers via the armed path (`recovered from stack overflow`,
   no UB); **Lambda baseline 2942/2942** (the 2105 input tests exercise the CSS path).
 
-**Not yet started:** Phases 4–6 (C3 view-pool `Handle<T>`/`PersistentField`; M1/M4 null-guards; ASan+fuzz CI),
-the deferred Phase-2 flex/grid realloc-null-checks, and the `make check-alloc` / `check-span` /
+**Phase 4 — landed and verified (C3).** Closed the animation use-after-free at the real vector with the
+minimal, audit-recommended fix rather than the full `Handle<T>` refactor.
+
+- **Root cause** — `radiant/event.cpp`: the full-relayout path `view_pool_destroy`s the view tree and already
+  scrubs stale pointers from the cursor, drag/drop, `state_map`, and DOM nodes, but **not** the animation
+  scheduler. `AnimationInstance::target` is a raw `View*`; the next `animation_scheduler_tick` dereferenced it.
+- **Fix** — added `animation_scheduler_remove_views(scheduler)` (`radiant/animation.{h,cpp}`) which drops all
+  `ANIM_CSS_ANIMATION`/`ANIM_CSS_TRANSITION` instances (whose `View*` targets were just freed) while leaving
+  `ANIM_GIF`/`ANIM_LOTTIE` (which target image-cache surfaces, not views) intact. Called from the existing
+  scrub block in `event.cpp` right after `view_pool_destroy`. The relayout that immediately follows re-creates
+  CSS animations for elements that still have them, so none are permanently lost.
+- **Scope check** — the other three `view_pool_destroy` sites (`cmd_layout.cpp`, `render_img.cpp`,
+  `ui_context.cpp`) reference no animation scheduler and never tick after destroying the tree, so they are not
+  UAF vectors; only the interactive `event.cpp` path is.
+- Regression tests: `test/test_animation_gtest.cpp` +2 (`RemoveViewsDropsCssKeepsSurface`,
+  `RemoveViewsHandlesEmptyAndNull`). Verified: animation suites `test_animation` 22, `test_css_animation` 15;
+  relayout suites `test_ui_automation` 230, `test_page_load` 104, `test_radiant_view` 19, `test_fuzzy_crash`
+  24 — all 0 failures; **Lambda baseline 2942/2942**.
+- **Architectural follow-up (not done):** the generational `Handle<T>` + view-pool generation counters
+  (§3.6/§4.1) remain the durable fix for the *whole class* of long-lived raw `View*` holders (cursor, drag,
+  `state_map`), which are currently handled by manual per-site scrubbing. The scrub fix closes the C3 vector;
+  `Handle<T>` would make the entire pattern fail-closed by construction. Deferred as a larger refactor in the
+  pre-existingly-flaky Radiant subsystem.
+
+**Status: every Critical and High finding from the audit is now fixed and verified, plus M2/M3/M5.**
+
+**Not yet started:** Phase 5 (M1/M4 null-guards + clamps; the deferred flex/grid realloc-null-checks),
+Phase 6 (ASan+UBSan CI + `lambda/input/` fuzzing), and the `make check-alloc` / `check-span` /
 `check-recursion` lint targets.
 
 ---
