@@ -722,7 +722,41 @@ matching each parser's existing idiom).
   collapse + capacity, H5 long-path clamp). Verified: `test_url_gtest` 39/39, `test_url_extra_gtest` 30/30,
   `test_mark_reader_gtest` 41/41, `test_input_roundtrip_gtest` 38/38; **Lambda baseline 2942/2942**.
 
-**Not yet started:** Phases 2–6 (production wiring), and the `make check-alloc` / `check-span` / `check-recursion` lint targets.
+**Phase 2 — landed and verified.** Allocation + size-math hardening across core runtime, lib, and radiant.
+Every fix changes only the *failure* path (overflow / OOM); the success path is byte-identical, so no
+behavior change for valid inputs.
+
+- **H2 (`heap_strcpy`)** — `lambda/lambda-mem.cpp`: guard negative length + size overflow of `heap_alloc`'s
+  `int` param; null-check the result instead of `memcpy`ing through NULL.
+- **H4 (`str_repeat`)** — `lambda/lambda-eval.cpp`: `checked_mul` on `str_len*times`, size bound, null-check.
+- **H4 (array factories)** — `lambda/lambda-data-runtime.cpp`: `array_fill`, `array_int_fill`,
+  `array_int64_fill`, `array_float_fill`, `array_num_new` now `checked_mul` the element-count size and only
+  set length/capacity + fill when the allocation succeeds (array stays empty on overflow/OOM; bounds-checked
+  getters return null).
+- **H4/H5 (`expand_list`)** — `lambda/lambda-data.cpp`: `checked_mul` the new buffer size, null-check
+  `heap_data_alloc`, and revert the capacity doubling on failure so the list never publishes a NULL/short
+  buffer.
+- **M2 (deep-copy length)** — `lambda/mark_builder.cpp`: `int64_t` length + loop counter (`arr->length` is
+  `int64_t`; `ArrayReader::get` takes `int64_t`) — no truncation.
+- **M3 (grid auto-repeat)** — `radiant/layout_grid.cpp` (cols + rows): compute the expanded track count in
+  64-bit and bail if it doesn't fit `int`, closing the overflow→undersized-`mem_calloc`→OOB-copy vector.
+- **H3 (display list)** — `radiant/display_list_storage.cpp` `dl_alloc_item`: detect `int` capacity-doubling
+  overflow, `checked_mul` the realloc size, and null-check the realloc (leaving the old buffer intact on OOM).
+- **M5 (lib)** — `lib/mempool.c`: null-check the mmap-chunk `malloc` and `munmap` the mapping on failure;
+  `lib/datetime.c`: null-check the two `pool_calloc`+`strncpy` datetime-literal sites.
+- New header consumers: `checked_math.hpp` now included by `lambda-eval.cpp`, `lambda-data.cpp`,
+  `lambda-data-runtime.cpp`, `display_list_storage.cpp`.
+- Verified: **Lambda baseline 2942/2942**; deterministic radiant suites `test_ui_automation` 230,
+  `test_page_load` 104, `test_radiant_view` 19, `test_fuzzy_crash` 24 — all 0 failures.
+
+**Deferred from Phase 2 (follow-up):** the remaining *realloc-null-checks* in `grid_item_array_realloc`
+(`layout_grid.cpp`) and `ensure_flex_items_capacity` / line-array growth (`layout_flex.cpp`). These are
+OOM-only (not overflow→corruption) and need per-caller bail/clamp logic; deferred because the Radiant
+baseline is pre-existingly flaky (see Phase 1 note), making clean verification of caller-contract changes
+harder. The overflow→heap-overflow vectors and the clean display-list site are done.
+
+**Not yet started:** Phase 3 (`RecursionGuard` wiring + recovery-point reorder), Phases 4–6, and the
+`make check-alloc` / `check-span` / `check-recursion` lint targets.
 
 ---
 

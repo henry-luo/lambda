@@ -3,6 +3,7 @@
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
+#include "../lib/checked_math.hpp"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
 #ifndef LAMBDA_STATIC
@@ -418,6 +419,7 @@ const char* fn_to_cstr(Item itm) {
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {
+    int64_t prev_capacity = list->capacity;   // for reverting if growth fails
     list->capacity = list->capacity ? list->capacity * 2 : 8;
 
     // Determine which allocator to use
@@ -449,8 +451,18 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // Allocate new buffer; old buffer is abandoned in the data zone
         // and will be reclaimed on next GC compaction/reset.
         size_t old_size = (list->capacity/2) * sizeof(Item);
-        size_t new_size = list->capacity * sizeof(Item);
+        size_t new_size;
+        if (!lam::checked_mul((size_t)list->capacity, sizeof(Item), &new_size)) {
+            list->capacity = prev_capacity;   // revert doubling; growth not possible
+            return;
+        }
         Item* new_items = (Item*)heap_data_alloc(new_size);
+        if (!new_items) {
+            // OOM: do not memcpy into / publish a NULL buffer. Revert the capacity so
+            // the list stays consistent with its existing (still-valid) items buffer.
+            list->capacity = prev_capacity;
+            return;
+        }
         // Re-read old_items after allocation: GC may have fired during
         // heap_data_alloc, compacting list->items from nursery to tenured.
         // The local old_items would then point to freed nursery memory.
