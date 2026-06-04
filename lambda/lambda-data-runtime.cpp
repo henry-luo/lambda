@@ -3,6 +3,7 @@
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/arraylist.hpp"
+#include "../lib/checked_math.hpp"
 #include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 
@@ -97,14 +98,19 @@ Array* array() {
 
 Array* array_fill(Array* arr, int count, ...) {
     if (count > 0) {
-        va_list args;
-        va_start(args, count);
-        arr->capacity = count;
-        arr->items = (Item*)heap_data_alloc(count * sizeof(Item));
-        for (int i = 0; i < count; i++) {
-            array_push(arr, va_arg(args, Item));
+        size_t bytes;
+        if (lam::checked_mul((size_t)count, sizeof(Item), &bytes)) {
+            arr->items = (Item*)heap_data_alloc(bytes);
         }
-        va_end(args);
+        if (arr->items) {                     // skip on overflow/OOM — array stays empty
+            arr->capacity = count;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i++) {
+                array_push(arr, va_arg(args, Item));
+            }
+            va_end(args);
+        }
     }
     log_item({.array = arr}, "array_filled");
     return arr;
@@ -139,11 +145,17 @@ Item array_get(Array *array, int64_t index) {
 // ============================================================================
 ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!arr) return NULL;
     arr->type_id = LMD_TYPE_ARRAY_NUM;
     arr->flags = elem_type;  // elem_type stored in Container::flags byte
-    arr->length = length;  arr->capacity = length;
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
-    arr->data = heap_data_alloc(length * elem_size);
+    size_t bytes;
+    if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {
+        arr->data = heap_data_alloc(bytes);
+    }
+    if (arr->data) {                          // length/capacity stay 0 on overflow/OOM
+        arr->length = length;  arr->capacity = length;
+    }
     return arr;
 }
 
@@ -201,14 +213,19 @@ ArrayNum* array_int_new(int64_t length) {
 
 ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
-        va_list args;
-        va_start(args, count);
-        arr->items = (int64_t*)heap_data_alloc(count * sizeof(int64_t));
-        arr->length = count;  arr->capacity = count;
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);
+        size_t bytes;
+        if (lam::checked_mul((size_t)count, sizeof(int64_t), &bytes)) {
+            arr->items = (int64_t*)heap_data_alloc(bytes);
         }
-        va_end(args);
+        if (arr->items) {                     // skip on overflow/OOM — array stays empty
+            arr->length = count;  arr->capacity = count;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i++) {
+                arr->items[i] = va_arg(args, int64_t);
+            }
+            va_end(args);
+        }
     }
     return arr;
 }
@@ -248,14 +265,19 @@ ArrayNum* array_int64_new(int64_t length) {
 
 ArrayNum* array_int64_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
-        va_list args;
-        va_start(args, count);
-        arr->items = (int64_t*)heap_data_alloc(count * sizeof(int64_t));
-        arr->length = count;  arr->capacity = count;
-        for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int64_t);
+        size_t bytes;
+        if (lam::checked_mul((size_t)count, sizeof(int64_t), &bytes)) {
+            arr->items = (int64_t*)heap_data_alloc(bytes);
         }
-        va_end(args);
+        if (arr->items) {                     // skip on overflow/OOM — array stays empty
+            arr->length = count;  arr->capacity = count;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i++) {
+                arr->items[i] = va_arg(args, int64_t);
+            }
+            va_end(args);
+        }
     }
     return arr;
 }
@@ -293,16 +315,21 @@ ArrayNum* array_float_new(int64_t length) {
 
 ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
-        va_list args;
-        va_start(args, count);
         arr->type_id = LMD_TYPE_ARRAY_NUM;
         arr->flags = ELEM_FLOAT;
-        arr->float_items = (double*)heap_data_alloc(count * sizeof(double));
-        arr->length = count;  arr->capacity = count;
-        for (int i = 0; i < count; i++) {
-            arr->float_items[i] = va_arg(args, double);
+        size_t bytes;
+        if (lam::checked_mul((size_t)count, sizeof(double), &bytes)) {
+            arr->float_items = (double*)heap_data_alloc(bytes);
         }
-        va_end(args);
+        if (arr->float_items) {               // skip on overflow/OOM — array stays empty
+            arr->length = count;  arr->capacity = count;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i++) {
+                arr->float_items[i] = va_arg(args, double);
+            }
+            va_end(args);
+        }
     }
     return arr;
 }

@@ -10,6 +10,7 @@
 #include <cmath>    // for pow function
 #include <errno.h>  // for errno checking
 #include <inttypes.h>  // for PRId64
+#include <limits.h>
 
 extern __thread EvalContext* context;
 

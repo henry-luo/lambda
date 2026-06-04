@@ -1,12 +1,15 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
+#include <limits.h>
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/url.h"
+#include "../lib/checked_math.hpp"
 #include "../lib/str.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
+#include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
 
 #include <stdarg.h>
@@ -322,6 +325,7 @@ String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        if (!result) return NULL;
         result->len = 0;
         result->is_ascii = 1;
         result->chars[0] = '\0';
@@ -329,8 +333,14 @@ String *str_repeat(String *str, int64_t times) {
     }
 
     size_t str_len = str->len;
-    size_t total_len = str_len * times;
-    String *result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    size_t total_len;
+    // guard str_len * times and the allocation size against overflow / heap_alloc's int param.
+    if (!lam::checked_mul(str_len, (size_t)times, &total_len) ||
+        total_len + sizeof(String) + 1 > (size_t)INT_MAX) {
+        return NULL;
+    }
+    String *result = (String *)heap_alloc((int)(sizeof(String) + total_len + 1), LMD_TYPE_STRING);
+    if (!result) return NULL;
     result->len = total_len;
     result->is_ascii = str->is_ascii;
 

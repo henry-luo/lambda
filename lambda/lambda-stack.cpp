@@ -50,6 +50,7 @@ __thread jmp_buf _lambda_recovery_point;
 #endif
 
 __thread volatile bool _lambda_stack_overflow_flag = false;
+__thread volatile sig_atomic_t _lambda_recovery_armed = 0;
 
 // Track whether signal handler has been installed (process-wide, only once)
 static volatile bool _signal_handler_installed = false;
@@ -173,7 +174,17 @@ static void stack_overflow_signal_handler(int sig, siginfo_t *info, void *ctx) {
         return;  // unreachable
     }
 
-    // It's a stack overflow — set flag and jump to recovery point
+    // It's a stack overflow. Only jump if a recovery point is currently armed — jumping
+    // into a zero-initialized jmp_buf (e.g. overflow during AST build, before any code
+    // execution armed it) is undefined behavior. Unarmed → clean default crash.
+    if (!_lambda_recovery_armed) {
+        log_error("signal handler: stack overflow with no armed recovery point "
+                  "(fault_addr=%p) — aborting", (void*)fault_addr);
+        signal(sig, SIG_DFL);
+        raise(sig);
+        return;  // unreachable
+    }
+
     _lambda_stack_overflow_flag = true;
     log_error("signal handler: stack overflow detected (fault_addr=%p, stack_limit=%p)",
               (void*)fault_addr, (void*)_lambda_stack_limit);

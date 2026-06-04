@@ -181,6 +181,13 @@ static void mmap_pool_grow(Pool* pool, size_t min_size) {
         return;
     }
     MmapChunk* chunk = (MmapChunk*)malloc(sizeof(MmapChunk));
+    if (!chunk) {
+        log_error("mmap_pool_grow: malloc failed for chunk metadata");
+        munmap(mem, chunk_size);   // don't leak the mapping we just created
+        pool->cursor = NULL;
+        pool->limit = NULL;
+        return;
+    }
     chunk->base = (uint8_t*)mem;
     chunk->size = chunk_size;
     chunk->next = pool->chunks;

@@ -166,6 +166,44 @@ TEST_F(AnimationSchedulerTest, AddRemove) {
     EXPECT_FALSE(scheduler->has_active_animations);
 }
 
+// C3 regression (vibe/Memory_Safety_Template3.md §3.6): a full relayout frees the view
+// pool, so view-targeted CSS animations/transitions must be dropped (their View* targets
+// dangle) while surface-targeted GIF/Lottie animations survive.
+TEST_F(AnimationSchedulerTest, RemoveViewsDropsCssKeepsSurface) {
+    int css_target = 0, transition_target = 0, gif_target = 0, lottie_target = 0;
+
+    AnimationInstance* css = animation_instance_create(scheduler);
+    css->type = ANIM_CSS_ANIMATION;  css->target = &css_target;
+    animation_scheduler_add(scheduler, css);
+
+    AnimationInstance* trans = animation_instance_create(scheduler);
+    trans->type = ANIM_CSS_TRANSITION;  trans->target = &transition_target;
+    animation_scheduler_add(scheduler, trans);
+
+    AnimationInstance* gif = animation_instance_create(scheduler);
+    gif->type = ANIM_GIF;  gif->target = &gif_target;
+    animation_scheduler_add(scheduler, gif);
+
+    AnimationInstance* lottie = animation_instance_create(scheduler);
+    lottie->type = ANIM_LOTTIE;  lottie->target = &lottie_target;
+    animation_scheduler_add(scheduler, lottie);
+
+    EXPECT_EQ(scheduler->count, 4);
+
+    animation_scheduler_remove_views(scheduler);
+
+    EXPECT_EQ(scheduler->count, 2);   // CSS animation + transition removed
+    for (AnimationInstance* a = scheduler->first; a; a = a->next) {
+        EXPECT_TRUE(a->type == ANIM_GIF || a->type == ANIM_LOTTIE);
+    }
+}
+
+TEST_F(AnimationSchedulerTest, RemoveViewsHandlesEmptyAndNull) {
+    animation_scheduler_remove_views(scheduler);   // empty scheduler — no-op
+    EXPECT_EQ(scheduler->count, 0);
+    animation_scheduler_remove_views(nullptr);     // NULL — must not crash
+}
+
 // Track values from tick callback
 static float g_last_tick_value = -1.0f;
 static int g_tick_count = 0;

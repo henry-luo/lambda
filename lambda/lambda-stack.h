@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <signal.h>   // sig_atomic_t
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <setjmp.h>
@@ -55,6 +56,13 @@ extern __thread jmp_buf _lambda_recovery_point;
 
 // Flag set by the signal handler when stack overflow is detected
 extern __thread volatile bool _lambda_stack_overflow_flag;
+
+// True only while _lambda_recovery_point holds a valid (armed) jump target — i.e.
+// during user/JIT code execution. The signal handler must NOT siglongjmp unless this
+// is set; otherwise (e.g. a stack overflow during AST build, before any arming) it would
+// jump into a zero-initialized jmp_buf, which is undefined behavior. When unarmed the
+// handler falls back to the default disposition (clean crash).
+extern __thread volatile sig_atomic_t _lambda_recovery_armed;
 
 /**
  * Initialize stack overflow protection for the current thread.

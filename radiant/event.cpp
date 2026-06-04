@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "render_export_support.hpp"
 #include "state_store.hpp"
+#include "animation.h"
 #include "state_machine.hpp"
 #include "scroller.hpp"
 #include "form_control.hpp"
@@ -3611,6 +3612,10 @@ static void post_html_handler_rebuild(EventContext* evcon,
         if (state->state_map) {
             hashmap_clear(state->state_map, false);
         }
+        // Drop CSS animations/transitions whose View* targets were just freed; relayout
+        // below re-creates them for elements that still have them. Without this, the next
+        // animation_scheduler_tick dereferences a dangling View* (use-after-free).
+        animation_scheduler_remove_views(state->animation_scheduler);
     }
 
     // Clear dangling view-pool pointers from DOM tree nodes before relayout

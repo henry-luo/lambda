@@ -2443,7 +2443,8 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
             if (tcell->td->row_span > 1) {
                 int start_row = tcell->td->row_index;
                 int end_row = start_row + tcell->td->row_span;
-                if (end_row > rows) end_row = rows;
+                if (start_row < 0) start_row = 0;     // never index before row_heights[0]
+                if (end_row > rows) end_row = rows;    // never index past row_heights[rows-1]
 
                 // Calculate current spanned height
                 float current_total = 0;
@@ -5585,8 +5586,11 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                 col++;
             }
 
-            // Assign indices
-            cell->td->col_index = col;
+            // Assign indices. An over-full row can leave col == columns; clamp the stored
+            // column index so it never indexes one past the columns-sized width arrays
+            // (col_widths/col_min_widths/col_max_widths). The grid-marking loop below uses
+            // the raw col and is already bounded by `c < columns`.
+            cell->td->col_index = (col < columns) ? col : (columns > 0 ? columns - 1 : 0);
             cell->td->row_index = current_row;
 
             // Mark grid as occupied
@@ -8243,6 +8247,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         if (tcell->td->row_span > 1) {
                             int start_row = tcell->td->row_index;
                             int end_row = start_row + tcell->td->row_span;
+                            if (start_row < 0) start_row = 0;                       // guard negative index
                             if (end_row > meta->row_count) end_row = meta->row_count;
 
                             // Sum heights of spanned rows

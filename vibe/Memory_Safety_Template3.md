@@ -722,7 +722,112 @@ matching each parser's existing idiom).
   collapse + capacity, H5 long-path clamp). Verified: `test_url_gtest` 39/39, `test_url_extra_gtest` 30/30,
   `test_mark_reader_gtest` 41/41, `test_input_roundtrip_gtest` 38/38; **Lambda baseline 2942/2942**.
 
-**Not yet started:** Phases 2–6 (production wiring), and the `make check-alloc` / `check-span` / `check-recursion` lint targets.
+**Phase 2 — landed and verified.** Allocation + size-math hardening across core runtime, lib, and radiant.
+Every fix changes only the *failure* path (overflow / OOM); the success path is byte-identical, so no
+behavior change for valid inputs.
+
+- **H2 (`heap_strcpy`)** — `lambda/lambda-mem.cpp`: guard negative length + size overflow of `heap_alloc`'s
+  `int` param; null-check the result instead of `memcpy`ing through NULL.
+- **H4 (`str_repeat`)** — `lambda/lambda-eval.cpp`: `checked_mul` on `str_len*times`, size bound, null-check.
+- **H4 (array factories)** — `lambda/lambda-data-runtime.cpp`: `array_fill`, `array_int_fill`,
+  `array_int64_fill`, `array_float_fill`, `array_num_new` now `checked_mul` the element-count size and only
+  set length/capacity + fill when the allocation succeeds (array stays empty on overflow/OOM; bounds-checked
+  getters return null).
+- **H4/H5 (`expand_list`)** — `lambda/lambda-data.cpp`: `checked_mul` the new buffer size, null-check
+  `heap_data_alloc`, and revert the capacity doubling on failure so the list never publishes a NULL/short
+  buffer.
+- **M2 (deep-copy length)** — `lambda/mark_builder.cpp`: `int64_t` length + loop counter (`arr->length` is
+  `int64_t`; `ArrayReader::get` takes `int64_t`) — no truncation.
+- **M3 (grid auto-repeat)** — `radiant/layout_grid.cpp` (cols + rows): compute the expanded track count in
+  64-bit and bail if it doesn't fit `int`, closing the overflow→undersized-`mem_calloc`→OOB-copy vector.
+- **H3 (display list)** — `radiant/display_list_storage.cpp` `dl_alloc_item`: detect `int` capacity-doubling
+  overflow, `checked_mul` the realloc size, and null-check the realloc (leaving the old buffer intact on OOM).
+- **M5 (lib)** — `lib/mempool.c`: null-check the mmap-chunk `malloc` and `munmap` the mapping on failure;
+  `lib/datetime.c`: null-check the two `pool_calloc`+`strncpy` datetime-literal sites.
+- New header consumers: `checked_math.hpp` now included by `lambda-eval.cpp`, `lambda-data.cpp`,
+  `lambda-data-runtime.cpp`, `display_list_storage.cpp`.
+- Verified: **Lambda baseline 2942/2942**; deterministic radiant suites `test_ui_automation` 230,
+  `test_page_load` 104, `test_radiant_view` 19, `test_fuzzy_crash` 24 — all 0 failures.
+
+**Deferred from Phase 2 (follow-up):** the remaining *realloc-null-checks* in `grid_item_array_realloc`
+(`layout_grid.cpp`) and `ensure_flex_items_capacity` / line-array growth (`layout_flex.cpp`). These are
+OOM-only (not overflow→corruption) and need per-caller bail/clamp logic; deferred because the Radiant
+baseline is pre-existingly flaky (see Phase 1 note), making clean verification of caller-contract changes
+harder. The overflow→heap-overflow vectors and the clean display-list site are done.
+
+**Phase 3 — landed and verified.** Closes **C2** (stack-overflow → `siglongjmp`-into-zeroed-`jmp_buf` UB)
+at both the root cause and as defense-in-depth.
+
+- **Root cause (depth guard)** — `lambda/build_ast.cpp` + `lambda/ast.hpp`: added a `build_depth` field to
+  `Transpiler` (zeroed by the existing `memset` init) and a `lam::RecursionGuard` at the top of `build_expr`
+  with `MAX_BUILD_DEPTH = 1000`. A pathologically nested source now returns `NULL` (the existing error
+  convention) instead of recursing into stack exhaustion.
+- **Defense-in-depth (recovery-armed flag)** — `lambda/lambda-stack.{h,cpp}`: added
+  `_lambda_recovery_armed` (`__thread volatile sig_atomic_t`). The SIGSEGV handler now only `siglongjmp`s when
+  a recovery point is actually armed; otherwise (e.g. a stack overflow during AST build or CSS parsing, before
+  any code execution armed it) it falls back to `SIG_DFL` + `raise` for a clean crash rather than jumping into
+  a zero-initialized `jmp_buf`. The flag is set/cleared around the three user/JIT execution sites
+  (`transpile-mir.cpp`, `runner.cpp`, `js/js_mir_entrypoints_require.cpp`).
+- **CSS parser depth cap (latent finding)** — `lambda/input/css/css_parser.cpp`: a `thread_local` depth
+  counter + `RecursionGuard` (`MAX_CSS_FUNC_DEPTH = 256`) in `css_parse_function_from_tokens` caps nested
+  `calc(calc(...))` so it returns a parse failure instead of overflowing.
+- Verified: a 5000-deep nested source now exits cleanly with `"expression nesting too deep"` (exit 1, **no
+  SIGSEGV**); runtime non-tail recursion still recovers via the armed path (`recovered from stack overflow`,
+  no UB); **Lambda baseline 2942/2942** (the 2105 input tests exercise the CSS path).
+
+**Phase 4 — landed and verified (C3).** Closed the animation use-after-free at the real vector with the
+minimal, audit-recommended fix rather than the full `Handle<T>` refactor.
+
+- **Root cause** — `radiant/event.cpp`: the full-relayout path `view_pool_destroy`s the view tree and already
+  scrubs stale pointers from the cursor, drag/drop, `state_map`, and DOM nodes, but **not** the animation
+  scheduler. `AnimationInstance::target` is a raw `View*`; the next `animation_scheduler_tick` dereferenced it.
+- **Fix** — added `animation_scheduler_remove_views(scheduler)` (`radiant/animation.{h,cpp}`) which drops all
+  `ANIM_CSS_ANIMATION`/`ANIM_CSS_TRANSITION` instances (whose `View*` targets were just freed) while leaving
+  `ANIM_GIF`/`ANIM_LOTTIE` (which target image-cache surfaces, not views) intact. Called from the existing
+  scrub block in `event.cpp` right after `view_pool_destroy`. The relayout that immediately follows re-creates
+  CSS animations for elements that still have them, so none are permanently lost.
+- **Scope check** — the other three `view_pool_destroy` sites (`cmd_layout.cpp`, `render_img.cpp`,
+  `ui_context.cpp`) reference no animation scheduler and never tick after destroying the tree, so they are not
+  UAF vectors; only the interactive `event.cpp` path is.
+- Regression tests: `test/test_animation_gtest.cpp` +2 (`RemoveViewsDropsCssKeepsSurface`,
+  `RemoveViewsHandlesEmptyAndNull`). Verified: animation suites `test_animation` 22, `test_css_animation` 15;
+  relayout suites `test_ui_automation` 230, `test_page_load` 104, `test_radiant_view` 19, `test_fuzzy_crash`
+  24 — all 0 failures; **Lambda baseline 2942/2942**.
+- **Architectural follow-up (not done):** the generational `Handle<T>` + view-pool generation counters
+  (§3.6/§4.1) remain the durable fix for the *whole class* of long-lived raw `View*` holders (cursor, drag,
+  `state_map`), which are currently handled by manual per-site scrubbing. The scrub fix closes the C3 vector;
+  `Handle<T>` would make the entire pattern fail-closed by construction. Deferred as a larger refactor in the
+  pre-existingly-flaky Radiant subsystem.
+
+**Status: every Critical and High finding from the audit is now fixed and verified, plus M2/M3/M5.**
+
+**Phase 5 — landed and verified.** The lower-severity tail + the deferred Phase-2 realloc-null-checks. All
+are failure-path/guard/clamp changes; valid-input layout geometry is unchanged.
+
+- **M1 (null `parent`)** — `radiant/layout_block.cpp` (3 sites): `(block->parent && block->parent->is_block())`
+  instead of dereferencing a possibly-null `parent`, matching the guard used elsewhere in the file.
+- **M4 (table off-by-one)** — `radiant/layout_table.cpp`: clamp the stored `col_index` so an over-full row
+  can't index one past the `columns`-sized width arrays (the grid-marking loop already bounds itself);
+  guard the rowspan `start_row` against a negative index in both rowspan-height loops.
+- **H3 deferred — grid** — `radiant/layout_grid.cpp`: `grid_item_array_realloc` now overflow-checks the size
+  and the call site bails (returns 0 items, keeping the old buffer) on realloc failure instead of writing
+  through a NULL/short buffer.
+- **H3 deferred — flex** — `radiant/layout_flex.cpp`: `ensure_flex_items_capacity` returns `bool` and the
+  collector `break`s on failure; `create_flex_lines` null-checks the initial `mem_calloc` and the growth
+  `mem_realloc` (overflow-checked), returning the lines collected so far.
+- **arraylist overflow** — `lib/arraylist.c`: guard the `_alloced * 2` doubling (enlarge) and the
+  `newsize *= 2` loop (reserve, which could otherwise wrap to an infinite loop) against `int` overflow.
+- New header consumers: `checked_math.hpp` now also in `layout_grid.cpp`, `layout_flex.cpp`.
+- Verified: deterministic radiant suites `test_ui_automation` 230, `test_page_load` 104, `test_radiant_view`
+  19, `test_fuzzy_crash` 24, `test_animation` 22 — all 0 failures; **Lambda baseline 2942/2942**.
+
+**Status: every Critical, High, and Medium finding from the audit is now fixed and verified.** The remaining
+Lows (HTML entity-buffer `static_assert`, PDF-decompress `compressed_len*4` — already mitigated by a 10 MB
+cap) are documented but not pursued.
+
+**Not yet started:** Phase 6 (ASan+UBSan CI variant + `lambda/input/` libFuzzer harnesses — the standing
+backstop for code not yet wrapped), and the `make check-alloc` / `check-span` / `check-recursion` lint
+targets that mechanically enforce the new facilities.
 
 ---
 

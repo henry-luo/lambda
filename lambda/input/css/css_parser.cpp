@@ -16,8 +16,13 @@
 #include "css_style.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/str.h"
+#include "../../../lib/recursion_guard.hpp"
 #include <stdlib.h>
 #include <string.h>
+
+// Caps nested CSS function parsing (e.g. calc(calc(calc(...)))) so pathological input
+// reports a parse failure instead of recursing until the stack overflows.
+#define MAX_CSS_FUNC_DEPTH 256
 
 static bool css_parser_is_hex_digit(char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
@@ -645,6 +650,14 @@ static CssValue* css_parse_font_family_values(const CssToken* tokens, int value_
 // *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
 // CSS function arguments are comma-separated; each argument may contain multiple space-separated tokens
 static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+    // depth guard for nested functions (calc(calc(...))); thread_local keeps it
+    // reentrant-safe without threading a counter through the signature.
+    static thread_local int css_func_depth = 0;
+    lam::RecursionGuard depth_guard(&css_func_depth, MAX_CSS_FUNC_DEPTH);
+    if (!depth_guard) {
+        log_error("css: function nesting too deep (>%d) — aborting parse", MAX_CSS_FUNC_DEPTH);
+        return NULL;
+    }
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
     if (tokens[*pos].type != CSS_TOKEN_FUNCTION) return NULL;
 

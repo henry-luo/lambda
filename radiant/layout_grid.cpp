@@ -4,6 +4,7 @@
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 #include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
 #include "../lib/tagged.hpp"
+#include "../lib/checked_math.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -25,7 +26,9 @@ static ViewBlock** grid_item_array_alloc(int count) {
 }
 
 static ViewBlock** grid_item_array_realloc(ViewBlock** items, int count) {
-    return reinterpret_cast<ViewBlock**>(mem_realloc(items, count * sizeof(GridItemPtr), MEM_CAT_LAYOUT));
+    size_t bytes;
+    if (count < 0 || !lam::checked_mul((size_t)count, sizeof(GridItemPtr), &bytes)) return nullptr;
+    return reinterpret_cast<ViewBlock**>(mem_realloc(items, bytes, MEM_CAT_LAYOUT));
 }
 
 // Initialize grid container layout state
@@ -719,9 +722,16 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
-        grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = grid_item_array_realloc(
-            grid_layout->grid_items, grid_layout->allocated_items);
+        int new_alloc = count * 2;
+        ViewBlock** grown = grid_item_array_realloc(grid_layout->grid_items, new_alloc);
+        if (!grown) {
+            // OOM/overflow: keep the old (still-valid) buffer and bail without collecting,
+            // so the fill loop below cannot write past the allocation.
+            *items = nullptr;
+            return 0;
+        }
+        grid_layout->grid_items = grown;
+        grid_layout->allocated_items = new_alloc;
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes
@@ -1029,8 +1039,14 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
                 log_debug("GRID: auto-fit adjusted repeat_count to %d (item_count)", repeat_count);
             }
 
-            // Expand the track list
-            int new_track_count = cols->track_count - 1 + (repeat_count * ts->repeat_track_count);
+            // Expand the track list. Guard against int overflow: a huge container width
+            // with a small pattern could otherwise wrap (repeat_count * repeat_track_count)
+            // to a small/negative count, after which the copy loops below write past the
+            // allocation. Compute in 64-bit and bail if the result doesn't fit an int.
+            long long expanded = (long long)repeat_count * (long long)ts->repeat_track_count;
+            long long total_tracks = (long long)cols->track_count - 1 + expanded;
+            if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return;
+            int new_track_count = (int)total_tracks;
             GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 
@@ -1148,7 +1164,11 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             // For auto-fit: expand like auto-fill, collapse empty tracks after placement.
             bool is_auto_fit_row = ts->is_auto_fit;
 
-            int new_track_count = rows->track_count - 1 + (repeat_count * ts->repeat_track_count);
+            // guard the row track-count expansion against int overflow (see cols path above)
+            long long expanded_r = (long long)repeat_count * (long long)ts->repeat_track_count;
+            long long total_tracks_r = (long long)rows->track_count - 1 + expanded_r;
+            if (total_tracks_r <= 0 || total_tracks_r != (long long)(int)total_tracks_r) return;
+            int new_track_count = (int)total_tracks_r;
             GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 

@@ -2,7 +2,9 @@
 #ifndef LAMBDA_INPUT_H
 #define LAMBDA_INPUT_H
 
+#ifndef LAMBDA_STATIC
 #define LAMBDA_STATIC
+#endif
 #include "../lambda-data.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
