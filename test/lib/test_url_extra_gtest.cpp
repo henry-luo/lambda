@@ -505,3 +505,49 @@ TEST_F(UrlExtraTest, EncodeWithTable) {
     EXPECT_STREQ(e, "abc%20def");
     free(e);
 }
+
+// --- Phase 1 memory-safety regressions (vibe/Memory_Safety_Template3.md §3.7 fixes) ---
+
+// C1: url_normalize_path must bound every write to the caller's buffer capacity.
+// Pre-fix, the collapse-to-root case did strncpy(path, "/", 2047), smashing any
+// buffer smaller than 2048. Guard canaries on both sides catch an overflow.
+TEST(UrlSafetyRegression, NormalizePathRespectsBufferCapacity) {
+    struct Guarded { char before[8]; char buf[16]; char after[8]; } g;
+    memset(&g, 0xAA, sizeof(g));
+
+    strcpy(g.buf, "/a/b/../..");           // normalizes to "/"
+    url_normalize_path(g.buf, sizeof(g.buf));
+
+    EXPECT_STREQ(g.buf, "/");
+    for (int i = 0; i < 8; i++) {
+        EXPECT_EQ((unsigned char)g.before[i], 0xAAu) << "underflow at before[" << i << "]";
+        EXPECT_EQ((unsigned char)g.after[i],  0xAAu) << "overflow at after[" << i << "]";
+    }
+}
+
+// C1: a normalized path must always stay NUL-terminated inside the given capacity.
+TEST(UrlSafetyRegression, NormalizePathStaysNulTerminatedInCapacity) {
+    struct Guarded { char buf[12]; char after[8]; } g;
+    memset(&g, 0xAA, sizeof(g));
+
+    strcpy(g.buf, "/x/y/z/w");             // fits in 12; normalization keeps it
+    url_normalize_path(g.buf, sizeof(g.buf));
+
+    EXPECT_LT(strlen(g.buf), sizeof(g.buf));   // NUL within the buffer
+    for (int i = 0; i < 8; i++)
+        EXPECT_EQ((unsigned char)g.after[i], 0xAAu) << "overflow at after[" << i << "]";
+}
+
+// H5: reconstructing href for a path longer than the 4096-byte href_buf must clamp,
+// not run the snprintf cursor past the buffer end.
+TEST(UrlSafetyRegression, HrefReconstructionClampsVeryLongPath) {
+    char longurl[6000];
+    int n = snprintf(longurl, sizeof(longurl), "http://h/");
+    memset(longurl + n, 'a', 5000);
+    longurl[n + 5000] = '\0';
+
+    Url* url = url_parse(longurl);          // must not overflow / crash
+    ASSERT_NE(url, nullptr);
+    if (url->href) EXPECT_LT(url->href->len, 4096u);   // clamped within href_buf
+    url_destroy(url);
+}

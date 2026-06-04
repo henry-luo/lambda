@@ -66,6 +66,10 @@ static inline void append_codepoint_utf8_strbuf(StrBuf* sb, uint32_t codepoint) 
 static inline int parse_escape_char(const char** pos, StringBuf* sb) {
     const char* start = *pos;
     char c = **pos;
+    // nothing to escape: a trailing backslash at end-of-input lands the caller on the
+    // NUL terminator. Return 0 (consume nothing) so the default branch below cannot
+    // append the NUL and advance past the buffer end.
+    if (!c) return 0;
 
     switch (c) {
         case '"':  stringbuf_append_char(sb, '"');  (*pos)++; break;

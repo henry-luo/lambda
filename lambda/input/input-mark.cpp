@@ -56,12 +56,23 @@ static String* parse_string(InputContext& ctx, const char **mark) {
                 case 'r': stringbuf_append_char(sb, '\r'); break;
                 case 't': stringbuf_append_char(sb, '\t'); break;
                 case 'u': {
-                    (*mark)++; // skip 'u'
-                    char hex[5] = {0};
-                    strncpy(hex, *mark, 4);
-                    (*mark) += 4; // skip 4 hex digits
-                    int codepoint = (int)strtol(hex, NULL, 16);
-                    append_codepoint_utf8(sb, (uint32_t)codepoint);
+                    // peek 4 hex digits without advancing first; *mark points at 'u'.
+                    // short-circuit && stops at the first non-hex byte (including the NUL
+                    // terminator), so a truncated "\u"/"\uAB" at end-of-input never reads
+                    // or advances past the buffer. on success advance to the last hex digit;
+                    // the loop's trailing (*mark)++ then lands on the char after the escape.
+                    const char* h = *mark + 1;
+                    auto is_hex = [](char c) {
+                        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                    };
+                    if (is_hex(h[0]) && is_hex(h[1]) && is_hex(h[2]) && is_hex(h[3])) {
+                        char hex[5] = {0};
+                        strncpy(hex, h, 4);
+                        int codepoint = (int)strtol(hex, NULL, 16);
+                        append_codepoint_utf8(sb, (uint32_t)codepoint);
+                        (*mark) += 4; // 'u' -> last hex digit; trailing ++ moves past it
+                    }
+                    // else: invalid/truncated escape — leave *mark on 'u' (trailing ++ is safe)
                 } break;
                 default: break; // invalid escape
             }

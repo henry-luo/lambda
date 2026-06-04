@@ -2027,6 +2027,48 @@
                         "icon": "🧩"
                     },
                     {
+                        "source": "test_span_gtest.cpp",
+                        "name": "Bounded Span and ByteCursor Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_span_gtest.exe",
+                        "icon": "🧩"
+                    },
+                    {
+                        "source": "test_checked_alloc_gtest.cpp",
+                        "name": "Checked Math, Alloc and NonNull Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_checked_alloc_gtest.exe",
+                        "icon": "🧩"
+                    },
+                    {
+                        "source": "test_recursion_guard_gtest.cpp",
+                        "name": "Recursion Guard Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_recursion_guard_gtest.exe",
+                        "icon": "🧩"
+                    },
+                    {
                         "source": "test_npm_semver_gtest.cpp",
                         "name": "NPM Semver Tests",
                         "dependencies": [],

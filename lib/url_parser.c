@@ -5,6 +5,7 @@
 #include "memtrack.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <ctype.h>
@@ -241,6 +242,25 @@ void url_parser_destroy(UrlParser* parser) {
 }
 
 // Enhanced URL parsing (Phase 2 - Enhanced component parsing)
+// Safe formatted append into a fixed buffer while reconstructing an href.
+// Keeps *pos within [0, cap): snprintf returns the would-have-written length, so on
+// truncation *pos is clamped to cap-1 instead of running past the buffer (which would
+// make buf+*pos an out-of-bounds pointer and cap-*pos an unsigned wrap on the next call).
+static void href_appendf(char* buf, size_t cap, int* pos, const char* fmt, ...) {
+    if (cap == 0 || (size_t)*pos >= cap) return;   // buffer already full
+    size_t avail = cap - (size_t)*pos;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *pos, avail, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;                              // encoding error — leave *pos unchanged
+    if ((size_t)n >= avail) {
+        *pos = (int)(cap - 1);                      // truncated — clamp to last writable index
+    } else {
+        *pos += n;
+    }
+}
+
 UrlError url_parse_into(const char* input, Url* url) {
     if (!input || !url) return URL_ERROR_INVALID_INPUT;
 
@@ -494,49 +514,39 @@ UrlError url_parse_into(const char* input, Url* url) {
         int pos = 0;
         // protocol
         if (url->protocol) {
-            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->protocol->chars);
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->protocol->chars);
         }
         // authority
         if (url->hostname && url->hostname->len > 0) {
-            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "//");
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "//");
             // credentials
             if (url->username && url->username->len > 0) {
-                n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->username->chars);
-                if (n > 0) pos += n;
+                href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->username->chars);
                 if (url->password && url->password->len > 0) {
-                    n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->password->chars);
-                    if (n > 0) pos += n;
+                    href_appendf(href_buf, sizeof(href_buf), &pos, ":%s", url->password->chars);
                 }
-                n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "@");
-                if (n > 0) pos += n;
+                href_appendf(href_buf, sizeof(href_buf), &pos, "@");
             }
-            n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hostname->chars);
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->hostname->chars);
             // port (only if non-default)
             if (url->port && url->port->len > 0) {
                 uint16_t default_port = url_default_port_for_scheme(url->scheme);
                 if (url->port_number != default_port) {
-                    n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->port->chars);
-                    if (n > 0) pos += n;
+                    href_appendf(href_buf, sizeof(href_buf), &pos, ":%s", url->port->chars);
                 }
             }
         }
         // pathname
         if (url->pathname) {
-            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->pathname->chars);
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->pathname->chars);
         }
         // search
         if (url->search) {
-            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->search->chars);
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->search->chars);
         }
         // hash
         if (url->hash) {
-            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hash->chars);
-            if (n > 0) pos += n;
+            href_appendf(href_buf, sizeof(href_buf), &pos, "%s", url->hash->chars);
         }
         href_buf[pos] = '\0';
         url_free_string(url->href);
@@ -579,9 +589,11 @@ UrlError url_set_href(Url* url, const char* href) {
     return url_parse_into(href, url);
 }
 
-// Helper function to normalize path (remove . and .. segments)
-void url_normalize_path(char* path) {
-    if (!path || !*path) return;
+// Helper function to normalize path (remove . and .. segments).
+// `cap` is the total size of the `path` buffer (including the NUL terminator); every
+// write below is bounded by it, so the function can never overflow the caller's buffer.
+void url_normalize_path(char* path, size_t cap) {
+    if (!path || !*path || cap == 0) return;
 
     char segments[64][256]; // Max 64 path segments, 256 chars each
     int segment_count = 0;
@@ -616,25 +628,25 @@ void url_normalize_path(char* path) {
         token = strtok(NULL, "/");
     }
 
-    // Rebuild path safely
+    // Rebuild path safely, bounded by the caller's buffer capacity.
     path[0] = '\0';
     if (segment_count == 0) {
-        strncpy(path, "/", 2047);
+        if (cap >= 2) { path[0] = '/'; path[1] = '\0'; }  // collapse to root
+        else          { path[0] = '\0'; }                  // cap == 1: only room for NUL
         return;
     }
 
     size_t current_len = 0;
-    for (int i = 0; i < segment_count && current_len < 2046; i++) {
-        // Add slash
-        if (current_len < 2047) {
-            path[current_len++] = '/';
-            path[current_len] = '\0';
-        }
+    // need room for at least a slash plus the NUL: current_len + 1 < cap
+    for (int i = 0; i < segment_count && current_len + 1 < cap; i++) {
+        // Add slash (index current_len < cap-1 is guaranteed by the loop condition)
+        path[current_len++] = '/';
+        path[current_len] = '\0';
 
-        // Add segment
+        // Add segment only if it fully fits, leaving room for the NUL.
         size_t segment_len = strlen(segments[i]);
-        if (current_len + segment_len < 2047) {
-            strncpy(path + current_len, segments[i], segment_len);
+        if (current_len + segment_len < cap) {
+            memcpy(path + current_len, segments[i], segment_len);
             current_len += segment_len;
             path[current_len] = '\0';
         }
@@ -652,7 +664,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         // Absolute path - use as-is, but normalize it
         strncpy(result, relative_path, 2047);
         result[2047] = '\0';
-        url_normalize_path(result);
+        url_normalize_path(result, 2048);   // result = mem_alloc(2048)
         return result;
     }
 
@@ -1358,7 +1370,7 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
             path_buf[path_len] = '\0';
 
             // Normalize the path
-            url_normalize_path(path_buf);
+            url_normalize_path(path_buf, sizeof(path_buf));
 
             url_free_string(result->pathname);
             result->pathname = url_create_string(path_buf);
