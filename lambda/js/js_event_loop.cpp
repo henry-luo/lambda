@@ -212,14 +212,8 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
 }
 
 extern "C" int js_animation_frame_drain(int max_frames) {
-    if (auto_close_mode) {
-        while (raf_count > 0) {
-            int64_t id = -1;
-            (void)raf_pop(&id);
-        }
-        return 0;
-    }
-
+    // Auto-close cancels timers in js_event_loop_drain(); rAF draining is
+    // bounded and needed to settle headless layout/reftest-wait snapshots.
     if (max_frames <= 0) max_frames = 1;
     int frames = 0;
     int called = 0;

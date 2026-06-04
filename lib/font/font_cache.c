@@ -12,8 +12,10 @@
 
 #include "font_internal.h"
 #include "../memtrack.h"
+#include "../str.h"
 
 #include <stdio.h>
+#include <string.h>
 
 // ============================================================================
 // Cache key construction
@@ -33,6 +35,28 @@ char* font_cache_make_key(Arena* arena, const char* family,
         n = (int)sizeof(buf) - 1;
     }
     return arena_strndup(arena, buf, (size_t)n);
+}
+
+static const char* browser_metric_family_alias(const char* requested_family) {
+    if (!requested_family) return NULL;
+#ifdef __APPLE__
+    size_t len = strlen(requested_family);
+    if (str_ieq_const(requested_family, len, "Times") ||
+        str_ieq_const(requested_family, len, "serif") ||
+        str_ieq_const(requested_family, len, "ui-serif")) {
+        return "Times";
+    }
+#endif
+    return NULL;
+}
+
+static void apply_browser_metric_family_alias(FontContext* ctx, FontHandle* handle,
+                                              const char* requested_family) {
+    if (!ctx || !handle) return;
+    const char* alias = browser_metric_family_alias(requested_family);
+    if (alias) {
+        handle->metric_family_name = arena_strdup(ctx->arena, alias);
+    }
 }
 
 // ============================================================================
@@ -186,8 +210,8 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
     }
 
     // 3.5. Browser-compatible family aliases that must win before exact local
-    // matches. On macOS, Chromium lays out CSS "Times" using Times New Roman
-    // metrics even when getComputedStyle() serializes "Times".
+    // matches on platforms where the browser treats a requested family as a
+    // metric-compatible substitute.
     {
         const char* const* aliases = font_get_browser_compat_aliases(style->family);
         if (aliases) {
@@ -206,6 +230,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
                                                       style->size_px, physical_size,
                                                       style->weight, style->slant);
                     if (handle) {
+                        apply_browser_metric_family_alias(ctx, handle, style->family);
                         log_info("font_resolve: browser alias '%s' → '%s'",
                                  style->family, aliases[i]);
                         font_cache_insert(ctx, key, handle);
@@ -238,6 +263,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
                                                   style->size_px, physical_size,
                                                   style->weight, style->slant);
                 if (handle) {
+                    apply_browser_metric_family_alias(ctx, handle, style->family);
                     log_info("font_resolve: generic '%s' → '%s'", style->family, generics[i]);
                     font_cache_insert(ctx, key, handle);
                     return handle;

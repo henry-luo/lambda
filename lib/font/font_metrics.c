@@ -280,6 +280,11 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
 // get_font_metrics_platform() — implemented in font_platform.c
 // declared in font_internal.h
 
+static const char* font_metrics_family(FontHandle* handle) {
+    if (!handle) return NULL;
+    return handle->metric_family_name ? handle->metric_family_name : handle->family_name;
+}
+
 /**
  * Calculate normal CSS line-height following Chrome/Blink exactly.
  *
@@ -298,7 +303,7 @@ float font_calc_normal_line_height(FontHandle* handle) {
     FontTables* ft = handle->tables;
     if (!ft) return 0;
 
-    const char* family = handle->family_name ? handle->family_name : NULL;
+    const char* family = font_metrics_family(handle);
 
     float font_size = handle->size_px;
 
@@ -382,7 +387,7 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         return;
     }
 
-    const char* family = handle->family_name ? handle->family_name : NULL;
+    const char* family = font_metrics_family(handle);
 
     float font_size = handle->size_px;
 
@@ -465,7 +470,7 @@ float font_get_cell_height(FontHandle* handle) {
     FontTables* ft = handle->tables;
     if (!ft) return 0;
 
-    const char* family = handle->family_name ? handle->family_name : NULL;
+    const char* family = font_metrics_family(handle);
 
     // derive CSS font size
     float font_size = handle->size_px;
@@ -513,7 +518,7 @@ float font_get_rendering_ascender(FontHandle* handle) {
     if (handle->cached_rendering_ascender_ready)
         return handle->cached_rendering_ascender;
 
-    const char* family = handle->family_name ? handle->family_name : NULL;
+    const char* family = font_metrics_family(handle);
     float ascent, descent, lh;
     float result;
     if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
