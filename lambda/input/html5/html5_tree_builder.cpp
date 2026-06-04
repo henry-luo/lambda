@@ -11,6 +11,12 @@
 // JSON parser for embedded JSON-LD in <script type="application/ld+json">
 Item parse_json_to_item(Input* input, const char* json_string);
 
+static bool html5_is_heading_tag(const char* tag) {
+    return strcmp(tag, "h1") == 0 || strcmp(tag, "h2") == 0 ||
+           strcmp(tag, "h3") == 0 || strcmp(tag, "h4") == 0 ||
+           strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0;
+}
+
 // ============================================================================
 // QUIRKS MODE DETECTION
 // Per WHATWG HTML5 spec section 13.2.6.4.1
@@ -1233,8 +1239,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
         // heading elements - h1 through h6
         // special behavior: if there's a heading element in the stack, close it
-        if (strcmp(tag, "h1") == 0 || strcmp(tag, "h2") == 0 || strcmp(tag, "h3") == 0 ||
-            strcmp(tag, "h4") == 0 || strcmp(tag, "h5") == 0 || strcmp(tag, "h6") == 0) {
+        if (html5_is_heading_tag(tag)) {
 
             // close any <p> element in button scope
             if (html5_has_element_in_button_scope(parser, "p")) {
@@ -1256,9 +1261,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             Element* current = html5_current_node(parser);
             if (current) {
                 const char* current_tag = ((TypeElmt*)current->type)->name.str;
-                if (strcmp(current_tag, "h1") == 0 || strcmp(current_tag, "h2") == 0 ||
-                    strcmp(current_tag, "h3") == 0 || strcmp(current_tag, "h4") == 0 ||
-                    strcmp(current_tag, "h5") == 0 || strcmp(current_tag, "h6") == 0) {
+                if (html5_is_heading_tag(current_tag)) {
                     log_error("html5: heading element nested inside another heading");
                     html5_pop_element(parser);
                 }
@@ -1786,6 +1789,37 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         // Formatting elements use the Adoption Agency Algorithm
         if (html5_is_formatting_element(tag)) {
             html5_run_adoption_agency(parser, token);
+            return;
+        }
+
+        // WHATWG §13.2.6.4.7: </h1> through </h6> close whichever
+        // heading element is in scope, even when the tag names differ.
+        if (html5_is_heading_tag(tag)) {
+            bool has_heading_in_scope = false;
+            for (int i = (int)parser->open_elements->length - 1; i >= 0; i--) {
+                Element* elem = (Element*)parser->open_elements->items[i].element;
+                const char* elem_tag = ((TypeElmt*)elem->type)->name.str;
+                if (html5_is_heading_tag(elem_tag)) {
+                    has_heading_in_scope = true;
+                    break;
+                }
+                if (html5_is_special_element(elem_tag)) {
+                    break;
+                }
+            }
+            if (!has_heading_in_scope) {
+                log_error("html5: heading end tag without heading in scope: %s", tag);
+                return;
+            }
+
+            html5_generate_implied_end_tags(parser);
+            while (parser->open_elements->length > 0) {
+                Element* popped = html5_pop_element(parser);
+                const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+                if (html5_is_heading_tag(popped_tag)) {
+                    break;
+                }
+            }
             return;
         }
 

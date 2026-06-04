@@ -2128,6 +2128,12 @@ void adjust_text_bounds(ViewText* text) {
     }
 }
 
+static inline void skip_collapsible_space_sequence(unsigned char** str, bool collapse_newlines) {
+    while (is_space(**str) && (collapse_newlines || (**str != '\n' && **str != '\r'))) {
+        (*str)++;
+    }
+}
+
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
     auto t_start = high_resolution_clock::now();
 
@@ -2213,9 +2219,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
         // When collapsing spaces, skip all whitespace (including newlines if collapse_newlines)
-        while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'))) {
-            str++;
-        }
+        skip_collapsible_space_sequence(&str, collapse_newlines);
         if (!*str) {
             // todo: probably should still set it bounds
             text_node->view_type = RDT_VIEW_NONE;
@@ -2233,6 +2237,21 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     LAYOUT_TEXT:
+    // CSS Text 3 §4.1/§4.2: collapsible spaces at the start of a line
+    // are removed. The initial pre-label skip handles the first entry, but
+    // internal wraps jump back here after line_break(); handle those too so
+    // a boundary space does not become visible indentation on the new line.
+    if (collapse_spaces && lycon->line.is_line_start && is_space(*str)) {
+        skip_collapsible_space_sequence(&str, collapse_newlines);
+        if (!*str) {
+            if (!text_view) {
+                text_node->view_type = RDT_VIEW_NONE;
+                log_debug("skipping whitespace text node at wrapped line start");
+            }
+            return;
+        }
+        had_leading_space = false;
+    }
     // Guard against infinite loop from extreme negative margins or degenerate layouts
     if (++layout_text_iterations > 500) {
         log_error("layout_text: exceeded 500 iterations, aborting text layout");
@@ -2260,6 +2279,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
                       lycon->line.advance_x, line_right);
             line_break(lycon);
+            if (collapse_spaces && is_space(*str)) {
+                skip_collapsible_space_sequence(&str, collapse_newlines);
+                if (!*str) {
+                    if (!text_view) {
+                        text_node->view_type = RDT_VIEW_NONE;
+                        log_debug("skipping whitespace text node after boundary wrap");
+                    }
+                    return;
+                }
+                had_leading_space = false;
+            }
         }
     }
     // CSS Text 3 §5.2: Before placing any characters, check whether the first
@@ -2281,6 +2311,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 log_debug("First word (%.1f) exceeds remaining space (%.1f), wrapping to next line",
                           first_word_w, remaining);
                 line_break(lycon);
+                if (collapse_spaces && is_space(*str)) {
+                    skip_collapsible_space_sequence(&str, collapse_newlines);
+                    if (!*str) {
+                        if (!text_view) {
+                            text_node->view_type = RDT_VIEW_NONE;
+                            log_debug("skipping whitespace text node after first-word wrap");
+                        }
+                        return;
+                    }
+                    had_leading_space = false;
+                }
             }
         }
     }

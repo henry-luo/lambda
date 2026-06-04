@@ -124,6 +124,7 @@ struct FontHandle {
     int         actual_font_weight;     // weight of the loaded font file (from OS/2 usWeightClass); 0 = unknown
     FontSlant   slant;
     char*       family_name;            // arena-allocated
+    char*       metric_family_name;     // optional arena-allocated browser metric family alias
     bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
 };
 

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/html5/html5_parser.h"
 
 extern "C" {
     #include "../lib/mempool.h"
@@ -66,6 +67,19 @@ protected:
         }
 
         return input->root;
+    }
+
+    Item parseHtml5Document(const char* html) {
+        Input* input = input_from_source("", NULL, html_type, NULL);
+        if (!input) {
+            return Item{.item = ITEM_NULL};
+        }
+
+        Element* doc = html5_parse(input, html);
+        if (!doc) {
+            return Item{.item = ITEM_NULL};
+        }
+        return Item{.element = doc};
     }
 
     Element* findElementByTag(Item item, const char* tag_name) {
@@ -207,6 +221,70 @@ protected:
 
         return count;
     }
+
+    int countDirectChildrenByTag(Element* elem, const char* tag_name) {
+        if (!elem || !elem->type) {
+            return 0;
+        }
+
+        int count = 0;
+        TypeElmt* type = (TypeElmt*)elem->type;
+        List* elem_list = (List*)elem;
+        int64_t attr_count = elem_list->length - type->content_length;
+        for (int64_t i = attr_count; i < elem_list->length; i++) {
+            Item child = elem_list->items[i];
+            if (get_type_id(child) != LMD_TYPE_ELEMENT) {
+                continue;
+            }
+            TypeElmt* child_type = (TypeElmt*)child.element->type;
+            if (strview_equal(&child_type->name, tag_name)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    Element* findElementByTagAllSlots(Item item, const char* tag_name) {
+        if (item.item == ITEM_NULL || item.item == ITEM_ERROR) {
+            return nullptr;
+        }
+
+        if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+            Element* elem = item.element;
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (strview_equal(&type->name, tag_name)) {
+                return elem;
+            }
+
+            List* elem_list = (List*)elem;
+            for (int64_t i = 0; i < elem_list->length; i++) {
+                Element* found = findElementByTagAllSlots(elem_list->items[i], tag_name);
+                if (found) return found;
+            }
+        }
+
+        return nullptr;
+    }
+
+    int countDirectElementChildrenByTagAllSlots(Element* elem, const char* tag_name) {
+        if (!elem || !elem->type) {
+            return 0;
+        }
+
+        int count = 0;
+        List* elem_list = (List*)elem;
+        for (int64_t i = 0; i < elem_list->length; i++) {
+            Item child = elem_list->items[i];
+            if (get_type_id(child) != LMD_TYPE_ELEMENT) {
+                continue;
+            }
+            TypeElmt* child_type = (TypeElmt*)child.element->type;
+            if (strview_equal(&child_type->name, tag_name)) {
+                count++;
+            }
+        }
+        return count;
+    }
 };
 
 // ============================================================================
@@ -222,6 +300,19 @@ TEST_F(HtmlParserTest, BasicParsingSimpleDiv) {
 
     TypeElmt* type = (TypeElmt*)elem->type;
     EXPECT_TRUE(strview_equal(&type->name, "div"));
+}
+
+TEST_F(HtmlParserTest, MismatchedHeadingEndTagClosesOpenHeading) {
+    Item result = parseHtml5Document("<div><h2>Why B-School?</h1><p>Intro</p></div>");
+
+    Element* div = findElementByTagAllSlots(result, "div");
+    ASSERT_NE(div, nullptr);
+    Element* h2 = findElementByTagAllSlots(result, "h2");
+    ASSERT_NE(h2, nullptr);
+
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(div, "h2"), 1);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(div, "p"), 1);
+    EXPECT_EQ(countDirectElementChildrenByTagAllSlots(h2, "p"), 0);
 }
 
 // ============================================================================

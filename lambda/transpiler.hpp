@@ -67,6 +67,7 @@ struct Runtime {
     Heap* heap;
     gc_nursery_t* nursery;
     NamePool* name_pool;
+    ArrayList* type_list;
 
     // Pool reuse for batch mode: when set, heap_init_with_pool() uses this
     // pool instead of creating a new one. Set by script_runner between files.

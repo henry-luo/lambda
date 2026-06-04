@@ -904,6 +904,33 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     return true;
 }
 
+static CssDeclaration* css_declaration_clone_for_element(CssDeclaration* source,
+                                                         CssSpecificity specificity,
+                                                         CssOrigin origin,
+                                                         Pool* pool) {
+    if (!source || !pool) return NULL;
+
+    CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
+    if (!decl) return NULL;
+
+    decl->property_id = source->property_id;
+    decl->value = source->value;
+    decl->specificity = specificity;
+    decl->specificity.important = source->important;
+    decl->origin = origin;
+    decl->source_order = source->source_order;
+    decl->important = source->important;
+    decl->source_file = source->source_file;
+    decl->source_line = source->source_line;
+    decl->property_name = source->property_name;
+    decl->value_text = source->value_text;
+    decl->value_text_len = source->value_text_len;
+    decl->valid = source->valid;
+    decl->ref_count = 1;
+
+    return decl;
+}
+
 int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity) {
     if (!element || !rule) {
         return 0;
@@ -916,12 +943,9 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
-                // Update declaration's specificity to match the selector
-                decl->specificity = specificity;
-                decl->specificity.important = decl->important; // preserve !important for cascade
-                decl->origin = rule->origin;
-
-                if (dom_element_apply_declaration(element, decl)) {
+                CssDeclaration* element_decl = css_declaration_clone_for_element(
+                    decl, specificity, rule->origin, element->doc->pool);
+                if (element_decl && dom_element_apply_declaration(element, element_decl)) {
                     applied_count++;
                 }
             }
@@ -1008,16 +1032,15 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
-                // Update declaration's specificity to match the selector
-                decl->specificity = specificity;
-                decl->specificity.important = decl->important; // preserve !important for cascade
-                decl->origin = rule->origin;
+                CssDeclaration* element_decl = css_declaration_clone_for_element(
+                    decl, specificity, rule->origin, element->doc->pool);
+                if (!element_decl) continue;
 
                 // Apply to pseudo-element style tree
-                if (style_tree_apply_declaration(*target_style, decl)) {
+                if (style_tree_apply_declaration(*target_style, element_decl)) {
                     applied_count++;
                     log_debug("[CSS] Applied %s property %d to <%s>",
-                              pseudo_name, decl->property_id, element->tag_name);
+                              pseudo_name, element_decl->property_id, element->tag_name);
                 }
             }
         }

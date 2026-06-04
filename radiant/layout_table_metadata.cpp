@@ -2,7 +2,9 @@
 
 TableMetadata::TableMetadata(ScratchArena* scratch, int cols, int rows)
     : column_count(cols), row_count(rows), grid_occupied(nullptr),
-      col_widths(nullptr), col_min_widths(nullptr), col_max_widths(nullptr),
+      col_widths(nullptr), col_single_min_widths(nullptr),
+      col_min_widths(nullptr), col_max_widths(nullptr),
+      col_percent_widths(nullptr),
       row_heights(nullptr), row_y_positions(nullptr), row_collapsed(nullptr),
       col_collapsed(nullptr), col_original_widths(nullptr),
       row_has_percent_height(nullptr), col_edge_max_border(nullptr),
@@ -11,8 +13,10 @@ TableMetadata::TableMetadata(ScratchArena* scratch, int cols, int rows)
       collapsed_border_left(0), sa(scratch) {
     grid_occupied = (bool*)scratch_calloc(sa, rows * cols * sizeof(bool));
     col_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+    col_single_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
     col_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
     col_max_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
+    col_percent_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
     row_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
     row_y_positions = (float*)scratch_calloc(sa, rows * sizeof(float));
     row_collapsed = (bool*)scratch_calloc(sa, rows * sizeof(bool));
@@ -32,8 +36,10 @@ TableMetadata::~TableMetadata() {
     scratch_free(sa, row_collapsed);
     scratch_free(sa, row_y_positions);
     scratch_free(sa, row_heights);
+    scratch_free(sa, col_percent_widths);
     scratch_free(sa, col_max_widths);
     scratch_free(sa, col_min_widths);
+    scratch_free(sa, col_single_min_widths);
     scratch_free(sa, col_widths);
     scratch_free(sa, grid_occupied);
 }

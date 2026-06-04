@@ -60,6 +60,11 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         if (!context->nursery) {
             context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         }
+        if (!context->type_list) {
+            context->type_list = runtime && runtime->type_list
+                ? runtime->type_list
+                : arraylist_new(64);
+        }
     } else {
         js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = &js_context;
@@ -185,6 +190,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         }
     }
 
+    ArrayList* result_type_list = (ArrayList*)context->type_list;
     context = old_context;
 
     // cleanup
@@ -195,6 +201,9 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     if (!reusing_context) {
         runtime->heap = js_context.heap;
         runtime->nursery = js_context.nursery;
+    }
+    if (runtime) {
+        runtime->type_list = result_type_list;
     }
 
     jm_cleanup_deferred_mir();
@@ -451,6 +460,11 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         reusing_context = true;
         if (!context->nursery) {
             context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
+        }
+        if (!context->type_list) {
+            context->type_list = runtime && runtime->type_list
+                ? runtime->type_list
+                : arraylist_new(64);
         }
     } else {
         js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
@@ -777,6 +791,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Convert JS HashMap objects to VMap for proper printing (before context restore)
     // (no longer needed — JS objects are now Lambda Maps)
 
+    ArrayList* result_type_list = (ArrayList*)context->type_list;
     context = old_context;
 
     // Cleanup
@@ -822,6 +837,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         runtime->heap = js_context.heap;
         runtime->nursery = js_context.nursery;
         runtime->name_pool = js_context.name_pool;
+    }
+    if (runtime) {
+        runtime->type_list = result_type_list;
     }
 
     // In hot-reload batch mode, skip deferred MIR cleanup — accumulated contexts
@@ -891,6 +909,31 @@ Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_sour
     Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
     g_jm_preamble_in = NULL;
     return result;
+}
+
+bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
+    if (!state || !g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) {
+        return false;
+    }
+
+    int count = g_eval_preamble_entry_count;
+    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_alloc(
+        count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+    if (!entries) {
+        log_error("js-mir: failed to refresh preamble snapshot");
+        return false;
+    }
+    memcpy(entries, g_eval_preamble_entries, count * sizeof(JsModuleConstEntry));
+
+    mem_free(state->entries);
+    state->entries = entries;
+    state->entry_count = count;
+    state->module_var_count = g_eval_preamble_var_count >= state->module_var_count
+        ? g_eval_preamble_var_count
+        : state->module_var_count;
+    log_debug("js-mir: refreshed preamble snapshot: %d entries, %d module vars",
+        state->entry_count, state->module_var_count);
+    return true;
 }
 
 void preamble_state_destroy(JsPreambleState* state) {
