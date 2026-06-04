@@ -27,6 +27,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/log.h"
+#include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include "../lib/url.h"
@@ -126,6 +127,11 @@ static Pool* s_js_reuse_pool = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
+typedef enum JsScriptPipelineMode {
+    JS_SCRIPT_PIPELINE_LEGACY_COMBINED,
+    JS_SCRIPT_PIPELINE_TASKS_POSTDOM
+} JsScriptPipelineMode;
+
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
 }
@@ -140,6 +146,53 @@ extern "C" void script_runner_cleanup_heap() {
         s_js_reuse_pool = nullptr;
     }
 }
+
+typedef enum JsScriptTaskKind {
+    JS_SCRIPT_TASK_CLASSIC,
+    JS_SCRIPT_TASK_BODY_ONLOAD
+} JsScriptTaskKind;
+
+typedef enum JsScriptTaskScheduling {
+    JS_SCRIPT_SCHED_POST_DOM,
+    JS_SCRIPT_SCHED_AFTER_SCRIPTS
+} JsScriptTaskScheduling;
+
+typedef enum JsScriptTaskStatus {
+    JS_SCRIPT_TASK_READY,
+    JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE,
+    JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED,
+    JS_SCRIPT_TASK_LOAD_FAILED
+} JsScriptTaskStatus;
+
+typedef struct JsScriptTask {
+    JsScriptTaskKind kind;
+    JsScriptTaskScheduling scheduling;
+    JsScriptTaskStatus status;
+    Element* script_element;
+    char* type_attr;
+    char* src_attr;
+    char* resolved_url;
+    char* source;
+    size_t source_len;
+    bool external;
+    bool parser_inserted;
+    int source_line;
+    int source_column;
+    int document_order;
+} JsScriptTask;
+
+typedef struct JsScriptTaskCollection {
+    ArrayList* scripts;
+    ArrayList* onload_handlers;
+    int total_script_elements;
+    int inline_scripts;
+    int external_scripts;
+    int skipped_scripts;
+    int onload_handlers_count;
+    size_t inline_source_bytes;
+    size_t external_source_bytes;
+    size_t onload_source_bytes;
+} JsScriptTaskCollection;
 
 // forward declaration from dom_element.cpp / cmd_layout.cpp
 extern const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
@@ -323,206 +376,225 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
     return content;
 }
 
-/**
- * Recursively walk the Element* tree, collecting <script> source text
- * (both inline and external) and the body onload handler in document order.
- */
-static int loaded_external_scripts = 0;
-static int failed_external_scripts = 0;
-
-static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf* onload_buf, Url* base_url) {
-    if (!elem) return;
-
-    // check for <body onload="...">
-    if (is_body_element(elem)) {
-        const char* onload = extract_element_attribute(elem, "onload", nullptr);
-        if (onload && onload[0]) {
-            // Preprocess the onload handler before emitting as JS code.
-            // The MIR transpiler cannot eval() strings, so the common pattern
-            // setTimeout('code()', delay) must be transformed: we extract the
-            // string content and emit it as direct code. The function-reference
-            // form setTimeout(fn, delay) needs no transformation — the preamble's
-            // setTimeout stub calls fn() directly, and inline script function
-            // declarations are at global scope (no try/catch wrapping).
-            // Also handle setInterval the same way (background-position-201).
-            const char* st = strstr(onload, "setTimeout(");
-            if (!st) st = strstr(onload, "setInterval(");
-            if (st) {
-                int skip_len = (st[3] == 'T' || st[3] == 't') ? 11 : 12; // "setTimeout(" vs "setInterval("
-                const char* p = st + skip_len;
-                if (*p == '\'' || *p == '"') {
-                    // String form: setTimeout('code()', delay) — extract inner code
-                    char quote = *p++;
-                    const char* code_start = p;
-                    while (*p && *p != quote) p++;
-                    if (*p == quote) {
-                        strbuf_append_str_n(onload_buf, code_start, (int)(p - code_start));
-                        strbuf_append_str(onload_buf, "\n");
-                    } else {
-                        // Malformed — emit as-is and let the transpiler handle it
-                        strbuf_append_str(onload_buf, onload);
-                        strbuf_append_str(onload_buf, "\n");
-                    }
-                } else {
-                    // Function reference or expression — emit as-is
-                    strbuf_append_str(onload_buf, onload);
-                    strbuf_append_str(onload_buf, "\n");
-                }
-            } else {
-                // No setTimeout/setInterval — emit the handler code directly
-                strbuf_append_str(onload_buf, onload);
-                strbuf_append_str(onload_buf, "\n");
-            }
-        }
-    }
-
-    // check for <script> elements
-    if (is_script_element(elem)) {
-        // check type attribute - only execute text/javascript or no type
-        const char* type_attr = extract_element_attribute(elem, "type", nullptr);
-        if (type_attr && type_attr[0] &&
-            strcasecmp(type_attr, "text/javascript") != 0 &&
-            strcasecmp(type_attr, "application/javascript") != 0 &&
-            strcasecmp(type_attr, "text/ecmascript") != 0 &&
-            strcasecmp(type_attr, "application/ecmascript") != 0) {
-            return;
-        }
-        // check for src attribute - load external scripts
-        const char* src_attr = extract_element_attribute(elem, "src", nullptr);
-        if (src_attr && src_attr[0]) {
-            if (!s_execute_external_scripts) {
-                return;
-            }
-            bool is_http = false;
-            const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
-            char* content = load_script_content(resolved, is_http);
-            if (content) {
-                // Wrap external scripts in try/catch to prevent library feature-detection
-                // exceptions (e.g. jQuery testing browser capabilities) from aborting
-                // the entire script execution. Feature detection errors are expected and
-                // non-fatal in real browsers.
-                strbuf_append_str(script_buf, "try {\n");
-                strbuf_append_str(script_buf, content);
-                strbuf_append_str(script_buf, "\n} catch(_ext_err) {}\n");
-                append_browser_global_sync(script_buf);
-                mem_free(content);
-                loaded_external_scripts++;
-            } else {
-                failed_external_scripts++;
-            }
-            return;
-        }
-        // Each classic script runs as its own unit. A script exception must not
-        // cancel later scripts or the document load handler.
-        strbuf_append_str(script_buf, "try {\n");
-        extract_script_text(elem, script_buf);
-        strbuf_append_str(script_buf, "\n} catch(_script_err) {}\n");
-        append_browser_global_sync(script_buf);
-        return;  // don't recurse into script children
-    }
-
-    // recurse into child elements
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        TypeId tid = get_type_id(child);
-        if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, script_buf, onload_buf, base_url);
-        }
+static const char* script_task_kind_name(JsScriptTaskKind kind) {
+    switch (kind) {
+        case JS_SCRIPT_TASK_CLASSIC: return "classic";
+        case JS_SCRIPT_TASK_BODY_ONLOAD: return "body-onload";
+        default: return "unknown";
     }
 }
 
-// ============================================================================
-// Main entry point
-// ============================================================================
+static const char* script_task_status_name(JsScriptTaskStatus status) {
+    switch (status) {
+        case JS_SCRIPT_TASK_READY: return "ready";
+        case JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE: return "skipped-unsupported-type";
+        case JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED: return "skipped-external-disabled";
+        case JS_SCRIPT_TASK_LOAD_FAILED: return "load-failed";
+        default: return "unknown";
+    }
+}
 
-extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url) {
-    if (!html_root || !dom_doc) {
-        log_debug("execute_document_scripts: null parameters, skipping");
+static bool script_task_diagnostics_enabled() {
+    const char* env = getenv("RADIANT_JS_TASK_DIAGNOSTICS");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
+
+static JsScriptPipelineMode script_runner_pipeline_mode() {
+    const char* env = getenv("RADIANT_JS_PIPELINE");
+    if (env && strcmp(env, "tasks-postdom") == 0) {
+        return JS_SCRIPT_PIPELINE_TASKS_POSTDOM;
+    }
+    return JS_SCRIPT_PIPELINE_LEGACY_COMBINED;
+}
+
+static const char* script_runner_pipeline_name(JsScriptPipelineMode mode) {
+    switch (mode) {
+        case JS_SCRIPT_PIPELINE_TASKS_POSTDOM: return "tasks-postdom";
+        case JS_SCRIPT_PIPELINE_LEGACY_COMBINED:
+        default: return "legacy-combined";
+    }
+}
+
+static JsScriptTask* script_task_new(JsScriptTaskKind kind, int document_order) {
+    JsScriptTask* task = (JsScriptTask*)mem_calloc(1, sizeof(JsScriptTask), MEM_CAT_JS_RUNTIME);
+    if (!task) return nullptr;
+    task->kind = kind;
+    task->scheduling = (kind == JS_SCRIPT_TASK_BODY_ONLOAD)
+        ? JS_SCRIPT_SCHED_AFTER_SCRIPTS
+        : JS_SCRIPT_SCHED_POST_DOM;
+    task->status = JS_SCRIPT_TASK_READY;
+    task->parser_inserted = true;
+    task->document_order = document_order;
+    return task;
+}
+
+static void script_task_free(JsScriptTask* task) {
+    if (!task) return;
+    if (task->type_attr) mem_free(task->type_attr);
+    if (task->src_attr) mem_free(task->src_attr);
+    if (task->resolved_url) mem_free(task->resolved_url);
+    if (task->source) mem_free(task->source);
+    mem_free(task);
+}
+
+static bool script_task_list_append(ArrayList* list, JsScriptTask* task) {
+    if (!list || !task) return false;
+    if (!arraylist_append(list, task)) {
+        script_task_free(task);
+        return false;
+    }
+    return true;
+}
+
+static void script_task_list_free(ArrayList* list) {
+    if (!list) return;
+    for (int i = 0; i < list->length; i++) {
+        script_task_free((JsScriptTask*)arraylist_get(list, i));
+    }
+    arraylist_free(list);
+}
+
+static bool script_task_collection_init(JsScriptTaskCollection* collection) {
+    if (!collection) return false;
+    memset(collection, 0, sizeof(JsScriptTaskCollection));
+    collection->scripts = arraylist_new(8);
+    collection->onload_handlers = arraylist_new(1);
+    if (!collection->scripts || !collection->onload_handlers) {
+        script_task_list_free(collection->scripts);
+        script_task_list_free(collection->onload_handlers);
+        memset(collection, 0, sizeof(JsScriptTaskCollection));
+        return false;
+    }
+    return true;
+}
+
+static void script_task_collection_free(JsScriptTaskCollection* collection) {
+    if (!collection) return;
+    script_task_list_free(collection->scripts);
+    script_task_list_free(collection->onload_handlers);
+    memset(collection, 0, sizeof(JsScriptTaskCollection));
+}
+
+static char* script_source_from_strbuf(StrBuf* buf) {
+    if (!buf || !buf->str || buf->length == 0) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
+    return mem_strndup(buf->str, buf->length, MEM_CAT_JS_RUNTIME);
+}
+
+static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
+    if (!onload || !onload[0] || !onload_buf) return;
+
+    // The MIR transpiler cannot eval() strings, so the common pattern
+    // setTimeout('code()', delay) must be transformed: extract the string
+    // content and emit it as direct code. Function-reference forms keep their
+    // source unchanged because the preamble timer stubs call them directly.
+    const char* st = strstr(onload, "setTimeout(");
+    if (!st) st = strstr(onload, "setInterval(");
+    if (st) {
+        int skip_len = (st[3] == 'T' || st[3] == 't') ? 11 : 12; // "setTimeout(" vs "setInterval("
+        const char* p = st + skip_len;
+        if (*p == '\'' || *p == '"') {
+            char quote = *p++;
+            const char* code_start = p;
+            while (*p && *p != quote) p++;
+            if (*p == quote) {
+                strbuf_append_str_n(onload_buf, code_start, (size_t)(p - code_start));
+                strbuf_append_str(onload_buf, "\n");
+                return;
+            }
+        }
+    }
+
+    strbuf_append_str(onload_buf, onload);
+    strbuf_append_str(onload_buf, "\n");
+}
+
+static bool is_supported_classic_script_type(const char* type_attr) {
+    if (!type_attr || !type_attr[0]) return true;
+    return strcasecmp(type_attr, "text/javascript") == 0 ||
+           strcasecmp(type_attr, "application/javascript") == 0 ||
+           strcasecmp(type_attr, "text/ecmascript") == 0 ||
+           strcasecmp(type_attr, "application/ecmascript") == 0;
+}
+
+static void emit_legacy_script_task(StrBuf* script_buf, JsScriptTask* task) {
+    if (!script_buf || !task || task->status != JS_SCRIPT_TASK_READY ||
+        task->kind != JS_SCRIPT_TASK_CLASSIC) {
         return;
     }
 
-    // reset counters
-    loaded_external_scripts = 0;
-    failed_external_scripts = 0;
+    const char* catch_name = task->external ? "_ext_err" : "_script_err";
+    strbuf_append_str(script_buf, "try {\n");
+    if (task->source && task->source_len > 0) {
+        strbuf_append_str_n(script_buf, task->source, task->source_len);
+    }
+    strbuf_append_str(script_buf, "\n} catch(");
+    strbuf_append_str(script_buf, catch_name);
+    strbuf_append_str(script_buf, ") {}\n");
+    append_browser_global_sync(script_buf);
+}
 
-    // collect all scripts and onload handlers
-    StrBuf* script_buf = strbuf_new_cap(4096);
+static void emit_legacy_onload_tasks(StrBuf* script_buf, ArrayList* onload_tasks) {
+    if (!script_buf || !onload_tasks || onload_tasks->length == 0) return;
+
     StrBuf* onload_buf = strbuf_new_cap(256);
+    for (int i = 0; i < onload_tasks->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(onload_tasks, i);
+        if (!task || task->status != JS_SCRIPT_TASK_READY ||
+            task->kind != JS_SCRIPT_TASK_BODY_ONLOAD) {
+            continue;
+        }
+        if (task->source && task->source_len > 0) {
+            strbuf_append_str_n(onload_buf, task->source, task->source_len);
+        }
+    }
 
-    collect_scripts_recursive(html_root, script_buf, onload_buf, base_url);
-
-    // append onload handler after all script definitions
-    // This handles both:
-    //   <body onload="doTest()">  → collected in onload_buf
-    //   window.onload = function() { ... }  → set on window object below
     if (onload_buf->length > 0) {
         strbuf_append_str(script_buf, "try {\n");
-        strbuf_append_str(script_buf, onload_buf->str);
+        strbuf_append_str_n(script_buf, onload_buf->str, onload_buf->length);
         strbuf_append_str(script_buf, "\n} catch(_onload_err) {}\n");
     }
+    strbuf_free(onload_buf);
+}
 
-    if (script_buf->length == 0) {
-        log_debug("execute_document_scripts: no scripts found");
-        strbuf_free(script_buf);
-        strbuf_free(onload_buf);
-        return;
-    }
-
-    // log external script loading stats
-    if (loaded_external_scripts > 0 || failed_external_scripts > 0) {
-        log_info("script_runner: external scripts: %d loaded, %d failed",
-            loaded_external_scripts, failed_external_scripts);
-    }
-
-    // Wrap script code with window object support:
-    // 1. Prepend: var window = {};  (provides window.onload, window.setTimeout etc.)
-    // 2. Append: extract library globals (jQuery/$) from window, then call window.onload
-    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 2048);
-    // Preamble: provide browser globals and stub unsupported APIs
-    strbuf_append_str(wrapped_buf,
+static void append_browser_document_preamble(StrBuf* script_buf) {
+    if (!script_buf) return;
+    strbuf_append_str(script_buf,
         "var window = {};\n"
         "var jQuery = undefined;\n"
         "var $ = undefined;\n"
         "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
-        // Timer globals are transpiler-intercepted. requestAnimationFrame is
-        // native too, but it is drained by Radiant's frame clock, not libuv.
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
         "window.clearTimeout = clearTimeout;\n"
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
-        // Stub storage APIs
         "var localStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
         "var sessionStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
         "window.localStorage = localStorage;\n"
         "window.sessionStorage = sessionStorage;\n"
-        // Stub observer/constructor APIs (return no-op objects)
         "function MutationObserver(cb) { this.observe = function(){}; this.disconnect = function(){}; this.takeRecords = function(){ return []; }; }\n"
         "function IntersectionObserver(cb, opts) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
         "function ResizeObserver(cb) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
         "window.MutationObserver = MutationObserver;\n"
         "window.IntersectionObserver = IntersectionObserver;\n"
         "window.ResizeObserver = ResizeObserver;\n"
-        // Stub console, performance, screen. Location/history are installed by
-        // the native DOM bridge so assignments can request document navigation.
         "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
         "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntriesByName: function(){ return []; }, timing: {}};\n"
         "var screen = {width: 1920, height: 1080, availWidth: 1920, availHeight: 1080, colorDepth: 24, pixelDepth: 24};\n"
         "window.console = console;\n"
         "window.performance = performance;\n"
         "window.screen = screen;\n"
-        // XMLHttpRequest: native constructor via js_xhr_new() — transpiler intercepts `new XMLHttpRequest()`
-        // Minimal stub so `typeof XMLHttpRequest !== 'undefined'` passes (jQuery feature detection).
         "function XMLHttpRequest() {}\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
-        "window.XMLHttpRequest = XMLHttpRequest;\n" // XMLHttpRequest is transpiler-provided
+        "window.XMLHttpRequest = XMLHttpRequest;\n"
         "window.WebSocket = WebSocket;\n"
         "window.Worker = Worker;\n"
-        // Stub event listener on window — delegate to native DOM event system
         "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
         "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
         "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
@@ -568,24 +640,361 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "window.pageYOffset = 0;\n"
         "window.scrollX = 0;\n"
         "window.scrollY = 0;\n"
-        // Set document.defaultView to window for jQuery/Sizzle compatibility
         "document.defaultView = window;\n"
     );
-    strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
-    // Postamble: fire DOMContentLoaded, then call window.onload if set by scripts.
-    strbuf_append_str(wrapped_buf,
+}
+
+static void append_browser_lifecycle_postamble(StrBuf* script_buf) {
+    if (!script_buf) return;
+    strbuf_append_str(script_buf,
         "\nif (document && document.dispatchEvent && typeof Event === 'function') {\n"
         "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
         "}\n"
         "\nif (window.onload) { window.onload(); }\n"
     );
-    strbuf_free(script_buf);
-    script_buf = wrapped_buf;
+}
 
-    log_info("execute_document_scripts: executing %zu bytes of JS", script_buf->length);
-    log_debug("execute_document_scripts: combined source:\n%.500s%s",
-              script_buf->str,
-              script_buf->length > 500 ? "\n..." : "");
+static StrBuf* build_legacy_document_script_source(JsScriptTaskCollection* collection) {
+    if (!collection) return nullptr;
+    StrBuf* body_buf = strbuf_new_cap(4096);
+    for (int i = 0; i < collection->scripts->length; i++) {
+        emit_legacy_script_task(body_buf, (JsScriptTask*)arraylist_get(collection->scripts, i));
+    }
+    emit_legacy_onload_tasks(body_buf, collection->onload_handlers);
+
+    if (body_buf->length == 0) {
+        strbuf_free(body_buf);
+        return nullptr;
+    }
+
+    StrBuf* script_buf = strbuf_new_cap(body_buf->length + 2048);
+    append_browser_document_preamble(script_buf);
+    strbuf_append_str_n(script_buf, body_buf->str, body_buf->length);
+    append_browser_lifecycle_postamble(script_buf);
+    strbuf_free(body_buf);
+    return script_buf;
+}
+
+static bool script_task_collection_has_executable_tasks(JsScriptTaskCollection* collection) {
+    if (!collection) return false;
+    for (int i = 0; i < collection->scripts->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
+        if (task && task->status == JS_SCRIPT_TASK_READY &&
+            task->kind == JS_SCRIPT_TASK_CLASSIC) {
+            return true;
+        }
+    }
+    for (int i = 0; i < collection->onload_handlers->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->onload_handlers, i);
+        if (task && task->status == JS_SCRIPT_TASK_READY &&
+            task->kind == JS_SCRIPT_TASK_BODY_ONLOAD && task->source_len > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t script_task_collection_source_bytes(JsScriptTaskCollection* collection) {
+    if (!collection) return 0;
+    size_t bytes = collection->inline_source_bytes + collection->external_source_bytes +
+        collection->onload_source_bytes + 4096;
+    bytes += (size_t)collection->scripts->length * 128;
+    bytes += (size_t)collection->onload_handlers->length * 64;
+    return bytes;
+}
+
+static int loaded_external_scripts = 0;
+static int failed_external_scripts = 0;
+
+static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
+    if (!collection) return;
+
+    log_debug("script_runner_tasks: scripts=%d inline=%d external=%d loaded=%d failed=%d skipped=%d onload=%d bytes inline=%zu external=%zu onload=%zu",
+        collection->total_script_elements, collection->inline_scripts,
+        collection->external_scripts, loaded_external_scripts,
+        failed_external_scripts, collection->skipped_scripts,
+        collection->onload_handlers_count, collection->inline_source_bytes,
+        collection->external_source_bytes, collection->onload_source_bytes);
+
+    if (!script_task_diagnostics_enabled()) return;
+
+    for (int i = 0; i < collection->scripts->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
+        log_info("script_runner_task: #%d kind=%s status=%s external=%d src=%s bytes=%zu",
+            task ? task->document_order : -1,
+            task ? script_task_kind_name(task->kind) : "null",
+            task ? script_task_status_name(task->status) : "null",
+            task && task->external ? 1 : 0,
+            task && task->resolved_url ? task->resolved_url :
+                (task && task->src_attr ? task->src_attr : "<inline>"),
+            task ? task->source_len : 0);
+    }
+
+    for (int i = 0; i < collection->onload_handlers->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->onload_handlers, i);
+        log_info("script_runner_task: #%d kind=%s status=%s external=0 src=<body onload> bytes=%zu",
+            task ? task->document_order : -1,
+            task ? script_task_kind_name(task->kind) : "null",
+            task ? script_task_status_name(task->status) : "null",
+            task ? task->source_len : 0);
+    }
+}
+
+/**
+ * Recursively walk the Element* tree, collecting <script> source text
+ * (both inline and external) and the body onload handler in document order.
+ */
+static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url) {
+    if (!elem) return;
+
+    // check for <body onload="...">
+    if (is_body_element(elem)) {
+        const char* onload = extract_element_attribute(elem, "onload", nullptr);
+        if (onload && onload[0]) {
+            StrBuf* onload_buf = strbuf_new_cap(256);
+            append_body_onload_source(onload, onload_buf);
+            JsScriptTask* task = script_task_new(JS_SCRIPT_TASK_BODY_ONLOAD,
+                collection->total_script_elements + collection->onload_handlers_count);
+            if (task) {
+                task->source = script_source_from_strbuf(onload_buf);
+                task->source_len = onload_buf->length;
+                collection->onload_handlers_count++;
+                collection->onload_source_bytes += task->source_len;
+                script_task_list_append(collection->onload_handlers, task);
+            }
+            strbuf_free(onload_buf);
+        }
+    }
+
+    // check for <script> elements
+    if (is_script_element(elem)) {
+        int document_order = collection->total_script_elements++;
+        JsScriptTask* task = script_task_new(JS_SCRIPT_TASK_CLASSIC, document_order);
+        if (!task) return;
+        task->script_element = elem;
+
+        const char* type_attr = extract_element_attribute(elem, "type", nullptr);
+        if (type_attr && type_attr[0]) {
+            task->type_attr = mem_strdup(type_attr, MEM_CAT_JS_RUNTIME);
+        }
+        if (!is_supported_classic_script_type(type_attr)) {
+            task->status = JS_SCRIPT_TASK_SKIPPED_UNSUPPORTED_TYPE;
+            collection->skipped_scripts++;
+            script_task_list_append(collection->scripts, task);
+            return;
+        }
+
+        const char* src_attr = extract_element_attribute(elem, "src", nullptr);
+        if (src_attr && src_attr[0]) {
+            task->external = true;
+            task->src_attr = mem_strdup(src_attr, MEM_CAT_JS_RUNTIME);
+            collection->external_scripts++;
+            if (!s_execute_external_scripts) {
+                task->status = JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED;
+                collection->skipped_scripts++;
+                script_task_list_append(collection->scripts, task);
+                return;
+            }
+            bool is_http = false;
+            const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
+            task->resolved_url = mem_strdup(resolved, MEM_CAT_JS_RUNTIME);
+            char* content = load_script_content(resolved, is_http);
+            if (content) {
+                task->source = content;
+                task->source_len = strlen(content);
+                collection->external_source_bytes += task->source_len;
+                loaded_external_scripts++;
+            } else {
+                task->status = JS_SCRIPT_TASK_LOAD_FAILED;
+                failed_external_scripts++;
+            }
+            script_task_list_append(collection->scripts, task);
+            return;
+        }
+
+        StrBuf* inline_buf = strbuf_new_cap(256);
+        extract_script_text(elem, inline_buf);
+        task->source = script_source_from_strbuf(inline_buf);
+        task->source_len = inline_buf->length;
+        collection->inline_scripts++;
+        collection->inline_source_bytes += task->source_len;
+        strbuf_free(inline_buf);
+        script_task_list_append(collection->scripts, task);
+        return;  // don't recurse into script children
+    }
+
+    // recurse into child elements
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId tid = get_type_id(child);
+        if (tid == LMD_TYPE_ELEMENT) {
+            collect_scripts_recursive(child.element, collection, base_url);
+        }
+    }
+}
+
+static const char* script_task_filename(JsScriptTask* task, char* scratch, size_t scratch_len) {
+    if (!task) return "<script-task>";
+    if (task->resolved_url && task->resolved_url[0]) return task->resolved_url;
+    if (task->src_attr && task->src_attr[0]) return task->src_attr;
+    if (task->kind == JS_SCRIPT_TASK_BODY_ONLOAD) return "<body-onload>";
+    snprintf(scratch, scratch_len, "<inline-script-%d>", task->document_order);
+    return scratch;
+}
+
+static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
+                                            const char* source, size_t source_len,
+                                            const char* filename, bool refresh_snapshot) {
+    if (!runtime || !preamble) return ItemError;
+    if (!source) {
+        source = "";
+        source_len = 0;
+    }
+
+    EvalContext task_context = {};
+    task_context.heap = runtime->heap;
+    task_context.nursery = runtime->nursery;
+    task_context.name_pool = runtime->name_pool;
+    if (!runtime->type_list) {
+        runtime->type_list = arraylist_new(64);
+    }
+    task_context.type_list = runtime->type_list;
+    task_context.pool = runtime->heap ? runtime->heap->pool : nullptr;
+
+    EvalContext* saved_context = context;
+    context = &task_context;
+    Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename, preamble);
+    context = saved_context;
+
+    if (refresh_snapshot && get_type_id(result) != LMD_TYPE_ERROR) {
+        preamble_state_update_from_eval_snapshot(preamble);
+    }
+    return result;
+}
+
+static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTaskCollection* collection,
+                                                  JsPreambleState* preamble) {
+    if (!runtime || !collection || !preamble) return ItemError;
+
+    StrBuf* preamble_buf = strbuf_new_cap(4096);
+    append_browser_document_preamble(preamble_buf);
+    Item result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
+                                                   "<document-preamble>", preamble);
+    strbuf_free(preamble_buf);
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        log_error("execute_document_scripts: document preamble execution failed");
+        return result;
+    }
+
+    bool any_error = false;
+    for (int i = 0; i < collection->scripts->length; i++) {
+        JsScriptTask* task = (JsScriptTask*)arraylist_get(collection->scripts, i);
+        if (!task || task->status != JS_SCRIPT_TASK_READY ||
+            task->kind != JS_SCRIPT_TASK_CLASSIC) {
+            continue;
+        }
+
+        StrBuf* task_buf = strbuf_new_cap(task->source_len + 256);
+        emit_legacy_script_task(task_buf, task);
+        char filename_buf[64];
+        const char* filename = script_task_filename(task, filename_buf, sizeof(filename_buf));
+        result = execute_js_source_with_preamble(runtime, preamble, task_buf->str, task_buf->length,
+                                                 filename, true);
+        strbuf_free(task_buf);
+        if (get_type_id(result) == LMD_TYPE_ERROR) {
+            any_error = true;
+            log_error("execute_document_scripts: script task failed: %s", filename);
+        }
+    }
+
+    StrBuf* onload_buf = strbuf_new_cap(512);
+    emit_legacy_onload_tasks(onload_buf, collection->onload_handlers);
+    if (onload_buf->length > 0) {
+        result = execute_js_source_with_preamble(runtime, preamble, onload_buf->str, onload_buf->length,
+                                                 "<body-onload>", true);
+        if (get_type_id(result) == LMD_TYPE_ERROR) {
+            any_error = true;
+            log_error("execute_document_scripts: body onload task failed");
+        }
+    }
+    strbuf_free(onload_buf);
+
+    StrBuf* lifecycle_buf = strbuf_new_cap(256);
+    append_browser_lifecycle_postamble(lifecycle_buf);
+    result = execute_js_source_with_preamble(runtime, preamble, lifecycle_buf->str, lifecycle_buf->length,
+                                             "<document-lifecycle>", false);
+    strbuf_free(lifecycle_buf);
+    if (get_type_id(result) == LMD_TYPE_ERROR) {
+        any_error = true;
+        log_error("execute_document_scripts: document lifecycle task failed");
+    }
+
+    return any_error ? ItemError : result;
+}
+
+// ============================================================================
+// Main entry point
+// ============================================================================
+
+extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url) {
+    if (!html_root || !dom_doc) {
+        log_debug("execute_document_scripts: null parameters, skipping");
+        return;
+    }
+
+    // reset counters
+    loaded_external_scripts = 0;
+    failed_external_scripts = 0;
+
+    // collect script task metadata first, then emit the legacy concatenated
+    // source from those tasks. This keeps behavior stable while introducing
+    // Phase 4 script-unit boundaries.
+    JsScriptTaskCollection script_tasks;
+    if (!script_task_collection_init(&script_tasks)) {
+        log_error("execute_document_scripts: failed to initialize script task collection");
+        return;
+    }
+    collect_scripts_recursive(html_root, &script_tasks, base_url);
+    log_script_task_diagnostics(&script_tasks);
+
+    JsScriptPipelineMode pipeline_mode = script_runner_pipeline_mode();
+    StrBuf* script_buf = nullptr;
+    size_t watchdog_source_len = 0;
+
+    if (pipeline_mode == JS_SCRIPT_PIPELINE_LEGACY_COMBINED) {
+        script_buf = build_legacy_document_script_source(&script_tasks);
+        if (script_buf) {
+            watchdog_source_len = script_buf->length;
+        }
+    } else if (script_task_collection_has_executable_tasks(&script_tasks)) {
+        watchdog_source_len = script_task_collection_source_bytes(&script_tasks);
+    }
+
+    if (!script_buf && pipeline_mode == JS_SCRIPT_PIPELINE_LEGACY_COMBINED) {
+        log_debug("execute_document_scripts: no scripts found");
+        script_task_collection_free(&script_tasks);
+        return;
+    }
+    if (pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM &&
+        !script_task_collection_has_executable_tasks(&script_tasks)) {
+        log_debug("execute_document_scripts: no scripts found");
+        script_task_collection_free(&script_tasks);
+        return;
+    }
+
+    // log external script loading stats
+    if (loaded_external_scripts > 0 || failed_external_scripts > 0) {
+        log_info("script_runner: external scripts: %d loaded, %d failed",
+            loaded_external_scripts, failed_external_scripts);
+    }
+
+    log_info("execute_document_scripts: executing JS with %s pipeline (%zu source bytes)",
+        script_runner_pipeline_name(pipeline_mode), watchdog_source_len);
+    if (script_buf) {
+        log_debug("execute_document_scripts: combined source:\n%.500s%s",
+                  script_buf->str,
+                  script_buf->length > 500 ? "\n..." : "");
+    }
 
     // set up Runtime for JS transpiler
     Runtime runtime = {};
@@ -618,15 +1027,15 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     sigaction(SIGALRM, &alrm_sa, &js_exec_old_alrm);
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
-    int timeout_seconds = js_exec_timeout_seconds(script_buf->length);
+    int timeout_seconds = js_exec_timeout_seconds(watchdog_source_len);
     if (timeout_seconds > JS_EXEC_TIMEOUT_BASE_SECONDS) {
         log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
-                 script_buf->length, timeout_seconds);
+                 watchdog_source_len, timeout_seconds);
     }
     alarm(timeout_seconds);
 #endif
 
-    Item result;
+    Item result = ItemNull;
     JsPreambleState* preamble = nullptr;
 #ifndef _WIN32
     int jmp_val = sigsetjmp(js_exec_jmpbuf, 1);
@@ -639,11 +1048,13 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         // compiled functions later. Static headless smoke loads only need
         // load-time DOM mutations, so use transient mode and avoid retaining
         // large MIR/transpiler pools for pages with big inline scripts.
-        if (s_retain_js_state) {
+        if (s_retain_js_state || pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM) {
             preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
         }
         log_mem_stage("js: before transpile/exec");
-        if (s_retain_js_state) {
+        if (pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM) {
+            result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble);
+        } else if (s_retain_js_state) {
             result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
         } else {
             result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
@@ -699,6 +1110,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         dom_doc->js_runtime_heap = runtime.heap;
         dom_doc->js_runtime_nursery = runtime.nursery;
         dom_doc->js_runtime_name_pool = runtime.name_pool;
+        dom_doc->js_runtime_type_list = runtime.type_list;
         dom_doc->js_runtime_pool = runtime.reuse_pool;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
@@ -733,10 +1145,14 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         if (runtime.nursery) {
             gc_nursery_destroy(runtime.nursery);
         }
+        if (runtime.type_list) {
+            arraylist_free(runtime.type_list);
+            runtime.type_list = nullptr;
+        }
     }
 
-    strbuf_free(script_buf);
-    strbuf_free(onload_buf);
+    if (script_buf) strbuf_free(script_buf);
+    script_task_collection_free(&script_tasks);
 }
 
 extern "C" bool script_runner_js_batch_cleanup_unsafe(void) {
@@ -877,6 +1293,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     runtime.heap = (Heap*)dom_doc->js_runtime_heap;
     runtime.nursery = (gc_nursery_t*)dom_doc->js_runtime_nursery;
     runtime.name_pool = (NamePool*)dom_doc->js_runtime_name_pool;
+    runtime.type_list = (ArrayList*)dom_doc->js_runtime_type_list;
     runtime.reuse_pool = (Pool*)dom_doc->js_runtime_pool;
 
     // Set up thread-local eval context so transpiler sees reusing_context=true.
@@ -885,6 +1302,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     handler_compile_ctx.heap = runtime.heap;
     handler_compile_ctx.nursery = runtime.nursery;
     handler_compile_ctx.name_pool = runtime.name_pool;
+    handler_compile_ctx.type_list = runtime.type_list;
     handler_compile_ctx.pool = runtime.reuse_pool ? runtime.reuse_pool :
         (runtime.heap ? runtime.heap->pool : nullptr);
     EvalContext* saved_ctx = context;
@@ -952,6 +1370,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     dom_doc->js_runtime_heap = runtime.heap;
     dom_doc->js_runtime_nursery = runtime.nursery;
     dom_doc->js_runtime_name_pool = runtime.name_pool;
+    dom_doc->js_runtime_type_list = runtime.type_list;
 
     dom_doc->js_event_registry = registry;
 }
@@ -984,6 +1403,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         dom_doc->js_preamble_state = nullptr;
         dom_doc->js_mir_ctx = nullptr;
     }
+    jm_cleanup_deferred_mir();
 
     // Destroy retained heap (GC metadata + nursery)
     if (dom_doc->js_runtime_heap) {
@@ -1000,6 +1420,11 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (dom_doc->js_runtime_nursery) {
         gc_nursery_destroy((gc_nursery_t*)dom_doc->js_runtime_nursery);
         dom_doc->js_runtime_nursery = nullptr;
+    }
+
+    if (dom_doc->js_runtime_type_list) {
+        arraylist_free((ArrayList*)dom_doc->js_runtime_type_list);
+        dom_doc->js_runtime_type_list = nullptr;
     }
 
     // Destroy retained mmap pool (native code pages, etc.)

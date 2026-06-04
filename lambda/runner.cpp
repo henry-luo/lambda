@@ -1422,6 +1422,10 @@ void runtime_reset_heap(Runtime* runtime) {
             name_pool_release(runtime->name_pool);
             runtime->name_pool = NULL;
         }
+        if (runtime->type_list) {
+            arraylist_free(runtime->type_list);
+            runtime->type_list = NULL;
+        }
 
         heap_destroy();
         if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
@@ -1462,6 +1466,10 @@ void runtime_cleanup(Runtime* runtime) {
         if (runtime->name_pool) {
             name_pool_release(runtime->name_pool);
             runtime->name_pool = NULL;
+        }
+        if (runtime->type_list) {
+            arraylist_free(runtime->type_list);
+            runtime->type_list = NULL;
         }
 
         heap_destroy();
