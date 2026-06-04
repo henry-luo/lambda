@@ -717,13 +717,16 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (0) {
 #endif
         // Stack overflow was caught — signal handler siglongjmp'd here
+        _lambda_recovery_armed = 0;   // recovery consumed; disarm
         log_error("js-mir: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
         result = (Item){.item = ITEM_ERROR};
         // Report the error so it shows up as an uncaught exception
         js_throw_range_error("Maximum call stack size exceeded");
     } else {
+        _lambda_recovery_armed = 1;    // arm only for the duration of user code
         result = js_main((Context*)context);
+        _lambda_recovery_armed = 0;
     }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));

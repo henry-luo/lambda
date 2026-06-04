@@ -755,8 +755,29 @@ OOM-only (not overflow→corruption) and need per-caller bail/clamp logic; defer
 baseline is pre-existingly flaky (see Phase 1 note), making clean verification of caller-contract changes
 harder. The overflow→heap-overflow vectors and the clean display-list site are done.
 
-**Not yet started:** Phase 3 (`RecursionGuard` wiring + recovery-point reorder), Phases 4–6, and the
-`make check-alloc` / `check-span` / `check-recursion` lint targets.
+**Phase 3 — landed and verified.** Closes **C2** (stack-overflow → `siglongjmp`-into-zeroed-`jmp_buf` UB)
+at both the root cause and as defense-in-depth.
+
+- **Root cause (depth guard)** — `lambda/build_ast.cpp` + `lambda/ast.hpp`: added a `build_depth` field to
+  `Transpiler` (zeroed by the existing `memset` init) and a `lam::RecursionGuard` at the top of `build_expr`
+  with `MAX_BUILD_DEPTH = 1000`. A pathologically nested source now returns `NULL` (the existing error
+  convention) instead of recursing into stack exhaustion.
+- **Defense-in-depth (recovery-armed flag)** — `lambda/lambda-stack.{h,cpp}`: added
+  `_lambda_recovery_armed` (`__thread volatile sig_atomic_t`). The SIGSEGV handler now only `siglongjmp`s when
+  a recovery point is actually armed; otherwise (e.g. a stack overflow during AST build or CSS parsing, before
+  any code execution armed it) it falls back to `SIG_DFL` + `raise` for a clean crash rather than jumping into
+  a zero-initialized `jmp_buf`. The flag is set/cleared around the three user/JIT execution sites
+  (`transpile-mir.cpp`, `runner.cpp`, `js/js_mir_entrypoints_require.cpp`).
+- **CSS parser depth cap (latent finding)** — `lambda/input/css/css_parser.cpp`: a `thread_local` depth
+  counter + `RecursionGuard` (`MAX_CSS_FUNC_DEPTH = 256`) in `css_parse_function_from_tokens` caps nested
+  `calc(calc(...))` so it returns a parse failure instead of overflowing.
+- Verified: a 5000-deep nested source now exits cleanly with `"expression nesting too deep"` (exit 1, **no
+  SIGSEGV**); runtime non-tail recursion still recovers via the armed path (`recovered from stack overflow`,
+  no UB); **Lambda baseline 2942/2942** (the 2105 input tests exercise the CSS path).
+
+**Not yet started:** Phases 4–6 (C3 view-pool `Handle<T>`/`PersistentField`; M1/M4 null-guards; ASan+fuzz CI),
+the deferred Phase-2 flex/grid realloc-null-checks, and the `make check-alloc` / `check-span` /
+`check-recursion` lint targets.
 
 ---
 

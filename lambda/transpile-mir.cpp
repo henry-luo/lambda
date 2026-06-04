@@ -12356,12 +12356,15 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         #else
         if (0) {
         #endif
+            _lambda_recovery_armed = 0;   // recovery consumed; disarm
             log_error("exec: recovered from stack overflow via signal handler");
             _lambda_stack_overflow_flag = false;
             lambda_stack_overflow_error("<signal>");
             result = runner.context.result = ItemError;
         } else {
+            _lambda_recovery_armed = 1;    // arm only for the duration of user code
             result = runner.context.result = runner.script->main_func(&runner.context);
+            _lambda_recovery_armed = 0;
         }
 
         // Create output
