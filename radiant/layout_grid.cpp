@@ -4,6 +4,7 @@
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 #include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
 #include "../lib/tagged.hpp"
+#include "../lib/checked_math.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -25,7 +26,9 @@ static ViewBlock** grid_item_array_alloc(int count) {
 }
 
 static ViewBlock** grid_item_array_realloc(ViewBlock** items, int count) {
-    return reinterpret_cast<ViewBlock**>(mem_realloc(items, count * sizeof(GridItemPtr), MEM_CAT_LAYOUT));
+    size_t bytes;
+    if (count < 0 || !lam::checked_mul((size_t)count, sizeof(GridItemPtr), &bytes)) return nullptr;
+    return reinterpret_cast<ViewBlock**>(mem_realloc(items, bytes, MEM_CAT_LAYOUT));
 }
 
 // Initialize grid container layout state
@@ -719,9 +722,16 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 
     // Ensure we have enough space in the grid items array
     if (count > grid_layout->allocated_items) {
-        grid_layout->allocated_items = count * 2;
-        grid_layout->grid_items = grid_item_array_realloc(
-            grid_layout->grid_items, grid_layout->allocated_items);
+        int new_alloc = count * 2;
+        ViewBlock** grown = grid_item_array_realloc(grid_layout->grid_items, new_alloc);
+        if (!grown) {
+            // OOM/overflow: keep the old (still-valid) buffer and bail without collecting,
+            // so the fill loop below cannot write past the allocation.
+            *items = nullptr;
+            return 0;
+        }
+        grid_layout->grid_items = grown;
+        grid_layout->allocated_items = new_alloc;
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes

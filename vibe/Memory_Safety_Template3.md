@@ -801,9 +801,33 @@ minimal, audit-recommended fix rather than the full `Handle<T>` refactor.
 
 **Status: every Critical and High finding from the audit is now fixed and verified, plus M2/M3/M5.**
 
-**Not yet started:** Phase 5 (M1/M4 null-guards + clamps; the deferred flex/grid realloc-null-checks),
-Phase 6 (ASan+UBSan CI + `lambda/input/` fuzzing), and the `make check-alloc` / `check-span` /
-`check-recursion` lint targets.
+**Phase 5 — landed and verified.** The lower-severity tail + the deferred Phase-2 realloc-null-checks. All
+are failure-path/guard/clamp changes; valid-input layout geometry is unchanged.
+
+- **M1 (null `parent`)** — `radiant/layout_block.cpp` (3 sites): `(block->parent && block->parent->is_block())`
+  instead of dereferencing a possibly-null `parent`, matching the guard used elsewhere in the file.
+- **M4 (table off-by-one)** — `radiant/layout_table.cpp`: clamp the stored `col_index` so an over-full row
+  can't index one past the `columns`-sized width arrays (the grid-marking loop already bounds itself);
+  guard the rowspan `start_row` against a negative index in both rowspan-height loops.
+- **H3 deferred — grid** — `radiant/layout_grid.cpp`: `grid_item_array_realloc` now overflow-checks the size
+  and the call site bails (returns 0 items, keeping the old buffer) on realloc failure instead of writing
+  through a NULL/short buffer.
+- **H3 deferred — flex** — `radiant/layout_flex.cpp`: `ensure_flex_items_capacity` returns `bool` and the
+  collector `break`s on failure; `create_flex_lines` null-checks the initial `mem_calloc` and the growth
+  `mem_realloc` (overflow-checked), returning the lines collected so far.
+- **arraylist overflow** — `lib/arraylist.c`: guard the `_alloced * 2` doubling (enlarge) and the
+  `newsize *= 2` loop (reserve, which could otherwise wrap to an infinite loop) against `int` overflow.
+- New header consumers: `checked_math.hpp` now also in `layout_grid.cpp`, `layout_flex.cpp`.
+- Verified: deterministic radiant suites `test_ui_automation` 230, `test_page_load` 104, `test_radiant_view`
+  19, `test_fuzzy_crash` 24, `test_animation` 22 — all 0 failures; **Lambda baseline 2942/2942**.
+
+**Status: every Critical, High, and Medium finding from the audit is now fixed and verified.** The remaining
+Lows (HTML entity-buffer `static_assert`, PDF-decompress `compressed_len*4` — already mitigated by a 10 MB
+cap) are documented but not pursued.
+
+**Not yet started:** Phase 6 (ASan+UBSan CI variant + `lambda/input/` libFuzzer harnesses — the standing
+backstop for code not yet wrapped), and the `make check-alloc` / `check-span` / `check-recursion` lint
+targets that mechanically enforce the new facilities.
 
 ---
 

@@ -5743,7 +5743,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
             if (first_in_flow == static_cast<View*>(block)) {
                 // First child: hypothetical with parent-child collapse
-                ViewBlock* parent = block->parent->is_block() ? lam::view_require_block(static_cast<View*>(block->parent)) : nullptr;
+                ViewBlock* parent = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : nullptr;
                 bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                 float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
                 float parent_border_top = parent && parent->bound && parent->bound->border ?
@@ -7365,7 +7365,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float y_shift = block->y - pa_block.advance_y;
                 float unaccounted = y_shift - stored_mt;
                 if (fabsf(unaccounted) > 0.01f) {
-                    ViewBlock* gp = block->parent->is_block() ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
+                    ViewBlock* gp = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
                     if (gp) {
                         View* first = gp->first_placed_child();
                         // Find the first block child that participates in margin
@@ -7542,7 +7542,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // skip parent-child margin collapse.
                     bool has_clearance = (lycon->block.saved_clear_y >= 0);
 
-                    ViewBlock* parent = block->parent->is_block() ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
+                    ViewBlock* parent = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
                     bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                     float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
                     float parent_border_top = parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0;
