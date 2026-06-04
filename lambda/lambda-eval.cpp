@@ -9,6 +9,7 @@
 #include "../lib/str.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
+#include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
 
 #include <stdarg.h>
