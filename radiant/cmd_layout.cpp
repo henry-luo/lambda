@@ -56,6 +56,7 @@ extern "C" {
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/font/font.h"
+#include "../lib/shell.h"
 void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 }
 
@@ -69,6 +70,8 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/transpiler.hpp"
+#include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_event_loop.h"
 #include "../lambda/mark_builder.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/rdt_vector.hpp"
@@ -5904,6 +5907,8 @@ struct LayoutOptions {
     bool event_log;
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
+    const char* timing_output_file;              // optional JSONL phase timing output
+    bool auto_close;                            // cancel async JS timers after load/onload
 };
 
 bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
@@ -5920,6 +5925,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->event_log = false;
     opts->continue_on_error = false;
     opts->summary = false;
+    opts->timing_output_file = nullptr;
+    opts->auto_close = false;
 
     // Parse arguments
     for (int i = 0; i < argc; i++) {
@@ -5985,6 +5992,17 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         else if (strcmp(argv[i], "--summary") == 0) {
             opts->summary = true;
         }
+        else if (strcmp(argv[i], "--auto-close") == 0) {
+            opts->auto_close = true;
+        }
+        else if (strcmp(argv[i], "--timing-output") == 0) {
+            if (i + 1 < argc) {
+                opts->timing_output_file = argv[++i];
+            } else {
+                log_error("Error: --timing-output requires an argument");
+                return false;
+            }
+        }
         else if (strcmp(argv[i], "--font-dir") == 0) {
             if (i + 1 < argc) {
                 if (opts->font_dir_count < 16) {
@@ -6024,6 +6042,61 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     return true;
 }
 
+struct LayoutPhaseTiming {
+    double total_ms;
+    double load_ms;
+    double document_parse_ms;
+    double js_parse_ms;
+    double js_ast_ms;
+    double js_transpile_ms;
+    double js_link_ms;
+    double js_exec_ms;
+    double js_cleanup_ms;
+    double js_total_ms;
+    double layout_ms;
+    double output_ms;
+};
+
+static double js_phase_us_to_ms(long us) {
+    return (double)us / 1000.0;
+}
+
+static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
+                                      bool success, const LayoutPhaseTiming* timing) {
+    if (!timing_file || !timing) return;
+
+    char buf[4096];
+    JsonWriter w;
+    jw_init(&w, buf, sizeof(buf));
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "file", input_file ? input_file : "");
+        jw_kv_bool(&w, "success", success);
+        jw_kv_double(&w, "total_ms", timing->total_ms);
+        jw_kv_double(&w, "load_ms", timing->load_ms);
+        jw_kv_double(&w, "document_parse_ms", timing->document_parse_ms);
+        jw_kv_double(&w, "js_parse_ms", timing->js_parse_ms);
+        jw_kv_double(&w, "js_ast_ms", timing->js_ast_ms);
+        jw_kv_double(&w, "js_transpile_ms", timing->js_transpile_ms);
+        jw_kv_double(&w, "js_link_ms", timing->js_link_ms);
+        jw_kv_double(&w, "js_exec_ms", timing->js_exec_ms);
+        jw_kv_double(&w, "js_cleanup_ms", timing->js_cleanup_ms);
+        jw_kv_double(&w, "js_total_ms", timing->js_total_ms);
+        jw_kv_double(&w, "layout_ms", timing->layout_ms);
+        jw_kv_double(&w, "output_ms", timing->output_ms);
+    jw_obj_end(&w);
+
+    const char* json = jw_finish(&w);
+    if (!json) {
+        log_error("layout_timing_output: JSON buffer overflow for %s",
+                  input_file ? input_file : "(unknown)");
+        return;
+    }
+    size_t len = strlen(json);
+    fwrite(json, 1, len, timing_file);
+    fwrite("\n", 1, 1, timing_file);
+    fflush(timing_file);
+}
+
 /**
  * Load and layout a single document file.
  * Returns true on success, false on failure.
@@ -6038,9 +6111,21 @@ static bool layout_single_file(
     UiContext* ui_context,
     Url* cwd,
     bool track_source_lines = false,
-    bool enable_event_log = false
+    bool enable_event_log = false,
+    FILE* timing_file = nullptr,
+    bool auto_close = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
+    auto total_start = std::chrono::high_resolution_clock::now();
+    auto load_start = total_start;
+    auto load_end = load_start;
+    auto layout_start = load_start;
+    auto layout_end = layout_start;
+    auto output_start = layout_start;
+    auto output_end = output_start;
+    bool layout_phase_ran = false;
+    bool output_phase_ran = false;
+    js_mir_reset_last_phase_timing();
 
     // Create memory pool for this file
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
@@ -6048,6 +6133,9 @@ static bool layout_single_file(
         log_error("Failed to create memory pool for %s", input_file);
         return false;
     }
+
+    bool previous_auto_close_mode = js_event_loop_auto_close_mode();
+    js_event_loop_set_auto_close_mode(auto_close);
 
     Url* input_url = url_parse_with_base(input_file, cwd);
     EventStateLog* event_log = nullptr;
@@ -6093,6 +6181,7 @@ static bool layout_single_file(
                 event_state_log_document(event_log, "load_failed");
                 event_state_log_close(event_log);
             }
+            js_event_loop_set_auto_close_mode(previous_auto_close_mode);
             pool_destroy(pool);
             return false;
         }
@@ -6165,12 +6254,31 @@ static bool layout_single_file(
             if (!pool) {
                 log_error("Failed to create memory pool for redirected document: %s",
                           next_href ? next_href : "(null)");
+                js_event_loop_set_auto_close_mode(previous_auto_close_mode);
                 break;
             }
         }
     }
+    js_event_loop_set_auto_close_mode(previous_auto_close_mode);
 
     if (!doc) {
+        load_end = std::chrono::high_resolution_clock::now();
+        LayoutPhaseTiming timing = {};
+        JsMirPhaseTiming js_timing = {};
+        js_mir_get_last_phase_timing(&js_timing);
+        timing.total_ms = std::chrono::duration<double, std::milli>(load_end - total_start).count();
+        timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
+        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_transpile_ms = js_phase_us_to_ms(
+            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+        timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
+        if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
+        write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
         if (event_log) {
             event_state_log_document(event_log, "load_failed");
@@ -6179,6 +6287,7 @@ static bool layout_single_file(
         pool_destroy(pool);
         return false;
     }
+    load_end = std::chrono::high_resolution_clock::now();
 
     ui_context->document = doc;
 
@@ -6217,8 +6326,11 @@ static bool layout_single_file(
     } else {
         log_debug("[Layout] About to call layout_html_doc...");
         auto event_layout_start = std::chrono::high_resolution_clock::now();
+        layout_start = event_layout_start;
         layout_html_doc(ui_context, doc, false);
         auto event_layout_end = std::chrono::high_resolution_clock::now();
+        layout_end = event_layout_end;
+        layout_phase_ran = true;
         if (event_log) {
             char event_buf[1024];
             JsonWriter event_writer;
@@ -6255,12 +6367,41 @@ static bool layout_single_file(
             set_combine_text_nodes(false);
         }
 
+        output_start = std::chrono::high_resolution_clock::now();
         print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
+        output_end = std::chrono::high_resolution_clock::now();
+        output_phase_ran = true;
         log_debug("[Layout] Layout tree written to %s", output_path ? output_path : "./temp/view_tree.json");
 
         if (is_pdf || is_svg) {
             set_combine_text_nodes(true);
         }
+    }
+
+    {
+        auto total_end = std::chrono::high_resolution_clock::now();
+        JsMirPhaseTiming js_timing = {};
+        js_mir_get_last_phase_timing(&js_timing);
+        LayoutPhaseTiming timing = {};
+        timing.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
+        timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
+        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_transpile_ms = js_phase_us_to_ms(
+            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+        timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
+        if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
+        timing.layout_ms = layout_phase_ran
+            ? std::chrono::duration<double, std::milli>(layout_end - layout_start).count()
+            : 0.0;
+        timing.output_ms = output_phase_ran
+            ? std::chrono::duration<double, std::milli>(output_end - output_start).count()
+            : 0.0;
+        write_layout_phase_timing(timing_file, input_file, success, &timing);
     }
 
     // Cleanup: destroy view tree, document, and per-file CSS pool.
@@ -6511,6 +6652,7 @@ int cmd_layout(int argc, char** argv) {
     }
 
     bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
+    bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
 
     // Disable all logging in batch mode for better performance
     if (batch_mode) {
@@ -6526,6 +6668,7 @@ int cmd_layout(int argc, char** argv) {
     log_debug("  Output dir: %s", opts.output_dir ? opts.output_dir : "(none)");
     log_debug("  CSS: %s", opts.css_file ? opts.css_file : "(inline only)");
     log_debug("  Viewport: %dx%d", opts.viewport_width, opts.viewport_height);
+    log_debug("  Auto-close: %s", auto_close ? "yes" : "no");
 
     // Initialize UI context once (shared across all files in batch mode)
     log_debug("[Layout] Initializing UI context (headless mode)...");
@@ -6557,6 +6700,14 @@ int cmd_layout(int argc, char** argv) {
 
     // Get current working directory
     Url* cwd = get_current_dir();
+
+    FILE* timing_file = nullptr;
+    if (opts.timing_output_file) {
+        timing_file = fopen(opts.timing_output_file, "w");
+        if (!timing_file) {
+            log_error("layout_timing_output: failed to open %s", opts.timing_output_file);
+        }
+    }
 
     // Track statistics for batch mode
     int success_count = 0;
@@ -6591,7 +6742,9 @@ int cmd_layout(int argc, char** argv) {
                 &ui_context,
                 cwd,
                 opts.debug,
-                opts.event_log
+                opts.event_log,
+                timing_file,
+                auto_close
             );
         } catch (...) {
             log_error("batch layout: uncaught exception processing %s", input_file);
@@ -6612,7 +6765,9 @@ int cmd_layout(int argc, char** argv) {
                     &ui_context,
                     cwd,
                     opts.debug,
-                    opts.event_log
+                    opts.event_log,
+                    timing_file,
+                    auto_close
                 );
             } catch (...) {
                 log_error("batch layout: uncaught exception processing %s", input_file);
@@ -6663,6 +6818,10 @@ int cmd_layout(int argc, char** argv) {
     }
 
     // Cleanup
+    if (timing_file) {
+        fclose(timing_file);
+        timing_file = nullptr;
+    }
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
