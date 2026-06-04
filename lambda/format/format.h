@@ -1,7 +1,9 @@
 #ifndef FORMAT_H
 #define FORMAT_H
 
+#ifndef LAMBDA_STATIC
 #define LAMBDA_STATIC
+#endif
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
 

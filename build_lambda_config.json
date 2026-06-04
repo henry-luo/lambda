@@ -4,7 +4,8 @@
     "lang": "c++17",
     "compiler": "clang",
     "output": "lambda.exe",
-    "enable_sanitizer_main": false,
+    "enable_sanitizer_main": true,
+    "enable_sanitizer_tests": false,
     "memtrack_poison": false,
     "memtrack_poison_dirs": ["lambda", "radiant"],
     "memtrack_poison_exempt": [
@@ -290,68 +291,6 @@
     ],
     "targets": [
         {
-            "name": "lambda-lib",
-            "description": "Unified runtime with all basic libraries for tests",
-            "lang": "c17",
-            "includes": [
-                "/opt/homebrew/include",
-                "mac-deps/rpmalloc-install/include"
-            ],
-            "sources": [
-                "lib/mempool.c",
-                "lib/memtrack.c",
-                "lib/hashmap.c",
-                "lib/arena.c",
-                "lib/scratch_arena.c",
-                "lib/mem_context.c",
-                "lib/mem_factory.c",
-                "lib/arraylist.c",
-                "lib/pdf_writer.c",
-                "lib/strbuf.c",
-                "lib/str.c",
-                "lib/utf.c",
-                "lib/stringbuf.c",
-                "lib/strview.c",
-                "lib/escape.c",
-                "lib/digest.c",
-                "lib/string.c",
-                "lib/num_stack.c",
-                "lib/gc/gc_nursery.c",
-                "lib/gc/gc_object_zone.c",
-                "lib/gc/gc_data_zone.c",
-                "lib/gc/gc_heap.c",
-                "lib/datetime.c",
-                "lib/url.c",
-                "lib/url_parser.c",
-                "lib/base64.c",
-                "lib/log.c",
-                "lib/cmdedit.c",
-                "lib/cmdedit_utf8.c",
-                "lib/mime-detect.c",
-                "lib/mime-types.c",
-                "lib/shell.c",
-                "lib/file.c",
-                "lib/file_utils.c",
-                "lib/sqlite/sqlite3.c",
-                "lib/rdb.c",
-                "lib/rdb_sqlite.c"
-            ],
-            "libraries": [
-                "mbedcrypto",
-                "utf8proc",
-                "rpmalloc"
-            ],
-            "special_flags": "-DUTF8PROC_STATIC",
-            "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
-            "link": "dynamic",
-            "pic": true,
-            "defines": [
-                "UTF8PROC_STATIC",
-                "SQLITE_THREADSAFE=0",
-                "SQLITE_OMIT_LOAD_EXTENSION"
-            ]
-        },
-        {
             "name": "lambda-input-full",
             "description": "Complete input parsing, formatting and validation with all dependencies",
             "lang": "c++17",
@@ -418,21 +357,50 @@
                 "lambda/input/html5/html5_parser.cpp",
                 "lambda/input/html5/html5_token.cpp",
                 "lambda/re2_wrapper.cpp",
+                "lib/mempool.c",
+                "lib/arena.c",
+                "lib/scratch_arena.c",
+                "lib/mem_context.c",
+                "lib/mem_factory.c",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
                 "lib/hashmap_helpers.c",
                 "lib/lru_cache.c",
                 "lib/thread_pool.c",
+                "lib/pdf_writer.c",
+                "lib/strbuf.c",
                 "lib/file.c",
+                "lib/file_utils.c",
                 "lib/log.c",
                 "lib/memtrack.c",
                 "lib/str.c",
                 "lib/utf.c",
+                "lib/stringbuf.c",
+                "lib/strview.c",
+                "lib/escape.c",
+                "lib/digest.c",
+                "lib/string.c",
+                "lib/num_stack.c",
+                "lib/gc/gc_nursery.c",
+                "lib/gc/gc_object_zone.c",
+                "lib/gc/gc_data_zone.c",
+                "lib/gc/gc_heap.c",
+                "lib/datetime.c",
+                "lib/url.c",
+                "lib/url_parser.c",
+                "lib/base64.c",
+                "lib/cmdedit.c",
+                "lib/cmdedit_utf8.c",
+                "lib/mime-detect.c",
+                "lib/mime-types.c",
+                "lib/shell.c",
+                "lib/sqlite/sqlite3.c",
+                "lib/rdb.c",
+                "lib/rdb_sqlite.c",
                 "radiant/symbol_resolver.cpp"
             ],
             "libraries": [
-                "lambda-lib",
                 "tree-sitter-lambda",
                 "tree-sitter-latex",
                 "tree-sitter-latex-math",
@@ -482,7 +450,10 @@
             "defines": [
                 "SIMPLE_SCHEMA_PARSER",
                 "PATH_NO_ITERATION",
-                "LAMBDA_STATIC"
+                "LAMBDA_STATIC",
+                "UTF8PROC_STATIC",
+                "SQLITE_THREADSAFE=0",
+                "SQLITE_OMIT_LOAD_EXTENSION"
             ],
             "link": "dynamic"
         }
@@ -1516,7 +1487,7 @@
                         "source": "test_rdb_gtest.cpp",
                         "name": "RDB SQLite Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1544,7 +1515,7 @@
                         "source": "lib/test_str_gtest.cpp",
                         "name": "Str Library Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1557,7 +1528,7 @@
                         "source": "lib/test_strbuf_gtest.cpp",
                         "name": "String Buffer Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1570,7 +1541,7 @@
                         "source": "lib/test_digest_gtest.cpp",
                         "name": "Digest Facade Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1583,7 +1554,7 @@
                         "source": "test_gc_heap_gtest.cpp",
                         "name": "GC Heap Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1597,7 +1568,7 @@
                         "source": "lib/test_stringbuf_gtest.cpp",
                         "name": "StringBuf Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1611,7 +1582,7 @@
                         "source": "lib/test_strview_gtest.cpp",
                         "name": "String View Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1625,7 +1596,7 @@
                         "source": "lib/test_num_stack_gtest.cpp",
                         "name": "Number Stack Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1639,7 +1610,7 @@
                         "source": "lib/test_datetime_gtest.cpp",
                         "name": "DateTime Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1744,7 +1715,7 @@
                         "source": "lib/test_base64_gtest.cpp",
                         "name": "Base64 Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1855,7 +1826,7 @@
                         "source": "test_font_config_gtest.cpp",
                         "name": "Font Configuration Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1884,7 +1855,7 @@
                         "source": "test_woff2_gtest.cpp",
                         "name": "WOFF2 Font Decompression Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1918,7 +1889,7 @@
                         "source": "lib/test_url_gtest.cpp",
                         "name": "URL Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1932,7 +1903,7 @@
                         "source": "lib/test_url_extra_gtest.cpp",
                         "name": "URL Extra Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -1946,7 +1917,7 @@
                         "source": "test_cmdedit_gtest.cpp",
                         "name": " Command Line Editor Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2002,7 +1973,7 @@
                         "source": "test_own_tagged.cpp",
                         "name": "Ownership and Tagged Dispatch Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2016,7 +1987,7 @@
                         "source": "test_lambda_typed.cpp",
                         "name": "Lambda Typed Item Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2146,7 +2117,7 @@
                         "source": "test_shell_gtest.cpp",
                         "name": "Shell Module Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2160,7 +2131,7 @@
                         "source": "lib/test_file_module_gtest.cpp",
                         "name": "File Module Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2196,7 +2167,7 @@
                         "source": "test_serve_gtest.cpp",
                         "name": "Web Server Module Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2238,7 +2209,7 @@
                         "source": "test_serve_phase2_gtest.cpp",
                         "name": "Web Server Phase 2 Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2273,7 +2244,7 @@
                         "source": "test_retained_display_list_gtest.cpp",
                         "name": "Retained Display List Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2293,7 +2264,7 @@
                         "source": "test_display_list_gtest.cpp",
                         "name": "Display List Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2320,7 +2291,7 @@
                         "source": "test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2334,7 +2305,7 @@
                         "source": "test_animation_gtest.cpp",
                         "name": "Animation Scheduler Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2351,7 +2322,7 @@
                         "source": "test_css_animation_gtest.cpp",
                         "name": "CSS Animation Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2371,7 +2342,7 @@
                         "source": "test_gif_player_gtest.cpp",
                         "name": "GIF Animation Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2395,7 +2366,7 @@
                         "source": "test_video_gtest.cpp",
                         "name": "Video Playback Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2424,7 +2395,7 @@
                         "source": "test_lottie_player_gtest.cpp",
                         "name": "Lottie Animation Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2736,7 +2707,7 @@
                         "source": "test_pdf_render_visual_gtest.cpp",
                         "name": "PDF Render Visual Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -3617,7 +3588,7 @@
                         "source": "test/test_lambda_errors_gtest.cpp",
                         "name": "Lambda Error System Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "additional_sources": [
                             "lambda/lambda-error.cpp"
@@ -3668,7 +3639,7 @@
                         "source": "test/test_js_bt_regex_gtest.cpp",
                         "name": "JS Backtracking Regex Matcher Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "binary": "test_js_bt_regex_gtest.exe",
                         "libraries": [
@@ -3833,7 +3804,7 @@
                         "source": "test/test_network_scheduler_gtest.cpp",
                         "name": "Network Scheduler Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",

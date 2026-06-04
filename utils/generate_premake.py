@@ -567,10 +567,11 @@ class PremakeGenerator:
         print(f"DEBUG: linux_config: {linux_config}")
         print(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
 
-        # Note: AddressSanitizer will be applied individually to test projects only
-        # This avoids applying it to the main lambda.exe executable
+        # AddressSanitizer is applied to the main lambda.exe debug build via
+        # enable_sanitizer_main. Test executables default to the fastest debug
+        # build and can opt in separately with enable_sanitizer_tests.
         if not disable_sanitizer:
-            print("DEBUG: AddressSanitizer will be applied to test projects only")
+            print("DEBUG: AddressSanitizer is available for opt-in debug targets")
         else:
             self.premake_content.extend([
                 '    -- AddressSanitizer disabled for Linux platform',
@@ -705,7 +706,7 @@ class PremakeGenerator:
 
     def _generate_lib_project(self, lib_project: Dict[str, Any]) -> None:
         """Generate a static library project from lib_project configuration"""
-        name = lib_project.get('name', 'lambda-lib')
+        name = lib_project.get('name', 'library')
         kind = lib_project.get('kind', 'StaticLib')
         language = lib_project.get('language', 'C')
         target_dir = lib_project.get('target_dir', 'build/lib')
@@ -831,7 +832,7 @@ class PremakeGenerator:
         for lib in targets:
             lib_name = lib.get('name', '')
             # Handle library targets
-            if lib_name in ['lambda-runtime-full', 'lambda-input-full', 'lambda-lib']:
+            if lib_name in ['lambda-runtime-full', 'lambda-input-full']:
                 self._generate_complex_library(lib)
 
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
@@ -856,11 +857,6 @@ class PremakeGenerator:
             exclude_deps = set(platform_overrides.get('exclude_libraries', []))
             if exclude_deps:
                 dependencies = [dep for dep in dependencies if dep not in exclude_deps]
-
-        # For lambda-lib, it's a meta-library that depends on other inline libraries
-        if lib_name == 'lambda-lib':
-            self._generate_meta_library(lib)
-            return
 
         # Separate C and C++ files
         c_files = [f for f in source_files if f.endswith('.c')]
@@ -2018,9 +2014,6 @@ class PremakeGenerator:
             for dep in dependencies:
                 if dep == 'criterion':
                     self.premake_content.append('        "criterion",')
-                elif dep == 'lambda-lib':
-                    # Lambda-lib contains all the core libraries
-                    self.premake_content.append('        "lambda-lib",')
                 elif dep in ['lambda-runtime-full', 'lambda-input-full']:
                     # Special handling for MIR, Lambda, Math, and Markup tests
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
@@ -2030,9 +2023,6 @@ class PremakeGenerator:
                     else:
                         # Regular tests: only need -cpp version (C++ project includes all C files)
                         self.premake_content.append(f'        "{dep}-cpp",')
-
-                    # Add lambda-lib which now contains all core dependencies
-                    self.premake_content.append('        "lambda-lib",')
 
         # Add test framework libraries
         # Add libraries specified in the test configuration
@@ -2106,7 +2096,7 @@ class PremakeGenerator:
         # Add external library linkoptions for test-specific libraries
         if libraries:
             external_static_libs = []
-            late_static_libs = []  # Static libs that need to come after lambda-lib (link order)
+            late_static_libs = []  # Static libs that need to come after internal libs (link order)
             for lib_name in libraries:
                 if lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
@@ -2123,8 +2113,8 @@ class PremakeGenerator:
                         # Special handling for tree-sitter libraries - add them to external_static_libs (linkoptions)
                         if lib_name in ['tree-sitter', 'tree-sitter-lambda', 'tree-sitter-latex-math']:
                             external_static_libs.append(lib_path)
-                        # On Linux/Windows, static libs need to come AFTER lambda-lib in link order
-                        # because lambda-lib has unresolved symbols that these libs provide
+                        # On Linux/Windows, static libs need to come after internal libs in link order
+                        # because internal libraries can have unresolved symbols that these libs provide
                         elif (self.use_linux_config or self.use_windows_config) and lib_name in ['rpmalloc', 'utf8proc']:
                             late_static_libs.append((lib_name, lib_path))
                         else:
@@ -2133,7 +2123,7 @@ class PremakeGenerator:
             # Note: tree-sitter libraries are now handled via external_static_libs (linkoptions)
             # No longer adding them to links block which causes incorrect -l flags
 
-            # Add late static libraries to links block (must come after lambda-lib on Linux)
+            # Add late static libraries to links block (must come after internal libs on Linux)
             if late_static_libs:
                 # Re-open the links block
                 self.premake_content[-2] = '    '  # Remove the closing brace line
@@ -2443,23 +2433,24 @@ class PremakeGenerator:
                 '    ',
             ])
 
-        # Add AddressSanitizer for test projects only (not for main lambda.exe)
-        # Disable on Windows since ASAN is not readily available in MINGW64
-        platforms_config = self.config.get('platforms', {})
-        disable_sanitizer = False
-        if self.use_windows_config:
-            windows_config = platforms_config.get('windows', {})
-            disable_sanitizer = windows_config.get('disable_sanitizer', True)  # Default to True for Windows
+        # Test executables default to fast debug builds without ASan. Keep ASan
+        # opt-in for targeted sanitizer test runs.
+        enable_sanitizer_tests = self.config.get('enable_sanitizer_tests', False)
+        if enable_sanitizer_tests and not disable_sanitizer_override:
+            platforms_config = self.config.get('platforms', {})
+            disable_sanitizer = False
+            if self.use_windows_config:
+                windows_config = platforms_config.get('windows', {})
+                disable_sanitizer = windows_config.get('disable_sanitizer', True)
+            else:
+                linux_config = platforms_config.get('linux', {})
+                disable_sanitizer = linux_config.get('disable_sanitizer', False)
         else:
-            linux_config = platforms_config.get('linux', {})
-            disable_sanitizer = linux_config.get('disable_sanitizer', False)
-
-        if disable_sanitizer_override:
             disable_sanitizer = True
 
         if not disable_sanitizer:
             self.premake_content.extend([
-                '    -- AddressSanitizer for test projects only',
+                '    -- AddressSanitizer for test projects (opt-in)',
                 '    filter { "configurations:debug", "not platforms:Linux_x64" }',
                 '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
                 '        linkoptions { "-fsanitize=address" }',

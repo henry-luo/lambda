@@ -50,9 +50,8 @@ RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
 LINK_JOBS := 1
-# Debug+ASan test builds use ~2-3x more memory per compiler instance; cap parallelism
-# to avoid OOM kills on machines with limited RAM.
-TEST_JOBS := $(shell echo $$(( ($(NPROCS) + 1) / 2 )) )
+# Fast debug test builds do not use ASan by default; use all cores for tests.
+TEST_JOBS := $(NPROCS)
 
 # ccache enablement moved below — must run AFTER the CC/CXX compiler-detection
 # block (lines ~94-109) so the ccache prefix isn't overwritten.
