@@ -675,6 +675,15 @@ extern "C" bool js_is_dom_node(Item item) {
     return m->type == (void*)&js_dom_type_marker;
 }
 
+extern "C" Item js_get_this(void);
+extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+
+static Item js_dom_matches_method(Item selector) {
+    Item self = js_get_this();
+    Item method = (Item){.item = s2it(heap_create_name("matches"))};
+    return js_dom_element_method(self, method, &selector, 1);
+}
+
 // ============================================================================
 // Document Proxy Object
 // ============================================================================
@@ -5744,6 +5753,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return js_new_function((void*)js_eventtarget_remove_listener, 3);
     if (strcmp(prop, "dispatchEvent") == 0)
         return js_new_function((void*)js_eventtarget_dispatch, 1);
+    if (strcmp(prop, "matches") == 0 ||
+        strcmp(prop, "webkitMatchesSelector") == 0 ||
+        strcmp(prop, "msMatchesSelector") == 0) {
+        return js_new_function((void*)js_dom_matches_method, 1);
+    }
 
     // DOM method names accessed as properties (not calls) return ITEM_TRUE
     // so that feature-detection patterns like `elem.getAttribute && elem.getAttribute("class")`

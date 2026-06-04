@@ -38,7 +38,7 @@ bool strview_to_int64(const StrView* s, int64_t* out);
 bool strview_to_double(const StrView* s, double* out);
 // hash compatible with hashmap_sip (uses zero seeds).
 uint64_t strview_hash(const StrView* s);
-char* strview_to_cstr(const StrView* s);                 // Convert to null-terminated string (allocates)
+char* strview_to_cstr(const StrView* s);                 // Convert to null-terminated string (mem_alloc; caller mem_free)
 // pool-allocated NUL-terminated copy. pool may be NULL (falls back to mem_alloc).
 char* strview_dup_with_pool(const StrView* s, Pool* pool);
 

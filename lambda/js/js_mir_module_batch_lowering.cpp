@@ -10,6 +10,7 @@
 MIR_context_t module_mir_contexts[MAX_MODULE_CONTEXTS];
 NamePool* module_mir_name_pools[MAX_MODULE_CONTEXTS];
 Pool* module_mir_ast_pools[MAX_MODULE_CONTEXTS];
+char* module_mir_source_buffers[MAX_MODULE_CONTEXTS];
 int module_mir_context_count = 0;
 
 // Runtime context saved for use by js_new_function_from_string (new Function(...) support)
@@ -531,6 +532,7 @@ void jm_defer_mir_cleanup(MIR_context_t ctx) {
     if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
         module_mir_name_pools[module_mir_context_count] = NULL;
         module_mir_ast_pools[module_mir_context_count] = NULL;
+        module_mir_source_buffers[module_mir_context_count] = NULL;
         module_mir_contexts[module_mir_context_count++] = ctx;
     } else {
         // Cannot MIR_finish — JIT-compiled function pointers still live and
@@ -545,6 +547,7 @@ void jm_cleanup_deferred_mir() {
         MIR_finish(module_mir_contexts[i]);
         if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);
         if (module_mir_ast_pools[i]) pool_destroy(module_mir_ast_pools[i]);
+        if (module_mir_source_buffers[i]) mem_free(module_mir_source_buffers[i]);
     }
     module_mir_context_count = 0;
 }
@@ -570,6 +573,10 @@ void jm_finish_last_deferred_mir() {
         if (module_mir_ast_pools[module_mir_context_count]) {
             pool_destroy(module_mir_ast_pools[module_mir_context_count]);
             module_mir_ast_pools[module_mir_context_count] = NULL;
+        }
+        if (module_mir_source_buffers[module_mir_context_count]) {
+            mem_free(module_mir_source_buffers[module_mir_context_count]);
+            module_mir_source_buffers[module_mir_context_count] = NULL;
         }
     }
 }
@@ -4374,15 +4381,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     case MCONST_FUNC: {
                                         int fii = (int)mc->int_val;
                                         if (fii >= 0 && fii < mt->func_count && mt->func_entries[fii].func_item) {
-                                            JsFuncCollected* func = &mt->func_entries[fii];
-                                            int fpc = func->param_count;
-                                            if (func->has_rest_param) fpc = -fpc;
-                                            const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                                MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
-                                                MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
-                                            const char* fn_name = (func->node && func->node->name) ? func->node->name->chars : NULL;
-                                            jm_emit_set_function_name(mt, const_val, fn_name, func->formal_length);
-                                            jm_emit_set_function_source(mt, const_val, func->node);
+                                            const_val = jm_create_func_or_closure(mt, &mt->func_entries[fii]);
                                         } else {
                                             const_val = jm_emit_null(mt);
                                         }

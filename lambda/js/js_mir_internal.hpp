@@ -37,6 +37,7 @@ extern MIR_context_t g_active_mir_ctx;
 extern MIR_context_t module_mir_contexts[];
 extern NamePool* module_mir_name_pools[];
 extern Pool* module_mir_ast_pools[];
+extern char* module_mir_source_buffers[];
 extern int module_mir_context_count;
 
 typedef enum JsMirReferenceKind {

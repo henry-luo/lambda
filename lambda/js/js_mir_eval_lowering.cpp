@@ -113,6 +113,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     JsTranspiler* tp = js_transpiler_create(js_source_runtime);
     if (!tp) {
         log_error("js-new-function: failed to create transpiler");
+        mem_free(source);
         return ItemNull;
     }
 
@@ -125,16 +126,17 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     TSNode root = ts_tree_root_node(tp->tree);
     JsAstNode* js_ast = build_js_ast(tp, root);
-    mem_free(source);  // source only needed for parsing and AST building
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         js_transpiler_destroy(tp);
+        mem_free(source);
         return ItemNull;
     }
 
     int early_errors = js_check_early_errors(tp, js_ast);
     if (early_errors > 0) {
         js_transpiler_destroy(tp);
+        mem_free(source);
         js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid function source", 23))});
         return ItemNull;
     }
@@ -145,6 +147,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     if (!ctx) {
         log_error("js-new-function: MIR context init failed");
         js_transpiler_destroy(tp);
+        mem_free(source);
         return ItemNull;
     }
 
@@ -157,6 +160,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     if (!mt) {
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(source);
         return ItemNull;
     }
 
@@ -179,6 +183,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(source);
         return ItemNull;
     }
 
@@ -192,6 +197,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(source);
         return ItemNull;
     }
 
@@ -204,11 +210,14 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // leave dangling pointers in the generated code.
     jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
-    // Attach name_pool and ast_pool to the deferred entry so they are freed
-    // together with the MIR context (e.g., when eval() calls jm_finish_last_deferred_mir).
+    // Attach source/name/AST storage to the deferred entry so they are freed
+    // together with the MIR context.  Dynamic functions can outlive this helper,
+    // and their generated code/source metadata still depends on these buffers.
     if (module_mir_context_count > 0) {
+        module_mir_source_buffers[module_mir_context_count - 1] = source;
         module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
         module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+        source = NULL;
     }
     // Detach from transpiler so js_transpiler_destroy doesn't free them.
     tp->name_pool = NULL;

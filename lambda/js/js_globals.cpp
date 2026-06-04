@@ -12798,7 +12798,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             String* sk = it2s(key);
             if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
                 if (arr->is_content == 1 && arr->extra != 0) {
-                    Item pm_item = (Item){.item = (uint64_t)(uintptr_t)arr->extra | ((uint64_t)LMD_TYPE_MAP << 56)};
+                    Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
                     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
                     js_property_set(pm_item, length_key, (Item){.item = JS_DELETED_SENTINEL_VAL});
                     js_shape_entry_set_deleted(pm_item, "length", 6, /*is_deleted=*/true);
@@ -12853,7 +12853,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             // ParameterMap link, so later re-defining the index must not
             // update the formal parameter binding.
             if (arr->is_content == 1 && arr->extra != 0) {
-                Item pm_item = (Item){.item = (uint64_t)(uintptr_t)arr->extra | ((uint64_t)LMD_TYPE_MAP << 56)};
+                Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
                 char marker_key[64];
                 snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)idx);
                 js_property_set(pm_item,
@@ -12868,7 +12868,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                 if (get_type_id(k_str) == LMD_TYPE_STRING) {
                     String* ks = it2s(k_str);
                     if (ks && ks->len > 0 && ks->len < 200) {
-                        Item pm_item = (Item){.item = (uint64_t)(uintptr_t)arr->extra | ((uint64_t)LMD_TYPE_MAP << 56)};
+                        Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
                         const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
                         for (int pi = 0; pi < 5; pi++) {
                             char mk[256];
@@ -12906,7 +12906,7 @@ extern "C" Item js_delete_property(Item obj, Item key) {
         // sentinel — superset of what the legacy code did inline.
         if (arr->extra != 0) {
             Map* pm = (Map*)(uintptr_t)arr->extra;
-            Item pm_item = (Item){.item = (uint64_t)(uintptr_t)pm | ((uint64_t)LMD_TYPE_MAP << 56)};
+            Item pm_item = (Item){.map = pm};
             // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
             // are canonicalized identically to define-property time.
             Item k = js_to_property_key(key);

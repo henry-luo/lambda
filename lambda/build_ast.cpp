@@ -870,11 +870,11 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
                     }
                     // for NUM_SIZED, also check sub-type uniformity
                     else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED) {
-                        TypeNumSized* a = (TypeNumSized*)nested_type;
-                        TypeNumSized* b = (TypeNumSized*)item->type;
-                        if (a->num_type != b->num_type) {
+                        NumSizedType a_num_type = type_num_sized_kind(nested_type);
+                        NumSizedType b_num_type = type_num_sized_kind(item->type);
+                        if (a_num_type != b_num_type) {
                             log_debug("DEBUG: NUM_SIZED sub-type mismatch (%d vs %d), resetting nested_type to NULL",
-                                a->num_type, b->num_type);
+                                a_num_type, b_num_type);
                             nested_type = NULL;
                         }
                     }
@@ -2525,8 +2525,11 @@ Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "map")) {
         return (Type*)&LIT_TYPE_MAP;
     }
-    else if (strview_equal(&type_name, "element") || strview_equal(&type_name, "entity") || strview_equal(&type_name, "object")) {
+    else if (strview_equal(&type_name, "element") || strview_equal(&type_name, "entity")) {
         return (Type*)&LIT_TYPE_ELMT;
+    }
+    else if (strview_equal(&type_name, "object")) {
+        return (Type*)&LIT_TYPE_OBJECT;
     }
     else if (strview_equal(&type_name, "function")) {
         return (Type*)&LIT_TYPE_FUNC;
@@ -3669,7 +3672,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                 Type* inner = type_expr->type;
                 if (inner && inner->type_id == LMD_TYPE_TYPE) {
                     Type* actual = ((TypeType*)inner)->type;
-                    if (actual && actual->type_id == LMD_TYPE_MAP && ast_node->name) {
+                    if (actual && actual->type_id == LMD_TYPE_MAP && actual != &TYPE_MAP && ast_node->name) {
                         ((TypeMap*)actual)->struct_name = ast_node->name->chars;
                     }
                 }
@@ -3707,7 +3710,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                         AstNode* rhs = ast_node->as;
                         if (rhs && rhs->node_type == AST_NODE_PRIMARY)
                             rhs = ((AstPrimaryNode*)rhs)->expr;
-                        if (ann && ann->type_id == LMD_TYPE_MAP
+                        if (ann && ann->type_id == LMD_TYPE_MAP && ann != &TYPE_MAP
                             && ((TypeMap*)ann)->struct_name
                             && rhs && rhs->node_type == AST_NODE_MAP
                             && rhs->type && rhs->type->type_id == LMD_TYPE_MAP) {

@@ -22,6 +22,10 @@ static inline Item make_js_undef() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
+static Item js_xhr_noop(void) {
+    return make_js_undef();
+}
+
 // ============================================================================
 // Per-XHR state
 // ============================================================================
@@ -217,7 +221,7 @@ extern "C" Item js_xhr_new(void) {
     js_property_set(obj, k, garh_fn);
 
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
-    Item noop_fn = js_new_function(nullptr, 0);
+    Item noop_fn = js_new_function((void*)js_xhr_noop, 0);
     k = (Item){.item = s2it(heap_create_name("addEventListener"))};
     js_property_set(obj, k, noop_fn);
     k = (Item){.item = s2it(heap_create_name("removeEventListener"))};

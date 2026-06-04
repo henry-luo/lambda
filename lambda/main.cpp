@@ -3616,6 +3616,14 @@ int main(int argc, char *argv[]) {
                         break;
                     }
                     js_batch_reset();
+                    if (batch_context.name_pool) {
+                        name_pool_release(batch_context.name_pool);
+                        batch_context.name_pool = NULL;
+                    }
+                    if (batch_context.type_list) {
+                        arraylist_free((ArrayList*)batch_context.type_list);
+                        batch_context.type_list = NULL;
+                    }
                     heap_destroy();
                     // Clean up deferred MIR contexts from previous tests — heap objects
                     // referencing their code pages are now gone after heap_destroy().
@@ -3660,6 +3668,14 @@ int main(int argc, char *argv[]) {
                     // the next test so large temporary strings from generated
                     // Unicode/URI suites do not make later tests hit the alarm.
                     js_batch_reset();
+                    if (batch_context.name_pool) {
+                        name_pool_release(batch_context.name_pool);
+                        batch_context.name_pool = NULL;
+                    }
+                    if (batch_context.type_list) {
+                        arraylist_free((ArrayList*)batch_context.type_list);
+                        batch_context.type_list = NULL;
+                    }
                     heap_destroy();
                     jm_cleanup_deferred_mir();
                     if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);

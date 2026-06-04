@@ -345,6 +345,15 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     log_mem_stage("js-core: enter");
 
+    char* owned_source = (char*)mem_alloc(js_source_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!owned_source) {
+        log_error("js-mir: failed to allocate source buffer");
+        return (Item){.item = ITEM_ERROR};
+    }
+    memcpy(owned_source, js_source, js_source_len);
+    owned_source[js_source_len] = '\0';
+    js_source = owned_source;
+
     // Inject __filename and __dirname for Node.js CommonJS compatibility.
     // Only for file-based scripts (not eval/REPL), and only if the source
     // doesn't already declare them (e.g., CJS-wrapped require'd modules).
@@ -386,6 +395,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         memcpy(injected_source + insert_at, commonjs_header, (size_t)off);
         memcpy(injected_source + insert_at + (size_t)off, js_source + insert_at, js_source_len - insert_at);
         injected_source[js_source_len + (size_t)off] = '\0';
+        mem_free(owned_source);
+        owned_source = injected_source;
         js_source = injected_source;
         js_source_len += (size_t)off;
     }
@@ -412,6 +423,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("js-mir: failed to create transpiler");
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -420,6 +432,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (!js_transpiler_parse(tp, js_source, js_source_len)) {
         log_error("js-mir: parse failed");
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
@@ -433,6 +446,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
@@ -444,6 +458,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (early_errors > 0) {
         log_error("js-mir: %d early error(s) detected", early_errors);
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
@@ -526,6 +541,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
@@ -540,6 +556,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (!mt) {
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -606,6 +623,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -667,6 +685,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         jm_destroy_mir_transpiler(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
+        mem_free(owned_source);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -808,6 +827,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         // Destroying the pool would leave dangling pointers (SIGSEGV on property lookup).
         g_jm_preamble_out->tp_ast_pool = tp->ast_pool;
         g_jm_preamble_out->tp_name_pool = tp->name_pool;
+        g_jm_preamble_out->source_buffer = owned_source;
+        owned_source = NULL;
         tp->ast_pool = NULL;  // prevent js_transpiler_destroy from freeing these
         tp->name_pool = NULL;
     } else if (reusing_context) {
@@ -822,6 +843,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         if (module_mir_context_count > 0) {
             module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
             module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+            module_mir_source_buffers[module_mir_context_count - 1] = owned_source;
+            owned_source = NULL;
         }
         tp->name_pool = NULL;
         tp->ast_pool = NULL;
@@ -852,7 +875,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
     js_transpiler_destroy(tp);
 
-    if (injected_source) mem_free(injected_source);
+    mem_free(owned_source);
     g_last_js_mir_phase_timing.cleanup_us = js_mir_phase_now_us() - phase_start;
     g_last_js_mir_phase_timing.total_us = js_mir_phase_now_us() - phase_total_start;
 
@@ -954,6 +977,10 @@ void preamble_state_destroy(JsPreambleState* state) {
     if (state->tp_ast_pool) {
         pool_destroy((Pool*)state->tp_ast_pool);
         state->tp_ast_pool = NULL;
+    }
+    if (state->source_buffer) {
+        mem_free(state->source_buffer);
+        state->source_buffer = NULL;
     }
     mem_free(state->entries);
     state->entries = NULL;

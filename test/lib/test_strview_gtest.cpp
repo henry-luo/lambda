@@ -6,6 +6,7 @@ extern "C" {
 #include "../../lib/strview.h"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/memtrack.h"
 }
 
 class StrViewTest : public ::testing::Test {
@@ -95,7 +96,7 @@ TEST_F(StrViewTest, ToCstr) {
     
     ASSERT_NE(cstr, nullptr);
     EXPECT_STREQ(cstr, "Hello");
-    free(cstr);
+    mem_free(cstr);
 }
 
 TEST_F(StrViewTest, EqualCstr) {

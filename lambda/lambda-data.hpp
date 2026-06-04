@@ -165,6 +165,14 @@ typedef struct TypeNumSized : TypeConst {
     uint32_t raw_bits;      // raw 32-bit value (bit pattern)
 } TypeNumSized;
 
+static inline NumSizedType type_num_sized_kind(const Type* type) {
+    if (!type || type->type_id != LMD_TYPE_NUM_SIZED) return NUM_INT8;
+    if (type->is_literal || type->is_const) {
+        return ((const TypeNumSized*)type)->num_type;
+    }
+    return (NumSizedType)type->kind;
+}
+
 typedef struct TypeUint64 : TypeConst {
     uint64_t uint64_val;
 } TypeUint64;

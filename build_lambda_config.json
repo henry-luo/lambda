@@ -2001,7 +2001,7 @@
                         "source": "test_span_gtest.cpp",
                         "name": "Bounded Span and ByteCursor Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2015,7 +2015,7 @@
                         "source": "test_checked_alloc_gtest.cpp",
                         "name": "Checked Math, Alloc and NonNull Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
@@ -2029,7 +2029,7 @@
                         "source": "test_recursion_guard_gtest.cpp",
                         "name": "Recursion Guard Tests",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",

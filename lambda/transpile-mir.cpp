@@ -3463,7 +3463,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         MIR_reg_t boxed = emit_box(mt, val, expr_tid);
                         if (elem_tid == LMD_TYPE_NUM_SIZED && operand) {
                             // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
-                            ArrayNumElemType et = num_sized_to_elem_type(((TypeNumSized*)operand)->num_type);
+                            ArrayNumElemType et = num_sized_to_elem_type(type_num_sized_kind(operand));
                             val = emit_call_2(mt, "ensure_sized_array", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)et));
@@ -3700,7 +3700,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     bool is_sized_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_NUM_SIZED;
     ArrayNumElemType sized_elem_type = ELEM_INT;  // default, overwritten below
     if (is_sized_array) {
-        sized_elem_type = num_sized_to_elem_type(((TypeNumSized*)arr_type->nested)->num_type);
+        sized_elem_type = num_sized_to_elem_type(type_num_sized_kind(arr_type->nested));
     }
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
@@ -6630,7 +6630,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                     }
 
                     // Convert to match parameter's representation
-                    if (param_tid == LMD_TYPE_INT || param_tid == LMD_TYPE_FLOAT || param_tid == LMD_TYPE_BOOL) {
+                    if (mir_is_native_param_type(param_tid)) {
                         if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
                             val = emit_unbox(mt, val, param_tid);
                         } else if (val_tid != param_tid) {

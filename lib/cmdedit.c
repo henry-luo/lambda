@@ -1113,17 +1113,27 @@ static char *editor_readline(const char *prompt) {
         line[len] = '\0';
         ssize_t nread = len;
 #else
-        ssize_t nread = getline(&line, &len, stdin);
+        char *raw_line = NULL;
+        ssize_t nread = getline(&raw_line, &len, stdin);
 
         if (nread == -1) {
-            if (line) mem_free(line);
+            if (raw_line) free(raw_line);
             return NULL; // EOF or error
         }
 
         // Remove trailing newline
-        if (nread > 0 && line[nread-1] == '\n') {
-            line[nread-1] = '\0';
+        if (nread > 0 && raw_line[nread-1] == '\n') {
+            raw_line[nread-1] = '\0';
+            nread--;
         }
+
+        line = mem_alloc((size_t)nread + 1, MEM_CAT_TEMP);
+        if (!line) {
+            free(raw_line);
+            return NULL;
+        }
+        memcpy(line, raw_line, (size_t)nread + 1);
+        free(raw_line);
 #endif
 
         return line;

@@ -11857,15 +11857,7 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                             case MCONST_FUNC: {
                                 int fii = (int)mc->int_val;
                                 if (fii >= 0 && fii < mt->func_count && mt->func_entries[fii].func_item) {
-                                    JsFuncCollected* func = &mt->func_entries[fii];
-                                    int fpc = func->param_count;
-                                    if (func->has_rest_param) fpc = -fpc;
-                                    const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                                        MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
-                                        MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
-                                    const char* fn_name = (func->node && func->node->name) ? func->node->name->chars : NULL;
-                                    jm_emit_set_function_name(mt, const_val, fn_name, func->formal_length);
-                                    jm_emit_set_function_source(mt, const_val, func->node);
+                                    const_val = jm_create_func_or_closure(mt, &mt->func_entries[fii]);
                                 } else {
                                     const_val = jm_emit_null(mt);
                                 }

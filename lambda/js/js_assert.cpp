@@ -18,6 +18,10 @@ static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
 }
 
+static Item js_assert_noop(void) {
+    return make_js_undefined();
+}
+
 static Item assert_make_string(const char* str) {
     if (!str) return ItemNull;
     String* s = heap_create_name(str, strlen(str));
@@ -637,7 +641,7 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
         promise = asyncFnOrPromise;
     }
 
-    Item on_fulfilled = js_new_function(NULL, 0); // no-op
+    Item on_fulfilled = js_new_function((void*)js_assert_noop, 0);
     Item on_rejected = js_new_function((void*)js_assert_doesNotReject_on_rejected, 1);
     return js_promise_then(promise, on_fulfilled, on_rejected);
 }

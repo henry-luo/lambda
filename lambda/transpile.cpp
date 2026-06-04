@@ -2168,7 +2168,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
             TypeId elem_tid = operand->type_id;
             if (elem_tid == LMD_TYPE_NUM_SIZED) {
                 // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
-                ArrayNumElemType et = num_sized_to_elem_type(((TypeNumSized*)operand)->num_type);
+                ArrayNumElemType et = num_sized_to_elem_type(type_num_sized_kind(operand));
                 strbuf_append_str(tp->code_buf, "(ArrayNum*)ensure_sized_array(");
                 transpile_box_item(tp, asn_node->as);
                 strbuf_append_format(tp->code_buf, ",%d)", (int)et);
@@ -4447,7 +4447,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 
     // Specialized compact sized array path: array_num_new(elem_type, count) + array_num_set_item(arr, i, boxed)
     if (is_sized_array && array_node->item) {
-        ArrayNumElemType elem_type = num_sized_to_elem_type(((TypeNumSized*)type->nested)->num_type);
+        ArrayNumElemType elem_type = num_sized_to_elem_type(type_num_sized_kind(type->nested));
         strbuf_append_str(tp->code_buf, "({ArrayNum* arr = array_num_new(");
         strbuf_append_int(tp->code_buf, (int)elem_type);
         strbuf_append_str(tp->code_buf, ",");

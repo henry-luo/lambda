@@ -72,7 +72,11 @@ char* strview_to_cstr(const StrView* s) {
         if (empty) empty[0] = '\0';
         return empty;
     }
-    return str_dup(s->str, s->length);
+    char* out = (char*)mem_alloc(s->length + 1, MEM_CAT_TEMP);
+    if (!out) return NULL;
+    memcpy(out, s->str, s->length);
+    out[s->length] = '\0';
+    return out;
 }
 
 bool strview_contains(const StrView* s, const char* substr) {

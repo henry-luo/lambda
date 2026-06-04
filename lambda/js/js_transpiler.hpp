@@ -146,6 +146,7 @@ struct JsPreambleState {
     void* tp_ast_pool;          // transpiler's ast_pool — kept alive because compiled MIR code
                                 // and map shape entries reference strings from name_pool
     void* tp_name_pool;         // transpiler's name_pool (allocated from ast_pool)
+    char* source_buffer;        // source bytes kept alive for retained AST/source ranges
     int module_var_count;       // number of harness module vars
     JsModuleConstEntry* entries;// snapshot of harness module_consts
     int entry_count;
