@@ -404,11 +404,15 @@ char*               font_platform_find_emoji_font(uint32_t codepoint, int* out_f
 void*               font_platform_create_ct_font(const char* postscript_name,
                                                   const char* family_name,
                                                   float size_px,
-                                                  int css_weight);  // css_weight: 100–900
+                                                  int css_weight,  // css_weight: 100–900
+                                                  FontSlant css_slant);
 void                font_platform_destroy_ct_font(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
+TextExtents         font_platform_measure_text(void* ct_font_ref,
+                                                const char* text, int byte_len,
+                                                float fallback_height);
 
 // font_rasterize_ct.c — CoreText rasterization (macOS)
 void*               font_rasterize_ct_create(const uint8_t* data, size_t len,

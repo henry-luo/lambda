@@ -1052,9 +1052,9 @@ static void stop_all_interval_timers(void) {
     }
 }
 
-// Auto-close mode matches closing the page after load/onload: pending timers
-// must not keep the static layout pass alive, and their GC roots need normal
-// close-path cleanup before the transient JS heap is released.
+// Auto-close mode matches closing the page after load/onload: immediate tasks
+// queued by onload get a browser-like macrotask turn, but pending timers must
+// not keep the static layout pass alive.
 static void close_all_timer_handles(void) {
     for (int i = timer_handle_count - 1; i >= 0; i--) {
         JsTimerHandle* th = timer_handles[i];
@@ -1072,6 +1072,11 @@ extern "C" int js_event_loop_drain(void) {
     if (!loop) return 0;
 
     if (auto_close_mode) {
+        for (int turn = 0; turn < 4; turn++) {
+            int active = uv_run(loop, UV_RUN_NOWAIT);
+            js_microtask_flush();
+            if (!active || timer_handle_count == 0) break;
+        }
         close_all_timer_handles();
         uv_run(loop, UV_RUN_NOWAIT);
         js_microtask_flush();

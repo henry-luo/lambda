@@ -727,10 +727,81 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
 
 #ifdef __APPLE__
 
+static CGFloat font_platform_ct_weight_trait(int css_weight) {
+    if      (css_weight >= 900) return 0.62f;
+    else if (css_weight >= 800) return 0.56f;
+    else if (css_weight >= 700) return 0.40f;
+    return 0.30f;  // 600 SemiBold (kCTFontWeightSemibold)
+}
+
+static CFMutableDictionaryRef font_platform_create_css_traits(int css_weight,
+                                                              FontSlant css_slant) {
+    CFMutableDictionaryRef traits = CFDictionaryCreateMutable(
+        NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (!traits) return NULL;
+
+    if (css_weight > 500) {
+        CGFloat ct_weight = font_platform_ct_weight_trait(css_weight);
+        CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
+        if (wt_num) {
+            CFDictionarySetValue(traits, kCTFontWeightTrait, wt_num);
+            CFRelease(wt_num);
+        }
+    }
+
+    if (css_slant == FONT_SLANT_ITALIC || css_slant == FONT_SLANT_OBLIQUE) {
+        CTFontSymbolicTraits symbolic = kCTFontItalicTrait;
+        CFNumberRef sym_num = CFNumberCreate(NULL, kCFNumberSInt32Type, &symbolic);
+        if (sym_num) {
+            CFDictionarySetValue(traits, kCTFontSymbolicTrait, sym_num);
+            CFRelease(sym_num);
+        }
+
+        CGFloat ct_slant = 1.0f;
+        CFNumberRef slant_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_slant);
+        if (slant_num) {
+            CFDictionarySetValue(traits, kCTFontSlantTrait, slant_num);
+            CFRelease(slant_num);
+        }
+    }
+
+    if (CFDictionaryGetCount(traits) == 0) {
+        CFRelease(traits);
+        return NULL;
+    }
+    return traits;
+}
+
+static CTFontRef font_platform_copy_with_css_traits(CTFontRef base,
+                                                    float size_px,
+                                                    int css_weight,
+                                                    FontSlant css_slant) {
+    if (!base) return NULL;
+
+    CFMutableDictionaryRef traits = font_platform_create_css_traits(css_weight, css_slant);
+    if (!traits) return NULL;
+
+    CFStringRef tk = kCTFontTraitsAttribute;
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+        (const void**)&tk, (const void**)&traits, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(traits);
+    if (!attrs) return NULL;
+
+    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+    CFRelease(attrs);
+    if (!desc) return NULL;
+
+    CTFontRef copied = CTFontCreateCopyWithAttributes(base, (CGFloat)size_px, NULL, desc);
+    CFRelease(desc);
+    return copied;
+}
+
 void* font_platform_create_ct_font(const char* postscript_name,
                                     const char* family_name,
                                     float size_px,
-                                    int css_weight) {
+                                    int css_weight,
+                                    FontSlant css_slant) {
     CTFontRef ct_font = NULL;
 
     // SFNS.ttf (System Font / -apple-system) is a variable font whose
@@ -746,29 +817,13 @@ void* font_platform_create_ct_font(const char* postscript_name,
         // kCTFontWeight* constants: Semibold≈0.30, Bold≈0.40, Heavy≈0.56, Black≈0.62
         ct_font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,
                                                 (CGFloat)size_px, NULL);
-        if (ct_font && css_weight > 500) {
-            // For semibold/bold: create a copy with the requested weight trait
-            // so glyph advances reflect the actual weight, not just Regular.
-            CGFloat ct_weight;
-            if      (css_weight >= 900) ct_weight = 0.62f;
-            else if (css_weight >= 800) ct_weight = 0.56f;
-            else if (css_weight >= 700) ct_weight = 0.40f;
-            else                        ct_weight = 0.30f;  // 600 SemiBold (kCTFontWeightSemibold)
-            CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
-            CFStringRef wt_key = kCTFontWeightTrait;
-            CFDictionaryRef traits = CFDictionaryCreate(NULL,
-                (const void**)&wt_key, (const void**)&wt_num, 1,
-                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            CFRelease(wt_num);
-            CFStringRef tk = kCTFontTraitsAttribute;
-            CFDictionaryRef attrs = CFDictionaryCreate(NULL,
-                (const void**)&tk, (const void**)&traits, 1,
-                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            CFRelease(traits);
-            CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
-            CFRelease(attrs);
-            CTFontRef weighted = CTFontCreateCopyWithAttributes(ct_font, (CGFloat)size_px, NULL, desc);
-            CFRelease(desc);
+        if (ct_font && (css_weight > 500 ||
+                        css_slant == FONT_SLANT_ITALIC ||
+                        css_slant == FONT_SLANT_OBLIQUE)) {
+            // For semibold/bold and italic/oblique, create a copy with CSS
+            // traits so layout advances reflect the matched face.
+            CTFontRef weighted = font_platform_copy_with_css_traits(
+                ct_font, size_px, css_weight, css_slant);
             CFRelease(ct_font);
             ct_font = weighted ? weighted : CTFontCreateUIFontForLanguage(
                                                kCTFontUIFontSystem, (CGFloat)size_px, NULL);
@@ -780,38 +835,27 @@ void* font_platform_create_ct_font(const char* postscript_name,
     // Browser font matching still chooses the family's heavier face for
     // font-weight:600+. Resolve a CoreText font by family + weight traits for
     // layout advances so text metrics follow the CSS font matching result.
-    if (!ct_font && family_name && family_name[0] && css_weight > 500) {
-        CGFloat ct_weight;
-        if      (css_weight >= 900) ct_weight = 0.62f;
-        else if (css_weight >= 800) ct_weight = 0.56f;
-        else if (css_weight >= 700) ct_weight = 0.40f;
-        else                        ct_weight = 0.30f;
-
+    if (!ct_font && family_name && family_name[0] &&
+        (css_weight > 500 || css_slant == FONT_SLANT_ITALIC ||
+         css_slant == FONT_SLANT_OBLIQUE)) {
         CFStringRef fam = CFStringCreateWithCString(NULL, family_name, kCFStringEncodingUTF8);
-        CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
-        if (fam && wt_num) {
-            CFStringRef wt_key = kCTFontWeightTrait;
-            CFDictionaryRef traits = CFDictionaryCreate(NULL,
-                (const void**)&wt_key, (const void**)&wt_num, 1,
+        CFMutableDictionaryRef traits = font_platform_create_css_traits(css_weight, css_slant);
+        if (fam && traits) {
+            CFStringRef keys[] = { kCTFontFamilyNameAttribute, kCTFontTraitsAttribute };
+            CFTypeRef vals[] = { fam, traits };
+            CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+                (const void**)keys, vals, 2,
                 &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-            if (traits) {
-                CFStringRef keys[] = { kCTFontFamilyNameAttribute, kCTFontTraitsAttribute };
-                CFTypeRef vals[] = { fam, traits };
-                CFDictionaryRef attrs = CFDictionaryCreate(NULL,
-                    (const void**)keys, vals, 2,
-                    &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-                if (attrs) {
-                    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
-                    if (desc) {
-                        ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
-                        CFRelease(desc);
-                    }
-                    CFRelease(attrs);
+            if (attrs) {
+                CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+                if (desc) {
+                    ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+                    CFRelease(desc);
                 }
-                CFRelease(traits);
+                CFRelease(attrs);
             }
         }
-        if (wt_num) CFRelease(wt_num);
+        if (traits) CFRelease(traits);
         if (fam) CFRelease(fam);
     }
 
@@ -847,8 +891,9 @@ void* font_platform_create_ct_font(const char* postscript_name,
     }
 
     if (ct_font) {
-        log_debug("font_platform: created CTFont (ps=%s, size=%.2f, wgt=%d)",
-                  postscript_name ? postscript_name : "?", size_px, css_weight);
+        log_debug("font_platform: created CTFont (ps=%s, size=%.2f, wgt=%d, slant=%d)",
+                  postscript_name ? postscript_name : "?", size_px, css_weight,
+                  (int)css_slant);
     }
     return (void*)ct_font;
 }
@@ -957,6 +1002,69 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
 
     CFRelease(line);
     return kerning;
+}
+
+TextExtents font_platform_measure_text(void* ct_font_ref, const char* text,
+                                       int byte_len, float fallback_height) {
+    TextExtents ext = {0};
+    if (!ct_font_ref || !text || byte_len <= 0) return ext;
+
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    CFStringRef str = CFStringCreateWithBytes(NULL, (const UInt8*)text, byte_len,
+                                              kCFStringEncodingUTF8, false);
+    if (!str) return ext;
+
+    CFStringRef keys[] = { kCTFontAttributeName };
+    CFTypeRef values[] = { font };
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+        (const void**)keys, (const void**)values, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    if (!attrs) {
+        CFRelease(str);
+        return ext;
+    }
+
+    CFAttributedStringRef astr = CFAttributedStringCreate(NULL, str, attrs);
+    CFRelease(str);
+    CFRelease(attrs);
+    if (!astr) return ext;
+
+    CTLineRef line = CTLineCreateWithAttributedString(astr);
+    CFRelease(astr);
+    if (!line) return ext;
+
+    CFArrayRef runs = CTLineGetGlyphRuns(line);
+    CFIndex run_count = runs ? CFArrayGetCount(runs) : 0;
+    for (CFIndex ri = 0; ri < run_count; ri++) {
+        CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, ri);
+        if (!run) continue;
+        CFIndex glyph_count = CTRunGetGlyphCount(run);
+        if (glyph_count <= 0) continue;
+        ext.glyph_count += (int)glyph_count;
+
+        const CGSize* advances = CTRunGetAdvancesPtr(run);
+        if (advances) {
+            for (CFIndex gi = 0; gi < glyph_count; gi++) {
+                ext.width += (float)advances[gi].width;
+            }
+        } else {
+            CFIndex gi = 0;
+            while (gi < glyph_count) {
+                CGSize buf[64];
+                CFIndex chunk = glyph_count - gi;
+                if (chunk > 64) chunk = 64;
+                CTRunGetAdvances(run, CFRangeMake(gi, chunk), buf);
+                for (CFIndex bi = 0; bi < chunk; bi++) {
+                    ext.width += (float)buf[bi].width;
+                }
+                gi += chunk;
+            }
+        }
+    }
+    ext.height = fallback_height;
+
+    CFRelease(line);
+    return ext;
 }
 
 #endif

@@ -276,6 +276,39 @@ struct DomElement : DomNode {
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
 
+    // CSS Text soft hyphen fragments can contribute to an inline element's
+    // border-box union without producing an additional DOM text rect.
+    bool has_inline_fragment_union;
+    float inline_fragment_min_x;
+    float inline_fragment_max_x;
+    float inline_fragment_min_y;
+    float inline_fragment_max_y;
+
+    // collapsed text can create an anonymous line fragment that affects ancestor
+    // inline decorations without contributing to this element's own DOMRect.
+    bool has_ancestor_fragment_union;
+    float ancestor_fragment_min_x;
+    float ancestor_fragment_max_x;
+    float ancestor_fragment_min_y;
+    float ancestor_fragment_max_y;
+
+    // line-edge collapsible whitespace may leave a zero-width inline fragment
+    // on a real line even though its text node has no visible rect.
+    bool has_collapsed_line_fragment_union;
+    float collapsed_line_fragment_min_x;
+    float collapsed_line_fragment_max_x;
+    float collapsed_line_fragment_min_y;
+    float collapsed_line_fragment_max_y;
+
+    // block-in-inline splitting creates anonymous line fragments for every inline
+    // ancestor in the split chain. These store the content-area union; each span's
+    // own border/padding is applied when its DOMRect is computed.
+    bool has_split_inline_fragment_union;
+    float split_inline_fragment_min_x;
+    float split_inline_fragment_max_x;
+    float split_inline_fragment_min_y;
+    float split_inline_fragment_max_y;
+
     // Item property type indicator (fi, gi, tb, td, form share union)
     enum ItemPropType : uint8_t {
         ITEM_PROP_NONE = 0,
@@ -337,6 +370,18 @@ struct DomElement : DomNode {
         style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),
+        has_inline_fragment_union(false),
+        inline_fragment_min_x(0), inline_fragment_max_x(0),
+        inline_fragment_min_y(0), inline_fragment_max_y(0),
+        has_ancestor_fragment_union(false),
+        ancestor_fragment_min_x(0), ancestor_fragment_max_x(0),
+        ancestor_fragment_min_y(0), ancestor_fragment_max_y(0),
+        has_collapsed_line_fragment_union(false),
+        collapsed_line_fragment_min_x(0), collapsed_line_fragment_max_x(0),
+        collapsed_line_fragment_min_y(0), collapsed_line_fragment_max_y(0),
+        has_split_inline_fragment_union(false),
+        split_inline_fragment_min_x(0), split_inline_fragment_max_x(0),
+        split_inline_fragment_min_y(0), split_inline_fragment_max_y(0),
         item_prop_type(ITEM_PROP_NONE), fi(nullptr),
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),

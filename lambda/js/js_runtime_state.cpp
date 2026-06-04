@@ -266,6 +266,7 @@ extern "C" void js_url_module_reset();
 extern "C" void js_util_reset();
 extern "C" void js_reset_template_registry(void);
 extern "C" void js_iterator_proto_cache_reset(void);
+extern "C" void js_reset_css_namespace_object(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -290,6 +291,7 @@ extern "C" void js_batch_reset() {
     js_reset_reflect_object();
     js_reset_atomics_object();
     js_reset_262_object();
+    js_reset_css_namespace_object();
     // reset interned __proto__ key (allocated in old pool)
     js_reset_proto_key();
     js_reset_template_registry();
@@ -417,6 +419,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_reset_reflect_object();
     js_reset_atomics_object();
     js_reset_262_object();
+    js_reset_css_namespace_object();
     // reset interned __proto__ key
     js_reset_proto_key();
     js_reset_template_registry();

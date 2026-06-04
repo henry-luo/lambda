@@ -940,6 +940,23 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
         ext.height = metrics->ascender - metrics->descender;
     }
 
+#ifdef __APPLE__
+    void* ct_font_ref = NULL;
+    if (should_use_ct_advance_override(handle)) {
+        ct_font_ref = handle->ct_font_ref;
+    } else if (handle->ct_raster_ref) {
+        ct_font_ref = handle->ct_raster_ref;
+    } else {
+        ct_font_ref = handle->ct_font_ref;
+    }
+    if (ct_font_ref) {
+        TextExtents shaped = font_platform_measure_text(ct_font_ref, text, byte_len, ext.height);
+        if (shaped.glyph_count > 0 || shaped.width > 0.0f) {
+            return shaped;
+        }
+    }
+#endif
+
     uint32_t prev_codepoint = 0;
     bool after_zwj = false;
     bool prev_is_zwj_base = false;

@@ -942,6 +942,25 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     lycon->line.parent_font_handle = saved_pa_handle;
 }
 
+static bool inline_span_has_in_flow_block_child(ViewSpan* span) {
+    if (!span) return false;
+    View* child = span->first_child;
+    while (child) {
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            bool out_of_flow = block->position &&
+                (block->position->position == CSS_VALUE_ABSOLUTE ||
+                 block->position->position == CSS_VALUE_FIXED ||
+                 block->position->float_prop == CSS_VALUE_LEFT ||
+                 block->position->float_prop == CSS_VALUE_RIGHT);
+            if (!out_of_flow && child->view_type != RDT_VIEW_INLINE_BLOCK) {
+                return true;
+            }
+        }
+        child = child->next();
+    }
+    return false;
+}
+
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
     // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
@@ -1066,15 +1085,28 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // recompute the span's bounding box. The bounding box was computed earlier
         // in layout_inline() before vertical alignment, so child y positions may
         // have shifted (e.g., baseline alignment with half-leading offsets).
-        // Always recompute to ensure the span's bounds reflect final child positions.
+        // Block-in-inline spans keep their split anonymous block geometry from
+        // layout_inline_with_block_children() instead of a generic child union.
         struct FontHandle* span_fh = span->font ? span->font->font_handle : lycon->font.font_handle;
-        compute_span_bounding_box(span, false, span_fh);
+        if (!inline_span_has_in_flow_block_child(span)) {
+            compute_span_bounding_box(span, false, span_fh);
+        }
         // CSS 2.1 §10.8.1: Empty/collapsed inline spans (no visible children)
         // get height=0 from compute_span_bounding_box, but should report their
-        // line-height height when on a line with visible content. content_height
-        // was set as a marker during layout_inline()/line_break().
+        // font content box when on a line with visible content. content_height
+        // marks that the inline contributed to line layout, while DOMRect height
+        // follows the font box rather than the used line-height.
         if (span->height == 0 && span->content_height > 0) {
-            span->height = (int)span->content_height;
+            float empty_inline_height = span_fh ? font_get_cell_height(span_fh) : 0.0f;
+            FontProp* empty_inline_font = span->font ? span->font : lycon->font.style;
+            if (empty_inline_height <= 0.0f && empty_inline_font && empty_inline_font->font_height > 0.0f) {
+                empty_inline_height = empty_inline_font->font_height;
+            }
+            if (empty_inline_height <= 0.0f && empty_inline_font &&
+                (empty_inline_font->ascender > 0.0f || empty_inline_font->descender > 0.0f)) {
+                empty_inline_height = empty_inline_font->ascender + empty_inline_font->descender;
+            }
+            span->height = empty_inline_height > 0.0f ? empty_inline_height : span->content_height;
         }
         float span_asc = 0, span_desc = 0;
         if (span->font) {
@@ -1663,8 +1695,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Create inline view for the marker with fixed width
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
-                    // font metrics are in physical pixels, divide by pixel_ratio for CSS pixels
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     marker_span->width = marker_prop->width;
                     // Use CSS computed line-height for marker height (not raw font metrics)
                     marker_span->height = lycon->block.line_height;
@@ -1710,6 +1740,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         // Mark line as non-empty so line_break() accounts for marker height
                         if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
                         lycon->line.is_line_start = false;
+                        lycon->line.has_replaced_content = true;
 
                         // Track normal line-height for platform metrics
                         if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
@@ -1934,7 +1965,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
     }
     else if (node->is_text()) {
-        const unsigned char* str = node->text_data();
         // Skip inter-element whitespace (whitespace between/around block elements)
         // CSS 2.2: "When white space is contained at the end of a block's content,
         // or at the start, or between block-level elements, it is rendered as nothing."

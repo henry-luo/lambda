@@ -180,13 +180,15 @@ static void offset_children_recursive(ViewElement* elem, float offset_x, float o
     }
 }
 
-/**
- * Apply relative positioning to an element
- * Relative positioning moves the element from its normal position without affecting other elements
- */
-void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
-    // calculate offset from top/right/bottom/left properties
-    float offset_x = 0, offset_y = 0;
+void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, float* offset_y_out) {
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    if (!block || !block->position ||
+        block->position->position != CSS_VALUE_RELATIVE) {
+        if (offset_x_out) *offset_x_out = offset_x;
+        if (offset_y_out) *offset_y_out = offset_y;
+        return;
+    }
 
     // Get parent's text direction to determine horizontal offset precedence
     // The CSS 'direction' property determines which value wins when both left and right are specified
@@ -289,6 +291,23 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
             offset_y = -block->position->bottom;
         }
     }
+
+    if (offset_x_out) *offset_x_out = offset_x;
+    if (offset_y_out) *offset_y_out = offset_y;
+}
+
+/**
+ * Apply relative positioning to an element
+ * Relative positioning moves the element from its normal position without affecting other elements
+ */
+void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
+    if (!block) return;
+
+    // calculate offset from top/right/bottom/left properties
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    layout_relative_position_offset(block, &offset_x, &offset_y);
+
     // apply offset to visual position (doesn't affect layout of other elements)
     block->x += offset_x;  block->y += offset_y;
     log_debug("Applied relative positioning: offset (%.1f, %.1f), final position (%.0f, %.0f)",

@@ -31,7 +31,8 @@ bool font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
             if (name) ps_name = name->postscript_name;
         }
         handle->ct_font_ref = font_platform_create_ct_font(ps_name, family,
-                                                           handle->size_px, (int)weight);
+                                                           handle->size_px, (int)weight,
+                                                           slant);
         handle->platform_aux_ref = handle->ct_font_ref;
     }
     return handle->backend_kind != FONT_BACKEND_NONE;

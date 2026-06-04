@@ -1295,6 +1295,9 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
 }
 
 extern "C" void js_dom_selection_reset(void) {
+    memset(&_range_methods, 0, sizeof(_range_methods));
+    memset(&_sel_methods, 0, sizeof(_sel_methods));
+
     // Native lifetime is owned by the per-document DocState. Walk the
     // current document's live ranges, drop our JS-side retain, and clear
     // host_wrapper back-pointers so a fresh document starts clean.

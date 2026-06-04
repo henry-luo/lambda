@@ -248,6 +248,7 @@ static void reset_dom_wrapper_cache(); // forward declaration
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
 extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
+    js_dom_selection_reset();
     reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
