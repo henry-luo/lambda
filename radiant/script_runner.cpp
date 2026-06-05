@@ -27,6 +27,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/log.h"
+#include "layout_guards.h"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
@@ -985,8 +986,18 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
  * Recursively walk the Element* tree, collecting <script> source text
  * (both inline and external) and the body onload handler in document order.
  */
-static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url) {
+static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* collection, Url* base_url, int depth) {
     if (!elem) return;
+
+    // guard against stack overflow from deeply nested DOM (fuzzer-found): this
+    // pre-order walk runs before layout and uses the native stack per level.
+    // Cap at the same depth as layout — content deeper than this is not laid
+    // out anyway, so scripts there would never run.
+    if (depth >= MAX_LAYOUT_DEPTH) {
+        log_error("collect_scripts_recursive: max depth %d exceeded, skipping deeper nodes",
+                  MAX_LAYOUT_DEPTH);
+        return;
+    }
 
     // check for <body onload="...">
     if (is_body_element(elem)) {
@@ -1109,7 +1120,7 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
         Item child = elem->items[i];
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, collection, base_url);
+            collect_scripts_recursive(child.element, collection, base_url, depth + 1);
         }
     }
 }
@@ -1473,7 +1484,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_error("execute_document_scripts: failed to initialize script task collection");
         return;
     }
-    collect_scripts_recursive(html_root, &script_tasks, base_url);
+    collect_scripts_recursive(html_root, &script_tasks, base_url, 0);
     log_script_task_diagnostics(&script_tasks);
 
     if (!script_task_collection_has_executable_tasks(&script_tasks)) {

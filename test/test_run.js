@@ -752,6 +752,7 @@ function displayResults(config, results) {
         const if_ = inputResults.total_failed;
         const it = ip + if_;
         const inputStatus = if_ === 0 ? '✅ PASS' : '❌ FAIL';
+        console.log('');
         console.log(`📥 Input Parser Tests ${inputStatus} (${ip}/${it} tests)`);
         for (let i = 0; i < inputResults.suites.length; i++) {
             const s = inputResults.suites[i];
@@ -765,6 +766,7 @@ function displayResults(config, results) {
     // Print lambda/runtime suite results
     for (const { suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs } of suiteResults) {
         const suiteStatus = suiteFailed === 0 ? '✅ PASS' : '❌ FAIL';
+        console.log('');
         console.log(`${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests, ${formatDuration(suiteDurationMs)})`);
 
         for (const t of suite.tests) {
