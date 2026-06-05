@@ -693,7 +693,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
             // because measurement passes should not permanently mark styles as resolved
             // and percentage values may need different containing block dimensions
-            if (dom_elem->styles_resolved && !layout_context_is_measuring(lycon)) {
+            if (dom_elem->styles_resolved && !dom_elem->needs_style_recompute &&
+                !layout_context_is_measuring(lycon)) {
                 // Restore lycon->block dimensions from stored CSS values.
                 // layout_block resets lycon->block.given_width/height to -1 before
                 // calling us. When we skip resolution, these must be restored from
@@ -795,6 +796,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
             if (!layout_context_is_measuring(lycon)) {
                 dom_elem->styles_resolved = true;
+                dom_elem->needs_style_recompute = false;
             }
         } else {
             // No specified_style - still apply element default styles for HTML attributes

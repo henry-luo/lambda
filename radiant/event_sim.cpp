@@ -1399,10 +1399,26 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     else if (strcmp(type_str, "assert_rect") == 0) {
         ev->type = SIM_EVENT_ASSERT_RECT;
         parse_target(reader, ev);
-        if (reader.has("x")) { ev->expected_rect_x = (float)reader.get("x").asFloat(); ev->has_rect_x = true; }
-        if (reader.has("y")) { ev->expected_rect_y = (float)reader.get("y").asFloat(); ev->has_rect_y = true; }
-        if (reader.has("width")) { ev->expected_rect_w = (float)reader.get("width").asFloat(); ev->has_rect_w = true; }
-        if (reader.has("height")) { ev->expected_rect_h = (float)reader.get("height").asFloat(); ev->has_rect_h = true; }
+        if (reader.has("x")) {
+            ItemReader value = reader.get("x");
+            ev->expected_rect_x = (float)(value.isFloat() ? value.asFloat() : value.asInt());
+            ev->has_rect_x = true;
+        }
+        if (reader.has("y")) {
+            ItemReader value = reader.get("y");
+            ev->expected_rect_y = (float)(value.isFloat() ? value.asFloat() : value.asInt());
+            ev->has_rect_y = true;
+        }
+        if (reader.has("width")) {
+            ItemReader value = reader.get("width");
+            ev->expected_rect_w = (float)(value.isFloat() ? value.asFloat() : value.asInt());
+            ev->has_rect_w = true;
+        }
+        if (reader.has("height")) {
+            ItemReader value = reader.get("height");
+            ev->expected_rect_h = (float)(value.isFloat() ? value.asFloat() : value.asInt());
+            ev->has_rect_h = true;
+        }
         {
             ItemReader tol = reader.get("tolerance");
             ev->rect_tolerance = tol.isFloat() ? (float)tol.asFloat() : (float)tol.asInt();
@@ -4012,6 +4028,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: assert_rect - target element not found");
                 ctx->fail_count++;
                 break;
+            }
+            DocState* state = doc ? (DocState*)doc->state : nullptr;
+            if (state && state->needs_reflow) {
+                reflow_process_pending(state);
+                if (state->needs_reflow) {
+                    extern void reflow_html_doc(DomDocument* doc);
+                    reflow_html_doc(doc);
+                    doc_state_clear_reflow(state);
+                }
             }
             float ax, ay, aw, ah;
             get_element_rect_abs(elem, &ax, &ay, &aw, &ah);
