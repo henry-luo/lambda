@@ -96,7 +96,7 @@ const BottomPanel = forwardRef(({ testPath, renderTest, isPdfTest = false }, ref
           <TerminalPanel ref={terminalRef} />
         </div>
         <div className={`tab-content ${activeTab === 'log' ? 'active' : ''}`}>
-          <LogViewer />
+          {activeTab === 'log' && <LogViewer />}
         </div>
         <div className={`tab-content ${activeTab === 'viewtree' ? 'active' : ''}`}>
           <ViewTreeViewer ref={viewTreeRef} />

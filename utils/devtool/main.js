@@ -88,6 +88,11 @@ class LayoutDevTool {
       return await this.readLogFile();
     });
 
+    // Read a small page of log lines before a byte offset
+    ipcMain.handle('read-log-lines', async (event, options) => {
+      return await this.readLogLines(options);
+    });
+
     // Read view tree file
     ipcMain.handle('read-view-tree-file', async () => {
       return await this.readViewTreeFile();
@@ -298,6 +303,94 @@ class LayoutDevTool {
     } catch (error) {
       console.error('Failed to read log file:', error);
       return '';
+    }
+  }
+
+  async readLogLines(options = {}) {
+    const maxLines = Math.max(1, Math.min(Number(options.maxLines) || 120, 1000));
+    const blockSize = 64 * 1024;
+    const maxBytes = 4 * 1024 * 1024;
+    const logPath = path.join(this.projectRoot, 'log.txt');
+
+    let handle = null;
+    try {
+      const stat = await fs.stat(logPath);
+      const fileSize = stat.size;
+      const requestedOffset = Number(options.beforeOffset);
+      const beforeOffset = Number.isFinite(requestedOffset)
+        ? Math.max(0, Math.min(requestedOffset, fileSize))
+        : fileSize;
+
+      if (fileSize === 0 || beforeOffset === 0) {
+        return {
+          lines: [],
+          startOffset: 0,
+          endOffset: beforeOffset,
+          fileSize,
+          hasMoreBefore: false
+        };
+      }
+
+      handle = await fs.open(logPath, 'r');
+      const chunks = [];
+      let cursor = beforeOffset;
+      let totalBytes = 0;
+      let newlineCount = 0;
+
+      while (cursor > 0 && newlineCount <= maxLines && totalBytes < maxBytes) {
+        const readSize = Math.min(blockSize, cursor, maxBytes - totalBytes);
+        cursor -= readSize;
+
+        const buffer = Buffer.allocUnsafe(readSize);
+        const { bytesRead } = await handle.read(buffer, 0, readSize, cursor);
+        const chunk = bytesRead === readSize ? buffer : buffer.subarray(0, bytesRead);
+
+        for (let i = 0; i < chunk.length; i++) {
+          if (chunk[i] === 10) newlineCount++;
+        }
+
+        chunks.unshift(chunk);
+        totalBytes += bytesRead;
+      }
+
+      const data = Buffer.concat(chunks, totalBytes);
+      let end = data.length;
+      if (end > 0 && data[end - 1] === 10) end--;
+
+      let start = 0;
+      let linesFound = 0;
+      for (let i = end - 1; i >= 0; i--) {
+        if (data[i] === 10) {
+          linesFound++;
+          if (linesFound >= maxLines) {
+            start = i + 1;
+            break;
+          }
+        }
+      }
+
+      const text = data.subarray(start, end).toString('utf8');
+      return {
+        lines: text ? text.split('\n') : [],
+        startOffset: cursor + start,
+        endOffset: beforeOffset,
+        fileSize,
+        hasMoreBefore: cursor + start > 0
+      };
+    } catch (error) {
+      console.error('Failed to read log lines:', error);
+      return {
+        lines: [],
+        startOffset: 0,
+        endOffset: 0,
+        fileSize: 0,
+        hasMoreBefore: false,
+        error: error.message
+      };
+    } finally {
+      if (handle) {
+        try { await handle.close(); } catch {}
+      }
     }
   }
 

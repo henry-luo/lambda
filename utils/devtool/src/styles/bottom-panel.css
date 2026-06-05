@@ -110,17 +110,32 @@
 .log-content {
   flex: 1;
   overflow: auto;
-  padding: 8px;
-}
-
-.log-text {
-  margin: 0;
+  position: relative;
   font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 18px;
+}
+
+.log-virtual-spacer {
+  position: relative;
+  min-width: 100%;
+}
+
+.log-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 18px;
+  padding: 0 8px;
   color: #333333;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow: hidden;
+  white-space: pre;
+  box-sizing: border-box;
+}
+
+.log-message {
+  padding: 8px;
+  color: #666666;
 }
 
 .log-footer {
