@@ -322,6 +322,8 @@ public:
         // Setext-style with underlines (next_line check)
         if (!info.valid && next_line) {
             const char* ul = next_line;
+            while (*ul == ' ' || *ul == '\t') ul++;
+            if (!*ul) return info;
             static const char* ul_chars = "=-~^+";
             if (strchr(ul_chars, *ul)) {
                 char ul_char = *ul;
