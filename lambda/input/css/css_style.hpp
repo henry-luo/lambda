@@ -711,6 +711,7 @@ typedef struct CssValue {
         struct {
             struct CssValue** values;
             int count;
+            bool comma_separated;
         } list;
 
         // Function value

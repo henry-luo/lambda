@@ -313,6 +313,85 @@ protected:
         return result;
     }
 
+    // Normalize comma spacing outside strings so function args and selector lists compare semantically
+    std::string normalizeCommaSpaces(const std::string& css) {
+        std::string result;
+        result.reserve(css.length());
+
+        bool in_string = false;
+        char string_quote = '\0';
+        bool escaped = false;
+
+        for (size_t i = 0; i < css.length(); i++) {
+            char c = css[i];
+
+            if (in_string) {
+                result += c;
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == string_quote) {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if (c == '"' || c == '\'') {
+                in_string = true;
+                string_quote = c;
+                result += c;
+                continue;
+            }
+
+            if (c == ',') {
+                while (!result.empty() && result.back() == ' ') {
+                    result.pop_back();
+                }
+                result += ',';
+                while (i + 1 < css.length() && css[i + 1] == ' ') {
+                    i++;
+                }
+                continue;
+            }
+
+            result += c;
+        }
+
+        return result;
+    }
+
+    // Normalize optional quotes in CSS functions whose arguments are identifiers/URLs
+    std::string normalizeOptionalFunctionQuotes(const std::string& css) {
+        std::string result;
+        result.reserve(css.length());
+
+        size_t i = 0;
+        while (i < css.length()) {
+            bool is_url = css.compare(i, 5, "url(\"") == 0;
+            bool is_format = css.compare(i, 8, "format(\"") == 0;
+
+            if (is_url || is_format) {
+                const char* prefix = is_url ? "url(" : "format(";
+                size_t prefix_len = is_url ? 5 : 8;
+                size_t arg_start = i + prefix_len;
+                size_t quote_end = css.find("\")", arg_start);
+                if (quote_end != std::string::npos) {
+                    result += prefix;
+                    result += css.substr(arg_start, quote_end - arg_start);
+                    result += ")";
+                    i = quote_end + 2;
+                    continue;
+                }
+            }
+
+            result += css[i];
+            i++;
+        }
+
+        return result;
+    }
+
     // Normalize CSS keywords to lowercase for comparison
     // Handles known keywords like currentColor, etc.
     std::string normalizeCssKeywords(const std::string& css) {
@@ -342,6 +421,8 @@ protected:
         result = normalizeHexColors(result);
         result = normalizeNumbers(result);
         result = normalizeMediaQuerySpaces(result);
+        result = normalizeCommaSpaces(result);
+        result = normalizeOptionalFunctionQuotes(result);
         result = normalizeCssKeywords(result);
         return result;
     }

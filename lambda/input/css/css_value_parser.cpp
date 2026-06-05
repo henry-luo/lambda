@@ -463,6 +463,7 @@ static CssValue* css_parse_font_family_list(CssPropertyValueParser* parser,
 
     CssValue* list = css_value_list_create(parser->pool);
     if (!list) return NULL;
+    list->data.list.comma_separated = true;
 
     int i = 0;
     while (i < token_count) {
@@ -582,6 +583,15 @@ CssValue* css_parse_value_list(CssPropertyValueParser* parser,
     // Create a list value
     CssValue* list = css_value_list_create(parser->pool);
     if (!list) return NULL;
+
+    bool has_comma = false;
+    for (int i = 0; i < token_count; i++) {
+        if (tokens[i].type == CSS_TOKEN_COMMA) {
+            has_comma = true;
+            break;
+        }
+    }
+    list->data.list.comma_separated = has_comma;
 
     // Parse individual values separated by commas or whitespace
     int i = 0;
@@ -850,6 +860,7 @@ CssValue* css_value_list_create(Pool* pool) {
 
     list->type = CSS_VALUE_TYPE_LIST;
     list->data.list.count = 0;
+    list->data.list.comma_separated = false;
 
     // Allocate initial array with capacity of 4
     size_t initial_capacity = 4;

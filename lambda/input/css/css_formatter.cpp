@@ -297,7 +297,11 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                         if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.values) {
                             for (size_t j = 0; j < arg->data.list.count; j++) {
                                 if (j > 0) {
-                                    stringbuf_append_str(formatter->output, " ");
+                                    if (arg->data.list.comma_separated) {
+                                        stringbuf_append_str(formatter->output, ", ");
+                                    } else {
+                                        stringbuf_append_str(formatter->output, " ");
+                                    }
                                 }
                                 if (arg->data.list.values[j]) {
                                     StringBuf* temp = formatter->output;
@@ -331,7 +335,8 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             // Format value list (space-separated or comma-separated)
             // Determine separator based on property type
             if (value->data.list.values) {
-                bool use_comma = property_uses_comma_separated_list(property_id);
+                bool use_comma = value->data.list.comma_separated ||
+                    property_uses_comma_separated_list(property_id);
                 for (size_t i = 0; i < value->data.list.count; i++) {
                     if (i > 0) {
                         if (use_comma) {

@@ -76,6 +76,8 @@ struct BackendRegistry {
 };
 
 // create/destroy registry
+// backends are external pointers; call backend_registry_shutdown_all() explicitly
+// while backend objects are still alive if their lifecycle was initialized.
 BackendRegistry* backend_registry_create(void);
 void             backend_registry_destroy(BackendRegistry *registry);
 

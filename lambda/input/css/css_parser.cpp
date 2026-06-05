@@ -540,6 +540,7 @@ static CssValue* css_parse_font_family_values(const CssToken* tokens, int value_
 
     list_value->type = CSS_VALUE_TYPE_LIST;
     list_value->data.list.count = family_count;
+    list_value->data.list.comma_separated = true;
     list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * family_count);
     if (!list_value->data.list.values) return NULL;
 
@@ -882,6 +883,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
             list_value->type = CSS_VALUE_TYPE_LIST;
             list_value->data.list.count = value_count;
+            list_value->data.list.comma_separated = false;
             list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
             if (!list_value->data.list.values) continue;
 
@@ -2338,6 +2340,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
             if (!list_value) return NULL;
             list_value->type = CSS_VALUE_TYPE_LIST;
+            list_value->data.list.comma_separated = true;
             list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * group_count);
             if (!list_value->data.list.values) return NULL;
 
@@ -2402,6 +2405,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                     CssValue* sub_list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
                     if (!sub_list) { group_idx++; continue; }
                     sub_list->type = CSS_VALUE_TYPE_LIST;
+                    sub_list->data.list.comma_separated = false;
                     sub_list->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * gval_count);
                     if (!sub_list->data.list.values) { group_idx++; continue; }
 
@@ -2440,6 +2444,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
             list_value->type = CSS_VALUE_TYPE_LIST;
             list_value->data.list.count = value_count;
+            list_value->data.list.comma_separated = false;
 
             // Allocate array of pointers to CssValue
             list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);

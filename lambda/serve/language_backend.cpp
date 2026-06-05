@@ -20,7 +20,8 @@ BackendRegistry* backend_registry_create(void) {
 
 void backend_registry_destroy(BackendRegistry *registry) {
     if (!registry) return;
-    backend_registry_shutdown_all(registry);
+    // registry stores external backend pointers; callers that initialized
+    // backends must shut them down explicitly before destroying the registry.
     serve_free(registry);
 }
 
