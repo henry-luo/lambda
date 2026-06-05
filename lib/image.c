@@ -474,7 +474,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     *channels = 4;
 
     // Allocate memory for image
-    image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    image_data = (unsigned char*)mem_calloc(1, *width * *height * 4, MEM_CAT_IMAGE);
     if (!image_data) {
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("Failed to allocate memory for PNG image");

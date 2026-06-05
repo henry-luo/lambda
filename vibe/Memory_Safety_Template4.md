@@ -919,7 +919,166 @@ from borrowed lookup into owner teardown:
 4. future serve registries cannot silently acquire element-lifecycle behavior
    without tripping the check.
 
-## 17. Open Questions
+## 17. Render Clip Shape Stack Lifetime
+
+The render batch failure in `make test-render` exposed a stack lifetime issue
+that was close to the CSS temporary declaration bug, but easier to miss in
+review because the pointer escaped through a render-state stack rather than a
+single copied declaration.
+
+### 17.1 Concrete Bug: Clip Scope Stored a Stack Shape
+
+`radiant/render_clip.cpp` builds synthetic clip shapes for rectangular clips
+and overflow clips. Before the fix, those shapes lived inside the local
+`RenderClipScope` object:
+
+```cpp
+RenderClipScope scope = {};
+scope.inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
+scope.inline_shape.rounded_rect = {...};
+
+render_clip_push_shape_scope(rdcon, &scope, &scope.inline_shape);
+return scope;
+```
+
+`render_clip_push_shape_scope()` then stored that pointer in the render
+context:
+
+```cpp
+rdcon->clip_shapes[rdcon->clip_shape_depth++] = shape;
+```
+
+The returned `RenderClipScope` is a copy. The pointer in
+`rdcon->clip_shapes[]` still pointed at the callee's stack frame, not at the
+returned scope object. Later positioned/nested rendering reused that stack
+memory, and background/shadow rasterization read the stale `ClipShape*` through
+`clip_shape_to_params()`. ASan reported the failure as a stack-buffer-overflow
+near a later render walk frame because the stale pointer no longer pointed into
+the original scope frame.
+
+The fix was to remove the scope-owned inline shape and clone synthetic rect and
+overflow shapes into `RenderContext::scratch` before pushing them onto
+`rdcon->clip_shapes[]`. CSS clip-path shapes were already allocated from the
+same scratch arena. `RenderClipScope::owns_shape` remains responsible for
+freeing scratch-owned shapes when the clip scope is popped.
+
+### 17.2 Root Cause
+
+The unsafe field was not `RenderClipScope::shape` by itself. A scope object may
+borrow a shape pointer safely if the pointee outlives all rendering that can
+observe the pushed clip. The bug was that a long-lived render-state stack
+accepted an arbitrary raw pointer with no storage-domain proof:
+
+```cpp
+ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];
+```
+
+That pointer can mean several different things:
+
+1. a CSS clip-path shape allocated in `RenderContext::scratch`;
+2. a synthetic clip shape allocated in `RenderContext::scratch`;
+3. a temporary stack `ClipShape` built only to call a helper;
+4. a borrowed retained/display-list copy with a separate lifetime.
+
+The third meaning is invalid once the pointer is stored in
+`RenderContext::clip_shapes`, because rendering can re-enter nested paint code
+before the clip is popped, and the original callee stack frame is already gone.
+
+This is the generalized pattern:
+
+```text
+Do not store `&local` or `&field_of_local` in a context, stack, queue, display
+list, callback, registry, or deferred work item unless that container is proven
+to be consumed before the local scope ends.
+```
+
+Returning the local object by value does not rescue pointers to the original
+local object's fields. Those pointers still name the old frame.
+
+### 17.3 Proposed Template: Stable Pushed Pointers
+
+For render-state stacks, prefer a small storage-qualified wrapper instead of a
+plain pointer API. The important idea is that the push helper should accept
+only pointers whose storage domain is stable for the active scope:
+
+```cpp
+template<class T>
+class ScratchOwnedPtr {
+    T* ptr_;
+
+public:
+    explicit ScratchOwnedPtr(T* ptr) : ptr_(ptr) {
+        assert(ptr && "scratch-owned pointer cannot be null");
+    }
+
+    T* get() const { return ptr_; }
+};
+
+static ScratchOwnedPtr<ClipShape> render_clip_make_shape(
+    ScratchArena* scratch, const ClipShape* shape);
+
+static bool render_clip_push_shape_scope(
+    RenderContext* rdcon,
+    RenderClipScope* scope,
+    ScratchOwnedPtr<ClipShape> shape);
+```
+
+The C-style version can use naming and constructors if a template wrapper is
+too invasive:
+
+```cpp
+ClipShape* render_clip_clone_shape(ScratchArena* scratch, const ClipShape* shape);
+bool render_clip_push_scratch_shape_scope(RenderContext* rdcon,
+                                          RenderClipScope* scope,
+                                          ClipShape* scratch_shape);
+```
+
+The rule is the same in either form: callers may build a temporary
+`ClipShape` on the stack, but they must clone/promote it before inserting it
+into `RenderContext::clip_shapes`.
+
+### 17.4 Proposed Lint
+
+Add a focused check, for example `make check-render-clip-lifetime`.
+
+Initial policy:
+
+1. reject `&scope.inline_shape` in `radiant/render_clip*.cpp`;
+2. reject `rdcon->clip_shapes[...] = &...`;
+3. reject `render_clip_push_shape_scope(..., &local...)` unless marked with
+   `RENDER_CLIP_STACK_OK: <reason>`;
+4. reject `RenderClipScope` fields that embed `ClipShape` storage;
+5. require synthetic `ClipShape` values to pass through
+   `render_clip_clone_shape()` or a storage-qualified helper before push.
+
+This should be a grep-first check. The goal is not perfect pointer analysis;
+it is to keep the high-risk address-taking shape from returning quietly.
+
+### 17.5 Generalized Safety Rule
+
+Any raw pointer inserted into a longer-lived container should be reviewed as a
+storage-domain transition:
+
+| Source storage | Destination | Default policy |
+|---|---|---|
+| stack local | context stack / registry / display list / deferred task | reject or clone/promote |
+| stack field of returned-by-value object | any retained raw pointer field | reject |
+| scratch arena | active render/layout scope | allow if popped before arena reset |
+| pool/GC allocation | retained tree/cache | allow through ownership/domain helper |
+| borrowed external object | lookup registry | allow only if destroy path never owns element lifecycle |
+
+The mechanical review question is:
+
+```text
+Will every use of this pointer finish before the pointee's storage can be
+reused, destroyed, or reset?
+```
+
+If the answer depends on informal call ordering, introduce a helper whose type
+or name encodes the storage domain, and add a lint rule for the raw-pointer
+escape pattern.
+
+## 18. Open Questions
 
 1. Should `CssTempDecl` live in `radiant/` only, or in `lambda/input/css/` so
    CSSOM and parser-side synthetic declarations can share it?
@@ -951,3 +1110,6 @@ from borrowed lookup into owner teardown:
     registry-like containers in `lambda/`?
 14. Should borrowed-pointer wrappers be introduced broadly, or only at registry
     boundaries where destroy/shutdown confusion is likely?
+15. Should `RenderContext::clip_shapes` accept only a storage-qualified wrapper,
+    or is `render_clip_clone_shape()` plus `make check-render-clip-lifetime`
+    enough for the current render architecture?

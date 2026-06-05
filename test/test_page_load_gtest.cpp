@@ -155,6 +155,7 @@ static std::vector<PageTestInfo> g_page_tests = discover_page_tests();
 #define MAX_PEAK_RSS_BYTES (160ULL * 1024 * 1024)  // 160 MB hard cap (RSS, includes shared OS pages)
 #define MAX_PEAK_FOOTPRINT_BYTES (180ULL * 1024 * 1024)  // fallback absolute cap when baseline telemetry is unavailable
 #define MAX_PAGE_FOOTPRINT_DELTA_BYTES (100ULL * 1024 * 1024)  // page-induced private memory growth cap
+#define MAX_PAGE_MEMTRACK_LIVE_BYTES (16ULL * 1024 * 1024)  // Lambda-owned live allocation cap after cleanup
 
 #ifdef __APPLE__
     #define RUSAGE_MAXRSS_TO_BYTES(x) ((uint64_t)(x))
@@ -170,8 +171,11 @@ struct PageTestResult {
     double render_ms;     // from [RENDER_PROF], -1 if not found
     uint64_t peak_rss_bytes;  // child's peak resident set size (0 if unknown)
     uint64_t baseline_footprint_bytes;  // child's initial phys_footprint (macOS only, 0 if unknown)
-    uint64_t current_footprint_bytes;  // child's retained phys_footprint after render (macOS only, 0 if unknown)
+    uint64_t current_footprint_bytes;  // child's retained phys_footprint after cleanup (macOS only, 0 if unknown)
     uint64_t peak_footprint_bytes;  // child's peak phys_footprint including transient spikes (macOS only, 0 if unknown)
+    bool memtrack_live_seen;  // true when Lambda-owned live allocation telemetry was emitted
+    uint64_t memtrack_live_bytes;  // Lambda-owned tracked bytes still live at shutdown
+    uint64_t memtrack_live_count;  // Lambda-owned tracked allocation count still live at shutdown
     std::string output;   // stderr/stdout from lambda.exe
 };
 
@@ -200,6 +204,29 @@ static uint64_t parse_peak_footprint(const std::string& output) {
     return strtoull(output.c_str() + pos, nullptr, 10);
 }
 
+static uint64_t parse_tagged_uint64(const std::string& output, const char* tag, const char* key) {
+    size_t pos = output.find(tag);
+    if (pos == std::string::npos) return 0;
+    pos = output.find(key, pos);
+    if (pos == std::string::npos) return 0;
+    pos += strlen(key);
+    while (pos < output.size() && (output[pos] < '0' || output[pos] > '9')) pos++;
+    if (pos >= output.size()) return 0;
+    return strtoull(output.c_str() + pos, nullptr, 10);
+}
+
+static uint64_t parse_memtrack_live_bytes(const std::string& output) {
+    return parse_tagged_uint64(output, "[MEMTRACK_LIVE]", "bytes=");
+}
+
+static uint64_t parse_memtrack_live_count(const std::string& output) {
+    return parse_tagged_uint64(output, "[MEMTRACK_LIVE]", "count=");
+}
+
+static bool parse_memtrack_live_seen(const std::string& output) {
+    return output.find("[MEMTRACK_LIVE]") != std::string::npos;
+}
+
 // Parse a specific VIEW_MEM_STAGES footprint. This is used for retained page
 // footprint so temporary compile/render spikes do not masquerade as leaks.
 static uint64_t parse_memstage_footprint(const std::string& output, const char* stage) {
@@ -221,7 +248,11 @@ static uint64_t parse_before_load_footprint(const std::string& output) {
     return parse_memstage_footprint(output, "[MEMSTAGE] before-load");
 }
 
-static uint64_t parse_after_render_footprint(const std::string& output) {
+static uint64_t parse_after_cleanup_footprint(const std::string& output) {
+    uint64_t after_mempool = parse_memstage_footprint(output, "[MEMSTAGE] after-mempool-cleanup");
+    if (after_mempool > 0) return after_mempool;
+    uint64_t after_cleanup = parse_memstage_footprint(output, "[MEMSTAGE] after-cleanup");
+    if (after_cleanup > 0) return after_cleanup;
     return parse_memstage_footprint(output, "[MEMSTAGE] after-render");
 }
 
@@ -256,8 +287,11 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
-    result.current_footprint_bytes = parse_after_render_footprint(result.output);
+    result.current_footprint_bytes = parse_after_cleanup_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
+    result.memtrack_live_seen = parse_memtrack_live_seen(result.output);
+    result.memtrack_live_bytes = parse_memtrack_live_bytes(result.output);
+    result.memtrack_live_count = parse_memtrack_live_count(result.output);
     return result;
 }
 
@@ -274,6 +308,9 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.baseline_footprint_bytes = 0;
     result.current_footprint_bytes = 0;
     result.peak_footprint_bytes = 0;
+    result.memtrack_live_seen = false;
+    result.memtrack_live_bytes = 0;
+    result.memtrack_live_count = 0;
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -362,8 +399,11 @@ static PageTestResult run_page_test(const PageTestInfo& info) {
     result.layout_ms = parse_prof_ms(result.output, "[LAYOUT_PROF]");
     result.render_ms = parse_prof_ms(result.output, "[RENDER_PROF]");
     result.baseline_footprint_bytes = parse_before_load_footprint(result.output);
-    result.current_footprint_bytes = parse_after_render_footprint(result.output);
+    result.current_footprint_bytes = parse_after_cleanup_footprint(result.output);
     result.peak_footprint_bytes = parse_peak_footprint(result.output);
+    result.memtrack_live_seen = parse_memtrack_live_seen(result.output);
+    result.memtrack_live_bytes = parse_memtrack_live_bytes(result.output);
+    result.memtrack_live_count = parse_memtrack_live_count(result.output);
     return result;
 }
 
@@ -464,7 +504,7 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
             : 0;
 
     char timing_buf[260];
-    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB, peak=%lluMB, page_delta=%lluMB)%s",
+    snprintf(timing_buf, sizeof(timing_buf), "  [%s] %dms (layout=%.0fms, render=%.0fms, rss=%lluMB, footprint=%lluMB, peak=%lluMB, page_delta=%lluMB, live=%lluKB/%llu)%s",
              info.test_name.c_str(), (int)result.elapsed_ms,
              result.layout_ms >= 0 ? result.layout_ms : 0.0,
              result.render_ms >= 0 ? result.render_ms : 0.0,
@@ -472,6 +512,8 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
              (unsigned long long)(page_footprint_bytes / (1024 * 1024)),
              (unsigned long long)(result.peak_footprint_bytes / (1024 * 1024)),
              (unsigned long long)(footprint_delta_bytes / (1024 * 1024)),
+             (unsigned long long)(result.memtrack_live_bytes / 1024),
+             (unsigned long long)result.memtrack_live_count,
              result.timed_out ? " (TIMEOUT)" : "");
     std::cout << timing_buf << std::endl;
 
@@ -503,12 +545,18 @@ TEST_P(PageLoadTest, LoadWithoutCrash) {
             << (MAX_RENDER_SECONDS * 1000) << "ms)";
     }
 
-    // Memory limit. Prefer retained page-induced phys_footprint growth when
-    // available (macOS): the absolute process footprint includes fixed runtime,
-    // JIT, framework allocation, and short-lived compile spikes. Fall back to
-    // the older absolute peak cap when retained telemetry is unavailable, and
-    // then to RSS when footprint is absent.
-    if (page_footprint_bytes > 0) {
+    // Memory limit. Prefer Lambda-owned live allocation bytes from memtrack at
+    // shutdown. macOS phys_footprint includes allocator/framework resident caches
+    // that are not live Lambda allocations and may not return to the OS before
+    // process exit. Fall back to the older footprint/RSS caps when memtrack
+    // telemetry is unavailable.
+    if (result.memtrack_live_seen) {
+        EXPECT_LE(result.memtrack_live_bytes, MAX_PAGE_MEMTRACK_LIVE_BYTES)
+            << info.test_name << " Lambda-owned live memory = "
+            << (result.memtrack_live_bytes / 1024) << " KB in "
+            << result.memtrack_live_count << " allocations (limit: "
+            << (MAX_PAGE_MEMTRACK_LIVE_BYTES / (1024 * 1024)) << " MB)";
+    } else if (page_footprint_bytes > 0) {
         if (footprint_delta_bytes > 0) {
             EXPECT_LE(footprint_delta_bytes, MAX_PAGE_FOOTPRINT_DELTA_BYTES)
                 << info.test_name << " page phys_footprint growth = "

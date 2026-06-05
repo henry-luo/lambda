@@ -10,7 +10,6 @@ typedef struct Bound Bound;
 
 typedef struct RenderClipScope {
     ClipShape* shape;
-    ClipShape inline_shape;
     bool active;
     bool pushed_shape;
     bool owns_shape;

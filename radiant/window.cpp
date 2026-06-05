@@ -1160,6 +1160,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         ui_context_cleanup(&ui_context);
         view_cleanup_js_batch_state();
         lambda_uv_cleanup();
+        log_mem_stage("after-cleanup");
         log_cleanup();
         return sim_fail_count > 0 ? 1 : 0;
     }
