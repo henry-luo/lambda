@@ -818,9 +818,79 @@ char* normalize_whitespace(const char* html) {
     return result;
 }
 
-// Strip trailing whitespace before '>' inside tags: <tag attr > -> <tag attr>
-// Also handles < /tag> -> </tag> and similar cases
+// Normalize whitespace inside tags: <a\n href=x> -> <a href=x>,
+// and strip trailing whitespace before '>'.
 char* strip_trailing_whitespace_in_tags(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+    bool in_tag = false;
+    char quote = 0;
+    bool pending_space = false;
+
+    while (*read) {
+        if (!in_tag && *read == '<') {
+            in_tag = true;
+            quote = 0;
+            pending_space = false;
+            *write++ = *read++;
+            continue;
+        }
+
+        if (in_tag) {
+            if (quote) {
+                *write++ = *read++;
+                if (*(read - 1) == quote) quote = 0;
+                continue;
+            }
+
+            if (*read == '"' || *read == '\'') {
+                if (pending_space && write > result && *(write - 1) != '<' && *(write - 1) != '/') {
+                    *write++ = ' ';
+                }
+                pending_space = false;
+                quote = *read;
+                *write++ = *read++;
+                continue;
+            }
+
+            if (*read == '>') {
+                pending_space = false;
+                in_tag = false;
+                *write++ = *read++;
+                continue;
+            }
+
+            if (isspace((unsigned char)*read)) {
+                pending_space = true;
+                read++;
+                continue;
+            }
+
+            if (pending_space && write > result && *(write - 1) != '<' && *(write - 1) != '/') {
+                *write++ = ' ';
+            }
+            pending_space = false;
+            *write++ = *read++;
+            continue;
+        }
+
+        *write++ = *read++;
+    }
+
+    *write = '\0';
+    return result;
+}
+
+// Normalize JSON-LD script data by removing whitespace outside JSON strings.
+// The HTML parser stores JSON-LD as structured data, so formatting may change
+// pretty/compact JSON layout while preserving the payload.
+char* normalize_jsonld_script_data(const char* html) {
     if (!html) return NULL;
 
     size_t len = strlen(html);
@@ -831,26 +901,56 @@ char* strip_trailing_whitespace_in_tags(const char* html) {
     char* write = result;
 
     while (*read) {
-        if (*read == '<') {
-            // Start of tag - copy to result, track trailing whitespace
-            *write++ = *read++;
-            
-            // Find the end of this tag
-            while (*read && *read != '>') {
+        if (strncmp(read, "<script", 7) == 0) {
+            const char* tag_end = strchr(read, '>');
+            if (!tag_end) {
+                while (*read) *write++ = *read++;
+                break;
+            }
+
+            bool is_jsonld = false;
+            const char* attr = read;
+            while (attr < tag_end) {
+                if (strncmp(attr, "type=\"application/ld+json\"", 26) == 0) {
+                    is_jsonld = true;
+                    break;
+                }
+                attr++;
+            }
+
+            while (read <= tag_end) {
                 *write++ = *read++;
             }
 
-            // Backtrack to remove trailing whitespace before '>'
-            while (write > result && isspace(*(write - 1))) {
-                write--;
-            }
+            if (is_jsonld) {
+                const char* close = strstr(read, "</script>");
+                if (!close) close = read + strlen(read);
 
-            if (*read == '>') {
-                *write++ = *read++;
+                bool in_string = false;
+                bool escaped = false;
+                while (read < close) {
+                    char c = *read++;
+                    if (in_string) {
+                        *write++ = c;
+                        if (escaped) {
+                            escaped = false;
+                        } else if (c == '\\') {
+                            escaped = true;
+                        } else if (c == '"') {
+                            in_string = false;
+                        }
+                    } else if (c == '"') {
+                        in_string = true;
+                        *write++ = c;
+                    } else if (!isspace((unsigned char)c)) {
+                        *write++ = c;
+                    }
+                }
             }
-        } else {
-            *write++ = *read++;
+            continue;
         }
+
+        *write++ = *read++;
     }
 
     *write = '\0';
@@ -1217,13 +1317,27 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         return false;
     }
 
-    // Strip inter-tag whitespace (HTML5 normalizes this away)
-    char* inter_tag1 = strip_inter_tag_whitespace(trailing_ws1);
-    char* inter_tag2 = strip_inter_tag_whitespace(trailing_ws2);
+    // Normalize JSON-LD script data before broader whitespace handling.
+    char* jsonld_norm1 = normalize_jsonld_script_data(trailing_ws1);
+    char* jsonld_norm2 = normalize_jsonld_script_data(trailing_ws2);
 
     // Free intermediate results
     free(trailing_ws1);
     free(trailing_ws2);
+
+    if (!jsonld_norm1 || !jsonld_norm2) {
+        free(jsonld_norm1);
+        free(jsonld_norm2);
+        return false;
+    }
+
+    // Strip inter-tag whitespace (HTML5 normalizes this away)
+    char* inter_tag1 = strip_inter_tag_whitespace(jsonld_norm1);
+    char* inter_tag2 = strip_inter_tag_whitespace(jsonld_norm2);
+
+    // Free intermediate results
+    free(jsonld_norm1);
+    free(jsonld_norm2);
 
     if (!inter_tag1 || !inter_tag2) {
         free(inter_tag1);
