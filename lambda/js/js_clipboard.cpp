@@ -45,6 +45,7 @@ extern "C" Item js_object_keys(Item obj);
 extern "C" Item js_promise_all(Item iterable);
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+extern "C" void js_set_prototype(Item object, Item prototype);
 
 // Forward decls for sibling fns within this file (used before their definition).
 extern "C" Item js_lambda_clipboard_write_records(Item arr);
@@ -75,6 +76,22 @@ static inline Item make_str_n(const char* s, size_t n) {
 static inline void mark_class(Item obj, const char* name) {
     js_property_set(obj, make_str("__class_name__"), make_str(name));
     js_class_stamp(obj, js_class_from_name(name, (int)strlen(name)));
+}
+
+static Item g_blob_proto = {0};
+static Item g_file_proto = {0};
+static Item g_clipboard_item_proto = {0};
+static Item g_clipboard_event_proto = {0};
+static Item g_data_transfer_proto = {0};
+static int64_t g_clipboard_generation = 1;
+
+static void attach_known_prototype(Item obj, Item proto) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return;
+    TypeId pt = get_type_id(proto);
+    if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_FUNC || pt == LMD_TYPE_ARRAY ||
+        pt == LMD_TYPE_ELEMENT) {
+        js_set_prototype(obj, proto);
+    }
 }
 
 // Read a string property as a C string (returns NULL if missing/non-string).
@@ -183,6 +200,7 @@ extern "C" Item js_blob_new(Item parts, Item options) {
 
     Item obj = js_new_object();
     mark_class(obj, "Blob");
+    attach_known_prototype(obj, g_blob_proto);
     Item text_str = make_str_n(sb->str ? sb->str : "", sb->length);
     js_property_set(obj, make_str("_text"), text_str);
     js_property_set(obj, make_str("size"), (Item){.item = i2it((int64_t)sb->length)});
@@ -255,6 +273,7 @@ extern "C" Item js_file_new(Item parts, Item name_item, Item options) {
     Item obj = js_blob_new(parts, options);
     if (get_type_id(obj) != LMD_TYPE_MAP) return obj;
     mark_class(obj, "File");
+    attach_known_prototype(obj, g_file_proto);
     const char* nm = "";
     if (get_type_id(name_item) == LMD_TYPE_STRING) {
         String* s = it2s(name_item);
@@ -296,6 +315,7 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
     }
     Item obj = js_new_object();
     mark_class(obj, "ClipboardItem");
+    attach_known_prototype(obj, g_clipboard_item_proto);
 
     Item types = js_array_new(0);
     Item orig_types = js_array_new(0);
@@ -338,6 +358,11 @@ extern "C" Item js_clipboard_item_new(Item items, Item options) {
 
 extern "C" Item js_clipboard_item_get_type(Item type_item) {
     Item self = js_get_this();
+    Item gen = js_property_get(self, make_str("_clipboard_generation"));
+    if (get_type_id(gen) == LMD_TYPE_INT && (int64_t)it2i(gen) != g_clipboard_generation) {
+        return js_promise_reject(js_new_error_with_name(
+            make_str("DataError"), make_str("clipboard item is stale")));
+    }
     if (get_type_id(type_item) != LMD_TYPE_STRING) {
         return js_promise_reject(js_new_error_with_name(
             make_str("TypeError"), make_str("ClipboardItem.getType: type must be a string")));
@@ -441,6 +466,7 @@ static Item js_make_data_transfer_object(void);
 extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
     Item ev = js_new_object();
     mark_class(ev, "ClipboardEvent");
+    attach_known_prototype(ev, g_clipboard_event_proto);
 
     const char* type = "";
     if (get_type_id(type_item) == LMD_TYPE_STRING) {
@@ -827,6 +853,7 @@ extern "C" Item js_dt_clear_data(Item format_item) {
 static Item js_make_data_transfer_object(void) {
     Item dt = js_new_object();
     mark_class(dt, "DataTransfer");
+    attach_known_prototype(dt, g_data_transfer_proto);
     js_property_set(dt, make_str("dropEffect"), make_str("none"));
     js_property_set(dt, make_str("effectAllowed"), make_str("none"));
     js_property_set(dt, make_str("_items"), js_array_new(0));
@@ -916,6 +943,7 @@ extern "C" Item js_clipboard_write_text(Item text_item) {
         if (s) t = s->chars;
     }
     clipboard_store_write_text(t);
+    g_clipboard_generation++;
     return js_promise_resolve(ItemNull);
 }
 
@@ -1319,6 +1347,8 @@ extern "C" Item js_clipboard_read(Item opts) {
                 js_property_set(wrapped, k, blob);
             }
             Item ci = js_clipboard_item_new(wrapped, ItemNull);
+            js_property_set(ci, make_str("_clipboard_generation"),
+                (Item){.item = i2it(g_clipboard_generation)});
             js_array_push(out, ci);
         }
     }
@@ -1374,6 +1404,7 @@ extern "C" Item js_permissions_query(Item desc) {
 
 extern "C" Item js_lambda_clipboard_clear(void) {
     clipboard_store_clear();
+    g_clipboard_generation++;
     return ItemNull;
 }
 
@@ -1402,6 +1433,7 @@ static void free_items_snapshot(ArrayList* items) {
 extern "C" Item js_lambda_clipboard_write_records(Item arr) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) {
         clipboard_store_clear();
+        g_clipboard_generation++;
         return ItemNull;
     }
     int64_t n = js_array_length(arr);
@@ -1444,6 +1476,7 @@ extern "C" Item js_lambda_clipboard_write_records(Item arr) {
     }
 
     clipboard_store_write_items(items);
+    g_clipboard_generation++;
 
     // The store deep-copies; free our temporaries.
     free_items_snapshot(items);
@@ -1529,6 +1562,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(proto, make_str("slice"),
             js_new_function((void*)js_blob_slice, 3));
         js_property_set(ctor, make_str("prototype"), proto);
+        g_blob_proto = proto;
         js_property_set(global_this, make_str("Blob"), ctor);
     }
 
@@ -1538,7 +1572,9 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_set_function_name(ctor, make_str("File"));
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
+        if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) js_set_prototype(proto, g_blob_proto);
         js_property_set(ctor, make_str("prototype"), proto);
+        g_file_proto = proto;
         js_property_set(global_this, make_str("File"), ctor);
     }
 
@@ -1553,6 +1589,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(ctor, make_str("prototype"), proto);
         js_property_set(ctor, make_str("supports"),
             js_new_function((void*)js_clipboard_item_supports, 1));
+        g_clipboard_item_proto = proto;
         js_property_set(global_this, make_str("ClipboardItem"), ctor);
     }
 
@@ -1563,6 +1600,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
         js_property_set(ctor, make_str("prototype"), proto);
+        g_clipboard_event_proto = proto;
         js_property_set(global_this, make_str("ClipboardEvent"), ctor);
     }
 
@@ -1573,6 +1611,7 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         Item proto = js_new_object();
         js_property_set(proto, make_str("constructor"), ctor);
         js_property_set(ctor, make_str("prototype"), proto);
+        g_data_transfer_proto = proto;
         js_property_set(global_this, make_str("DataTransfer"), ctor);
     }
 

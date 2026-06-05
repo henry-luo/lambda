@@ -1025,13 +1025,19 @@ extern "C" void js_formdata_install_globals(void) {
     Item ctor_fn = js_new_function((void*)js_formdata_construct, 2);
     prop_set(global, "FormData", ctor_fn);
 
-    // Install Blob constructor: new Blob(parts, options)
-    Item blob_ctor_fn = js_new_function((void*)js_blob_construct, 2);
-    prop_set(global, "Blob", blob_ctor_fn);
+    Item blob_ctor_fn = prop_get(global, "Blob");
+    if (get_type_id(blob_ctor_fn) == LMD_TYPE_UNDEFINED ||
+        blob_ctor_fn.item == ITEM_JS_UNDEFINED || blob_ctor_fn.item == ItemNull.item) {
+        blob_ctor_fn = js_new_function((void*)js_blob_construct, 2);
+        prop_set(global, "Blob", blob_ctor_fn);
+    }
 
-    // Install File constructor: new File(parts, name, options)
-    Item file_ctor_fn = js_new_function((void*)js_file_construct, 3);
-    prop_set(global, "File", file_ctor_fn);
+    Item file_ctor_fn = prop_get(global, "File");
+    if (get_type_id(file_ctor_fn) == LMD_TYPE_UNDEFINED ||
+        file_ctor_fn.item == ITEM_JS_UNDEFINED || file_ctor_fn.item == ItemNull.item) {
+        file_ctor_fn = js_new_function((void*)js_file_construct, 3);
+        prop_set(global, "File", file_ctor_fn);
+    }
 
     // Also install on window if it exists
     Item window = prop_get(global, "window");
