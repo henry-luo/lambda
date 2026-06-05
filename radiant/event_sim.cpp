@@ -3581,8 +3581,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (focus_view) {
                 focus_set((DocState*)doc->state, focus_view, true);
             }
-            selection_set((DocState*)doc->state, range_view, (int)start, (int)end);
-            caret_set((DocState*)doc->state, range_view, (int)end);
+            if (start == end) {
+                if (selection_has_projection((DocState*)doc->state)) {
+                    selection_clear((DocState*)doc->state);
+                }
+                caret_set((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+            } else {
+                selection_set((DocState*)doc->state, range_view,
+                              (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+            }
             log_info("event_sim: set_editing_selection [%u..%u]", start, end);
             doc_state_request_repaint((DocState*)doc->state);
             break;

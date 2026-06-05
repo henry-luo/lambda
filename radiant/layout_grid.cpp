@@ -1045,8 +1045,8 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             // allocation. Compute in 64-bit and bail if the result doesn't fit an int.
             long long expanded = (long long)repeat_count * (long long)ts->repeat_track_count;
             long long total_tracks = (long long)cols->track_count - 1 + expanded;
-            if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return;
-            int new_track_count = (int)total_tracks;
+            if (total_tracks <= 0 || total_tracks != (long long)(int)total_tracks) return; // INT_CAST_OK: overflow guard for track count.
+            int new_track_count = (int)total_tracks; // INT_CAST_OK: grid track count after overflow guard.
             GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 
@@ -1167,8 +1167,8 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             // guard the row track-count expansion against int overflow (see cols path above)
             long long expanded_r = (long long)repeat_count * (long long)ts->repeat_track_count;
             long long total_tracks_r = (long long)rows->track_count - 1 + expanded_r;
-            if (total_tracks_r <= 0 || total_tracks_r != (long long)(int)total_tracks_r) return;
-            int new_track_count = (int)total_tracks_r;
+            if (total_tracks_r <= 0 || total_tracks_r != (long long)(int)total_tracks_r) return; // INT_CAST_OK: overflow guard for track count.
+            int new_track_count = (int)total_tracks_r; // INT_CAST_OK: grid track count after overflow guard.
             GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
             if (!new_tracks) return;
 

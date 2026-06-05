@@ -2486,6 +2486,26 @@ static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
                                       INPUT_INTENT_DELETE_BY_CUT);
 }
 
+static const char* form_control_live_value(DomElement* elem, uint32_t* out_len) {
+    if (out_len) *out_len = 0;
+    if (!elem || !elem->form) return "";
+
+    tc_ensure_init(elem);
+    FormControlProp* form = elem->form;
+    const char* value = form->current_value ? form->current_value : form->value;
+    uint32_t value_len = form->current_value
+        ? form->current_value_len
+        : event_log_text_len(value);
+    if (out_len) *out_len = value_len;
+    return value ? value : "";
+}
+
+static int form_control_live_value_len_int(DomElement* elem) {
+    uint32_t value_len = 0;
+    form_control_live_value(elem, &value_len);
+    return (int)value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
+}
+
 static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
                                      DocState* state, View* target) {
     if (!evcon || !elem || !state || !target) return false;
@@ -2502,10 +2522,10 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
     intent.type = INPUT_INTENT_SELECT_ALL;
     editing_dispatch_log_intent(evcon, &surface, &intent);
 
-    const char* value = elem->form ? elem->form->value : nullptr;
-    uint32_t value_len = event_log_text_len(value);
+    uint32_t value_len = 0;
+    form_control_live_value(elem, &value_len);
     selection_start(state, target, 0);
-    selection_extend(state, (int)value_len);
+    selection_extend(state, (int)value_len); // INT_CAST_OK: StateStore selection API uses int offsets.
     selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION, NULL);
     tc_sync_legacy_to_form(elem, state);
     event_log_editing_selection(state, &surface, &intent, "selectAll",
@@ -2533,8 +2553,8 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
         return false;
     }
 
-    const char* value = elem->form ? elem->form->value : nullptr;
-    uint32_t value_len = event_log_text_len(value);
+    uint32_t value_len = 0;
+    form_control_live_value(elem, &value_len);
     if (offset > value_len) offset = value_len;
 
     caret_set(state, target, (int)offset); // INT_CAST_OK: StateStore caret API uses int offsets.
@@ -2558,8 +2578,7 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
         return false;
     }
 
-    const char* value = elem->form ? elem->form->value : nullptr;
-    int value_len = (int)event_log_text_len(value); // INT_CAST_OK: text-control offsets use StateStore int APIs.
+    int value_len = form_control_live_value_len_int(elem);
     if (anchor_offset < 0) anchor_offset = 0;
     if (focus_offset < 0) focus_offset = 0;
     if (anchor_offset > value_len) anchor_offset = value_len;
@@ -2583,7 +2602,6 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
     }
 
     selection_extend(state, focus_offset);
-    caret_set(state, target, focus_offset);
     tc_sync_legacy_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "extend",
@@ -2640,9 +2658,13 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
         end = t;
     }
 
-    selection_start(state, target, (int)start); // INT_CAST_OK: StateStore selection API uses int offsets.
-    selection_extend(state, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
-    caret_set(state, target, (int)end); // INT_CAST_OK: StateStore caret API uses int offsets.
+    if (start == end) {
+        if (selection_has_projection(state)) selection_clear(state);
+        caret_set(state, target, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+    } else {
+        selection_start(state, target, (int)start); // INT_CAST_OK: StateStore selection API uses int offsets.
+        selection_extend(state, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+    }
     selection_finish_active_gesture(state);
     tc_sync_legacy_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
@@ -2676,11 +2698,9 @@ static bool dispatch_form_history_restore_selection(DomElement* elem,
     } else if (form->selection_direction == 2) {
         selection_start(state, target, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
         selection_extend(state, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
-        caret_set(state, target, (int)start8); // INT_CAST_OK: StateStore caret API uses int offsets.
     } else {
         selection_start(state, target, (int)start8); // INT_CAST_OK: StateStore selection API uses int offsets.
         selection_extend(state, (int)end8); // INT_CAST_OK: StateStore selection API uses int offsets.
-        caret_set(state, target, (int)end8); // INT_CAST_OK: StateStore caret API uses int offsets.
     }
     tc_sync_legacy_to_form(elem, state);
     event_log_editing_selection(state, surface, intent, "historyRestore",
@@ -2916,8 +2936,12 @@ static bool editing_text_drag_set_range(EventContext* evcon,
                                              surface->view, start, end,
                                              operation);
     }
-    selection_set(state, range_view, (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
-    caret_set(state, range_view, (int)end); // INT_CAST_OK: StateStore caret API uses int offsets.
+    if (start == end) {
+        if (selection_has_projection(state)) selection_clear(state);
+        caret_set(state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+    } else {
+        selection_set(state, range_view, (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
+    }
     dispatch_rich_selection_snapshot(evcon, state, range_view,
                                      operation ? operation : "dragDropRange",
                                      nullptr);
@@ -7749,8 +7773,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 focus_elem->form &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXT) {
 
-                const char* value = focus_elem->form->value;
-                int value_len = value ? (int)strlen(value) : 0;
+                uint32_t live_value_len = 0;
+                const char* value = form_control_live_value(focus_elem, &live_value_len);
+                int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = form_caret_offset;
                 bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
                 bool ctrl = (key_event->mods & RDT_MOD_CTRL)  != 0;
@@ -7767,8 +7792,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         &evcon, focus_elem, state, focused, history_type);
                     if (did) {
                         // Restore caret to the snapshot's selection end.
-                        int vlen = focus_elem->form->value
-                            ? (int)strlen(focus_elem->form->value) : 0;
+                        int vlen = form_control_live_value_len_int(focus_elem);
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
@@ -7783,8 +7807,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (dispatch_form_history_via_controller(
                             &evcon, focus_elem, state, focused,
                             INPUT_INTENT_HISTORY_REDO)) {
-                        int vlen = focus_elem->form->value
-                            ? (int)strlen(focus_elem->form->value) : 0;
+                        int vlen = form_control_live_value_len_int(focus_elem);
                         int caret_offset = 0;
                         if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
@@ -8011,8 +8034,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
-                            int new_len = focus_elem->form->value
-                                ? (int)strlen(focus_elem->form->value) : 0;
+                            int new_len = form_control_live_value_len_int(focus_elem);
                             uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaDeleteBackward");
@@ -8077,8 +8099,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 focus_elem->form &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
 
-                const char* value = focus_elem->form->value;
-                int value_len = value ? (int)strlen(value) : 0;
+                uint32_t live_value_len = 0;
+                const char* value = form_control_live_value(focus_elem, &live_value_len);
+                int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = textarea_caret_offset;
 
                 // helper: compute line start offset and line length for a given line
@@ -8405,8 +8428,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // Lambda handler already processed the delete; adjust caret
                         if (had_keydown_selection) {
                             // selection was deleted: caret goes to selection start
-                            int new_len = focus_elem->form->value
-                                ? (int)strlen(focus_elem->form->value) : 0;
+                            int new_len = form_control_live_value_len_int(focus_elem);
                             uint32_t collapse_off = (uint32_t)(keydown_sel_start <= new_len
                                 ? keydown_sel_start : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
@@ -8417,8 +8439,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             int new_off = base_off - 1;
                             while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
                                 new_off--;
-                            int new_len = focus_elem->form->value
-                                ? (int)strlen(focus_elem->form->value) : 0;
+                            int new_len = form_control_live_value_len_int(focus_elem);
                             uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaDeleteBackward");
@@ -8475,16 +8496,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // Lambda handler processed the enter; adjust caret
                         if (had_keydown_selection) {
                             // selection was replaced with '\n': caret goes to sel_start + 1
-                            int new_len = focus_elem->form->value
-                                ? (int)strlen(focus_elem->form->value) : 0;
+                            int new_len = form_control_live_value_len_int(focus_elem);
                             int new_off = keydown_sel_start + 1;
                             uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaInsertParagraph");
                         } else {
                             // normal enter: advance caret by 1 byte
-                            int new_len = focus_elem->form->value
-                                ? (int)strlen(focus_elem->form->value) : 0;
+                            int new_len = form_control_live_value_len_int(focus_elem);
                             int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
                             uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
