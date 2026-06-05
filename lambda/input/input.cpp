@@ -691,7 +691,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         const char* pathname = url_get_pathname(abs_url);
         // if Windows, need to strip the starting '/' for absolute paths like /C:/path/to/file
         #ifdef _WIN32
-        if (pathname && pathname[0] == '/' && isalpha(pathname[1]) && pathname[2] == ':') {
+        if (pathname && pathname[0] == '/' && str_char_is_alpha(pathname[1]) && pathname[2] == ':') {
             pathname++; // Skip the leading '/'
         }
         #endif
@@ -798,7 +798,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         if (target->scheme == TARGET_SCHEME_FILE) {
             const char* pathname = url_get_pathname(url);
             #ifdef _WIN32
-            if (pathname && pathname[0] == '/' && isalpha(pathname[1]) && pathname[2] == ':') {
+            if (pathname && pathname[0] == '/' && str_char_is_alpha(pathname[1]) && pathname[2] == ':') {
                 pathname++; // Skip the leading '/' for Windows paths
             }
             #endif

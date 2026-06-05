@@ -482,7 +482,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership check-string-scan docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -2048,6 +2048,13 @@ check-int-cast:
 	else \
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
+
+# Check for unsafe open-coded string scanning (lib/str.h §17).
+# Flags strchr(set, *p) membership (matches '\0') and ctype on char* (UB for
+# bytes >= 0x80). Suppress intentional local parsers with a trailing
+# '// STR_SCAN_LOCAL_OK: <reason>' comment. Pass ARGS=--all for soft warnings.
+check-string-scan:
+	@python3 utils/check_string_scans.py $(ARGS)
 
 # Check for raw Lambda Item payload casts in migrated files.
 # New migrated Lambda runtime code should use lib/lambda_typed.hpp helpers such as

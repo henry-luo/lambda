@@ -44,11 +44,11 @@ public:
         if (!*ul) return info;  // Empty line is not a valid underline
 
         static const char* ul_chars = "=-`:.\'\"~^_*+#";
-        if (!strchr(ul_chars, *ul)) return info;
+        if (!str_char_in_set(*ul, ul_chars)) return info;
 
         char ul_char = *ul;
         const char* ul_start = ul;
-        while (*ul == ul_char) ul++;
+        ul += str_count_run(ul, 0, ul_char);
 
         // Must be only underline characters (and trailing whitespace)
         while (*ul == ' ' || *ul == '\t') ul++;
@@ -224,12 +224,15 @@ public:
         // RST transitions: 4+ of -, =, _, etc.
         static const char* transition_chars = "-=_*+#";
         const char* p = line;
-        while (*p == ' ') p++;
-        if (!strchr(transition_chars, *p)) return false;
+        p = str_skip_chars(p, " ");
+        // str_char_in_set returns false for '\0', so an all-space line (where
+        // *p reaches the terminator) correctly fails here instead of letting
+        // strchr match the literal's NUL and walking the run loop off the end.
+        if (!str_char_in_set(*p, transition_chars)) return false;
         char c = *p;
-        int count = 0;
-        while (*p == c) { count++; p++; }
-        while (*p == ' ' || *p == '\t') p++;
+        int count = (int)str_count_run(p, 0, c);
+        p += count;
+        p = str_skip_line_space(p);
         return count >= 4 && (*p == '\0' || *p == '\n' || *p == '\r');
     }
 

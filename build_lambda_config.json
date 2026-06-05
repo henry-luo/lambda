@@ -1525,6 +1525,19 @@
                         "icon": "📐"
                     },
                     {
+                        "source": "lib/test_str_scan_gtest.cpp",
+                        "name": "Str Scanner Tier Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_str_scan_gtest.exe",
+                        "icon": "📐"
+                    },
+                    {
                         "source": "lib/test_strbuf_gtest.cpp",
                         "name": "String Buffer Tests",
                         "dependencies": [

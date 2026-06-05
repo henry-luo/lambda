@@ -415,12 +415,12 @@ static bool has_t_format_specifier(const char *format) {
             while (*p && (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0')) p++;
             // Skip width
             if (*p == '*') p++;
-            else while (*p && isdigit(*p)) p++;
+            else while (*p && str_char_is_digit(*p)) p++;
             // Skip precision
             if (*p == '.') {
                 p++;
                 if (*p == '*') p++;
-                else while (*p && isdigit(*p)) p++;
+                else while (*p && str_char_is_digit(*p)) p++;
             }
             // Skip length modifiers
             if (*p && (*p == 'h' || *p == 'l' || *p == 'L' || *p == 'z' || *p == 'j')) {
@@ -470,7 +470,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
                 has_star_width = true;
                 check_p++;
             } else {
-                while (*check_p && isdigit(*check_p)) check_p++;
+                while (*check_p && str_char_is_digit(*check_p)) check_p++;
             }
 
             // Check precision (including .*)
@@ -480,7 +480,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
                     has_star_precision = true;
                     check_p++;
                 } else {
-                    while (*check_p && isdigit(*check_p)) check_p++;
+                    while (*check_p && str_char_is_digit(*check_p)) check_p++;
                 }
             }
 
@@ -561,7 +561,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
                     has_star_w = true;
                     p++;
                 } else {
-                    while (*p && isdigit(*p)) p++;
+                    while (*p && str_char_is_digit(*p)) p++;
                 }
 
                 // Skip precision (may be .* or .digits)
@@ -571,7 +571,7 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
                         has_star_p = true;
                         p++;
                     } else {
-                        while (*p && isdigit(*p)) p++;
+                        while (*p && str_char_is_digit(*p)) p++;
                     }
                 }
 

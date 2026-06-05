@@ -15,6 +15,7 @@
 #include "inline_common.hpp"
 #include <cstring>
 #include <cctype>
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -227,7 +228,7 @@ Item parse_superscript(MarkupParser* parser, const char** text) {
     const char* content_start = pos;
 
     // Find closing ^ (not at beginning, no whitespace)
-    while (*pos && *pos != '^' && !isspace(*pos)) {
+    while (*pos && *pos != '^' && !str_char_is_ascii_space(*pos)) {
         pos++;
     }
 
@@ -281,7 +282,7 @@ Item parse_subscript(MarkupParser* parser, const char** text) {
     const char* content_start = pos;
 
     // Find closing ~ (not at beginning, no whitespace)
-    while (*pos && *pos != '~' && !isspace(*pos)) {
+    while (*pos && *pos != '~' && !str_char_is_ascii_space(*pos)) {
         pos++;
     }
 
@@ -333,7 +334,7 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     const char* name_start = pos;
 
     // Find closing : (alphanumeric and _ only)
-    while (*pos && (isalnum(*pos) || *pos == '_' || *pos == '+' || *pos == '-')) {
+    while (*pos && (str_char_is_alnum(*pos) || *pos == '_' || *pos == '+' || *pos == '-')) {
         pos++;
     }
 

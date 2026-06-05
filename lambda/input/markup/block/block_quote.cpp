@@ -17,6 +17,7 @@
 #include "../../../../lib/mem.h"
 #include <cctype>
 #include <cstring>
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -234,9 +235,9 @@ static bool is_lazy_continuation(const char* line) {
             return false;  // unordered list item
         }
         // Ordered list check
-        if (isdigit(*p)) {
+        if (str_char_is_digit(*p)) {
             const char* dig = p;
-            while (isdigit(*dig)) dig++;
+            while (str_char_is_digit(*dig)) dig++;
             if ((*dig == '.' || *dig == ')') && (*(dig+1) == ' ' || *(dig+1) == '\t' || *(dig+1) == '\0')) {
                 return false;  // ordered list item
             }

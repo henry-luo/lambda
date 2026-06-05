@@ -399,6 +399,74 @@ char* str_hex_encode(char* dst, const char* s, size_t len);
 /** hex decode [hex, hex+hex_len) into dst. returns bytes written. */
 size_t str_hex_decode(char* dst, const char* hex, size_t hex_len);
 
+/* ──────────────────────────────────────────────────────────────────────
+ *  17. Scanner tier (NUL-safe parser primitives)
+ *
+ *  Centralizes the pointer-advancing scan idioms that parsers used to
+ *  open-code. Two motivations:
+ *    (a) C string membership includes NUL: `strchr(set, *p)` matches the
+ *        terminator when *p == '\0', so a following run loop can walk past
+ *        the allocation. Every helper here treats '\0' as a non-member.
+ *    (b) Signed-char ctype is UB: `isspace(*p)` on a (signed) char* is
+ *        undefined for bytes >= 0x80, routine on UTF-8 input. The
+ *        str_char_is_* classifiers below are safe for any byte value.
+ *
+ *  Tiers (prefer in this order):
+ *    - bounded strn_* (carry `end`; cannot over-read) — the default.
+ *    - StrCursor (owns `end`; peek returns '\0' at the boundary) —
+ *      recommended for new parsers.
+ *    - NUL-terminated str_* — convenience only, for known-terminated bufs.
+ *
+ *  All are ASCII byte scanners, not Unicode semantics.
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* 17.1 — NUL-safe character classes. Every one returns false for '\0'. */
+bool str_char_in_set(char c, const char* chars);  /* false if c=='\0' or chars==NULL */
+bool str_char_is_ascii_space(char c);  /* ' ', '\t', '\n', '\r', '\f', '\v' */
+bool str_char_is_line_space(char c);   /* ' ', '\t' */
+bool str_char_is_digit(char c);        /* '0'..'9' */
+bool str_char_is_alpha(char c);        /* a-z, A-Z */
+bool str_char_is_alnum(char c);        /* digit or alpha */
+bool str_char_is_ident(char c);        /* alnum or '_' */
+
+/* 17.2 — Bounded scanners (the default tier). None ever return past `end`.
+ *  All are NULL-tolerant: a NULL `p` is returned unchanged. */
+const char* strn_skip_chars(const char* p, const char* end, const char* chars);
+const char* strn_skip_line_space(const char* p, const char* end);
+const char* strn_skip_ascii_space(const char* p, const char* end);
+const char* strn_skip_digits(const char* p, const char* end);
+const char* strn_scan_until_char(const char* p, const char* end, char stop);
+const char* strn_scan_until_any(const char* p, const char* end, const char* stops);
+const char* strn_scan_to_line_end(const char* p, const char* end);  /* stops at '\n'/'\r'/end */
+size_t      strn_count_run(const char* p, const char* end, char marker);  /* 0 if marker=='\0' */
+
+/* 17.3 — NUL-terminated scanners (convenience exception; not safe on
+ *  non-terminated buffers — use the bounded tier when a length is available). */
+const char* str_skip_chars(const char* p, const char* chars);
+const char* str_skip_line_space(const char* p);
+const char* str_skip_ascii_space(const char* p);
+const char* str_skip_digits(const char* p);
+const char* str_scan_until_char(const char* p, char stop);
+const char* str_scan_until_any(const char* p, const char* stops);
+const char* str_scan_to_line_end(const char* p);
+/** count a run of `marker`. max_len==0 means NUL-terminated mode.
+ *  returns 0 when marker is '\0' (prevents the NUL-run failure class). */
+size_t str_count_run(const char* p, size_t max_len, char marker);
+
+/* 17.4 — Cursor: the recommended interface for new parsers. Always bounded;
+ *  peek returns '\0' at the boundary, so callers never branch on a raw deref. */
+typedef struct {
+    const char* p;
+    const char* end;  /* required; the cursor is always bounded */
+} StrCursor;
+
+bool        str_cursor_at_end(const StrCursor* c);
+char        str_cursor_peek(const StrCursor* c);          /* '\0' at end — never over-reads */
+void        str_cursor_skip_line_space(StrCursor* c);
+void        str_cursor_skip_ascii_space(StrCursor* c);
+size_t      str_cursor_count_run(StrCursor* c, char marker);  /* advances the cursor */
+const char* str_cursor_mark(const StrCursor* c);
+
 #ifdef __cplusplus
 }
 #endif

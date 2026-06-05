@@ -1,5 +1,6 @@
 #include "input.hpp"
 #include "../../lib/mem.h"
+#include "../../lib/str.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -70,7 +71,7 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
         tag_name_start = jsx_end;
 
         // Extract tag name
-        while (jsx_end < end && *jsx_end != '>' && *jsx_end != '/' && !isspace(*jsx_end)) {
+        while (jsx_end < end && *jsx_end != '>' && *jsx_end != '/' && !str_char_is_ascii_space(*jsx_end)) {
             jsx_end++;
         }
         tag_name_len = jsx_end - tag_name_start;

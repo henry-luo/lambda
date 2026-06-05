@@ -509,7 +509,7 @@ static SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
 
     while (*p && count < 4) {
         // skip whitespace and commas
-        while (*p && (isspace(*p) || *p == ',')) p++;
+        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
         if (!*p) break;
 
         char* end;
@@ -542,7 +542,7 @@ static float parse_svg_length(const char* value, float default_value) {
     if (end == value) return default_value;
 
     // skip whitespace after number
-    while (*end && isspace(*end)) end++;
+    while (*end && str_char_is_ascii_space(*end)) end++;
 
     // check for unit suffix
     if (*end == '\0') {
@@ -654,7 +654,7 @@ static Color parse_svg_color(const char* value) {
     if (!value || !*value) return c;
 
     // skip whitespace
-    while (*value && isspace(*value)) value++;
+    while (*value && str_char_is_ascii_space(*value)) value++;
 
     // check for "none"
     if (strcmp(value, "none") == 0) {
@@ -804,7 +804,7 @@ static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
 
     while (*p) {
         // skip whitespace
-        while (*p && isspace(*p)) p++;
+        while (*p && str_char_is_ascii_space(*p)) p++;
         if (!*p) break;
 
         float local[6] = {1, 0, 0, 1, 0, 0};
@@ -816,7 +816,7 @@ static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
                 p++;
                 float tx = 0, ty = 0;
                 tx = strtof(p, (char**)&p);
-                while (*p && (isspace(*p) || *p == ',')) p++;
+                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                 if (*p && *p != ')') {
                     ty = strtof(p, (char**)&p);
                 }
@@ -830,7 +830,7 @@ static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
                 p++;
                 float sx = 1, sy = 1;
                 sx = strtof(p, (char**)&p);
-                while (*p && (isspace(*p) || *p == ',')) p++;
+                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                 if (*p && *p != ')') {
                     sy = strtof(p, (char**)&p);
                 } else {
@@ -852,10 +852,10 @@ static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
                 local[2] = -s_val; local[3] = c_val;
 
                 // handle rotate(angle, cx, cy) with pivot point
-                while (*p && (isspace(*p) || *p == ',')) p++;
+                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                 if (*p && *p != ')') {
                     float cx = strtof(p, (char**)&p);
-                    while (*p && (isspace(*p) || *p == ',')) p++;
+                    while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                     float cy = strtof(p, (char**)&p);
                     // rotate(angle, cx, cy) = translate(cx,cy) * rotate(angle) * translate(-cx,-cy)
                     local[4] = cx * (1.0f - c_val) + cy * s_val;
@@ -886,7 +886,7 @@ static bool parse_svg_transform(const char* transform_str, float matrix[6]) {
             if (*p == '(') {
                 p++;
                 for (int i = 0; i < 6 && *p; i++) {
-                    while (*p && (isspace(*p) || *p == ',')) p++;
+                    while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                     local[i] = strtof(p, (char**)&p);
                 }
             }
@@ -1569,7 +1569,7 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
         if (dasharray && strcmp(dasharray, "none") != 0) {
             const char* p = dasharray;
             while (*p && dash_count < 16) {
-                while (*p && (isspace(*p) || *p == ',')) p++;
+                while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
                 if (!*p) break;
                 dashes[dash_count++] = strtof(p, (char**)&p);
             }
@@ -1674,7 +1674,7 @@ static bool parse_points_to_path(const char* points_str, RdtPath* path, bool clo
     bool first = true;
 
     while (*p) {
-        while (*p && (isspace(*p) || *p == ',')) p++;
+        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
         if (!*p) break;
 
         char* end;
@@ -1682,7 +1682,7 @@ static bool parse_points_to_path(const char* points_str, RdtPath* path, bool clo
         if (end == p) break;
         p = end;
 
-        while (*p && (isspace(*p) || *p == ',')) p++;
+        while (*p && (str_char_is_ascii_space(*p) || *p == ',')) p++;
         if (!*p) break;
 
         y = strtof(p, &end);
@@ -1727,12 +1727,12 @@ static void render_svg_polyline(SvgInlineRenderContext* ctx, Element* elem, bool
 
 // helper functions for path parsing
 static void skip_wsp_comma(const char** p) {
-    while (**p && (isspace(**p) || **p == ',')) (*p)++;
+    while (**p && (str_char_is_ascii_space(**p) || **p == ',')) (*p)++;
 }
 
 static bool peek_number(const char* p) {
     skip_wsp_comma(&p);
-    return *p == '-' || *p == '+' || *p == '.' || isdigit(*p);
+    return *p == '-' || *p == '+' || *p == '.' || str_char_is_digit(*p);
 }
 
 static float parse_number(const char** p) {

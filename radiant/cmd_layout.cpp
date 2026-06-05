@@ -370,7 +370,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                             if (str_istarts_with_const(content, strlen(content), "html")) {
                                 // Skip whitespace after "html"
                                 const char* after_html = content + 4;
-                                while (*after_html && isspace(*after_html)) {
+                                while (*after_html && str_char_is_ascii_space(*after_html)) {
                                     after_html++;
                                 }
                                 // HTML5 should have nothing after "html" (or only whitespace)

@@ -15,6 +15,7 @@
 #include "../format_adapter.hpp"
 #include <cstring>
 #include <cctype>
+#include "../../../../lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -325,10 +326,10 @@ public:
             while (*ul == ' ' || *ul == '\t') ul++;
             if (!*ul) return info;
             static const char* ul_chars = "=-~^+";
-            if (strchr(ul_chars, *ul)) {
+            if (str_char_in_set(*ul, ul_chars)) {
                 char ul_char = *ul;
-                int ul_len = 0;
-                while (*ul == ul_char) { ul_len++; ul++; }
+                size_t ul_len = str_count_run(ul, 0, ul_char);
+                ul += ul_len;
                 if (ul_len >= 2) {
                     static const char levels[] = "=-~^+";
                     const char* lp = strchr(levels, ul_char);
@@ -357,8 +358,8 @@ public:
         // Unordered: *, -, or multiple **
         if (*p == '*' || *p == '-') {
             char marker = *p;
-            int depth = 0;
-            while (*p == marker) { depth++; p++; }
+            int depth = (int)str_count_run(p, 0, marker);
+            p += depth;
             if (*p == ' ') {
                 info.marker = marker;
                 info.indent = depth;
@@ -370,8 +371,8 @@ public:
 
         // Ordered: . or multiple ..
         if (!info.valid && *p == '.') {
-            int depth = 0;
-            while (*p == '.') { depth++; p++; }
+            int depth = (int)str_count_run(p, 0, '.');
+            p += depth;
             if (*p == ' ') {
                 info.marker = '.';
                 info.indent = depth;
@@ -392,8 +393,8 @@ public:
         // ---- or ==== or ....
         if (*p == '-' || *p == '=' || *p == '.') {
             char fence = *p;
-            int len = 0;
-            while (*p == fence) { len++; p++; }
+            int len = (int)str_count_run(p, 0, fence);
+            p += len;
             if (len >= 4) {
                 info.fence_char = fence;
                 info.fence_length = len;

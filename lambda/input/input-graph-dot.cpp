@@ -1,4 +1,5 @@
 #include "input-graph.h"
+#include "../../lib/str.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
@@ -411,7 +412,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         bool is_edge = false;
 
         // Skip identifier/quoted string
-        while (*lookahead_pos && (isalnum(*lookahead_pos) || *lookahead_pos == '_')) {
+        while (*lookahead_pos && (str_char_is_alnum(*lookahead_pos) || *lookahead_pos == '_')) {
             lookahead_pos++;
         }
         if (*lookahead_pos == '"') {

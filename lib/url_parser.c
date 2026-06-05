@@ -781,10 +781,10 @@ bool url_is_absolute_url(const char* input) {
 
     // Look for scheme (must start with letter, then letters/digits/+/-/.)
     const char* p = input;
-    if (!isalpha(*p)) return false;
+    if (!str_char_is_alpha(*p)) return false;
 
     p++;
-    while (*p && (isalnum(*p) || *p == '+' || *p == '-' || *p == '.')) {
+    while (*p && (str_char_is_alnum(*p) || *p == '+' || *p == '-' || *p == '.')) {
         p++;
     }
 
@@ -1246,11 +1246,11 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
     }
 
     // Skip leading and trailing whitespace
-    while (*input && isspace(*input)) input++;
+    while (*input && str_char_is_ascii_space(*input)) input++;
 
     // Trim trailing whitespace
     const char* end = input + strlen(input) - 1;
-    while (end > input && isspace(*end)) end--;
+    while (end > input && str_char_is_ascii_space(*end)) end--;
     size_t input_len = end - input + 1;
 
     // Create trimmed input string

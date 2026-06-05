@@ -229,7 +229,7 @@ static void parse_counter_spec(const char* spec,
     const char* p = spec;
     bool in_token = false;
     while (*p) {
-        if (isspace(*p)) {
+        if (str_char_is_ascii_space(*p)) {
             in_token = false;
         } else if (!in_token) {
             token_count++;
@@ -253,17 +253,17 @@ static void parse_counter_spec(const char* spec,
 
     while (*p && pair_count < max_pairs) {
         // Skip whitespace
-        while (*p && isspace(*p)) p++;
+        while (*p && str_char_is_ascii_space(*p)) p++;
         if (!*p) break;
 
         // Parse name: read until whitespace (CSS <custom-ident> can contain hyphens, underscores, digits)
         const char* name_start = p;
-        while (*p && !isspace(*p)) p++;
+        while (*p && !str_char_is_ascii_space(*p)) p++;
 
         if (p == name_start) break;
 
         // verify it looks like a CSS identifier (starts with letter, underscore, or hyphen)
-        if (!isalpha(name_start[0]) && name_start[0] != '_' && name_start[0] != '-') break;
+        if (!str_char_is_alpha(name_start[0]) && name_start[0] != '_' && name_start[0] != '-') break;
 
         size_t name_len = p - name_start;
         char* name = (char*)arena_alloc(arena, name_len + 1);
@@ -273,11 +273,11 @@ static void parse_counter_spec(const char* spec,
         name[name_len] = '\0';
 
         // Skip whitespace
-        while (*p && isspace(*p)) p++;
+        while (*p && str_char_is_ascii_space(*p)) p++;
 
         // Parse optional integer value (sign must be followed by digit)
         int value = default_value;
-        if (*p && (isdigit(*p) || ((*p == '-' || *p == '+') && *(p+1) && isdigit(*(p+1))))) {
+        if (*p && (str_char_is_digit(*p) || ((*p == '-' || *p == '+') && *(p+1) && str_char_is_digit(*(p+1))))) {
             char* endptr = nullptr;
             long long_value = strtol(p, &endptr, 10);
 

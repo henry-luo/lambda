@@ -665,12 +665,12 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
                 const char* pos = element_attr;
                 while (*pos) {
                     // Skip whitespace
-                    while (*pos && isspace(*pos)) pos++;
+                    while (*pos && str_char_is_ascii_space(*pos)) pos++;
                     if (!*pos) break;
 
                     // Check if this word matches
                     const char* word_start = pos;
-                    while (*pos && !isspace(*pos)) pos++;
+                    while (*pos && !str_char_is_ascii_space(*pos)) pos++;
 
                     size_t word_len = pos - word_start;
                     if (word_len == value_len) {
@@ -1316,7 +1316,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
     formula->even = false;
 
     // Trim whitespace
-    while (*formula_str && isspace(*formula_str)) {
+    while (*formula_str && str_char_is_ascii_space(*formula_str)) {
         formula_str++;
     }
 
@@ -1340,7 +1340,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
         p++;
 
         // Check for +b or -b
-        while (*p && isspace(*p)) p++;
+        while (*p && str_char_is_ascii_space(*p)) p++;
         if (*p == '+' || *p == '-') {
             formula->b = (int)str_to_int64_default(p, strlen(p), 0);
         }
@@ -1354,22 +1354,22 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
     } else if (*p == '+') {
         formula->a = 1;
         p++;
-    } else if (isdigit(*p)) {
+    } else if (str_char_is_digit(*p)) {
         formula->a = (int)str_to_int64_default(p, strlen(p), 0);
-        while (*p && isdigit(*p)) p++;
+        while (*p && str_char_is_digit(*p)) p++;
     } else {
         formula->a = 1;
     }
 
     // Skip whitespace
-    while (*p && isspace(*p)) p++;
+    while (*p && str_char_is_ascii_space(*p)) p++;
 
     // Check for 'n'
     if (*p == 'n' || *p == 'N') {
         p++;
 
         // Skip whitespace
-        while (*p && isspace(*p)) p++;
+        while (*p && str_char_is_ascii_space(*p)) p++;
 
         // Parse constant 'b'
         if (*p == '+' || *p == '-') {
