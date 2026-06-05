@@ -1367,15 +1367,14 @@ var _wpt_load_listeners = [];
 function _wpt_add_load_listener(fn, opts) {
     if (typeof fn === "function") _wpt_load_listeners.push(fn);
 }
-// Provide an addEventListener shim for "load" so tests using
-// addEventListener("load", fn) work the same as window.onload = fn.
-if (typeof addEventListener !== "function") {
-    var addEventListener = function(type, fn, opts) {
-        if (type === "load" || type === "DOMContentLoaded") {
-            _wpt_add_load_listener(fn, opts);
-        }
-    };
-}
+// Provide an addEventListener fallback for "load" ONLY when the runtime has no
+// native addEventListener at all. Do NOT declare `var addEventListener` here:
+// a top-level `var` is hoisted before this script runs and, since the global
+// object IS globalThis, that hoist shadows the native window.addEventListener
+// binding with undefined — breaking every test that registers listeners on
+// window. The native addEventListener handles all event types, and
+// _wpt_fire_onload() dispatches real "load"/"DOMContentLoaded" events below, so
+// addEventListener("load", fn) registrations fire without any capture shim.
 if (typeof window !== "undefined" && window) {
     try {
         if (typeof window.addEventListener !== "function") {

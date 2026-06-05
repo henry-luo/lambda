@@ -2274,7 +2274,7 @@
                     },
                     {
                         "source": "test_serve_phase2_gtest.cpp",
-                        "name": "Web Server Phase 2 Tests",
+                        "name": "Web Server Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2596,7 +2596,7 @@
                     },
                     {
                         "source": "test_namespace_gtest.cpp",
-                        "name": "Namespace Infrastructure Tests",
+                        "name": "Namespace Infra Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2772,7 +2772,7 @@
                     },
                     {
                         "source": "test_pdf_render_visual_gtest.cpp",
-                        "name": "PDF Render Visual Tests",
+                        "name": "PDF Render Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2867,7 +2867,7 @@
                     },
                     {
                         "source": "test_html_negative_gtest.cpp",
-                        "name": "HTML Parser Negative Tests - Invalid HTML",
+                        "name": "HTML Parser Negative Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2988,7 +2988,7 @@
                     },
                     {
                         "source": "parser/test_parser_robustness_gtest.cpp",
-                        "name": "Parser Robustness Tests - Safety and Error Handling",
+                        "name": "Parser Safety and Error Handling Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -3098,7 +3098,7 @@
                     },
                     {
                         "source": "test_validator_integration.cpp",
-                        "name": "Validator Integration Tests - Sprint 5 Comprehensive Testing",
+                        "name": "Validator Integration Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -3324,7 +3324,7 @@
                     },
                     {
                         "source": "test_html_css_gtest.cpp",
-                        "name": "HTML to CSS End-to-End Integration Tests",
+                        "name": "HTML to CSS E2E Integration Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -3389,7 +3389,7 @@
                     },
                     {
                         "source": "test/css/test_css_engine_unit.cpp",
-                        "name": "CSS Engine Unit Tests (Comprehensive)",
+                        "name": "CSS Engine Unit Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -3431,7 +3431,7 @@
                     },
                     {
                         "source": "test/css/test_css_roundtrip_unit.cpp",
-                        "name": "CSS Roundtrip Unit Tests (Parse→Format→Parse)",
+                        "name": "CSS Roundtrip Tests (Parse→Format→Parse)",
                         "dependencies": [
                             "lambda-input-full"
                         ],

@@ -687,9 +687,19 @@ extern "C" void legacy_sync_from_dom_selection(DocState* state) {
 
     {
         CaretState* caret = state->caret;
+        // A collapsed DOM Selection can project its focus onto a non-editable
+        // element (e.g. <body> via Selection.collapse). Such a position has no
+        // rendered insertion point, so the legacy caret must not be marked
+        // visible there — a visible caret is only valid inside editable content
+        // (a text control, or a text node within editable flow). Marking it
+        // visible on a non-text-control element violates the DocState
+        // interaction invariant ("visible element caret target is not editable").
+        bool caret_can_render = !foc_view ||
+            !foc_view->is_element() ||
+            tc_is_text_control(lam::dom_require_element(foc_view));
         caret->view        = foc_view;
         caret->char_offset = foc_off;
-        caret->visible     = ds->is_collapsed;
+        caret->visible     = ds->is_collapsed && caret_can_render;
         caret->blink_time  = 0;
 
         // Resolve layout cache (x/y/height) via the resolver. Best-effort:
@@ -3703,7 +3713,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url) {
 // ============================================================================
 
 void caret_set(DocState* state, View* view, int char_offset) {
-    log_info("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
+    log_debug("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -5910,7 +5920,21 @@ void focus_clear(DocState* state) {
 
 void focus_clear_preserve_selection(DocState* state) {
     if (!state || !state->focus) return;
+
+    // Clearing focus touches several flags (:focus, :focus-visible, and the
+    // :focus-within ancestor chain) across multiple mutations that are only
+    // mutually consistent once the whole operation completes. The per-mutation
+    // interaction invariant ties every flag to focus->current, so the
+    // intermediate states are necessarily invalid. Bracket the clear as a
+    // transition (mirroring focus_clear → focus_transition) to suppress the
+    // mid-operation assert and validate only the final, consistent state.
+    bool own_transition = (state->transition_depth == 0);
+    if (own_transition) state->transition_depth++;
     focus_clear_internal(state, true);
+    if (own_transition) {
+        state->transition_depth--;
+        state_assert_after_mutation(state, "focus_clear_preserve_selection");
+    }
 }
 
 // collect focusable elements from view tree in DOM order
