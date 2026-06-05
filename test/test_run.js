@@ -119,6 +119,8 @@ function getMaxConcurrent() {
 }
 
 const MAX_CONCURRENT = getMaxConcurrent();
+const heartbeatSeconds = parseInt(process.env.LAMBDA_TEST_HEARTBEAT || '30', 10);
+const HEARTBEAT_MS = (Number.isFinite(heartbeatSeconds) ? Math.max(10, heartbeatSeconds) : 30) * 1000;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -293,6 +295,53 @@ function filterTests(tests) {
     if (excludeSuite)   result = result.filter(t => t.suite !== excludeSuite);
     if (targetCategory) result = result.filter(t => t.category === targetCategory);
     return result;
+}
+
+function parseDurationMs(value) {
+    if (typeof value === 'number') return Math.max(0, value * 1000);
+    if (typeof value !== 'string') return 0;
+
+    const trimmed = value.trim();
+    if (trimmed.endsWith('ms')) return Math.max(0, parseFloat(trimmed));
+    if (trimmed.endsWith('s')) return Math.max(0, parseFloat(trimmed) * 1000);
+    const numeric = parseFloat(trimmed);
+    return Number.isFinite(numeric) ? Math.max(0, numeric * 1000) : 0;
+}
+
+function getPreviousDurationMs(baseName) {
+    const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+    try {
+        if (!fs.existsSync(jsonFile)) return 0;
+        const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+        return parseDurationMs(data.time);
+    } catch (_) {
+        return 0;
+    }
+}
+
+function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes > 0 ? `${minutes}m${seconds.toString().padStart(2, '0')}s` : `${seconds}s`;
+}
+
+function scheduleTests(tests) {
+    if (!parallelExecution) return tests;
+
+    return tests
+        .map((test, index) => ({
+            test,
+            index,
+            previousDurationMs: getPreviousDurationMs(test.baseName),
+        }))
+        .sort((a, b) => {
+            if (b.previousDurationMs !== a.previousDurationMs) {
+                return b.previousDurationMs - a.previousDurationMs;
+            }
+            return a.index - b.index;
+        })
+        .map(entry => entry.test);
 }
 
 // ─── Run a single test with idle-timeout ────────────────────────────────────────
@@ -540,9 +589,30 @@ function parseTestResults(baseName, jsonFile, timedOut) {
 async function runAllTests(tests) {
     const results = new Map(); // baseName -> result + testInfo
     let nextIndex = 0;
-    const running = new Set();
+    const running = new Map();
+    let heartbeat = null;
 
     return new Promise((resolveAll) => {
+        if (!rawOutput && parallelExecution) {
+            heartbeat = setInterval(() => {
+                if (running.size === 0) return;
+
+                const now = Date.now();
+                const active = [...running.values()]
+                    .sort((a, b) => (now - b.startMs) - (now - a.startMs))
+                    .slice(0, 5)
+                    .map(entry => `${entry.testInfo.baseName} ${formatDuration(now - entry.startMs)}`);
+                console.log(`   ... still running (${running.size}): ${active.join(', ')}`);
+            }, HEARTBEAT_MS);
+        }
+
+        function finishIfDone() {
+            if (running.size === 0 && nextIndex >= tests.length) {
+                if (heartbeat) clearInterval(heartbeat);
+                resolveAll(results);
+            }
+        }
+
         function startNext() {
             while (running.size < MAX_CONCURRENT && nextIndex < tests.length) {
                 const idx = nextIndex++;
@@ -563,17 +633,17 @@ async function runAllTests(tests) {
                     }
 
                     startNext();
-
-                    if (running.size === 0 && nextIndex >= tests.length) {
-                        resolveAll(results);
-                    }
+                    finishIfDone();
                 });
 
-                running.add(promise);
+                running.set(promise, { testInfo, startMs: Date.now() });
             }
 
             // Edge case: no tests to run
-            if (tests.length === 0) resolveAll(results);
+            if (tests.length === 0) {
+                if (heartbeat) clearInterval(heartbeat);
+                resolveAll(results);
+            }
         }
 
         startNext();
@@ -758,6 +828,7 @@ async function main() {
     // Discover and filter tests
     let tests = discoverTests(config);
     tests = filterTests(tests);
+    tests = scheduleTests(tests);
 
     if (tests.length === 0) {
         console.error('❌ No test executables found matching filters');
