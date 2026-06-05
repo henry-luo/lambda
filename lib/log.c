@@ -1166,6 +1166,21 @@ static int log_parse_zlog_config(const char *config) {
                         }
                     }
 
+                    // Allow a process to redirect file logging to a private path
+                    // via the LAMBDA_LOG_FILE env var. The default log.txt is a
+                    // shared, truncate-on-startup file, so concurrent lambda
+                    // processes (e.g. under parallel test runs) clobber each
+                    // other's logs. Redirect only real file targets — leave
+                    // stdout/stderr categories untouched.
+                    if (output_file && output_file[0] &&
+                        strcmp(output_file, "stdout") != 0 &&
+                        strcmp(output_file, "stderr") != 0) {
+                        const char *log_file_override = getenv("LAMBDA_LOG_FILE");
+                        if (log_file_override && log_file_override[0]) {
+                            output_file = (char *)log_file_override;
+                        }
+                    }
+
                     // Apply rule to category
                     log_category_t *cat = log_get_category(category_name);
                     if (cat) {

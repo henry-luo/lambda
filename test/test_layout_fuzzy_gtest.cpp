@@ -53,8 +53,12 @@
     #define NULL_DEV "/dev/null"
 #endif
 
-// Timeout per file in seconds
-#define FUZZY_TIMEOUT_SECONDS 15
+// Timeout per file in seconds. Generous because a few cases legitimately do a
+// lot of work: crash_extreme_dom_depth parses a ~10k-deep DOM (super-linear in
+// depth) and takes ~5s solo in the ASan debug build, rising to ~14s under the
+// heavy CPU contention of a full parallel `make test`. The timeout only guards
+// against true hangs, so keep ample margin above that worst case.
+#define FUZZY_TIMEOUT_SECONDS 60
 
 // ============================================================================
 // Test info

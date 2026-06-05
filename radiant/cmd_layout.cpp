@@ -5145,11 +5145,17 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
                 (strncmp(result_str->chars, "<html", 5) == 0 ||
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
+            // Parse the HTML into a DomDocument BEFORE tearing down the runtime:
+            // result_str lives in the runtime's GC heap, so runtime_cleanup() frees
+            // result_str->chars. load_html_string_doc() copies its input (see the
+            // SVG helper above, which frees its buffer right after the call), so the
+            // document is self-contained once it returns. (was heap-use-after-free)
+            DomDocument* doc = load_html_string_doc(result_str->chars, viewport_width, viewport_height);
             runtime_cleanup(runtime);
             mem_free(runtime);
             pool_destroy(result_pool);
             url_destroy(script_url);
-            return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
+            return doc;
         }
     }
 
