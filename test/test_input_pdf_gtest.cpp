@@ -54,7 +54,7 @@ static void ensure_temp_dir(void) {
 // Static fixture paths (PDFs that already contain indirect objects).
 static const char* PDF_FIXTURE_SIMPLE   = "test/input/test.pdf";
 static const char* PDF_FIXTURE_ADVANCED = "test/input/advanced_test.pdf";
-static const char* PDF_FIXTURE_SMALLPDF = "test/pdf/Get_Started_With_Smallpdf.pdf";
+static const char* PDF_FIXTURE_INVOICE  = "test/input/invoice.pdf";
 
 // Generated fixture path (3-page PDF written in SetUp).
 static const char* PDF_GEN_3PAGE        = "temp/test_input_pdf_3page.pdf";
@@ -255,39 +255,39 @@ TEST_F(InputPdfTest, AdvancedFixtureHasManyIndirectObjects) {
     EXPECT_GE(objs.length(), 10);
 }
 
-TEST_F(InputPdfTest, ObjectStreamsExpandFontDictionaries) {
-    Input* input = parse_pdf_file(PDF_FIXTURE_SMALLPDF);
+TEST_F(InputPdfTest, ObjectStreamsExpandCompressedObjects) {
+    Input* input = parse_pdf_file(PDF_FIXTURE_INVOICE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ASSERT_TRUE(root.has("objects"));
     ArrayReader objs = root.get("objects").asArray();
 
-    MapReader type0_font = find_indirect_object(objs, 17);
-    ASSERT_TRUE(type0_font.isValid()) << "object stream font 17 must be materialized";
-    ASSERT_TRUE(type0_font.has("Type"));
-    EXPECT_STREQ(type0_font.get("Type").cstring(), "Font");
-    ASSERT_TRUE(type0_font.has("BaseFont"));
-    EXPECT_STREQ(type0_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Regular");
-    EXPECT_TRUE(type0_font.has("ToUnicode"));
-    EXPECT_TRUE(type0_font.has("to_unicode"));
+    MapReader outlines = find_indirect_object(objs, 4);
+    ASSERT_TRUE(outlines.isValid()) << "object stream outline object 4 must be materialized";
+    ASSERT_TRUE(outlines.has("Type"));
+    EXPECT_STREQ(outlines.get("Type").cstring(), "Outlines");
+    ASSERT_TRUE(outlines.has("First"));
+    ASSERT_TRUE(outlines.get("First").isMap());
+    EXPECT_TRUE(outlines.has("Last"));
 
-    MapReader bold_font = find_indirect_object(objs, 18);
-    ASSERT_TRUE(bold_font.isValid()) << "object stream font 18 must be materialized";
-    ASSERT_TRUE(bold_font.has("Type"));
-    EXPECT_STREQ(bold_font.get("Type").cstring(), "Font");
-    ASSERT_TRUE(bold_font.has("BaseFont"));
-    EXPECT_STREQ(bold_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Bold");
-    EXPECT_TRUE(bold_font.has("ToUnicode"));
-    EXPECT_TRUE(bold_font.has("to_unicode"));
+    MapReader first_outline = find_indirect_object(objs, 6);
+    ASSERT_TRUE(first_outline.isValid()) << "object stream outline object 6 must be materialized";
+    ASSERT_TRUE(first_outline.has("Title"));
+    EXPECT_STREQ(first_outline.get("Title").cstring(), "Invoice");
+    ASSERT_TRUE(first_outline.has("Dest"));
+    EXPECT_TRUE(first_outline.get("Dest").isArray());
 
-    MapReader regular_font = find_indirect_object(objs, 19);
-    ASSERT_TRUE(regular_font.isValid()) << "object stream font 19 must be materialized";
-    ASSERT_TRUE(regular_font.has("Type"));
-    EXPECT_STREQ(regular_font.get("Type").cstring(), "Font");
-    ASSERT_TRUE(regular_font.has("BaseFont"));
-    EXPECT_STREQ(regular_font.get("BaseFont").cstring(), "JFGNNE+SourceSansPro-Regular");
-    EXPECT_TRUE(regular_font.has("ToUnicode"));
-    EXPECT_TRUE(regular_font.has("to_unicode"));
+    MapReader annot = find_indirect_object(objs, 10);
+    ASSERT_TRUE(annot.isValid()) << "object stream annotation object 10 must be materialized";
+    ASSERT_TRUE(annot.has("Type"));
+    EXPECT_STREQ(annot.get("Type").cstring(), "Annot");
+    ASSERT_TRUE(annot.has("Subtype"));
+    EXPECT_STREQ(annot.get("Subtype").cstring(), "Link");
+    ASSERT_TRUE(annot.has("A"));
+    ASSERT_TRUE(annot.get("A").isMap());
+    MapReader action = annot.get("A").asMap();
+    ASSERT_TRUE(action.has("URI"));
+    EXPECT_STREQ(action.get("URI").cstring(), "http://www.princexml.com/");
 }
 
 /* ══════════════════════════════════════════════════════════════════════
