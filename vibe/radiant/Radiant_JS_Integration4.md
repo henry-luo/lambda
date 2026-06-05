@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-04
 **Prerequisites**: Phase 2 load-time JS coverage and Phase 3 interactive event handler support
-**Goal**: Replace the current concatenated-script load path with a browser-compatible post-DOM script loading, execution, event, and lifecycle model while preserving existing Radiant event dispatch, event simulation, and baseline behavior.
+**Goal**: Replace the concatenated-script load path with a browser-compatible post-DOM script loading, execution, event, and lifecycle model while preserving existing Radiant event dispatch, event simulation, and baseline behavior.
 
 ---
 
@@ -26,7 +26,7 @@ The proposed Phase 4 direction is:
 1. Keep the existing DOM bridge, CSSOM bridge, retained JS state, inline handler registry, event dispatch, post-handler relayout, and event simulation.
 2. Introduce a script task and scheduler layer.
 3. Move from "one synthetic document script" toward "one persistent document realm, many script units".
-4. Preserve baseline tests by keeping the legacy pipeline as the default until each stage has coverage.
+4. Preserve baseline tests while making the covered post-DOM task pipeline the only load-time script executor.
 5. Use the post-DOM task pipeline to improve both correctness and performance: smaller script units, per-script caching, clearer lifecycle order, and future parallel fetch/compile where it is safe.
 
 ---
@@ -408,24 +408,15 @@ This keeps the parser stable and avoids a large parser pause/resume refactor. It
 
 ### 4.6 Staged Compatibility Path
 
-To avoid regressions, do not jump directly from concatenation to a new default executor.
+To avoid regressions, the rollout first introduced task collection and separate-script execution behind a flag. The covered post-DOM task executor is now the only load-time script executor.
 
 Recommended sequence:
 
-1. Add `JsScriptTask` collection while still using the legacy concatenated executor.
+1. Add `JsScriptTask` collection while preserving behavior during migration.
 2. Add a feature flag for separate-script execution after full DOM build.
 3. Make separate-script execution preserve existing CSS2.1 and UI automation results.
 4. Add post-DOM lifecycle ordering for DOMContentLoaded/load and modeled `defer`/`async` behavior.
-5. Move default behavior after `make test-radiant-baseline`, JS layout suites, and UI automation remain stable.
-
-Possible controls:
-
-```text
-RADIANT_JS_PIPELINE=legacy
-RADIANT_JS_PIPELINE=tasks-postdom
-```
-
-Default should remain `legacy` until the new path has enough coverage.
+5. Move default behavior after `make test-radiant-baseline` and UI automation remain stable. The former JS layout suite coverage now lives in the layout baseline. This default flip is complete.
 
 ### 4.7 Parallelism
 
@@ -683,9 +674,9 @@ Status: this document.
 
 Keep collecting timing data through the existing `--timing-output` path and add per-script metrics later.
 
-### Phase 4.1: ScriptTask Collector With Legacy Executor
+### Phase 4.1: ScriptTask Collector
 
-Add a `JsScriptTask` collector but keep the legacy concatenate-and-compile behavior.
+Add a `JsScriptTask` collector and use it as the canonical source of script metadata for execution.
 
 Purpose:
 
@@ -694,9 +685,9 @@ Purpose:
 - count scripts and source sizes,
 - add tests without behavior changes.
 
-Expected regression risk: very low if the executor is unchanged.
+Expected regression risk: low when task metadata matches the previous script discovery behavior.
 
-### Phase 4.2: Separate Classic Script Executor Behind Flag
+### Phase 4.2: Separate Classic Script Executor
 
 Execute scripts as separate units but still after full DOM construction.
 
@@ -708,16 +699,9 @@ This is not full browser parser behavior, but it validates:
 - global sharing across scripts,
 - event handler registry compatibility.
 
-Target:
-
-```text
-RADIANT_JS_PIPELINE=tasks-postdom
-```
-
 Must pass:
 
 - `make test-radiant-baseline`,
-- current JS layout suite,
 - UI automation/event_sim tests.
 
 ### Phase 4.3: Post-DOM Lifecycle and Scheduling
@@ -778,9 +762,9 @@ Only optimize after the post-DOM script/lifecycle work is stable:
 
 ## 8. Regression and Compatibility Plan
 
-### 8.1 Keep Legacy as Baseline Until Proven
+### 8.1 Single Executor Baseline
 
-New script scheduling must be introduced behind a flag. Default behavior should remain legacy until all required suites pass.
+The post-DOM task scheduler is now the default baseline and the only load-time script executor. Regressions should be bisected against ordinary commits and focused Phase 4 tests rather than an in-process fallback.
 
 ### 8.2 Required Test Gates
 
@@ -788,7 +772,6 @@ For every implementation phase:
 
 ```bash
 make test-radiant-baseline
-make layout suite=js
 ```
 
 For interactive changes:
@@ -889,9 +872,9 @@ Browsers delay `window load` for images, stylesheets, subframes, and some script
 
 Start with Phase 4.1:
 
-1. Add `JsScriptTask` metadata collection while still feeding the legacy concatenated executor.
+1. Add `JsScriptTask` metadata collection and feed the post-DOM task executor.
 2. Emit optional per-script timing/source-size diagnostics.
 3. Add tests that assert the collector sees script attributes correctly.
 4. Verify `make test-radiant-baseline` remains unchanged.
 
-Then move to Phase 4.2 behind `RADIANT_JS_PIPELINE=tasks-postdom`. That is the first meaningful step toward separate script execution while preserving the existing working event handler dispatch and UI automation surfaces.
+Then move to Phase 4.2 by making the post-DOM task executor the default after coverage stabilizes. That is the first meaningful step toward separate script execution while preserving the existing working event handler dispatch and UI automation surfaces.

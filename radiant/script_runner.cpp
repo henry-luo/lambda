@@ -42,7 +42,6 @@
 extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 
 #include <cstring>
-#include <cctype>
 #include <cstdlib>
 #include <signal.h>
 #include <setjmp.h>
@@ -131,11 +130,6 @@ static Pool* s_js_reuse_pool = nullptr;
 static LruCache* s_script_source_cache = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
-
-typedef enum JsScriptPipelineMode {
-    JS_SCRIPT_PIPELINE_LEGACY_COMBINED,
-    JS_SCRIPT_PIPELINE_TASKS_POSTDOM
-} JsScriptPipelineMode;
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
@@ -639,28 +633,10 @@ static bool element_has_attr_ci(Element* elem, const char* attr_name) {
     return elem->has_attr(attr_name);
 }
 
-static JsScriptPipelineMode script_runner_pipeline_mode() {
-    const char* env = getenv("RADIANT_JS_PIPELINE");
-    if (env && (strcmp(env, "legacy") == 0 || strcmp(env, "legacy-combined") == 0)) {
-        return JS_SCRIPT_PIPELINE_LEGACY_COMBINED;
-    }
-    return JS_SCRIPT_PIPELINE_TASKS_POSTDOM;
-}
-
 static bool script_runner_module_scripts_enabled() {
     const char* env = getenv("RADIANT_JS_MODULES");
     return env && strcmp(env, "1") == 0;
 }
-
-#ifndef NDEBUG
-static const char* script_runner_pipeline_name(JsScriptPipelineMode mode) {
-    switch (mode) {
-        case JS_SCRIPT_PIPELINE_TASKS_POSTDOM: return "tasks-postdom";
-        case JS_SCRIPT_PIPELINE_LEGACY_COMBINED:
-        default: return "legacy-combined";
-    }
-}
-#endif
 
 static JsScriptTask* script_task_new(JsScriptTaskKind kind, int document_order) {
     JsScriptTask* task = (JsScriptTask*)mem_calloc(1, sizeof(JsScriptTask), MEM_CAT_JS_RUNTIME);
@@ -824,46 +800,6 @@ static bool is_module_script_type(const char* type_attr) {
     return type_attr && strcasecmp(type_attr, "module") == 0;
 }
 
-static void emit_legacy_script_task(StrBuf* script_buf, JsScriptTask* task) {
-    if (!script_buf || !task || task->status != JS_SCRIPT_TASK_READY ||
-        task->kind != JS_SCRIPT_TASK_CLASSIC) {
-        return;
-    }
-
-    const char* catch_name = task->external ? "_ext_err" : "_script_err";
-    strbuf_append_str(script_buf, "try {\n");
-    if (task->source && task->source_len > 0) {
-        strbuf_append_str_n(script_buf, task->source, task->source_len);
-    }
-    strbuf_append_str(script_buf, "\n} catch(");
-    strbuf_append_str(script_buf, catch_name);
-    strbuf_append_str(script_buf, ") {}\n");
-    append_browser_global_sync(script_buf);
-}
-
-static void emit_legacy_onload_tasks(StrBuf* script_buf, ArrayList* onload_tasks) {
-    if (!script_buf || !onload_tasks || onload_tasks->length == 0) return;
-
-    StrBuf* onload_buf = strbuf_new_cap(256);
-    for (int i = 0; i < onload_tasks->length; i++) {
-        JsScriptTask* task = (JsScriptTask*)arraylist_get(onload_tasks, i);
-        if (!task || task->status != JS_SCRIPT_TASK_READY ||
-            task->kind != JS_SCRIPT_TASK_BODY_ONLOAD) {
-            continue;
-        }
-        if (task->source && task->source_len > 0) {
-            strbuf_append_str_n(onload_buf, task->source, task->source_len);
-        }
-    }
-
-    if (onload_buf->length > 0) {
-        strbuf_append_str(script_buf, "try {\n");
-        strbuf_append_str_n(script_buf, onload_buf->str, onload_buf->length);
-        strbuf_append_str(script_buf, "\n} catch(_onload_err) {}\n");
-    }
-    strbuf_free(onload_buf);
-}
-
 static void emit_body_onload_source(StrBuf* script_buf, ArrayList* onload_tasks) {
     if (!script_buf || !onload_tasks || onload_tasks->length == 0) return;
 
@@ -964,37 +900,6 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.scrollY = 0;\n"
         "document.defaultView = window;\n"
     );
-}
-
-static void append_browser_lifecycle_postamble(StrBuf* script_buf) {
-    if (!script_buf) return;
-    strbuf_append_str(script_buf,
-        "\nif (document && document.dispatchEvent && typeof Event === 'function') {\n"
-        "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
-        "}\n"
-        "\nif (window.onload) { window.onload(); }\n"
-    );
-}
-
-static StrBuf* build_legacy_document_script_source(JsScriptTaskCollection* collection) {
-    if (!collection) return nullptr;
-    StrBuf* body_buf = strbuf_new_cap(4096);
-    for (int i = 0; i < collection->scripts->length; i++) {
-        emit_legacy_script_task(body_buf, (JsScriptTask*)arraylist_get(collection->scripts, i));
-    }
-    emit_legacy_onload_tasks(body_buf, collection->onload_handlers);
-
-    if (body_buf->length == 0) {
-        strbuf_free(body_buf);
-        return nullptr;
-    }
-
-    StrBuf* script_buf = strbuf_new_cap(body_buf->length + 2048);
-    append_browser_document_preamble(script_buf);
-    strbuf_append_str_n(script_buf, body_buf->str, body_buf->length);
-    append_browser_lifecycle_postamble(script_buf);
-    strbuf_free(body_buf);
-    return script_buf;
 }
 
 static bool script_task_collection_has_executable_tasks(JsScriptTaskCollection* collection) {
@@ -1561,9 +1466,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     loaded_external_scripts = 0;
     failed_external_scripts = 0;
 
-    // collect script task metadata first, then emit the legacy concatenated
-    // source from those tasks. This keeps behavior stable while introducing
-    // Phase 4 script-unit boundaries.
+    // collect script task metadata first. The Phase 4 pipeline runs these
+    // tasks as separate post-DOM units in one persistent document realm.
     JsScriptTaskCollection script_tasks;
     if (!script_task_collection_init(&script_tasks)) {
         log_error("execute_document_scripts: failed to initialize script task collection");
@@ -1572,32 +1476,13 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     collect_scripts_recursive(html_root, &script_tasks, base_url);
     log_script_task_diagnostics(&script_tasks);
 
-    JsScriptPipelineMode pipeline_mode = script_runner_pipeline_mode();
-    StrBuf* script_buf = nullptr;
-    size_t watchdog_source_len = 0;
-
-    if (pipeline_mode == JS_SCRIPT_PIPELINE_LEGACY_COMBINED) {
-        script_buf = build_legacy_document_script_source(&script_tasks);
-        if (script_buf) {
-            watchdog_source_len = script_buf->length;
-        }
-    } else if (script_task_collection_has_executable_tasks(&script_tasks)) {
-        watchdog_source_len = script_task_collection_source_bytes(&script_tasks);
-    }
-
-    if (!script_buf && pipeline_mode == JS_SCRIPT_PIPELINE_LEGACY_COMBINED) {
+    if (!script_task_collection_has_executable_tasks(&script_tasks)) {
         log_debug("execute_document_scripts: no scripts found");
         script_task_collection_free(&script_tasks);
         script_runner_cleanup_source_cache();
         return;
     }
-    if (pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM &&
-        !script_task_collection_has_executable_tasks(&script_tasks)) {
-        log_debug("execute_document_scripts: no scripts found");
-        script_task_collection_free(&script_tasks);
-        script_runner_cleanup_source_cache();
-        return;
-    }
+    size_t watchdog_source_len = script_task_collection_source_bytes(&script_tasks);
 
     // log external script loading stats
     if (loaded_external_scripts > 0 || failed_external_scripts > 0) {
@@ -1606,14 +1491,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     }
 
 #ifndef NDEBUG
-    log_info("execute_document_scripts: executing JS with %s pipeline (%zu source bytes)",
-        script_runner_pipeline_name(pipeline_mode), watchdog_source_len);
+    log_info("execute_document_scripts: executing JS with tasks-postdom pipeline (%zu source bytes)",
+        watchdog_source_len);
 #endif
-    if (script_buf) {
-        log_debug("execute_document_scripts: combined source:\n%.500s%s",
-                  script_buf->str,
-                  script_buf->length > 500 ? "\n..." : "");
-    }
 
     // set up Runtime for JS transpiler
     Runtime runtime = {};
@@ -1628,7 +1508,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // rather than silently dropped. The loop is drained after script execution.
     js_event_loop_init();
 
-    // execute the combined JS source via JIT transpiler
+    // execute document scripts via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
     // and per-script timeout via SIGALRM
 #ifndef _WIN32
@@ -1667,17 +1547,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         // compiled functions later. Static headless smoke loads only need
         // load-time DOM mutations, so use transient mode and avoid retaining
         // large MIR/transpiler pools for pages with big inline scripts.
-        if (s_retain_js_state || pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM) {
-            preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
-        }
+        preamble = (JsPreambleState*)mem_calloc(1, sizeof(JsPreambleState), MEM_CAT_EVAL);
         log_mem_stage("js: before transpile/exec");
-        if (pipeline_mode == JS_SCRIPT_PIPELINE_TASKS_POSTDOM) {
-            result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble);
-        } else if (s_retain_js_state) {
-            result = transpile_js_to_mir_preamble(&runtime, script_buf->str, "<document-scripts>", preamble);
-        } else {
-            result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
-        }
+        result = execute_document_script_tasks_postdom(&runtime, &script_tasks, preamble);
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
         js_exec_guarded = 0;
@@ -1770,7 +1642,6 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         }
     }
 
-    if (script_buf) strbuf_free(script_buf);
     script_task_collection_free(&script_tasks);
     script_runner_cleanup_source_cache();
 }
