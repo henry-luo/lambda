@@ -384,7 +384,6 @@ static void editing_controller_extend_selection_after_scroll(
     View* focus_view = static_cast<View*>(hit_boundary.dom.node);
     int focus_offset = (int)hit_boundary.offset; // INT_CAST_OK: editor selection offsets are byte-index ints.
     selection_extend_to_view(state, focus_view, focus_offset);
-    caret_set(state, focus_view, focus_offset);
     update_caret_visual_position(evcon->ui_context, state);
     editing_controller_selection_snapshot(evcon, state, hooks, focus_view,
                                           "autoscrollExtend");

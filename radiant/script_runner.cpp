@@ -761,6 +761,78 @@ static char* script_source_from_strbuf(StrBuf* buf) {
     return mem_strndup(buf->str, buf->length, MEM_CAT_JS_RUNTIME);
 }
 
+static bool is_js_identifier_start_char(char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+        ch == '_' || ch == '$';
+}
+
+static bool is_js_identifier_part_char(char ch) {
+    return is_js_identifier_start_char(ch) || (ch >= '0' && ch <= '9');
+}
+
+static const char* skip_js_ascii_space(const char* p) {
+    while (p && (*p == ' ' || *p == '\t' || *p == '\n' ||
+                 *p == '\r' || *p == '\f' || *p == '\v')) {
+        p++;
+    }
+    return p;
+}
+
+static bool is_js_identifier_boundary(char ch) {
+    return ch == '\0' || !is_js_identifier_part_char(ch);
+}
+
+static void append_classic_script_window_function_exports(const char* source, StrBuf* script_buf) {
+    if (!source || !script_buf) return;
+
+    StrBuf* export_buf = strbuf_new_cap(256);
+    const char* cursor = source;
+    while ((cursor = strstr(cursor, "function")) != nullptr) {
+        char before = cursor == source ? '\0' : cursor[-1];
+        if (!is_js_identifier_boundary(before)) {
+            cursor += 8;
+            continue;
+        }
+        const char* p = cursor + 8;
+        if (!is_js_identifier_boundary(*p) && *p != '*' &&
+            *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            cursor += 8;
+            continue;
+        }
+        p = skip_js_ascii_space(p);
+        if (*p == '*') {
+            p++;
+            p = skip_js_ascii_space(p);
+        }
+        if (!is_js_identifier_start_char(*p)) {
+            cursor += 8;
+            continue;
+        }
+        const char* name_start = p;
+        p++;
+        while (is_js_identifier_part_char(*p)) p++;
+        const char* after_name = skip_js_ascii_space(p);
+        if (!after_name || *after_name != '(') {
+            cursor = p;
+            continue;
+        }
+
+        strbuf_append_str(export_buf, "\nif (typeof ");
+        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
+        strbuf_append_str(export_buf, " === 'function') { window.");
+        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
+        strbuf_append_str(export_buf, " = ");
+        strbuf_append_str_n(export_buf, name_start, (size_t)(p - name_start));
+        strbuf_append_str(export_buf, "; }\n");
+        cursor = p;
+    }
+
+    if (export_buf->length > 0) {
+        strbuf_append_str_n(script_buf, export_buf->str, export_buf->length);
+    }
+    strbuf_free(export_buf);
+}
+
 static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
     if (!onload || !onload[0] || !onload_buf) return;
 
@@ -780,6 +852,29 @@ static void append_body_onload_source(const char* onload, StrBuf* onload_buf) {
             if (*p == quote) {
                 strbuf_append_str_n(onload_buf, code_start, (size_t)(p - code_start));
                 strbuf_append_str(onload_buf, "\n");
+                return;
+            }
+        }
+
+        // onload="setTimeout(test, 0)" depends on resolving a prior classic
+        // script's top-level function as a later task callback. Static layout
+        // drains zero-delay onload timers before capture, so emit a direct call.
+        p = skip_js_ascii_space(p);
+        if (p && is_js_identifier_start_char(*p)) {
+            const char* name_start = p;
+            p++;
+            while (is_js_identifier_part_char(*p)) p++;
+            const char* after_name = skip_js_ascii_space(p);
+            if (after_name && *after_name == ',') {
+                strbuf_append_str(onload_buf, "if (typeof window !== 'undefined' && typeof window.");
+                strbuf_append_str_n(onload_buf, name_start, (size_t)(p - name_start));
+                strbuf_append_str(onload_buf, " === 'function') { window.");
+                strbuf_append_str_n(onload_buf, name_start, (size_t)(p - name_start));
+                strbuf_append_str(onload_buf, "(); } else if (typeof ");
+                strbuf_append_str_n(onload_buf, name_start, (size_t)(p - name_start));
+                strbuf_append_str(onload_buf, " === 'function') { ");
+                strbuf_append_str_n(onload_buf, name_start, (size_t)(p - name_start));
+                strbuf_append_str(onload_buf, "(); }\n");
                 return;
             }
         }
@@ -1105,6 +1200,9 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
 
         StrBuf* inline_buf = strbuf_new_cap(256);
         extract_script_text(elem, inline_buf);
+        if (task->kind == JS_SCRIPT_TASK_CLASSIC && inline_buf->str && inline_buf->length > 0) {
+            append_classic_script_window_function_exports(inline_buf->str, inline_buf);
+        }
         task->source = script_source_from_strbuf(inline_buf);
         task->source_len = inline_buf->length;
         collection->inline_scripts++;
