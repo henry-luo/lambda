@@ -376,6 +376,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
     return content;
 }
 
+#ifndef NDEBUG
 static const char* script_task_kind_name(JsScriptTaskKind kind) {
     switch (kind) {
         case JS_SCRIPT_TASK_CLASSIC: return "classic";
@@ -398,6 +399,7 @@ static bool script_task_diagnostics_enabled() {
     const char* env = getenv("RADIANT_JS_TASK_DIAGNOSTICS");
     return env && env[0] && strcmp(env, "0") != 0;
 }
+#endif
 
 static JsScriptPipelineMode script_runner_pipeline_mode() {
     const char* env = getenv("RADIANT_JS_PIPELINE");
@@ -407,6 +409,7 @@ static JsScriptPipelineMode script_runner_pipeline_mode() {
     return JS_SCRIPT_PIPELINE_LEGACY_COMBINED;
 }
 
+#ifndef NDEBUG
 static const char* script_runner_pipeline_name(JsScriptPipelineMode mode) {
     switch (mode) {
         case JS_SCRIPT_PIPELINE_TASKS_POSTDOM: return "tasks-postdom";
@@ -414,6 +417,7 @@ static const char* script_runner_pipeline_name(JsScriptPipelineMode mode) {
         default: return "legacy-combined";
     }
 }
+#endif
 
 static JsScriptTask* script_task_new(JsScriptTaskKind kind, int document_order) {
     JsScriptTask* task = (JsScriptTask*)mem_calloc(1, sizeof(JsScriptTask), MEM_CAT_JS_RUNTIME);
@@ -716,6 +720,7 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
         collection->onload_handlers_count, collection->inline_source_bytes,
         collection->external_source_bytes, collection->onload_source_bytes);
 
+#ifndef NDEBUG
     if (!script_task_diagnostics_enabled()) return;
 
     for (int i = 0; i < collection->scripts->length; i++) {
@@ -738,6 +743,7 @@ static void log_script_task_diagnostics(JsScriptTaskCollection* collection) {
             task ? script_task_status_name(task->status) : "null",
             task ? task->source_len : 0);
     }
+#endif
 }
 
 /**
@@ -988,8 +994,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
             loaded_external_scripts, failed_external_scripts);
     }
 
+#ifndef NDEBUG
     log_info("execute_document_scripts: executing JS with %s pipeline (%zu source bytes)",
         script_runner_pipeline_name(pipeline_mode), watchdog_source_len);
+#endif
     if (script_buf) {
         log_debug("execute_document_scripts: combined source:\n%.500s%s",
                   script_buf->str,
