@@ -3955,10 +3955,10 @@
                         "icon": "🖼️"
                     },
                     {
-                        "source": "test/test_fuzzy_crash_gtest.cpp",
-                        "name": "Fuzzy Crash Tests",
+                        "source": "test/test_layout_fuzzy_gtest.cpp",
+                        "name": "Layout Fuzzy Tests",
                         "dependencies": [],
-                        "binary": "test_fuzzy_crash_gtest.exe",
+                        "binary": "test_layout_fuzzy_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"

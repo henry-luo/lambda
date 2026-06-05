@@ -1,8 +1,9 @@
 /**
- * GTest runner for Fuzzy Crash Tests
+ * GTest runner for Layout Fuzzy Tests
  *
  * Auto-discovers HTML files under test/layout/data/fuzzy/ and runs each via
- * `./lambda.exe layout <html> --no-log -o /dev/null` to verify they don't crash.
+ * `./lambda.exe layout <html> --no-log -o /dev/null` to verify the layout
+ * engine doesn't crash on fuzzer-found pathological inputs.
  *
  * Exit code convention:
  *   0   = layout completed successfully
@@ -10,9 +11,9 @@
  *   >1  = unrecoverable crash or signal (FAIL)
  *
  * Usage:
- *   ./test/test_fuzzy_crash_gtest.exe
- *   ./test/test_fuzzy_crash_gtest.exe --gtest_filter=FuzzyCrash.*table*
- *   ./test/test_fuzzy_crash_gtest.exe -j 4
+ *   ./test/test_layout_fuzzy_gtest.exe
+ *   ./test/test_layout_fuzzy_gtest.exe --gtest_filter=FuzzyCrash.*table*
+ *   ./test/test_layout_fuzzy_gtest.exe -j 4
  */
 
 #include <gtest/gtest.h>
@@ -406,7 +407,7 @@ int main(int argc, char** argv) {
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
-    std::cout << "║     Fuzzy Crash Test Suite                               ║\n";
+    std::cout << "║     Layout Fuzzy Test Suite                              ║\n";
     std::cout << "║                                                          ║\n";
     std::cout << "║  Runs HTML files from test/layout/data/fuzzy/ via:       ║\n";
     std::cout << "║    ./lambda.exe layout <html> --no-log -o /dev/null      ║\n";
