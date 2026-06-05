@@ -22,6 +22,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_private_property_set(Item object, Item key, Item value);
 extern "C" Item js_private_property_set_strict(Item object, Item key, Item value);
+extern "C" void js_dom_collection_before_property_get(Item object, Item key);
+extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_number_wrapper(Item arg);
 extern "C" Item js_new_boolean_wrapper(Item arg);
 extern "C" Item js_new_string_wrapper(Item arg);
@@ -3709,6 +3711,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             key = js_to_property_key(key);
             if (js_check_exception()) return make_js_undefined();
         }
+        js_dom_collection_before_property_get(object, key);
         // Array index access
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -5010,6 +5013,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             key = js_to_property_key(key);
             if (js_check_exception()) return value;
         }
+        js_dom_options_collection_before_property_set(object, key, value);
         // Handle arr.length = newLength (resize array)
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);

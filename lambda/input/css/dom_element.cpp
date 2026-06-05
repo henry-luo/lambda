@@ -2930,13 +2930,19 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Store form attributes; selector matching derives static pseudo-class
     // defaults from attributes before StateStore-backed view state exists.
     if (str_ieq_const(tag_name, strlen(tag_name), "input")) {
+        const char* type_value_src = extract_element_attribute(elem, "type", doc->arena);
+        const char* type_value = type_value_src ? lam::promote_to_arena(doc->arena, type_value_src).get() : nullptr;
+        const char* name_value_src = extract_element_attribute(elem, "name", doc->arena);
+        const char* name_value = name_value_src ? lam::promote_to_arena(doc->arena, name_value_src).get() : nullptr;
+        const char* ph_value_src = extract_element_attribute(elem, "placeholder", doc->arena);
+        const char* ph_value = ph_value_src ? lam::promote_to_arena(doc->arena, ph_value_src).get() : nullptr;
+        const char* val_attr_src = extract_element_attribute(elem, "value", doc->arena);
+        const char* val_attr = val_attr_src ? lam::promote_to_arena(doc->arena, val_attr_src).get() : nullptr;
         // Store the type attribute for later use
-        const char* type_value = extract_element_attribute(elem, "type", doc->arena);
         if (type_value) {
             dom_element_set_attribute(dom_elem, "type", type_value);
         }
         // Store the name attribute for radio button grouping
-        const char* name_value = extract_element_attribute(elem, "name", doc->arena);
         if (name_value) {
             dom_element_set_attribute(dom_elem, "name", name_value);
         }
@@ -2952,11 +2958,9 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         if (elem->has_attr("readonly")) {
             dom_element_set_attribute(dom_elem, "readonly", "readonly");
         }
-        const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
         if (ph_value) {
             dom_element_set_attribute(dom_elem, "placeholder", ph_value);
         }
-        const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
         if (val_attr) {
             dom_element_set_attribute(dom_elem, "value", val_attr);
         }
@@ -2969,6 +2973,10 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
              str_ieq_const(tag_name, strlen(tag_name), "optgroup") ||
              str_ieq_const(tag_name, strlen(tag_name), "option") ||
              str_ieq_const(tag_name, strlen(tag_name), "fieldset")) {
+        const char* ph_value_src = extract_element_attribute(elem, "placeholder", doc->arena);
+        const char* ph_value = ph_value_src ? lam::promote_to_arena(doc->arena, ph_value_src).get() : nullptr;
+        const char* val_attr_src = extract_element_attribute(elem, "value", doc->arena);
+        const char* val_attr = val_attr_src ? lam::promote_to_arena(doc->arena, val_attr_src).get() : nullptr;
         if (elem->has_attr("disabled")) {
             dom_element_set_attribute(dom_elem, "disabled", "disabled");
         }
@@ -2981,11 +2989,9 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         if (elem->has_attr("readonly")) {
             dom_element_set_attribute(dom_elem, "readonly", "readonly");
         }
-        const char* ph_value = extract_element_attribute(elem, "placeholder", doc->arena);
         if (ph_value) {
             dom_element_set_attribute(dom_elem, "placeholder", ph_value);
         }
-        const char* val_attr = extract_element_attribute(elem, "value", doc->arena);
         if (val_attr) {
             dom_element_set_attribute(dom_elem, "value", val_attr);
         }

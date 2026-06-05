@@ -676,8 +676,79 @@ extern "C" bool js_is_dom_node(Item item) {
     return m->type == (void*)&js_dom_type_marker;
 }
 
+struct SelectOptionsOwnerEntry {
+    Array* array;
+    DomElement* owner;
+    int kind;
+};
+
+static const int SELECT_COLLECTION_OPTIONS = 1;
+static const int SELECT_COLLECTION_SELECTED_OPTIONS = 2;
+static const int SELECT_OPTIONS_OWNER_CACHE_SIZE = 4096;
+static __thread SelectOptionsOwnerEntry s_select_options_owners[SELECT_OPTIONS_OWNER_CACHE_SIZE] = {};
+static __thread int s_select_options_owner_count = 0;
+
+static void _register_select_options_owner(Item collection, DomElement* owner, int kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
+    for (int i = 0; i < s_select_options_owner_count; i++) {
+        if (s_select_options_owners[i].array == collection.array) {
+            s_select_options_owners[i].owner = owner;
+            s_select_options_owners[i].kind = kind;
+            return;
+        }
+    }
+    if (s_select_options_owner_count >= SELECT_OPTIONS_OWNER_CACHE_SIZE) return;
+    s_select_options_owners[s_select_options_owner_count].array = collection.array;
+    s_select_options_owners[s_select_options_owner_count].owner = owner;
+    s_select_options_owners[s_select_options_owner_count].kind = kind;
+    s_select_options_owner_count++;
+}
+
+static DomElement* _select_options_owner(Item collection, int* out_kind) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array) return nullptr;
+    for (int i = 0; i < s_select_options_owner_count; i++) {
+        if (s_select_options_owners[i].array == collection.array) {
+            if (out_kind) *out_kind = s_select_options_owners[i].kind;
+            return s_select_options_owners[i].owner;
+        }
+    }
+    return nullptr;
+}
+
 extern "C" Item js_get_this(void);
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
+extern "C" Item js_new_function(void* func_ptr, int param_count);
+
+static Item _collection_named_item(Item name_arg) {
+    const char* name = fn_to_cstr(name_arg);
+    if (!name || !*name) return ItemNull;
+    Item self = js_get_this();
+    if (get_type_id(self) != LMD_TYPE_ARRAY || !self.array) return ItemNull;
+    for (int64_t i = 0; i < self.array->length; i++) {
+        Item item = js_array_get_int(self, i);
+        DomElement* elem = (DomElement*)js_dom_unwrap_element(item);
+        if (!elem) continue;
+        const char* id = dom_element_get_attribute(elem, "id");
+        if (id && strcmp(id, name) == 0) return item;
+        const char* nm = dom_element_get_attribute(elem, "name");
+        if (nm && strcmp(nm, name) == 0) return item;
+    }
+    return ItemNull;
+}
+
+static void _decorate_dom_collection(Item collection, const char* ctor_name) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !ctor_name) return;
+    Item named_key = (Item){.item = s2it(heap_create_name("namedItem"))};
+    Item existing = js_property_get(collection, named_key);
+    if (get_type_id(existing) != LMD_TYPE_FUNC) {
+        js_property_set(collection, named_key, js_new_function((void*)_collection_named_item, 1));
+    }
+    Item ctor = js_property_get(js_get_global_this(),
+        (Item){.item = s2it(heap_create_name(ctor_name))});
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        js_property_set(collection, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
+    }
+}
 
 static Item js_dom_matches_method(Item selector) {
     Item self = js_get_this();
@@ -3476,24 +3547,32 @@ static long long _parse_datetime(const char* s) {
 static bool _get_selectedness(DomElement* opt);
 static void _set_selectedness(DomElement* opt, bool v);
 
-// Walk the descendants of `sel` and append each <option> to `arr`. Walks
-// into <optgroup> children too. Does NOT walk into nested <select>.
-static void _collect_options(DomNode* node, Item arr) {
+// Walk the descendants of `sel` and append each <option> to `arr`. Direct
+// optgroup descendants contribute options, but nested option/hr/select/optgroup
+// subtrees are not part of the owning select's option list.
+static void _collect_options_impl(DomNode* node, Item arr, bool allow_optgroup) {
     while (node) {
         if (node->is_element()) {
             DomElement* ce = (DomElement*)node;
             if (ce->tag_name) {
                 if (strcasecmp(ce->tag_name, "option") == 0) {
                     js_array_push(arr, js_dom_wrap_element(ce));
-                } else if (strcasecmp(ce->tag_name, "select") == 0) {
-                    // skip nested select
+                } else if (strcasecmp(ce->tag_name, "select") == 0 ||
+                           strcasecmp(ce->tag_name, "hr") == 0) {
+                    // skip nested select/hr subtrees
+                } else if (strcasecmp(ce->tag_name, "optgroup") == 0) {
+                    if (allow_optgroup) _collect_options_impl(ce->first_child, arr, false);
                 } else {
-                    _collect_options(ce->first_child, arr);
+                    _collect_options_impl(ce->first_child, arr, allow_optgroup);
                 }
             }
         }
         node = node->next_sibling;
     }
+}
+
+static void _collect_options(DomNode* node, Item arr) {
+    _collect_options_impl(node, arr, true);
 }
 
 // Get the option's text content (concatenated descendant text, trimmed
@@ -3598,6 +3677,136 @@ static void _set_selectedness(DomElement* opt, bool v) {
     js_property_set(exp, key, (Item){.item = b2it(v)});
 }
 
+static int _select_index_from_item(Item value) {
+    TypeId t = get_type_id(value);
+    if (t == LMD_TYPE_INT) return (int)it2i(value); // INT_CAST_OK: option index
+    if (t == LMD_TYPE_INT64) return (int)it2l(value); // INT_CAST_OK: option index
+    if (t == LMD_TYPE_FLOAT) return (int)it2d(value); // INT_CAST_OK: option index
+    return 0;
+}
+
+static void _select_set_selected_index(DomElement* sel, int idx) {
+    if (!sel) return;
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    int64_t n = js_array_length(arr);
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (!opt) continue;
+        _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
+    }
+    _select_mark_dirty(sel);
+}
+
+static void _select_select_only_option(DomElement* sel, DomElement* selected_opt) {
+    if (!sel || !selected_opt) return;
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    int64_t n = js_array_length(arr);
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
+        if (opt) _set_selectedness(opt, opt == selected_opt);
+    }
+}
+
+static void _select_normalize_for_selected_options(DomElement* sel, Item options) {
+    if (!sel || get_type_id(options) != LMD_TYPE_ARRAY) return;
+    if (dom_element_has_attribute(sel, "multiple")) return;
+    int64_t n = js_array_length(options);
+    int selected_count = 0;
+    int last_selected = -1;
+    int first_non_disabled = -1;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(options, i));
+        if (!opt) continue;
+        if (_get_selectedness(opt)) {
+            selected_count++;
+            last_selected = (int)i; // INT_CAST_OK: option index
+        }
+        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+            first_non_disabled = (int)i; // INT_CAST_OK: option index
+        }
+    }
+    int size = 0;
+    const char* sz = dom_element_get_attribute(sel, "size");
+    if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
+    int chosen = -1;
+    if (selected_count > 1) chosen = last_selected;
+    else if (selected_count == 0 && size <= 1 && !_select_is_dirty(sel)) chosen = first_non_disabled;
+    if (chosen < 0) return;
+    for (int64_t i = 0; i < n; i++) {
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(options, i));
+        if (!opt) continue;
+        _set_selectedness(opt, (int)i == chosen); // INT_CAST_OK: option index
+    }
+}
+
+static void _select_refresh_selected_options_collection(Item collection, DomElement* sel) {
+    if (get_type_id(collection) != LMD_TYPE_ARRAY || !sel) return;
+    js_property_set(collection, (Item){.item = s2it(heap_create_name("length"))},
+                    (Item){.item = i2it(0)});
+
+    Item arr = js_array_new(0);
+    _collect_options(sel->first_child, arr);
+    _select_normalize_for_selected_options(sel, arr);
+    int64_t n = js_array_length(arr);
+    for (int64_t i = 0; i < n; i++) {
+        Item it = js_array_get_int(arr, i);
+        DomElement* opt = (DomElement*)js_dom_unwrap_element(it);
+        if (opt && _get_selectedness(opt)) js_array_push(collection, it);
+    }
+}
+
+static DomElement* _nearest_select_for_node(DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (_is_tag(elem, "select")) return elem;
+    }
+    return nullptr;
+}
+
+static void _select_refresh_cached_selected_options(DomElement* sel) {
+    if (!sel) return;
+    Item exp = expando_get_map((DomNode*)sel);
+    if (exp.item == ITEM_NULL) return;
+    Item cache_key = (Item){.item = s2it(heap_create_name("__selectedOptions"))};
+    Item out = js_property_get(exp, cache_key);
+    if (get_type_id(out) == LMD_TYPE_ARRAY) {
+        _select_refresh_selected_options_collection(out, sel);
+    }
+}
+
+static void _select_refresh_cached_selected_options_for_node(DomNode* node) {
+    _select_refresh_cached_selected_options(_nearest_select_for_node(node));
+}
+
+extern "C" void js_dom_collection_before_property_get(Item object, Item key) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY) return;
+    int kind = 0;
+    DomElement* owner = _select_options_owner(object, &kind);
+    if (!owner || kind != SELECT_COLLECTION_SELECTED_OPTIONS) return;
+    TypeId kt = get_type_id(key);
+    if (kt == LMD_TYPE_INT || kt == LMD_TYPE_INT64 || kt == LMD_TYPE_FLOAT) {
+        _select_refresh_selected_options_collection(object, owner);
+        return;
+    }
+    if (kt != LMD_TYPE_STRING) return;
+    String* sk = it2s(key);
+    if (!sk) return;
+    _select_refresh_selected_options_collection(object, owner);
+}
+
+extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY || get_type_id(key) != LMD_TYPE_STRING) return;
+    String* sk = it2s(key);
+    if (!sk || sk->len != 13 || strncmp(sk->chars, "selectedIndex", 13) != 0) return;
+    int kind = 0;
+    DomElement* owner = _select_options_owner(object, &kind);
+    if (!owner || kind != SELECT_COLLECTION_OPTIONS || !_is_tag(owner, "select")) return;
+    _select_set_selected_index(owner, _select_index_from_item(value));
+}
+
 // Find the parent <select> of an <option>. Returns nullptr if none.
 static DomElement* _option_owner_select(DomElement* opt) {
     if (!opt) return nullptr;
@@ -3700,24 +3909,17 @@ static bool _select_value_missing(DomElement* sel) {
     const char* sz = dom_element_get_attribute(sel, "size");
     if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
     bool is_listbox = dom_element_has_attribute(sel, "multiple") || size > 1;
-    // Identify the placeholder option (first direct option child of the
-    // select, when display size is 1 and not multiple, with value="" and
-    // empty text). Options inside an optgroup don't qualify.
+    // Identify the placeholder option: the first option in the select's
+    // option list, only if it is a direct child of the select and has empty
+    // value. Options inside an optgroup don't qualify.
     DomElement* placeholder = nullptr;
-    if (!is_listbox) {
-        for (DomNode* c = sel->first_child; c; c = c->next_sibling) {
-            if (!c->is_element()) continue;
-            DomElement* ce = (DomElement*)c;
-            if (ce->tag_name && strcasecmp(ce->tag_name, "option") == 0) {
-                const char* v = dom_element_get_attribute(ce, "value");
-                if (!v || !*v) {
-                    char* t = _option_text(ce);
-                    bool empty_text = !t || !*t;
-                    mem_free(t);
-                    if (empty_text) placeholder = ce;
-                }
-                break;
-            }
+    if (!is_listbox && n > 0) {
+        DomElement* first_opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, 0));
+        if (first_opt && first_opt->parent == (DomNode*)sel) {
+            char* v = _option_value(first_opt);
+            bool empty_value = !v || !*v;
+            mem_free(v);
+            if (empty_value) placeholder = first_opt;
         }
     }
     bool any_non_placeholder_selected = false;
@@ -5111,6 +5313,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                             (Item){.item = i2it(sel_idx)});
             js_property_set(arr, (Item){.item = s2it(heap_create_name("length"))},
                             (Item){.item = i2it(n)});
+            _decorate_dom_collection(arr, "HTMLOptionsCollection");
+            _register_select_options_owner(arr, elem, SELECT_COLLECTION_OPTIONS);
             return arr;
         }
         if (strcmp(prop, "length") == 0) {
@@ -5119,15 +5323,16 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(js_array_length(arr))};
         }
         if (strcmp(prop, "selectedOptions") == 0) {
-            Item arr = js_array_new(0);
-            Item out = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t n = js_array_length(arr);
-            for (int64_t i = 0; i < n; i++) {
-                Item it = js_array_get_int(arr, i);
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(it);
-                if (opt && _get_selectedness(opt)) js_array_push(out, it);
+            Item exp = expando_get_or_create_map((DomNode*)elem);
+            Item cache_key = (Item){.item = s2it(heap_create_name("__selectedOptions"))};
+            Item out = (exp.item != ITEM_NULL) ? js_property_get(exp, cache_key) : ItemNull;
+            if (get_type_id(out) != LMD_TYPE_ARRAY) {
+                out = js_array_new(0);
+                _decorate_dom_collection(out, "HTMLCollection");
+                if (exp.item != ITEM_NULL) js_property_set(exp, cache_key, out);
             }
+            _register_select_options_owner(out, elem, SELECT_COLLECTION_SELECTED_OPTIONS);
+            _select_refresh_selected_options_collection(out, elem);
             return out;
         }
         if (strcmp(prop, "selectedIndex") == 0) {
@@ -5799,7 +6004,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     log_debug("js_dom_get_property: unknown property '%s' on <%s>",
               prop, elem->tag_name ? elem->tag_name : "?");
-    return ItemNull;
+    return make_js_undefined();
 }
 
 // ============================================================================
@@ -6075,7 +6280,10 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         elem->last_child = nullptr;
 
         // 2. Empty string → done (cleared children)
-        if (html_str[0] == '\0') return value;
+        if (html_str[0] == '\0') {
+            _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+            return value;
+        }
 
         // 3. Parse HTML fragment
         DomDocument* doc = elem->doc;
@@ -6122,6 +6330,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         // selection tests rely on `document.body.innerHTML = "<div id=foo>..."`
         // making `foo` a global).
         js_dom_register_named_elements(elem);
+        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         js_dom_mutation_notify();
         return value;
     }
@@ -6191,25 +6400,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             return value;
         }
         if (strcmp(prop, "selectedIndex") == 0) {
-            int idx = 0;
-            { TypeId t = get_type_id(value);
-              if (t == LMD_TYPE_INT) idx = (int)it2i(value); // INT_CAST_OK: idx
-              else if (t == LMD_TYPE_FLOAT) {
-                  double* d = (double*)(value.item & 0x00FFFFFFFFFFFFFF);
-                  if (d) idx = (int)*d; // INT_CAST_OK: idx
-              }
-            }
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t n = js_array_length(arr);
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-                if (!opt) continue;
-                _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
-            }
-            // Mark select's selectedness as explicitly set so the default
-            // reset (first non-disabled option) is no longer applied.
-            _select_mark_dirty(elem);
+            _select_set_selected_index(elem, _select_index_from_item(value));
             return value;
         }
         if (strcmp(prop, "length") == 0) {
@@ -6275,7 +6466,8 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
     if (_is_tag(elem, "option")) {
         if (strcmp(prop, "selected") == 0) {
-            _set_selectedness(elem, js_is_truthy(value));
+            bool selected = js_is_truthy(value);
+            _set_selectedness(elem, selected);
             // Mark the option's dirty selectedness flag.
             Item exp = expando_get_or_create_map((DomNode*)elem);
             if (exp.item != ITEM_NULL) {
@@ -6283,9 +6475,15 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                     (Item){.item = s2it(heap_create_name("__optDirty"))},
                     (Item){.item = b2it(true)});
             }
-            // Per spec, run ask-for-reset to enforce single-selection.
+            // The option explicitly being selected wins for non-multiple
+            // selects; do not let a later selected option in tree order undo it.
             DomElement* sel = _option_owner_select(elem);
-            if (sel) _select_ask_for_reset(sel);
+            if (sel && selected && !dom_element_has_attribute(sel, "multiple")) {
+                _select_select_only_option(sel, elem);
+            } else if (sel) {
+                _select_ask_for_reset(sel);
+            }
+            _select_refresh_cached_selected_options(sel);
             return value;
         }
         // option.defaultSelected setter — reflects `selected` attribute.
@@ -6489,6 +6687,9 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 dom_element_set_attribute(elem, attr, "");
             } else {
                 dom_element_remove_attribute(elem, attr);
+                if (_is_tag(elem, "select") && strcmp(attr, "multiple") == 0) {
+                    _select_ask_for_reset(elem);
+                }
             }
             js_dom_mutation_notify();
             return value;
@@ -6870,6 +7071,11 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_val = fn_to_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         dom_element_set_attribute(elem, attr_name, attr_val);
+        if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
+            DomElement* sel = _nearest_select_for_node((DomNode*)elem);
+            if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
+        }
+        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         js_dom_mutation_notify();
         return ItemNull;
     }
@@ -6889,6 +7095,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
         dom_element_remove_attribute(elem, attr_name);
+        if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+            _select_ask_for_reset(elem);
+        }
         js_dom_mutation_notify();
         return ItemNull;
     }
@@ -7042,6 +7251,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             elem->tag() == HTM_TAG_SELECT) {
             _select_ask_for_reset(elem);
         }
+        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         js_dom_mutation_notify();
         // If we just inserted an <iframe>, queue its synthetic load event.
         if (child_node->is_element()) {
@@ -7332,6 +7542,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             dom_element_set_attribute(elem, attr_name, "");
         } else if (!should_have && has) {
             dom_element_remove_attribute(elem, attr_name);
+            if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
+                _select_ask_for_reset(elem);
+            }
         }
         return (Item){.item = b2it(should_have ? 1 : 0)};
     }
@@ -7551,6 +7764,15 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             if (child_node) {
                 if (child_node->parent) child_node->parent->remove_child(child_node);
                 ((DomNode*)elem)->insert_before(child_node, ref);
+                if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
+                    child_node->as_element()->tag() == HTM_TAG_OPTION) {
+                    DomElement* child_elem = child_node->as_element();
+                    if (_get_selectedness(child_elem) && !dom_element_has_attribute(elem, "multiple")) {
+                        _select_select_only_option(elem, child_elem);
+                    } else {
+                        _select_ask_for_reset(elem);
+                    }
+                }
             } else {
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
@@ -7560,6 +7782,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 }
             }
         }
+        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         js_dom_mutation_notify();
         return make_js_undefined();
     }
@@ -7784,7 +8007,26 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return (Item){.item = b2it(is_valid)};
     }
 
-    log_debug("js_dom_element_method: unknown method '%s'", method);
+    // HTMLSelectElement.namedItem(name) — search options by id/name.
+    if (strcmp(method, "namedItem") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        if (argc < 1) return ItemNull;
+        const char* name = fn_to_cstr(args[0]);
+        if (!name || !*name) return ItemNull;
+        Item arr = js_array_new(0);
+        _collect_options(elem->first_child, arr);
+        int64_t n = js_array_length(arr);
+        for (int64_t i = 0; i < n; i++) {
+            Item item = js_array_get_int(arr, i);
+            DomElement* opt = (DomElement*)js_dom_unwrap_element(item);
+            if (!opt) continue;
+            const char* id = dom_element_get_attribute(opt, "id");
+            if (id && strcmp(id, name) == 0) return item;
+            const char* nm = dom_element_get_attribute(opt, "name");
+            if (nm && strcmp(nm, name) == 0) return item;
+        }
+        return ItemNull;
+    }
+
     // HTMLSelectElement.add(element, before) — insert option/optgroup
     if (strcmp(method, "add") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
         if (argc < 1) return ItemNull;
@@ -7911,6 +8153,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         js_dom_mutation_notify();
         return ItemNull;
     }
+    log_debug("js_dom_element_method: unknown method '%s'", method);
     return ItemNull;
 }
 
