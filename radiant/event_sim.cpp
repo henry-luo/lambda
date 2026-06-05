@@ -2113,6 +2113,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->option_label) mem_free(ev->option_label);
             if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
             if (ev->js_code) mem_free(ev->js_code);
+            if (ev->frame_selector) mem_free(ev->frame_selector);
             if (ev->ime_phase) mem_free(ev->ime_phase);
             if (ev->editing_event_type) mem_free(ev->editing_event_type);
             if (ev->editing_input_type) mem_free(ev->editing_input_type);
@@ -4950,6 +4951,10 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
         ctx->is_running = false;
         log_info("event_sim: simulation complete");
         replay_check_final_state(ctx, uicon);
+        if (ctx->original_document) {
+            uicon->document = (DomDocument*)ctx->original_document;
+            ctx->frame_stack_depth = 0;
+        }
         event_sim_print_results(ctx);
         return false;
     }

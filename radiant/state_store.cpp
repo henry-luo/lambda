@@ -2234,6 +2234,8 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
     if (existing) {
         // Update existing entry
         Item old_value = existing->value;
+        StateChangeCallback on_change = existing->on_change;
+        void* callback_udata = existing->callback_udata;
 
         // Create updated entry (hashmap_set replaces)
         StateEntry updated = *existing;
@@ -2242,8 +2244,8 @@ void state_set(DocState* state, void* node, const char* name, Item value) {
         hashmap_set(state->state_map, &updated);
 
         // Fire callback if registered
-        if (existing->on_change) {
-            existing->on_change(node, name, old_value, value, existing->callback_udata);
+        if (on_change) {
+            on_change(node, name, old_value, value, callback_udata);
         }
     } else {
         // Create new entry

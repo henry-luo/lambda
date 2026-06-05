@@ -94,6 +94,9 @@ static void view_cleanup_js_batch_state(void) {
         js_globals_batch_reset();
         script_runner_cleanup_heap();
     }
+}
+
+static void view_cleanup_input_manager(void) {
     InputManager::destroy_global();
 }
 
@@ -1143,9 +1146,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         int sim_fail_count = 0;
         if (sim_ctx) {
             sim_fail_count = sim_ctx->fail_count;
+            if (sim_ctx->original_document) {
+                ui_context.document = (DomDocument*)sim_ctx->original_document;
+                sim_ctx->frame_stack_depth = 0;
+            }
             event_sim_free(sim_ctx);
         }
         log_info("End of headless document viewer");
+        view_cleanup_js_batch_state();
         // Cleanup network resources before ui_context
         if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
         // Cleanup browsing session
@@ -1158,7 +1166,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         network_downloader_cleanup_shared();
         view_close_event_log();
         ui_context_cleanup(&ui_context);
-        view_cleanup_js_batch_state();
+        view_cleanup_input_manager();
         lambda_uv_cleanup();
         log_mem_stage("after-cleanup");
         log_cleanup();
@@ -1315,10 +1323,15 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     int sim_fail_count = 0;
     if (sim_ctx) {
         sim_fail_count = sim_ctx->fail_count;
+        if (sim_ctx->original_document) {
+            ui_context.document = (DomDocument*)sim_ctx->original_document;
+            sim_ctx->frame_stack_depth = 0;
+        }
         event_sim_free(sim_ctx);
     }
 
     log_info("End of document viewer");
+    view_cleanup_js_batch_state();
     // Cleanup network resources before ui_context
     if (ui_context.document) radiant_cleanup_network_support(ui_context.document);
     // Cleanup browsing session
@@ -1331,7 +1344,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     network_downloader_cleanup_shared();
     view_close_event_log();
     ui_context_cleanup(&ui_context);
-    view_cleanup_js_batch_state();
+    view_cleanup_input_manager();
     lambda_uv_cleanup();
     log_cleanup();
 
