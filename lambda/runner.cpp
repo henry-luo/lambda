@@ -1445,7 +1445,6 @@ void runtime_cleanup(Runtime* runtime) {
     module_registry_cleanup();
     template_registry_destroy(g_template_registry);
     js_eval_preamble_cache_reset();
-    css_property_system_cleanup();
     lambda_uv_cleanup();
     lambda_stack_cleanup();
 

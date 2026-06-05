@@ -54,6 +54,7 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsPdfIntoIframeAfterLinkClickWithNoLog", "pdf_iframe", "test/html/index.html", "test/ui/radiant_view_pdf_iframe.json"},
     {"RadiantViewTest.LoadsMarkdownIntoIframeAfterLinkClickWithNoLog", "markdown_iframe", "test/html/index.html", "test/ui/radiant_view_markdown_iframe.json"},
     {"RadiantViewTest.LoadsPngIntoIframeAfterLinkClickWithNoLog", "png_iframe", "test/html/index.html", "test/ui/radiant_view_png_iframe.json"},
+    {"RadiantViewTest.KeepsIframeSizedAfterPdfThenSvgTargetNavigation", "iframe_pdf_svg_sequence", "test/html/index.html", "test/ui/radiant_view_iframe_pdf_svg_sequence.json"},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -279,6 +280,10 @@ TEST(RadiantViewTest, LoadsMarkdownIntoIframeAfterLinkClickWithNoLog) {
 
 TEST(RadiantViewTest, LoadsPngIntoIframeAfterLinkClickWithNoLog) {
     test_radiant_view_expect_case(17);
+}
+
+TEST(RadiantViewTest, KeepsIframeSizedAfterPdfThenSvgTargetNavigation) {
+    test_radiant_view_expect_case(18);
 }
 
 TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {

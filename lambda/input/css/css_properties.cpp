@@ -693,6 +693,7 @@ bool css_property_system_init(Pool* pool) {
 void css_property_system_cleanup(void) {
     // Free the malloc-allocated property database
     mem_free(g_property_database);
+    memset(g_property_hash, 0, sizeof(g_property_hash));
     g_system_initialized = false;
     g_property_database = NULL;
     g_property_count = 0;

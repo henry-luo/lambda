@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Log file
   readLogFile: () => ipcRenderer.invoke('read-log-file'),
+  readLogLines: (options) => ipcRenderer.invoke('read-log-lines', options),
 
   // View tree file
   readViewTreeFile: () => ipcRenderer.invoke('read-view-tree-file'),
