@@ -4210,6 +4210,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit_label(mt, global_define_done);
                         jm_emit_label(mt, export_done);
                     }
+                    if (!mt->is_module && !mt->is_eval_direct) {
+                        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+                        jm_call_void_2(mt, "js_define_global_function_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                    }
                 }
             }
         }
@@ -4478,6 +4484,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         jm_emit_label(mt, global_define_done);
                         jm_emit_label(mt, export_done);
+                    }
+                    if (!mt->is_module && !mt->is_eval_direct) {
+                        MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
+                        jm_call_void_2(mt, "js_define_global_function_property",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                     }
                 }
             }

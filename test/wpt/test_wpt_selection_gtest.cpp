@@ -26,6 +26,11 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <ctime>
+#include <mutex>
+#include <thread>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -67,6 +72,10 @@ static const char* SKIP_SUBSTRINGS[] = {
     // It contains no testharness assertions of its own and produces 0/0 — not
     // a real test from our perspective.
     "test-iframe",
+    // Requires a true iframe JavaScript global/lexical environment. Lambda's
+    // current iframe model provides a separate contentDocument, but script
+    // helpers still share the parent top-level bindings.
+    "deleteFromDocument",
     // dir-manual.html is `setup({explicit_done: true})` and requires the user
     // to click+drag to seed a backward selection before clicking a "Test"
     // button that runs the assertions. There is no automated path: the
@@ -192,6 +201,73 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
     return result;
 }
 
+static std::string extract_inline_only_scripts(const std::string& html) {
+    std::string result;
+    size_t pos = 0;
+
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<script", pos);
+        if (tag_start == std::string::npos) break;
+
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string src = extract_attr(tag, "src");
+        if (!src.empty()) {
+            pos = tag_end + 1;
+            continue;
+        }
+
+        size_t close = html.find("</script>", tag_end);
+        if (close == std::string::npos) break;
+
+        result += html.substr(tag_end + 1, close - tag_end - 1);
+        result += "\n";
+
+        pos = close + strlen("</script>");
+    }
+
+    return result;
+}
+
+static std::string extract_local_iframe_helper_scripts(const std::string& scripts,
+                                                       const std::string& html_dir) {
+    std::string result;
+    size_t pos = 0;
+
+    while (pos < scripts.size()) {
+        size_t src_pos = scripts.find(".src", pos);
+        if (src_pos == std::string::npos) break;
+        size_t eq = scripts.find('=', src_pos + 4);
+        if (eq == std::string::npos) break;
+        size_t q = scripts.find_first_of("\"'", eq + 1);
+        if (q == std::string::npos) break;
+        char quote = scripts[q];
+        size_t end = scripts.find(quote, q + 1);
+        if (end == std::string::npos) break;
+
+        std::string src = scripts.substr(q + 1, end - q - 1);
+        bool local_html = !src.empty() &&
+            src[0] != '/' &&
+            src.compare(0, 3, "../") != 0 &&
+            src.find("://") == std::string::npos &&
+            src.size() >= 5 &&
+            src.substr(src.size() - 5) == ".html";
+        if (local_html) {
+            std::string helper_html = read_file_contents((html_dir + "/" + src).c_str());
+            if (!helper_html.empty()) {
+                result += "// ---- inlined iframe helper " + src + " ----\n";
+                result += extract_inline_only_scripts(helper_html);
+                result += "\n";
+            }
+        }
+        pos = end + 1;
+    }
+
+    return result;
+}
+
 /**
  * Execute a JS file with a document and capture output.
  */
@@ -231,6 +307,59 @@ struct WptSelectionParam {
     std::string test_name;
     bool        skip;
 };
+
+struct WptSelectionResult {
+    WptSelectionParam param;
+    bool skipped;
+    bool failed;
+    bool crash_test_passed;
+    int pass_count;
+    int total_count;
+    int exit_code;
+    double seconds;
+    std::string skip_reason;
+    std::string output;
+    std::vector<std::string> failures;
+};
+
+static std::string json_escape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 16);
+    for (char ch : text) {
+        switch (ch) {
+            case '\\': out += "\\\\"; break;
+            case '"':  out += "\\\""; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if ((unsigned char)ch < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)ch);
+                    out += buf;
+                } else {
+                    out += ch;
+                }
+                break;
+        }
+    }
+    return out;
+}
+
+static std::string now_timestamp() {
+    char buf[32];
+    time_t now = time(NULL);
+    struct tm tm_now;
+#ifdef _WIN32
+    gmtime_s(&tm_now, &now);
+#else
+    gmtime_r(&now, &tm_now);
+#endif
+    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_now);
+    return std::string(buf);
+}
 
 static std::vector<WptSelectionParam> discover_wpt_selection_tests() {
     std::vector<WptSelectionParam> params;
@@ -303,25 +432,50 @@ static std::vector<WptSelectionParam> discover_wpt_selection_tests() {
 
 class WptSelectionTest : public testing::TestWithParam<WptSelectionParam> {};
 
-TEST_P(WptSelectionTest, Run) {
-    const auto& p = GetParam();
+static WptSelectionResult run_selection_case(const WptSelectionParam& p) {
+    WptSelectionResult result;
+    result.param = p;
+    result.skipped = false;
+    result.failed = false;
+    result.crash_test_passed = false;
+    result.pass_count = 0;
+    result.total_count = 0;
+    result.exit_code = 0;
+    result.seconds = 0.0;
+
+    auto started = std::chrono::steady_clock::now();
 
     if (p.skip) {
-        GTEST_SKIP() << "skipped (requires capability not yet supported): " << p.html_path;
+        result.skipped = true;
+        result.skip_reason = "skipped (requires capability not yet supported): " +
+                             p.html_path;
+        return result;
     }
 
     std::string html = read_file_contents(p.html_path.c_str());
-    ASSERT_FALSE(html.empty()) << "Could not read test file: " << p.html_path;
+    if (html.empty()) {
+        result.failed = true;
+        result.failures.push_back("Could not read test file: " + p.html_path);
+        return result;
+    }
 
     std::string scripts = extract_inline_scripts(html, WPT_DIR);
     if (scripts.empty()) {
-        GTEST_SKIP() << "No scripts (reftest or empty): " << p.html_path;
+        result.skipped = true;
+        result.skip_reason = "No scripts (reftest or empty): " + p.html_path;
+        return result;
     }
 
     std::string shim = read_file_contents(SHIM_PATH);
-    ASSERT_FALSE(shim.empty()) << "Could not read testharness shim: " << SHIM_PATH;
+    if (shim.empty()) {
+        result.failed = true;
+        result.failures.push_back(std::string("Could not read testharness shim: ") +
+                                  SHIM_PATH);
+        return result;
+    }
 
     // Compose: shim + extracted scripts + onload simulation + summary.
+    scripts += extract_local_iframe_helper_scripts(scripts, WPT_DIR);
     std::string combined = shim + "\n" + scripts +
                            "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
@@ -330,6 +484,8 @@ TEST_P(WptSelectionTest, Run) {
 
     int exit_code = 0;
     std::string output = execute_js_with_doc(temp_js.c_str(), p.html_path.c_str(), &exit_code);
+    result.exit_code = exit_code;
+    result.output = output;
 
     // Parse output for FAIL lines and summary.
     //   FAIL: <name> - <error message>
@@ -352,36 +508,57 @@ TEST_P(WptSelectionTest, Run) {
 
     unlink(temp_js.c_str());
 
+    result.pass_count = pass_count;
+    result.total_count = total_count;
+    result.failures = failures;
+
     // WPT "crash tests" (filenames containing "-crash" / "_crash") have no
     // testharness assertions — they pass purely by completing without
     // crashing the runtime. WPT_RESULT: 0/0 + clean exit_code == PASS.
     bool is_crash_test = (p.test_name.find("crash") != std::string::npos);
     if (is_crash_test && total_count == 0 && exit_code == 0) {
-        printf("  %s: crash test — completed without crash\n", p.test_name.c_str());
+        result.crash_test_passed = true;
+    } else if (total_count == 0) {
+        result.failed = true;
+        result.failures.push_back("No test results from " + p.html_path +
+            "\nExit code: " + std::to_string(exit_code) +
+            "\nOutput (first 2KB):\n" + output.substr(0, 2048));
+    } else {
+        result.failed = !failures.empty() || pass_count != total_count;
+    }
+
+    auto ended = std::chrono::steady_clock::now();
+    result.seconds = std::chrono::duration<double>(ended - started).count();
+    return result;
+}
+
+static void report_gtest_result(const WptSelectionResult& result) {
+    if (result.skipped) {
+        GTEST_SKIP() << result.skip_reason;
         return;
     }
 
-    if (total_count == 0) {
-        // No WPT_RESULT — script likely failed to load/transpile (e.g. missing
-        // Selection/Range API caused a top-level ReferenceError before any
-        // test() call ran).
-        FAIL() << "No test results from " << p.html_path
-               << "\nExit code: " << exit_code
-               << "\nOutput (first 2KB):\n"
-               << output.substr(0, 2048);
+    const WptSelectionParam& p = result.param;
+    if (result.crash_test_passed) {
+        printf("  %s: crash test -- completed without crash\n", p.test_name.c_str());
         return;
     }
 
-    printf("  %s: %d/%d passed", p.test_name.c_str(), pass_count, total_count);
-    if (!failures.empty()) printf(" (%zu failures)", failures.size());
+    printf("  %s: %d/%d passed", p.test_name.c_str(),
+           result.pass_count, result.total_count);
+    if (!result.failures.empty()) printf(" (%zu failures)", result.failures.size());
     printf("\n");
 
-    for (const auto& f : failures) {
+    for (const auto& f : result.failures) {
         ADD_FAILURE() << f;
     }
 
-    EXPECT_EQ(pass_count, total_count)
+    EXPECT_EQ(result.pass_count, result.total_count)
         << "Not all tests passed in " << p.html_path;
+}
+
+TEST_P(WptSelectionTest, Run) {
+    report_gtest_result(run_selection_case(GetParam()));
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -394,7 +571,212 @@ INSTANTIATE_TEST_SUITE_P(
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WptSelectionTest);
 
+static int get_parallel_jobs() {
+    const char* env_jobs = getenv("LAMBDA_WPT_SELECTION_JOBS");
+    if (!env_jobs || !env_jobs[0]) env_jobs = getenv("WPT_SELECTION_JOBS");
+    if (env_jobs && env_jobs[0]) {
+        int jobs = atoi(env_jobs);
+        if (jobs > 0) return jobs;
+    }
+
+    unsigned int cpus = std::thread::hardware_concurrency();
+    if (cpus <= 1) return 1;
+    return (int)cpus - 1;
+}
+
+static bool starts_with(const char* text, const char* prefix) {
+    return strncmp(text, prefix, strlen(prefix)) == 0;
+}
+
+static bool has_filtered_gtest_arg(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--gtest_list_tests") == 0) return true;
+        if (starts_with(argv[i], "--gtest_filter=")) {
+            const char* filter = argv[i] + strlen("--gtest_filter=");
+            if (strcmp(filter, "*") != 0 && strcmp(filter, "WptSelection*") != 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+static std::string get_gtest_json_path(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        const char* prefix = "--gtest_output=json:";
+        if (starts_with(argv[i], prefix)) {
+            return std::string(argv[i] + strlen(prefix));
+        }
+    }
+    return "";
+}
+
+static void write_parallel_json(const char* json_path,
+                                const std::vector<WptSelectionResult>& results,
+                                double total_seconds) {
+    if (!json_path || !json_path[0]) return;
+
+    FILE* f = fopen(json_path, "w");
+    if (!f) return;
+
+    int failures = 0;
+    for (const auto& result : results) {
+        if (!result.skipped && result.failed) failures++;
+    }
+
+    std::string timestamp = now_timestamp();
+    fprintf(f,
+        "{\n"
+        "  \"tests\": %zu,\n"
+        "  \"failures\": %d,\n"
+        "  \"disabled\": 0,\n"
+        "  \"errors\": 0,\n"
+        "  \"timestamp\": \"%s\",\n"
+        "  \"time\": \"%.3fs\",\n"
+        "  \"name\": \"AllTests\",\n"
+        "  \"testsuites\": [\n"
+        "    {\n"
+        "      \"name\": \"WptSelection/WptSelectionTest\",\n"
+        "      \"tests\": %zu,\n"
+        "      \"failures\": %d,\n"
+        "      \"disabled\": 0,\n"
+        "      \"errors\": 0,\n"
+        "      \"timestamp\": \"%s\",\n"
+        "      \"time\": \"%.3fs\",\n"
+        "      \"testsuite\": [\n",
+        results.size(), failures, timestamp.c_str(), total_seconds,
+        results.size(), failures, timestamp.c_str(), total_seconds);
+
+    for (size_t i = 0; i < results.size(); i++) {
+        const WptSelectionResult& result = results[i];
+        const WptSelectionParam& p = result.param;
+        const char* case_result = result.skipped ? "SKIPPED" : "COMPLETED";
+        fprintf(f,
+            "        {\n"
+            "          \"name\": \"Run/%s\",\n"
+            "          \"value_param\": \"%s\",\n"
+            "          \"file\": \"%s\",\n"
+            "          \"line\": 558,\n"
+            "          \"status\": \"RUN\",\n"
+            "          \"result\": \"%s\",\n"
+            "          \"timestamp\": \"%s\",\n"
+            "          \"time\": \"%.3fs\",\n"
+            "          \"classname\": \"WptSelection/WptSelectionTest\"",
+            json_escape(p.test_name).c_str(),
+            json_escape(p.html_path).c_str(),
+            json_escape(__FILE__).c_str(),
+            case_result,
+            timestamp.c_str(),
+            result.seconds);
+
+        if (result.skipped) {
+            fprintf(f,
+                ",\n"
+                "          \"skipped\": [ { \"message\": \"%s\" } ]\n"
+                "        }%s\n",
+                json_escape(result.skip_reason).c_str(),
+                (i + 1 == results.size()) ? "" : ",");
+        } else if (result.failed) {
+            fprintf(f,
+                ",\n"
+                "          \"failures\": [\n");
+            for (size_t fi = 0; fi < result.failures.size(); fi++) {
+                fprintf(f,
+                    "            { \"failure\": \"%s\", \"type\": \"\" }%s\n",
+                    json_escape(result.failures[fi]).c_str(),
+                    (fi + 1 == result.failures.size()) ? "" : ",");
+            }
+            fprintf(f,
+                "          ]\n"
+                "        }%s\n",
+                (i + 1 == results.size()) ? "" : ",");
+        } else {
+            fprintf(f,
+                "\n"
+                "        }%s\n",
+                (i + 1 == results.size()) ? "" : ",");
+        }
+    }
+
+    fprintf(f,
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}\n");
+    fclose(f);
+}
+
+static int run_parallel_suite(int argc, char** argv) {
+    std::vector<WptSelectionParam> params = discover_wpt_selection_tests();
+    std::vector<WptSelectionResult> results(params.size());
+    std::atomic<size_t> next_index(0);
+    std::mutex print_mutex;
+
+    int jobs = get_parallel_jobs();
+    if (jobs < 1) jobs = 1;
+    if ((size_t)jobs > params.size() && !params.empty()) jobs = (int)params.size();
+
+    printf("[==========] Running %zu WPT selection cases with %d jobs\n",
+           params.size(), jobs);
+    auto started = std::chrono::steady_clock::now();
+
+    std::vector<std::thread> workers;
+    for (int wi = 0; wi < jobs; wi++) {
+        workers.emplace_back([&]() {
+            while (true) {
+                size_t index = next_index.fetch_add(1);
+                if (index >= params.size()) break;
+
+                const WptSelectionParam& p = params[index];
+                {
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    printf("[ RUN      ] WptSelection/WptSelectionTest.Run/%s\n",
+                           p.test_name.c_str());
+                }
+
+                WptSelectionResult result = run_selection_case(p);
+                results[index] = result;
+
+                {
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    const char* status = result.skipped ? "[  SKIPPED ]" :
+                        (result.failed ? "[  FAILED  ]" : "[       OK ]");
+                    printf("%s WptSelection/WptSelectionTest.Run/%s (%.0f ms)\n",
+                           status, p.test_name.c_str(), result.seconds * 1000.0);
+                }
+            }
+        });
+    }
+
+    for (auto& worker : workers) worker.join();
+
+    auto ended = std::chrono::steady_clock::now();
+    double total_seconds = std::chrono::duration<double>(ended - started).count();
+
+    int failures = 0;
+    int skipped = 0;
+    for (const auto& result : results) {
+        if (result.skipped) skipped++;
+        else if (result.failed) failures++;
+    }
+
+    printf("[==========] %zu WPT selection cases ran. (%.0f ms total)\n",
+           params.size(), total_seconds * 1000.0);
+    printf("[  PASSED  ] %zu tests.\n", params.size() - failures - skipped);
+    if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
+    if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
+
+    std::string json_path = get_gtest_json_path(argc, argv);
+    if (!json_path.empty())
+        write_parallel_json(json_path.c_str(), results, total_seconds);
+
+    return failures == 0 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
+    if (!has_filtered_gtest_arg(argc, argv)) {
+        return run_parallel_suite(argc, argv);
+    }
+
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

@@ -772,6 +772,12 @@ void focus_set(DocState* state, View* view, bool from_keyboard);
 void focus_clear(DocState* state);
 
 /**
+ * Clear focus without changing the document selection.
+ * Used when DOM removal has already relocated a live Selection range.
+ */
+void focus_clear_preserve_selection(DocState* state);
+
+/**
  * Move focus to next/previous focusable element
  * @param forward true for next (Tab), false for previous (Shift+Tab)
  * @return true if focus moved, false if no more focusable elements
