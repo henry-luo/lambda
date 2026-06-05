@@ -626,12 +626,14 @@ async function runAllTests(tests) {
                 }
 
                 const promise = runTest(testInfo).then((result) => {
+                    const entry = running.get(promise);
+                    const durationMs = entry ? Date.now() - entry.startMs : 0;
                     running.delete(promise);
-                    results.set(testInfo.baseName, { ...result, testInfo });
+                    results.set(testInfo.baseName, { ...result, durationMs, testInfo });
 
                     if (!rawOutput) {
                         const icon = result.status.includes('PASS') ? '✓' : '✗';
-                        console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed)`);
+                        console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(durationMs)})`);
                     }
 
                     startNext();
@@ -696,12 +698,13 @@ function displayResults(config, results) {
     const suiteResults = [];
     for (const suiteKey of allSuites) {
         const suite = suiteMap.get(suiteKey);
-        let suitePassed = 0, suiteFailed = 0, suiteTotal = 0;
+        let suitePassed = 0, suiteFailed = 0, suiteTotal = 0, suiteDurationMs = 0;
 
         for (const t of suite.tests) {
             suitePassed += t.result.passed;
             suiteFailed += t.result.failed;
             suiteTotal  += t.result.total;
+            suiteDurationMs += t.result.durationMs || 0;
             allFailedTests.push(...t.result.failedTests);
         }
 
@@ -709,7 +712,7 @@ function displayResults(config, results) {
         totalPassed += suitePassed;
         totalFailed += suiteFailed;
 
-        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal });
+        suiteResults.push({ suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs });
     }
 
     // Save summary JSON
@@ -720,13 +723,13 @@ function displayResults(config, results) {
         failed_test_names: allFailedTests,
         level1_test_suites: allSuites.map(key => {
             const s = suiteMap.get(key);
-            let sp = 0, sf = 0, st = 0;
-            for (const t of s.tests) { sp += t.result.passed; sf += t.result.failed; st += t.result.total; }
-            return { name: s.displayName, total: st, passed: sp, failed: sf, status: sf === 0 ? '✅ PASS' : '❌ FAIL' };
+            let sp = 0, sf = 0, st = 0, sd = 0;
+            for (const t of s.tests) { sp += t.result.passed; sf += t.result.failed; st += t.result.total; sd += t.result.durationMs || 0; }
+            return { name: s.displayName, total: st, passed: sp, failed: sf, duration_ms: sd, status: sf === 0 ? '✅ PASS' : '❌ FAIL' };
         }),
         level2_c_tests: [...results.entries()].map(([bn, e]) => ({
             name: e.testInfo.displayName, suite: e.testInfo.suite,
-            total: e.total, passed: e.passed, failed: e.failed, status: e.status,
+            total: e.total, passed: e.passed, failed: e.failed, duration_ms: e.durationMs || 0, status: e.status,
         })),
     };
 
@@ -754,18 +757,18 @@ function displayResults(config, results) {
             const s = inputResults.suites[i];
             const st = s.passed + s.failed;
             const ss = s.failed === 0 ? '✅ PASS' : '❌ FAIL';
-            const prefix = i < inputResults.suites.length - 1 ? '├─' : '└─';
-            console.log(`     ${prefix} 📄 ${ss} (${s.passed}/${st} tests) ${s.name}`);
+            const prefix = i < inputResults.suites.length - 1 ? '├' : '└';
+            console.log(` ${prefix}📄 ${ss} (${s.passed}/${st} tests) ${s.name}`);
         }
     }
 
     // Print lambda/runtime suite results
-    for (const { suite, suitePassed, suiteFailed, suiteTotal } of suiteResults) {
+    for (const { suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs } of suiteResults) {
         const suiteStatus = suiteFailed === 0 ? '✅ PASS' : '❌ FAIL';
-        console.log(`   ${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests)`);
+        console.log(`   ${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests, ${formatDuration(suiteDurationMs)})`);
 
         for (const t of suite.tests) {
-            console.log(`     └─ ${t.icon} ${t.result.status} (${t.result.passed}/${t.result.total} tests) ${t.displayName} (${t.baseName}.exe)`);
+            console.log(` └${t.icon} ${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${t.baseName}.exe)`);
         }
     }
 
