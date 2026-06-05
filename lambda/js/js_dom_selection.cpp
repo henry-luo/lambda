@@ -1106,6 +1106,8 @@ extern "C" void js_dom_selection_install_globals(void) {
     // / getSelection); they exist purely as identity markers.
     Item sel_ctor   = js_new_function((void*)js_global_get_selection, 0);
     Item range_ctor = js_new_function((void*)js_dom_create_range, 0);
+    js_property_set(sel_ctor, make_key("__class_name__"), make_key("Selection"));
+    js_property_set(range_ctor, make_key("__class_name__"), make_key("Range"));
     js_property_set(global, make_key("Selection"), sel_ctor);
     js_property_set(global, make_key("Range"),     range_ctor);
 

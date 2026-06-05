@@ -3719,7 +3719,7 @@ void caret_set(DocState* state, View* view, int char_offset) {
     }
 
     SelectionState* active_selection = state->selection;
-    if (active_selection && !active_selection->is_collapsed &&
+    if (active_selection && active_selection->is_selecting && !active_selection->is_collapsed &&
         active_selection->focus_view == view && active_selection->focus_offset == char_offset) {
         state->caret->view = view;
         state->caret->char_offset = char_offset;
@@ -5859,14 +5859,7 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
     log_debug("focus_set: view=%p, from_keyboard=%d", view, from_keyboard);
 }
 
-void focus_clear(DocState* state) {
-    if (!state || !state->focus) return;
-
-    if (state->transition_depth == 0) {
-        focus_transition(state, FOCUS_TRANSITION_BLUR_CURRENT, NULL);
-        return;
-    }
-
+static void focus_clear_internal(DocState* state, bool preserve_selection) {
     FocusState* focus = state->focus;
 
     // Clear pseudo-states on current element
@@ -5891,7 +5884,7 @@ void focus_clear(DocState* state) {
     bool preserve_rich_editing =
         state->editing.has_active_surface &&
         editing_surface_is_rich(&state->editing.active_surface);
-    if (!preserve_rich_editing) {
+    if (!preserve_selection && !preserve_rich_editing) {
         // Also clear caret and selection
         caret_clear(state);
         selection_clear(state);
@@ -5902,6 +5895,22 @@ void focus_clear(DocState* state) {
     focus_log_transition(state, "blur_current", old_focus, NULL, false, false);
 
     log_debug("focus_clear");
+}
+
+void focus_clear(DocState* state) {
+    if (!state || !state->focus) return;
+
+    if (state->transition_depth == 0) {
+        focus_transition(state, FOCUS_TRANSITION_BLUR_CURRENT, NULL);
+        return;
+    }
+
+    focus_clear_internal(state, false);
+}
+
+void focus_clear_preserve_selection(DocState* state) {
+    if (!state || !state->focus) return;
+    focus_clear_internal(state, true);
 }
 
 // collect focusable elements from view tree in DOM order

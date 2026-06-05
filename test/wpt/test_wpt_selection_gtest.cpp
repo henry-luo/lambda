@@ -67,6 +67,10 @@ static const char* SKIP_SUBSTRINGS[] = {
     // It contains no testharness assertions of its own and produces 0/0 — not
     // a real test from our perspective.
     "test-iframe",
+    // Requires a true iframe JavaScript global/lexical environment. Lambda's
+    // current iframe model provides a separate contentDocument, but script
+    // helpers still share the parent top-level bindings.
+    "deleteFromDocument",
     // dir-manual.html is `setup({explicit_done: true})` and requires the user
     // to click+drag to seed a backward selection before clicking a "Test"
     // button that runs the assertions. There is no automated path: the
@@ -187,6 +191,73 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
         result += "\n";
 
         pos = close + strlen("</script>");
+    }
+
+    return result;
+}
+
+static std::string extract_inline_only_scripts(const std::string& html) {
+    std::string result;
+    size_t pos = 0;
+
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<script", pos);
+        if (tag_start == std::string::npos) break;
+
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string src = extract_attr(tag, "src");
+        if (!src.empty()) {
+            pos = tag_end + 1;
+            continue;
+        }
+
+        size_t close = html.find("</script>", tag_end);
+        if (close == std::string::npos) break;
+
+        result += html.substr(tag_end + 1, close - tag_end - 1);
+        result += "\n";
+
+        pos = close + strlen("</script>");
+    }
+
+    return result;
+}
+
+static std::string extract_local_iframe_helper_scripts(const std::string& scripts,
+                                                       const std::string& html_dir) {
+    std::string result;
+    size_t pos = 0;
+
+    while (pos < scripts.size()) {
+        size_t src_pos = scripts.find(".src", pos);
+        if (src_pos == std::string::npos) break;
+        size_t eq = scripts.find('=', src_pos + 4);
+        if (eq == std::string::npos) break;
+        size_t q = scripts.find_first_of("\"'", eq + 1);
+        if (q == std::string::npos) break;
+        char quote = scripts[q];
+        size_t end = scripts.find(quote, q + 1);
+        if (end == std::string::npos) break;
+
+        std::string src = scripts.substr(q + 1, end - q - 1);
+        bool local_html = !src.empty() &&
+            src[0] != '/' &&
+            src.compare(0, 3, "../") != 0 &&
+            src.find("://") == std::string::npos &&
+            src.size() >= 5 &&
+            src.substr(src.size() - 5) == ".html";
+        if (local_html) {
+            std::string helper_html = read_file_contents((html_dir + "/" + src).c_str());
+            if (!helper_html.empty()) {
+                result += "// ---- inlined iframe helper " + src + " ----\n";
+                result += extract_inline_only_scripts(helper_html);
+                result += "\n";
+            }
+        }
+        pos = end + 1;
     }
 
     return result;
@@ -322,6 +393,7 @@ TEST_P(WptSelectionTest, Run) {
     ASSERT_FALSE(shim.empty()) << "Could not read testharness shim: " << SHIM_PATH;
 
     // Compose: shim + extracted scripts + onload simulation + summary.
+    scripts += extract_local_iframe_helper_scripts(scripts, WPT_DIR);
     std::string combined = shim + "\n" + scripts +
                            "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
