@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "../lib/scratch_arena.h"
-#include "../lib/arena.h"
-#include "../lib/mempool.h"
+#include "../../lib/scratch_arena.h"
+#include "../../lib/arena.h"
+#include "../../lib/mempool.h"
 #include <string.h>
 
 // Test fixture with pool + arena setup

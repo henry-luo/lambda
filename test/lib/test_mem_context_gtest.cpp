@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/mem_context.h"
+#include "../../lib/mem_context.h"
 #include <string.h>
 #include <stdlib.h>
 #include <atomic>

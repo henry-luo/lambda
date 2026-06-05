@@ -23,8 +23,8 @@
 #include <string>
 
 extern "C" {
-#include "../lib/shell.h"
-#include "../lib/log.h"
+#include "../../lib/shell.h"
+#include "../../lib/log.h"
 }
 
 /* ================================================================== *

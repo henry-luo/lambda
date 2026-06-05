@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../lib/lambda_typed.hpp"
+#include "../../lib/lambda_typed.hpp"
 
 namespace {
 

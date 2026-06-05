@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
-#include "../lib/ownership.hpp"
-#include "../lib/tagged.hpp"
+#include "../../lib/ownership.hpp"
+#include "../../lib/tagged.hpp"
 
 namespace {
 

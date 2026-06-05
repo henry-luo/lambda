@@ -20,8 +20,8 @@
 #include <sstream>
 
 extern "C" {
-#include "../lib/pdf_writer.h"
-#include "../lib/log.h"
+#include "../../lib/pdf_writer.h"
+#include "../../lib/log.h"
 }
 
 class PdfWriterTest : public ::testing::Test {

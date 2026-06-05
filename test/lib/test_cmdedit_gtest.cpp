@@ -5,10 +5,10 @@
 #include <unistd.h>
 
 extern "C" {
-#include "../lib/cmdedit.h"
-#include "../lib/cmdedit_utf8.h"
-#include "../lib/strbuf.h"
-#include "../lib/log.h"
+#include "../../lib/cmdedit.h"
+#include "../../lib/cmdedit_utf8.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/log.h"
 }
 
 class CmdEditTest : public ::testing::Test {

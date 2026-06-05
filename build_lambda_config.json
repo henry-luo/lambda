@@ -1551,7 +1551,7 @@
                         "icon": "🔐"
                     },
                     {
-                        "source": "test_gc_heap_gtest.cpp",
+                        "source": "lib/test_gc_heap_gtest.cpp",
                         "name": "GC Heap Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1823,7 +1823,7 @@
                         "icon": "📦"
                     },
                     {
-                        "source": "test_font_config_gtest.cpp",
+                        "source": "lib/test_font_config_gtest.cpp",
                         "name": "Font Configuration Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1852,7 +1852,7 @@
                         "icon": "🔤"
                     },
                     {
-                        "source": "test_woff2_gtest.cpp",
+                        "source": "lib/test_woff2_gtest.cpp",
                         "name": "WOFF2 Font Decompression Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1914,7 +1914,7 @@
                         "icon": "🌐"
                     },
                     {
-                        "source": "test_cmdedit_gtest.cpp",
+                        "source": "lib/test_cmdedit_gtest.cpp",
                         "name": " Command Line Editor Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1949,7 +1949,7 @@
                         "icon": "🚀"
                     },
                     {
-                        "source": "test_memtrack_gtest.cpp",
+                        "source": "lib/test_memtrack_gtest.cpp",
                         "name": "Memory Tracker Tests",
                         "dependencies": [],
                         "libraries": [
@@ -1970,7 +1970,7 @@
                         "icon": "🔍"
                     },
                     {
-                        "source": "test_own_tagged.cpp",
+                        "source": "lib/test_own_tagged.cpp",
                         "name": "Ownership and Tagged Dispatch Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1984,7 +1984,7 @@
                         "icon": "🧩"
                     },
                     {
-                        "source": "test_lambda_typed.cpp",
+                        "source": "lib/test_lambda_typed.cpp",
                         "name": "Lambda Typed Item Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -1998,7 +1998,7 @@
                         "icon": "🧩"
                     },
                     {
-                        "source": "test_span_gtest.cpp",
+                        "source": "lib/test_span_gtest.cpp",
                         "name": "Bounded Span and ByteCursor Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2017,7 +2017,7 @@
                         "icon": "🧩"
                     },
                     {
-                        "source": "test_checked_alloc_gtest.cpp",
+                        "source": "lib/test_checked_alloc_gtest.cpp",
                         "name": "Checked Math, Alloc and NonNull Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2107,7 +2107,7 @@
                         "icon": "🏟️"
                     },
                     {
-                        "source": "test_scratch_arena_gtest.cpp",
+                        "source": "lib/test_scratch_arena_gtest.cpp",
                         "name": "Scratch Arena Tests",
                         "dependencies": [],
                         "libraries": [
@@ -2127,7 +2127,7 @@
                         "icon": "📋"
                     },
                     {
-                        "source": "test_mem_context_gtest.cpp",
+                        "source": "lib/test_mem_context_gtest.cpp",
                         "name": "Memory Context Tests",
                         "dependencies": [],
                         "libraries": [
@@ -2145,7 +2145,7 @@
                         "icon": "🧠"
                     },
                     {
-                        "source": "test_mem_factory_gtest.cpp",
+                        "source": "lib/test_mem_factory_gtest.cpp",
                         "name": "Memory Factory Tests",
                         "dependencies": [],
                         "libraries": [
@@ -2168,7 +2168,7 @@
                         "icon": "🏭"
                     },
                     {
-                        "source": "test_shell_gtest.cpp",
+                        "source": "lib/test_shell_gtest.cpp",
                         "name": "Shell Module Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2342,7 +2342,7 @@
                         "icon": "🧾"
                     },
                     {
-                        "source": "test_pdf_writer_gtest.cpp",
+                        "source": "lib/test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
                             "lambda-input-full"
@@ -2482,7 +2482,7 @@
                 "category": "baseline",
                 "tests": [
                     {
-                        "source": "test_mime_detect_gtest.cpp",
+                        "source": "lib/test_mime_detect_gtest.cpp",
                         "name": "MIME Detection Tests",
                         "dependencies": [
                             "lambda-input-full"

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "../lib/mime-detect.h"
+#include "../../lib/mime-detect.h"
 
 // Test fixture class for MIME detection tests
 class MimeDetectTest : public ::testing::Test {

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/memtrack.h"
+#include "../../lib/memtrack.h"
 #include <cstring>
 #include <cstdio>
 

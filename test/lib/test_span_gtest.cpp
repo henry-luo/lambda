@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
-#include "../lib/span.hpp"
+#include "../../lib/span.hpp"
 
 // ---- Span<T> -------------------------------------------------------------
 

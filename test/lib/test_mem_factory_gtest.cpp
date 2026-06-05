@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
-#include "../lib/mem_factory.h"
-#include "../lib/mem_context.h"
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/scratch_arena.h"
-#include "../lib/gc/gc_nursery.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/mem_context.h"
+#include "../../lib/mempool.h"
+#include "../../lib/arena.h"
+#include "../../lib/scratch_arena.h"
+#include "../../lib/gc/gc_nursery.h"
 #include <string.h>
 
 // Exercises the allocator factory with REAL Pool/Arena allocators: snapshot
