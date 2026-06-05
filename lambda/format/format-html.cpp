@@ -401,6 +401,11 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         }
     }
     else if (item.isArray()) {
+        if (raw_text_mode) {
+            format_json_to_strbuf(ctx.output(), item.item());
+            return;
+        }
+
         ArrayReader arr = item.asArray();
         if (!arr.isEmpty()) {
             ctx.write_text("<ul>");
@@ -417,6 +422,11 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         }
     }
     else if (item.isMap()) {
+        if (raw_text_mode) {
+            format_json_to_strbuf(ctx.output(), item.item());
+            return;
+        }
+
         // simple map representation
         ctx.write_text("<div>{object}</div>");
     }
