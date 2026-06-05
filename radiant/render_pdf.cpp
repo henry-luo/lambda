@@ -110,6 +110,64 @@ static PaintList* pdf_active_paint_list(PdfRenderContext* ctx) {
     return ctx ? &ctx->paint_list : nullptr;
 }
 
+static void pdf_effect_raster_fallback_clear(PdfEffectRasterFallback* fallback) {
+    if (!fallback) return;
+    PaintList* list = &fallback->paint_list;
+    for (int i = 0; i < list->count; i++) {
+        PaintCmd* cmd = &list->cmds[i];
+        switch (cmd->op) {
+        case PAINT_FILL_PATH:
+            if (cmd->fill_path.owns_path && cmd->fill_path.path) {
+                rdt_path_free(cmd->fill_path.path);
+                cmd->fill_path.path = nullptr;
+                cmd->fill_path.owns_path = false;
+            }
+            break;
+        case PAINT_STROKE_PATH:
+            if (cmd->stroke_path.owns_path && cmd->stroke_path.path) {
+                rdt_path_free(cmd->stroke_path.path);
+                cmd->stroke_path.path = nullptr;
+                cmd->stroke_path.owns_path = false;
+            }
+            break;
+        case PAINT_FILL_LINEAR_GRADIENT:
+            if (cmd->fill_linear_gradient.owns_path && cmd->fill_linear_gradient.path) {
+                rdt_path_free(cmd->fill_linear_gradient.path);
+                cmd->fill_linear_gradient.path = nullptr;
+                cmd->fill_linear_gradient.owns_path = false;
+            }
+            if (cmd->fill_linear_gradient.owns_stops && cmd->fill_linear_gradient.stops) {
+                mem_free((void*)cmd->fill_linear_gradient.stops);
+                cmd->fill_linear_gradient.stops = nullptr;
+                cmd->fill_linear_gradient.owns_stops = false;
+            }
+            break;
+        case PAINT_FILL_RADIAL_GRADIENT:
+            if (cmd->fill_radial_gradient.owns_path && cmd->fill_radial_gradient.path) {
+                rdt_path_free(cmd->fill_radial_gradient.path);
+                cmd->fill_radial_gradient.path = nullptr;
+                cmd->fill_radial_gradient.owns_path = false;
+            }
+            if (cmd->fill_radial_gradient.owns_stops && cmd->fill_radial_gradient.stops) {
+                mem_free((void*)cmd->fill_radial_gradient.stops);
+                cmd->fill_radial_gradient.stops = nullptr;
+                cmd->fill_radial_gradient.owns_stops = false;
+            }
+            break;
+        case PAINT_GLYPH_RUN:
+            if (cmd->glyph_run.owns_text && cmd->glyph_run.text) {
+                mem_free((void*)cmd->glyph_run.text);
+                cmd->glyph_run.text = nullptr;
+                cmd->glyph_run.owns_text = false;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    paint_list_clear(list);
+}
+
 static bool pdf_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {
     return group &&
            (group->has_clip || group->blend_mode != 0 || group->filter ||
@@ -534,7 +592,7 @@ static void pdf_begin_effect_raster_fallback(PdfRenderContext* ctx,
     ctx->effect_fallback.active = true;
     ctx->effect_fallback.nested_depth = 0;
     ctx->effect_fallback.group = *group;
-    paint_list_clear(&ctx->effect_fallback.paint_list);
+    pdf_effect_raster_fallback_clear(&ctx->effect_fallback);
     paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
     paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
     log_error("[PDF_PAINT_IR] raster fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
@@ -577,7 +635,7 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
     }
     pdf_record_page_backdrop_paint_list(ctx, &ctx->effect_fallback.paint_list);
     if (image.surface) image_surface_destroy(image.surface);
-    paint_list_clear(&ctx->effect_fallback.paint_list);
+    pdf_effect_raster_fallback_clear(&ctx->effect_fallback);
     ctx->effect_fallback.active = false;
     ctx->effect_fallback.nested_depth = 0;
 }
@@ -1281,9 +1339,19 @@ static void pdf_paint_fill_rect(PdfRenderContext* ctx,
     pdf_lower_paint_list(ctx);
 }
 
-static void pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
-    paint_fill_path(pdf_active_paint_list(ctx), path, color, RDT_FILL_WINDING, nullptr);
+static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color color) {
+    PaintList* list = pdf_active_paint_list(ctx);
+    int index = list ? list->count : -1;
+    paint_fill_path(list, path, color, RDT_FILL_WINDING, nullptr);
+    bool owns_path = false;
+    if (ctx && ctx->effect_fallback.active && list &&
+        list->count == index + 1 && index >= 0 &&
+        list->cmds[index].op == PAINT_FILL_PATH) {
+        list->cmds[index].fill_path.owns_path = true;
+        owns_path = true;
+    }
     pdf_lower_paint_list(ctx);
+    return owns_path;
 }
 
 static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
@@ -1296,11 +1364,66 @@ static void pdf_paint_draw_image(PdfRenderContext* ctx, ImageSurface* img,
     pdf_lower_paint_list(ctx);
 }
 
-static void pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
+static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
                                   Color color, float width) {
-    paint_stroke_path(pdf_active_paint_list(ctx), path, color, width,
+    PaintList* list = pdf_active_paint_list(ctx);
+    int index = list ? list->count : -1;
+    paint_stroke_path(list, path, color, width,
                       RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0.0f, nullptr);
+    bool owns_path = false;
+    if (ctx && ctx->effect_fallback.active && list &&
+        list->count == index + 1 && index >= 0 &&
+        list->cmds[index].op == PAINT_STROKE_PATH) {
+        list->cmds[index].stroke_path.owns_path = true;
+        owns_path = true;
+    }
     pdf_lower_paint_list(ctx);
+    return owns_path;
+}
+
+static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
+                                           BoundaryLinearGradientPaint* gradient,
+                                           RdtGradientStop* stops) {
+    if (!gradient) return false;
+    PaintList* list = pdf_active_paint_list(ctx);
+    int index = list ? list->count : -1;
+    paint_fill_linear_gradient(list, gradient->path,
+                               gradient->x1, gradient->y1,
+                               gradient->x2, gradient->y2,
+                               gradient->stops, gradient->stop_count,
+                               RDT_FILL_WINDING, nullptr);
+    bool owns_payload = false;
+    if (ctx && ctx->effect_fallback.active && list &&
+        list->count == index + 1 && index >= 0 &&
+        list->cmds[index].op == PAINT_FILL_LINEAR_GRADIENT) {
+        list->cmds[index].fill_linear_gradient.owns_path = gradient->path != nullptr;
+        list->cmds[index].fill_linear_gradient.owns_stops = stops != nullptr;
+        owns_payload = true;
+    }
+    pdf_lower_paint_list(ctx);
+    return owns_payload;
+}
+
+static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
+                                           BoundaryRadialGradientPaint* gradient,
+                                           RdtGradientStop* stops) {
+    if (!gradient) return false;
+    PaintList* list = pdf_active_paint_list(ctx);
+    int index = list ? list->count : -1;
+    paint_fill_radial_gradient(list, gradient->path,
+                               gradient->cx, gradient->cy, gradient->r,
+                               gradient->stops, gradient->stop_count,
+                               RDT_FILL_WINDING, nullptr);
+    bool owns_payload = false;
+    if (ctx && ctx->effect_fallback.active && list &&
+        list->count == index + 1 && index >= 0 &&
+        list->cmds[index].op == PAINT_FILL_RADIAL_GRADIENT) {
+        list->cmds[index].fill_radial_gradient.owns_path = gradient->path != nullptr;
+        list->cmds[index].fill_radial_gradient.owns_stops = stops != nullptr;
+        owns_payload = true;
+    }
+    pdf_lower_paint_list(ctx);
+    return owns_payload;
 }
 
 static Corner pdf_corner_inset(const Corner* radius, float inset_x, float inset_y) {
@@ -1479,6 +1602,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.color = ctx->color;
     run.text = text_content;
     run.text_len = (int)strlen(text_content); // INT_CAST_OK: text run byte length is bounded by TextRect input.
+    run.owns_text = ctx && ctx->effect_fallback.active;
     run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
     run.font_size = font_size;
     run.x = base_x;
@@ -1487,7 +1611,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
-    mem_free(text_content);
+    if (!run.owns_text) mem_free(text_content);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1605,8 +1729,9 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
             RdtPath* background_path =
                 render_path_create_rounded_rect(background_rect, &background_radius);
             if (background_path) {
-                pdf_paint_fill_path(ctx, background_path, view->bound->background->color);
-                rdt_path_free(background_path);
+                bool owns_path =
+                    pdf_paint_fill_path(ctx, background_path, view->bound->background->color);
+                if (!owns_path) rdt_path_free(background_path);
             } else {
                 pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
             }
@@ -1623,19 +1748,20 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
         RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
             (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
         BoundaryLinearGradientPaint gradient = {};
+        bool owns_payload = false;
         if (stops &&
             render_paint_boundary_build_linear_gradient(view, abs_x, abs_y,
                                                         stops, stop_count,
                                                         &gradient)) {
-            paint_fill_linear_gradient(pdf_active_paint_list(ctx), gradient.path,
-                                       gradient.x1, gradient.y1,
-                                       gradient.x2, gradient.y2,
-                                       gradient.stops, gradient.stop_count,
-                                       RDT_FILL_WINDING, nullptr);
-            pdf_lower_paint_list(ctx);
-            rdt_path_free(gradient.path);
+            owns_payload = pdf_paint_fill_linear_gradient(ctx, &gradient, stops);
+            if (!owns_payload) {
+                rdt_path_free(gradient.path);
+            }
+        } else {
+            if (stops) mem_free(stops);
+            stops = nullptr;
         }
-        if (stops) mem_free(stops);
+        if (stops && !owns_payload) mem_free(stops);
     } else if (view->bound->background &&
                view->bound->background->gradient_type == GRADIENT_RADIAL &&
                view->bound->background->radial_gradient &&
@@ -1644,18 +1770,20 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
         RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
             (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
         BoundaryRadialGradientPaint gradient = {};
+        bool owns_payload = false;
         if (stops &&
             render_paint_boundary_build_radial_gradient(view, abs_x, abs_y,
                                                         stops, stop_count,
                                                         &gradient)) {
-            paint_fill_radial_gradient(pdf_active_paint_list(ctx), gradient.path,
-                                       gradient.cx, gradient.cy, gradient.r,
-                                       gradient.stops, gradient.stop_count,
-                                       RDT_FILL_WINDING, nullptr);
-            pdf_lower_paint_list(ctx);
-            rdt_path_free(gradient.path);
+            owns_payload = pdf_paint_fill_radial_gradient(ctx, &gradient, stops);
+            if (!owns_payload) {
+                rdt_path_free(gradient.path);
+            }
+        } else {
+            if (stops) mem_free(stops);
+            stops = nullptr;
         }
-        if (stops) mem_free(stops);
+        if (stops && !owns_payload) mem_free(stops);
     }
 
     // Borders
@@ -1672,8 +1800,9 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
                                 width - border_width, height - border_width};
             RdtPath* stroke_path = render_path_create_rounded_rect(stroke_rect, &stroke_radius);
             if (stroke_path) {
-                pdf_paint_stroke_path(ctx, stroke_path, border->top_color, border_width);
-                rdt_path_free(stroke_path);
+                bool owns_path =
+                    pdf_paint_stroke_path(ctx, stroke_path, border->top_color, border_width);
+                if (!owns_path) rdt_path_free(stroke_path);
                 return;
             }
         }
@@ -1859,11 +1988,13 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
             if (left && right) {
                 rdt_path_move_to(left, rule_x - thin_width, block_y);
                 rdt_path_line_to(left, rule_x - thin_width, block_y + rule_height);
-                pdf_paint_stroke_path(ctx, left, mc->rule_color, thin_width);
+                bool left_owned = pdf_paint_stroke_path(ctx, left, mc->rule_color, thin_width);
+                if (left_owned) left = nullptr;
 
                 rdt_path_move_to(right, rule_x + thin_width, block_y);
                 rdt_path_line_to(right, rule_x + thin_width, block_y + rule_height);
-                pdf_paint_stroke_path(ctx, right, mc->rule_color, thin_width);
+                bool right_owned = pdf_paint_stroke_path(ctx, right, mc->rule_color, thin_width);
+                if (right_owned) right = nullptr;
             }
             if (left) rdt_path_free(left);
             if (right) rdt_path_free(right);
@@ -1872,8 +2003,8 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
             if (path) {
                 rdt_path_move_to(path, rule_x, block_y);
                 rdt_path_line_to(path, rule_x, block_y + rule_height);
-                pdf_paint_stroke_path(ctx, path, mc->rule_color, mc->rule_width);
-                rdt_path_free(path);
+                bool owns_path = pdf_paint_stroke_path(ctx, path, mc->rule_color, mc->rule_width);
+                if (!owns_path) rdt_path_free(path);
             }
         }
     }
@@ -2101,6 +2232,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
 
     paint_list_destroy(&ctx.paint_list);
+    pdf_effect_raster_fallback_clear(&ctx.effect_fallback);
     paint_list_destroy(&ctx.effect_fallback.paint_list);
     if (ctx.page_backdrop_ready) {
         dl_destroy(&ctx.page_backdrop_dl);

@@ -367,6 +367,7 @@ function runTest(testInfo) {
         }
 
         const jsonFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.json`);
+        try { fs.unlinkSync(jsonFile); } catch (_) {}
 
         // Build argv based on test type
         let testArgs = [];
@@ -378,6 +379,7 @@ function runTest(testInfo) {
 
         if (baseName === 'lambda_test_runner') {
             const tapFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.tap`);
+            try { fs.unlinkSync(tapFile); } catch (_) {}
             testArgs = ['--test-dir', 'test/std', '--format', 'both',
                         '--json-output', jsonFile, '--tap-output', tapFile];
             if (rawOutput) testArgs.push('--verbose');

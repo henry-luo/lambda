@@ -109,7 +109,8 @@ typedef struct {
 } PaintFillRoundedRect;
 
 typedef struct {
-    RdtPath* path;          // borrowed; raster lowering clones into the DisplayList
+    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
+    bool owns_path;         // path must be freed by the owning PaintList cleanup
     Color color;
     RdtFillRule rule;
     bool has_transform;
@@ -117,7 +118,8 @@ typedef struct {
 } PaintFillPath;
 
 typedef struct {
-    RdtPath* path;          // borrowed
+    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
+    bool owns_path;         // path must be freed by the owning PaintList cleanup
     Color color;
     float width;
     RdtStrokeCap cap;
@@ -130,9 +132,11 @@ typedef struct {
 } PaintStrokePath;
 
 typedef struct {
-    RdtPath* path;          // borrowed
+    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
+    bool owns_path;         // path must be freed by the owning PaintList cleanup
     float x1, y1, x2, y2;
-    const RdtGradientStop* stops;  // borrowed
+    const RdtGradientStop* stops;  // borrowed unless owns_stops is set
+    bool owns_stops;        // stops must be freed by the owning PaintList cleanup
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -140,9 +144,11 @@ typedef struct {
 } PaintFillLinearGradient;
 
 typedef struct {
-    RdtPath* path;          // borrowed
+    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
+    bool owns_path;         // path must be freed by the owning PaintList cleanup
     float cx, cy, r;
-    const RdtGradientStop* stops;  // borrowed
+    const RdtGradientStop* stops;  // borrowed unless owns_stops is set
+    bool owns_stops;        // stops must be freed by the owning PaintList cleanup
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -354,8 +360,9 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 typedef struct {
     void* font;              // FontBox* / font handle
     Color color;
-    const char* text;        // optional native text payload; UTF-8, borrowed
+    const char* text;        // optional native text payload; UTF-8, borrowed unless owns_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
+    bool owns_text;          // text must be freed by the owning PaintList cleanup
     const char* font_family; // borrowed; optional for vector text lowering
     float font_size;
     float x, baseline_y;
