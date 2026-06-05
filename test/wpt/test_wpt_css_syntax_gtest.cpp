@@ -50,6 +50,26 @@ static const int WPT_DIR_COUNT = sizeof(WPT_DIRS) / sizeof(WPT_DIRS[0]);
 static const char* SHIM_PATH = "test/wpt/wpt_css_syntax_shim.js";
 static const char* TEMP_DIR = "temp";
 
+// Tests skipped because the upstream WPT file itself is broken or relies on a
+// capability the headless runtime cannot provide. Entries are substrings
+// matched against the test file path.
+static const char* SKIP_SUBSTRINGS[] = {
+    // Upstream WPT bug: the testValidRanges([...]) array literal is missing a
+    // comma after `[0x203f, 0x2040]`, so `[0x203f,0x2040][0x2070,0x218f]`
+    // evaluates to `undefined` and iterating it throws at top level before any
+    // subtest runs. The test errors in real browsers too (harness Error
+    // status). https://github.com/web-platform-tests/wpt master still has it.
+    "non-ascii-codepoints.html",
+};
+static const int SKIP_COUNT = sizeof(SKIP_SUBSTRINGS) / sizeof(SKIP_SUBSTRINGS[0]);
+
+static bool should_skip(const std::string& path) {
+    for (int i = 0; i < SKIP_COUNT; i++) {
+        if (path.find(SKIP_SUBSTRINGS[i]) != std::string::npos) return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -249,6 +269,10 @@ class WptCssSyntaxTest : public testing::TestWithParam<WptCssSyntaxParam> {};
 
 TEST_P(WptCssSyntaxTest, Run) {
     const auto& p = GetParam();
+
+    if (should_skip(p.html_path)) {
+        GTEST_SKIP() << "skipped (broken upstream WPT test): " << p.html_path;
+    }
 
     // Read the HTML test file
     std::string html = read_file_contents(p.html_path.c_str());

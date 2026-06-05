@@ -130,6 +130,11 @@ static const char* SKIP_SUBSTRINGS[] = {
     // test_driver / pointer Actions API + requestAnimationFrame loop.
     "handler-count.html",
 
+    // test_driver.Actions() pointer simulation (pointerDown/Up synthesizing a
+    // click) plus pseudo-element (::after) hit-testing and pseudoTarget — no
+    // user-input simulation in the headless runtime.
+    "click-on-absolute-pseudo.html",
+
     // Custom elements (customElements.define + class extends HTMLElement).
     "EventTarget-add-listener-platform-object.html",
 
