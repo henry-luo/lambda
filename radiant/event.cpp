@@ -3542,6 +3542,7 @@ static void clear_dom_view_pool_pointers(DomNode* node) {
 /**
  * Post-handler rebuild: after JS handler mutates DOM, re-cascade CSS and relayout.
  */
+#ifndef NDEBUG
 static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
     switch (kind) {
         case DOM_JS_MUTATION_CHILD_INSERT: return "child-insert";
@@ -3555,6 +3556,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
         default: return "unknown";
     }
 }
+#endif
 
 static void dom_js_mutation_reset_records(DomDocument* doc) {
     if (!doc) return;
@@ -3565,14 +3567,17 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
+#ifndef NDEBUG
 static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
     if (!doc) return false;
     uint32_t slot = (uint32_t)kind;
     if (slot >= 31) slot = 0;
     return (doc->js_mutation_kind_mask & (1u << slot)) != 0;
 }
+#endif
 
 static void dom_js_mutation_log_records(DomDocument* doc) {
+#ifndef NDEBUG
     if (!doc) return;
 
     log_info("html handler mutations: count=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
@@ -3588,7 +3593,6 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
              dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
              dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
 
-#ifndef NDEBUG
     int limit = doc->js_mutation_record_count < 8 ? doc->js_mutation_record_count : 8;
     for (int i = 0; i < limit; i++) {
         DomJsMutationRecord* record = &doc->js_mutation_records[i];
@@ -3598,6 +3602,8 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
                   record->target_id,
                   record->parent_id);
     }
+#else
+    (void)doc;
 #endif
 }
 
