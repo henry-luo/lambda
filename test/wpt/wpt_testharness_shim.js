@@ -358,6 +358,7 @@ function async_test(arg1, arg2) {
         _name: name,
         _done: false,
         _counted: false,
+        _pending_timeouts: 0,
         _steps: [],
         step_func: function(fn) {
             var self = this;
@@ -370,6 +371,7 @@ function async_test(arg1, arg2) {
                     _wpt_pass++;
                 } catch (e) {
                     _wpt_fail++;
+                    self._done = true;
                     console.log("FAIL: " + self._name + " - " + e.message);
                 }
             };
@@ -384,6 +386,7 @@ function async_test(arg1, arg2) {
                     this._counted = true;
                     console.log("FAIL: " + this._name + " - " + e.message);
                 }
+                this._done = true;
             }
         },
         step_func_done: function(fn) {
@@ -412,10 +415,24 @@ function async_test(arg1, arg2) {
             }
             this._done = true;
         },
+        step_timeout: function(fn, ms) {
+            var self = this;
+            self._pending_timeouts++;
+            return setTimeout(function() {
+                try {
+                    fn.call(self);
+                } finally {
+                    self._pending_timeouts--;
+                }
+            }, ms || 0);
+        },
         unreached_func: function(desc) {
+            var self = this;
             return function() {
                 _wpt_total++;
                 _wpt_fail++;
+                self._counted = true;
+                self._done = true;
                 console.log("FAIL: " + desc + " - reached unreachable code");
             };
         }
@@ -431,6 +448,8 @@ function async_test(arg1, arg2) {
             if (async_record._done) return async_record;
             _wpt_total++;
             _wpt_fail++;
+            async_record._counted = true;
+            async_record._done = true;
             console.log("FAIL: " + name + " - " + (e && e.message ? e.message : e));
         }
     }
@@ -2287,7 +2306,24 @@ function _wpt_print_summary() {
         }
         return false;
     }
+    function _fast_fail_pending_async_without_timers() {
+        if (typeof _wpt_fast_pending_async === "undefined" ||
+            !_wpt_fast_pending_async) return;
+        for (var i = 0; i < _wpt_async_tests.length; i++) {
+            var rec = _wpt_async_tests[i];
+            if (rec._done || rec._pending_timeouts > 0) continue;
+            if (!rec._counted) {
+                _wpt_total++;
+                rec._counted = true;
+            }
+            _wpt_fail++;
+            rec._done = true;
+            console.log("FAIL: " + rec._name +
+                " - async_test did not complete; unsupported event/API did not fire");
+        }
+    }
     function tick(remaining) {
+        if (remaining < 256) _fast_fail_pending_async_without_timers();
         var still_pending = (_wpt_pending_promises > 0) || _async_tests_pending();
         if (!still_pending || remaining <= 0) {
             console.log("WPT_RESULT: " + _wpt_pass + "/" + _wpt_total + " passed");
