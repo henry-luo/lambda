@@ -1144,7 +1144,23 @@ run-radiant-baseline:
 	for suite in $(LAYOUT_BASELINE_SUITES); do \
 		echo ""; \
 		echo "  ▸ $$suite:"; \
-		output=$$(node test/layout/test_radiant_layout.js -c $$suite 2>&1) || true; \
+		log_file="temp/_layout_baseline_$${suite}.log"; \
+		rm -f "$$log_file"; \
+		node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 & \
+		suite_pid=$$!; \
+		while kill -0 $$suite_pid 2>/dev/null; do \
+			sleep 5; \
+			if kill -0 $$suite_pid 2>/dev/null; then \
+				last_test=$$(grep "📊 Test Case:" "$$log_file" | tail -1 | sed 's/^.*Test Case: //'); \
+				if [ -n "$$last_test" ]; then \
+					echo "     ... running, latest: $$last_test"; \
+				else \
+					echo "     ... running"; \
+				fi; \
+			fi; \
+		done; \
+		wait $$suite_pid || true; \
+		output=$$(cat "$$log_file"); \
 		echo "$$output" | tail -8; \
 		s_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
 		s_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
@@ -1157,6 +1173,7 @@ run-radiant-baseline:
 		layout_total_failed=$$((layout_total_failed + s_failed)); \
 		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
 		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> temp/_layout_baseline_results.txt; \
+		rm -f "$$log_file"; \
 	done; \
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \

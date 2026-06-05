@@ -80,6 +80,14 @@ static void render_clip_free_shape(ScratchArena* scratch, ClipShape* shape) {
     scratch_free(scratch, shape);
 }
 
+static ClipShape* render_clip_clone_shape(ScratchArena* scratch, const ClipShape* shape) {
+    if (!scratch || !shape) return nullptr;
+    ClipShape* copy = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+    if (!copy) return nullptr;
+    *copy = *shape;
+    return copy;
+}
+
 static float render_clip_parse_len(const char*& s, float ref) {
     while (*s == ' ' || *s == ',') s++;
     float val = strtof(s, (char**)&s);
@@ -420,9 +428,16 @@ RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* c
         return scope;
     }
 
-    scope.inline_shape.type = CLIP_SHAPE_INSET;
-    scope.inline_shape.inset = {clip->left, clip->top, w, h, 0, 0};
-    if (!render_clip_push_shape_scope(rdcon, &scope, &scope.inline_shape)) {
+    ClipShape inline_shape = {};
+    inline_shape.type = CLIP_SHAPE_INSET;
+    inline_shape.inset = {clip->left, clip->top, w, h, 0, 0};
+    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &inline_shape);
+    if (!shape) {
+        return scope;
+    }
+    scope.owns_shape = true;
+    if (!render_clip_push_shape_scope(rdcon, &scope, shape)) {
+        render_clip_free_shape(&rdcon->scratch, shape);
         scope = {};
         return scope;
     }
@@ -444,10 +459,17 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
         return scope;
     }
 
-    scope.inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
-    scope.inline_shape.rounded_rect = {clip->left, clip->top, cw, ch,
+    ClipShape inline_shape = {};
+    inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
+    inline_shape.rounded_rect = {clip->left, clip->top, cw, ch,
         cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
-    if (!render_clip_push_shape_scope(rdcon, &scope, &scope.inline_shape)) {
+    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &inline_shape);
+    if (!shape) {
+        return scope;
+    }
+    scope.owns_shape = true;
+    if (!render_clip_push_shape_scope(rdcon, &scope, shape)) {
+        render_clip_free_shape(&rdcon->scratch, shape);
         scope = {};
         return scope;
     }

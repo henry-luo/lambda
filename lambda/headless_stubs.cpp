@@ -17,6 +17,8 @@ struct SvgGeneratorOptions;
 struct DomDocument;
 struct DomElement;
 
+extern "C" void log_mem_stage(const char*) {}
+
 // --- Symbol Resolution Stubs ---
 
 extern "C" SymbolResolution resolve_symbol(const char* name, size_t len) {

@@ -134,6 +134,9 @@ extern "C" {
 }
 
 static bool g_lambda_main_memtrack_shutdown_done = false;
+static bool g_lambda_main_mempool_cleanup_done = false;
+
+extern "C" void log_mem_stage(const char* stage);
 
 static size_t lambda_main_memtrack_shutdown_once(void) {
     if (g_lambda_main_memtrack_shutdown_done) {
@@ -147,11 +150,28 @@ static void lambda_main_memtrack_atexit(void) {
     lambda_main_memtrack_shutdown_once();
 }
 
+static void lambda_main_mempool_cleanup_once(void) {
+    if (g_lambda_main_mempool_cleanup_done) {
+        return;
+    }
+    g_lambda_main_mempool_cleanup_done = true;
+    mempool_cleanup();
+}
+
 static int lambda_main_finish(int ret_code) {
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
     log_finish();
+    MemtrackStats mem_stats = {};
+    memtrack_get_stats(&mem_stats);
+    const char* mem_stages = shell_getenv("VIEW_MEM_STAGES");
+    if (mem_stages && *mem_stages && strcmp(mem_stages, "0") != 0) {
+        fprintf(stderr, "[MEMTRACK_LIVE] bytes=%zu count=%zu\n",
+                mem_stats.current_bytes, mem_stats.current_count);
+    }
     lambda_main_memtrack_shutdown_once();
+    lambda_main_mempool_cleanup_once();
+    log_mem_stage("after-mempool-cleanup");
     return ret_code;
 }
 
@@ -4005,9 +4025,6 @@ int main(int argc, char *argv[]) {
         mem_context_dump_json_file(NULL, mem_dump_path);
         mem_context_report_leaks(NULL);
     }
-
-    // Clean up rpmalloc (release thread and global state)
-    mempool_cleanup();
 
     return lambda_main_finish(ret_code);
 }
