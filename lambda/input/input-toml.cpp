@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "../../lib/str.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
@@ -592,7 +593,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
     }
 
     // Remove underscores and check for float indicators
-    while (*temp && (isdigit(*temp) || *temp == '.' || *temp == 'e' || *temp == 'E' || *temp == '+' || *temp == '-' || *temp == '_')) {
+    while (*temp && (str_char_is_digit(*temp) || *temp == '.' || *temp == 'e' || *temp == 'E' || *temp == '+' || *temp == '-' || *temp == '_')) {
         if (*temp == '.' || *temp == 'e' || *temp == 'E') {
             is_float = true;
         }

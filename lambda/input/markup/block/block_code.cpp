@@ -13,6 +13,7 @@
 #include "../../html_entities.h"
 #include "../../input-utils.h"
 #include "../../../../lib/mem.h"
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -217,7 +218,7 @@ static void extract_language(const char* line, char* lang, size_t lang_size) {
 
     // Extract language identifier
     size_t i = 0;
-    while (*pos && !isspace(*pos) && i < lang_size - 1) {
+    while (*pos && !str_char_is_ascii_space(*pos) && i < lang_size - 1) {
         lang[i++] = *pos++;
     }
     lang[i] = '\0';

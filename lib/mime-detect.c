@@ -3,6 +3,7 @@
 
 #include "mime-detect.h"
 #include "memtrack.h"
+#include "str.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -137,7 +138,7 @@ static const char* detect_subtype(const char* base_type, const char* data, size_
             size_t trimmed_len = data_len;
             
             // Skip leading whitespace
-            while (trimmed_len > 0 && isspace(*trimmed)) {
+            while (trimmed_len > 0 && str_char_is_ascii_space(*trimmed)) {
                 trimmed++;
                 trimmed_len--;
             }

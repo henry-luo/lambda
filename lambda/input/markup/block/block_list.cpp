@@ -16,6 +16,7 @@
 #include <cstdio>
 #include "../../../../lib/mem.h"
 #include "lib/arraylist.h"
+#include "lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -67,9 +68,9 @@ char get_list_marker(const char* line) {
 
     // Check for ordered markers (1., 2., 1), 2), etc.)
     // CommonMark: ordered list numbers must be at most 9 digits
-    if (isdigit(*pos)) {
+    if (str_char_is_digit(*pos)) {
         int digit_count = 0;
-        while (isdigit(*pos)) {
+        while (str_char_is_digit(*pos)) {
             pos++;
             digit_count++;
         }
@@ -128,9 +129,9 @@ static int get_list_item_content_column(const char* line) {
         marker_end_col = col;
     }
     // Check for ordered marker
-    else if (isdigit(*pos)) {
+    else if (str_char_is_digit(*pos)) {
         int digit_count = 0;
-        while (isdigit(*pos)) {
+        while (str_char_is_digit(*pos)) {
             pos++;
             col++;
             digit_count++;
@@ -215,9 +216,9 @@ static bool is_lazy_continuation(const char* line) {
     if ((*p == '-' || *p == '*' || *p == '+') && (*(p+1) == ' ' || *(p+1) == '\t')) {
         return false;
     }
-    if (isdigit(*p)) {
+    if (str_char_is_digit(*p)) {
         const char* dig = p;
-        while (isdigit(*dig)) dig++;
+        while (str_char_is_digit(*dig)) dig++;
         if ((*dig == '.' || *dig == ')') && (*(dig+1) == ' ' || *(dig+1) == '\t' || *(dig+1) == '\0')) {
             return false;
         }
@@ -422,10 +423,10 @@ static int get_ordered_list_start(const char* line) {
     const char* pos = line;
     skip_whitespace(&pos);
 
-    if (!isdigit(*pos)) return 1;
+    if (!str_char_is_digit(*pos)) return 1;
 
     int number = 0;
-    while (isdigit(*pos)) {
+    while (str_char_is_digit(*pos)) {
         number = number * 10 + (*pos - '0');
         pos++;
     }
@@ -460,7 +461,7 @@ static const char* get_list_item_content(const char* line, bool is_ordered) {
 
     if (is_ordered) {
         // Skip digits
-        while (isdigit(*pos)) pos++;
+        while (str_char_is_digit(*pos)) pos++;
         // Skip . or )
         if (*pos == '.' || *pos == ')') pos++;
     } else {

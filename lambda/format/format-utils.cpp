@@ -435,7 +435,7 @@ int get_heading_level(const ElementReader& elem, int default_level) {
     }
 
     // fallback: parse hN tag name (h1, h2, ... h6)
-    if (tag_name && strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
+    if (tag_name && strlen(tag_name) >= 2 && tag_name[0] == 'h' && str_char_is_digit(tag_name[1])) {
         level = tag_name[1] - '0';
         if (level < 1) level = 1;
         if (level > 6) level = 6;

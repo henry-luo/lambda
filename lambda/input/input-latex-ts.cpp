@@ -4,6 +4,7 @@
 #include <tree_sitter/api.h>
 #include "../ts-enum.h"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/strbuf.h"
 // Tree-sitter LaTeX parser
 extern "C" {
@@ -1410,7 +1411,7 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
 
         // Find command name length
         size_t cmd_len = 0;
-        while (cmd_len < len && (isalpha(cmd_start[cmd_len]) || cmd_start[cmd_len] == ',' ||
+        while (cmd_len < len && (str_char_is_alpha(cmd_start[cmd_len]) || cmd_start[cmd_len] == ',' ||
                                   cmd_start[cmd_len] == '!' || cmd_start[cmd_len] == ';' ||
                                   cmd_start[cmd_len] == ':')) {
             cmd_len++;

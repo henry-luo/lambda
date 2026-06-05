@@ -1,6 +1,7 @@
 #include "datetime.h"
 #include "string.h"
 #include "strbuf.h"
+#include "str.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -527,7 +528,7 @@ DateTime* datetime_from_string(Pool* pool, const char* datetime_str) {
     }
 
     /* Try ICS format (YYYYMMDDTHHMMSS or YYYYMMDD) */
-    if (strlen(datetime_str) >= 8 && isdigit(datetime_str[0])) {
+    if (strlen(datetime_str) >= 8 && str_char_is_digit(datetime_str[0])) {
         dt = datetime_parse(pool, datetime_str, DATETIME_PARSE_ICS, NULL);
         if (dt) return dt;
     }

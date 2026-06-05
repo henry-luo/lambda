@@ -59,7 +59,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
     if (strlen(ptr) >= 8) {
         stringbuf_reset(sb);
         for (int i = 0; i < 4; i++) {
-            if (isdigit(*ptr)) {
+            if (str_char_is_digit(*ptr)) {
                 stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map; // Invalid format
@@ -74,7 +74,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
         // Parse month (2 digits)
         stringbuf_reset(sb);
         for (int i = 0; i < 2; i++) {
-            if (isdigit(*ptr)) {
+            if (str_char_is_digit(*ptr)) {
                 stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map;
@@ -89,7 +89,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
         // Parse day (2 digits)
         stringbuf_reset(sb);
         for (int i = 0; i < 2; i++) {
-            if (isdigit(*ptr)) {
+            if (str_char_is_digit(*ptr)) {
                 stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map;
@@ -108,7 +108,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             // Parse hour (2 digits)
             stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
-                if (isdigit(*ptr)) {
+                if (str_char_is_digit(*ptr)) {
                     stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
@@ -123,7 +123,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             // Parse minute (2 digits)
             stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
-                if (isdigit(*ptr)) {
+                if (str_char_is_digit(*ptr)) {
                     stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
@@ -138,7 +138,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             // Parse second (2 digits)
             stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
-                if (isdigit(*ptr)) {
+                if (str_char_is_digit(*ptr)) {
                     stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
@@ -190,7 +190,7 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
 
         // Parse number
         stringbuf_reset(sb);
-        while (isdigit(*ptr)) {
+        while (str_char_is_digit(*ptr)) {
             stringbuf_append_char(sb, *ptr++);
         }
 

@@ -34,7 +34,7 @@ static void format_yaml_string(YamlContext& ctx, String* str) {
         strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || strchr(s, '[') ||
         strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || strchr(s, '|') ||
         strchr(s, '>') || strchr(s, '&') || strchr(s, '*') || strchr(s, '!') ||
-        (len > 0 && (isspace(s[0]) || isspace(s[len-1])))) {
+        (len > 0 && (str_char_is_ascii_space(s[0]) || str_char_is_ascii_space(s[len-1])))) {
         needs_quotes = true;
     }
 

@@ -1,4 +1,5 @@
 #include "input-graph.h"
+#include "../../lib/str.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
@@ -67,7 +68,7 @@ static String* parse_d2_label(InputContext& ctx) {
     }
 
     // trim trailing whitespace
-    while (len > 0 && isspace(start[len - 1])) {
+    while (len > 0 && str_char_is_ascii_space(start[len - 1])) {
         len--;
     }
 

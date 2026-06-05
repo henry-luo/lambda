@@ -25,14 +25,14 @@ static void tokenize_number(const char* input, size_t length, size_t start,
     size_t pos = *pos_ptr;
 
     // parse integer part
-    while (pos < length && isdigit(input[pos])) {
+    while (pos < length && str_char_is_digit(input[pos])) {
         pos++;
     }
 
     // parse decimal part (only if '.' is followed by a digit per CSS spec)
-    if (pos < length && input[pos] == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
+    if (pos < length && input[pos] == '.' && pos + 1 < length && str_char_is_digit(input[pos + 1])) {
         pos++;
-        while (pos < length && isdigit(input[pos])) {
+        while (pos < length && str_char_is_digit(input[pos])) {
             pos++;
         }
     }
@@ -42,8 +42,8 @@ static void tokenize_number(const char* input, size_t length, size_t start,
         size_t exp_start = pos;
         pos++;
         if (pos < length && (input[pos] == '+' || input[pos] == '-')) pos++;
-        if (pos < length && isdigit(input[pos])) {
-            while (pos < length && isdigit(input[pos])) pos++;
+        if (pos < length && str_char_is_digit(input[pos])) {
+            while (pos < length && str_char_is_digit(input[pos])) pos++;
         } else {
             pos = exp_start;  // not a valid exponent, rollback
         }
@@ -54,7 +54,7 @@ static void tokenize_number(const char* input, size_t length, size_t start,
     if (pos < length && input[pos] == '%') {
         pos++;
         token->type = CSS_TOKEN_PERCENTAGE;
-    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_'
+    } else if (pos < length && (str_char_is_alpha(input[pos]) || input[pos] == '_'
                || (unsigned char)input[pos] >= 0x80
                || css_starts_escape(input, length, pos))) {
         size_t unit_start = pos;
@@ -1123,7 +1123,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 break;
             case '+':
                 // Check if this is a signed number
-                if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
+                if (pos + 1 < length && (str_char_is_digit(input[pos + 1]) || input[pos + 1] == '.')) {
                     size_t start = pos;
                     pos++; // Skip sign
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
@@ -1156,13 +1156,13 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     // This will be set by css_token_set_value
                 }
                 // Check if this is a signed number
-                else if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
+                else if (pos + 1 < length && (str_char_is_digit(input[pos + 1]) || input[pos + 1] == '.')) {
                     size_t start = pos;
                     pos++; // Skip sign
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 }
                 // Check for custom property (--foo) or identifier starting with - (e.g., -webkit-transform)
-                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-'
+                else if (pos + 1 < length && (str_char_is_alpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-'
                           || css_starts_escape(input, length, pos + 1))) {
                     // Identifier starting with - or -- (custom property)
                     size_t start = pos;
@@ -1183,16 +1183,16 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 }
                 break;
             default:
-                if (isdigit(ch)) {
+                if (str_char_is_digit(ch)) {
                     // Number or dimension starting with digit
                     size_t start = pos;
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
-                } else if (ch == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
+                } else if (ch == '.' && pos + 1 < length && str_char_is_digit(input[pos + 1])) {
                     // Decimal number starting with . (e.g., .5)
                     size_t start = pos;
                     pos++; // Skip the '.'
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
-                } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))
+                } else if (str_char_is_alpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && str_char_is_alpha(input[pos + 1]))
                            || css_starts_escape(input, length, pos)) {
                     // Identifier or function
                     size_t start = pos;
@@ -1216,7 +1216,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
 
                         // Continue parsing identifier with UTF-8 support
                         while (pos < length) {
-                            if (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_') {
+                            if (str_char_is_alnum(input[pos]) || input[pos] == '-' || input[pos] == '_') {
                                 pos++;
                             } else if (css_starts_escape(input, length, pos)) {
                                 css_consume_escape_seq(input, length, &pos);

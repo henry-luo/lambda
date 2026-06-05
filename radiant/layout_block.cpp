@@ -22,6 +22,7 @@
 
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/str.h"
 #include "../lib/font/font.h"
 #include "../lib/tagged.hpp"
 #include "../lambda/input/input.hpp"
@@ -3346,7 +3347,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
                     const char* p = text->text;
                     int char_count = 0;
                     while (*p) {
-                        if (!isspace(*p)) char_count++;
+                        if (!str_char_is_ascii_space(*p)) char_count++;
                         p++;
                     }
                     // Rough estimate: 8px per character
@@ -3382,7 +3383,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
                             const char* p = text->text;
                             int char_count = 0;
                             while (*p) {
-                                if (!isspace(*p)) char_count++;
+                                if (!str_char_is_ascii_space(*p)) char_count++;
                                 p++;
                             }
                             preceding_content_width += char_count * 8.0f;

@@ -162,7 +162,7 @@ void MarkupEmitter::emit_heading(const ElementReader& elem) {
     String* level_attr = elem.get_string_attr("level");
     if (level_attr && level_attr->len > 0) {
         level = (int)str_to_int64_default(level_attr->chars, strlen(level_attr->chars), 0);
-    } else if (tag_name && tag_name[0] == 'h' && isdigit(tag_name[1])) {
+    } else if (tag_name && tag_name[0] == 'h' && str_char_is_digit(tag_name[1])) {
         level = tag_name[1] - '0';
     }
     if (level < 1) level = 1;

@@ -2,6 +2,7 @@
 #define FORMAT_UTILS_HPP
 
 #include "../../lib/stringbuf.h"
+#include "../../lib/str.h"
 #include "../lambda-data.hpp"
 #include "format-utils.h"
 
@@ -246,7 +247,7 @@ public:
         }
 
         // Check for leading/trailing whitespace
-        if (isspace(s[0]) || isspace(s[len-1])) {
+        if (str_char_is_ascii_space(s[0]) || str_char_is_ascii_space(s[len-1])) {
             return true;
         }
 

@@ -496,7 +496,7 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
                     if (!has_nonprint) {
                         static const char special_chars[] = " \t!\"#$&'()*;<=>?[\\]^`{|}~";
                         for (const char* p2 = str; *p2; p2++) {
-                            if (strchr(special_chars, *p2)) strbuf_append_char(out, '\\');
+                            if (str_char_in_set(*p2, special_chars)) strbuf_append_char(out, '\\');
                             strbuf_append_char(out, *p2);
                         }
                     } else {

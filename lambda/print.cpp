@@ -2,6 +2,7 @@
 #include "lambda-decimal.hpp"
 #include "../lib/lambda_typed.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
 #include "ast.hpp"
@@ -32,7 +33,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, const char* in
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     if (indent > 0) log_enter();
     const char *type = ts_node_type(node);
-    if (isalpha(*type)) {
+    if (str_char_is_alpha(*type)) {
         log_debug("(%s", type);
     } else if (*type == '\'') {
         log_debug("(\"%s\"", type);
@@ -47,7 +48,7 @@ void print_ts_node(const char *source, TSNode node, uint32_t indent) {
             print_ts_node(source, child, indent + 1);
         }
     }
-    else if (isalpha(*type)) {
+    else if (str_char_is_alpha(*type)) {
         int start_byte = ts_node_start_byte(node);
         int end_byte = ts_node_end_byte(node);
         const char* start = source + start_byte;

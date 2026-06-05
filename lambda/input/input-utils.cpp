@@ -175,7 +175,7 @@ bool input_is_whitespace_char(char c) {
 
 bool input_is_empty_line(const char* line) {
     while (*line) {
-        if (!isspace(*line)) return false;
+        if (!str_char_is_ascii_space(*line)) return false;
         line++;
     }
     return true;
@@ -191,13 +191,13 @@ char* input_trim_whitespace(const char* str) {
     if (!str) return NULL;
 
     // find start
-    while (isspace(*str)) str++;
+    while (str_char_is_ascii_space(*str)) str++;
 
     if (*str == '\0') return mem_strdup("", MEM_CAT_INPUT_OTHER);
 
     // find end
     const char* end = str + strlen(str) - 1;
-    while (end > str && isspace(*end)) end--;
+    while (end > str && str_char_is_ascii_space(*end)) end--;
 
     // create trimmed copy
     int len = end - str + 1;

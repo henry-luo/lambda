@@ -5,6 +5,7 @@
 #include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "lib/log.h"
+#include "lib/str.h"
 #include <stdlib.h>
 
 using namespace lambda;
@@ -620,10 +621,10 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
 
 static bool is_digit_or_space_ahead(const char *pdf, int max_lookahead) {
     for (int i = 0; i < max_lookahead && pdf[i]; i++) {
-        if (isdigit(pdf[i]) || pdf[i] == ' ' || pdf[i] == 'R') {
+        if (str_char_is_digit(pdf[i]) || pdf[i] == ' ' || pdf[i] == 'R') {
             return true;
         }
-        if (!isspace(pdf[i])) {
+        if (!str_char_is_ascii_space(pdf[i])) {
             return false;
         }
     }
@@ -1370,7 +1371,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             }
 
             // Try to parse indirect object first (e.g., "1 0 obj")
-            if (isdigit(*pdf)) {
+            if (str_char_is_digit(*pdf)) {
                 const char* saved_pos = pdf;
                 obj = parse_pdf_indirect_object(ctx, &pdf);
                 if (obj .item == ITEM_ERROR) {
@@ -1419,8 +1420,8 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
             if (startxref_pos) {
                 // Parse the xref offset
                 const char* offset_ptr = startxref_pos + 9; // skip "startxref"
-                while (offset_ptr < pdf_file_end && isspace(*offset_ptr)) offset_ptr++;
-                if (offset_ptr < pdf_file_end && isdigit(*offset_ptr)) {
+                while (offset_ptr < pdf_file_end && str_char_is_ascii_space(*offset_ptr)) offset_ptr++;
+                if (offset_ptr < pdf_file_end && str_char_is_digit(*offset_ptr)) {
                     long xref_offset = strtol(offset_ptr, nullptr, 10);
                     log_debug("Found startxref at offset %lld, pointing to xref at %ld\n", 
                               (long long)(startxref_pos - ctx.source()), xref_offset);
@@ -1437,7 +1438,7 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
                                 log_debug("Successfully parsed xref table at offset %ld\n", xref_offset);
                                 
                                 // Look for trailer right after xref
-                                while (xref_parse_pos < pdf_file_end && isspace(*xref_parse_pos)) xref_parse_pos++;
+                                while (xref_parse_pos < pdf_file_end && str_char_is_ascii_space(*xref_parse_pos)) xref_parse_pos++;
                                 log_debug("After xref, looking for trailer at offset %lld, first chars: '%.20s'\n", 
                                           (long long)(xref_parse_pos - ctx.source()), xref_parse_pos);
                                 if ((size_t)(pdf_file_end - xref_parse_pos) >= 7 && 

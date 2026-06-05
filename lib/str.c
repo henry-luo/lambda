@@ -1235,3 +1235,179 @@ size_t str_hex_decode(char* dst, const char* hex, size_t hex_len) {
     }
     return out;
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+ *  17. Scanner tier (NUL-safe parser primitives)
+ * ────────────────────────────────────────────────────────────────────── */
+
+/* 17.1 — NUL-safe character classes */
+
+bool str_char_in_set(char c, const char* chars) {
+    /* NUL is never a member — this is the fix for the strchr(set, '\0') class */
+    if (c == '\0' || !chars) return false;
+    for (; *chars; chars++) {
+        if (*chars == c) return true;
+    }
+    return false;
+}
+
+bool str_char_is_ascii_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+bool str_char_is_line_space(char c) {
+    return c == ' ' || c == '\t';
+}
+
+bool str_char_is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+bool str_char_is_alpha(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool str_char_is_alnum(char c) {
+    return str_char_is_digit(c) || str_char_is_alpha(c);
+}
+
+bool str_char_is_ident(char c) {
+    return str_char_is_alnum(c) || c == '_';
+}
+
+/* 17.2 — Bounded scanners (the default tier) */
+
+const char* strn_skip_chars(const char* p, const char* end, const char* chars) {
+    if (!p) return p;
+    while (p < end && str_char_in_set(*p, chars)) p++;
+    return p;
+}
+
+const char* strn_skip_line_space(const char* p, const char* end) {
+    if (!p) return p;
+    while (p < end && str_char_is_line_space(*p)) p++;
+    return p;
+}
+
+const char* strn_skip_ascii_space(const char* p, const char* end) {
+    if (!p) return p;
+    while (p < end && str_char_is_ascii_space(*p)) p++;
+    return p;
+}
+
+const char* strn_skip_digits(const char* p, const char* end) {
+    if (!p) return p;
+    while (p < end && str_char_is_digit(*p)) p++;
+    return p;
+}
+
+const char* strn_scan_until_char(const char* p, const char* end, char stop) {
+    if (!p) return p;
+    while (p < end && *p != stop) p++;
+    return p;
+}
+
+const char* strn_scan_until_any(const char* p, const char* end, const char* stops) {
+    if (!p) return p;
+    while (p < end && !str_char_in_set(*p, stops)) p++;
+    return p;
+}
+
+const char* strn_scan_to_line_end(const char* p, const char* end) {
+    if (!p) return p;
+    while (p < end && *p != '\n' && *p != '\r') p++;
+    return p;
+}
+
+size_t strn_count_run(const char* p, const char* end, char marker) {
+    if (!p || marker == '\0') return 0;
+    size_t n = 0;
+    while (p + n < end && p[n] == marker) n++;
+    return n;
+}
+
+/* 17.3 — NUL-terminated scanners (convenience exception) */
+
+const char* str_skip_chars(const char* p, const char* chars) {
+    if (!p) return p;
+    while (str_char_in_set(*p, chars)) p++;
+    return p;
+}
+
+const char* str_skip_line_space(const char* p) {
+    if (!p) return p;
+    while (str_char_is_line_space(*p)) p++;
+    return p;
+}
+
+const char* str_skip_ascii_space(const char* p) {
+    if (!p) return p;
+    while (str_char_is_ascii_space(*p)) p++;
+    return p;
+}
+
+const char* str_skip_digits(const char* p) {
+    if (!p) return p;
+    while (str_char_is_digit(*p)) p++;
+    return p;
+}
+
+const char* str_scan_until_char(const char* p, char stop) {
+    if (!p) return p;
+    while (*p && *p != stop) p++;
+    return p;
+}
+
+const char* str_scan_until_any(const char* p, const char* stops) {
+    if (!p) return p;
+    while (*p && !str_char_in_set(*p, stops)) p++;
+    return p;
+}
+
+const char* str_scan_to_line_end(const char* p) {
+    if (!p) return p;
+    while (*p && *p != '\n' && *p != '\r') p++;
+    return p;
+}
+
+size_t str_count_run(const char* p, size_t max_len, char marker) {
+    if (!p || marker == '\0') return 0;
+    size_t n = 0;
+    if (max_len == 0) {
+        while (p[n] == marker) n++;       /* NUL-terminated mode; '\0' != marker stops */
+    } else {
+        while (n < max_len && p[n] == marker) n++;
+    }
+    return n;
+}
+
+/* 17.4 — Cursor */
+
+bool str_cursor_at_end(const StrCursor* c) {
+    return !c || c->p >= c->end;
+}
+
+char str_cursor_peek(const StrCursor* c) {
+    return str_cursor_at_end(c) ? '\0' : *c->p;
+}
+
+void str_cursor_skip_line_space(StrCursor* c) {
+    if (!c) return;
+    c->p = strn_skip_line_space(c->p, c->end);
+}
+
+void str_cursor_skip_ascii_space(StrCursor* c) {
+    if (!c) return;
+    c->p = strn_skip_ascii_space(c->p, c->end);
+}
+
+size_t str_cursor_count_run(StrCursor* c, char marker) {
+    if (!c) return 0;
+    size_t n = strn_count_run(c->p, c->end, marker);
+    c->p += n;
+    return n;
+}
+
+const char* str_cursor_mark(const StrCursor* c) {
+    return c ? c->p : NULL;
+}

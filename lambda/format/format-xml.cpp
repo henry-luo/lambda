@@ -42,7 +42,7 @@ static void format_xml_string(XmlContext& ctx, String* str, bool is_attribute = 
             break;
         case '&':
             // Check if this is already an entity reference
-            if (i + 1 < len && (s[i + 1] == '#' || isalpha(s[i + 1]))) {
+            if (i + 1 < len && (s[i + 1] == '#' || str_char_is_alpha(s[i + 1]))) {
                 // Look for closing semicolon
                 size_t j = i + 1;
                 while (j < len && s[j] != ';' && s[j] != ' ' && s[j] != '<' && s[j] != '&') {
