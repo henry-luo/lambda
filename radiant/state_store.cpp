@@ -2305,6 +2305,10 @@ void state_set_bool(DocState* state, void* node, const char* name, bool value) {
 
 bool form_control_get_checked(DocState* state, View* view) {
     if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    if (elem && elem->live_checkedness_dirty) {
+        return elem->live_checkedness;
+    }
 
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.checked != 0;
@@ -2313,6 +2317,11 @@ bool form_control_get_checked(DocState* state, View* view) {
 
 void form_control_set_checked(DocState* state, View* view, bool checked) {
     if (!view || !view->is_element()) return;
+    DomElement* elem = lam::dom_require_element(view);
+    if (elem) {
+        elem->live_checkedness_dirty = true;
+        elem->live_checkedness = checked;
+    }
 
     FormControlProp* form = form_prop_for_view(view);
     ViewState* view_state = form_view_state_get_or_create(state, view, form);

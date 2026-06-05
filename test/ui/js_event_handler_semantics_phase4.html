@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Phase 4 event handler semantics</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  button { margin-right: 8px; padding: 6px 10px; }
+  #log { margin-top: 12px; font-family: monospace; }
+</style>
+<script>
+  function appendLog(part) {
+    var log = document.getElementById('log');
+    log.textContent = log.textContent ? log.textContent + '|' + part : part;
+  }
+
+  function inlineHandler(ev) {
+    appendLog('inline-this-' + (this && this.id));
+    appendLog('inline-event-' + (ev && ev.type) + '-' + (event && event.target && event.target.id));
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var prop = document.getElementById('prop');
+    prop.onclick = function (ev) {
+      appendLog('prop-this-' + (this && this.id));
+      appendLog('prop-event-' + (ev && ev.currentTarget && ev.currentTarget.id));
+    };
+
+    var cancel = document.getElementById('cancel');
+    cancel.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      appendLog('listener-prevented-' + ev.defaultPrevented);
+    });
+    cancel.onclick = function (ev) {
+      appendLog('property-sees-prevented-' + ev.defaultPrevented);
+    };
+  });
+</script>
+</head>
+<body>
+  <button id="inline" onclick="inlineHandler.call(this, event)">Inline</button>
+  <button id="prop">Property</button>
+  <button id="cancel">Cancel</button>
+  <div id="log"></div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Phase 4 dynamic event handlers</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  button, label { display: block; margin: 8px 0; }
+  #inline-log, #dynamic-log { margin-top: 8px; font-family: monospace; }
+</style>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var dynamicBox = document.getElementById('dynamic-cancel');
+    document.getElementById('install-dynamic').onclick = function () {
+      dynamicBox.setAttribute(
+        'onclick',
+        "document.getElementById('dynamic-log').textContent = 'dynamic-' + this.id + '-' + event.type; return false;"
+      );
+      document.getElementById('dynamic-log').textContent = 'installed';
+    };
+    document.getElementById('remove-dynamic').onclick = function () {
+      dynamicBox.removeAttribute('onclick');
+      document.getElementById('dynamic-log').textContent = 'removed';
+    };
+  });
+</script>
+</head>
+<body>
+  <label>
+    <input id="inline-cancel" type="checkbox" onclick="document.getElementById('inline-log').textContent = 'inline-' + this.id + '-' + event.type; return false">
+    Inline return false
+  </label>
+  <div id="inline-log">idle</div>
+
+  <button id="install-dynamic">Install dynamic handler</button>
+  <button id="remove-dynamic">Remove dynamic handler</button>
+  <label>
+    <input id="dynamic-cancel" type="checkbox">
+    Dynamic return false
+  </label>
+  <div id="dynamic-log">idle</div>
+</body>
+</html>

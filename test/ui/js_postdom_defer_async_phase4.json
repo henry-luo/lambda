@@ -1,0 +1,15 @@
+{
+  "name": "JS Phase 4: tasks-postdom defer and async ordering",
+  "html": "test/ui/js_postdom_defer_async_phase4.html",
+  "description": "Covers the default tasks-postdom scheduler: normal classics run first, defer scripts preserve order before DOMContentLoaded, ready async scripts run after DOMContentLoaded and before window load.",
+  "events": [
+    {"type": "log", "message": "=== js_postdom_defer_async_phase4 ==="},
+    {"type": "wait", "ms": 200},
+    {
+      "type": "assert_text",
+      "target": {"selector": "#result"},
+      "equals": "normal-after-ext-tags|defer-a|defer-b|dom|async|load",
+      "assert_timeout": 1000
+    }
+  ]
+}

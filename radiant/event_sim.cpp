@@ -3161,8 +3161,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 DocState* state = (DocState*)uicon->document->state;
                 bool is_checked_now = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
                 if (is_checked_now == was_checked) {
-                    // State didn't change — coordinate click missed the element
-                    if (state && !state_get_pseudo_state(state, form_elem, PSEUDO_STATE_DISABLED)) {
+                    bool has_inline_click_handler = false;
+                    if (form_elem->is_element()) {
+                        DomElement* elem = lam::dom_require_element(form_elem);
+                        has_inline_click_handler = dom_element_has_attribute(elem, "onclick");
+                    }
+                    // State didn't change — coordinate click may have missed the
+                    // element. Do not synthesize a fallback toggle when an inline
+                    // click handler is present; `return false` intentionally keeps
+                    // checkbox/radio state unchanged.
+                    if (!has_inline_click_handler && state &&
+                        !state_get_pseudo_state(state, form_elem, PSEUDO_STATE_DISABLED)) {
                         sim_toggle_checkbox_radio(form_elem, state);
                     }
                 }

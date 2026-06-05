@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Phase 4 script lifecycle</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #result { padding: 8px; border: 1px solid #999; }
+</style>
+<script>
+  window.phase4Order = [];
+  window.phase4Value = 'first';
+  document.addEventListener('readystatechange', function () {
+    window.phase4Order.push('rs-' + document.readyState);
+  });
+  document.addEventListener('DOMContentLoaded', function () {
+    window.phase4Order.push('dom-' + window.phase4Value);
+  });
+  window.addEventListener('load', function () {
+    window.phase4Order.push('load-listener');
+  });
+  window.onload = function () {
+    window.phase4Order.push('onload-prop');
+    document.getElementById('result').textContent = window.phase4Order.join('|');
+  };
+</script>
+<script>
+  if (window.phase4Value !== 'first') {
+    throw new Error('global value was not shared');
+  }
+  window.phase4Value = 'second';
+  window.phase4Order.push('second-script');
+</script>
+<script>
+  window.phase4Order.push('throws-before');
+  throw new Error('intentional phase4 lifecycle test exception');
+</script>
+<script>
+  window.phase4Order.push('after-throw-' + window.phase4Value);
+</script>
+<script defer>
+  window.phase4Order.push('defer-' + window.phase4Value);
+</script>
+</head>
+<body onload="window.phase4Order.push('body-onload')">
+  <div id="result">pending</div>
+</body>
+</html>

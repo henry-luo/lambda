@@ -1513,12 +1513,20 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     // handler was set first).
     if (has_on && !_STOP_IMM) {
         Item args[1] = { event };
-        js_call_function(on_handler, target_item, args, 1);
+        Item on_result = js_call_function(on_handler, target_item, args, 1);
         if (js_check_exception()) {
             // Report and swallow — dispatch must continue.
             Item err = js_clear_exception();
             log_error("event handler (on%s) threw an exception", type);
             report_exception_to_window_onerror(err, type);
+        }
+        if (!js_check_exception() && get_type_id(on_result) == LMD_TYPE_BOOL && !it2b(on_result)) {
+            Item cancelable = js_property_get(event, (Item){.item = s2it(heap_create_name("cancelable"))});
+            if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
+                event_set_bool(event, "__default_prevented", true);
+                event_set_bool(event, "defaultPrevented", true);
+                event_set_bool(event, "returnValue", false);
+            }
         }
     }
 

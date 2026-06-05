@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Phase 4 post-DOM module policy</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #result { padding: 8px; border: 1px solid #999; }
+</style>
+<script>
+  window.modulePolicyOrder = [];
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('result').textContent = window.modulePolicyOrder.join('|');
+  });
+</script>
+<script type="module">
+  window.modulePolicyOrder.push('module');
+</script>
+<script nomodule>
+  window.modulePolicyOrder.push('nomodule');
+</script>
+</head>
+<body>
+  <div id="result">pending</div>
+</body>
+</html>

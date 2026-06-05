@@ -1,0 +1,15 @@
+{
+  "name": "JS Phase 4: tasks-postdom module policy",
+  "html": "test/ui/js_postdom_module_policy_phase4.html",
+  "description": "Covers the default module policy: module scripts remain unsupported/skipped until graph semantics are implemented, and nomodule classics still execute.",
+  "events": [
+    {"type": "log", "message": "=== js_postdom_module_policy_phase4 ==="},
+    {"type": "wait", "ms": 200},
+    {
+      "type": "assert_text",
+      "target": {"selector": "#result"},
+      "equals": "nomodule",
+      "assert_timeout": 1000
+    }
+  ]
+}
