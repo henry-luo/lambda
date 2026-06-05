@@ -335,15 +335,10 @@ MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
 // Calls heap_create_name(chars) -> String*, then boxes with s2it
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
     // Intern the string at transpile time (handles embedded NUL bytes correctly).
-    // For module compilation the string constant is baked into JIT code and
-    // accessed at RUNTIME (after js_transpiler_destroy has freed mt->tp->name_pool).
-    // Use context->name_pool (the persistent JS eval-context pool, created in
-    // load_js_module and never freed) so the String* pointer remains valid.
-    // Same applies to with-preamble mode (event handler compilation): the handler
-    // functions are invoked long after the transpiler is destroyed.
-    bool use_persistent_pool = (mt->is_module || mt->preamble_entries != nullptr)
-                               && context && context->name_pool;
-    NamePool* np = use_persistent_pool ? context->name_pool : mt->tp->name_pool;
+    // The boxed Item is baked into JIT code as a raw String* constant. That code
+    // can run after compilation from nested functions, timers, event handlers, or
+    // the synthetic WPT onload path, so the literal must outlive the transpiler.
+    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
     String* interned = name_pool_create_len(np, str, len);
     // Box directly: the interned String* is already a valid heap pointer
     // Use s2it(interned) as a compile-time constant Item value

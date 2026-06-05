@@ -8629,16 +8629,48 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
             }
             if (recv_type == LMD_TYPE_MAP) {
-                // Fallback: dispatch through js_map_method which handles
-                // collections (Map/Set) and falls back to property access + call
-                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
+                // MAP covers ordinary objects, typed arrays, and DOM wrappers.
+                // Keep this fast path semantically aligned with the runtime
+                // cascade below: typed arrays use map dispatch, DOM wrappers
+                // use the DOM method dispatcher, and plain maps fall back to
+                // js_map_method.
+                MIR_reg_t result = jm_new_reg(mt, "mapmcall", MIR_T_I64);
+                MIR_label_t l_map_dom = jm_new_label(mt);
+                MIR_label_t l_map_fallback = jm_new_label(mt);
+                MIR_label_t l_map_end = jm_new_label(mt);
+
+                MIR_reg_t is_ta = jm_emit_uext8(mt, jm_call_1(mt, "js_is_typed_array", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_map_fallback),
+                    MIR_new_reg_op(mt->ctx, is_ta)));
+
+                MIR_reg_t is_dom = jm_emit_uext8(mt, jm_call_1(mt, "js_is_dom_node", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_map_dom),
+                    MIR_new_reg_op(mt->ctx, is_dom)));
+
+                jm_emit_label(mt, l_map_fallback);
+                MIR_reg_t map_r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, map_r)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_map_end)));
+
+                jm_emit_label(mt, l_map_dom);
+                MIR_reg_t dom_r = jm_call_4(mt, "js_dom_element_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, dom_r)));
+                jm_emit_label(mt, l_map_end);
                 jm_emit_exc_propagate_check(mt);
                 jm_readback_closure_env(mt);
-                return r;
+                return result;
             }
 
             // Runtime type dispatch cascade (when receiver type unknown)

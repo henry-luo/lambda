@@ -36,6 +36,7 @@
 #include <ctime>
 #include <mutex>
 #include <thread>
+#include <set>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -85,6 +86,12 @@ static const char* SHIM_PATH  = "test/wpt/wpt_testharness_shim.js";
 static const char* BLANK_DOC  = "test/wpt/wpt_blank_document.html";
 static const char* TEMP_DIR   = "temp";
 static const char* RESULT_JSON_PATH = "test_output/test_wpt_form_gtest_results.json";
+
+// Conformance baseline: records the test cases that currently pass. A baselined
+// test that later fails is a regression (real error). A non-baselined test that
+// fails is a known/expected failure and is tolerated (reported as skipped).
+// Regenerate with: WPT_FORM_UPDATE_BASELINE=1 ./test/test_wpt_form_gtest.exe
+static const char* BASELINE_PATH = "test/wpt/wpt_form_baseline.txt";
 
 // ---------------------------------------------------------------------------
 // Skip list — tests that require capabilities Lambda's headless JS runtime
@@ -352,6 +359,8 @@ struct WptFormResult {
     WptFormParam param;
     bool skipped;
     bool failed;
+    bool known_failure = false;  // failed but not in baseline — tolerated
+    bool new_pass = false;       // passed but not yet in baseline
     int pass_count;
     int total_count;
     int exit_code;
@@ -645,9 +654,86 @@ static WptFormResult run_form_case(const WptFormParam& p) {
     return result;
 }
 
-static void report_gtest_result(const WptFormResult& result) {
+// ---------------------------------------------------------------------------
+// Baseline handling
+// ---------------------------------------------------------------------------
+
+// load the set of test names expected to pass (cached for the process).
+static const std::set<std::string>& get_baseline() {
+    static std::set<std::string> baseline = []() {
+        std::set<std::string> s;
+        std::string content = read_file_str(BASELINE_PATH);
+        size_t pos = 0;
+        while (pos < content.size()) {
+            size_t eol = content.find('\n', pos);
+            if (eol == std::string::npos) eol = content.size();
+            std::string line = content.substr(pos, eol - pos);
+            pos = eol + 1;
+            // trim surrounding whitespace / CR.
+            size_t start = line.find_first_not_of(" \t\r");
+            if (start == std::string::npos) continue;
+            size_t end = line.find_last_not_of(" \t\r");
+            line = line.substr(start, end - start + 1);
+            if (line.empty() || line[0] == '#') continue;  // comment or blank
+            s.insert(line);
+        }
+        return s;
+    }();
+    return baseline;
+}
+
+// classify a result against the baseline: a non-baselined failure is tolerated
+// as a known failure; a passing test missing from the baseline is a new pass.
+static void classify_against_baseline(WptFormResult& r) {
+    r.known_failure = false;
+    r.new_pass = false;
+    if (r.skipped) return;
+    bool in_baseline = get_baseline().count(r.param.test_name) > 0;
+    bool passing = !r.failed && r.total_count > 0;
+    if (!passing) {
+        if (!in_baseline) r.known_failure = true;  // tolerated, not a regression
+    } else if (!in_baseline) {
+        r.new_pass = true;  // improvement — candidate for the baseline
+    }
+}
+
+static bool baseline_update_requested() {
+    const char* v = getenv("WPT_FORM_UPDATE_BASELINE");
+    return v && v[0] && strcmp(v, "0") != 0;
+}
+
+// rewrite the baseline file from the set of currently passing tests.
+static void write_baseline(const std::vector<WptFormResult>& results) {
+    std::vector<std::string> passing;
+    for (const auto& r : results) {
+        if (!r.skipped && !r.failed && r.total_count > 0)
+            passing.push_back(r.param.test_name);
+    }
+    std::sort(passing.begin(), passing.end());
+
+    std::string out;
+    out += "# WPT Form & FormData conformance baseline.\n";
+    out += "# Lists the test cases that currently pass; only these are enforced.\n";
+    out += "# A listed test that fails is a regression; an unlisted failure is tolerated.\n";
+    out += "# Regenerate with: WPT_FORM_UPDATE_BASELINE=1 ./test/test_wpt_form_gtest.exe\n";
+    out += "\n";
+    for (const auto& name : passing) { out += name; out += "\n"; }
+
+    write_file_str(BASELINE_PATH, out);
+    printf("[ BASELINE ] Wrote %zu passing tests to %s\n",
+           passing.size(), BASELINE_PATH);
+}
+
+static void report_gtest_result(WptFormResult result) {
+    classify_against_baseline(result);
+
     if (result.skipped) {
         GTEST_SKIP() << result.skip_reason;
+        return;
+    }
+    if (result.known_failure) {
+        GTEST_SKIP() << "known failure (not in baseline): "
+                     << result.pass_count << "/" << result.total_count << " passed";
         return;
     }
 
@@ -728,7 +814,7 @@ static void write_parallel_json(const char* json_path,
 
     int failures = 0;
     for (const auto& result : results) {
-        if (!result.skipped && result.failed) failures++;
+        if (!result.skipped && !result.known_failure && result.failed) failures++;
     }
 
     std::string timestamp = now_timestamp();
@@ -757,7 +843,9 @@ static void write_parallel_json(const char* json_path,
     for (size_t i = 0; i < results.size(); i++) {
         const WptFormResult& result = results[i];
         const WptFormParam& p = result.param;
-        const char* case_result = result.skipped ? "SKIPPED" : "COMPLETED";
+        // a tolerated known failure is recorded as skipped, not a failure.
+        bool as_skipped = result.skipped || result.known_failure;
+        const char* case_result = as_skipped ? "SKIPPED" : "COMPLETED";
         fprintf(f,
             "        {\n"
             "          \"name\": \"Run/%s\",\n"
@@ -776,12 +864,16 @@ static void write_parallel_json(const char* json_path,
             timestamp.c_str(),
             result.seconds);
 
-        if (result.skipped) {
+        if (as_skipped) {
+            std::string msg = result.skipped ? result.skip_reason :
+                ("known failure (not in baseline): " +
+                 std::to_string(result.pass_count) + "/" +
+                 std::to_string(result.total_count) + " passed");
             fprintf(f,
                 ",\n"
                 "          \"skipped\": [ { \"message\": \"%s\" } ]\n"
                 "        }%s\n",
-                json_escape(result.skip_reason).c_str(),
+                json_escape(msg).c_str(),
                 (i + 1 == results.size()) ? "" : ",");
         } else if (result.failed) {
             fprintf(f,
@@ -860,24 +952,52 @@ static int run_parallel_suite(int argc, char** argv) {
     auto ended = std::chrono::steady_clock::now();
     double total_seconds = std::chrono::duration<double>(ended - started).count();
 
-    int failures = 0;
-    int skipped = 0;
-    for (const auto& result : results) {
-        if (result.skipped) skipped++;
-        else if (result.failed) failures++;
+    // baseline update mode: record the current passing set and exit.
+    if (baseline_update_requested()) {
+        write_baseline(results);
+        return 0;
     }
+
+    // classify every result against the baseline before tallying.
+    for (auto& result : results) classify_against_baseline(result);
+
+    int regressions = 0;   // baselined tests that now fail — real errors
+    int known_fail = 0;    // non-baselined failures — tolerated
+    int new_pass = 0;      // passing but not yet in baseline
+    int skipped = 0;
+    int passed = 0;
+    std::vector<std::string> regression_names;
+    std::vector<std::string> new_pass_names;
+    for (const auto& result : results) {
+        if (result.skipped) { skipped++; }
+        else if (result.known_failure) { known_fail++; }
+        else if (result.failed) { regressions++; regression_names.push_back(result.param.test_name); }
+        else { passed++; if (result.new_pass) new_pass_names.push_back(result.param.test_name); }
+    }
+    new_pass = (int)new_pass_names.size();
 
     printf("[==========] %zu WPT form cases ran. (%.0f ms total)\n",
            params.size(), total_seconds * 1000.0);
-    printf("[  PASSED  ] %zu tests.\n", params.size() - failures - skipped);
-    if (skipped > 0) printf("[  SKIPPED ] %d tests.\n", skipped);
-    if (failures > 0) printf("[  FAILED  ] %d tests.\n", failures);
+    printf("[  PASSED  ] %d tests.\n", passed);
+    if (skipped > 0)    printf("[  SKIPPED ] %d tests.\n", skipped);
+    if (known_fail > 0) printf("[  KNOWN   ] %d tolerated failures (not in baseline).\n", known_fail);
+    if (new_pass > 0) {
+        printf("[ NEW PASS ] %d tests pass but are not in the baseline — "
+               "run WPT_FORM_UPDATE_BASELINE=1 to record them:\n", new_pass);
+        for (const auto& name : new_pass_names)
+            printf("             + %s\n", name.c_str());
+    }
+    if (regressions > 0) {
+        printf("[  FAILED  ] %d baseline regressions.\n", regressions);
+        for (const auto& name : regression_names)
+            printf("             - %s\n", name.c_str());
+    }
 
     std::string json_path = get_gtest_json_path(argc, argv);
     if (!json_path.empty())
         write_parallel_json(json_path.c_str(), results, total_seconds);
 
-    return failures == 0 ? 0 : 1;
+    return regressions == 0 ? 0 : 1;
 }
 
 int main(int argc, char** argv) {

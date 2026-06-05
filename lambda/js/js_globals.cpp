@@ -5330,6 +5330,14 @@ static Item js_instanceof_impl(Item left, Item right, bool skip_symbol) {
             Item name_item = (Item){.item = s2it(fp->name)};
             return js_instanceof_classname(left, name_item);
         }
+        {
+            Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+            Item name_item = js_property_get(right, class_key);
+            if (js_check_exception()) return ItemNull;
+            if (get_type_id(name_item) == LMD_TYPE_STRING) {
+                return js_instanceof_classname(left, name_item);
+            }
+        }
         return (Item){.item = b2it(false)};
     }
 

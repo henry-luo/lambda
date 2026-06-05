@@ -22,6 +22,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
 extern "C" Item js_private_property_set(Item object, Item key, Item value);
 extern "C" Item js_private_property_set_strict(Item object, Item key, Item value);
+extern "C" void js_dom_collection_before_property_get(Item object, Item key);
+extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_number_wrapper(Item arg);
 extern "C" Item js_new_boolean_wrapper(Item arg);
 extern "C" Item js_new_string_wrapper(Item arg);
@@ -3709,6 +3711,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             key = js_to_property_key(key);
             if (js_check_exception()) return make_js_undefined();
         }
+        js_dom_collection_before_property_get(object, key);
         // Array index access
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -5010,6 +5013,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             key = js_to_property_key(key);
             if (js_check_exception()) return value;
         }
+        js_dom_options_collection_before_property_set(object, key, value);
         // Handle arr.length = newLength (resize array)
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -17009,6 +17013,26 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_get_prototype_value(void);
 extern "C" Item js_dom_selection_get_prototype_value(void);
+extern "C" bool js_doc_has_browsing_context(void* doc);
+
+static Item js_call_foreign_window_global_method(Item obj, void* foreign,
+                                                 Item method_name, Item* args, int argc) {
+    if (!foreign) return ItemNull;
+    if (!js_doc_has_browsing_context(foreign)) return ItemNull;
+    Item fn = js_get_global_property(method_name);
+    if (get_type_id(fn) != LMD_TYPE_FUNC) return ItemNull;
+
+    Item global = js_get_global_this();
+    Item window_key = (Item){.item = s2it(heap_create_name("window", 6))};
+    Item old_window = js_property_get(global, window_key);
+
+    void* prev_doc = js_dom_swap_active_document(foreign);
+    js_property_set(global, window_key, obj);
+    Item result = js_call_function(fn, obj, args, argc);
+    js_property_set(global, window_key, old_window);
+    js_dom_restore_active_document(prev_doc);
+    return result;
+}
 
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Document proxy methods (getElementById, querySelector, createElement, ...).
@@ -17020,6 +17044,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             void* prev = js_dom_swap_active_document(foreign);
             Item r = js_document_proxy_method(method_name, args, argc);
             js_dom_restore_active_document(prev);
+            if (r.item == ItemNull.item && !js_check_exception()) {
+                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
+                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            }
             return r;
         }
         return js_document_proxy_method(method_name, args, argc);
@@ -17065,6 +17093,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             void* prev = js_dom_swap_active_document(foreign);
             Item r = js_document_proxy_method(method_name, args, argc);
             js_dom_restore_active_document(prev);
+            if (r.item == ItemNull.item && !js_check_exception()) {
+                Item fallback = js_call_foreign_window_global_method(obj, foreign, method_name, args, argc);
+                if (fallback.item != ItemNull.item || js_check_exception()) return fallback;
+            }
             return r;
         }
         return js_document_proxy_method(method_name, args, argc);

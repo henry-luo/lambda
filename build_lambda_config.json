@@ -3718,7 +3718,7 @@
                     },
                     {
                         "source": "test/test_js_coerce_gtest.cpp",
-                        "name": "JS Coercion Kernel Tests (J39-1 ToPrimitive)",
+                        "name": "JS Coercion Kernel Tests",
                         "dependencies": [],
                         "binary": "test_js_coerce_gtest.exe",
                         "libraries": [
