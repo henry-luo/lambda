@@ -752,23 +752,23 @@ function displayResults(config, results) {
         const if_ = inputResults.total_failed;
         const it = ip + if_;
         const inputStatus = if_ === 0 ? '✅ PASS' : '❌ FAIL';
-        console.log(`   📥 Input Parser Tests ${inputStatus} (${ip}/${it} tests)`);
+        console.log(`📥 Input Parser Tests ${inputStatus} (${ip}/${it} tests)`);
         for (let i = 0; i < inputResults.suites.length; i++) {
             const s = inputResults.suites[i];
             const st = s.passed + s.failed;
             const ss = s.failed === 0 ? '✅ PASS' : '❌ FAIL';
-            const prefix = i < inputResults.suites.length - 1 ? '├' : '└';
-            console.log(` ${prefix}📄 ${ss} (${s.passed}/${st} tests) ${s.name}`);
+            const prefix = i < inputResults.suites.length - 1 ? '├─' : '└─';
+            console.log(` ${prefix}${ss} (${s.passed}/${st} tests) ${s.name}`);
         }
     }
 
     // Print lambda/runtime suite results
     for (const { suite, suitePassed, suiteFailed, suiteTotal, suiteDurationMs } of suiteResults) {
         const suiteStatus = suiteFailed === 0 ? '✅ PASS' : '❌ FAIL';
-        console.log(`   ${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests, ${formatDuration(suiteDurationMs)})`);
+        console.log(`${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests, ${formatDuration(suiteDurationMs)})`);
 
         for (const t of suite.tests) {
-            console.log(` └${t.icon} ${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${t.baseName}.exe)`);
+            console.log(` └─${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${t.baseName}.exe)`);
         }
     }
 
