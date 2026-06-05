@@ -1,0 +1,27 @@
+{
+  "name": "JS Phase 4: dynamic event handler mutation",
+  "html": "test/ui/js_event_handler_dynamic_phase4.html",
+  "description": "Covers inline return false default prevention, dynamic setAttribute('onclick', ...), and removeAttribute('onclick').",
+  "events": [
+    {"type": "log", "message": "=== js_event_handler_dynamic_phase4 ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "assert_checked", "target": {"selector": "#inline-cancel"}, "checked": false},
+    {"type": "click", "target": {"selector": "#inline-cancel"}},
+    {"type": "assert_text", "target": {"selector": "#inline-log"}, "equals": "inline-inline-cancel-click", "assert_timeout": 1000},
+    {"type": "assert_checked", "target": {"selector": "#inline-cancel"}, "checked": false},
+
+    {"type": "click", "target": {"selector": "#install-dynamic"}},
+    {"type": "assert_text", "target": {"selector": "#dynamic-log"}, "equals": "installed", "assert_timeout": 1000},
+    {"type": "assert_checked", "target": {"selector": "#dynamic-cancel"}, "checked": false},
+    {"type": "click", "target": {"selector": "#dynamic-cancel"}},
+    {"type": "assert_text", "target": {"selector": "#dynamic-log"}, "equals": "dynamic-dynamic-cancel-click", "assert_timeout": 1000},
+    {"type": "assert_checked", "target": {"selector": "#dynamic-cancel"}, "checked": false},
+
+    {"type": "click", "target": {"selector": "#remove-dynamic"}},
+    {"type": "assert_text", "target": {"selector": "#dynamic-log"}, "equals": "removed", "assert_timeout": 1000},
+    {"type": "click", "target": {"selector": "#dynamic-cancel"}},
+    {"type": "assert_text", "target": {"selector": "#dynamic-log"}, "equals": "removed", "assert_timeout": 1000},
+    {"type": "assert_checked", "target": {"selector": "#dynamic-cancel"}, "checked": true}
+  ]
+}

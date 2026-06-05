@@ -76,6 +76,7 @@ void apply_inline_styles_to_tree(DomElement* root, Element* html_root, Pool* poo
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
+static void clear_cascaded_styles_recursive(DomNode* node);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -3541,6 +3542,434 @@ static void clear_dom_view_pool_pointers(DomNode* node) {
 /**
  * Post-handler rebuild: after JS handler mutates DOM, re-cascade CSS and relayout.
  */
+#ifndef NDEBUG
+static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
+    switch (kind) {
+        case DOM_JS_MUTATION_CHILD_INSERT: return "child-insert";
+        case DOM_JS_MUTATION_CHILD_REMOVE: return "child-remove";
+        case DOM_JS_MUTATION_TEXT: return "text";
+        case DOM_JS_MUTATION_ATTRIBUTE: return "attribute";
+        case DOM_JS_MUTATION_STYLE: return "style";
+        case DOM_JS_MUTATION_TREE_REPLACE: return "tree-replace";
+        case DOM_JS_MUTATION_STYLE_REPAINT: return "style-repaint";
+        case DOM_JS_MUTATION_UNKNOWN:
+        default: return "unknown";
+    }
+}
+#endif
+
+static void dom_js_mutation_reset_records(DomDocument* doc) {
+    if (!doc) return;
+    doc->js_mutation_count = 0;
+    doc->js_mutation_sequence = 0;
+    doc->js_mutation_kind_mask = 0;
+    doc->js_mutation_record_count = 0;
+    doc->js_mutation_record_overflow = 0;
+}
+
+#ifndef NDEBUG
+static bool dom_js_mutation_kind_seen(DomDocument* doc, DomJsMutationKind kind) {
+    if (!doc) return false;
+    uint32_t slot = (uint32_t)kind;
+    if (slot >= 31) slot = 0;
+    return (doc->js_mutation_kind_mask & (1u << slot)) != 0;
+}
+#endif
+
+static void dom_js_mutation_log_records(DomDocument* doc) {
+#ifndef NDEBUG
+    if (!doc) return;
+
+    log_info("html handler mutations: count=%d records=%d overflow=%d kinds=[insert:%d remove:%d text:%d attr:%d style:%d style_repaint:%d tree:%d unknown:%d]",
+             doc->js_mutation_count,
+             doc->js_mutation_record_count,
+             doc->js_mutation_record_overflow,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_INSERT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_CHILD_REMOVE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TEXT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_ATTRIBUTE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_STYLE_REPAINT) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_TREE_REPLACE) ? 1 : 0,
+             dom_js_mutation_kind_seen(doc, DOM_JS_MUTATION_UNKNOWN) ? 1 : 0);
+
+    int limit = doc->js_mutation_record_count < 8 ? doc->js_mutation_record_count : 8;
+    for (int i = 0; i < limit; i++) {
+        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+        log_debug("html handler mutation record: seq=%u kind=%s target=%u parent=%u",
+                  record->sequence,
+                  dom_js_mutation_kind_name(record->kind),
+                  record->target_id,
+                  record->parent_id);
+    }
+#else
+    (void)doc;
+#endif
+}
+
+static void dom_js_clear_layout_dirty_recursive(DomNode* node) {
+    if (!node) return;
+    node->layout_dirty = false;
+    if (node->is_element()) {
+        DomElement* elem = lam::dom_require_element(node);
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            dom_js_clear_layout_dirty_recursive(child);
+        }
+    }
+}
+
+static bool dom_js_is_connected_to_document(DomDocument* doc, DomNode* node) {
+    if (!doc || !node) return false;
+    DomNode* root = static_cast<DomNode*>(doc->root);
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == root) return true;
+    }
+    return false;
+}
+
+static DomElement* dom_js_record_cascade_root(DomDocument* doc,
+                                              DomJsMutationRecord* record) {
+    if (!doc || !record) return nullptr;
+
+    DomNode* node = nullptr;
+    if (record->kind == DOM_JS_MUTATION_CHILD_REMOVE) {
+        node = record->parent;
+    } else {
+        node = record->target ? record->target : record->parent;
+    }
+    if (!node || !dom_js_is_connected_to_document(doc, node)) {
+        node = record->parent;
+    }
+    if (!node || !dom_js_is_connected_to_document(doc, node)) return nullptr;
+    if (node->is_element()) return lam::dom_require_element(node);
+    if (node->parent && node->parent->is_element()) {
+        return lam::dom_require_element(node->parent);
+    }
+    return nullptr;
+}
+
+static bool dom_js_record_has_connected_endpoint(DomDocument* doc,
+                                                 DomJsMutationRecord* record) {
+    if (!doc || !record) return false;
+    DomNode* root = static_cast<DomNode*>(doc->root);
+    if (record->target == root) return true;
+    return dom_js_is_connected_to_document(doc, record->parent);
+}
+
+static bool dom_js_node_is_stylesheet_related(DomNode* node) {
+    if (!node) return false;
+    DomElement* elem = nullptr;
+    if (node->is_element()) {
+        elem = lam::dom_require_element(node);
+    } else if (node->parent && node->parent->is_element()) {
+        elem = lam::dom_require_element(node->parent);
+    }
+    if (!elem || !elem->tag_name) return false;
+    return strcasecmp(elem->tag_name, "style") == 0 ||
+           strcasecmp(elem->tag_name, "link") == 0;
+}
+
+static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reason) {
+    if (reason) *reason = "eligible";
+    if (!doc || !doc->root || !doc->view_tree) {
+        if (reason) *reason = "missing-layout-state";
+        return false;
+    }
+    if (doc->js_mutation_record_overflow || doc->js_mutation_record_count <= 0) {
+        if (reason) *reason = doc->js_mutation_record_overflow ? "record-overflow" : "no-records";
+        return false;
+    }
+
+    for (int i = 0; i < doc->js_mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) {
+            continue;
+        }
+        if (record->kind == DOM_JS_MUTATION_UNKNOWN ||
+            record->kind == DOM_JS_MUTATION_TREE_REPLACE) {
+            if (reason) *reason = "broad-mutation";
+            return false;
+        }
+        if (dom_js_node_is_stylesheet_related(record->target) ||
+            dom_js_node_is_stylesheet_related(record->parent)) {
+            if (reason) *reason = "stylesheet-mutation";
+            return false;
+        }
+        if ((record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
+             record->kind == DOM_JS_MUTATION_CHILD_REMOVE) &&
+            doc->stylesheet_count > 0) {
+            if (reason) *reason = "structural-css-risk";
+            return false;
+        }
+    }
+    return true;
+}
+
+static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
+                                     DomJsMutationKind kind,
+                                     SelectorMatcher* matcher) {
+    if (!doc || !root) return;
+
+    if (kind == DOM_JS_MUTATION_STYLE ||
+        kind == DOM_JS_MUTATION_STYLE_REPAINT ||
+        kind == DOM_JS_MUTATION_TEXT) {
+        root->styles_resolved = false;
+        return;
+    }
+
+    clear_cascaded_styles_recursive(static_cast<DomNode*>(root));
+
+    Pool* pool = doc->pool;
+    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    if (pool && css_engine && matcher) {
+        for (int i = 0; i < doc->stylesheet_count; i++) {
+            if (doc->stylesheets[i]) {
+                apply_stylesheet_to_dom_tree_fast(root, doc->stylesheets[i],
+                                                  matcher, pool, css_engine);
+            }
+        }
+    }
+
+    if (root->native_element) {
+        apply_inline_styles_to_tree(root, root->native_element, pool);
+    }
+}
+
+typedef struct DomJsDirtyBound {
+    DomNode* node;
+    float x;
+    float y;
+    float width;
+    float height;
+    bool valid;
+} DomJsDirtyBound;
+
+static bool dom_js_compute_absolute_bound(DomNode* node, DomJsDirtyBound* bound) {
+    if (!node || !bound) return false;
+
+    bound->node = node;
+    bound->x = node->x;
+    bound->y = node->y;
+    bound->width = node->width;
+    bound->height = node->height;
+    for (DomNode* parent = node->parent; parent; parent = parent->parent) {
+        bound->x += parent->x;
+        bound->y += parent->y;
+    }
+    bound->valid = bound->width > 0.0f && bound->height > 0.0f;
+    return bound->valid;
+}
+
+static bool dom_js_bounds_equal(DomJsDirtyBound* a, DomJsDirtyBound* b) {
+    if (!a || !b || !a->valid || !b->valid) return false;
+    const float epsilon = 0.5f;
+    float dx = a->x - b->x; if (dx < 0.0f) dx = -dx;
+    float dy = a->y - b->y; if (dy < 0.0f) dy = -dy;
+    float dw = a->width - b->width; if (dw < 0.0f) dw = -dw;
+    float dh = a->height - b->height; if (dh < 0.0f) dh = -dh;
+    return dx <= epsilon && dy <= epsilon && dw <= epsilon && dh <= epsilon;
+}
+
+static bool dom_js_add_unique_repaint_root(DomNode* node,
+                                           DomNode** roots,
+                                           int capacity,
+                                           int* count) {
+    if (!node || !roots || !count || capacity <= 0) return true;
+    for (int i = 0; i < *count; i++) {
+        if (roots[i] == node) return true;
+    }
+    if (*count >= capacity) return false;
+    roots[(*count)++] = node;
+    return true;
+}
+
+static int dom_js_collect_repaint_roots(DomDocument* doc,
+                                        DomNode** roots,
+                                        int capacity,
+                                        bool* overflow) {
+    if (overflow) *overflow = false;
+    if (!doc || !roots || capacity <= 0) return 0;
+
+    int count = 0;
+    for (int i = 0; i < doc->js_mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) {
+            continue;
+        }
+        DomElement* root = dom_js_record_cascade_root(doc, record);
+        if (!root) continue;
+
+        for (DomNode* node = static_cast<DomNode*>(root); node; node = node->parent) {
+            if (!dom_js_add_unique_repaint_root(node, roots, capacity, &count)) {
+                if (overflow) *overflow = true;
+                return count;
+            }
+        }
+    }
+    return count;
+}
+
+static bool dom_js_mark_selective_dirty(DocState* state,
+                                        DomJsDirtyBound* old_bounds,
+                                        int bound_count,
+                                        int* dirty_rect_count,
+                                        const char** reason,
+                                        bool allow_geometry_change) {
+    if (dirty_rect_count) *dirty_rect_count = 0;
+    if (reason) *reason = "dirty-rects";
+    if (!state) {
+        if (reason) *reason = "no-state";
+        return false;
+    }
+    if (!old_bounds || bound_count <= 0) {
+        if (reason) *reason = "no-bounds";
+        return false;
+    }
+
+    for (int i = 0; i < bound_count; i++) {
+        DomJsDirtyBound* old_bound = &old_bounds[i];
+        DomJsDirtyBound new_bound = {};
+        if (!old_bound->valid) {
+            if (reason) *reason = "old-bound-invalid";
+            return false;
+        }
+        if (!dom_js_compute_absolute_bound(old_bound->node, &new_bound)) {
+            if (reason) *reason = "new-bound-invalid";
+            return false;
+        }
+        if (!allow_geometry_change && !dom_js_bounds_equal(old_bound, &new_bound)) {
+            if (reason) *reason = "geometry-changed";
+            return false;
+        }
+    }
+
+    for (int i = 0; i < bound_count; i++) {
+        DomJsDirtyBound* old_bound = &old_bounds[i];
+        dirty_mark_rect(&state->dirty_tracker,
+                        old_bound->x, old_bound->y,
+                        old_bound->width, old_bound->height);
+        if (dirty_rect_count) (*dirty_rect_count)++;
+        DomJsDirtyBound new_bound = {};
+        if (allow_geometry_change &&
+            dom_js_compute_absolute_bound(old_bound->node, &new_bound) &&
+            !dom_js_bounds_equal(old_bound, &new_bound)) {
+            dirty_mark_rect(&state->dirty_tracker,
+                            new_bound.x, new_bound.y,
+                            new_bound.width, new_bound.height);
+            if (dirty_rect_count) (*dirty_rect_count)++;
+        }
+    }
+    bool has_regions = dirty_has_regions(&state->dirty_tracker);
+    if (!has_regions && reason) *reason = "no-regions";
+    return has_regions;
+}
+
+static bool post_html_handler_incremental_rebuild(
+        EventContext* evcon, DomDocument* doc,
+        std::chrono::high_resolution_clock::time_point t_start,
+        std::chrono::high_resolution_clock::time_point t0,
+        int mutations) {
+    using namespace std::chrono;
+
+    const char* reason = nullptr;
+    if (!dom_js_mutation_can_incremental(doc, &reason)) {
+        log_info("html handler incremental: fallback=%s", reason ? reason : "unknown");
+        return false;
+    }
+
+    Pool* pool = doc->pool;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    state_configure_selector_matcher((DocState*)doc->state, matcher);
+
+    DomNode* repaint_roots[DOM_JS_MUTATION_RECORD_CAP] = {};
+    bool repaint_root_overflow = false;
+    int repaint_root_count = dom_js_collect_repaint_roots(
+        doc, repaint_roots, DOM_JS_MUTATION_RECORD_CAP, &repaint_root_overflow);
+    DomJsDirtyBound old_bounds[DOM_JS_MUTATION_RECORD_CAP] = {};
+    int old_bound_count = 0;
+    for (int i = 0; i < repaint_root_count; i++) {
+        DomJsDirtyBound bound = {};
+        if (dom_js_compute_absolute_bound(repaint_roots[i], &bound)) {
+            old_bounds[old_bound_count++] = bound;
+        }
+    }
+
+    for (int i = 0; i < doc->js_mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+        if (!dom_js_record_has_connected_endpoint(doc, record)) {
+            continue;
+        }
+        DomElement* root = dom_js_record_cascade_root(doc, record);
+        if (root) {
+            dom_js_recascade_subtree(doc, root, record->kind, matcher);
+        }
+    }
+
+    auto t1 = high_resolution_clock::now();
+
+    DocState* state = (DocState*)doc->state;
+    if (state) {
+        doc_state_close_dropdown(state, NULL);
+        doc_state_close_context_menu(state);
+    }
+
+    DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+    if (evcon->ui_context) evcon->ui_context->document = doc;
+    doc->incremental_layout = true;
+    doc->skip_style_reset = true;
+    layout_html_doc(evcon->ui_context, doc, true);
+    doc->skip_style_reset = false;
+    doc->incremental_layout = false;
+    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+
+    if (doc->root) {
+        dom_js_clear_layout_dirty_recursive(static_cast<DomNode*>(doc->root));
+    }
+
+    auto t2 = high_resolution_clock::now();
+
+    int dirty_rect_count = 0;
+    bool selective_dirty = false;
+    const char* repaint_reason = nullptr;
+    bool allow_geometry_dirty = !repaint_root_overflow && old_bound_count > 0;
+    if (state) {
+        dirty_clear(&state->dirty_tracker);
+        if (repaint_root_overflow) {
+            repaint_reason = "repaint-root-overflow";
+        } else {
+            selective_dirty = dom_js_mark_selective_dirty(state, old_bounds,
+                                                          old_bound_count,
+                                                          &dirty_rect_count,
+                                                          &repaint_reason,
+                                                          allow_geometry_dirty);
+        }
+        if (!selective_dirty) {
+            state->dirty_tracker.full_repaint = true;
+            doc_state_mark_dirty(state);
+        }
+        state->needs_repaint = true;
+        doc_state_clear_reflow(state);
+        reflow_clear(state);
+    }
+
+    evcon->need_repaint = true;
+    to_repaint();
+
+    auto t3 = high_resolution_clock::now();
+    log_info("[TIMING] html handler rebuild: mode=incremental cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
+             "total=%.2fms (mutations=%d records=%d repaint=%s dirty_rects=%d repaint_reason=%s)",
+             duration<double, std::milli>(t1 - t0).count(),
+             duration<double, std::milli>(t2 - t1).count(),
+             duration<double, std::milli>(t3 - t2).count(),
+             duration<double, std::milli>(t3 - t_start).count(),
+             mutations,
+             doc->js_mutation_record_count,
+             selective_dirty ? "dirty-rects" : "full",
+             dirty_rect_count,
+             repaint_reason ? repaint_reason : "none");
+    return true;
+}
+
 static void post_html_handler_rebuild(EventContext* evcon,
                                        std::chrono::high_resolution_clock::time_point t_start,
                                        std::chrono::high_resolution_clock::time_point t_handler) {
@@ -3556,13 +3985,23 @@ static void post_html_handler_rebuild(EventContext* evcon,
     }
 
     auto t0 = high_resolution_clock::now();
+    dom_js_mutation_log_records(doc);
 
-    // Re-cascade CSS on the full tree (handles className changes, style writes, etc.)
+    if (post_html_handler_incremental_rebuild(evcon, doc, t_start, t0, mutations)) {
+        dom_js_mutation_reset_records(doc);
+        return;
+    }
+
+    // Re-cascade CSS on the full tree (handles broad className changes, style writes, etc.)
     // Re-collect inline stylesheets in case JS added/removed/disabled <style> elements
     Pool* pool = doc->pool;
     CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
     SelectorMatcher* matcher = selector_matcher_create(pool);
     state_configure_selector_matcher((DocState*)doc->state, matcher);
+
+    // Clear previously cascaded declarations so removed classes/attributes cannot
+    // keep stale winning CSS declarations in specified_style.
+    clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
 
     // Apply all cached stylesheets
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -3636,7 +4075,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     auto t3 = high_resolution_clock::now();
 
-    log_info("[TIMING] html handler rebuild: cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
+    log_info("[TIMING] html handler rebuild: mode=full cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d)",
              duration<double, std::milli>(t1 - t0).count(),
              duration<double, std::milli>(t2 - t1).count(),
@@ -3645,7 +4084,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
              mutations);
 
     // Reset mutation count for next event
-    doc->js_mutation_count = 0;
+    dom_js_mutation_reset_records(doc);
 }
 
 /**
@@ -3704,8 +4143,8 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 // Restore JS DOM bridge context
                 js_dom_set_document(doc);
 
-                // Reset mutation counter before handler
-                doc->js_mutation_count = 0;
+                // Reset mutation records before handler
+                dom_js_mutation_reset_records(doc);
 
                 // §7.4.6 (U-7): set legacy `window.event` so handler bodies
                 // like `onclick="alert(event.type)"` can see the event.
@@ -3744,16 +4183,29 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                             0, 0, 0.0, 0.0, 0, false, false, false, false);
                     }
                 }
+                Item handler_this = js_dom_wrap_element((DomNode*)elem);
+                if (synth_ev.item != ItemNull.item && handler_this.item != ItemNull.item) {
+                    js_property_set(synth_ev,
+                        (Item){.item = s2it(heap_create_name("target"))},
+                        handler_this);
+                    js_property_set(synth_ev,
+                        (Item){.item = s2it(heap_create_name("srcElement"))},
+                        handler_this);
+                    js_property_set(synth_ev,
+                        (Item){.item = s2it(heap_create_name("currentTarget"))},
+                        handler_this);
+                }
+
                 Item prev_window_event = ItemNull;
                 bool window_event_set = (synth_ev.item != ItemNull.item);
                 if (window_event_set) {
                     prev_window_event = js_set_window_event_for_legacy(synth_ev);
                 }
 
-                // Invoke: function __evt_handler_N() { ... }
-                typedef Item (*js_handler_fn)(void);
+                // Invoke: function __evt_handler_N(__evt_this) { ... }
+                typedef Item (*js_handler_fn)(Item);
                 js_handler_fn fn = (js_handler_fn)handler->compiled_func;
-                Item handler_result = fn();
+                Item handler_result = fn(handler_this);
                 if (js_check_exception()) {
                     const char* msg = js_get_exception_message();
                     log_error("[HTML_HANDLER] %s handler on <%s> threw: %s",
@@ -3766,7 +4218,7 @@ static bool dispatch_html_event_handler(EventContext* evcon, View* target, const
                 if (window_event_set && js_event_is_default_prevented(synth_ev)) {
                     handler_prevented = true;
                 }
-                if (get_type_id(handler_result) == LMD_TYPE_BOOL && !handler_result.bool_val) {
+                if (get_type_id(handler_result) == LMD_TYPE_BOOL && !it2b(handler_result)) {
                     handler_prevented = true;
                 }
                 if (handler_prevented) {
@@ -3851,7 +4303,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     context = &s->handler_ctx;
     input_context = nullptr;
     js_dom_set_document(s->doc);
-    s->doc->js_mutation_count = 0;
+    dom_js_mutation_reset_records(s->doc);
     s->active = true;
     return true;
 }
@@ -6637,6 +7089,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (prevented) evcon.default_prevented = true;
                 }
 
+                // Dispatch legacy HTML inline event handlers (onclick="...")
+                // before native defaults so `return false` can cancel the same
+                // activation behavior as addEventListener()/IDL handlers.
+                if (evcon.target) {
+                    if (dispatch_html_event_handler(&evcon, evcon.target, "click")) {
+                        evcon.need_repaint = true;
+                    }
+                }
+
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
                 bool click_check_radio_changed = false;
@@ -6645,6 +7106,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                         click_check_radio,
                                                         PSEUDO_STATE_CHECKED);
                     click_check_radio_changed = after != click_check_radio_before;
+                    if (evcon.default_prevented && click_check_radio_changed) {
+                        if (click_check_radio->is_element()) {
+                            DomElement* elem = lam::dom_require_element(click_check_radio);
+                            elem->live_checkedness_dirty = true;
+                            elem->live_checkedness = click_check_radio_before;
+                        }
+                        form_control_set_checked(click_check_radio_state,
+                                                 click_check_radio,
+                                                 click_check_radio_before);
+                        sync_pseudo_state(click_check_radio,
+                                          PSEUDO_STATE_CHECKED,
+                                          click_check_radio_before);
+                        doc_state_request_repaint(click_check_radio_state);
+                        click_check_radio_changed = false;
+                    }
                 }
                 if (evcon.target && !evcon.default_prevented &&
                     (!js_click_dispatched || (click_check_radio && !click_check_radio_changed))) {
@@ -6761,13 +7237,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Dispatch to Lambda template event handlers
                 if (evcon.target) {
                     if (dispatch_lambda_handler(&evcon, evcon.target, "click")) {
-                        evcon.need_repaint = true;
-                    }
-                }
-
-                // Dispatch HTML inline event handlers (onclick="...")
-                if (evcon.target) {
-                    if (dispatch_html_event_handler(&evcon, evcon.target, "click")) {
                         evcon.need_repaint = true;
                     }
                 }

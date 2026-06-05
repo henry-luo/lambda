@@ -27,8 +27,8 @@ struct Url;
  *
  * Walks the original Element* tree (Lambda data model) in document order,
  * collects script-task metadata, loads external script sources and extracts
- * inline script text, emits the legacy combined source with the body onload
- * attribute value, and JIT-compiles that combined source via the JS transpiler.
+ * inline script text, and executes each task in the post-DOM scheduler through
+ * one retained JS document realm.
  *
  * The DomDocument's DomElement* tree is the DOM context — all DOM mutations
  * from JavaScript (getElementById, appendChild, style changes, etc.) operate

@@ -11,7 +11,7 @@ typedef struct JsEventHandler {
     DomElement* element;
     const char* event_type;         // "click", "mouseover", etc.
     const char* handler_source;     // original attribute value
-    void* compiled_func;            // compiled function pointer (void -> Item)
+    void* compiled_func;            // compiled function pointer (Item this -> Item)
     struct JsEventHandler* next;    // next handler on same element
 } JsEventHandler;
 

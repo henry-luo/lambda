@@ -1,0 +1,15 @@
+{
+  "name": "JS Phase 4: tasks-postdom script lifecycle and recovery",
+  "html": "test/ui/js_script_lifecycle_phase4.html",
+  "description": "Covers the default tasks-postdom pipeline: persistent globals, per-script exception recovery, defer before DOMContentLoaded, readyState completion, load listener, body onload, and window.onload.",
+  "events": [
+    {"type": "log", "message": "=== js_script_lifecycle_phase4 ==="},
+    {"type": "wait", "ms": 200},
+    {
+      "type": "assert_text",
+      "target": {"selector": "#result"},
+      "equals": "second-script|throws-before|after-throw-second|defer-second|dom-second|rs-complete|body-onload|load-listener|onload-prop",
+      "assert_timeout": 1000
+    }
+  ]
+}

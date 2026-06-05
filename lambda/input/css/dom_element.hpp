@@ -45,6 +45,28 @@ typedef struct Runtime Runtime;  // From lambda/lambda.h
 // DOM Document
 // ============================================================================
 
+typedef enum DomJsMutationKind {
+    DOM_JS_MUTATION_UNKNOWN = 0,
+    DOM_JS_MUTATION_CHILD_INSERT = 1,
+    DOM_JS_MUTATION_CHILD_REMOVE = 2,
+    DOM_JS_MUTATION_TEXT = 3,
+    DOM_JS_MUTATION_ATTRIBUTE = 4,
+    DOM_JS_MUTATION_STYLE = 5,
+    DOM_JS_MUTATION_TREE_REPLACE = 6,
+    DOM_JS_MUTATION_STYLE_REPAINT = 7
+} DomJsMutationKind;
+
+typedef struct DomJsMutationRecord {
+    uint32_t sequence;
+    DomJsMutationKind kind;
+    DomNode* target;
+    DomNode* parent;
+    uint32_t target_id;
+    uint32_t parent_id;
+} DomJsMutationRecord;
+
+#define DOM_JS_MUTATION_RECORD_CAP 64
+
 /**
  * DomDocument - Root container for DOM tree
  * Manages memory (arena) and Lambda integration (Input*)
@@ -117,6 +139,11 @@ struct DomDocument {
 
     // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
     int js_mutation_count;
+    uint32_t js_mutation_sequence;
+    uint32_t js_mutation_kind_mask;
+    int js_mutation_record_count;
+    int js_mutation_record_overflow;
+    DomJsMutationRecord js_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
 
     // JS/meta requested document navigation. The loader follows this after
     // load-time scripts and refresh metadata have been processed.
@@ -143,6 +170,9 @@ struct DomDocument {
     float pending_viewport_scroll_x;
     float pending_viewport_scroll_y;
 
+    // Browser-like lifecycle state exposed by document.readyState.
+    const char* js_ready_state;
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -162,6 +192,9 @@ struct DomDocument {
                     skip_style_reset(false),
                     incremental_layout(false),
                     js_mutation_count(0),
+                    js_mutation_sequence(0), js_mutation_kind_mask(0),
+                    js_mutation_record_count(0), js_mutation_record_overflow(0),
+                    js_mutation_records{},
                     pending_navigation_url(nullptr),
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
@@ -170,7 +203,8 @@ struct DomDocument {
                     js_runtime_pool(nullptr),
                     js_event_registry(nullptr),
                     document_charset(nullptr),
-                    pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f) {}
+                    pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
+                    js_ready_state("complete") {}
 };
 
 typedef struct {
@@ -264,6 +298,13 @@ struct DomElement : DomNode {
     bool float_prelaid;          // Flag to skip float during normal flow (pre-laid in float pass)
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
+
+    // Live form state that belongs to the DOM element rather than the
+    // transient layout view/state map. The content attribute remains the
+    // defaultChecked source; this slot is used after user/script checkedness
+    // has diverged from that default.
+    bool live_checkedness_dirty;
+    bool live_checkedness;
 
     // CSS custom properties (CSS variables)
     struct CssCustomProp* css_variables;  // Hashmap of --var-name: value

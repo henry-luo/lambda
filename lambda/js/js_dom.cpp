@@ -168,13 +168,104 @@ static Url* js_dom_make_fallback_url(const char* raw_url);
 
 static inline DocState* js_dom_current_state();
 
-// Helper: increment DOM mutation counter on current document
-static inline void js_dom_mutation_notify() {
-    if (_js_current_document) {
-        _js_current_document->js_mutation_count++;
-        DocState* st = js_dom_current_state();
-        if (st) view_state_prune_orphans(st);
+static void js_dom_mark_dirty_subtree(DomNode* root) {
+    if (!root) return;
+
+    root->layout_dirty = true;
+    if (root->is_element()) {
+        DomElement* elem = root->as_element();
+        elem->styles_resolved = false;
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            js_dom_mark_dirty_subtree(child);
+        }
     }
+}
+
+static void js_dom_mark_dirty_ancestors(DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        cur->layout_dirty = true;
+        if (cur->is_element()) {
+            cur->as_element()->styles_resolved = false;
+        }
+    }
+}
+
+static inline uint32_t js_dom_mutation_bit(DomJsMutationKind kind) {
+    uint32_t slot = (uint32_t)kind;
+    if (slot >= 31) slot = 0;
+    return 1u << slot;
+}
+
+static inline DomJsMutationKind js_dom_style_mutation_kind(CssPropertyId prop_id) {
+    switch (prop_id) {
+        case CSS_PROPERTY_BACKGROUND_COLOR:
+        case CSS_PROPERTY_COLOR:
+        case CSS_PROPERTY_OPACITY:
+        case CSS_PROPERTY_VISIBILITY:
+            return DOM_JS_MUTATION_STYLE_REPAINT;
+        default:
+            return DOM_JS_MUTATION_STYLE;
+    }
+}
+
+static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
+                                                 DomNode* target,
+                                                 DomNode* parent,
+                                                 uint32_t sequence) {
+    DomDocument* doc = _js_current_document;
+    if (!doc) return;
+
+    if (sequence == 0) {
+        sequence = doc->js_mutation_sequence + 1;
+    }
+    doc->js_mutation_kind_mask |= js_dom_mutation_bit(kind);
+
+    if (doc->js_mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
+        DomJsMutationRecord* record =
+            &doc->js_mutation_records[doc->js_mutation_record_count++];
+        record->sequence = sequence;
+        record->kind = kind;
+        record->target = target;
+        record->parent = parent;
+        record->target_id = target ? target->id : 0;
+        record->parent_id = parent ? parent->id : 0;
+    } else {
+        doc->js_mutation_record_overflow++;
+    }
+
+    if (target) {
+        js_dom_mark_dirty_subtree(target);
+        js_dom_mark_dirty_ancestors(target);
+    }
+    if (parent) {
+        js_dom_mark_dirty_ancestors(parent);
+    }
+}
+
+// Helper: increment DOM mutation counter on current document and record the
+// mutation shape for future incremental cascade/layout decisions.
+static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
+                                          DomNode* target = nullptr,
+                                          DomNode* parent = nullptr) {
+    DomDocument* doc = _js_current_document;
+    if (!doc) return;
+
+    doc->js_mutation_count++;
+    doc->js_mutation_sequence++;
+
+    bool has_pending_structural_record = false;
+    if (kind == DOM_JS_MUTATION_UNKNOWN && !target && !parent &&
+        doc->js_mutation_record_count > 0) {
+        DomJsMutationRecord* last = &doc->js_mutation_records[doc->js_mutation_record_count - 1];
+        has_pending_structural_record = last->sequence == doc->js_mutation_sequence;
+    }
+
+    if (!has_pending_structural_record) {
+        js_dom_record_mutation_detail(kind, target, parent, doc->js_mutation_sequence);
+    }
+
+    DocState* st = js_dom_current_state();
+    if (st) view_state_prune_orphans(st);
 }
 
 // ----------------------------------------------------------------------------
@@ -229,15 +320,20 @@ static inline void dom_pre_remove(DomNode* child) {
             }
         }
     }
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
+                                  child ? child->parent : nullptr, 0);
 }
 static inline void dom_post_insert(DomNode* parent, DomNode* node) {
     DocState* st = js_dom_current_state();
     if (st && parent && node) dom_mutation_post_insert(st, parent, node);
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT, node, parent, 0);
 }
 static inline void dom_text_replace_data(DomText* text, uint32_t off,
                                          uint32_t cnt, uint32_t repl_len) {
     DocState* st = js_dom_current_state();
     if (st && text) dom_mutation_text_replace_data(st, text, off, cnt, repl_len);
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text,
+                                  text ? text->parent : nullptr, 0);
 }
 
 /**
@@ -329,6 +425,60 @@ static void expando_reset() {
     _expando_initialized = false;
 }
 
+static bool js_dom_event_attr_name(const char* attr_name, char* prop_buf, size_t prop_buf_size) {
+    if (!attr_name || !prop_buf || prop_buf_size == 0) return false;
+    size_t len = strlen(attr_name);
+    if (len < 3 || len >= prop_buf_size) return false;
+    if ((attr_name[0] != 'o' && attr_name[0] != 'O') ||
+        (attr_name[1] != 'n' && attr_name[1] != 'N')) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        char c = attr_name[i];
+        prop_buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 0x20) : c;
+    }
+    prop_buf[len] = '\0';
+    return true;
+}
+
+static void js_dom_compile_event_attr_to_expando(DomElement* elem,
+                                                 const char* attr_name,
+                                                 const char* attr_value) {
+    if (!elem || !attr_name || !attr_value) return;
+
+    char prop_name[64];
+    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
+
+    Item args[2];
+    args[0] = (Item){.item = s2it(heap_create_name("event"))};
+    args[1] = (Item){.item = s2it(heap_create_name(attr_value))};
+    Item fn = js_new_function_from_string(args, 2);
+    if (get_type_id(fn) != LMD_TYPE_FUNC) {
+        log_error("js_dom_event_attr: failed to compile %s handler", prop_name);
+        if (js_check_exception()) {
+            (void)js_clear_exception();
+        }
+        return;
+    }
+
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    if (exp_map.item != ITEM_NULL) {
+        js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+    }
+}
+
+static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_name) {
+    if (!elem || !attr_name) return;
+
+    char prop_name[64];
+    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return;
+
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    if (exp_map.item != ITEM_NULL) {
+        js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, ItemNull);
+    }
+}
+
 // ------------------------------------------------------------------
 // HTML form-control IDL helpers (Phase 4 click activation).
 // `checked` and `disabled` are boolean IDL attributes that must be
@@ -388,6 +538,11 @@ static bool _get_checkedness(DomElement* elem) {
 }
 
 static void _set_checkedness(DomElement* elem, bool v) {
+    if (elem) {
+        elem->live_checkedness_dirty = true;
+        elem->live_checkedness = v;
+    }
+
     DocState* state = _state_for_element(elem);
     if (state) {
         form_control_set_checked(state, (View*)elem, v);
@@ -3132,9 +3287,11 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return (Item){.item = s2it(heap_create_name(origin))};
     }
 
-    // readyState — always "complete" since scripts run after parse
+    // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
+    // script scheduler updates this during modeled lifecycle transitions.
     if (strcmp(prop, "readyState") == 0) {
-        return (Item){.item = s2it(heap_create_name("complete"))};
+        const char* ready_state = doc->js_ready_state ? doc->js_ready_state : "complete";
+        return (Item){.item = s2it(heap_create_name(ready_state))};
     }
 
     if (strcmp(prop, "fonts") == 0) {
@@ -4032,7 +4189,10 @@ static void _reset_form_control(DomElement* elem) {
         const char* itype = _input_type_lower(elem);
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
             // checked := defaultChecked (presence of "checked" content attr)
-            _set_checkedness(elem, dom_element_has_attribute(elem, "checked"));
+            bool default_checked = dom_element_has_attribute(elem, "checked");
+            _set_checkedness(elem, default_checked);
+            elem->live_checkedness = default_checked;
+            elem->live_checkedness_dirty = false;
             // Clear dirty checkedness flag.
             Item exp = expando_get_map((DomNode*)elem);
             if (exp.item != ITEM_NULL) {
@@ -6016,6 +6176,21 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         }
     }
 
+    // Dynamic event attributes compiled through setAttribute("onclick", ...)
+    // live in the expando table. Prefer the compiled handler over the raw
+    // attribute text so EventTarget dispatch can invoke it.
+    char event_prop_name[64];
+    if (js_dom_event_attr_name(prop, event_prop_name, sizeof(event_prop_name))) {
+        Item exp_map = expando_get_map((DomNode*)elem);
+        if (exp_map.item != ITEM_NULL) {
+            Item key = (Item){.item = s2it(heap_create_name(event_prop_name))};
+            Item val = js_property_get(exp_map, key);
+            if (val.item != ITEM_NULL && !is_js_undefined(val)) {
+                return val;
+            }
+        }
+    }
+
     // fall back to native element attribute access
     if (elem->native_element) {
         const char* attr_val = dom_element_get_attribute(elem, prop);
@@ -6208,6 +6383,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             text_node->length = len;
             uint32_t new_u16_len = dom_text_utf16_length(text_node);
             dom_text_replace_data(text_node, 0, old_u16_len, new_u16_len);
+            js_dom_mutation_notify();
             log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
@@ -6267,7 +6443,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             parse_class_names(elem, class_str);
             // also update the native element attribute
             dom_element_set_attribute(elem, "class", class_str);
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -6284,7 +6460,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         if (!s) s = "";
         if (*s == '\0' || strcasecmp(s, "inherit") == 0) {
             dom_element_remove_attribute(elem, "contenteditable");
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
         if (strcasecmp(s, "true") == 0) {
@@ -6297,7 +6473,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             log_debug("contentEditable setter: SyntaxError on '%s'", s);
             return value;
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -6311,7 +6487,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             id_copy[len] = '\0';
             elem->id = id_copy;
             dom_element_set_attribute(elem, "id", id_str);
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }
@@ -6346,7 +6522,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             }
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
         }
         return value;
     }
@@ -6421,7 +6597,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         // making `foo` a global).
         js_dom_register_named_elements(elem);
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
         return value;
     }
 
@@ -6458,6 +6634,10 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
         }
         if (!dirty) _set_checkedness(elem, t);
+        if (!dirty) {
+            elem->live_checkedness = t;
+            elem->live_checkedness_dirty = false;
+        }
         return value;
     }
 
@@ -6742,7 +6922,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 if (!_value_is_dirty(elem)) {
                     tc_set_value(elem, s, strlen(s));
                 }
-                js_dom_mutation_notify();
+                js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE, (DomNode*)elem, elem->parent);
                 return value;
             }
             // input.defaultValue setter: reflects "value" attribute.
@@ -6781,7 +6961,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                     _select_ask_for_reset(elem);
                 }
             }
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -6809,7 +6989,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             char buf[32];
             snprintf(buf, sizeof(buf), "%ld", n);
             dom_element_set_attribute(elem, int_attr, buf);
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -6823,7 +7003,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             } else {
                 dom_element_remove_attribute(elem, mapped_attr);
             }
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
 
@@ -6840,7 +7020,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             } else {
                 dom_element_set_attribute(elem, "type", "text");
             }
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
     }
@@ -6867,7 +7047,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         } else {
             dom_element_remove_attribute(elem, prop);
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
     char nbuf[64];
@@ -6886,7 +7066,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     }
     if (val_str && *val_str) {
         dom_element_set_attribute(elem, prop, val_str);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
     }
     return value;
 }
@@ -6917,7 +7097,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         if (val_str[0]) {
             dom_element_apply_inline_style(elem, val_str);
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
         log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
         return value;
@@ -6929,7 +7109,8 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
             style_tree_remove_property(elem->specified_style, prop_id);
             elem->styles_resolved = false;
-            js_dom_mutation_notify();
+            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                                   (DomNode*)elem, elem->parent);
         }
         log_debug("js_dom_set_style_property: removed %s (CSS: %s) on <%s>",
                   js_prop, css_prop, elem->tag_name ? elem->tag_name : "?");
@@ -6958,7 +7139,9 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     // apply as inline style (highest cascade priority)
     dom_element_apply_inline_style(elem, style_decl);
     elem->styles_resolved = false;  // mark for re-cascading
-    js_dom_mutation_notify();
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                           (DomNode*)elem, elem->parent);
 
     log_debug("js_dom_set_style_property: set %s='%s' (CSS: %s) on <%s>",
               js_prop, val_str, css_prop, elem->tag_name ? elem->tag_name : "?");
@@ -7161,12 +7344,13 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_val = fn_to_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         dom_element_set_attribute(elem, attr_name, attr_val);
+        js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
             DomElement* sel = _nearest_select_for_node((DomNode*)elem);
             if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -7185,10 +7369,12 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
         dom_element_remove_attribute(elem, attr_name);
+        js_dom_clear_event_attr_expando(elem, attr_name);
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
-        js_dom_mutation_notify();
+        _select_refresh_cached_selected_options_for_node((DomNode*)elem);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -7636,6 +7822,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
                 _select_ask_for_reset(elem);
             }
         }
+        if (should_have != has) {
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        }
         return (Item){.item = b2it(should_have ? 1 : 0)};
     }
 
@@ -7648,19 +7837,31 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
 
         // detach from old parent
         if (new_node->parent) {
+            dom_pre_remove(new_node);
             new_node->parent->remove_child(new_node);
         }
 
+        DomNode* new_parent = nullptr;
         if (strcasecmp(position, "beforebegin") == 0) {
-            if (elem->parent && elem->parent->is_element())
+            if (elem->parent && elem->parent->is_element()) {
                 elem->parent->insert_before(new_node, (DomNode*)elem);
+                new_parent = elem->parent;
+            }
         } else if (strcasecmp(position, "afterbegin") == 0) {
             ((DomNode*)elem)->insert_before(new_node, elem->first_child);
+            new_parent = (DomNode*)elem;
         } else if (strcasecmp(position, "beforeend") == 0) {
             ((DomNode*)elem)->append_child(new_node);
+            new_parent = (DomNode*)elem;
         } else if (strcasecmp(position, "afterend") == 0) {
-            if (elem->parent && elem->parent->is_element())
+            if (elem->parent && elem->parent->is_element()) {
                 elem->parent->insert_before(new_node, elem->next_sibling);
+                new_parent = elem->parent;
+            }
+        }
+        if (new_parent) {
+            dom_post_insert(new_parent, new_node);
+            js_dom_mutation_notify();
         }
         return args[1]; // return the inserted element
     }
@@ -8235,6 +8436,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         if (!opt || !opt->parent) return ItemNull;
         DomElement* parent = (DomElement*)opt->parent;
         DomNode* on = (DomNode*)opt;
+        dom_pre_remove(on);
         if (on->prev_sibling) on->prev_sibling->next_sibling = on->next_sibling;
         else parent->first_child = on->next_sibling;
         if (on->next_sibling) on->next_sibling->prev_sibling = on->prev_sibling;
@@ -8270,7 +8472,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             const char* cls = fn_to_cstr(args[i]);
             if (cls) dom_element_add_class(elem, cls);
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -8280,7 +8482,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             const char* cls = fn_to_cstr(args[i]);
             if (cls) dom_element_remove_class(elem, cls);
         }
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
     }
 
@@ -8295,17 +8497,17 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             bool force = js_is_truthy(args[1]);
             if (force) {
                 dom_element_add_class(elem, cls);
-                js_dom_mutation_notify();
+                js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_TRUE};
             } else {
                 dom_element_remove_class(elem, cls);
-                js_dom_mutation_notify();
+                js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_FALSE};
             }
         }
         // no force: toggle
         bool result = dom_element_toggle_class(elem, cls);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return (Item){.item = b2it(result ? 1 : 0)};
     }
 
@@ -8666,6 +8868,11 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
         }
         int applied = dom_element_apply_inline_style(elem, style_decl);
         elem->styles_resolved = false;
+        if (applied) {
+            CssPropertyId prop_id = css_property_id_from_name(css_prop);
+            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                                   (DomNode*)elem, elem->parent);
+        }
         log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
                   css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
         return ItemNull;
@@ -8689,6 +8896,8 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
             }
             // remove the declaration from the style tree
             style_tree_remove_property(elem->specified_style, prop_id);
+            js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
+                                   (DomNode*)elem, elem->parent);
         }
         elem->styles_resolved = false;
         log_debug("js_dom_style_method: removeProperty '%s' on <%s>",

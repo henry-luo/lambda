@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>JS Phase 4 post-DOM defer and async ordering</title>
+<style>
+  body { margin: 20px; font-family: sans-serif; font-size: 16px; }
+  #result { padding: 8px; border: 1px solid #999; }
+</style>
+<script>
+  window.postdomOrder = [];
+  document.addEventListener('DOMContentLoaded', function () {
+    window.postdomOrder.push('dom');
+  });
+  window.addEventListener('load', function () {
+    window.postdomOrder.push('load');
+    document.getElementById('result').textContent = window.postdomOrder.join('|');
+  });
+</script>
+<script src="js_postdom_async_phase4.js" async></script>
+<script src="js_postdom_defer_a_phase4.js" defer></script>
+<script src="js_postdom_defer_b_phase4.js" defer></script>
+<script>
+  window.postdomOrder.push('normal-after-ext-tags');
+</script>
+</head>
+<body>
+  <div id="result">pending</div>
+</body>
+</html>
