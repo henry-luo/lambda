@@ -2358,7 +2358,11 @@ static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, S
     ViewState* view_state = view_state_get(state, view);
     if (view_state) {
         if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_SCROLL) {
-            log_error("scroll_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
+            // Form controls keep their live value/selection in ViewState.form.
+            // Their internal scroll panes cannot share the union-backed state, so
+            // they fall back to pane-local scroll fields.
+            log_debug("scroll_view_state_get_or_create: using pane-local scroll for ViewState kind %d",
+                      view_state->kind);
             return NULL;
         }
         if (view_state->kind == VIEW_STATE_SCROLL) return view_state;

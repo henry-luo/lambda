@@ -53,6 +53,81 @@ static size_t normalize_whitespace_for_flex(const char* text, size_t length, cha
     return out_pos;
 }
 
+static bool css_flex_direction_keyword_is_row(CssEnum direction, bool* recognized) {
+    if (recognized) *recognized = true;
+    if (direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE) {
+        return true;
+    }
+    if (direction == CSS_VALUE_COLUMN || direction == CSS_VALUE_COLUMN_REVERSE) {
+        return false;
+    }
+    if (recognized) *recognized = false;
+    return true;
+}
+
+static bool flex_measurement_direction_is_row(ViewElement* elem) {
+    if (!elem) return true;
+
+    if (elem->specified_style) {
+        CssDeclaration* dir_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+        if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            bool recognized = false;
+            bool is_row = css_flex_direction_keyword_is_row(
+                dir_decl->value->data.keyword, &recognized);
+            if (recognized) {
+                return is_row;
+            }
+        }
+
+        CssDeclaration* flow_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_FLEX_FLOW);
+        if (flow_decl && flow_decl->value) {
+            if (flow_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                bool recognized = false;
+                bool is_row = css_flex_direction_keyword_is_row(
+                    flow_decl->value->data.keyword, &recognized);
+                if (recognized) {
+                    return is_row;
+                }
+            } else if (flow_decl->value->type == CSS_VALUE_TYPE_LIST) {
+                for (int i = 0; i < flow_decl->value->data.list.count; i++) {
+                    CssValue* value = flow_decl->value->data.list.values[i];
+                    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) continue;
+                    bool recognized = false;
+                    bool is_row = css_flex_direction_keyword_is_row(
+                        value->data.keyword, &recognized);
+                    if (recognized) {
+                        return is_row;
+                    }
+                }
+            }
+        }
+
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum display_val = display_decl->value->data.keyword;
+            if (display_val == CSS_VALUE_FLEX || display_val == CSS_VALUE_INLINE_FLEX) {
+                return true;
+            }
+        }
+    }
+
+    ViewBlock* block_view = lam::view_as_block(elem);
+    if (block_view && block_view->embed && block_view->embed->flex) {
+        bool recognized = false;
+        bool is_row = css_flex_direction_keyword_is_row(
+            (CssEnum)block_view->embed->flex->direction, &recognized);
+        if (recognized) {
+            return is_row;
+        }
+    }
+
+    return true;
+}
+
 // Forward declaration for recursive function
 static float measure_content_height_recursive(DomNode* node, LayoutContext* lycon, int depth);
 
@@ -418,18 +493,7 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
     // Determine flex direction from CSS properties or resolved ViewBlock
     bool is_row = true;  // CSS default is row
     if (elem) {
-        ViewBlock* blk_view = lam::view_as_block(elem);
-        if (blk_view && blk_view->embed && blk_view->embed->flex) {
-            int dir = blk_view->embed->flex->direction;
-            is_row = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
-        } else if (elem->specified_style) {
-            CssDeclaration* dir_decl = style_tree_get_declaration(
-                elem->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
-            if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum d = dir_decl->value->data.keyword;
-                is_row = (d == CSS_VALUE_ROW || d == CSS_VALUE_ROW_REVERSE);
-            }
-        }
+        is_row = flex_measurement_direction_is_row(elem);
     }
 
     float max_child_height = 0;
@@ -616,18 +680,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // Check display property directly on the DOM element
             if (elem_view->display.inner == CSS_VALUE_FLEX) {
                 // It's a flex container - check direction
-                ViewBlock* block_view = lam::view_as_block(elem_view);
-                if (block_view && block_view->embed && block_view->embed->flex) {
-                    int dir = block_view->embed->flex->direction;
-                    is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
-                    log_debug("Element %s is%s a row flex container (direction=%d)",
-                              child->node_name(), is_row_flex ? "" : " NOT", dir);
-                } else {
-                    // Default flex direction is row
-                    is_row_flex = true;
-                    log_debug("Element %s is a flex container with default row direction",
-                              child->node_name());
-                }
+                is_row_flex = flex_measurement_direction_is_row(elem_view);
+                log_debug("Element %s is%s a row flex container",
+                          child->node_name(), is_row_flex ? "" : " NOT");
             }
         }
 
@@ -1975,34 +2030,37 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // Also check display.inner for flex containers whose embed->flex isn't allocated yet
         // (e.g., nested flex items measured during parent's resolve_flex_item_constraints
         // before their own flex layout starts)
-        if (item->display.inner == CSS_VALUE_FLEX) {
+        bool item_style_is_flex = item->display.inner == CSS_VALUE_FLEX;
+        if (!item_style_is_flex && item->specified_style) {
+            CssDeclaration* display_decl = style_tree_get_declaration(
+                item->specified_style, CSS_PROPERTY_DISPLAY);
+            if (display_decl && display_decl->value &&
+                display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum display_val = display_decl->value->data.keyword;
+                item_style_is_flex = display_val == CSS_VALUE_FLEX ||
+                    display_val == CSS_VALUE_INLINE_FLEX;
+            }
+        }
+        if (item_style_is_flex) {
             is_flex_container = true;
             // Try to get direction from embed->flex if available
             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
                 ViewBlock* block_view = lam::view_as_block(item);
                 if (block_view->embed && block_view->embed->flex) {
-                    is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
+                    is_row_flex_container = flex_measurement_direction_is_row(item);
                 } else {
                     // embed->flex not yet allocated - resolve direction from CSS
                     // Default is row per CSS spec
-                    is_row_flex_container = true;
-                    if (item->specified_style) {
-                        CssDeclaration* dir_decl = style_tree_get_declaration(
-                            item->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
-                        if (dir_decl && dir_decl->value && dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                            CssEnum dir_val = dir_decl->value->data.keyword;
-                            is_row_flex_container = (dir_val == CSS_VALUE_ROW || dir_val == CSS_VALUE_ROW_REVERSE);
-                        }
-                    }
+                    is_row_flex_container = flex_measurement_direction_is_row(item);
                 }
             }
-            log_debug("calculate_item_intrinsic_sizes: is_flex_container=1, is_row=%d (display.inner=flex)",
+            log_debug("calculate_item_intrinsic_sizes: is_flex_container=1, is_row=%d (display flex)",
                       is_row_flex_container);
         } else if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block_view = lam::view_as_block(item);
             if (block_view->embed && block_view->embed->flex) {
                 is_flex_container = true;
-                is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
+                is_row_flex_container = flex_measurement_direction_is_row(item);
                 log_debug("calculate_item_intrinsic_sizes: is_row_flex_container=%d (direction=%d)",
                           is_row_flex_container, block_view->embed->flex->direction);
             }
@@ -2345,6 +2403,24 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             }
                             // Explicit width is both min and max
                             child_min_width = child_max_width = explicit_w;
+                        } else if (child_display.inner == CSS_VALUE_FLEX && lycon) {
+                            FontBox saved_child_font = lycon->font;
+                            bool child_font_changed = false;
+                            if (child_view->font) {
+                                setup_font(lycon->ui_context, &lycon->font, child_view->font);
+                                child_font_changed = true;
+                            }
+
+                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(
+                                lycon, lam::dom_require<DOM_NODE_ELEMENT>(child_view), /*content_only=*/true);
+                            child_min_width = child_sizes.min_content;
+                            child_max_width = child_sizes.max_content;
+                            log_debug("Used flex container intrinsic widths for child: min=%.1f, max=%.1f",
+                                      child_min_width, child_max_width);
+
+                            if (child_font_changed) {
+                                lycon->font = saved_child_font;
+                            }
                         } else if (child_view->item_prop_type == DomElement::ITEM_PROP_FORM && child_view->form) {
                             child_min_width = child_view->form->intrinsic_width;
                             child_max_width = child_view->form->intrinsic_width;

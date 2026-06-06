@@ -2317,6 +2317,149 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
 // in normal flow with auto width must be adjusted to match the new containing block
 // width. During initial layout, these children stretched to the full available width
 // (before the parent shrank). This function corrects their widths and repositions
+struct DeferredInlineLineRun {
+    float y;
+    float min_x;
+    float max_x;
+    bool used;
+};
+
+static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count, float y) {
+    const float y_tolerance = 1.0f;
+    for (int i = 0; i < *run_count; i++) {
+        if (fabsf(runs[i].y - y) <= y_tolerance) {
+            return i;
+        }
+    }
+    const int max_runs = 256;
+    if (*run_count >= max_runs) return -1;
+    int index = *run_count;
+    runs[index].y = y;
+    runs[index].min_x = FLT_MAX;
+    runs[index].max_x = -FLT_MAX;
+    runs[index].used = true;
+    (*run_count)++;
+    return index;
+}
+
+static void add_deferred_line_extent(DeferredInlineLineRun* runs, int* run_count,
+                                     float y, float min_x, float max_x) {
+    if (max_x <= min_x) return;
+    int index = find_deferred_line_run(runs, run_count, y);
+    if (index < 0) return;
+    if (min_x < runs[index].min_x) runs[index].min_x = min_x;
+    if (max_x > runs[index].max_x) runs[index].max_x = max_x;
+}
+
+static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun* runs,
+                                              int* run_count) {
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                add_deferred_line_extent(runs, run_count, rect->y, rect->x,
+                                         rect->x + rect->width);
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            if (span->first_child) {
+                collect_deferred_inline_line_runs(span->first_child, runs, run_count);
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                   child->view_type == RDT_VIEW_BLOCK ||
+                   child->view_type == RDT_VIEW_LIST_ITEM) {
+            add_deferred_line_extent(runs, run_count, child->y, child->x,
+                                     child->x + child->width);
+        }
+        child = child->next();
+    }
+}
+
+static bool view_has_deferred_line_content(View* child, float line_y) {
+    const float y_tolerance = 1.0f;
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (fabsf(rect->y - line_y) <= y_tolerance && rect->width > 0.0f) {
+                    return true;
+                }
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            if (span->first_child && view_has_deferred_line_content(span->first_child, line_y)) {
+                return true;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                   child->view_type == RDT_VIEW_BLOCK ||
+                   child->view_type == RDT_VIEW_LIST_ITEM) {
+            if (fabsf(child->y - line_y) <= y_tolerance) return true;
+        }
+        child = child->next();
+    }
+    return false;
+}
+
+static void shift_deferred_inline_line(View* child, float line_y, float shift) {
+    const float y_tolerance = 1.0f;
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            bool shifted_rect = false;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (fabsf(rect->y - line_y) <= y_tolerance) {
+                    rect->x += shift;
+                    shifted_rect = true;
+                }
+            }
+            if (shifted_rect) {
+                text->x += shift;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            if (span->first_child && view_has_deferred_line_content(span->first_child, line_y)) {
+                span->x += shift;
+                shift_deferred_inline_line(span->first_child, line_y, shift);
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                   child->view_type == RDT_VIEW_BLOCK ||
+                   child->view_type == RDT_VIEW_LIST_ITEM) {
+            if (fabsf(child->y - line_y) <= y_tolerance) {
+                child->x += shift;
+            }
+        }
+        child = child->next();
+    }
+}
+
+static void align_deferred_inline_line_runs(ViewElement* parent, float final_content_width,
+                                            CssEnum text_align) {
+    if (!parent || final_content_width <= 0.0f ||
+        (text_align != CSS_VALUE_CENTER && text_align != CSS_VALUE_RIGHT)) {
+        return;
+    }
+
+    DeferredInlineLineRun runs[256] = {};
+    int run_count = 0;
+    collect_deferred_inline_line_runs(parent->first_placed_child(), runs, &run_count);
+
+    float padding_left = parent->bound ? parent->bound->padding.left : 0.0f;
+    for (int i = 0; i < run_count; i++) {
+        if (!runs[i].used || runs[i].max_x <= runs[i].min_x) continue;
+        float line_width = runs[i].max_x - runs[i].min_x;
+        float target_x = padding_left;
+        if (text_align == CSS_VALUE_CENTER) {
+            target_x += (final_content_width - line_width) / 2.0f;
+        } else {
+            target_x += final_content_width - line_width;
+        }
+        float shift = target_x - runs[i].min_x;
+        if (fabsf(shift) > 0.5f) {
+            shift_deferred_inline_line(parent->first_placed_child(), runs[i].y, shift);
+        }
+    }
+}
+
 // text content for text-align center/right.
 static void adjust_block_children_after_shrink(ViewBlock* parent, float new_parent_cw, CssEnum inherited_text_align) {
     // CSS Flexbox §9: Flex item widths are determined by the flex algorithm,
@@ -2380,24 +2523,9 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
         // text-align: use child's own value if it has blk, otherwise inherit from parent
         CssEnum ta = cb->blk ? cb->blk->text_align : inherited_text_align;
 
-        // adjust text positions for text-align center/right within this child
+        // adjust inline line runs for text-align center/right within this child
         if (ta == CSS_VALUE_CENTER || ta == CSS_VALUE_RIGHT) {
-            float pad_left = cb->bound ? cb->bound->padding.left : 0;
-            for (View* gc = lam::view_require_element(cb)->first_placed_child(); gc; gc = gc->next()) {
-                if (gc->view_type != RDT_VIEW_TEXT) continue;
-                ViewText* tv = lam::view_require<RDT_VIEW_TEXT>(gc);
-                for (TextRect* r = tv->rect; r; r = r->next) {
-                    float cur_offset = r->x - pad_left;
-                    float target;
-                    if (ta == CSS_VALUE_CENTER)
-                        target = (new_avail_cw - r->width) / 2;
-                    else
-                        target = new_avail_cw - r->width;
-                    float shift = target - cur_offset;
-                    if (fabsf(shift) > 0.5f)
-                        r->x += shift;
-                }
-            }
+            align_deferred_inline_line_runs(lam::view_require_element(cb), new_avail_cw, ta);
         }
 
         // recursively adjust nested block children
@@ -2566,36 +2694,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                     final_content_width -= (block->bound->border->width.left + block->bound->border->width.right);
                 }
             }
-
-            // Align children using the final content width
-            View* child = block->first_child;
-            while (child) {
-                if (child->view_type == RDT_VIEW_TEXT) {
-                    ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
-                    TextRect* rect = text->rect;
-                    while (rect) {
-                        float line_width = rect->width;
-                        // Calculate offset to center/right align within content area
-                        // Note: rect->x is relative to block including padding offset
-                        float padding_left = block->bound ? block->bound->padding.left : 0;
-                        float current_offset_in_content = rect->x - padding_left;
-                        float target_offset_in_content;
-                        if (lycon->block.text_align == CSS_VALUE_CENTER) {
-                            target_offset_in_content = (final_content_width - line_width) / 2;
-                        } else { // RIGHT
-                            target_offset_in_content = final_content_width - line_width;
-                        }
-                        float offset = target_offset_in_content - current_offset_in_content;
-                        if (abs(offset) > 0.5f) {  // Only adjust if offset is significant
-                            rect->x += offset;
-                            log_debug("%s deferred text align: rect->x adjusted by %.1f to %.1f (content_width=%.1f)", block->source_loc(),
-                                      offset, rect->x, final_content_width);
-                        }
-                        rect = rect->next;
-                    }
-                }
-                child = child->next();
-            }
+            align_deferred_inline_line_runs(lam::view_require_element(block),
+                                            final_content_width,
+                                            lycon->block.text_align);
         }
 
         // CSS 2.1 §10.3.3: Adjust block-level children that stretched to the
