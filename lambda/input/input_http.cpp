@@ -24,7 +24,7 @@ typedef struct {
 static HttpConfig default_http_config = {
     .timeout_seconds = 30,
     .max_redirects = 5,
-    .user_agent = "Lambda-Script/1.0",
+    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0",
     .verify_ssl = true,
     .enable_compression = true
 };

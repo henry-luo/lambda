@@ -418,7 +418,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (fn->body) jm_collect_functions(mt, fn->body);
         int children_end = mt->func_count;
         // add this function
-        if (mt->func_count < 4096) {
+        if (mt->func_count < JS_MIR_MAX_COLLECTED_FUNCTIONS) {
             int my_index = mt->func_count;
             JsFuncCollected* e = &mt->func_entries[my_index];
             memset(e, 0, sizeof(JsFuncCollected));
@@ -439,6 +439,9 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             }
             // A5: Scan for this.prop = expr patterns (constructor shape pre-alloc)
             if (fn->body) jm_scan_ctor_props(e, fn->body);
+        } else if (!mt->func_collection_overflow_logged) {
+            log_error("js-mir: function collection limit reached at %d", JS_MIR_MAX_COLLECTED_FUNCTIONS);
+            mt->func_collection_overflow_logged = true;
         }
         break;
     }
@@ -676,7 +679,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_CLASS_DECLARATION: {
         JsClassNode* cls = (JsClassNode*)node;
         if (cls->superclass) jm_collect_functions(mt, cls->superclass);
-        if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT && mt->class_count < 512) {
+        if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
+            mt->class_count < JS_MIR_MAX_COLLECTED_CLASSES) {
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
             memset(ce, 0, sizeof(JsClassEntry));
@@ -766,7 +770,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         if (fn->body) jm_collect_functions(mt, fn->body);
                         int method_children_end = mt->func_count;
                         // Add as collected function
-                        if (mt->func_count < 4096) {
+                        if (mt->func_count < JS_MIR_MAX_COLLECTED_FUNCTIONS) {
                             int method_index = mt->func_count;
                             JsFuncCollected* fc = &mt->func_entries[mt->func_count];
                             memset(fc, 0, sizeof(JsFuncCollected));
@@ -869,6 +873,9 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 fc->is_class_static_method = me->is_static;
                                 ce->method_count++;
                             }
+                        } else if (!mt->func_collection_overflow_logged) {
+                            log_error("js-mir: function collection limit reached at %d", JS_MIR_MAX_COLLECTED_FUNCTIONS);
+                            mt->func_collection_overflow_logged = true;
                         }
                     }
                 }
@@ -887,6 +894,10 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 ce->constructor->fc->ctor_prop_count > 0) {
                 ce->shape_cache_ptr = (void**)mem_calloc(1, sizeof(void*), MEM_CAT_JS_RUNTIME);
             }
+        } else if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
+                   !mt->class_collection_overflow_logged) {
+            log_error("js-mir: class collection limit reached at %d", JS_MIR_MAX_COLLECTED_CLASSES);
+            mt->class_collection_overflow_logged = true;
         }
         break;
     }

@@ -14,6 +14,7 @@
 #include "../input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/url.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -57,6 +58,7 @@ struct XhrState {
 
 static XhrState _xhr_pool[MAX_XHR];
 static int _xhr_count = 0;
+static char* _xhr_base_url = nullptr;
 
 // ============================================================================
 // Helpers
@@ -133,6 +135,77 @@ static char* xhr_mem_strdup(const char* s) {
     char* dup = (char*)mem_calloc(1, len + 1, MEM_CAT_JS_RUNTIME);
     memcpy(dup, s, len);
     return dup;
+}
+
+extern "C" void js_xhr_set_base_url(const char* base_url) {
+    if (_xhr_base_url) {
+        mem_free(_xhr_base_url);
+        _xhr_base_url = nullptr;
+    }
+    if (base_url && base_url[0]) {
+        _xhr_base_url = xhr_mem_strdup(base_url);
+    }
+}
+
+static char* xhr_resolve_url(const char* url) {
+    if (!url || !url[0]) return nullptr;
+    if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        return xhr_mem_strdup(url);
+    }
+    if (!_xhr_base_url || !_xhr_base_url[0]) {
+        return xhr_mem_strdup(url);
+    }
+
+    if (url[0] == '/' && url[1] == '/') {
+        const char* scheme_end = strstr(_xhr_base_url, "://");
+        if (!scheme_end) return xhr_mem_strdup(url);
+        size_t scheme_len = (size_t)(scheme_end - _xhr_base_url);
+        size_t url_len = strlen(url);
+        char* out = (char*)mem_alloc(scheme_len + 1 + url_len + 1, MEM_CAT_JS_RUNTIME);
+        if (!out) return nullptr;
+        memcpy(out, _xhr_base_url, scheme_len);
+        out[scheme_len] = ':';
+        memcpy(out + scheme_len + 1, url, url_len + 1);
+        return out;
+    }
+
+    if (url[0] == '/') {
+        const char* scheme_end = strstr(_xhr_base_url, "://");
+        if (!scheme_end) return xhr_mem_strdup(url);
+        const char* host_start = scheme_end + 3;
+        const char* host_end = host_start;
+        while (*host_end && *host_end != '/' && *host_end != '?' && *host_end != '#') {
+            host_end++;
+        }
+        if (host_end == host_start) {
+            return xhr_mem_strdup(url);
+        }
+        size_t origin_len = (size_t)(host_end - _xhr_base_url);
+        size_t url_len = strlen(url);
+        char* out = (char*)mem_alloc(origin_len + url_len + 1, MEM_CAT_JS_RUNTIME);
+        if (!out) {
+            return nullptr;
+        }
+        memcpy(out, _xhr_base_url, origin_len);
+        memcpy(out + origin_len, url, url_len + 1);
+        return out;
+    }
+
+    Url* base = url_parse(_xhr_base_url);
+    if (!base || !base->is_valid) {
+        if (base) url_destroy(base);
+        return xhr_mem_strdup(url);
+    }
+
+    Url* resolved = parse_url(base, url);
+    char* out = nullptr;
+    if (resolved && resolved->is_valid) {
+        const char* href = url_get_href(resolved);
+        if (href) out = xhr_mem_strdup(href);
+    }
+    if (resolved) url_destroy(resolved);
+    url_destroy(base);
+    return out ? out : xhr_mem_strdup(url);
 }
 
 static const char* status_text_for_code(long code) {
@@ -269,7 +342,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     xhr->req_header_count = 0;
 
     xhr->method = xhr_mem_strdup(method);
-    xhr->url = xhr_mem_strdup(url);
+    xhr->url = xhr_resolve_url(url);
     xhr->async_flag = true; // default true, ignored
     xhr->status = 0;
     xhr->response_size = 0;
@@ -277,7 +350,7 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     xhr->ready_state = 1; // OPENED
     xhr_fire_readystatechange(xhr);
 
-    log_debug("xhr: open(%s, %s)", method, url);
+    log_debug("xhr: open(%s, %s -> %s)", method, url, xhr->url ? xhr->url : "");
     return make_js_undef();
 }
 
@@ -322,7 +395,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     config.max_redirects = 5;
     config.verify_ssl = false;
     config.enable_compression = true;
-    config.user_agent = "Lambda/1.0";
+    config.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0";
 
     // body
     const char* body_str = nullptr;
@@ -551,5 +624,9 @@ extern "C" void js_xhr_reset(void) {
         }
     }
     _xhr_count = 0;
+    if (_xhr_base_url) {
+        mem_free(_xhr_base_url);
+        _xhr_base_url = nullptr;
+    }
     log_debug("xhr: reset");
 }

@@ -211,7 +211,8 @@ static char* url_percent_encode(const char* input, size_t len) {
             i += 2;
         } else if (c > 0x7E) {
             // non-ASCII: percent-encode each byte
-            j += sprintf(out + j, "%%%02X", c);
+            int written = snprintf(out + j, 4, "%%%02X", c);
+            if (written > 0) j += (size_t)written;
         } else {
             out[j++] = (char)c;
         }
@@ -594,62 +595,72 @@ UrlError url_set_href(Url* url, const char* href) {
 void url_normalize_path(char* path, size_t cap) {
     if (!path || !*path || cap == 0) return;
 
-    char segments[64][256]; // Max 64 path segments, 256 chars each
+    size_t original_len = strlen(path);
+    bool is_absolute = path[0] == '/';
+    bool had_trailing_slash = original_len > 1 && path[original_len - 1] == '/';
+
+    char* path_copy = (char*)mem_alloc(original_len + 1, MEM_CAT_TEMP);
+    if (!path_copy) return;
+    memcpy(path_copy, path, original_len + 1);
+
+    char* segments[256];
     int segment_count = 0;
+    char* saveptr = NULL;
+    char* token = strtok_r(path_copy, "/", &saveptr);
 
-    // Make a copy to work with since strtok modifies the string
-    char path_copy[2048];
-    strncpy(path_copy, path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
-
-    // Split path into segments
-    char* token = strtok(path_copy, "/");
-
-    while (token && segment_count < 63) {
+    while (token && segment_count < 256) {
         if (strcmp(token, ".") == 0) {
-            // Skip current directory references
+            // skip current directory references
         } else if (strcmp(token, "..") == 0) {
-            // Go up one directory (remove last segment)
             if (segment_count > 0) {
                 segment_count--;
             }
         } else if (strlen(token) > 0) {
-            // Regular segment - copy the string
-            size_t token_len = strlen(token);
-            if (token_len < 256) {
-                strncpy(segments[segment_count], token, 255);
-                segments[segment_count][255] = '\0';
-                segment_count++;
-            }
+            segments[segment_count++] = token;
         }
 
-        // Always advance to next token
-        token = strtok(NULL, "/");
+        token = strtok_r(NULL, "/", &saveptr);
     }
 
-    // Rebuild path safely, bounded by the caller's buffer capacity.
+    // rebuild path safely without dropping long but valid URL path segments
     path[0] = '\0';
     if (segment_count == 0) {
-        if (cap >= 2) { path[0] = '/'; path[1] = '\0'; }  // collapse to root
-        else          { path[0] = '\0'; }                  // cap == 1: only room for NUL
+        if (is_absolute && cap >= 2) {
+            path[0] = '/';
+            path[1] = '\0';
+        }
+        mem_free(path_copy);
         return;
     }
 
     size_t current_len = 0;
-    // need room for at least a slash plus the NUL: current_len + 1 < cap
-    for (int i = 0; i < segment_count && current_len + 1 < cap; i++) {
-        // Add slash (index current_len < cap-1 is guaranteed by the loop condition)
+    if (is_absolute && current_len + 1 < cap) {
         path[current_len++] = '/';
         path[current_len] = '\0';
+    }
 
-        // Add segment only if it fully fits, leaving room for the NUL.
-        size_t segment_len = strlen(segments[i]);
-        if (current_len + segment_len < cap) {
-            memcpy(path + current_len, segments[i], segment_len);
-            current_len += segment_len;
+    for (int i = 0; i < segment_count && current_len + 1 < cap; i++) {
+        if (current_len > 0 && path[current_len - 1] != '/' && current_len + 1 < cap) {
+            path[current_len++] = '/';
             path[current_len] = '\0';
         }
+        size_t segment_len = strlen(segments[i]);
+        size_t available = cap - current_len - 1;
+        size_t copy_len = segment_len < available ? segment_len : available;
+        if (copy_len > 0) {
+            memcpy(path + current_len, segments[i], copy_len);
+            current_len += copy_len;
+            path[current_len] = '\0';
+        }
+        if (copy_len < segment_len) break;
     }
+
+    if (had_trailing_slash && current_len > 0 && path[current_len - 1] != '/' && current_len + 1 < cap) {
+        path[current_len++] = '/';
+        path[current_len] = '\0';
+    }
+
+    mem_free(path_copy);
 }
 
 // Enhanced helper function to resolve relative path against base path
@@ -1363,19 +1374,29 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
         }
 
         size_t path_len = path_end - input;
-        if (path_len > 0 && path_len < 1024) {
-            char path_buf[1024];
-            strncpy(path_buf, input, path_len);
+        if (path_len > 0) {
+            char* path_buf = (char*)mem_alloc(path_len + 1, MEM_CAT_TEMP);
+            if (!path_buf) {
+                return URL_ERROR_MEMORY_ALLOCATION;
+            }
+            memcpy(path_buf, input, path_len);
             path_buf[path_len] = '\0';
 
-            // Normalize the path
-            url_normalize_path(path_buf, sizeof(path_buf));
+            // Normalize the path without imposing an arbitrary URL-length cap.
+            url_normalize_path(path_buf, path_len + 1);
 
             url_free_string(result->pathname);
             result->pathname = url_create_string(path_buf);
+            mem_free(path_buf);
+            if (!result->pathname) {
+                return URL_ERROR_MEMORY_ALLOCATION;
+            }
         } else {
             url_free_string(result->pathname);
             result->pathname = url_create_string("/");
+            if (!result->pathname) {
+                return URL_ERROR_MEMORY_ALLOCATION;
+            }
         }
 
         // Handle query and fragment
