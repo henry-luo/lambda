@@ -2201,7 +2201,9 @@ static void prepare_all_tests(
 
             // load metadata from cache or fall back to file read
             Test262Metadata meta;
-            bool cached_native_harness = false;
+            // Used only in debug builds (native-harness eligibility at line ~2287);
+            // release uses p.is_raw, so mark maybe_unused to satisfy -Werror.
+            [[maybe_unused]] bool cached_native_harness = false;
             if (!g_metadata_cache.empty()) {
                 auto it = g_metadata_cache.find(param.test_path);
                 if (it != g_metadata_cache.end()) {

@@ -1,4 +1,5 @@
 #include "js_transpiler.hpp"
+#include "js_runtime.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
@@ -14,6 +15,26 @@
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
     const TSLanguage* tree_sitter_javascript(void);
+}
+
+// Tune6 diagnostics: scope-lookup counters (see js_runtime.h). Disabled by
+// default so normal transpiles pay only a single predictable not-taken branch
+// per scanned entry.
+static bool g_js_scope_counters_enabled = false;
+static JsScopeCounters g_js_scope_counters = {0, 0, 0};
+
+extern "C" void js_scope_counters_set_enabled(int enabled) {
+    g_js_scope_counters_enabled = (enabled != 0);
+}
+
+extern "C" void js_scope_counters_reset(void) {
+    g_js_scope_counters.lookup_calls = 0;
+    g_js_scope_counters.entries_scanned = 0;
+    g_js_scope_counters.scopes_walked = 0;
+}
+
+extern "C" void js_scope_counters_get(JsScopeCounters* out) {
+    if (out) *out = g_js_scope_counters;
 }
 
 // Scope management functions
@@ -49,9 +70,13 @@ void js_scope_pop(JsTranspiler* tp) {
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     JsScope* scope = tp->current_scope;
 
+    if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
+
     while (scope) {
+        if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
         NameEntry* entry = scope->first;
         while (entry) {
+            if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
             if (entry->name->len == name->len &&
                 memcmp(entry->name->chars, name->chars, name->len) == 0) {
                 return entry;
@@ -67,10 +92,13 @@ NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
 }
 
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
+    if (g_js_scope_counters_enabled) g_js_scope_counters.lookup_calls++;
     if (!tp->current_scope) return NULL;
 
+    if (g_js_scope_counters_enabled) g_js_scope_counters.scopes_walked++;
     NameEntry* entry = tp->current_scope->first;
     while (entry) {
+        if (g_js_scope_counters_enabled) g_js_scope_counters.entries_scanned++;
         if (entry->name->len == name->len &&
             memcmp(entry->name->chars, name->chars, name->len) == 0) {
             return entry;

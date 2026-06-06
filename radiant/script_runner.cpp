@@ -245,8 +245,8 @@ typedef struct JsScriptSourceCacheEntry {
     uint64_t file_size;
 } JsScriptSourceCacheEntry;
 
-static long script_runner_wall_now_us();
 #ifndef NDEBUG
+static long script_runner_wall_now_us();
 static bool script_task_timing_enabled();
 #endif
 
@@ -653,6 +653,7 @@ static bool script_task_timing_enabled() {
 }
 #endif
 
+#ifndef NDEBUG
 static long script_runner_wall_now_us() {
 #ifndef _WIN32
     struct timeval tv;
@@ -669,6 +670,7 @@ static long script_runner_timing_total_us(const JsMirPhaseTiming* timing) {
         timing->imports_us + timing->mir_us + timing->link_us +
         timing->execute_us + timing->cleanup_us;
 }
+#endif  // !NDEBUG
 
 static bool element_has_attr_ci(Element* elem, const char* attr_name) {
     if (!elem || !attr_name || !attr_name[0]) return false;
