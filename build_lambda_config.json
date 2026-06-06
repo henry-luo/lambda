@@ -3736,6 +3736,19 @@
                         "icon": "🔁"
                     },
                     {
+                        "source": "test/test_js_transpile_timing_gtest.cpp",
+                        "name": "JS Transpile Timing Benchmark",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_js_transpile_timing_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "⏱️"
+                    },
+                    {
                         "source": "test/test_node_gtest.cpp",
                         "name": "Node.js Module Tests",
                         "dependencies": [],

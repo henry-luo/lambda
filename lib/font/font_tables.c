@@ -540,12 +540,7 @@ static uint16_t cmap_lookup_format4(CmapSubtable* sub, uint32_t codepoint) {
         return (uint16_t)((cp16 + id_delta) & 0xFFFF);
     }
 
-    // offset into glyphIdArray
-    // the id_range_offset is relative to the current position in the idRangeOffset array
-    size_t range_off_pos = (size_t)(f->id_range_offsets + lo * 2 - f->glyph_id_array);
-    // glyphIdArray index
-    size_t glyph_off = (size_t)id_range_offset + (cp16 - start_code) * 2 - range_off_pos;
-    // the above is a standard cmap4 formula but let's use the direct approach:
+    // offset into glyphIdArray (direct approach):
     // ptr = &idRangeOffsets[lo] + idRangeOffset + (cp - startCode) * 2
     const uint8_t* ptr = f->id_range_offsets + lo * 2 + id_range_offset + (cp16 - start_code) * 2;
 
@@ -681,7 +676,6 @@ KernTable* font_tables_get_kern(FontTables* tables) {
     if (!k) return NULL;
 
     // kern table header: version(2), nTables(2)
-    uint16_t version = rd16(raw);
     uint16_t n_tables = rd16(raw + 2);
 
     if (n_tables == 0) {
@@ -700,7 +694,6 @@ KernTable* font_tables_get_kern(FontTables* tables) {
     // coverage bits: format in bits 8-15
     uint16_t sub_version = rd16(sub);
     (void)sub_version;
-    uint16_t sub_length = rd16(sub + 2);
     uint16_t coverage = rd16(sub + 4);
     uint8_t format = (uint8_t)(coverage >> 8);
 

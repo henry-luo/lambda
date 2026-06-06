@@ -2690,7 +2690,6 @@ class PremakeGenerator:
             self.premake_content.extend([
                 '        "/opt/homebrew/lib",',
                 '        "/usr/local/lib",',
-                '        "build/lib",',
             ])
 
         self.premake_content.extend([

@@ -633,7 +633,7 @@ extern "C" Item js_assert_doesNotReject(Item asyncFnOrPromise, Item error_expect
     if (get_type_id(asyncFnOrPromise) == LMD_TYPE_FUNC) {
         promise = js_call_function(asyncFnOrPromise, make_js_undefined(), NULL, 0);
         if (js_check_exception()) {
-            Item thrown = js_clear_exception();
+            js_clear_exception();
             throw_assertion_error("Got unwanted rejection");
             return js_promise_resolve(make_js_undefined());
         }

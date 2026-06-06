@@ -105,13 +105,22 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
 
     // Get base path from document URL
     const char* base_path = nullptr;
+    char* owned_base_path = nullptr;
     if (lycon->doc && lycon->doc->url) {
-        base_path = url_to_local_path(lycon->doc->url);
+        if (lycon->doc->url->scheme == URL_SCHEME_HTTP || lycon->doc->url->scheme == URL_SCHEME_HTTPS) {
+            base_path = url_get_href(lycon->doc->url);
+        } else {
+            owned_base_path = url_to_local_path(lycon->doc->url);
+            base_path = owned_base_path;
+        }
     }
 
     // Parse using CSS module
     CssFontFaceDescriptor* css_desc = css_parse_font_face_content(content, nullptr);
-    if (!css_desc) return;
+    if (!css_desc) {
+        if (owned_base_path) mem_free(owned_base_path);
+        return;
+    }
 
     // Resolve URL
     if (css_desc->src_url && base_path) {
@@ -136,6 +145,7 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     }
 
     css_font_face_descriptor_free(css_desc);
+    if (owned_base_path) mem_free(owned_base_path);
 }
 
 // Process all @font-face rules from a stylesheet - uses css_font_face.hpp module
@@ -240,8 +250,17 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     if (!uicon || !doc) return;
     if (!doc->stylesheets || doc->stylesheet_count == 0) return;
 
-    // Default base path from document URL (used for inline styles)
-    char* doc_base_path = url_to_local_path(doc->url);
+    // Default base path from document URL (used for inline styles).
+    const char* doc_base_path = nullptr;
+    char* owned_doc_base_path = nullptr;
+    if (doc->url) {
+        if (doc->url->scheme == URL_SCHEME_HTTP || doc->url->scheme == URL_SCHEME_HTTPS) {
+            doc_base_path = url_get_href(doc->url);
+        } else {
+            owned_doc_base_path = url_to_local_path(doc->url);
+            doc_base_path = owned_doc_base_path;
+        }
+    }
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];
@@ -261,6 +280,13 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
                 if (stylesheet_path) {
                     base_path = stylesheet_path;
                     clog_debug(font_log, "Using stylesheet origin_url (plain path) for font resolution: %s", base_path);
+                }
+            } else if (strncmp(stylesheet->origin_url, "http://", 7) == 0 ||
+                       strncmp(stylesheet->origin_url, "https://", 8) == 0) {
+                stylesheet_path = mem_strdup(stylesheet->origin_url, MEM_CAT_FONT);
+                if (stylesheet_path) {
+                    base_path = stylesheet_path;
+                    clog_debug(font_log, "Using stylesheet origin_url (remote URL) for font resolution: %s", base_path);
                 }
             } else if (strncmp(stylesheet->origin_url, "file://", 7) == 0) {
                 // URL - parse and convert
@@ -291,8 +317,8 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
         }
     }
 
-    if (doc_base_path) {
-        mem_free(doc_base_path);  // from url_to_local_path() which uses stdlib
+    if (owned_doc_base_path) {
+        mem_free(owned_doc_base_path);  // from url_to_local_path()
     }
 }
 

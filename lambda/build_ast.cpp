@@ -4380,7 +4380,7 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     node_type->type = (Type*)type;  ast_node->list_type = type;
 
     TSNode child = ts_node_named_child(list_node, 0);
-    AstNode* prev_declare = NULL, * prev_item = NULL;
+    AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (item) {
@@ -4760,7 +4760,6 @@ AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
-        TSSymbol symbol = ts_node_symbol(child);
         AstNode* item = build_expr(tp, child);
         if (item) {
             if (!prev_item) ast_node->item = item;

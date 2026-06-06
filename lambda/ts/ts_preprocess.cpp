@@ -232,7 +232,6 @@ static size_t skip_type_annotation_end(const char* src, size_t colon_pos, size_t
 }
 
 static void blank_type_annotation(TsPreprocessor* pp, size_t colon_pos) {
-    size_t after_colon = skip_ws(pp->src, colon_pos + 1, pp->len);
     size_t type_end = skip_type_annotation_end(pp->src, colon_pos, pp->len);
     blank(pp, colon_pos, type_end);
 }
@@ -257,7 +256,6 @@ static size_t process_params(TsPreprocessor* pp, size_t pos) {
 
         // look for identifier followed by optional '?' and then ':'
         if (is_alpha(c)) {
-            size_t id_start = pos;
             size_t id_end = skip_ident(pp->src, pos, pp->len);
             pos = id_end;
             size_t after_id = skip_ws(pp->src, pos, pp->len);

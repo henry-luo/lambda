@@ -188,7 +188,6 @@ static void parse_kv_section(InputContext& ctx, const char** pos,
         if (kv_is_comment(**pos, cfg->comment_chars)) { skip_to_newline(pos); continue; }
         if (cfg->support_sections && **pos == '[') break;   // next section starts
 
-        SourceLocation line_loc = tracker.location();
         String* key = kv_parse_key(ctx, pos);
         if (!key) { skip_to_newline(pos); continue; }
 

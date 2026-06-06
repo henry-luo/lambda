@@ -247,6 +247,24 @@ extern unsigned int g_js_mir_optimize_level;
 
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
+// Tune6: force document JS to the link-interface interpreter (generator stays init)
+extern int g_js_force_document_interp;
+
+// Tune6: cold-document rendering commands (layout/render/view) default page JS to
+// the MIR interpreter. Vendor scripts in these documents are cold (run once at
+// load), so skipping JIT codegen cuts JS compile work ~2-2.6x with negligible
+// runtime cost — see vibe/jube/Transpile_Js_Tune6_AST.md §0.2. Uses the link-
+// interface interp path (JIT generator stays initialized) rather than pure-interp,
+// since pure-interp diverges from the JIT on some interactive JS. Escape hatch:
+// LAMBDA_JS_LARGE_INTERP=0 keeps the JIT (JS-heavy interactive pages / A/B timing).
+static void default_render_cmd_to_interp(void) {
+    const char* env = getenv("LAMBDA_JS_LARGE_INTERP");
+    bool enabled = !env || !env[0] || (strcmp(env, "0") != 0 && strcmp(env, "false") != 0);
+    if (enabled) {
+        g_js_force_document_interp = 1;
+        log_debug("render command: defaulting document JS to MIR interpreter (cold vendor JS)");
+    }
+}
 
 // External function declarations
 extern "C" {
@@ -1635,7 +1653,40 @@ int main(int argc, char *argv[]) {
                 js_store_process_argv(js_argc_store, js_argv_store);
             }
 
+            // Tune6: optional per-phase transpile timing + scope-lookup counters,
+            // gated by JS_TRANSPILE_TIMING. Used by the JS transpile timing
+            // benchmark (test_js_transpile_timing_gtest). Phase timing comes from
+            // js_mir_get_last_phase_timing; transpile_js_to_mir_len resets it.
+            const char* tune6_timing_env = getenv("JS_TRANSPILE_TIMING");
+            bool tune6_timing = tune6_timing_env && tune6_timing_env[0] &&
+                                strcmp(tune6_timing_env, "0") != 0;
+            if (tune6_timing) {
+                js_scope_counters_set_enabled(1);
+                js_scope_counters_reset();
+                js_mir_volume_counters_reset();
+            }
+
             Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
+
+            if (tune6_timing) {
+                JsMirPhaseTiming t; js_mir_get_last_phase_timing(&t);
+                JsScopeCounters sc; js_scope_counters_get(&sc);
+                printf("JS_TRANSPILE_TIMING file=%s bytes=%zu "
+                       "parse_ms=%.3f ast_ms=%.3f early_ms=%.3f imports_ms=%.3f "
+                       "mir_ms=%.3f link_ms=%.3f exec_ms=%.3f cleanup_ms=%.3f total_ms=%.3f\n",
+                       js_file, js_source_len,
+                       t.parse_us / 1000.0, t.ast_us / 1000.0, t.early_us / 1000.0,
+                       t.imports_us / 1000.0, t.mir_us / 1000.0, t.link_us / 1000.0,
+                       t.execute_us / 1000.0, t.cleanup_us / 1000.0, t.total_us / 1000.0);
+                printf("JS_AST_COUNTERS file=%s scope_lookups=%ld "
+                       "scope_entries_scanned=%ld scopes_walked=%ld\n",
+                       js_file, sc.lookup_calls, sc.entries_scanned, sc.scopes_walked);
+                JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
+                printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
+                       js_file, vc.functions_discovered, vc.mir_insns_emitted);
+                fflush(stdout);
+                js_scope_counters_set_enabled(0);
+            }
 
             // JS mode: no REPL printing of last expression value
             // (JS spec: scripts don't print their completion value)
@@ -2046,6 +2097,7 @@ int main(int argc, char *argv[]) {
     log_debug("Checking for layout command");
     if (argc >= 2 && strcmp(argv[1], "layout") == 0) {
         log_debug("Entering layout command handler");
+        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -2119,6 +2171,7 @@ int main(int argc, char *argv[]) {
     log_debug("Checking for render command");
     if (argc >= 2 && strcmp(argv[1], "render") == 0) {
         log_debug("Entering render command handler");
+        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -2551,6 +2604,7 @@ int main(int argc, char *argv[]) {
     log_debug("Checking for view command");
     if (argc >= 2 && strcmp(argv[1], "view") == 0) {
         log_debug("Entering view command handler");
+        default_render_cmd_to_interp();
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -3388,7 +3442,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 memset(&preamble, 0, sizeof(preamble));
-                Item pres = transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
+                transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
 
                 // Save harness source for recompilation after crash recovery
                 if (saved_harness_src) mem_free(saved_harness_src);

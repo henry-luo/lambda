@@ -595,6 +595,31 @@ typedef struct JsMirPhaseTiming {
 void js_mir_reset_last_phase_timing(void);
 void js_mir_get_last_phase_timing(JsMirPhaseTiming* out);
 
+// Tune6 diagnostics: scope-lookup counters. Used by the JS transpile timing
+// benchmark to test whether the linear-scan scope lookup is the AST-build
+// bottleneck on large/minified libraries. Counting is gated by an enable flag so
+// there is zero accumulation cost in normal runs.
+typedef struct JsScopeCounters {
+    long lookup_calls;     // calls to js_scope_lookup + js_scope_lookup_current
+    long entries_scanned;  // total NameEntry compared across all lookups
+    long scopes_walked;    // total parent scopes visited across all lookups
+} JsScopeCounters;
+
+void js_scope_counters_set_enabled(int enabled);
+void js_scope_counters_reset(void);
+void js_scope_counters_get(JsScopeCounters* out);
+
+// Tune6 §3.2: MIR generated-code volume for the last transpile. Drives the
+// MIR-lowering reduction work (§3.3) — identifies which fixtures emit the most MIR.
+typedef struct JsMirVolumeCounters {
+    long functions_discovered;  // JS functions collected (mt->func_count)
+    long mir_insns_emitted;     // total MIR instructions across all func items
+} JsMirVolumeCounters;
+
+void js_mir_volume_counters_reset(void);
+void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted);
+void js_mir_volume_counters_get(JsMirVolumeCounters* out);
+
 // globalThis / global object
 Item js_get_global_this(void);
 Item js_get_global_object(void);

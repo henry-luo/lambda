@@ -8,6 +8,16 @@ set -e
 SCRIPT_DIR="$(pwd)"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
+MACOS_DEPLOYMENT_TARGET="${LAMBDA_MACOS_DEPLOYMENT_TARGET:-${MACOSX_DEPLOYMENT_TARGET:-15.0}}"
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+
+mac_archive_matches_deployment_target() {
+    local archive="$1"
+    otool -l "$archive" 2>/dev/null | awk -v target="$MACOS_DEPLOYMENT_TARGET" '
+        /minos / { seen = 1; if ($2 != target) bad = 1 }
+        END { exit (seen && !bad) ? 0 : 1 }
+    '
+}
 
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
@@ -590,8 +600,13 @@ build_brotli_for_mac() {
     if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && [ -f "mac-deps/brotli/out/libbrotlicommon.a" ]; then
         # Verify the library has expected symbols
         if nm "mac-deps/brotli/out/libbrotlidec.a" 2>/dev/null | grep -q "BrotliDecoderDecompress"; then
-            echo "✅ Brotli already built and verified"
-            return 0
+            if mac_archive_matches_deployment_target "mac-deps/brotli/out/libbrotlidec.a" && \
+               mac_archive_matches_deployment_target "mac-deps/brotli/out/libbrotlicommon.a"; then
+                echo "✅ Brotli already built and verified"
+                return 0
+            else
+                echo "Brotli deployment target differs from macOS $MACOS_DEPLOYMENT_TARGET, rebuilding..."
+            fi
         else
             echo "Brotli found but missing expected symbols, rebuilding..."
             rm -rf mac-deps/brotli 2>/dev/null || true
@@ -620,10 +635,14 @@ build_brotli_for_mac() {
     mkdir -p out
 
     echo "Configuring Brotli with CMake..."
+    local macos_sdk_path
+    macos_sdk_path="$(xcrun --show-sdk-path)"
     cd out
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+        -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
         -DBROTLI_DISABLE_TESTS=ON \
         ..; then
 
@@ -700,10 +719,14 @@ build_woff2_for_mac() {
 
     # Point to our locally built Brotli
     BROTLI_DIR="$SCRIPT_DIR/mac-deps/brotli"
+    local macos_sdk_path
+    macos_sdk_path="$(xcrun --show-sdk-path)"
 
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+        -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DBROTLIDEC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
         -DBROTLIDEC_LIBRARIES="$BROTLI_DIR/out/libbrotlidec.a;$BROTLI_DIR/out/libbrotlicommon.a" \
@@ -1185,7 +1208,10 @@ fi
 
 # Build Brotli for Mac (required by WOFF2)
 echo "Setting up Brotli..."
-if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && [ -f "mac-deps/brotli/out/libbrotlicommon.a" ]; then
+if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && \
+   [ -f "mac-deps/brotli/out/libbrotlicommon.a" ] && \
+   mac_archive_matches_deployment_target "mac-deps/brotli/out/libbrotlidec.a" && \
+   mac_archive_matches_deployment_target "mac-deps/brotli/out/libbrotlicommon.a"; then
     echo "Brotli already available"
 else
     if ! build_brotli_for_mac; then
@@ -1198,7 +1224,10 @@ fi
 
 # Build WOFF2 for Mac (required for WOFF2 font decompression)
 echo "Setting up WOFF2..."
-if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && [ -f "mac-deps/woff2/out/libwoff2common.a" ]; then
+if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && \
+   [ -f "mac-deps/woff2/out/libwoff2common.a" ] && \
+   mac_archive_matches_deployment_target "mac-deps/woff2/out/libwoff2dec.a" && \
+   mac_archive_matches_deployment_target "mac-deps/woff2/out/libwoff2common.a"; then
     echo "WOFF2 already available"
 else
     if ! build_woff2_for_mac; then
@@ -1229,7 +1258,7 @@ fi
 # Build utf8proc from source (static library required by build config)
 echo "Setting up utf8proc..."
 UTF8PROC_LIB="build_temp/utf8proc/build/libutf8proc.a"
-if [ -f "$UTF8PROC_LIB" ]; then
+if [ -f "$UTF8PROC_LIB" ] && mac_archive_matches_deployment_target "$UTF8PROC_LIB"; then
     echo "✅ utf8proc static library already built"
 else
     echo "Building utf8proc from source..."
@@ -1241,9 +1270,17 @@ else
             exit 1
         fi
     fi
+    rm -rf build_temp/utf8proc/build
     mkdir -p build_temp/utf8proc/build
     cd build_temp/utf8proc/build
-    if cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DUTF8PROC_INSTALL=OFF -DUTF8PROC_ENABLE_TESTING=OFF && \
+    macos_sdk_path="$(xcrun --show-sdk-path)"
+    if cmake .. \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DBUILD_SHARED_LIBS=OFF \
+       -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
+       -DCMAKE_OSX_SYSROOT="$macos_sdk_path" \
+       -DUTF8PROC_INSTALL=OFF \
+       -DUTF8PROC_ENABLE_TESTING=OFF && \
        cmake --build . -j$(sysctl -n hw.ncpu); then
         echo "✅ utf8proc built successfully"
     else

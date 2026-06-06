@@ -1261,7 +1261,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
                     html5_fragment_parse(parser, srcdoc);
                     Element* body_elem = html5_fragment_get_body(parser);
                     if (body_elem) {
-                        for (size_t i = 0; i < body_elem->length; i++) {
+                        for (int64_t i = 0; i < body_elem->length; i++) {
                             TypeId t = get_type_id(body_elem->items[i]);
                             if (t == LMD_TYPE_ELEMENT) {
                                 build_dom_tree_from_element(
@@ -1890,7 +1890,6 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
             size_t adj_len = literal_len;
             while (adj_len >= 4) {
                 // find last */ in the segment
-                size_t end_pos = adj_len;
                 // check if segment ends with */  (possibly followed by whitespace)
                 size_t check = adj_len;
                 while (check > 0 && (lit_start[check-1] == ' ' || lit_start[check-1] == '\t'))
@@ -3550,7 +3549,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     }
 
     log_debug("js_document_get_property: unknown property '%s'", prop);
-    return ItemNull;
+    return make_js_undefined();
 }
 
 // ============================================================================
@@ -4899,6 +4898,36 @@ static bool _is_int_reflected(DomElement* elem, const char* prop,
     return false;
 }
 
+// True if `prop` reflects a string-valued content attribute whose missing
+// value is the empty string in the DOM IDL layer.
+static bool _is_string_reflected(DomElement* elem, const char* prop,
+                                 const char** attr_name) {
+    if (!elem || !elem->tag_name || !prop || !attr_name) return false;
+    const char* tag = elem->tag_name;
+    if (strcmp(prop, "src") == 0) {
+        if (strcasecmp(tag, "img") == 0 || strcasecmp(tag, "script") == 0 ||
+            strcasecmp(tag, "iframe") == 0 || strcasecmp(tag, "embed") == 0 ||
+            strcasecmp(tag, "source") == 0 || strcasecmp(tag, "track") == 0 ||
+            strcasecmp(tag, "audio") == 0 || strcasecmp(tag, "video") == 0 ||
+            strcasecmp(tag, "input") == 0) {
+            *attr_name = "src";
+            return true;
+        }
+    }
+    if (strcmp(prop, "href") == 0) {
+        if (strcasecmp(tag, "a") == 0 || strcasecmp(tag, "area") == 0 ||
+            strcasecmp(tag, "link") == 0 || strcasecmp(tag, "base") == 0) {
+            *attr_name = "href";
+            return true;
+        }
+    }
+    if (strcmp(prop, "alt") == 0 && strcasecmp(tag, "img") == 0) {
+        *attr_name = "alt";
+        return true;
+    }
+    return false;
+}
+
 // Returns the lowercased input `formmethod` value or "get" default.
 static const char* _normalise_method(const char* v) {
     if (v) {
@@ -5927,6 +5956,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     if (_is_tag(elem, "select") && strcmp(prop, "size") == 0) {
         return (Item){.item = i2it(_reflect_int_attr("size", 0))};
     }
+    const char* string_attr = nullptr;
+    if (_is_string_reflected(elem, prop, &string_attr)) {
+        const char* v = dom_element_get_attribute(elem, string_attr);
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
 
     // HTMLInputElement.defaultChecked — reflects `checked` content attribute
     if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
@@ -6564,7 +6598,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         if (!body_elem) return value;
 
         // 4. Convert parsed Lambda Elements to DOM nodes and append
-        for (size_t i = 0; i < body_elem->length; i++) {
+        for (int64_t i = 0; i < body_elem->length; i++) {
             TypeId type = get_type_id(body_elem->items[i]);
             if (type == LMD_TYPE_ELEMENT) {
                 build_dom_tree_from_element(
@@ -7908,7 +7942,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         }
 
         // build DOM nodes from parsed fragment and insert
-        for (size_t i = 0; i < body_elem->length; i++) {
+        for (int64_t i = 0; i < body_elem->length; i++) {
             TypeId type = get_type_id(body_elem->items[i]);
             if (type == LMD_TYPE_ELEMENT) {
                 DomElement* child_dom = build_dom_tree_from_element(
@@ -8280,8 +8314,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "reportValidity") == 0) {
         if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
             // delegate to checkValidity for forms
-            Item check_args[0];
-            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, check_args, 0);
+            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, nullptr, 0);
         }
         if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
         Item vs = _build_validity_state(elem);

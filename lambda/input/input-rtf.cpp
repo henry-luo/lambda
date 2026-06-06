@@ -167,7 +167,6 @@ static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
 
 static Array* parse_color_table(InputContext& ctx, const char **rtf) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder;
     Array* colors = array_pooled(input->pool);
     if (!colors) return NULL;
 
@@ -249,7 +248,6 @@ static Array* parse_font_table(InputContext& ctx, const char **rtf) {
 
 static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder;
     if (**rtf != '{') {
         return {.item = ITEM_ERROR};
     }
@@ -345,7 +343,6 @@ void parse_rtf(Input* input, const char* rtf_string) {
     }
     log_debug("rtf_parse\n");
     InputContext ctx(input, rtf_string, strlen(rtf_string));
-    MarkBuilder& builder = ctx.builder;
 
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);

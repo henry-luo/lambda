@@ -62,7 +62,6 @@ static int log_parse_simple_config(const char *config);
 /* Global state */
 static log_category_t categories[MAX_CATEGORIES];
 static log_format_t formats[MAX_FORMATS];
-static log_rule_t rules[MAX_RULES];
 static int categories_count = 0;
 static int formats_count = 0;
 static int rules_count = 0;

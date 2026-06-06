@@ -117,6 +117,9 @@ static const uint64_t ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
 static const uint64_t STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 static const uint64_t MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
+static const int JS_MIR_MAX_COLLECTED_FUNCTIONS = 32768;
+static const int JS_MIR_MAX_COLLECTED_CLASSES = 4096;
+
 struct JsMirImportEntry {
     MIR_item_t proto;
     MIR_item_t import;
@@ -366,12 +369,14 @@ struct JsMirTranspiler {
     int label_counter;
 
     // Collected functions (pre-pass)
-    JsFuncCollected func_entries[4096];
+    JsFuncCollected func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS];
     int func_count;
+    bool func_collection_overflow_logged;
 
     // Collected classes
-    JsClassEntry class_entries[512];
+    JsClassEntry class_entries[JS_MIR_MAX_COLLECTED_CLASSES];
     int class_count;
+    bool class_collection_overflow_logged;
 
     // Current class being transpiled (for super resolution)
     JsClassEntry* current_class;
@@ -498,7 +503,7 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
             mt->var_scopes[i] = NULL;
         }
     }
-    for (int i = 0; i < mt->class_count && i < 512; i++) {
+    for (int i = 0; i < mt->class_count && i < JS_MIR_MAX_COLLECTED_CLASSES; i++) {
         if (mt->class_entries[i].shape_cache_ptr) {
             mem_free(mt->class_entries[i].shape_cache_ptr);
             mt->class_entries[i].shape_cache_ptr = NULL;

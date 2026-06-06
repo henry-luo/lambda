@@ -2595,7 +2595,6 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
         // If diacritic with empty group, return standalone + ZWSP as string
         if (has_empty_group) {
             log_debug("input-latex-ts: Diacritic '%s' has empty group - outputting standalone '%s' + ZWS", cmd_name, diacritic->standalone);
-            MarkBuilder& builder = ctx.builder;
             StringBuf* sb = ctx.sb;
             stringbuf_reset(sb);
             stringbuf_append_str(sb, diacritic->standalone);
@@ -2806,14 +2805,12 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     if (strcmp(env_name->chars, "comment") == 0) {
         // Find the real \end{comment} in the raw source
         // The parser may have incorrectly included content after it due to malformed instances
-        uint32_t env_start = ts_node_start_byte(node);
         uint32_t env_end = ts_node_end_byte(node);
 
         // Look for the first valid \end{comment} after \begin{comment}
         // A valid \end{comment} is followed by } (not inside the comment content)
         uint32_t begin_end = ts_node_end_byte(begin_node);
         const char* search_start = source + begin_end;
-        size_t search_len = env_end - begin_end;
 
         // Find \end{comment} followed by optional whitespace/newlines and the next content
         const char* real_end = nullptr;

@@ -4324,7 +4324,6 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             float fg = get_item_flex_grow(item);
             float fs = get_item_flex_shrink(item);
             float current_size = get_main_axis_size(item, flex_layout);
-            float flex_basis = item_flex_basis[i];
             float target_size = current_size;
 
             if (is_growing && fg > 0) {

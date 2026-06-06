@@ -239,7 +239,6 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
 
 static Item parse_entity(InputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder;
-    Input* input = ctx.input();
     // Skip past the "!ENTITY" part (already consumed by caller)
     skip_whitespace(xml);
 

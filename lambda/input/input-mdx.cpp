@@ -51,7 +51,6 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
 
 // Parse JSX component using existing JSX parser
 static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end) {
-    Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder;
     // Use the existing JSX parsing functionality
     // For now, create a simple JSX element and delegate to JSX parser
@@ -61,7 +60,6 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
     int bracket_count = 0;
     const char* jsx_end = jsx_start;
     bool in_opening_tag = true;
-    bool is_self_closing = false;
     const char* tag_name_start = NULL;
     size_t tag_name_len = 0;
 
@@ -128,7 +126,6 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
 
 // Parse HTML element using existing HTML parser
 static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end) {
-    Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder;
     // Use existing HTML parsing functionality
     const char* html_start = *pos;

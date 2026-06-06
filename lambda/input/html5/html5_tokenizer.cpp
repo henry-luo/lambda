@@ -437,6 +437,10 @@ static void html5_append_to_temp_buffer(Html5Parser* parser, char c) {
     parser->temp_buffer[parser->temp_buffer_len++] = c;
 }
 
+// UTF-8 encoding of U+FFFD REPLACEMENT CHARACTER.
+// single-byte append helpers need multi-byte codepoints appended byte-by-byte.
+#define HTML5_REPLACEMENT_CHAR_UTF8 "\xEF\xBF\xBD"
+
 static void html5_append_bytes_to_temp_buffer(Html5Parser* parser, const char* bytes, int len) {
     for (int i = 0; i < len; i++) {
         html5_append_to_temp_buffer(parser, bytes[i]);
@@ -444,7 +448,7 @@ static void html5_append_bytes_to_temp_buffer(Html5Parser* parser, const char* b
 }
 
 static void html5_append_replacement_to_temp_buffer(Html5Parser* parser) {
-    html5_append_bytes_to_temp_buffer(parser, "\xEF\xBF\xBD", 3);
+    html5_append_bytes_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
 }
 
 // helper: clear temp buffer
@@ -471,9 +475,8 @@ static void html5_append_to_attr_name(Html5Parser* parser, char c) {
 }
 
 static void html5_append_replacement_to_attr_name(Html5Parser* parser) {
-    const char* replacement = "\xEF\xBF\xBD";
     for (int i = 0; i < 3; i++) {
-        html5_append_to_attr_name(parser, replacement[i]);
+        html5_append_to_attr_name(parser, HTML5_REPLACEMENT_CHAR_UTF8[i]);
     }
 }
 
@@ -866,7 +869,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         // parse error: unexpected null
                         log_error("html5: unexpected null character in data state");
-                        return html5_token_create_character_string(parser->pool, parser->arena, "\xEF\xBF\xBD", 3);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     // Single character (non-ASCII or after batch scan)
@@ -894,7 +897,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in RCDATA");
-                        return html5_token_create_character_string(parser->pool, parser->arena, "\xEF\xBF\xBD", 3);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -996,7 +999,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in RAWTEXT");
-                        return html5_token_create_character_string(parser->pool, parser->arena, "\xEF\xBF\xBD", 3);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -1087,7 +1090,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in PLAINTEXT");
-                        return html5_token_create_character_string(parser->pool, parser->arena, "\xEF\xBF\xBD", 3);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);

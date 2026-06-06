@@ -1,5 +1,7 @@
 // Define _GNU_SOURCE before any includes for memmem
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include "mime-detect.h"
 #include "memtrack.h"

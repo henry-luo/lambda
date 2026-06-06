@@ -28,6 +28,8 @@ ifeq ($(OS),Darwin)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
+	MACOS_DEPLOYMENT_TARGET ?= $(or $(MACOSX_DEPLOYMENT_TARGET),15.0)
+	MACOS_CMAKE_FLAGS := -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(shell xcrun --show-sdk-path)
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.lin.lua
@@ -46,6 +48,7 @@ NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; th
 # Render visual tests are CPU-heavy but independent; leave one core free for
 # the OS and browser/reference helpers.
 RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
+LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -347,6 +350,7 @@ $(RE2_LIB):
 			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			$$( [ -n "$$RE2_LAUNCHER" ] && echo "-DCMAKE_C_COMPILER_LAUNCHER=$$RE2_LAUNCHER -DCMAKE_CXX_COMPILER_LAUNCHER=$$RE2_LAUNCHER" ) \
 			-DCMAKE_CXX_FLAGS="$(if $(filter /clang64/bin/clang++,$(CXX)),-stdlib=libc++,) -O2" \
+			$(MACOS_CMAKE_FLAGS) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 			-DBUILD_SHARED_LIBS=OFF \
@@ -1146,7 +1150,7 @@ run-radiant-baseline:
 		echo "  ▸ $$suite:"; \
 		log_file="temp/_layout_baseline_$${suite}.log"; \
 		rm -f "$$log_file"; \
-		node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 & \
+		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 & \
 		suite_pid=$$!; \
 		while kill -0 $$suite_pid 2>/dev/null; do \
 			sleep 5; \
@@ -1179,7 +1183,7 @@ run-radiant-baseline:
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "📦 Layout Page Suite Regression:"; \
-		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+		snap_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
 			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
 		echo "$$snap_output" | tail -5; \
 		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1326,12 +1330,12 @@ run-radiant-baseline:
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
 	@echo "=============================================================="
-	@node test/layout/test_radiant_layout.js -c baseline
+	@$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c baseline
 	@if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "Running page suite snapshot regression check..."; \
 		echo "=============================================================="; \
-		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
 			| node test/layout/layout_suite_snapshot.js --check page; \
 	fi
 
@@ -1401,7 +1405,7 @@ layout-snapshot:
 		exit 1; \
 	fi; \
 	echo "Saving snapshot for suite: $$SUITE_VAR"; \
-	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --save $$SUITE_VAR
 
 layout-snapshot-check:
@@ -1410,7 +1414,7 @@ layout-snapshot-check:
 		echo "Usage: make layout-snapshot-check suite=<name>"; \
 		exit 1; \
 	fi; \
-	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --check $$SUITE_VAR
 
 layout-snapshot-diff:
@@ -1419,7 +1423,7 @@ layout-snapshot-diff:
 		echo "Usage: make layout-snapshot-diff suite=<name>"; \
 		exit 1; \
 	fi; \
-	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+	$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
 		| node test/layout/layout_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
@@ -2575,16 +2579,16 @@ test-layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css $$CONCURRENCY_FLAG $$UPDATE_BASELINE_FLAG; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \

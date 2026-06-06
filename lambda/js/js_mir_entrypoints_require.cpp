@@ -29,6 +29,23 @@ extern "C" void js_mir_get_last_phase_timing(JsMirPhaseTiming* out) {
     *out = g_last_js_mir_phase_timing;
 }
 
+// Tune6 §3.2: MIR generated-code volume for the last transpile.
+static JsMirVolumeCounters g_last_js_mir_volume;
+
+extern "C" void js_mir_volume_counters_reset(void) {
+    g_last_js_mir_volume.functions_discovered = 0;
+    g_last_js_mir_volume.mir_insns_emitted = 0;
+}
+
+extern "C" void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted) {
+    g_last_js_mir_volume.functions_discovered = functions_discovered;
+    g_last_js_mir_volume.mir_insns_emitted = mir_insns_emitted;
+}
+
+extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
+    if (out) *out = g_last_js_mir_volume;
+}
+
 static bool js_mir_large_source_interp_enabled(void) {
     const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
     return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
@@ -560,6 +577,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Tune6 §3.3: enable per-opcode emission histogram for this transpile.
+    static int js_opcode_hist_cached = -1;
+    if (js_opcode_hist_cached < 0) {
+        const char* e = getenv("JS_MIR_OPCODE_HIST");
+        js_opcode_hist_cached = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
+    }
+    if (js_opcode_hist_cached) { jm_opcode_hist_set_enabled(1); jm_opcode_hist_reset(); }
+
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
@@ -639,29 +664,70 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         }
     }
 #endif
-    // Auto-downgrade opt level for very large modules (e.g., lodash: 272K insns).
-    // MIR's SSA/GVN/LICM passes at opt>=2 have super-linear cost for large functions,
-    // causing 57s+ compile times in debug builds. Opt=0 compiles in <2s with negligible
-    // runtime difference for JS workloads (dominated by runtime function calls).
-    unsigned int effective_opt = g_js_mir_optimize_level;
-    if (effective_opt >= 2) {
-        unsigned long total_insns = 0;
-        for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
-             m = DLIST_NEXT(MIR_module_t, m)) {
-            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
-                 item = DLIST_NEXT(MIR_item_t, item)) {
-                if (item->item_type == MIR_func_item)
-                    total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
-            }
-        }
-        if (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
-            log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
-            MIR_gen_set_optimize_level(ctx, 0);
-            effective_opt = 0;
+    // Count total MIR instructions (drives the interpreter policy and the JIT
+    // opt-downgrade fallback below).
+    unsigned long total_insns = 0;
+    for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
+         m = DLIST_NEXT(MIR_module_t, m)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
+             item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type == MIR_func_item)
+                total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
         }
     }
+    js_mir_volume_counters_set((long)mt->func_count, (long)total_insns);
+    if (js_opcode_hist_cached) {
+        jm_opcode_hist_dump(ctx, filename ? filename : "<string>");
+        jm_opcode_hist_set_enabled(0);
+    }
+
+    // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
+    // startup cost is eager per-function MIR_gen during MIR_link. For large modules
+    // opt=0 JIT ≈ opt=2 JIT (link is codegen-emit-bound, not optimizer-bound), so
+    // the old ">100k → opt=0" downgrade was a near-no-op. The genuinely fast path
+    // for large *cold* code is the MIR interpreter, which skips codegen entirely.
+    //
+    // Policy: prefer the interpreter when the module is very large (any context) OR
+    // when running in a document/Radiant context (cold vendor JS) above a moderate
+    // size. Keep the JIT for compute-heavy standalone JS. The generator stays
+    // initialized (g_mir_interp_mode is left 0), so jit_init/jit_cleanup remain
+    // paired — only the MIR_link interface differs. Disable with LAMBDA_JS_LARGE_INTERP=0.
+    unsigned int effective_opt = g_js_mir_optimize_level;
+    bool document_context = (runtime && runtime->dom_doc != NULL);
+    if (!use_mir_interp_for_script && js_mir_large_source_interp_enabled() &&
+        (total_insns > JM_LARGE_MODULE_INSN_THRESHOLD ||
+         (document_context && (g_js_force_document_interp ||
+                               total_insns > JM_RADIANT_INTERP_INSN_THRESHOLD)))) {
+        use_mir_interp_for_script = true;
+        log_info("js-mir: %s module (%lu insns)%s → MIR interpreter (skip JIT codegen)",
+                 total_insns > JM_LARGE_MODULE_INSN_THRESHOLD ? "large" : "cold-document",
+                 total_insns, document_context ? " [document]" : "");
+    }
+    // Fallback: if we still JIT a very large module (interpreter disabled), downgrade
+    // opt to avoid MIR's super-linear opt passes on huge functions.
+    if (!use_mir_interp_for_script && effective_opt >= 2 &&
+        total_insns > JM_LARGE_MODULE_INSN_THRESHOLD) {
+        log_info("js-mir: large module (%lu insns) → opt=0 (was %u)", total_insns, effective_opt);
+        MIR_gen_set_optimize_level(ctx, 0);
+        effective_opt = 0;
+    }
+    // Tune6: JS_LAZY_MIR=1 selects MIR's native per-function lazy codegen
+    // (MIR_set_lazy_gen_interface) instead of eager generation. Lazy gen installs
+    // a wrapper thunk on func_item->addr and runs MIR_gen on first call, then
+    // redirects the thunk to the real code. This defers the dominant per-function
+    // codegen cost out of the link phase to first call. ABI-compatible: both the
+    // direct-call (MIR_new_ref_op(func_item)) and indirect (js_call_function)
+    // paths use func_item->addr. Does not affect the interp path.
+    static int js_lazy_mir_cached = -1;
+    if (js_lazy_mir_cached < 0) {
+        const char* lazy_env = getenv("JS_LAZY_MIR");
+        js_lazy_mir_cached = (lazy_env && lazy_env[0] && strcmp(lazy_env, "0") != 0) ? 1 : 0;
+    }
+    void (*gen_interface)(MIR_context_t, MIR_item_t) =
+        js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
+
     phase_start = js_mir_phase_now_us();
-    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : gen_interface, import_resolver);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: mir_linked");
     // Restore opt level if we changed it

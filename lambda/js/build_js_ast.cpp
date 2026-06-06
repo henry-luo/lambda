@@ -196,7 +196,7 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
         if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
         if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
         if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
-        if (strncmp(op_str, "??=", 3) == 0) return JS_OP_NULLISH_ASSIGN;
+        if (strncmp(op_str, "?\?=", 3) == 0) return JS_OP_NULLISH_ASSIGN;  // escaped to avoid ??= trigraph
         if (strncmp(op_str, "&&=", 3) == 0) return JS_OP_AND_ASSIGN;
         if (strncmp(op_str, "||=", 3) == 0) return JS_OP_OR_ASSIGN;
     } else if (len == 4) {
@@ -284,6 +284,13 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
         if (source.length >= 2) {
             size_t content_len = source.length - 2;
             const char* src = source.str + 1;
+            // Tune6 §2.4: fast path — no escapes means the literal equals its source
+            // slice, so intern directly without the temp-buffer alloc/copy/free.
+            if (memchr(src, '\\', content_len) == NULL) {
+                literal->value.string_value = name_pool_create_len(tp->name_pool, src, content_len);
+                literal->base.type = &TYPE_STRING;
+                return (JsAstNode*)literal;
+            }
             // Process escape sequences in-place
             char* temp_str = (char*)mem_alloc(content_len + 1, MEM_CAT_JS_RUNTIME);
             if (temp_str) {
@@ -805,11 +812,14 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         // Handle shorthand_property_identifier: { Vector } -> { Vector: Vector }
         if (strcmp(child_type, "shorthand_property_identifier") == 0) {
             JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
-            // The node itself is an identifier — use it for both key and value
+            // The node itself is an identifier — use it for both key and value.
+            // Tune6 §2.6: build once and share. Lowering consumes the key read-only
+            // (key->name) and the value as an expression (variable read); it never
+            // mutates AST nodes, so a single shared node is safe and avoids a
+            // duplicate build + scope lookup per shorthand property.
             JsAstNode* ident = build_js_expression(tp, property_node);
             property->key = ident;
-            // Create a separate identifier node for value (same name)
-            property->value = build_js_expression(tp, property_node);
+            property->value = ident;
             property->shorthand = true;
             property->base.type = &TYPE_ANY;
             if (!prev_property) {

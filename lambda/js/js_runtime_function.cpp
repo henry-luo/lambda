@@ -440,7 +440,6 @@ extern "C" void js_set_class_name(Item cls_item, Item name_item) {
         return;
     }
     String* name_key_str = heap_create_name("name", 4);
-    Item key = (Item){.item = s2it(name_key_str)};
     map_put(cls_item.map, name_key_str, name_item, js_input);
     js_attr_set_writable(cls_item, "name", 4, false);
     js_attr_set_enumerable(cls_item, "name", 4, false);

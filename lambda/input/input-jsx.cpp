@@ -222,8 +222,6 @@ static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const cha
 
 // Parse JSX attribute value
 static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end) {
-    Input* input = ctx.input();
-
     skip_jsx_whitespace(jsx, end);
 
     if (*jsx >= end) return NULL;

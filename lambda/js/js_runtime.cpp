@@ -13600,7 +13600,7 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     rd->unicode = ce.has_unicode;
     rd->has_indices = ce.has_indices;
     Item regex_obj = js_new_object();
-    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
+    heap_create_name(JS_REGEX_DATA_KEY);
     Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
     js_regex_put_fresh(regex_obj, JS_REGEX_DATA_KEY, 4, rd_val);
     Item source_key = (Item){.item = s2it(heap_create_name("source"))};
@@ -13634,14 +13634,14 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     // Per ES §22.2.3.1 RegExpAlloc: lastIndex is {writable:true, enumerable:false, configurable:false}
     js_mark_non_enumerable(regex_obj, li_key);
     js_mark_non_configurable(regex_obj, li_key);
-    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    heap_create_name("__class_name__", 14);
     Item cn_val = (Item){.item = s2it(heap_create_name("RegExp", 6))};
     js_regex_put_fresh(regex_obj, "__class_name__", 14, cn_val);
     js_class_stamp(regex_obj, JS_CLASS_REGEXP);
     // v90: set __proto__ so prototype chain overrides (delete/reassign Symbol.matchAll etc.) work
     Item regexp_proto = js_get_regexp_prototype();
     if (regexp_proto.item != ItemNull.item) {
-        Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        heap_create_name("__proto__", 9);
         js_regex_put_fresh(regex_obj, "__proto__", 9, regexp_proto);
     }
     return regex_obj;
@@ -16008,7 +16008,7 @@ static Item js_regexp_symbol_match(Item this_val, Item arg0) {
     // Steps 4-5: get flags for error propagation, then read global directly (coerce-global.js)
     Item flags_val = js_string_matchall_get_flags(this_val);
     if (js_exception_pending) return ItemNull;
-    Item flags_str = js_to_string(flags_val);
+    js_to_string(flags_val);
     if (js_exception_pending) return ItemNull;
     // Read global directly (ES2015 step 8 / ES2021 reads global from Get(rx,"global") for coerce-global.js)
     Item global_key_item = (Item){.item = s2it(heap_create_name("global", 6))};
@@ -16115,7 +16115,7 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
     if (!functional_replace) {
         Item flags_val = js_string_matchall_get_flags(this_val);
         if (js_exception_pending) return ItemNull;
-        Item flags_str_item = js_to_string(flags_val);
+        js_to_string(flags_val);
         if (js_exception_pending) return ItemNull;
     }
     // Step 7 (ES2015): global = ToBoolean(Get(rx, "global")) — read directly so overrides work
@@ -17237,7 +17237,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 return js_typed_array_set_from(obj, source, offset);
             }
             if (method->len == 8 && strncmp(method->chars, "subarray", 8) == 0) {
-                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = js_typed_array_length(obj);
                 double d_start = 0;
                 if (argc > 0) {
@@ -17274,7 +17273,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 return js_typed_array_subarray(obj, start, end, end_is_default);
             }
             if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
-                JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 int len = js_typed_array_length(obj);
                 // ES §22.2.3.24: ToIntegerOrInfinity on arguments
                 double d_start = 0;
@@ -20696,7 +20694,6 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             bool is_regexp = false;
             if (get_type_id(args[0]) == LMD_TYPE_MAP) {
                 // Check for __sym_7 (Symbol.match) or __rd
-                bool has_match = false;
                 Item sym_match_val = js_property_get(args[0], (Item){.item = s2it(heap_create_name("__sym_7", 7))});
                 if (sym_match_val.item != ItemNull.item && get_type_id(sym_match_val) != LMD_TYPE_UNDEFINED) {
                     is_regexp = js_is_truthy(sym_match_val);
@@ -30602,7 +30599,7 @@ extern "C" Item js_module_get(Item specifier) {
             v8_epoch = js_heap_epoch;
             v8_ns = js_new_object();
             heap_register_gc_root(&v8_ns.item);
-            Item noop = js_new_function((void*)js_stub_noop, 0);
+            js_new_function((void*)js_stub_noop, 0);
             Item noop1 = js_new_function((void*)js_stub_noop, 1);
             // promiseHooks stub — { onInit, onBefore, onAfter, onSettled, createHook }
             Item ph = js_new_object();

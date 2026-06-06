@@ -18,8 +18,12 @@ extern void js_double_to_string(double d, char* out, int out_size);
 extern "C" void js_process_emit_exit(int code);
 extern MIR_error_func_t g_batch_mir_error_handler;
 extern unsigned int g_js_mir_optimize_level;
+extern int g_js_force_document_interp;
 #define JM_LARGE_FUNC_INSN_THRESHOLD 10000
 #define JM_LARGE_MODULE_INSN_THRESHOLD 100000
+// Tune6: in a document/Radiant context (cold vendor JS), use the MIR interpreter
+// for modules above this (moderate) insn count — see Transpile_Js_Tune6_AST.md §0.2d.
+#define JM_RADIANT_INTERP_INSN_THRESHOLD 20000
 extern "C" int g_mir_interp_mode;
 extern "C" const TSLanguage* tree_sitter_typescript(void);
 extern "C" const TSLanguage* tree_sitter_javascript(void);
@@ -72,6 +76,10 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
+// Tune6 §3.3: per-opcode emission histogram (env JS_MIR_OPCODE_HIST)
+void jm_opcode_hist_set_enabled(int enabled);
+void jm_opcode_hist_reset(void);
+void jm_opcode_hist_dump(MIR_context_t ctx, const char* label);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);

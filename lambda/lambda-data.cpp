@@ -544,16 +544,13 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-        String *str = type_id == LMD_TYPE_STRING ? itm.get_safe_string() : itm.get_safe_binary();
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol *sym = itm.get_safe_symbol();
         break;
     }
     default:
         if (LMD_TYPE_CONTAINER <= type_id && type_id <= LMD_TYPE_OBJECT) {
-            Container *container = itm.container;
         }
     }
 }
@@ -657,10 +654,8 @@ void list_push(List *list, Item item) {
         }
     }
     else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_OBJECT) {
-        Container *container = item.container;
     }
     else if (type_id == LMD_TYPE_FUNC) {
-        Function *fn = item.function;
     }
 
     // store the value in the list (and we may need two slots for long/double)
@@ -674,11 +669,9 @@ void list_push(List *list, Item item) {
     list->items[list->length++] = item;
     switch (item._type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-        String *str = item._type_id == LMD_TYPE_STRING ? item.get_safe_string() : item.get_safe_binary();
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        Symbol *sym = item.get_safe_symbol();
         break;
     }
     case LMD_TYPE_DECIMAL: {
