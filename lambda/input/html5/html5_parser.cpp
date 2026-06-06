@@ -269,7 +269,7 @@ Element* html5_pop_element(Html5Parser* parser) {
 static Element* find_parent_of_element(Element* root, Element* target, int* child_pos) {
     if (root == nullptr || target == nullptr) return nullptr;
 
-    for (size_t i = 0; i < root->length; i++) {
+    for (size_t i = 0; i < (size_t)root->length; i++) {
         TypeId type = get_type_id(root->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
             Element* child = root->items[i].element;
@@ -450,7 +450,7 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
 
     // check if entry is in stack
     bool in_stack = false;
-    for (size_t i = 0; i < parser->open_elements->length; i++) {
+    for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
         if (parser->open_elements->items[i].element == entry.element) {
             in_stack = true;
             break;
@@ -471,7 +471,7 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
         }
 
         in_stack = false;
-        for (size_t i = 0; i < parser->open_elements->length; i++) {
+        for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
             if (parser->open_elements->items[i].element == entry.element) {
                 in_stack = true;
                 break;
@@ -536,7 +536,7 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
 
                 for (int i = table_index - 1; i >= 0; i--) {
                     Element* candidate = (Element*)parser->open_elements->items[i].element;
-                    for (size_t j = 0; j < candidate->length; j++) {
+                    for (size_t j = 0; j < (size_t)candidate->length; j++) {
                         if (candidate->items[j].element == table_element) {
                             foster_parent = candidate;
                             table_pos = (int)j;
@@ -552,7 +552,7 @@ void html5_reconstruct_active_formatting_elements(Html5Parser* parser) {
                 if (foster_parent == nullptr && parser->document != nullptr) {
                     // Search from body element if it exists, otherwise from document
                     Element* search_root = nullptr;
-                    for (size_t i = 0; i < parser->document->length; i++) {
+                    for (size_t i = 0; i < (size_t)parser->document->length; i++) {
                         TypeId type = get_type_id(parser->document->items[i]);
                         if (type == LMD_TYPE_ELEMENT) {
                             Element* child = parser->document->items[i].element;
@@ -648,7 +648,7 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
             for (int i = table_index - 1; i >= 0; i--) {
                 Element* candidate = (Element*)parser->open_elements->items[i].element;
                 // Check if table is a direct child of this element
-                for (size_t j = 0; j < candidate->length; j++) {
+                for (size_t j = 0; j < (size_t)candidate->length; j++) {
                     if (candidate->items[j].element == table_element) {
                         foster_parent = candidate;
                         table_pos = (int)j;
@@ -663,7 +663,7 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
             // If not found in open_elements, search the entire DOM tree
             if (foster_parent == nullptr && parser->document != nullptr) {
                 Element* search_root = nullptr;
-                for (size_t i = 0; i < parser->document->length; i++) {
+                for (size_t i = 0; i < (size_t)parser->document->length; i++) {
                     TypeId type = get_type_id(parser->document->items[i]);
                     if (type == LMD_TYPE_ELEMENT) {
                         Element* child = parser->document->items[i].element;
@@ -807,7 +807,7 @@ void html5_flush_foster_text(Html5Parser* parser) {
 
     // Find the table's position in foster parent's children
     int table_pos = -1;
-    for (size_t i = 0; i < foster_parent->length; i++) {
+    for (size_t i = 0; i < (size_t)foster_parent->length; i++) {
         if (foster_parent->items[i].element == table_element) {
             table_pos = (int)i;
             break;
@@ -918,7 +918,7 @@ void html5_foster_parent_character(Html5Parser* parser, char c) {
     // First try searching backwards in the open elements stack
     for (int i = table_index - 1; i >= 0; i--) {
         Element* candidate = (Element*)parser->open_elements->items[i].element;
-        for (size_t j = 0; j < candidate->length; j++) {
+        for (size_t j = 0; j < (size_t)candidate->length; j++) {
             if (candidate->items[j].element == table_element) {
                 foster_parent = candidate;
                 break;
@@ -932,7 +932,7 @@ void html5_foster_parent_character(Html5Parser* parser, char c) {
     // If not found in open_elements, search the entire DOM tree
     if (foster_parent == nullptr && parser->document != nullptr) {
         Element* search_root = nullptr;
-        for (size_t i = 0; i < parser->document->length; i++) {
+        for (size_t i = 0; i < (size_t)parser->document->length; i++) {
             TypeId type = get_type_id(parser->document->items[i]);
             if (type == LMD_TYPE_ELEMENT) {
                 Element* child = parser->document->items[i].element;
@@ -1152,7 +1152,7 @@ void html5_remove_from_active_formatting(Html5Parser* parser, int index) {
         return;
     }
     // shift elements down
-    for (size_t i = index; i < parser->active_formatting->length - 1; i++) {
+    for (size_t i = index; i < (size_t)(parser->active_formatting->length - 1); i++) {
         parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
     }
     parser->active_formatting->length--;
@@ -1164,7 +1164,7 @@ void html5_remove_from_stack(Html5Parser* parser, int index) {
         return;
     }
     // shift elements down
-    for (size_t i = index; i < parser->open_elements->length - 1; i++) {
+    for (size_t i = index; i < (size_t)(parser->open_elements->length - 1); i++) {
         parser->open_elements->items[i] = parser->open_elements->items[i + 1];
     }
     parser->open_elements->length--;

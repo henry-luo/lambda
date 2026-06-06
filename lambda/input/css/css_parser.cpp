@@ -2707,7 +2707,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         pos += nested_consumed;
                         if (nested_rule) {
                             // Expand array if needed
-                            if (rule->data.conditional_rule.rule_count >= nested_capacity) {
+                            if (rule->data.conditional_rule.rule_count >= (size_t)nested_capacity) {
                                 nested_capacity *= 2;
                                 CssRule** new_rules = (CssRule**)pool_alloc(pool,
                                     nested_capacity * sizeof(CssRule*));

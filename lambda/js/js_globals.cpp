@@ -5520,7 +5520,7 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
                             if (on) { on_chars = on->chars; on_len = (int)on->len; }
                         }
                     }
-                    if (on_chars && on_len == rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
+                    if (on_chars && on_len == (int)rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
                         return (Item){.item = b2it(true)};
                     }
                     Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
@@ -5555,7 +5555,7 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
             }
         }
         if (on_chars) {
-            if (on_len == rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
+            if (on_len == (int)rn->len && strncmp(on_chars, rn->chars, on_len) == 0) {
                 return (Item){.item = b2it(true)};
             }
             // error hierarchy: any *Error subtype instanceof Error

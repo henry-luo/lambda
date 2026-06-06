@@ -1320,10 +1320,10 @@ static const char* resolve_builtin_module(Transpiler* tp, StrView* name) {
     if (strview_equal(name, "math")) return "math";
     if (strview_equal(name, "io")) return "io";
     // check aliases
-    if (tp->builtin_alias_math && (int)name->length == tp->builtin_alias_math->len
+    if (tp->builtin_alias_math && (int)name->length == (int)tp->builtin_alias_math->len
         && strncmp(name->str, tp->builtin_alias_math->chars, name->length) == 0)
         return "math";
-    if (tp->builtin_alias_io && (int)name->length == tp->builtin_alias_io->len
+    if (tp->builtin_alias_io && (int)name->length == (int)tp->builtin_alias_io->len
         && strncmp(name->str, tp->builtin_alias_io->chars, name->length) == 0)
         return "io";
     return NULL;

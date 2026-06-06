@@ -992,7 +992,7 @@ Item fn_min1(Item item_a) {
         ArrayNumElemType et = arr->get_elem_type();
         if (et == ELEM_FLOAT) {
             double min_val = arr->float_items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->float_items[i] < min_val) {
                     min_val = arr->float_items[i];
                 }
@@ -1000,7 +1000,7 @@ Item fn_min1(Item item_a) {
             return push_d(min_val);
         } else if (et == ELEM_INT64) {
             int64_t min_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] < min_val) {
                     min_val = arr->items[i];
                 }
@@ -1008,7 +1008,7 @@ Item fn_min1(Item item_a) {
             return push_l(min_val);
         } else {
             int64_t min_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] < min_val) {
                     min_val = arr->items[i];
                 }
@@ -1046,7 +1046,7 @@ Item fn_min1(Item item_a) {
         }
 
         // find minimum
-        for (size_t i = 1; i < arr->length; i++) {
+        for (size_t i = 1; i < (size_t)arr->length; i++) {
             Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
@@ -1190,7 +1190,7 @@ Item fn_max1(Item item_a) {
         ArrayNumElemType et = arr->get_elem_type();
         if (et == ELEM_FLOAT) {
             double max_val = arr->float_items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->float_items[i] > max_val) {
                     max_val = arr->float_items[i];
                 }
@@ -1198,7 +1198,7 @@ Item fn_max1(Item item_a) {
             return push_d(max_val);
         } else if (et == ELEM_INT64) {
             int64_t max_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] > max_val) {
                     max_val = arr->items[i];
                 }
@@ -1206,7 +1206,7 @@ Item fn_max1(Item item_a) {
             return push_l(max_val);
         } else {
             int64_t max_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
+            for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] > max_val) {
                     max_val = arr->items[i];
                 }
@@ -1239,7 +1239,7 @@ Item fn_max1(Item item_a) {
         }
 
         // Find maximum
-        for (size_t i = 1; i < arr->length; i++) {
+        for (size_t i = 1; i < (size_t)arr->length; i++) {
             Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
@@ -1303,7 +1303,7 @@ Item fn_sum(Item item) {
         }
         double sum = 0.0;
         bool has_float = false;
-        for (size_t i = 0; i < arr->length; i++) {
+        for (size_t i = 0; i < (size_t)arr->length; i++) {
             Item elem_item = array_get(arr, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
@@ -1342,7 +1342,7 @@ Item fn_sum(Item item) {
                 return push_d(0.0);
             }
             double sum = 0.0;
-            for (size_t i = 0; i < arr->length; i++) {
+            for (size_t i = 0; i < (size_t)arr->length; i++) {
                 sum += arr->float_items[i];
             }
             return push_d(sum);
@@ -1351,7 +1351,7 @@ Item fn_sum(Item item) {
                 return (Item) { .item = i2it(0) };
             }
             int64_t sum = 0;
-            for (size_t i = 0; i < arr->length; i++) {
+            for (size_t i = 0; i < (size_t)arr->length; i++) {
                 sum += arr->items[i];
             }
             return push_l(sum);
@@ -1364,7 +1364,7 @@ Item fn_sum(Item item) {
         }
         double sum = 0.0;
         bool has_float = false;
-        for (size_t i = 0; i < list->length; i++) {
+        for (size_t i = 0; i < (size_t)list->length; i++) {
             Item elem_item = list_get(list, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
@@ -1425,7 +1425,7 @@ Item fn_avg(Item item) {
             return ItemError;
         }
         double sum = 0.0;
-        for (size_t i = 0; i < arr->length; i++) {
+        for (size_t i = 0; i < (size_t)arr->length; i++) {
             Item elem_item = array_get(arr, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();
@@ -1452,11 +1452,11 @@ Item fn_avg(Item item) {
         double sum = 0.0;
         ArrayNumElemType et = arr->get_elem_type();
         if (et == ELEM_FLOAT) {
-            for (size_t i = 0; i < arr->length; i++) {
+            for (size_t i = 0; i < (size_t)arr->length; i++) {
                 sum += arr->float_items[i];
             }
         } else {
-            for (size_t i = 0; i < arr->length; i++) {
+            for (size_t i = 0; i < (size_t)arr->length; i++) {
                 sum += (double)arr->items[i];
             }
         }
@@ -1468,7 +1468,7 @@ Item fn_avg(Item item) {
             return ItemError;
         }
         double sum = 0.0;
-        for (size_t i = 0; i < list->length; i++) {
+        for (size_t i = 0; i < (size_t)list->length; i++) {
             Item elem_item = list_get(list, i);
             if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.get_int56();

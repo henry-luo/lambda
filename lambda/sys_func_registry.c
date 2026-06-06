@@ -234,6 +234,16 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
 // native_func_ptr: NPTR(native_fn) — resolves to real pointer or dummy stub
 // NULL means function is unimplemented or handled by special transpiler paths.
 
+// FPTR()/NPTR() deliberately erase every system function's real signature to the
+// uniform `fn_ptr` (void*(*)()) so heterogeneous functions can share one registry
+// table; the matching ABI is recorded per-row (c_ret_type/c_arg_conv) and MIR calls
+// each through the correct prototype at JIT dispatch. clang's -Wcast-function-type-mismatch
+// fires on every such erase (~952 here) but the round-trip is sound by construction.
+// Suppress it for the registry tables only; the flag stays on globally so genuinely
+// suspect casts elsewhere are still reported.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+
 SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Type/conversion functions — all method-eligible
@@ -2736,3 +2746,5 @@ const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_ru
 JitImport jit_runtime_imports[] = {{NULL, NULL}};
 const int jit_runtime_import_count = 0;
 #endif // !LAMBDA_STATIC
+
+#pragma clang diagnostic pop // -Wcast-function-type-mismatch (FPTR/NPTR registry erasure)

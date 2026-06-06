@@ -360,7 +360,7 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
             if (text && text->len > 0) {
                 // Only add non-empty text
                 bool has_non_whitespace = false;
-                for (int i = 0; i < text->len; i++) {
+                for (int i = 0; i < (int)text->len; i++) {
                     if (!is_jsx_whitespace(text->chars[i])) {
                         has_non_whitespace = true;
                         break;
@@ -462,7 +462,7 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
             if (text && text->len > 0) {
                 // Only add non-empty text
                 bool has_non_whitespace = false;
-                for (int i = 0; i < text->len; i++) {
+                for (int i = 0; i < (int)text->len; i++) {
                     if (!is_jsx_whitespace(text->chars[i])) {
                         has_non_whitespace = true;
                         break;

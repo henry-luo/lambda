@@ -665,7 +665,7 @@ String* escape_shell_arg(String* arg) {
 
     // Check if argument needs escaping (contains spaces, special chars, etc.)
     bool needs_quoting = false;
-    for (int i = 0; i < arg->len; i++) {
+    for (int i = 0; i < (int)arg->len; i++) {
         char c = arg->chars[i];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' ||
             c == '\\' || c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
@@ -684,7 +684,7 @@ String* escape_shell_arg(String* arg) {
 #ifdef _WIN32
     // Use caret escaping for cmd.exe so shell builtins like echo do not print quotes.
     size_t escaped_len = arg->len;
-    for (int i = 0; i < arg->len; i++) {
+    for (int i = 0; i < (int)arg->len; i++) {
         char c = arg->chars[i];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' ||
             c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
@@ -699,7 +699,7 @@ String* escape_shell_arg(String* arg) {
     escaped->is_ascii = 1;
 
     char* dst = escaped->chars;
-    for (int i = 0; i < arg->len; i++) {
+    for (int i = 0; i < (int)arg->len; i++) {
         char c = arg->chars[i];
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' ||
             c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
@@ -715,7 +715,7 @@ String* escape_shell_arg(String* arg) {
 #else
     // Use single quotes for safety and escape any single quotes in the string
     size_t escaped_len = arg->len + 2; // Start with quotes
-    for (int i = 0; i < arg->len; i++) {
+    for (int i = 0; i < (int)arg->len; i++) {
         if (arg->chars[i] == '\'') {
             escaped_len += 3; // Replace ' with '\''
         }
@@ -728,7 +728,7 @@ String* escape_shell_arg(String* arg) {
     char* dst = escaped->chars;
     *dst++ = '\''; // Opening quote
 
-    for (int i = 0; i < arg->len; i++) {
+    for (int i = 0; i < (int)arg->len; i++) {
         if (arg->chars[i] == '\'') {
             // Escape single quote: ' becomes '\''
             *dst++ = '\'';
