@@ -95,7 +95,40 @@ MIR_label_t jm_new_label(JsMirTranspiler* mt) {
     return MIR_new_label(mt->ctx);
 }
 
+// Tune6 §3.3: per-opcode emission histogram (env-gated, zero cost when off) to
+// find which MIR the lowering emits the most of — drives helper extraction.
+#define JM_OPCODE_HIST_SIZE 1024
+static long g_jm_opcode_hist[JM_OPCODE_HIST_SIZE];
+static bool g_jm_opcode_hist_enabled = false;
+
+void jm_opcode_hist_set_enabled(int enabled) { g_jm_opcode_hist_enabled = (enabled != 0); }
+void jm_opcode_hist_reset(void) { memset(g_jm_opcode_hist, 0, sizeof(g_jm_opcode_hist)); }
+
+void jm_opcode_hist_dump(MIR_context_t ctx, const char* label) {
+    // collect non-zero, sort by count desc, print top 25
+    int idx[JM_OPCODE_HIST_SIZE]; int n = 0;
+    long total = 0;
+    for (int i = 0; i < JM_OPCODE_HIST_SIZE; i++) {
+        if (g_jm_opcode_hist[i] > 0) { idx[n++] = i; total += g_jm_opcode_hist[i]; }
+    }
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            if (g_jm_opcode_hist[idx[j]] > g_jm_opcode_hist[idx[i]]) { int t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+    printf("JS_MIR_OPCODE_HIST label=%s total_emitted=%ld distinct_opcodes=%d\n", label ? label : "", total, n);
+    int top = n < 25 ? n : 25;
+    for (int i = 0; i < top; i++) {
+        const char* name = MIR_insn_name(ctx, (MIR_insn_code_t)idx[i]);
+        printf("  %-12s %10ld  %5.1f%%\n", name ? name : "?", g_jm_opcode_hist[idx[i]],
+               total ? 100.0 * (double)g_jm_opcode_hist[idx[i]] / (double)total : 0.0);
+    }
+    fflush(stdout);
+}
+
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
+    if (g_jm_opcode_hist_enabled) {
+        unsigned c = (unsigned)insn->code;
+        if (c < JM_OPCODE_HIST_SIZE) g_jm_opcode_hist[c]++;
+    }
     MIR_append_insn(mt->ctx, mt->current_func_item, insn);
 }
 

@@ -609,6 +609,17 @@ void js_scope_counters_set_enabled(int enabled);
 void js_scope_counters_reset(void);
 void js_scope_counters_get(JsScopeCounters* out);
 
+// Tune6 §3.2: MIR generated-code volume for the last transpile. Drives the
+// MIR-lowering reduction work (§3.3) — identifies which fixtures emit the most MIR.
+typedef struct JsMirVolumeCounters {
+    long functions_discovered;  // JS functions collected (mt->func_count)
+    long mir_insns_emitted;     // total MIR instructions across all func items
+} JsMirVolumeCounters;
+
+void js_mir_volume_counters_reset(void);
+void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted);
+void js_mir_volume_counters_get(JsMirVolumeCounters* out);
+
 // globalThis / global object
 Item js_get_global_this(void);
 Item js_get_global_object(void);

@@ -417,21 +417,34 @@ Updated order:
    faster total** on big libraries (lodash 6.7 s → 1.3 s), 0 test262 regressions,
    Radiant baseline 5,715/5,715. Context-aware (interpreter for document/Radiant +
    very-large modules; JIT for compute-heavy standalone JS).
-2. **Compiled-artifact caching (§3.4):** highest-leverage *structural* Radiant win —
-   the layout suite recompiles identical vendor files many times, and a cache hit
-   elides the entire generate+link cost. Independent of opt policy; stacks with it.
-3. **Area Two — Reduce MIR volume (§3):** add MIR-volume counters (§3.2), then cut
-   emitted MIR via generic always-emitted helpers. Less code to generate shrinks the
-   dominant cost on the uncached path at any opt level.
+2. **Area Two — Reduce MIR volume (§3.2 DONE / §3.3 investigated):** MIR-volume
+   counters landed (§3.2). The per-opcode breakdown (§3.3) found volume is **88% MOV
+   (data movement)**, not calls — so helper extraction is the wrong lever. The real
+   fix is a **destination-passing lowering** (≈40% fewer insns), a deep/high-risk
+   codegen refactor. **Not recommended for Tune6** given diminishing returns after
+   the interp win; treat as a separate codegen-quality project.
+3. **Compiled-artifact caching (§3.4): DEPRIORITIZED** (measured, see §3.4 banner).
+   Post-interp the realm-safe slice (AST cache) saves only ~5–15%; the valuable
+   MIR-module slice is blocked by ~59 baked realm pointers in the lowering. Revisit
+   only alongside a de-pointered/relocatable MIR lowering.
+
+**Net (rev 3):** after the interpreter win (#1), the remaining proposal levers
+(caching #3, MIR-volume #2) both turn out to be **deep codegen refactors with
+uncertain ROI** — caching needs de-pointered relocatable MIR; volume needs
+destination-passing lowering. Tune6's headline goal (slow cold vendor-JS compile in
+layout) is **substantially met**: ~3× faster web-tmpl suite, all baselines green.
+The instrumentation (timing GTest, scope/volume counters, opcode histogram) remains
+for any future codegen-quality project.
 4. **Lazy generation — only if needed, redesigned (§4):** §0.2c/§0.2d show it is
    largely unnecessary for Radiant (the interpreter already skips codegen entirely).
    Revisit only for compute-heavy apps that need optimized code but call only part
    of it, and only as **coarse batched deferral** (Option C, §4.0.1) — never the
    per-function opt≥2 path (≈O(n²), §0.2c).
-5. **Area One — AST (§2): minor cleanup.** Worth ~0.5–2% on current fixtures. Keep
-   only the cheap items (duplicate shorthand removal §2.6, string-literal fast path
-   §2.4) if they fall out of other work. The scope-lookup refactor (§2.1) and the
-   symbol/field-id migrations (§2.2/§2.3) are **not worth doing** unless §0.4
+5. **Area One — AST (§2): minor cleanup — DONE (cheap items).** The two cheap,
+   low-risk items shipped: string-literal no-escape fast path (§2.4) and object-
+   literal shorthand de-duplication (§2.6), both validated js262 0-regression. Effect
+   is minor as expected (AST <2% of compile). The scope-lookup refactor (§2.1) and
+   the symbol/field-id migrations (§2.2/§2.3) remain **not worth doing** unless §0.4
    surfaces an AST-dominated fixture.
 
 ### 0.4 Open items / what we learned
@@ -788,7 +801,15 @@ binary expressions, calls, members, classes, functions, imports, exports,
 destructuring, and assignments. Lower risk than §2.2 (field ids are queried from
 the live language, not hard-coded).
 
-### 2.4 Fast path for **string-literal** decoding (identifier fast path already exists)
+### 2.4 Fast path for **string-literal** decoding (identifier fast path already exists) — DONE
+
+> **rev 3: implemented.** `build_js_literal` (`build_js_ast.cpp`) now `memchr`s the
+> string body for `\`; if none, it interns directly from the source slice and
+> returns, skipping the temp-buffer alloc/copy/free. Escaped strings keep the
+> existing decode path. Validated: js262 **0 regressions**; targeted test confirms
+> `\t \n \x42 \u{1F600}` and unescaped strings decode identically. AST time
+> equal-or-slightly-lower (minor, as expected — AST is <2% of compile).
+
 
 **Correction to rev 1.** The identifier no-escape fast path is already
 implemented: `js_decode_identifier_name()` (`build_js_ast.cpp:387`) does
@@ -826,7 +847,18 @@ Risk: some lowerers assume `identifier->entry` is populated immediately
 accessors or a sentinel state first. Treat this as a larger follow-up, not a
 Phase B item — §2.1 captures most of the win with far less churn.
 
-### 2.6 Remove duplicate shorthand-property nodes
+### 2.6 Remove duplicate shorthand-property nodes — DONE (object literal)
+
+> **rev 3: implemented for object literals.** `{x}` now builds the identifier once
+> and shares it for `property->key` and `property->value` (`build_js_ast.cpp:~809`),
+> removing a duplicate identifier build + scope lookup per shorthand property.
+> Verified safe: lowering consumes the key read-only (`key->name`) and the value as
+> an expression, and never mutates AST nodes. The **destructuring** shorthand site
+> (`{x}` pattern, `build_js_ast.cpp:~2046`) was intentionally **left as-is** — there
+> the value is an lvalue binding target, so node-sharing carries lvalue-semantics
+> risk not worth a <1% win. Validated: js262 **0 regressions**; shorthand object +
+> both destructuring forms produce correct output.
+
 
 Object shorthand and shorthand destructuring build the same node twice — once for
 key, once for value (`build_js_ast.cpp:809-812` and `:2046-2047`):
@@ -896,44 +928,171 @@ functions/modules. Anything that changes module size (lazy MIR, helper
 extraction) will shift which fixtures cross these thresholds, so re-check them
 when measuring.
 
-### 3.2 Track generated MIR volume
+### 3.2 Track generated MIR volume — DONE (counters landed + measured)
 
-Before changing lowering policy, expose counters and add them to the §1 GTest
-output:
+Implemented `JsMirVolumeCounters` (`functions_discovered`, `mir_insns_emitted`) in
+`js_runtime.h` / `js_mir_entrypoints_require.cpp`, populated in core_len and printed
+as `JS_MIR_VOLUME file=… functions=… mir_insns=…` under `JS_TRANSPILE_TIMING=1`.
 
-| Counter | Why |
-| --- | --- |
-| functions discovered | potential lazy compile population |
-| functions lowered eagerly | codegen volume |
-| function bodies skipped/deferred | lazy MIR benefit |
-| MIR instructions emitted | lower/link work proxy |
-| MIR functions linked | JIT cost proxy |
-| top-level calls executed | call graph seed |
-| first-call lazy compiles | lazy MIR runtime cost |
+Measured (release, interp default):
 
-### 3.3 Generic always-emitted runtime helpers (no source-pattern recognition)
+| Fixture | funcs | MIR insns | mir_ms | insns/fn |
+| --- | ---: | ---: | ---: | ---: |
+| `underscore_lib.js` | 333 | 62,258 | 70 | 186 |
+| `lib_yup.js` | 476 | 119,203 | 91 | 250 |
+| `dom_jquery_lib.js` | 616 | 253,474 | 210 | 411 |
+| `lib_ajv.js` | 263 | 120,718 | 61 | 459 |
+| `ramda_src_min.js` | 581 | 303,890 | 286 | 523 |
+| `lib_acorn.js` | 340 | 233,704 | 129 | 687 |
+| `lib_lodash.js` | 701 | 680,490 | 959 | 970 |
 
-**Correction to rev 1.** Do *not* pattern-match JS source idioms (e.g. "recognize
-an object extend/merge loop") to redirect them to native helpers — that is brittle
-and risks miscompiling arbitrary code.
+Findings: `mir_ms` ≈ linear in insn count (~1.4 µs/insn), so cutting emitted MIR
+reduces lowering time proportionally. **insns/function spans 186–970** — lodash
+emits ~970 MIR insns/func, evidence of verbose inline lowering. The per-opcode
+breakdown of *what* that MIR is follows in §3.3 (answer: ~88% data-movement MOVs,
+not calls — so the lever is a destination-passing lowering, not helper extraction).
 
-The supported direction is the one the engine already follows: provide generic
-native C runtime helpers that the transpiler **always** emits calls to for a given
-operation, so semantics live in one C implementation and generated MIR stays
-small. The runtime already has an extensive native layer — `js_globals.cpp`,
-`js_props.cpp`, `js_property_attrs.cpp`, `js_dom*.cpp`, `js_cssom.cpp`. The work
-here is:
+### 3.3 Reduce MIR volume — DEFERRED TO FUTURE (design below)
 
-- Audit, using the §3.2 instruction counter, which *generic* operations currently
-  inline a lot of repeated MIR (property define/assign sequences, array-like
-  iteration scaffolding, common DOM class/style mutations).
-- Where a generic helper would replace a repeated inline MIR sequence for an
-  operation that is *always* that operation (not a guessed source pattern), add
-  the helper and emit a call.
+> **rev 3 per-operation breakdown (measured) — the helper-extraction premise is
+> wrong; the volume is data movement.** A per-opcode histogram at the `jm_emit`
+> chokepoint (env `JS_MIR_OPCODE_HIST`, `js_mir_hashmap_scope_utils.cpp`) shows:
+>
+> | Workload | mov | call | branches | other |
+> | --- | ---: | ---: | ---: | ---: |
+> | `lib_lodash.js` | **87.9%** | 6.9% | 3.3% | 1.9% |
+> | 500-elem array literal | 64.8% | 34.4% | 0.6% | — |
+> | 500-key object literal | 65.2% | 34.2% | 0.5% | — |
+> | `a=a+i` ×50 | 37% | 43% | — | ~20% |
+> | tiny `f(a,b){return a+b}` | 30% | 53% | 9% | — |
+>
+> **MOV (data movement) dominates (66–88%); calls are secondary (7–34%).** So
+> extracting verbose idioms into helpers (calls) targets the *wrong* thing. The MOVs
+> come from pervasive value materialization — roughly **2 MOV per value op** (one to
+> materialize into a temp, one to place into the destination/var/arg slot), plus
+> call-arg setup. Small functions are call-heavy; large minified library functions
+> are MOV-heavy (lodash 88%), and `mir_ms` is ~linear in insn count, so MOVs are the
+> lever for both lowering time and interp execution.
+>
+> **What would actually reduce it: a destination-passing lowering** (compute each
+> expression directly into its target register instead of temp-then-MOV), which
+> could roughly halve MOVs → ~40% fewer total insns. That is a **deep, invasive,
+> high-risk refactor** of the entire expression lowering (every lower-expression
+> path threads a destination), requiring full js262 + Radiant re-validation. A
+> `jm_emit`-level peephole can't safely coalesce across the opt=0/SSA-less flow.
+>
+> **Recommendation: do not pursue MOV-reduction as part of Tune6.** It is a
+> codegen-architecture project disproportionate to "tuning," with uncertain ROI now
+> that interp (§0.2e) already banked the headline win (3× suite). The MOVs are
+> largely structural to the "materialize each value" lowering style, and most pages
+> are far smaller than lodash. Treat destination-passing as a separate, scoped
+> codegen-quality effort if ever justified by profiles. The original
+> helper-extraction idea (below) does not match the data and is retired.
 
-This keeps MIR smaller without faking semantics or sniffing user code.
+#### 3.3.1 Deferred design: destination-passing lowering
 
-### 3.4 Compiled-artifact caching across the test batch and run *(replaces native vendor installers)*
+This is the recommended (future) way to cut the ~88% MOV volume. It is recorded
+here so a later effort can pick it up; it is **not** scheduled for Tune6.
+
+**Problem.** The current expression lowering is value-returning: each
+`jm_lower_expression(mt, node)` allocates a fresh temp register, computes the result
+into it, and returns it. The caller then `MOV`s that temp into wherever the value
+actually belongs (a variable slot, a call-argument slot, an operand of the parent
+op, the return register). That is the structural source of "~2 MOV per value op":
+one MOV to materialize, one MOV to place. For leaf nodes (identifier reads,
+literals) the materialize MOV is itself often redundant.
+
+**Idea.** Make lowering *destination-passing*: the caller tells the callee where the
+result must end up, and the callee emits code that writes the result **directly**
+into that destination — eliminating the trailing placement MOV (and, for leaves,
+the materialize MOV).
+
+**Sketch.**
+
+```c
+// A destination descriptor: where a lowered expression should write its result.
+typedef enum { JM_DEST_ANY, JM_DEST_REG, JM_DEST_DISCARD } JmDestKind;
+typedef struct { JmDestKind kind; MIR_reg_t reg; } JmDest;
+
+// New core entry; the old value-returning form becomes a thin wrapper that
+// passes JM_DEST_ANY and returns the chosen reg (preserving behavior for
+// not-yet-converted callers).
+void      jm_lower_expr_to(JsMirTranspiler* mt, JsAstNode* n, JmDest dest);
+MIR_reg_t jm_lower_expr   (JsMirTranspiler* mt, JsAstNode* n);  // wrapper: dest=ANY
+```
+
+- `JM_DEST_ANY`: callee may pick/return a register (today's behavior; fallback for
+  unconverted paths and for values needed in a reusable reg, e.g. used twice).
+- `JM_DEST_REG`: callee must leave the result in `dest.reg` — no extra MOV.
+- `JM_DEST_DISCARD`: result unused (expression statements) — skip the result MOV
+  entirely, and let dead-value elimination drop more.
+
+**Where it pays (convert these first, highest MOV density):**
+
+1. **Assignment** `x = expr` → lower `expr` with `dest = slot/reg of x`. Removes the
+   assign MOV.
+2. **Call arguments** `f(a, b, …)` → lower each arg with `dest =` its arg slot.
+   Removes one MOV per argument (call-arg setup is a large MOV source).
+3. **`return expr`** → lower with `dest =` the return reg.
+4. **Leaves** (identifier read, literal) → write straight into `dest` instead of
+   temp-then-return. Removes the materialize MOV.
+5. **Binary / unary** → emit the op's output operand as `dest` directly.
+6. **Array/object literal elements** → lower each element with `dest =` the
+   element's target slot (these are ~2 MOV/element today, §3.3 table).
+
+**Correctness constraints.**
+
+- All control-flow paths must write `dest` (short-circuit `&&`/`||`/`?:`, `try`,
+  exceptions/`?` propagation). Where a path can't, fall back to ANY + one MOV.
+- A value needed more than once (or needed in a specific reg class) uses ANY and is
+  MOV'd as today — destination-passing is an optimization, never a requirement.
+- Boxing/tagging stays identical; only the *placement* changes.
+
+**Rollout & validation.**
+
+- Behind a flag (e.g. `JS_DEST_PASSING=1`), convert paths incrementally, leaving the
+  ANY wrapper for everything not yet converted (so partial conversion is always
+  correct). Measure MOV delta per step with `JS_MIR_OPCODE_HIST` and total insns
+  with `JS_MIR_VOLUME`.
+- Gate on full `make test262-baseline` + `make test-radiant-baseline` green at each
+  step; this changes generated code so re-validation is mandatory.
+- Expected: ~40–50% fewer MOVs → ~30–40% fewer total insns → proportional
+  `mir_ms` + interp-execution reduction. Unlike caching, this helps **single** page
+  loads too, not just the repeated-compile suite.
+
+**Scope estimate:** large — touches every expression-lowering path in
+`js_mir_expression_lowering.cpp` (and assignment/return/arg sites in
+`js_mir_statement_lowering.cpp`). A multi-step project, not a tuning patch.
+
+### 3.4 Compiled-artifact caching across the test batch and run — DEFERRED TO FUTURE *(replaces native vendor installers)*
+
+> **rev 3 feasibility finding (measured): caching is NOT a tractable near-term win
+> after the interpreter change, and is deprioritized.** Three measurements:
+>
+> 1. **Duplication is real** — across web-tmpl: `bootstrap.min.js` ×116, jquery
+>    variants ×58/45/30/27…, modernizr ×44 (byte-identical within a version). So the
+>    suite recompiles identical vendor files many times.
+> 2. **But the cacheable cost shrank.** The interpreter (§0.2e) already removed JIT
+>    codegen — caching's pre-interp premise ("elides the entire generate+link cost")
+>    is moot. Post-interp the remaining per-file cost is parse+ast+**mir-lowering**,
+>    and mir-lowering dominates (jquery: parse+ast 37 ms vs mir 210 ms; lodash 30 ms
+>    vs 957 ms). So the **realm-safe AST-level cache saves only ~5–15%** — low value.
+> 3. **The valuable slice (MIR-module reuse) is blocked by realm-specific pointers.**
+>    MIR *can* serialize (`MIR_write_module`/`MIR_read`), but the JS→MIR lowering
+>    bakes ~**59 raw realm pointers** into modules as integer constants — interned
+>    `String->chars` (`js_mir_expression_lowering.cpp:2069`), `ctor_prop_ptrs`,
+>    `shape_cache_ptr`, inline caches (`js_mir_calls_boxing_types.cpp:566,1192,…`).
+>    These are valid only in the creating realm/process, so a deserialized or
+>    cross-realm-reused module would dereference stale pointers. Making it safe needs
+>    de-pointering all 59 sites into symbolic/link-resolved references — a large,
+>    high-risk codegen refactor — and some (shape/inline caches) are *inherently*
+>    per-realm runtime state.
+>
+> **Recommendation:** do not build caching now. The better next lever is **reducing
+> MIR-lowering cost** (§3.2/§3.3) — it cuts the dominant remaining per-file cost and,
+> unlike caching, helps *single* page loads (real product use), not just the
+> repeated-compile test suite. Revisit caching only if a de-pointered, relocatable
+> MIR lowering is pursued for other reasons. Original design retained below.
 
 The native vendor installer idea from rev 1 is **removed**. Hand-written
 jQuery/Bootstrap/Modernizr compat layers are a rule-#1 work-around: they fake
