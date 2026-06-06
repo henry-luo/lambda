@@ -76,6 +76,10 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
+// Tune6 §3.3: per-opcode emission histogram (env JS_MIR_OPCODE_HIST)
+void jm_opcode_hist_set_enabled(int enabled);
+void jm_opcode_hist_reset(void);
+void jm_opcode_hist_dump(MIR_context_t ctx, const char* label);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);

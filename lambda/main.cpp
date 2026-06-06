@@ -1663,6 +1663,7 @@ int main(int argc, char *argv[]) {
             if (tune6_timing) {
                 js_scope_counters_set_enabled(1);
                 js_scope_counters_reset();
+                js_mir_volume_counters_reset();
             }
 
             Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
@@ -1680,6 +1681,9 @@ int main(int argc, char *argv[]) {
                 printf("JS_AST_COUNTERS file=%s scope_lookups=%ld "
                        "scope_entries_scanned=%ld scopes_walked=%ld\n",
                        js_file, sc.lookup_calls, sc.entries_scanned, sc.scopes_walked);
+                JsMirVolumeCounters vc; js_mir_volume_counters_get(&vc);
+                printf("JS_MIR_VOLUME file=%s functions=%ld mir_insns=%ld\n",
+                       js_file, vc.functions_discovered, vc.mir_insns_emitted);
                 fflush(stdout);
                 js_scope_counters_set_enabled(0);
             }

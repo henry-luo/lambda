@@ -29,6 +29,23 @@ extern "C" void js_mir_get_last_phase_timing(JsMirPhaseTiming* out) {
     *out = g_last_js_mir_phase_timing;
 }
 
+// Tune6 §3.2: MIR generated-code volume for the last transpile.
+static JsMirVolumeCounters g_last_js_mir_volume;
+
+extern "C" void js_mir_volume_counters_reset(void) {
+    g_last_js_mir_volume.functions_discovered = 0;
+    g_last_js_mir_volume.mir_insns_emitted = 0;
+}
+
+extern "C" void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted) {
+    g_last_js_mir_volume.functions_discovered = functions_discovered;
+    g_last_js_mir_volume.mir_insns_emitted = mir_insns_emitted;
+}
+
+extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
+    if (out) *out = g_last_js_mir_volume;
+}
+
 static bool js_mir_large_source_interp_enabled(void) {
     const char* flag = getenv("LAMBDA_JS_LARGE_INTERP");
     return !flag || (strcmp(flag, "0") != 0 && strcmp(flag, "false") != 0);
@@ -560,6 +577,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Tune6 §3.3: enable per-opcode emission histogram for this transpile.
+    static int js_opcode_hist_cached = -1;
+    if (js_opcode_hist_cached < 0) {
+        const char* e = getenv("JS_MIR_OPCODE_HIST");
+        js_opcode_hist_cached = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
+    }
+    if (js_opcode_hist_cached) { jm_opcode_hist_set_enabled(1); jm_opcode_hist_reset(); }
+
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
@@ -649,6 +674,11 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             if (item->item_type == MIR_func_item)
                 total_insns += DLIST_LENGTH(MIR_insn_t, item->u.func->insns);
         }
+    }
+    js_mir_volume_counters_set((long)mt->func_count, (long)total_insns);
+    if (js_opcode_hist_cached) {
+        jm_opcode_hist_dump(ctx, filename ? filename : "<string>");
+        jm_opcode_hist_set_enabled(0);
     }
 
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
