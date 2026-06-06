@@ -562,9 +562,6 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
                 bool is_lambda_sys_func = (strncmp(name, "fn_", 3) == 0);
                 bool is_error_machinery = (strncmp(name, "set_runtime_error", 17) == 0) ||
                                           (strncmp(name, "err_", 4) == 0);
-                bool is_system_entry = (strcmp(name, "start") == 0) ||
-                                       (strcmp(name, "main") == 0);  // C main, not Lambda main
-                
                 if (is_lambda_sys_func && !is_error_machinery) {
                     log_debug("err_capture_stack_trace: found C func '%s' at %p",
                               name, return_addr);

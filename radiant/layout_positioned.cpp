@@ -1880,7 +1880,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
         float cb_padding_width = cb->width - cb_border_left - cb_border_right;
         float margin_right = (block->bound) ? block->bound->margin.right : 0;
-        float margin_left = (block->bound) ? block->bound->margin.left : 0;
         block->x = cb_border_left + cb_padding_width - block->position->right - margin_right - block->width;
         log_debug("[ABS POS] right-positioned shrink-to-fit X recalc: x=%.1f (cb_pad_w=%.1f, right=%d, width=%.1f)",
                   block->x, cb_padding_width, block->position->right, block->width);

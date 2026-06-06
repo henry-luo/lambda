@@ -425,7 +425,6 @@ static bool has_complete_inner_link(MarkupParser* parser, const char* start, con
 
         if (*pos == '`') {
             // skip code span
-            const char* backtick_start = pos;
             int backtick_count = 0;
             while (pos < end && *pos == '`') {
                 backtick_count++;
@@ -435,7 +434,6 @@ static bool has_complete_inner_link(MarkupParser* parser, const char* start, con
             while (pos < end) {
                 if (*pos == '`') {
                     int close_count = 0;
-                    const char* close_start = pos;
                     while (pos < end && *pos == '`') {
                         close_count++;
                         pos++;
@@ -583,7 +581,6 @@ Item parse_link(MarkupParser* parser, const char** text) {
             while (*pos) {
                 if (*pos == '`') {
                     int close_count = 0;
-                    const char* close_start = pos;
                     while (*pos == '`') {
                         close_count++;
                         pos++;

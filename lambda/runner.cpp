@@ -441,7 +441,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Phase profiling: use high-res timer for release-accurate timing
     // Skip profiling for worker threads (parallel module compilation) to avoid data races
     bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS && !tls_parser;
-    profile_time_t p0, p1, p2, p3, p4, p5, p6, p7;
+    profile_time_t p0, p1, p2;
     if (profiling) profile_get_time(&p0);
 
     // create a parser
@@ -539,6 +539,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     }
 
 #ifdef LAMBDA_C2MIR
+    profile_time_t p3, p4, p5, p6, p7;  // only used in the C2MIR pipeline below
     // print the AST for debugging
     log_debug("AST: %s ---------", tp->reference);
     print_ast_root(tp);

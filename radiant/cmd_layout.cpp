@@ -3165,8 +3165,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    auto t_scripts = high_resolution_clock::now();
-
     // Log JS DOM mutations — cascade will pick these up since it runs after scripts
     if (dom_doc->js_mutation_count > 0) {
         log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve",
@@ -5782,7 +5780,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         // Replace old DOM child with new subtree in parent's linked list
-        bool replaced = dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
+        dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty

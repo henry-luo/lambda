@@ -1514,7 +1514,7 @@ static Item js_fs_readlink_async(Item path_item, Item opts_or_cb, Item callback)
 
 static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_cb, Item callback) {
     Item cb = (get_type_id(type_or_cb) == LMD_TYPE_FUNC) ? type_or_cb : callback;
-    Item result = js_fs_symlinkSync(target_item, path_item);
+    js_fs_symlinkSync(target_item, path_item);
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1525,7 +1525,7 @@ static Item js_fs_symlink_async(Item target_item, Item path_item, Item type_or_c
 static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) {
     Item cb = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? len_or_cb : callback;
     Item len = (get_type_id(len_or_cb) == LMD_TYPE_FUNC) ? (Item){.item = i2it(0)} : len_or_cb;
-    Item result = js_fs_truncateSync(path_item, len);
+    js_fs_truncateSync(path_item, len);
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);
@@ -1535,7 +1535,7 @@ static Item js_fs_truncate_async(Item path_item, Item len_or_cb, Item callback) 
 
 static Item js_fs_appendFile_async(Item path_item, Item data_item, Item opts_or_cb, Item callback) {
     Item cb = (get_type_id(opts_or_cb) == LMD_TYPE_FUNC) ? opts_or_cb : callback;
-    Item result = js_fs_appendFileSync(path_item, data_item);
+    js_fs_appendFileSync(path_item, data_item);
     if (get_type_id(cb) == LMD_TYPE_FUNC) {
         Item args[1] = { ItemNull };
         js_call_function(cb, ItemNull, args, 1);

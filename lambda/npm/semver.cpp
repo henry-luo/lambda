@@ -341,7 +341,6 @@ static void parse_comparator_set(const char** p, SemVerComparatorSet* set) {
                 continue;
             }
             // check for hyphen range: "1.2.3 - 2.3.4"
-            const char* saved = s;
             SemVerComparator low;
             if (parse_comparator(&s, &low)) {
                 s = skip_ws(s);

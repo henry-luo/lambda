@@ -1252,7 +1252,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             // Items with 4+ spaces of indent are content of the previous item, not siblings
             // Process as if at base_indent
             char line_marker = get_list_marker(line);
-            bool line_is_ordered = is_ordered_marker(line_marker);
 
             // If there was a blank line before this item, the list is loose
             if (had_blank_before_item && ((List*)list)->length > 0) {
@@ -1279,7 +1278,6 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             current_item_content_column = item_content_column;
 
             // Get content after marker
-            const char* item_content = get_list_item_content(line, line_is_ordered);
             char* first_line_stripped = strip_to_column_with_tabs(line, item_content_column);
 
             // Add content if any

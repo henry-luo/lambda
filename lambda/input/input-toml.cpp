@@ -637,10 +637,7 @@ static Item parse_number(InputContext& ctx, const char **toml) {
 }
 
 static Array* parse_array(InputContext& ctx, const char **toml, int *line_num, int depth) {
-    SourceTracker& tracker = ctx.tracker;
-
     Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '[') return NULL;
     if (depth >= TOML_MAX_DEPTH) {
@@ -691,7 +688,6 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
     SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '{') return NULL;
     if (depth >= TOML_MAX_DEPTH) {
@@ -750,9 +746,6 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
 
 static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int depth) {
     SourceTracker& tracker = ctx.tracker;
-
-    Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder;
 
     if (depth >= TOML_MAX_DEPTH) {
         ctx.addError(ctx.tracker.location(), "Maximum TOML nesting depth (%d) exceeded", TOML_MAX_DEPTH);

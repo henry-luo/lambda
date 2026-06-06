@@ -767,7 +767,6 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf, int depth) {
 
 static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     // expects format "n m R" where n and m are numbers
-    const char* start_pos = *pdf;
     int obj_num = 0, gen_num = 0;
     char* end;
 
@@ -1078,7 +1077,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                             skip_pdf_whitespace_and_comments(pdf);
 
                             if (isdigit(**pdf)) {
-                                int generation = strtol(*pdf, (char**)pdf, 10);
+                                strtol(*pdf, (char**)pdf, 10);
                                 skip_pdf_whitespace_and_comments(pdf);
 
                                 // Parse flag (n or f)
@@ -1520,8 +1519,6 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
 
                 // Count stream objects
                 int stream_count = 0;
-                int font_count = 0;
-                int page_count = 0;
 
                 if (objects && objects->length > 0) {
                     for (int i = 0; i < objects->length && i < 20; i++) { // Safety limit

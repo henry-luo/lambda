@@ -2076,12 +2076,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
 static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     // TCO: binary expression operands are NEVER in tail position.
     // e.g., `1 + f(n-1)` — the call is NOT tail because addition follows.
-    bool saved_tail = mt->in_tail_position;
     mt->in_tail_position = false;
 
     TypeId left_tid = get_effective_type(mt, bi->left);
     TypeId right_tid = get_effective_type(mt, bi->right);
-    TypeId result_tid = ((AstNode*)bi)->type ? ((AstNode*)bi)->type->type_id : LMD_TYPE_ANY;
 
     // IDIV and MOD: native fast paths when operand types are known
     // Note: INT64 excluded from native path — transpile_expr returns inconsistent
@@ -4040,7 +4038,6 @@ static bool is_side_effect_stam(int node_type) {
 static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
     // TCO: content block items are NOT in tail position. Only return statements
     // (which set in_tail_position=true for their value) should be considered tail.
-    bool saved_tail = mt->in_tail_position;
     mt->in_tail_position = false;
 
     // Detect proc context: either we're inside a pn function (mt->in_proc),
@@ -4560,7 +4557,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
     m = emit_call_2(mt, "map_with_tl", MIR_T_P,
         MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
         MIR_T_P, MIR_new_reg_op(mt->ctx, emit_load_module_type_list(mt)));
-    int map_root = create_pointer_gc_root_slot(mt, m);
+    create_pointer_gc_root_slot(mt, m);
 
     for (int ri = 0; ri < vi; ri++) {
         if (val_root_slots[ri] >= 0) {
@@ -7728,10 +7725,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
                          (lt == LMD_TYPE_FLOAT && rt == LMD_TYPE_INT);
         bool both_bool = (lt == LMD_TYPE_BOOL) && (rt == LMD_TYPE_BOOL);
         bool both_string = (lt == LMD_TYPE_STRING) && (rt == LMD_TYPE_STRING);
-        bool left_int64 = (lt == LMD_TYPE_INT64);
-        bool right_int64 = (rt == LMD_TYPE_INT64);
-        bool both_int64 = left_int64 && right_int64;
-        bool int_int64 = ((lt == LMD_TYPE_INT) && right_int64) || (left_int64 && (rt == LMD_TYPE_INT));
         int op = bi->op;
 
         // Enumerate ALL cases where transpile_binary returns native values:

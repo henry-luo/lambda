@@ -321,7 +321,6 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
     // check if target node has a shape and create node if so
     skip_whitespace_and_comments_mermaid(tracker);
     char c0 = tracker.current();
-    char c1 = tracker.peek(1);
 
     // Check for any shape opening pattern
     bool has_shape = (c0 == '[') || (c0 == '(') || (c0 == '{') || (c0 == '>');

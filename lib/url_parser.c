@@ -268,7 +268,6 @@ UrlError url_parse_into(const char* input, Url* url) {
     url->is_valid = false;
 
     const char* current = input;
-    const char* start = input;
 
     // Phase 1: Parse scheme
     const char* colon = strchr(current, ':');

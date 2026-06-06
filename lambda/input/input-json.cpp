@@ -65,7 +65,6 @@ static String* parse_string(InputContext& ctx, const char **json) {
 static Item parse_number(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker;
 
-    const char* start = *json;
     char* end;
     double value = strtod(*json, &end);
 

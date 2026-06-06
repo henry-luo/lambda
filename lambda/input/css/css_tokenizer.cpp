@@ -858,7 +858,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
 
     // CSS Syntax §3.3: Preprocess the input stream
     // Replace U+0000 NULL with U+FFFD, and UTF-8 encoded surrogates (U+D800-U+DFFF) with U+FFFD
-    const char* orig_input = input;
     bool needs_preprocess = false;
     for (size_t i = 0; i < length; i++) {
         unsigned char c = (unsigned char)input[i];

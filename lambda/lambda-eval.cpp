@@ -745,7 +745,6 @@ Bool fn_is(Item a, Item b) {
 
     // If b is a TypeUnary directly (kind = TYPE_KIND_UNARY), handle it directly
     if (b_type->kind == TYPE_KIND_UNARY) {
-        TypeUnary* type_unary = (TypeUnary*)b_type;
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
@@ -757,7 +756,6 @@ Bool fn_is(Item a, Item b) {
 
     // If b is a TypeBinary directly (kind = TYPE_KIND_BINARY), handle it via validator
     if (b_type->kind == TYPE_KIND_BINARY) {
-        TypeBinary* type_binary = (TypeBinary*)b_type;
         // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
@@ -773,7 +771,6 @@ Bool fn_is(Item a, Item b) {
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
     // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
     if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_UNARY) {
-        TypeUnary* type_unary = (TypeUnary*)type_b->type;
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
         if (result->error_count > 0) {
@@ -786,7 +783,6 @@ Bool fn_is(Item a, Item b) {
     // Check if inner type is TypeBinary (union/intersection: |, &, \)
     // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
     if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_BINARY) {
-        TypeBinary* type_binary = (TypeBinary*)type_b->type;
         // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
         if (result->error_count > 0) {
@@ -4781,20 +4777,17 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
 static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
     switch (field_type) {
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-        String* old_str = *(String**)field_ptr;
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
-        Container* old_c = *(Container**)field_ptr;
         break;
     }
     case LMD_TYPE_NULL: {
         // a container might have been stored via a prior transition
         void* old_ptr = *(void**)field_ptr;
         if (old_ptr) {
-            Container* old_c = (Container*)old_ptr;
         }
         break;
     }

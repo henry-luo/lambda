@@ -451,7 +451,6 @@ static Item parse_double_quoted(YamlParser* p) {
             advance(p);
             int empty_lines = 0;
             while (!at_end(p)) {
-                int start = p->pos;
                 while (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
                 if (!at_end(p) && peek(p) == '\n') {
                     empty_lines++;
@@ -785,7 +784,6 @@ static Item parse_plain_scalar(YamlParser* p, int min_indent, bool in_flow) {
 
         int empty_lines = 0;
         while (!at_end(p)) {
-            int spos = p->pos;
             while (!at_end(p) && (peek(p) == ' ' || peek(p) == '\t')) advance(p);
             if (!at_end(p) && peek(p) == '\n') {
                 empty_lines++;
@@ -1523,7 +1521,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
         if (explicit_key) {
             skip_spaces(p);
             // parse tags/anchors after ? (e.g., "? !!str a")
-            const char* ek_anchor = parse_node_properties(p);
+            parse_node_properties(p);
             if (p->tag == TAG_NONE) p->tag = key_tag;
             key_tag = p->tag;
             skip_spaces(p);
@@ -1674,7 +1672,6 @@ static Item parse_block_node(YamlParser* p, int min_indent) {
     while (!at_end(p) && peek(p) == '\t') advance(p);
 
     const char* anchor_name = parse_node_properties(p);
-    int tag = p->tag;
 
     if (at_end(p) || peek(p) == '\n') {
         // anchor/tag on own line - value on next line(s)
@@ -1834,7 +1831,7 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
         if (explicit_key) {
             skip_spaces(p);
             // parse tags/anchors after ? (e.g., "? !!str a")
-            const char* ek_anchor = parse_node_properties(p);
+            parse_node_properties(p);
             if (p->tag == TAG_NONE) p->tag = key_tag;
             key_tag = p->tag;
             skip_spaces(p);

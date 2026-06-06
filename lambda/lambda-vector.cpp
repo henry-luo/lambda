@@ -1796,7 +1796,6 @@ Item fn_sort2(Item item, Item dir_item) {
     } else if (dir_type == LMD_TYPE_MAP || dir_type == LMD_TYPE_OBJECT) {
         // 2nd arg is an options map: {dir: 'asc|'desc, by: key_fn}
         Map* options_map = dir_item.map;
-        bool is_found;
 
         // extract 'dir' field
         Item dir_val = map_get(options_map, (Item){.item = s2it(heap_create_name("dir", 3))});

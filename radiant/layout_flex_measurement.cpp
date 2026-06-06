@@ -577,7 +577,6 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     line_init(&measure_context, 0, 10000);
 
     // Perform layout in measurement mode to determine intrinsic sizes
-    ViewBlock* temp_view = nullptr;
     float measured_width = 0;
     float measured_height = 0;
     float content_width = 0;
@@ -1965,7 +1964,6 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // CRITICAL FIX: For items without explicit dimensions, the cached values may be
         // based on container size, not intrinsic size. In such cases, we should NOT use
         // the cache for the axis that doesn't have an explicit size.
-        bool has_explicit_width = (item->blk && item->blk->given_width >= 0);
         bool has_explicit_height = (item->blk && item->blk->given_height >= 0);
 
         // Check if this item is a row flex container

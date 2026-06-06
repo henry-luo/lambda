@@ -3586,7 +3586,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             else has_local = true;
         }
 
-        size_t parent_locals_count = hashmap_count(parent_locals);
         hashmap_free(parent_locals);
 
         if (!has_transitive || !has_local) continue; // pure-local or pure-transitive (handled by 1.7b)

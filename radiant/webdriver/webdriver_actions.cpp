@@ -345,7 +345,6 @@ bool webdriver_element_is_displayed(WebDriverSession* session, View* element) {
         
         // Check visibility: hidden
         if (element->is_element()) {
-            DomElement* dom = lam::dom_require_element(lam::view_dom_node(element));
             // TODO: Check computed visibility property
         }
     }

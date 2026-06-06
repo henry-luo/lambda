@@ -759,8 +759,8 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define IS_NUMERIC_ID(t) (((t) >= LMD_TYPE_INT && (t) <= LMD_TYPE_NUMBER) || \
                           (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
-#define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
-#define ITEM_FALSE          ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0
+#define ITEM_TRUE           (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1)
+#define ITEM_FALSE          (((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0)
 
 // int56 limits: signed 56-bit integer range
 #define INT56_MAX  ((int64_t)0x007FFFFFFFFFFFFF)   // +36,028,797,018,963,967

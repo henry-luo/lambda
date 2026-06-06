@@ -198,7 +198,6 @@ DateTime* datetime_parse_iso8601(Pool* pool, const char* iso_str) {
 static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimeParseFormat format) {
     if (!dt || !ptr || !*ptr) return false;
 
-    const char* start = *ptr;
     skip_whitespace(ptr);
 
     /* Lambda format: Check for negative year first */

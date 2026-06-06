@@ -386,7 +386,6 @@ inline void place_definite_secondary_axis_item(
     const GridPlacement& primary_placement =
         (primary == AbsoluteAxis::Vertical) ? item.row : item.column;
 
-    uint16_t primary_explicit = (primary == AbsoluteAxis::Vertical) ? explicit_row_count : explicit_col_count;
     uint16_t secondary_explicit = (secondary == AbsoluteAxis::Vertical) ? explicit_row_count : explicit_col_count;
 
     LineSpan secondary_span = secondary_placement.to_origin_zero(secondary_explicit);

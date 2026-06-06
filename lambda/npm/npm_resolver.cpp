@@ -122,7 +122,6 @@ NpmResolutionResult* npm_resolve_dependencies(
 
         // check lockfile first
         if (lockfile) {
-            char lock_key[256];
             // try exact key format "name@version"
             // iterate lockfile entries to find matching name
             for (int i = 0; i < lockfile->entry_count; i++) {

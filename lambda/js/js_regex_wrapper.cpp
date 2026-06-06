@@ -778,7 +778,6 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     {
         int re2_idx = 0;
         int orig_idx = 0;
-        int total_re2_groups = count_capture_groups(result);
         int remap_size = out->original_group_count + 1;
         out->group_remap = (int*)mem_calloc(remap_size, sizeof(int), MEM_CAT_JS_RUNTIME);
         out->group_remap_count = remap_size;

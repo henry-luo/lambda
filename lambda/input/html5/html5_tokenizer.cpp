@@ -460,6 +460,20 @@ static void html5_append_to_attr_name(Html5Parser* parser, char c) {
     parser->current_attr_name[parser->current_attr_name_len] = '\0';
 }
 
+// UTF-8 encoding of U+FFFD REPLACEMENT CHARACTER (the single-byte append helpers
+// take a char, so multi-byte codepoints must be appended byte-by-byte)
+#define HTML5_REPLACEMENT_CHAR_UTF8 "\xEF\xBF\xBD"
+
+// helper: append a byte string to temp buffer
+static void html5_append_str_to_temp_buffer(Html5Parser* parser, const char* s, size_t n) {
+    for (size_t i = 0; i < n; i++) html5_append_to_temp_buffer(parser, s[i]);
+}
+
+// helper: append a byte string to attribute name buffer
+static void html5_append_str_to_attr_name(Html5Parser* parser, const char* s, size_t n) {
+    for (size_t i = 0; i < n; i++) html5_append_to_attr_name(parser, s[i]);
+}
+
 // helper: clear attribute name buffer
 static void html5_clear_attr_name(Html5Parser* parser) {
     parser->current_attr_name_len = 0;
@@ -757,7 +771,6 @@ static int html5_try_decode_char_reference(Html5Parser* parser, char* out_chars,
 
     // Second try: look for longest legacy entity prefix match
     // This handles cases like "&notit;" -> "&not" + "it;"
-    size_t save_pos = parser->pos;
     for (size_t try_len = name_len; try_len > 0; try_len--) {
         entity_name[try_len] = '\0';
         if (html5_is_legacy_entity(entity_name, try_len)) {
@@ -850,7 +863,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         // parse error: unexpected null
                         log_error("html5: unexpected null character in data state");
-                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     // Single character (non-ASCII or after batch scan)
@@ -878,7 +891,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in RCDATA");
-                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -980,7 +993,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in RAWTEXT");
-                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -1071,7 +1084,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in PLAINTEXT");
-                        return html5_token_create_character(parser->pool, parser->arena, 0xFFFD);
+                        return html5_token_create_character_string(parser->pool, parser->arena, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     return html5_token_create_character(parser->pool, parser->arena, c);
@@ -1175,7 +1188,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         // parse error: unexpected null
                         log_error("html5: unexpected null in tag name");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
@@ -1229,7 +1242,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     } else {
                         // actual null character in input
                         log_error("html5: unexpected null in attribute name");
-                        html5_append_to_attr_name(parser, 0xFFFD);
+                        html5_append_str_to_attr_name(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '"' || c == '\'' || c == '<') {
                     log_error("html5: unexpected character in attribute name");
@@ -1330,7 +1343,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in attribute value");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
@@ -1359,7 +1372,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in attribute value");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
@@ -1401,7 +1414,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return html5_token_create_eof(parser->pool, parser->arena);
                     } else {
                         log_error("html5: unexpected null in attribute value");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '"' || c == '\'' || c == '<' || c == '=' || c == '`') {
                     log_error("html5: unexpected character in unquoted attribute value");
@@ -1557,7 +1570,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in comment");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
@@ -1699,7 +1712,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     parser->current_token = nullptr;
                     return token;
                 } else if (c == '\0') {
-                    html5_append_to_temp_buffer(parser, 0xFFFD);
+                    html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                 } else {
                     html5_append_to_temp_buffer(parser, c);
                 }
@@ -1749,7 +1762,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         log_error("html5: unexpected null in doctype name");
                         parser->current_token = html5_token_create_doctype(parser->pool, parser->arena);
                         html5_clear_temp_buffer(parser);
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                         html5_switch_tokenizer_state(parser, HTML5_TOK_DOCTYPE_NAME);
                     }
                 } else if (c == '>') {
@@ -1792,7 +1805,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in doctype name");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else {
                     html5_append_to_temp_buffer(parser, c);
@@ -1919,7 +1932,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in doctype public identifier");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '>') {
                     log_error("html5: abrupt doctype public identifier");
@@ -1950,7 +1963,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in doctype public identifier");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '>') {
                     log_error("html5: abrupt doctype public identifier");
@@ -2109,7 +2122,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in doctype system identifier");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '>') {
                     log_error("html5: abrupt doctype system identifier");
@@ -2140,7 +2153,7 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                         return token;
                     } else {
                         log_error("html5: unexpected null in doctype system identifier");
-                        html5_append_to_temp_buffer(parser, 0xFFFD);
+                        html5_append_str_to_temp_buffer(parser, HTML5_REPLACEMENT_CHAR_UTF8, 3);
                     }
                 } else if (c == '>') {
                     log_error("html5: abrupt doctype system identifier");
