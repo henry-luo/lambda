@@ -4686,6 +4686,29 @@ static bool document_has_hover_rules(DomDocument* doc) {
     return false;
 }
 
+static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* state) {
+    if (!doc || !state) return;
+
+    Pool* pool = doc->pool;
+    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    if (pool && css_engine && doc->root) {
+        // Pseudo-state changes can affect descendants through selectors like
+        // `.parent:hover .child`, so clear and re-apply the full cascade once
+        // after the StateStore pseudo bits have been updated.
+        clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
+
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        state_configure_selector_matcher(state, matcher);
+        for (int i = 0; i < doc->stylesheet_count; i++) {
+            if (doc->stylesheets[i]) {
+                apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
+                                                  matcher, pool, css_engine);
+            }
+        }
+        apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
+    }
+}
+
 /**
  * Schedule style/layout work after StateStore pseudo-state changes.
  */
@@ -4702,31 +4725,7 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
             return;
         }
 
-        // Pseudo-state changes affect which CSS rules match (e.g. `.btn:hover`).
-        // Re-apply the cascade so the element's `specified_style` AVL tree picks
-        // up the matching :hover/:active/:focus rules; otherwise resolve_css_styles
-        // replays the pre-state declarations and the visual never updates.
-        // We re-cascade the entire document because pseudo-class rules on an
-        // ancestor (e.g. `.parent:hover .child`) can affect descendants.
-        Pool* pool = doc->pool;
-        CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
-        if (pool && css_engine && doc->root) {
-            // Clear previously cascaded declarations on every element. Without this,
-            // declarations applied while :hover matched (with higher specificity)
-            // would remain in `specified_style` after the pointer leaves and the
-            // base styles would never be restored.
-            clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
-
-            SelectorMatcher* matcher = selector_matcher_create(pool);
-            state_configure_selector_matcher(state, matcher);
-            for (int i = 0; i < doc->stylesheet_count; i++) {
-                if (doc->stylesheets[i]) {
-                    apply_stylesheet_to_dom_tree_fast(doc->root, doc->stylesheets[i],
-                                                      matcher, pool, css_engine);
-                }
-            }
-            apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
-        }
+        recascade_document_for_pseudo_state(doc, state);
 
         reflow_schedule(state, view, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
 
@@ -4734,6 +4733,43 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
         dirty_mark_element(state, view);
         doc_state_mark_dirty(state);
     }
+}
+
+static void sync_hover_pseudo_state_after_transition(DocState* state,
+                                                     View* prev_hover,
+                                                     View* new_target) {
+    if (!state) return;
+
+    DomDocument* doc = nullptr;
+    if (new_target && new_target->is_element()) {
+        doc = lam::dom_require_element(new_target)->doc;
+    }
+    if (!doc && prev_hover && prev_hover->is_element()) {
+        doc = lam::dom_require_element(prev_hover)->doc;
+    }
+    if (!doc) return;
+
+    if (document_has_hover_rules(doc)) {
+        recascade_document_for_pseudo_state(doc, state);
+        if (doc->root) {
+            reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+            dirty_mark_element(state, doc->root);
+        }
+    }
+
+    View* node = prev_hover;
+    while (node) {
+        dirty_mark_element(state, node);
+        node = static_cast<View*>(node->parent);
+    }
+
+    node = new_target;
+    while (node) {
+        dirty_mark_element(state, node);
+        node = static_cast<View*>(node->parent);
+    }
+
+    doc_state_mark_dirty(state);
 }
 
 /**
@@ -4751,18 +4787,9 @@ void update_hover_state(EventContext* evcon, View* new_target) {
     HoverTransitionArgs hover_args = { .target = new_target };
     hover_transition(state, HOVER_TRANSITION_SET_TARGET, &hover_args);
 
-    View* node = prev_hover;
-    while (node) {
-        sync_pseudo_state(node, PSEUDO_STATE_HOVER, false);
-        node = static_cast<View*>(node->parent);
-    }
-    if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
+    sync_hover_pseudo_state_after_transition(state, prev_hover, new_target);
 
-    node = new_target;
-    while (node) {
-        sync_pseudo_state(node, PSEUDO_STATE_HOVER, true);
-        node = static_cast<View*>(node->parent);
-    }
+    if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
 
     if (new_target) {
         log_debug("update_hover_state: set hover on %p", new_target);
