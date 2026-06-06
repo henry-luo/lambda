@@ -3168,7 +3168,21 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         return;
     }
     MIR_reg_t reg;
+    bool existing_from_env = false;
+    int existing_env_slot = 0;
+    MIR_reg_t existing_env_reg = 0;
+    bool existing_in_scope_env = false;
+    int existing_scope_env_slot = 0;
+    MIR_reg_t existing_scope_env_reg = 0;
+    bool existing_is_let_const = false;
     if (var) {
+        existing_from_env = var->from_env;
+        existing_env_slot = var->env_slot;
+        existing_env_reg = var->env_reg;
+        existing_in_scope_env = var->in_scope_env;
+        existing_scope_env_slot = var->scope_env_slot;
+        existing_scope_env_reg = var->scope_env_reg;
+        existing_is_let_const = var->is_let_const;
         if (var->tdz_active && !mt->destructure_assignment_mode) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, val)));
@@ -3257,17 +3271,17 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, reg), MIR_new_reg_op(mt->ctx, val)));
     jm_set_var(mt, vname, reg);
-    if (var && var->from_env) {
+    if (existing_from_env) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, existing_env_slot * (int)sizeof(uint64_t), existing_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
     }
-    if (var && var->in_scope_env && var->scope_env_reg != 0) {
+    if (existing_in_scope_env && existing_scope_env_reg != 0) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, existing_scope_env_slot * (int)sizeof(uint64_t), existing_scope_env_reg, 0, 1),
             MIR_new_reg_op(mt->ctx, reg)));
     }
-    if (var && var->from_env && mt->current_func_index >= 0 && mt->module_consts) {
+    if (existing_from_env && mt->current_func_index >= 0 && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
         JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
@@ -3289,7 +3303,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     // body whose locals were promoted to module vars. In a nested function, a
     // local declaration that shadows a module var name (e.g. `const {x: n} = e`
     // where `n` is also a top-level const) must NOT clobber the module slot.
-    bool is_local_let_const = (var && var->is_let_const);
+    bool is_local_let_const = existing_is_let_const;
     if (!is_local_let_const && mt->module_consts) {
         JsModuleConstEntry lookup;
         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);

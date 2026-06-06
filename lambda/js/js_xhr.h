@@ -20,6 +20,9 @@ Item js_xhr_new(void);
 // Reset all XHR state (call between batch runs)
 void js_xhr_reset(void);
 
+// Set document URL used to resolve browser-relative XHR URLs.
+void js_xhr_set_base_url(const char* base_url);
+
 // XHR methods (called via js_new_function on XHR objects)
 Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg);
 Item js_xhr_set_request_header(Item name_arg, Item value_arg);

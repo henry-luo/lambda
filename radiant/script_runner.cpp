@@ -20,6 +20,7 @@
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_dom_events.h"
 #include "../lambda/js/js_runtime.h"
+#include "../lambda/js/js_xhr.h"
 #include "../lambda/transpiler.hpp"
 #include "../lib/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
@@ -66,7 +67,8 @@ static volatile sig_atomic_t js_exec_timed_out = 0;
 // Per-document script timeout: covers parse/transpile plus execution.
 static struct sigaction js_exec_old_alrm;
 #define JS_EXEC_TIMEOUT_BASE_SECONDS 5
-#define JS_EXEC_TIMEOUT_MAX_SECONDS 30
+#define JS_EXEC_TIMEOUT_MAX_SECONDS 120
+#define JS_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
 static volatile sig_atomic_t js_batch_cleanup_unsafe = 0;
 
 static void js_exec_timeout_handler(int sig) {
@@ -112,7 +114,7 @@ static int js_exec_timeout_seconds(size_t source_len) {
         char* end = nullptr;
         long parsed = strtol(env, &end, 10);
         if (end != env && parsed > 0) {
-            if (parsed > JS_EXEC_TIMEOUT_MAX_SECONDS) return JS_EXEC_TIMEOUT_MAX_SECONDS;
+            if (parsed > JS_EXEC_TIMEOUT_ENV_MAX_SECONDS) return JS_EXEC_TIMEOUT_ENV_MAX_SECONDS;
             return (int)parsed;
         }
     }
@@ -184,6 +186,7 @@ typedef enum JsScriptTaskStatus {
     JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED,
     JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED,
     JS_SCRIPT_TASK_SKIPPED_NOMODULE,
+    JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER,
     JS_SCRIPT_TASK_LOAD_FAILED
 } JsScriptTaskStatus;
 
@@ -356,51 +359,61 @@ static void append_browser_global_sync(StrBuf* buf) {
  * @param src        The src attribute value (absolute, relative, or full URL)
  * @param base_url   The document base URL for resolving relative paths
  * @param out_is_http Set to true if the resolved path is an HTTP(S) URL
- * @return           Resolved path string (static buffer — copy before next call)
+ * @return           Resolved path string owned by the caller, or nullptr on OOM.
  */
-static const char* resolve_script_url(const char* src, Url* base_url, bool* out_is_http) {
-    static char resolved_path[2048];
+static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_http) {
+    if (!src) return nullptr;
     *out_is_http = false;
 
-    if (src[0] == '/' && src[1] != '/') {
+    if (src[0] == '/' && src[1] != '/' && base_url &&
+        (base_url->scheme == URL_SCHEME_HTTP || base_url->scheme == URL_SCHEME_HTTPS)) {
+        // resolve root-relative remote paths against the document origin
+        Url* resolved_url = parse_url(base_url, src);
+        if (resolved_url && resolved_url->is_valid &&
+            (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS)) {
+            const char* url_str = url_get_href(resolved_url);
+            char* resolved_path = mem_strdup(url_str ? url_str : src, MEM_CAT_JS_RUNTIME);
+            *out_is_http = true;
+            url_destroy(resolved_url);
+            return resolved_path;
+        } else {
+            if (resolved_url) url_destroy(resolved_url);
+            return mem_strdup(src, MEM_CAT_JS_RUNTIME);
+        }
+    } else if (src[0] == '/' && src[1] != '/') {
         // absolute local path
-        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
-        resolved_path[sizeof(resolved_path) - 1] = '\0';
+        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
     } else if (strstr(src, "://") != nullptr) {
-        // full URL
-        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
-        resolved_path[sizeof(resolved_path) - 1] = '\0';
+        // full url
         *out_is_http = (strncmp(src, "http://", 7) == 0 || strncmp(src, "https://", 8) == 0);
+        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
     } else if (base_url) {
-        // relative path — resolve against base URL
+        // resolve relative paths against the base url
         Url* resolved_url = parse_url(base_url, src);
         if (resolved_url && resolved_url->is_valid) {
             if (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS) {
                 const char* url_str = url_get_href(resolved_url);
-                strncpy(resolved_path, url_str, sizeof(resolved_path) - 1);
-                resolved_path[sizeof(resolved_path) - 1] = '\0';
+                char* resolved_path = mem_strdup(url_str ? url_str : src, MEM_CAT_JS_RUNTIME);
                 *out_is_http = true;
+                url_destroy(resolved_url);
+                return resolved_path;
             } else {
                 char* local_path = url_to_local_path(resolved_url);
                 if (local_path) {
-                    strncpy(resolved_path, local_path, sizeof(resolved_path) - 1);
-                    resolved_path[sizeof(resolved_path) - 1] = '\0';
-                    mem_free(local_path);
+                    url_destroy(resolved_url);
+                    return local_path;
                 } else {
-                    strncpy(resolved_path, src, sizeof(resolved_path) - 1);
-                    resolved_path[sizeof(resolved_path) - 1] = '\0';
+                    url_destroy(resolved_url);
+                    return mem_strdup(src, MEM_CAT_JS_RUNTIME);
                 }
             }
-            url_destroy(resolved_url);
         } else {
-            strncpy(resolved_path, src, sizeof(resolved_path) - 1);
-            resolved_path[sizeof(resolved_path) - 1] = '\0';
+            if (resolved_url) url_destroy(resolved_url);
+            return mem_strdup(src, MEM_CAT_JS_RUNTIME);
         }
     } else {
-        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
-        resolved_path[sizeof(resolved_path) - 1] = '\0';
+        return mem_strdup(src, MEM_CAT_JS_RUNTIME);
     }
-    return resolved_path;
 }
 
 /**
@@ -637,6 +650,7 @@ static const char* script_task_status_name(JsScriptTaskStatus status) {
         case JS_SCRIPT_TASK_SKIPPED_EXTERNAL_DISABLED: return "skipped-external-disabled";
         case JS_SCRIPT_TASK_SKIPPED_MODULE_UNSUPPORTED: return "skipped-module-unsupported";
         case JS_SCRIPT_TASK_SKIPPED_NOMODULE: return "skipped-nomodule";
+        case JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER: return "skipped-large-defer";
         case JS_SCRIPT_TASK_LOAD_FAILED: return "load-failed";
         default: return "unknown";
     }
@@ -652,6 +666,19 @@ static bool script_task_timing_enabled() {
     return env && env[0] && strcmp(env, "0") != 0;
 }
 #endif
+
+static size_t script_prelayout_defer_limit_bytes() {
+    const char* env = getenv("RADIANT_JS_PRELAYOUT_DEFER_BYTES");
+    if (env && env[0]) {
+        char* end = nullptr;
+        long parsed = strtol(env, &end, 10);
+        if (end != env) {
+            if (parsed <= 0) return (size_t)-1;
+            return (size_t)parsed;
+        }
+    }
+    return 128 * 1024;
+}
 
 static long script_runner_wall_now_us() {
 #ifndef _WIN32
@@ -966,12 +993,18 @@ static void emit_body_onload_source(StrBuf* script_buf, ArrayList* onload_tasks)
 static void append_browser_document_preamble(StrBuf* script_buf) {
     if (!script_buf) return;
     strbuf_append_str(script_buf,
-        "var window = {};\n"
+        "var window = globalThis;\n"
         "var jQuery = undefined;\n"
         "var $ = undefined;\n"
-        "var navigator = {userAgent: '', platform: '', language: 'en', languages: ['en']};\n"
+        "var navigator = {userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0', platform: 'MacIntel', language: 'en-US', languages: ['en-US', 'en']};\n"
+        "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
+        "document.hidden = false;\n"
+        "document.prerendering = false;\n"
+        "document.visibilityState = 'visible';\n"
+        "document.fonts = document.fonts || {};\n"
+        "document.fonts.load = document.fonts.load || function(){ return {then: function(){ return this; }, catch: function(){ return this; }}; };\n"
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
         "window.clearTimeout = clearTimeout;\n"
@@ -989,7 +1022,7 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.IntersectionObserver = IntersectionObserver;\n"
         "window.ResizeObserver = ResizeObserver;\n"
         "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
-        "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntriesByName: function(){ return []; }, timing: {}};\n"
+        "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntries: function(){ return []; }, getEntriesByName: function(){ return []; }, getEntriesByType: function(t){ return t === 'navigation' ? [{type: 'navigate', transferSize: 1, deliveryType: ''}] : []; }, timing: {}};\n"
         "var screen = {width: 1920, height: 1080, availWidth: 1920, availHeight: 1080, colorDepth: 24, pixelDepth: 24};\n"
         "window.console = console;\n"
         "window.performance = performance;\n"
@@ -1226,10 +1259,16 @@ static void collect_scripts_recursive(Element* elem, JsScriptTaskCollection* col
                 return;
             }
             bool is_http = false;
-            const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
-            task->resolved_url = mem_strdup(resolved, MEM_CAT_JS_RUNTIME);
+            char* resolved = resolve_script_url(src_attr, base_url, &is_http);
+            if (!resolved) {
+                task->status = JS_SCRIPT_TASK_LOAD_FAILED;
+                failed_external_scripts++;
+                script_task_list_append(collection->scripts, task);
+                return;
+            }
+            task->resolved_url = resolved;
             bool source_cache_hit = false;
-            char* content = load_script_content_with_source_cache(resolved, is_http,
+            char* content = load_script_content_with_source_cache(task->resolved_url, is_http,
                                                                   collection, &source_cache_hit);
             if (content) {
                 task->source = content;
@@ -1423,6 +1462,19 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         char filename_buf[64];
         const char* filename = script_task_filename(task, filename_buf, sizeof(filename_buf));
         const char* source = task->source ? task->source : "";
+        size_t prelayout_defer_limit = script_prelayout_defer_limit_bytes();
+        if (task->external &&
+            (task->scheduling == JS_SCRIPT_SCHED_DEFER ||
+             task->scheduling == JS_SCRIPT_SCHED_ASYNC) &&
+            task->source_len > prelayout_defer_limit) {
+            task->status = JS_SCRIPT_TASK_SKIPPED_LARGE_DEFER;
+            log_info("execute_document_scripts: skipping large %s external script before layout: %zu bytes > %zu (%s)",
+                     phase_name ? phase_name : "scheduled",
+                     task->source_len,
+                     prelayout_defer_limit,
+                     filename ? filename : "<external-script>");
+            continue;
+        }
 #ifndef NDEBUG
         bool timing_enabled = script_task_timing_enabled();
         long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
@@ -1720,6 +1772,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 
     // Initialize the JS event loop so setTimeout/setInterval timers are queued
     // rather than silently dropped. The loop is drained after script execution.
+    js_xhr_set_base_url(base_url ? url_get_href(base_url) : nullptr);
     js_event_loop_init();
 
     // execute document scripts via JIT transpiler

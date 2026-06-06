@@ -291,6 +291,53 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         }
     }
 
+    // Resolve protocol-relative URLs (//host/path) using the base URL scheme.
+    if (url[0] == '/' && url[1] == '/' && base_path) {
+        const char* scheme_end = strstr(base_path, "://");
+        if (scheme_end) {
+            size_t scheme_len = (size_t)(scheme_end - base_path);
+            size_t url_len = strlen(url);
+            size_t result_size = scheme_len + 1 + url_len + 1;
+            char* result;
+            if (pool) {
+                result = (char*)pool_alloc(pool, result_size);
+            } else {
+                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
+            }
+            if (!result) return nullptr;
+
+            memcpy(result, base_path, scheme_len);
+            result[scheme_len] = ':';
+            memcpy(result + scheme_len + 1, url, url_len + 1);
+            log_debug("[CSS FontFace] Resolved protocol-relative font URL: %s", result);
+            return result;
+        }
+    }
+
+    // Resolve root-relative URLs (/path) against a remote base URL origin.
+    if (url[0] == '/' && url[1] != '/' && base_path) {
+        const char* scheme_end = strstr(base_path, "://");
+        if (scheme_end) {
+            const char* host_start = scheme_end + 3;
+            const char* path_start = strchr(host_start, '/');
+            size_t origin_len = path_start ? (size_t)(path_start - base_path) : strlen(base_path);
+            size_t url_len = strlen(url);
+            size_t result_size = origin_len + url_len + 1;
+            char* result;
+            if (pool) {
+                result = (char*)pool_alloc(pool, result_size);
+            } else {
+                result = (char*)mem_alloc(result_size, MEM_CAT_INPUT_CSS);
+            }
+            if (!result) return nullptr;
+
+            memcpy(result, base_path, origin_len);
+            memcpy(result + origin_len, url, url_len + 1);
+            log_debug("[CSS FontFace] Resolved root-relative font URL: %s", result);
+            return result;
+        }
+    }
+
     // If URL is absolute path, return as-is
     if (url[0] == '/') {
         if (pool) {
