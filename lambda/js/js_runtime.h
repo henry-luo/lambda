@@ -595,6 +595,20 @@ typedef struct JsMirPhaseTiming {
 void js_mir_reset_last_phase_timing(void);
 void js_mir_get_last_phase_timing(JsMirPhaseTiming* out);
 
+// Tune6 diagnostics: scope-lookup counters. Used by the JS transpile timing
+// benchmark to test whether the linear-scan scope lookup is the AST-build
+// bottleneck on large/minified libraries. Counting is gated by an enable flag so
+// there is zero accumulation cost in normal runs.
+typedef struct JsScopeCounters {
+    long lookup_calls;     // calls to js_scope_lookup + js_scope_lookup_current
+    long entries_scanned;  // total NameEntry compared across all lookups
+    long scopes_walked;    // total parent scopes visited across all lookups
+} JsScopeCounters;
+
+void js_scope_counters_set_enabled(int enabled);
+void js_scope_counters_reset(void);
+void js_scope_counters_get(JsScopeCounters* out);
+
 // globalThis / global object
 Item js_get_global_this(void);
 Item js_get_global_object(void);

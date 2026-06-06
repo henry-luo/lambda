@@ -34,6 +34,12 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+// Tune6: when set (by document-rendering CLI commands layout/render/view), JS in a
+// document context links via the MIR interpreter regardless of size — but with the
+// JIT generator still initialized (g_mir_interp_mode stays 0), i.e. the link-
+// interface interp path, not pure-interp. See Transpile_Js_Tune6_AST.md §0.2.
+int g_js_force_document_interp = 0;
+
 // keep the newer CLI --diagnose switch linkable after rolling the JS runtime
 // back to d609; the reverted runtime ignores the flag unless diagnose probes
 // are reintroduced later.
