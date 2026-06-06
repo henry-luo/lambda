@@ -3019,6 +3019,12 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     }
 
     SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
+    bool parent_has_definite_slot = lycon->block.parent &&
+        lycon->block.parent->content_width > 0.0f &&
+        lycon->block.parent->content_height > 0.0f;
+    bool use_parent_slot = parent_has_definite_slot &&
+        !intrinsic.has_intrinsic_width &&
+        !intrinsic.has_intrinsic_height;
 
     log_debug("%s SVG intrinsic: width=%.1f height=%.1f aspect=%.3f has_w=%d has_h=%d", block->source_loc(),
               intrinsic.width, intrinsic.height, intrinsic.aspect_ratio,
@@ -3068,15 +3074,17 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     } else {
         // Neither CSS dimension specified - use intrinsic size
         // or parent width if intrinsic width is not available
-        if (intrinsic.has_intrinsic_width) {
-            content_width = intrinsic.width;
-        } else if (lycon->block.parent && lycon->block.parent->content_width > 0) {
+        if (use_parent_slot) {
             content_width = lycon->block.parent->content_width;
+        } else if (intrinsic.has_intrinsic_width) {
+            content_width = intrinsic.width;
         } else {
             content_width = 300;  // HTML default
         }
 
-        if (intrinsic.has_intrinsic_height) {
+        if (use_parent_slot) {
+            content_height = lycon->block.parent->content_height;
+        } else if (intrinsic.has_intrinsic_height) {
             content_height = intrinsic.height;
         } else if (intrinsic.aspect_ratio > 0) {
             content_height = content_width / intrinsic.aspect_ratio;
@@ -4986,6 +4994,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     if (elmt_name == HTM_TAG_SVG) {
         Element* native_elem = block->as_element() ? block->as_element()->native_element : nullptr;
         SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
+        bool parent_has_definite_slot = pa_block &&
+            pa_block->content_width > 0.0f &&
+            pa_block->content_height > 0.0f;
+        bool use_parent_slot = parent_has_definite_slot &&
+            !intrinsic.has_intrinsic_width &&
+            !intrinsic.has_intrinsic_height;
         bool has_width_percent = block->blk && !isnan(block->blk->given_width_percent);
         bool has_height_percent = block->blk && !isnan(block->blk->given_height_percent);
         bool width_is_auto = !block->blk || block->blk->given_width_type == CSS_VALUE_AUTO ||
@@ -4994,7 +5008,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                               block->blk->given_height_type == CSS_VALUE__UNDEF;
 
         if (width_is_auto && lycon->block.given_width < 0 && !has_width_percent) {
-            lycon->block.given_width = intrinsic.has_intrinsic_width ? intrinsic.width : 300.0f;
+            lycon->block.given_width = use_parent_slot ? pa_block->content_width :
+                (intrinsic.has_intrinsic_width ? intrinsic.width : 300.0f);
             if (!block->blk) block->blk = alloc_block_prop(lycon);
             block->blk->given_width = lycon->block.given_width;
             if (block->blk->given_width_type == CSS_VALUE_AUTO) {
@@ -5002,7 +5017,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
         }
         if (height_is_auto && lycon->block.given_height < 0 && !has_height_percent) {
-            if (intrinsic.has_intrinsic_height) {
+            if (use_parent_slot) {
+                lycon->block.given_height = pa_block->content_height;
+            } else if (intrinsic.has_intrinsic_height) {
                 lycon->block.given_height = intrinsic.height;
             } else if (intrinsic.aspect_ratio > 0.0f && lycon->block.given_width > 0.0f) {
                 lycon->block.given_height = lycon->block.given_width / intrinsic.aspect_ratio;

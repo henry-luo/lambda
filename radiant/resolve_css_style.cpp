@@ -25,6 +25,15 @@ static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
 }
 
+static bool css_custom_property_name_matches(const char* stored_name, const char* lookup_name) {
+    if (!stored_name || !lookup_name) return false;
+    if (strcmp(stored_name, lookup_name) == 0) return true;
+
+    const char* stored_body = strncmp(stored_name, "--", 2) == 0 ? stored_name + 2 : stored_name;
+    const char* lookup_body = strncmp(lookup_name, "--", 2) == 0 ? lookup_name + 2 : lookup_name;
+    return strcmp(stored_body, lookup_body) == 0;
+}
+
 /**
  * Look up a CSS custom property (variable) value
  * Searches current element and ancestors (CSS variables inherit)
@@ -43,7 +52,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
         if (element->css_variables) {
             CssCustomProp* var = element->css_variables;
             while (var) {
-                if (var->name && strcmp(var->name, var_name) == 0) {
+                if (css_custom_property_name_matches(var->name, var_name)) {
                     return var->value;
                 }
                 var = var->next;
@@ -1523,7 +1532,13 @@ DisplayValue resolve_display_value(void* child) {
                 return none_display;
             }
         }
-        if (dom_elem && dom_elem->display.inner != CSS_VALUE_NONE &&
+        bool has_specified_display = false;
+        if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
+            has_specified_display =
+                avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY) != nullptr;
+        }
+        if (dom_elem && !has_specified_display &&
+            dom_elem->display.inner != CSS_VALUE_NONE &&
             dom_elem->display.inner != 0 && dom_elem->styles_resolved) {
             log_debug("[CSS] Using pre-set display from element: outer=%d, inner=%d",
                 dom_elem->display.outer, dom_elem->display.inner);

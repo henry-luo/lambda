@@ -834,9 +834,9 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
 
     switch (pseudo_type) {
         case CSS_SELECTOR_PSEUDO_ROOT: {
-            bool is_root = element->parent == NULL;
-            log_debug("[SELECTOR] :root check for <%s>: parent=%p, is_root=%d",
-                      element->tag_name, element->parent, is_root);
+            bool is_root = element->doc && element->doc->root == element;
+            log_debug("[SELECTOR] :root check for <%s>: doc_root=%p, is_root=%d",
+                      element->tag_name, element->doc ? element->doc->root : nullptr, is_root);
             return is_root;
         }
 

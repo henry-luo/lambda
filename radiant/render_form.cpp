@@ -788,6 +788,18 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
     log_debug("[FORM] render_radio at (%.1f, %.1f) checked=%d", x, y, checked ? 1 : 0);
 }
 
+static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
+    const char* text = form ? form->value : nullptr;
+    if ((!text || !*text) && block) {
+        text = block->get_attribute("value");
+    }
+    if ((!text || !*text) && form && form->input_type) {
+        if (strcmp(form->input_type, "submit") == 0) return "Submit";
+        if (strcmp(form->input_type, "reset") == 0) return "Reset";
+    }
+    return text;
+}
+
 /**
  * Render a button control.
  * If the button has CSS-styled background (from author stylesheet),
@@ -825,7 +837,8 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
 
     // For void elements like <input type="submit">, render value text directly
     // (child content rendering only works for <button>text</button> style elements)
-    if (!block->first_child && form->value && *form->value && block->font) {
+    const char* label_text = form_button_label_text(block, form);
+    if (!block->first_child && label_text && *label_text && block->font) {
         Color text_color = make_color(0, 0, 0);
         if (block->in_line && block->in_line->has_color) {
             text_color.r = block->in_line->color.r;
@@ -841,8 +854,8 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         if (fbox.font_handle) {
             float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
                 ? rdcon->ui_context->pixel_ratio : 1.0f;
-            const unsigned char* p = (const unsigned char*)form->value;
-            const unsigned char* p_end = p + strlen(form->value);
+            const unsigned char* p = (const unsigned char*)label_text;
+            const unsigned char* p_end = p + strlen(label_text);
             while (p < p_end) {
                 uint32_t codepoint;
                 int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
@@ -858,7 +871,7 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         float font_size_scaled = block->font->font_size * s;
         float text_x = x + (w - text_width) / 2;
         float text_y = y + (h - font_size_scaled) / 2;
-        render_simple_string(rdcon, form->value, text_x, text_y, block->font, text_color);
+        render_simple_string(rdcon, label_text, text_x, text_y, block->font, text_color);
     }
 
     // Focus ring (Tab navigation indicator).

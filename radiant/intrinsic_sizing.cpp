@@ -5239,6 +5239,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                      element_has_float(child_block))) {
                     continue;
                 }
+                if ((!child_block || !child_block->position) && child_elem->specified_style) {
+                    CssDeclaration* pos_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_POSITION);
+                    if (pos_decl && pos_decl->value &&
+                        pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum pos_val = pos_decl->value->data.keyword;
+                        if (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED) {
+                            log_debug("calculate_max_content_height: skipping absolute/fixed child %s from specified style",
+                                      child_elem->node_name());
+                            continue;
+                        }
+                    }
+                }
             }
             // CSS 2.1 §10.3.3: The available width for a child element's content
             // is the parent's content width minus the child's own padding and border.

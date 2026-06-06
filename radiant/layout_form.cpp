@@ -230,6 +230,18 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
     }
 }
 
+static const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
+    const char* text = form ? form->value : nullptr;
+    if ((!text || !*text) && block) {
+        text = block->get_attribute("value");
+    }
+    if ((!text || !*text) && form && form->input_type) {
+        if (strcmp(form->input_type, "submit") == 0) return "Submit";
+        if (strcmp(form->input_type, "reset") == 0) return "Reset";
+    }
+    return text;
+}
+
 /**
  * Calculate intrinsic size for a button based on content/value.
  * Returns border-box dimensions matching Chrome's UA defaults.
@@ -238,15 +250,8 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
 static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
-    // Get button text from value attribute or child content
-    const char* text = form->value;
-    if (!text || !*text) {
-        // Check input type for default text
-        if (form->input_type) {
-            if (strcmp(form->input_type, "submit") == 0) text = "Submit";
-            else if (strcmp(form->input_type, "reset") == 0) text = "Reset";
-        }
-    }
+    // Get button text from live value, value attribute, or input-type default.
+    const char* text = form_button_label_text(block, form);
 
     if (text && *text && font && font->font_size > 0) {
         // Use backend font measurement for accurate button text width.

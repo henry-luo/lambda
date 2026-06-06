@@ -5740,6 +5740,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
          _is_tag(elem, "option"))) {
         return (Item){.item = b2it(dom_element_has_attribute(elem, "disabled"))};
     }
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+        const char* v = dom_element_get_attribute(elem, "value");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
 
     // ------------------------------------------------------------------
     // HTML form text-control (HTMLInputElement / HTMLTextAreaElement)
@@ -6846,6 +6850,16 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             else dom_element_remove_attribute(elem, "selected");
             return value;
         }
+    }
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+        const char* s = fn_to_cstr(value);
+        if (!s) s = "";
+        dom_element_set_attribute(elem, "value", s);
+        if (elem->form) {
+            elem->form->value = dom_element_get_attribute(elem, "value");
+        }
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
     }
 
     // ------------------------------------------------------------------
