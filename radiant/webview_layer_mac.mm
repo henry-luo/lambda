@@ -39,8 +39,8 @@ extern "C" {
         _handle->loaded = true;
         _handle->dirty = true;
     }
-    log_info("webview layer: navigation finished: %s",
-             webView.URL.absoluteString.UTF8String ?: "(srcdoc)");
+    const char* nav_url = webView.URL.absoluteString.UTF8String;
+    log_info("webview layer: navigation finished: %s", nav_url ? nav_url : "(srcdoc)");
 }
 
 - (void)webView:(WKWebView*)webView didFailNavigation:(WKNavigation*)navigation
@@ -333,8 +333,6 @@ bool webview_layer_platform_snapshot(WebViewHandle* handle, ImageSurface* surfac
                 return;
             }
 
-            // convert NSImage → RGBA bitmap
-            NSBitmapImageRep* bitmap = nil;
             CGImageRef cg_image = [image CGImageForProposedRect:nil context:nil hints:nil];
             if (cg_image) {
                 size_t cg_w = CGImageGetWidth(cg_image);

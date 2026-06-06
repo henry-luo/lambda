@@ -169,8 +169,6 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
     float bwt = border->width.top, bwr = border->width.right;
     float bwb = border->width.bottom, bwl = border->width.left;
 
-    const RdtMatrix* xform = render_state_current_transform(rdcon);
-
     // If border-radius is present, clip all per-side trapezoids to the outer rounded rect
     bool has_radius = corner_has_radius(&border->radius);
     RdtPath* radius_clip = nullptr;

@@ -2467,7 +2467,6 @@ static DomBoundary move_one_char(DomBoundary b, int dir) {
                 return DomBoundary{ c, dom_text_utf16_length(c->as_text()) };
             // skip past element child backwards; if the previous child is a
             // text node, descend to its end so callers see (text, len).
-            DomNode* prev_child = (b.offset >= 2 && c) ? c : nullptr;
             // Find child at index (b.offset - 2) — the one before the one we
             // just skipped over (which was at index b.offset - 1).
             if (b.offset >= 2) {

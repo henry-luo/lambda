@@ -2375,7 +2375,6 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
             if (cb->bound->border)
                 pb += cb->bound->border->width.left + cb->bound->border->width.right;
         }
-        float old_avail_cw = old_width - pb;
         float new_avail_cw = new_width - pb;
 
         // text-align: use child's own value if it has blk, otherwise inherit from parent
@@ -2789,32 +2788,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         } else {
             log_debug("%s finalize block flow: %s container, keeping height: %f (flow=%f)", block->source_loc(),
                       is_table ? "table" : "flex", block->height, flow_height);
-        }
-        // DEBUG: Check table height RIGHT BEFORE fprintf (only for body and html)
-        if (strcmp(block->node_name(), "html") == 0 || strcmp(block->node_name(), "body") == 0) {
-            View* html_or_body = block;
-            View* body_view = nullptr;
-
-            // For html, find body first; for body, use itself
-            if (strcmp(block->node_name(), "html") == 0) {
-                View* child = lam::view_require_element(block)->first_placed_child();
-                while (child) {
-                    if (child->is_block() && strcmp(child->node_name(), "body") == 0) {
-                        body_view = child;
-                        break;
-                    }
-                    child = child->next();
-                }
-            } else {
-                body_view = block;
-            }
-
-            if (body_view) {
-                View* grandchild = lam::view_require_element(body_view)->first_placed_child();
-                while (grandchild) {
-                    grandchild = grandchild->next();
-                }
-            }
         }
     }
 
@@ -6532,10 +6505,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    // Check if this block is a flex item
-    ViewElement* parent_block = lam::view_as_element(static_cast<View*>(elmt->parent));
-    bool is_flex_item = (parent_block && parent_block->display.inner == CSS_VALUE_FLEX);
-
     // CSS 2.2: Floats are removed from normal flow and don't cause line breaks
     // Check for float property before deciding on line break
     bool is_float = false;
@@ -6660,7 +6629,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.first_line_max_ascender = 0;
     lycon->block.first_line_max_descender = 0;
 
-    uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = lam::view_require_block(set_view(lycon,
         // Check table first to handle inline-table correctly
         display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE :

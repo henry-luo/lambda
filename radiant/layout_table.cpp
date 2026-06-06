@@ -1034,7 +1034,6 @@ static float apply_row_baseline_alignment(LayoutContext* lycon, ViewTableRow* tr
 
     // Step 3: Shift content in each baseline-aligned cell to align baselines
     // Only shift cells that have a real text baseline (skip cells with no line box)
-    float extra_height = 0;
     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
         if (tcell->td && tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE &&
             !tcell->td->is_empty && tcell->td->row_span <= 1) {
@@ -2423,7 +2422,6 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
 static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
     log_debug("=== ROWSPAN HEIGHT DISTRIBUTION ===");
 
-    int columns = meta->column_count;
     int rows = meta->row_count;
 
     // Track rowspan cells that need height distribution
@@ -6085,10 +6083,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Use metadata's col_widths array (already allocated)
     float* col_widths = meta->col_widths;
 
-    // Use metadata's grid for colspan/rowspan tracking (already populated)
-    bool* grid_occupied = meta->grid_occupied;
-    #define GRID(r, c) grid_occupied[(r) * columns + (c)]
-
     // Assign column indices and measure content with grid support
     // Use navigation helpers to iterate over all cells uniformly
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
@@ -7744,15 +7738,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("%s Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%.1f, columns=%d)", table->source_loc(),
                    child->x, child->y, child->width, tbody_content_width, columns);
 
-	            // Count rows in this group to identify the last row
-	            int row_count = 0;
-	            for (View* count_row_view = child->first_child; count_row_view; count_row_view = count_row_view->next_sibling) {
-	                ViewBlock* count_row = lam::view_as_block(count_row_view);
-	                if (!count_row) continue;
-	                if (count_row->view_type == RDT_VIEW_TABLE_ROW) row_count++;
-	            }
-            int current_row_index = 0;
-
             // CSS 2.1 §17.5.3: Check row group height properties
             // Percentage heights compute to auto; non-percentage heights act as minimum height
             // Note: CSS 2.1 says min-height/max-height on row groups is undefined.
@@ -7783,9 +7768,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 	                ViewBlock* row = lam::view_as_block(row_view);
 	                if (!row) continue;
 	                if (row->view_type == RDT_VIEW_TABLE_ROW) {
-                    current_row_index++;
-                    bool is_last_row = (current_row_index == row_count);
-
                     // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
                     if (group_has_percent_height && global_row_index < meta->row_count) {
                         meta->row_has_percent_height[global_row_index] = true;
@@ -8388,7 +8370,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_spacing_vert = 2 * table->tb->border_spacing_v;  // Top and bottom edge spacing
     }
 
-    float total_box_overhead = table_padding_vert + table_border_vert + table_spacing_vert;
     float content_only_height = min_content_height - table_padding_vert;  // current_y includes top padding
 
     // If explicit height is larger than content, distribute extra height to rows

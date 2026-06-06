@@ -2209,7 +2209,7 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
     HashMap* seen = hashmap_new(sizeof(CssRule*), 64, 0, 0, rule_ptr_hash, rule_ptr_compare, nullptr, nullptr);
 
     // Add universal rules
-    for (unsigned int i = 0; i < index->universal->length; i++) {
+    for (int i = 0; i < index->universal->length; i++) {
         IndexedRule* entry = (IndexedRule*)index->universal->data[i];
         if (!hashmap_get(seen, &entry->rule)) {
             arraylist_append(candidates, entry);
@@ -2221,7 +2221,7 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
     if (elem->tag_name) {
         ArrayList* tag_rules = get_rules_from_map(index->by_tag, elem->tag_name);
         if (tag_rules) {
-            for (unsigned int i = 0; i < tag_rules->length; i++) {
+            for (int i = 0; i < tag_rules->length; i++) {
                 IndexedRule* entry = (IndexedRule*)tag_rules->data[i];
                 if (!hashmap_get(seen, &entry->rule)) {
                     arraylist_append(candidates, entry);
@@ -2235,7 +2235,7 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
     if (elem->id) {
         ArrayList* id_rules = get_rules_from_map(index->by_id, elem->id);
         if (id_rules) {
-            for (unsigned int i = 0; i < id_rules->length; i++) {
+            for (int i = 0; i < id_rules->length; i++) {
                 IndexedRule* entry = (IndexedRule*)id_rules->data[i];
                 if (!hashmap_get(seen, &entry->rule)) {
                     arraylist_append(candidates, entry);
@@ -2251,7 +2251,7 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
             if (elem->class_names[i]) {
                 ArrayList* class_rules = get_rules_from_map(index->by_class, elem->class_names[i]);
                 if (class_rules) {
-                    for (unsigned int j = 0; j < class_rules->length; j++) {
+                    for (int j = 0; j < class_rules->length; j++) {
                         IndexedRule* entry = (IndexedRule*)class_rules->data[j];
                         if (!hashmap_get(seen, &entry->rule)) {
                             arraylist_append(candidates, entry);
@@ -2495,7 +2495,7 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
     g_candidate_rule_count += candidates->length;
 
     // Only check candidate rules (much fewer than all rules)
-    for (unsigned int i = 0; i < candidates->length; i++) {
+    for (int i = 0; i < candidates->length; i++) {
         IndexedRule* entry = (IndexedRule*)candidates->data[i];
         apply_rule_to_dom_element(root, entry->rule, matcher, pool, engine);
     }
@@ -3164,8 +3164,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             mem_free(refresh_url);
         }
     }
-
-    auto t_scripts = high_resolution_clock::now();
 
     // Log JS DOM mutations — cascade will pick these up since it runs after scripts
     if (dom_doc->js_mutation_count > 0) {
@@ -5782,7 +5780,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         // Replace old DOM child with new subtree in parent's linked list
-        bool replaced = dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
+        dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom), static_cast<DomNode*>(new_dom));
         if (i < 16) new_doms[i] = new_dom;
 
         // Phase 16: Mark new subtree as layout_dirty

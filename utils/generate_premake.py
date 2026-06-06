@@ -513,7 +513,7 @@ class PremakeGenerator:
             '    ',
             '    -- Global settings',
             '    cppdialect "C++17"',
-            '    cdialect "C99"',
+            '    cdialect "C11"',
             '    warnings "Extra"',
             '    ',
         ])
@@ -2888,10 +2888,27 @@ class PremakeGenerator:
             '    ',
             '    -- C specific options',
             '    filter "files:**.c"',
-            '        buildoptions { "-std=c99" }',
+            '        buildoptions { "-std=c11" }',
             '    ',
             '    filter {}',
             '    ',
+        ])
+
+        if self.use_macos_config:
+            platforms_config = self.config.get('platforms', {})
+            macos_config = platforms_config.get('macos', {})
+            linker_flags = macos_config.get('linker_flags', [])
+            if linker_flags:
+                self.premake_content.append('    linkoptions {')
+                for flag in linker_flags:
+                    opt = f'-{flag}' if not flag.startswith('-') else flag
+                    self.premake_content.append(f'        "{opt}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    ',
+                ])
+
+        self.premake_content.extend([
             '    defines {',
             '        "_GNU_SOURCE",',
         ])

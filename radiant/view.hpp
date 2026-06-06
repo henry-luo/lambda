@@ -37,12 +37,18 @@
 // Support mixed types (e.g., int and float) by using common_type
 template<typename T, typename U>
 inline auto max(T a, U b) -> typename std::common_type<T, U>::type {
-    return (a > b) ? a : b;
+    using Common = typename std::common_type<T, U>::type;
+    Common ca = static_cast<Common>(a);
+    Common cb = static_cast<Common>(b);
+    return (ca > cb) ? ca : cb;
 }
 
 template<typename T, typename U>
 inline auto min(T a, U b) -> typename std::common_type<T, U>::type {
-    return (a < b) ? a : b;
+    using Common = typename std::common_type<T, U>::type;
+    Common ca = static_cast<Common>(a);
+    Common cb = static_cast<Common>(b);
+    return (ca < cb) ? ca : cb;
 }
 
 // Absolute value - works for any signed numeric type
@@ -544,17 +550,17 @@ typedef struct FlexItemProp {
     float hypothetical_outer_cross_size;  // Outer cross size (with margins)
 
     // Flags for percentage values and measurement state
-    int flex_basis_is_percent : 1;
-    int is_margin_top_auto : 1;
-    int is_margin_right_auto : 1;
-    int is_margin_bottom_auto : 1;
-    int is_margin_left_auto : 1;
-    int has_intrinsic_width : 1;   // True if intrinsic widths calculated
-    int has_intrinsic_height : 1;  // True if intrinsic heights calculated
-    int needs_measurement : 1;      // True if content needs measuring
-    int has_explicit_width : 1;     // True if width explicitly set in CSS
-    int has_explicit_height : 1;    // True if height explicitly set in CSS
-    int main_size_from_flex : 1;    // True if parent flex grew/shrank this item's main-axis size
+    uint8_t flex_basis_is_percent : 1;
+    uint8_t is_margin_top_auto : 1;
+    uint8_t is_margin_right_auto : 1;
+    uint8_t is_margin_bottom_auto : 1;
+    uint8_t is_margin_left_auto : 1;
+    uint8_t has_intrinsic_width : 1;   // True if intrinsic widths calculated
+    uint8_t has_intrinsic_height : 1;  // True if intrinsic heights calculated
+    uint8_t needs_measurement : 1;     // True if content needs measuring
+    uint8_t has_explicit_width : 1;    // True if width explicitly set in CSS
+    uint8_t has_explicit_height : 1;   // True if height explicitly set in CSS
+    uint8_t main_size_from_flex : 1;   // True if parent flex grew/shrank this item's main-axis size
 } FlexItemProp;
 
 struct InlineProp {
@@ -628,8 +634,8 @@ struct LinearGradient {
     float angle;           // in degrees, 0 = to top, 90 = to right
     GradientStop* stops;   // array of color stops
     int stop_count;
-    int is_repeating : 1;  // true for repeating-linear-gradient
-    int stops_in_px : 1;   // true if stop positions are in px (not fractions)
+    uint8_t is_repeating : 1;  // true for repeating-linear-gradient
+    uint8_t stops_in_px : 1;   // true if stop positions are in px (not fractions)
 };
 
 // Radial gradient shape
@@ -674,16 +680,16 @@ typedef struct {
     CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
     float bg_size_width;    // explicit width (px or %)
     float bg_size_height;   // explicit height (px or %)
-    int bg_size_width_is_percent : 1;
-    int bg_size_height_is_percent : 1;
-    int bg_size_width_auto : 1;   // true if width component is 'auto'
-    int bg_size_height_auto : 1;  // true if height component is 'auto'
+    uint8_t bg_size_width_is_percent : 1;
+    uint8_t bg_size_height_is_percent : 1;
+    uint8_t bg_size_width_auto : 1;   // true if width component is 'auto'
+    uint8_t bg_size_height_auto : 1;  // true if height component is 'auto'
     // Background-position: <length> | <percentage> | left | center | right | top | bottom
     float bg_position_x;   // x offset (px or %)
     float bg_position_y;   // y offset (px or %)
-    int bg_position_x_is_percent : 1;
-    int bg_position_y_is_percent : 1;
-    int bg_position_set : 1;  // true if position was explicitly set
+    uint8_t bg_position_x_is_percent : 1;
+    uint8_t bg_position_y_is_percent : 1;
+    uint8_t bg_position_set : 1;  // true if position was explicitly set
     // Background-repeat: repeat | no-repeat | round | space (per axis)
     CssEnum bg_repeat_x;   // CSS_VALUE_REPEAT (default), CSS_VALUE_NO_REPEAT, CSS_VALUE_ROUND, CSS_VALUE_SPACE
     CssEnum bg_repeat_y;
