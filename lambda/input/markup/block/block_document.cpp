@@ -195,7 +195,7 @@ Item parse_document(MarkupParser* parser) {
         Element* html_dom = create_element(parser, "html-dom");
         if (html_dom) {
             // Copy all children from the HTML5 body to our html-dom element
-            for (size_t i = 0; i < html_body->length; i++) {
+            for (size_t i = 0; i < (size_t)html_body->length; i++) {
                 list_push((List*)html_dom, html_body->items[i]);
             }
             // Set content length

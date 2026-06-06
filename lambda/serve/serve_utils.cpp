@@ -61,7 +61,7 @@ char* serve_strdup(const char *str) {
 // Error handling (thread-local error buffer)
 // ============================================================================
 
-static _Thread_local char error_buffer[512] = {0};
+static thread_local char error_buffer[512] = {0};
 
 void serve_set_error(const char *format, ...) {
     va_list args;

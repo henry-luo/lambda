@@ -308,10 +308,10 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
         if (is_empty_line(current)) {
             // Check if next non-empty line continues the blockquote
             size_t peek = parser->current_line + 1;
-            while (peek < parser->line_count && is_empty_line(parser->lines[peek])) {
+            while (peek < (size_t)parser->line_count && is_empty_line(parser->lines[peek])) {
                 peek++;
             }
-            if (peek < parser->line_count) {
+            if (peek < (size_t)parser->line_count) {
                 const char* next = parser->lines[peek];
                 int next_indent = 0;
                 const char* np = next;

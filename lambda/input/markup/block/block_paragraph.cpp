@@ -53,10 +53,10 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
         if (is_empty_line(line)) {
             // Check if there are more indented lines after
             size_t peek = parser->current_line + 1;
-            while (peek < parser->line_count && is_empty_line(parser->lines[peek])) {
+            while (peek < (size_t)parser->line_count && is_empty_line(parser->lines[peek])) {
                 peek++;
             }
-            if (peek < parser->line_count) {
+            if (peek < (size_t)parser->line_count) {
                 const char* next = parser->lines[peek];
                 int next_indent = 0;
                 while (next[next_indent] == ' ') next_indent++;
@@ -304,7 +304,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                 // Check if this line is a lazy continuation
                 bool is_lazy = false;
                 if (parser->state.lazy_lines &&
-                    parser->current_line < parser->state.lazy_lines_count) {
+                    (size_t)parser->current_line < parser->state.lazy_lines_count) {
                     is_lazy = parser->state.lazy_lines[parser->current_line];
                 }
 
@@ -792,7 +792,7 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
                     if (is_empty_line(dl_line)) {
                         // Empty line - check if more definition content follows
                         size_t peek = parser->current_line + 1;
-                        if (peek < parser->line_count) {
+                        if (peek < (size_t)parser->line_count) {
                             const char* next = parser->lines[peek];
                             if (*next == ' ' || *next == '\t') {
                                 // More indented content, include blank line

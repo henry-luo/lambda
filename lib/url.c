@@ -633,7 +633,7 @@ Url* get_current_dir() {
         snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
     } else { // Windows
         // convert \ to /
-        int slen = strlen(cwd);
+        size_t slen = strlen(cwd);
         for (size_t i = 0; i < slen; i++) {
             if (cwd[i] == '\\') { cwd[i] = '/'; }
         }

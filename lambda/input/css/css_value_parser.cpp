@@ -882,7 +882,7 @@ void css_value_list_add(CssValue* list, CssValue* value) {
     // In a production implementation, we'd need to expand the array here
     // For now, just add if there's space
     size_t max_capacity = 64; // Reasonable upper limit
-    if (list->data.list.count < max_capacity) {
+    if ((size_t)list->data.list.count < max_capacity) {
         list->data.list.values[list->data.list.count++] = value;
     }
 }

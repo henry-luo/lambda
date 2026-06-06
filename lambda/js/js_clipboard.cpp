@@ -554,7 +554,7 @@ static bool dt_normalize_format(Item type_item, char* out, size_t out_cap) {
     String* s = it2s(type_item);
     if (!s) return false;
     if ((size_t)s->len + 1 > out_cap) return false;
-    for (int i = 0; i < s->len; i++) {
+    for (int i = 0; i < (int)s->len; i++) {
         unsigned char c = (unsigned char)s->chars[i];
         out[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c;
     }

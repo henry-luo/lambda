@@ -123,7 +123,7 @@ void parse_csv(Input* input, const char* csv_string) {
 
             // Check for duplicate headers
             if (field) {
-                for (size_t i = 0; i < headers->length; i++) {
+                for (size_t i = 0; i < (size_t)headers->length; i++) {
                     Item existing = headers->items[i];
                     if (existing.item != ITEM_NULL) {
                         String* existing_str = existing.get_safe_string();
