@@ -65,7 +65,6 @@ static bool is_tag_name_end(char c) {
 
 // Check if line contains a string (case-insensitive)
 static bool line_contains_ci(const char* line, const char* needle) {
-    size_t needle_len = strlen(needle);
     while (*line) {
         if (starts_with_ci(line, needle)) {
             return true;

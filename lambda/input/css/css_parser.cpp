@@ -2889,7 +2889,6 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             int prefix_end = pos;
 
             if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-                int brace_start = pos;
                 pos++; // consume '{'
                 int content_start = pos; // Content starts after '{'
 

@@ -189,7 +189,7 @@ void print_double(StrBuf *strbuf, double num) {
         return;
     }
     int exponent;
-    double mantissa = frexp(num, &exponent);
+    frexp(num, &exponent);
     if (-20 < exponent && exponent < 30) {
         // log_debug("printing fancy double: %.10f", num);
         strbuf_append_format(strbuf, "%.10f", num);

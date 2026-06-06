@@ -632,7 +632,7 @@ struct TsTypeParser {
     // ================================================================
     TsTypeNode* parse_mapped_type_rest(const char* key_name, int key_len) {
         // [K in T as U]?: V }
-        TsTypeNode* constraint = parse_type();
+        parse_type();
         TsTypeNode* name_type = nullptr;
         if (check_str("as")) {
             pos += 2;
@@ -929,8 +929,6 @@ struct TsTypeParser {
             if (pos < len && (text[pos] == '+' || text[pos] == '-')) advance_one();
             while (pos < len && isdigit((unsigned char)text[pos])) pos++;
         }
-        int nlen = (int)((text + pos) - start);
-
         TsLiteralTypeNode* ln = (TsLiteralTypeNode*)alloc_node(
             TS_AST_NODE_LITERAL_TYPE, sizeof(TsLiteralTypeNode));
         ln->literal_type = JS_LITERAL_NUMBER;

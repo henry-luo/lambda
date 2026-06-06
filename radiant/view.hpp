@@ -544,17 +544,17 @@ typedef struct FlexItemProp {
     float hypothetical_outer_cross_size;  // Outer cross size (with margins)
 
     // Flags for percentage values and measurement state
-    int flex_basis_is_percent : 1;
-    int is_margin_top_auto : 1;
-    int is_margin_right_auto : 1;
-    int is_margin_bottom_auto : 1;
-    int is_margin_left_auto : 1;
-    int has_intrinsic_width : 1;   // True if intrinsic widths calculated
-    int has_intrinsic_height : 1;  // True if intrinsic heights calculated
-    int needs_measurement : 1;      // True if content needs measuring
-    int has_explicit_width : 1;     // True if width explicitly set in CSS
-    int has_explicit_height : 1;    // True if height explicitly set in CSS
-    int main_size_from_flex : 1;    // True if parent flex grew/shrank this item's main-axis size
+    unsigned flex_basis_is_percent : 1;
+    unsigned is_margin_top_auto : 1;
+    unsigned is_margin_right_auto : 1;
+    unsigned is_margin_bottom_auto : 1;
+    unsigned is_margin_left_auto : 1;
+    unsigned has_intrinsic_width : 1;   // True if intrinsic widths calculated
+    unsigned has_intrinsic_height : 1;  // True if intrinsic heights calculated
+    unsigned needs_measurement : 1;      // True if content needs measuring
+    unsigned has_explicit_width : 1;     // True if width explicitly set in CSS
+    unsigned has_explicit_height : 1;    // True if height explicitly set in CSS
+    unsigned main_size_from_flex : 1;    // True if parent flex grew/shrank this item's main-axis size
 } FlexItemProp;
 
 struct InlineProp {
@@ -674,16 +674,16 @@ typedef struct {
     CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
     float bg_size_width;    // explicit width (px or %)
     float bg_size_height;   // explicit height (px or %)
-    int bg_size_width_is_percent : 1;
-    int bg_size_height_is_percent : 1;
-    int bg_size_width_auto : 1;   // true if width component is 'auto'
-    int bg_size_height_auto : 1;  // true if height component is 'auto'
+    unsigned bg_size_width_is_percent : 1;
+    unsigned bg_size_height_is_percent : 1;
+    unsigned bg_size_width_auto : 1;   // true if width component is 'auto'
+    unsigned bg_size_height_auto : 1;  // true if height component is 'auto'
     // Background-position: <length> | <percentage> | left | center | right | top | bottom
     float bg_position_x;   // x offset (px or %)
     float bg_position_y;   // y offset (px or %)
-    int bg_position_x_is_percent : 1;
-    int bg_position_y_is_percent : 1;
-    int bg_position_set : 1;  // true if position was explicitly set
+    unsigned bg_position_x_is_percent : 1;
+    unsigned bg_position_y_is_percent : 1;
+    unsigned bg_position_set : 1;  // true if position was explicitly set
     // Background-repeat: repeat | no-repeat | round | space (per axis)
     CssEnum bg_repeat_x;   // CSS_VALUE_REPEAT (default), CSS_VALUE_NO_REPEAT, CSS_VALUE_ROUND, CSS_VALUE_SPACE
     CssEnum bg_repeat_y;

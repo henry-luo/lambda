@@ -649,7 +649,6 @@ static void format_children_range(StringBuf* sb, const ElementReader& elem,
 
                 if (word_extends_into_subsup) {
                     // Word extends into subsup base: emit word then sub/sup parts
-                    int chars_before_subsup = direct_chars; // e.g. "sigm" = 4
                     int64_t subsup_idx = j; // index of the subsup element
                     ElementReader subsup_elem = elem.childAt(subsup_idx).asElement();
 

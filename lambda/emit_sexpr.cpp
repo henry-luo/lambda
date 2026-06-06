@@ -873,7 +873,6 @@ static void emit_expr(const char* source, AstNode* node) {
             break;
         }
         case LMD_TYPE_FLOAT: {
-            TypeFloat* ft = (TypeFloat*)node->type;
             // use source text for exact representation
             int len; const char* src = node_src(source, node->node, &len);
             printf("%.*s", len, src);

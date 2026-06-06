@@ -1700,7 +1700,6 @@ Item fn_int(Item item) {
 
 int64_t fn_int64(Item item) {
     // convert item to int64
-    int64_t val;
     if (item._type_id == LMD_TYPE_INT) {
         return item.get_int56();
     }

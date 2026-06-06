@@ -1,8 +1,9 @@
 /**
- * GTest runner for Fuzzy Crash Tests
+ * GTest runner for Layout Fuzzy Tests
  *
  * Auto-discovers HTML files under test/layout/data/fuzzy/ and runs each via
- * `./lambda.exe layout <html> --no-log -o /dev/null` to verify they don't crash.
+ * `./lambda.exe layout <html> --no-log -o /dev/null` to verify the layout
+ * engine doesn't crash on fuzzer-found pathological inputs.
  *
  * Exit code convention:
  *   0   = layout completed successfully
@@ -10,9 +11,9 @@
  *   >1  = unrecoverable crash or signal (FAIL)
  *
  * Usage:
- *   ./test/test_fuzzy_crash_gtest.exe
- *   ./test/test_fuzzy_crash_gtest.exe --gtest_filter=FuzzyCrash.*table*
- *   ./test/test_fuzzy_crash_gtest.exe -j 4
+ *   ./test/test_layout_fuzzy_gtest.exe
+ *   ./test/test_layout_fuzzy_gtest.exe --gtest_filter=FuzzyCrash.*table*
+ *   ./test/test_layout_fuzzy_gtest.exe -j 4
  */
 
 #include <gtest/gtest.h>
@@ -52,8 +53,12 @@
     #define NULL_DEV "/dev/null"
 #endif
 
-// Timeout per file in seconds
-#define FUZZY_TIMEOUT_SECONDS 15
+// Timeout per file in seconds. Generous because a few cases legitimately do a
+// lot of work: crash_extreme_dom_depth parses a ~10k-deep DOM (super-linear in
+// depth) and takes ~5s solo in the ASan debug build, rising to ~14s under the
+// heavy CPU contention of a full parallel `make test`. The timeout only guards
+// against true hangs, so keep ample margin above that worst case.
+#define FUZZY_TIMEOUT_SECONDS 60
 
 // ============================================================================
 // Test info
@@ -406,7 +411,7 @@ int main(int argc, char** argv) {
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
-    std::cout << "║     Fuzzy Crash Test Suite                               ║\n";
+    std::cout << "║     Layout Fuzzy Test Suite                              ║\n";
     std::cout << "║                                                          ║\n";
     std::cout << "║  Runs HTML files from test/layout/data/fuzzy/ via:       ║\n";
     std::cout << "║    ./lambda.exe layout <html> --no-log -o /dev/null      ║\n";

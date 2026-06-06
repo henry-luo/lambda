@@ -64,7 +64,6 @@ static void ts_transpiler_destroy(TsTranspiler* tp) {
 // Lower: enum Direction { Up, Down = 5, Left }
 // Into:  const Direction = { Up: 0, Down: 5, Left: 6, 0: "Up", 5: "Down", 6: "Left" };
 static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* enum_decl) {
-    Pool* pool = tp->ast_pool;
     TSNode dummy = enum_decl->base.node;
 
     // build object literal with forward (name → value) and reverse (value → name) mappings
@@ -437,7 +436,6 @@ static JsAstNode* ts_lower_expr_tree(TsTranspiler* tp, JsAstNode* node) {
 // ============================================================================
 
 static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarationNode* ns) {
-    Pool* pool = tp->ast_pool;
     TSNode dummy = ns->base.node;
 
     // create: var Foo;
@@ -615,7 +613,6 @@ static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarat
 static JsAstNode* ts_lower_class_with_decorators(TsTranspiler* tp,
     TsDecoratorNode** decorators, int deco_count, JsAstNode* class_node)
 {
-    Pool* pool = tp->ast_pool;
     JsClassNode* cls = (JsClassNode*)class_node;
     TSNode dummy = class_node->node;
     if (!cls->name) return class_node;

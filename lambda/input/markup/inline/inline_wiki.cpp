@@ -255,7 +255,6 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    const char* start_pos = pos;
     int quote_count = 0;
 
     // Count opening quotes

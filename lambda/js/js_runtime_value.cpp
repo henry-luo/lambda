@@ -160,7 +160,6 @@ extern "C" Item js_to_number(Item value) {
         }
         // ES spec: only "Infinity" (exact case) is valid; strtod accepts case-insensitive
         if (trimmed_len >= 3 && (buf[0] == 'i' || buf[0] == 'I')) {
-            int off = 0;
             if (strncmp(buf, "Infinity", 8) != 0) {
                 double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
                 *nan_ptr = NAN;

@@ -534,11 +534,9 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
                 if (entry->type->type_id == LMD_TYPE_STRING ||
                     entry->type->type_id == LMD_TYPE_SYMBOL ||
                     entry->type->type_id == LMD_TYPE_BINARY) {
-                    String* str = *(String**)new_field;
                 }
                 else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
                          entry->type->type_id <= LMD_TYPE_OBJECT) {
-                    Container* container = *(Container**)new_field;
                 }
             }
         }
@@ -1066,11 +1064,9 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
                     if (entry->type->type_id == LMD_TYPE_STRING ||
                         entry->type->type_id == LMD_TYPE_SYMBOL ||
                         entry->type->type_id == LMD_TYPE_BINARY) {
-                        String* str = *(String**)new_field;
                     }
                     else if (entry->type->type_id >= LMD_TYPE_ARRAY &&
                              entry->type->type_id <= LMD_TYPE_OBJECT) {
-                        Container* container = *(Container**)new_field;
                     }
                 }
             }

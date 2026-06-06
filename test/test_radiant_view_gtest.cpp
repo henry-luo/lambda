@@ -290,13 +290,23 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/image_cache_promotion.html"));
     test_radiant_view_ensure_temp_dir();
 
-    int status = system("./lambda.exe view test/html/image_cache_promotion.html --headless > ./temp/test_radiant_view_cache_promotion.log 2>&1");
+    // Route this run's file logging to a private path via LAMBDA_LOG_FILE. The
+    // default log.txt is shared and truncated on every lambda startup, so under
+    // parallel test runs concurrent processes clobber it — making assertions on
+    // log.txt flaky. A per-test log file is isolated.
+    const char* view_log = "./temp/test_radiant_view_cache_promotion_log.txt";
+    char command[512];
+    snprintf(command, sizeof(command),
+             "LAMBDA_LOG_FILE=%s ./lambda.exe view test/html/image_cache_promotion.html "
+             "--headless > ./temp/test_radiant_view_cache_promotion.log 2>&1",
+             view_log);
+    int status = system(command);
     ASSERT_EQ(0, test_radiant_view_exit_code(status));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        "log.txt",
+        view_log,
         "[image] Decoded local image on demand: 64x42 (intrinsic 640x427, target 60x40)"));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        "log.txt",
+        view_log,
         "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
 }
 

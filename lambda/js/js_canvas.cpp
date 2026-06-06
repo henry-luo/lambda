@@ -302,7 +302,6 @@ extern "C" void js_canvas_ctx_set_font(Item ctx_obj, Item font_val) {
 extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
     // get font handle ID
     Item fh_key = (Item){.item = s2it(heap_create_name("__font_handle_id"))};
-    bool has = false;
     Item fh_val = js_property_get(ctx_obj, fh_key);
     int fh_id = -1;
     if (get_type_id(fh_val) == LMD_TYPE_INT) {

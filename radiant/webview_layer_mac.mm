@@ -334,7 +334,6 @@ bool webview_layer_platform_snapshot(WebViewHandle* handle, ImageSurface* surfac
             }
 
             // convert NSImage → RGBA bitmap
-            NSBitmapImageRep* bitmap = nil;
             CGImageRef cg_image = [image CGImageForProposedRect:nil context:nil hints:nil];
             if (cg_image) {
                 size_t cg_w = CGImageGetWidth(cg_image);

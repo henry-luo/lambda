@@ -196,7 +196,7 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
         if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
         if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
         if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
-        if (strncmp(op_str, "??=", 3) == 0) return JS_OP_NULLISH_ASSIGN;
+        if (strncmp(op_str, "?\?=", 3) == 0) return JS_OP_NULLISH_ASSIGN;  // escaped to avoid ??= trigraph
         if (strncmp(op_str, "&&=", 3) == 0) return JS_OP_AND_ASSIGN;
         if (strncmp(op_str, "||=", 3) == 0) return JS_OP_OR_ASSIGN;
     } else if (len == 4) {

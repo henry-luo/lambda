@@ -76,7 +76,6 @@ static bool cpal_get_color(const uint8_t* cpal, uint32_t cpal_len,
     if (!cpal || cpal_len < 12) return false;
 
     // CPAL header
-    uint16_t num_palette_entries = rd16(cpal + 2);
     uint16_t num_palettes        = rd16(cpal + 4);
     uint16_t num_color_records   = rd16(cpal + 6);
     uint32_t color_records_offset = rd32(cpal + 8);

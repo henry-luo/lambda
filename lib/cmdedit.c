@@ -1,5 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <string.h>
 #include "memtrack.h"
 
@@ -653,31 +655,6 @@ static int handle_yank(struct line_editor *ed, int key, int count);
 static int handle_transpose_chars(struct line_editor *ed, int key, int count);
 #endif
 
-// Default key bindings
-static key_binding_t default_bindings[] = {
-    {KEY_CTRL_A, handle_move_home},
-    {KEY_CTRL_E, handle_move_end},
-    {KEY_CTRL_B, handle_move_left},
-    {KEY_CTRL_F, handle_move_right},
-    {KEY_CTRL_H, handle_backspace},  // Ctrl+H is backspace
-    {KEY_CTRL_C, handle_ctrl_c},
-    {KEY_CTRL_D, handle_ctrl_d},
-    {KEY_CTRL_L, handle_ctrl_l},
-    {KEY_CTRL_P, handle_history_prev},  // Previous history
-    {KEY_CTRL_N, handle_history_next},  // Next history
-    {KEY_TAB, handle_tab_completion},   // Tab completion
-    {KEY_BACKSPACE, handle_backspace},
-    {KEY_DELETE, handle_delete},
-    {KEY_LEFT, handle_move_left},
-    {KEY_RIGHT, handle_move_right},
-    {KEY_UP, handle_history_prev},      // Up arrow = previous history
-    {KEY_DOWN, handle_history_next},    // Down arrow = next history
-    {KEY_HOME, handle_move_home},
-    {KEY_END, handle_move_end},
-    {KEY_ENTER, handle_enter},
-    {0, NULL} // Sentinel
-};
-
 int editor_init(struct line_editor *ed, const char *prompt) {
     if (!ed) return -1;
 
@@ -927,6 +904,9 @@ static key_binding_t enhanced_bindings[] = {
 
     // Advanced editing
     {KEY_CTRL_T, handle_transpose_chars},
+
+    // Completion
+    {KEY_TAB, handle_tab_completion},
 
     // Control
     {KEY_CTRL_L, handle_ctrl_l},

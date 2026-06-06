@@ -1028,7 +1028,6 @@ Item bigint_from_string(const char* str, int len) {
     if (len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
         // hex: parse manually since mpd doesn't support hex
         // use strtoull for up-to-64-bit, fall back to digit-by-digit for larger
-        bool negative = false;
         const char* hex = buf + 2;
         int hex_len = len - 2;
         // each hex digit is 4 bits; if > 16 digits, won't fit in uint64

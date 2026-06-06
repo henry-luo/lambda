@@ -1890,7 +1890,6 @@ static const char* js_resolve_custom_property_value(DomElement* elem, const char
             size_t adj_len = literal_len;
             while (adj_len >= 4) {
                 // find last */ in the segment
-                size_t end_pos = adj_len;
                 // check if segment ends with */  (possibly followed by whitespace)
                 size_t check = adj_len;
                 while (check > 0 && (lit_start[check-1] == ' ' || lit_start[check-1] == '\t'))
@@ -8280,8 +8279,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "reportValidity") == 0) {
         if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
             // delegate to checkValidity for forms
-            Item check_args[0];
-            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, check_args, 0);
+            return js_dom_element_method(elem_item, (Item){.item = s2it(heap_create_name("checkValidity"))}, nullptr, 0);
         }
         if (_elem_is_barred(elem)) return (Item){.item = ITEM_TRUE};
         Item vs = _build_validity_state(elem);

@@ -28,6 +28,8 @@ ifeq ($(OS),Darwin)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
+	MACOS_DEPLOYMENT_TARGET ?= $(or $(MACOSX_DEPLOYMENT_TARGET),15.0)
+	MACOS_CMAKE_FLAGS := -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(shell xcrun --show-sdk-path)
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.lin.lua
@@ -348,6 +350,7 @@ $(RE2_LIB):
 			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			$$( [ -n "$$RE2_LAUNCHER" ] && echo "-DCMAKE_C_COMPILER_LAUNCHER=$$RE2_LAUNCHER -DCMAKE_CXX_COMPILER_LAUNCHER=$$RE2_LAUNCHER" ) \
 			-DCMAKE_CXX_FLAGS="$(if $(filter /clang64/bin/clang++,$(CXX)),-stdlib=libc++,) -O2" \
+			$(MACOS_CMAKE_FLAGS) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 			-DBUILD_SHARED_LIBS=OFF \

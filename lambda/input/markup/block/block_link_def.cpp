@@ -278,7 +278,6 @@ label_done:
     }
 
     if (*p == '"' || *p == '\'' || *p == '(') {
-        char open_char = *p;
         char close_char = (*p == '(') ? ')' : *p;
         p++;
         title_start = p;

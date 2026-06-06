@@ -3388,7 +3388,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 memset(&preamble, 0, sizeof(preamble));
-                Item pres = transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
+                transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
 
                 // Save harness source for recompilation after crash recovery
                 if (saved_harness_src) mem_free(saved_harness_src);

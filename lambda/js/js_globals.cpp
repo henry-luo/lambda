@@ -746,7 +746,6 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     }
 
     bool is_accessor = js_pd_is_accessor(&pd);
-    bool is_data = (pd.flags & JS_PD_HAS_VALUE) != 0;
 
     Item define_target = obj;
     if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
@@ -1236,9 +1235,6 @@ extern "C" Item js_performance_now(void) {
 }
 
 // Date.now() — returns milliseconds since Unix epoch
-static double js_date_now_buf[64];
-static int js_date_now_idx = 0;
-
 static int64_t js_date_days_from_civil(int64_t year, unsigned month, unsigned day);
 
 static double js_date_time_clip(double value) {
@@ -1876,13 +1872,6 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
     double ms = time_val.get_double();
 
-    auto to_double = [](Item v) -> double {
-        TypeId t = get_type_id(v);
-        if (t == LMD_TYPE_FLOAT) return it2d(v);
-        if (t == LMD_TYPE_INT) return (double)it2i(v);
-        if (t == LMD_TYPE_INT64) return (double)it2l(v);
-        return NAN;
-    };
     auto is_present = [](Item v) -> bool {
         return v.item != ItemError.item;
     };
@@ -3872,9 +3861,6 @@ extern "C" Item js_toFixed(Item num_item, Item digits_item) {
             // Check if we should round up to 10^(-digits)
             char wide[64];
             snprintf(wide, sizeof(wide), "%.20e", abs_num);
-            // Parse exponent from wide
-            char* ep = strchr(wide, 'e');
-            int we = ep ? atoi(ep + 1) : 0;
             // The value is abs_num = sig * 10^we, we need to check if abs_num * 10^digits >= 0.5
             // i.e., if the (digits+1)th decimal place rounds up
             // Simplified: if keep == 0, check the first sig digit for >= 5
@@ -4243,8 +4229,6 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
             }
         } else {
             // ES spec: find e,n such that n × 10^(e-f) ≈ x, round half up
-            int exp = (int)floor(log10(abs_d));
-            int digits = has_frac ? frac + 1 : 0;
             if (!has_frac) {
                 // No fractionDigits: use shortest unique representation
                 // Try increasing precision until round-trip matches
@@ -7009,7 +6993,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
     bool desc_present = (get_type_id(ownDesc) == LMD_TYPE_MAP);
     Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
     Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    heap_create_name("value", 5);
     Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
 
     if (desc_present) {
@@ -8399,7 +8383,6 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     }
     if (type == LMD_TYPE_FUNC) {
         // function own properties: length, name, [prototype] + custom from properties_map
-        JsFunctionLayout* fn_lay = (JsFunctionLayout*)object.function;
         bool has_proto = js_func_has_own_prototype(object); // constructors & generators have prototype
         Item result = js_array_new(0);
         js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});

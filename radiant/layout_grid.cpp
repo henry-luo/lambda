@@ -432,7 +432,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     {
         int neg_row_offset = grid_layout->negative_implicit_row_count;
         int explicit_row_start = neg_row_offset;
-        int explicit_row_end = neg_row_offset + grid_layout->explicit_row_count;
 
         for (int idx = 0; idx < item_count; idx++) {
             ViewBlock* item = items[idx];

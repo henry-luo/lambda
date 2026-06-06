@@ -251,7 +251,6 @@ static const char* try_parse_html_tag(const char* start) {
         // CommonMark: "An attribute value specification consists of optional whitespace,
         // a `=` character, optional whitespace, and an attribute value."
         // So we only skip whitespace if we're about to see '='
-        const char* after_name = p;
         const char* maybe_eq = skip_whitespace(p);
 
         // Check for attribute value

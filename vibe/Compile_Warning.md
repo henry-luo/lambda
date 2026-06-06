@@ -210,22 +210,38 @@ Current clean-build result: `-Wunused-function` is **0** in `temp/compile_warnin
 
 ✅ **`-Wunused-but-set-variable` done.** Removed stale state/counter variables and assignment-only leftovers across markup parsers, CSS parsing, YAML/TOML/XML/RDB/D2 inputs, JS regex/path/buffer helpers, TS preprocessing/type parsing, logging/memtrack, and Radiant layout/table/intrinsic sizing. One warning exposed a real TypeScript preprocessing bug: `angle_depth` was tracked but not included in the nested-depth condition, so generic type expressions now stay inside the skipped type span. Clean build result: `-Wunused-but-set-variable` is **0** in `temp/compile_warning_unused_set_werror_clean_build.log`; `-Werror=unused-but-set-variable` is now enabled in `build_lambda_config.json`.
 
-Current clean-build warning inventory after this wave:
+### Phase 6 — Defect wave (2026-06-06)
 
-| Count | Flag |
-|------:|------|
-| 995 | `-Wcast-function-type-mismatch` |
-| 165 | `-Wunused-variable` |
-| 120 | `-Wsign-compare` |
-| 47 | `-Wsingle-bit-bitfield-constant-conversion` |
-| 43 | `-Wdeprecated-declarations` |
-| 24 | `-Wc11-extensions` |
-| 17 | `-Wconstant-conversion` |
-| 7 | `-Wundefined-bool-conversion` |
-| 3 | `-Wmacro-redefined` |
-| 2 | `-Wparentheses` |
-| 2 | `-Wmicrosoft-redeclare-static` |
-| 1 each | `-Wzero-length-array`, `-Wtrigraphs`, `-Wgnu-conditional-omitted-operand` |
+A full clean rebuild (`make build`, debug_native) showed **1,420** warnings. This wave fixed every category that represents an actual defect, plus the bulk dead-variable cleanup. Result: **1,420 → 1,198**, 0 errors; Lambda baseline **2942/2942** and Radiant baseline **5712/5712** both green.
+
+| Flag | Fixed | Root cause & fix |
+|------|------:|------------------|
+| `-Wparentheses` | 2 → **0** | **Real bug.** `ITEM_TRUE`/`ITEM_FALSE` in `lambda/lambda.h` lacked outer parens → `x != ITEM_FALSE` parsed as `(x != …<<56) \| 0`. Added parentheses; removes a latent correctness bug wherever these macros appear in a larger expression. |
+| `-Wconstant-conversion` | 17 → **0** | **Real bug.** U+FFFD (`0xFFFD`) was truncated to a single invalid `char` (`-3`) in `lambda/input/html5/html5_tokenizer.cpp`. Added `HTML5_REPLACEMENT_CHAR_UTF8` + byte-string append helpers so the replacement char is emitted as proper 3-byte UTF-8 per the HTML5 spec. |
+| `-Wsingle-bit-bitfield-constant-conversion` | 47 → **0** | Boolean flags declared signed `int : 1` (truncating `1`→`-1`) in `radiant/view.hpp` (`FlexItemProp`, background struct). Changed to `unsigned : 1`. |
+| `-Wmacro-redefined` | 3 → **0** | `_GNU_SOURCE` defined on the command line *and* in `lib/cmdedit.c`, `lib/file_utils.c`, `lib/mime-detect.c`. Guarded the local defines with `#ifndef`. |
+| `-Wtrigraphs` | 1 → **0** | `"??="` is a trigraph sequence in `lambda/js/build_js_ast.cpp`. Escaped to `"?\?="`. |
+| `-Wzero-length-array` | 1 → **0** | `Item check_args[0]` in `lambda/js/js_dom.cpp` passed with count 0 → replaced with `nullptr`. |
+| `-Wunused-variable` | 154 → **3** | Dead-code cleanup across ~70 files (incl. cascade-orphans the removals exposed: `row_count`/`current_row_index` in `layout_table.cpp`, `left_int64`/`right_int64` in `transpile-mir.cpp`, `ep`/`line_is_ordered`/`range_off_pos`). `runner.cpp` `p3`–`p7` moved inside `#ifdef LAMBDA_C2MIR`; `cmdedit.c` `default_bindings` removed (tab completion wired into `enhanced_bindings`). The 3 remaining are platform/config-gated — see below. |
+
+Side-effect-bearing initializers were preserved (the call kept as a bare statement); only the unused binding was dropped.
+
+### Deliberately not fixed (and why)
+
+Remaining **1,199** warnings, none of which represent a defect to fix in this pass:
+
+| Flag | Count | Why left |
+|------|------:|----------|
+| `-Wcast-function-type-mismatch` | 996 | Intentional. All from the `FPTR()` type-erasure macro in `lambda/sys_func_registry.c`, which stores heterogeneous function pointers in one registry table and calls them through the correct signature at dispatch. This is the design, not a bug. |
+| `-Wsign-compare` | 119 | Mostly benign `size_t`/`int` loop comparisons; a broad sweep is risky for little gain. Fix per-file when touching the code (Phase 5 stance). |
+| `-Wdeprecated-declarations` | 44 | Deprecated macOS platform APIs (e.g. `NSBitmapImageRep`); needs API migration, out of scope. |
+| `-Wc11-extensions` | 26 | Benign C11-in-C++ usage. |
+| `-Wundefined-bool-conversion` | 7 | The `if (!this) return null_result;` defensive null-receiver pattern in `lambda/lambda-data.cpp`. UB in C++ but a deliberate convention; a proper fix is a call-site-wide refactor (already deferred in the Phase 2 caveat). |
+| `-Wunused-variable` | 3 | Platform/config-gated, needed in other builds: `g_old_sigwinch` (`#if defined(SIGWINCH)`), `linux_font_dirs` (`#ifdef __linux__`), `dst_offset` (`#ifdef FONT_COMPRESSION_BIN`). |
+| `-Wmicrosoft-redeclare-static` | 2 | Minor static/non-static redeclaration. |
+| `-Wgnu-conditional-omitted-operand` | 1 | Benign `x ?: y` GNU idiom in `radiant/webview_layer_mac.mm`. |
+
+**`cmdedit.c` tab completion (resolved):** the live dispatch table is `enhanced_bindings` (via `find_key_handler`), and it previously did **not** map `KEY_TAB` — so `handle_tab_completion` was unreachable and the duplicate `default_bindings` table was dead. Fixed by adding `{KEY_TAB, handle_tab_completion}` to `enhanced_bindings` and deleting the dead `default_bindings` table (its other handlers all already live in `enhanced_bindings`). TAB now reaches the handler; full completion still requires the REPL to register a provider (`rl_attempted_completion_function`), otherwise TAB inserts a literal tab. REPL tests (`test_lambda_repl_gtest.exe`) pass 38/38.
 
 ## Success Criteria
 
