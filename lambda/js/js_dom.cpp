@@ -8266,7 +8266,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         js_property_set(ev, (Item){.item = s2it(heap_create_name("isTrusted"))},
                         (Item){.item = ITEM_TRUE});
         Item dispatched = js_dom_dispatch_event(elem_item, ev);
-        if (dispatched.item == ITEM_FALSE) return make_js_undefined();
+        if (dispatched.item == (ITEM_FALSE)) return make_js_undefined();
         _run_form_reset(elem);
         return make_js_undefined();
     }

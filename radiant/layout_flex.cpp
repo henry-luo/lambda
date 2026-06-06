@@ -4281,12 +4281,11 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             } else if (is_shrinking && fs > 0) {
                 // CRITICAL FIX: Use original flex_basis for scaled shrink factor
                 // Per CSS Flexbox spec: scaled_flex_shrink_factor = flex_shrink × flex_base_size
-                float flex_basis = item_flex_basis[i];
-                double scaled = (double)flex_basis * fs;
+                double scaled = (double)item_flex_basis[i] * fs;
                 total_scaled_shrink += scaled;
                 unfrozen_count++;
                 log_debug("FLEX_SHRINK - item %d: flex_shrink=%.2f, flex_basis=%.1f, scaled=%.2f",
-                          i, fs, flex_basis, scaled);
+                          i, fs, item_flex_basis[i], scaled);
             }
         }
 

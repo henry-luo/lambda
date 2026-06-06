@@ -2789,31 +2789,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             log_debug("%s finalize block flow: %s container, keeping height: %f (flow=%f)", block->source_loc(),
                       is_table ? "table" : "flex", block->height, flow_height);
         }
-        // DEBUG: Check table height RIGHT BEFORE fprintf (only for body and html)
-        if (strcmp(block->node_name(), "html") == 0 || strcmp(block->node_name(), "body") == 0) {
-            View* body_view = nullptr;
-
-            // For html, find body first; for body, use itself
-            if (strcmp(block->node_name(), "html") == 0) {
-                View* child = lam::view_require_element(block)->first_placed_child();
-                while (child) {
-                    if (child->is_block() && strcmp(child->node_name(), "body") == 0) {
-                        body_view = child;
-                        break;
-                    }
-                    child = child->next();
-                }
-            } else {
-                body_view = block;
-            }
-
-            if (body_view) {
-                View* grandchild = lam::view_require_element(body_view)->first_placed_child();
-                while (grandchild) {
-                    grandchild = grandchild->next();
-                }
-            }
-        }
     }
 
     // BFC (Block Formatting Context) height expansion to contain floats

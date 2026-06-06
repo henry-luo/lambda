@@ -6083,9 +6083,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Use metadata's col_widths array (already allocated)
     float* col_widths = meta->col_widths;
 
-    // Use metadata's grid for colspan/rowspan tracking (already populated)
-    #define GRID(r, c) grid_occupied[(r) * columns + (c)]
-
     // Assign column indices and measure content with grid support
     // Use navigation helpers to iterate over all cells uniformly
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
@@ -7741,7 +7738,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("%s Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%.1f, columns=%d)", table->source_loc(),
                    child->x, child->y, child->width, tbody_content_width, columns);
 
-	            // CSS 2.1 §17.5.3: Check row group height properties
+            // CSS 2.1 §17.5.3: Check row group height properties
             // Percentage heights compute to auto; non-percentage heights act as minimum height
             // Note: CSS 2.1 says min-height/max-height on row groups is undefined.
             // Browsers apply 'height' as minimum but ignore min-height/max-height.

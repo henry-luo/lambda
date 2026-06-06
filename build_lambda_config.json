@@ -1368,6 +1368,13 @@
                 "/opt/homebrew/include/libpng16",
                 "/usr/local/include"
             ],
+            "flags": [
+                "DGL_SILENCE_DEPRECATION",
+                "mmacosx-version-min=15.7"
+            ],
+            "linker_flags": [
+                "mmacosx-version-min=15.7"
+            ],
             "libraries": [
                 {
                     "name": "CoreFoundation",

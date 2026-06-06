@@ -722,7 +722,7 @@ static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Cor
 
     if (value->type == CSS_VALUE_TYPE_LIST) {
         bool seen_slash = false;
-        for (size_t i = 0; i < value->data.list.count; i++) {
+        for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             if (!item) continue;
             if (is_border_radius_slash(item)) {
@@ -775,7 +775,7 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     int count = 0;
 
     if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (size_t i = 0; i < value->data.list.count; i++) {
+        for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             if (!item || is_border_radius_slash(item)) continue;
             if (count >= 2) return false;
@@ -970,7 +970,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 int num_idx = 0;
                 bool found_slash = false;
 
-                for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
+                for (int i = 0; i < list->data.list.count && num_idx < 4; i++) {
                     const CssValue* v = list->data.list.values[i];
                     if (!v) continue;
 
@@ -1047,7 +1047,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 const CssValue* list = func->args[0];
                 int num_idx = 0;
 
-                for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
+                for (int i = 0; i < list->data.list.count && num_idx < 4; i++) {
                     const CssValue* v = list->data.list.values[i];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
@@ -4203,7 +4203,7 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
     }
     else if (value->type == CSS_VALUE_TYPE_LIST) {
         // handle list of values
-        for (size_t i = 0; i < value->data.list.count; i++) {
+        for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             set_multi_value(mv, item);
         }
@@ -4821,7 +4821,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Charter, Linux Libertine, Times New Roman, serif")
                 // Try each font in order until we find one that's available
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (int i = 0; i < value->data.list.count; i++) {
                     CssValue* item = value->data.list.values[i];
                     if (!item) continue;
                     const char* family = NULL;
@@ -6371,7 +6371,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (shadow_value->type == CSS_VALUE_TYPE_LIST) {
                     const CssValue* list = shadow_value;
                     int length_count = 0;
-                    for (size_t i = 0; i < list->data.list.count; i++) {
+                    for (int i = 0; i < list->data.list.count; i++) {
                         const CssValue* v = list->data.list.values[i];
                         if (!v) continue;
 
@@ -6414,7 +6414,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 bool is_multi_shadow = false;
 
                 // Check if any child is itself a list (indicates multiple shadows)
-                for (size_t i = 0; i < list->data.list.count && !is_multi_shadow; i++) {
+                for (int i = 0; i < list->data.list.count && !is_multi_shadow; i++) {
                     if (list->data.list.values[i] &&
                         list->data.list.values[i]->type == CSS_VALUE_TYPE_LIST) {
                         is_multi_shadow = true;
@@ -6423,7 +6423,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 if (is_multi_shadow) {
                     // Multiple shadows - each child is a shadow
-                    for (size_t i = 0; i < list->data.list.count; i++) {
+                    for (int i = 0; i < list->data.list.count; i++) {
                         const CssValue* shadow_val = list->data.list.values[i];
                         if (!shadow_val) continue;
                         BoxShadow* shadow = parse_single_shadow(shadow_val);
@@ -6761,7 +6761,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple transform functions
                 const CssValue* list = value;
-                for (size_t i = 0; i < list->data.list.count; i++) {
+                for (int i = 0; i < list->data.list.count; i++) {
                     const CssValue* item = list->data.list.values[i];
                     if (!item) continue;
 
@@ -6821,7 +6821,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 const CssValue* list = value;
                 // First value is X, second is Y (optional third is Z)
-                for (size_t i = 0; i < list->data.list.count && i < 3; i++) {
+                for (int i = 0; i < list->data.list.count && i < 3; i++) {
                     const CssValue* v = list->data.list.values[i];
                     if (!v) continue;
 
@@ -7380,7 +7380,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
 
             if (value->type == CSS_VALUE_TYPE_LIST) {
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -9788,7 +9788,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 if (sv->type == CSS_VALUE_TYPE_LIST) {
                     int length_count = 0;
-                    for (size_t i = 0; i < sv->data.list.count; i++) {
+                    for (int i = 0; i < sv->data.list.count; i++) {
                         const CssValue* v = sv->data.list.values[i];
                         if (!v) continue;
                         if (v->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -9816,14 +9816,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 bool is_multi = false;
-                for (size_t i = 0; i < value->data.list.count && !is_multi; i++) {
+                for (int i = 0; i < value->data.list.count && !is_multi; i++) {
                     if (value->data.list.values[i] &&
                         value->data.list.values[i]->type == CSS_VALUE_TYPE_LIST) {
                         is_multi = true;
                     }
                 }
                 if (is_multi) {
-                    for (size_t i = 0; i < value->data.list.count; i++) {
+                    for (int i = 0; i < value->data.list.count; i++) {
                         const CssValue* sv = value->data.list.values[i];
                         if (!sv) continue;
                         TextShadow* ts = parse_single_text_shadow(sv);
@@ -10509,7 +10509,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // "span N" comes as a list [keyword:span, number:N]
                 bool is_span = false;
                 int span_n = 1;
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (int i = 0; i < value->data.list.count; i++) {
                     CssValue* v = value->data.list.values[i];
                     if (v->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* ki = css_enum_info(v->data.keyword);
@@ -10597,7 +10597,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // "span N" comes as a list [keyword:span, number:N]
                 bool is_span = false;
                 int span_n = 1;
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (int i = 0; i < value->data.list.count; i++) {
                     CssValue* v = value->data.list.values[i];
                     if (v->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* ki = css_enum_info(v->data.keyword);
@@ -13363,7 +13363,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
             if (value->type == CSS_VALUE_TYPE_LIST) {
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (int i = 0; i < value->data.list.count; i++) {
                     const CssValue* v = value->data.list.values[i];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_KEYWORD) {

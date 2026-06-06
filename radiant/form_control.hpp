@@ -171,7 +171,7 @@ struct FormControlProp {
     float flex_grow;
     float flex_shrink;
     float flex_basis;
-    int flex_basis_is_percent : 1;
+    uint8_t flex_basis_is_percent : 1;
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)
