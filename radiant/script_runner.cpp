@@ -49,6 +49,7 @@ extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/time.h>
 #endif
 
 extern __thread EvalContext* context;
@@ -243,6 +244,11 @@ typedef struct JsScriptSourceCacheEntry {
     time_t mtime;
     uint64_t file_size;
 } JsScriptSourceCacheEntry;
+
+static long script_runner_wall_now_us();
+#ifndef NDEBUG
+static bool script_task_timing_enabled();
+#endif
 
 // forward declaration from dom_element.cpp / cmd_layout.cpp
 extern const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
@@ -557,9 +563,22 @@ static char* load_script_content_with_source_cache(const char* resolved_path, bo
                                                   bool* out_cache_hit) {
     if (out_cache_hit) *out_cache_hit = false;
 
+#ifndef NDEBUG
+    bool timing_enabled = script_task_timing_enabled();
+    long load_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
+#endif
     char* cached = script_source_cache_lookup(resolved_path, is_http, collection);
     if (cached) {
         if (out_cache_hit) *out_cache_hit = true;
+#ifndef NDEBUG
+        if (timing_enabled) {
+            log_notice("script_runner_timing: phase=source-load kind=%s status=source-cache-hit wall_us=%ld bytes=%zu src=%s",
+                       is_http ? "remote" : "local",
+                       script_runner_wall_now_us() - load_start_us,
+                       strlen(cached),
+                       resolved_path ? resolved_path : "<null>");
+        }
+#endif
         return cached;
     }
 
@@ -567,6 +586,16 @@ static char* load_script_content_with_source_cache(const char* resolved_path, bo
     if (content) {
         script_source_cache_store(resolved_path, is_http, content, strlen(content));
     }
+#ifndef NDEBUG
+    if (timing_enabled) {
+        log_notice("script_runner_timing: phase=source-load kind=%s status=%s wall_us=%ld bytes=%zu src=%s",
+                   is_http ? "remote" : "local",
+                   content ? "loaded" : "load-failed",
+                   script_runner_wall_now_us() - load_start_us,
+                   content ? strlen(content) : 0,
+                   resolved_path ? resolved_path : "<null>");
+    }
+#endif
     return content;
 }
 
@@ -617,7 +646,29 @@ static bool script_task_diagnostics_enabled() {
     const char* env = getenv("RADIANT_JS_TASK_DIAGNOSTICS");
     return env && env[0] && strcmp(env, "0") != 0;
 }
+
+static bool script_task_timing_enabled() {
+    const char* env = getenv("RADIANT_JS_TASK_TIMING");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
 #endif
+
+static long script_runner_wall_now_us() {
+#ifndef _WIN32
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec * 1000000L + (long)tv.tv_usec;
+#else
+    return 0;
+#endif
+}
+
+static long script_runner_timing_total_us(const JsMirPhaseTiming* timing) {
+    if (!timing) return 0;
+    return timing->parse_us + timing->ast_us + timing->early_us +
+        timing->imports_us + timing->mir_us + timing->link_us +
+        timing->execute_us + timing->cleanup_us;
+}
 
 static bool element_has_attr_ci(Element* elem, const char* attr_name) {
     if (!elem || !attr_name || !attr_name[0]) return false;
@@ -1372,10 +1423,39 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         char filename_buf[64];
         const char* filename = script_task_filename(task, filename_buf, sizeof(filename_buf));
         const char* source = task->source ? task->source : "";
+#ifndef NDEBUG
+        bool timing_enabled = script_task_timing_enabled();
+        long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
+#endif
         Item result = task->kind == JS_SCRIPT_TASK_MODULE
             ? execute_js_module_source(runtime, source, task->source_len, filename)
             : execute_js_source_with_preamble(runtime, preamble, source,
                                              task->source_len, filename, true);
+#ifndef NDEBUG
+        if (timing_enabled) {
+            long task_wall_us = script_runner_wall_now_us() - task_start_us;
+            JsMirPhaseTiming phase_timing = {};
+            js_mir_get_last_phase_timing(&phase_timing);
+            log_notice("script_runner_timing: phase=%s order=%d kind=%s status=%s wall_us=%ld mir_total_us=%ld mir_recorded_total_us=%ld parse_us=%ld ast_us=%ld early_us=%ld imports_us=%ld mir_us=%ld link_us=%ld execute_us=%ld cleanup_us=%ld bytes=%zu src=%s",
+                     phase_name ? phase_name : "scheduled",
+                     task->document_order,
+                     script_task_kind_name(task->kind),
+                     get_type_id(result) == LMD_TYPE_ERROR ? "error" : "ok",
+                     task_wall_us,
+                     script_runner_timing_total_us(&phase_timing),
+                     phase_timing.total_us,
+                     phase_timing.parse_us,
+                     phase_timing.ast_us,
+                     phase_timing.early_us,
+                     phase_timing.imports_us,
+                     phase_timing.mir_us,
+                     phase_timing.link_us,
+                     phase_timing.execute_us,
+                     phase_timing.cleanup_us,
+                     task->source_len,
+                     filename);
+        }
+#endif
         if (get_type_id(result) == LMD_TYPE_ERROR) {
             script_runner_clear_pending_exception(phase_name, filename);
             log_error("execute_document_scripts: %s script task failed: %s",
@@ -1481,8 +1561,33 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     StrBuf* preamble_buf = strbuf_new_cap(4096);
     append_browser_document_preamble(preamble_buf);
+#ifndef NDEBUG
+    bool timing_enabled = script_task_timing_enabled();
+    long preamble_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
+#endif
     Item result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
                                                    "<document-preamble>", preamble);
+#ifndef NDEBUG
+    if (timing_enabled) {
+        long preamble_wall_us = script_runner_wall_now_us() - preamble_start_us;
+        JsMirPhaseTiming phase_timing = {};
+        js_mir_get_last_phase_timing(&phase_timing);
+        log_notice("script_runner_timing: phase=preamble order=-1 kind=preamble status=%s wall_us=%ld mir_total_us=%ld mir_recorded_total_us=%ld parse_us=%ld ast_us=%ld early_us=%ld imports_us=%ld mir_us=%ld link_us=%ld execute_us=%ld cleanup_us=%ld bytes=%zu src=<document-preamble>",
+                   get_type_id(result) == LMD_TYPE_ERROR ? "error" : "ok",
+                   preamble_wall_us,
+                   script_runner_timing_total_us(&phase_timing),
+                   phase_timing.total_us,
+                   phase_timing.parse_us,
+                   phase_timing.ast_us,
+                   phase_timing.early_us,
+                   phase_timing.imports_us,
+                   phase_timing.mir_us,
+                   phase_timing.link_us,
+                   phase_timing.execute_us,
+                   phase_timing.cleanup_us,
+                   preamble_buf->length);
+    }
+#endif
     strbuf_free(preamble_buf);
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: document preamble execution failed");
