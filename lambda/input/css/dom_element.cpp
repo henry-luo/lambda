@@ -1992,7 +1992,11 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
         }
     }
 
-    // Deep copy style trees using style_tree_clone
+    // Copy style trees. NOTE: style_tree_clone is a SHALLOW clone — the cloned
+    // tree shares (refcounts) the source's CssDeclaration/CssValue objects, which
+    // remain owned by the SOURCE document's pool (see style_tree_clone contract).
+    // The source document must outlive this clone. A true deep copy independent of
+    // the source pool is not yet available.
     if (source->specified_style) {
         clone->specified_style = style_tree_clone(source->specified_style, pool);
     }

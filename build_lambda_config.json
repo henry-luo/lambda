@@ -3330,6 +3330,17 @@
                         "icon": "🎨"
                     },
                     {
+                        "source": "test/css/test_css_temp_decl_gtest.cpp",
+                        "name": "CSS Shorthand Temp Decl Helper Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_temp_decl_gtest.exe",
+                        "icon": "🧩"
+                    },
+                    {
                         "source": "test_html_css_gtest.cpp",
                         "name": "HTML to CSS E2E Integration Tests",
                         "dependencies": [
