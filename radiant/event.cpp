@@ -4735,18 +4735,29 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     }
 }
 
+// Resolve the owning document from any view, including non-element views
+// (e.g. a text run). The hover hit-test target for inline content is the
+// leaf text view, which is not an element, so walk up to the nearest
+// element ancestor to find the document.
+static DomDocument* hover_resolve_document(View* view) {
+    DomNode* node = static_cast<DomNode*>(view);
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = lam::dom_require_element(node);
+            if (elem->doc) return elem->doc;
+        }
+        node = node->parent;
+    }
+    return nullptr;
+}
+
 static void sync_hover_pseudo_state_after_transition(DocState* state,
                                                      View* prev_hover,
                                                      View* new_target) {
     if (!state) return;
 
-    DomDocument* doc = nullptr;
-    if (new_target && new_target->is_element()) {
-        doc = lam::dom_require_element(new_target)->doc;
-    }
-    if (!doc && prev_hover && prev_hover->is_element()) {
-        doc = lam::dom_require_element(prev_hover)->doc;
-    }
+    DomDocument* doc = hover_resolve_document(new_target);
+    if (!doc) doc = hover_resolve_document(prev_hover);
     if (!doc) return;
 
     if (document_has_hover_rules(doc)) {
