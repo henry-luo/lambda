@@ -604,7 +604,27 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
 
     if (elem->id && elem->id[0] != '\0') {
         Item key = (Item){.item = s2it(heap_create_name(elem->id))};
-        if (!it2b(js_has_own_property(global, key))) {
+        // HTML named-property access on Window reflects the *current* element
+        // with this id. Register when there is no own property yet, and also
+        // refresh a stale auto-registered wrapper whose element was detached
+        // (e.g. after `innerHTML` replaced the subtree). Do NOT clobber a
+        // genuine user-assigned global, and keep the first connected element in
+        // tree order when ids collide within the current document.
+        bool do_register = true;
+        if (it2b(js_has_own_property(global, key))) {
+            DomNode* exn = static_cast<DomNode*>(
+                js_dom_unwrap_element(js_property_get(global, key)));
+            DomElement* ex = (exn && exn->is_element()) ? exn->as_element() : nullptr;
+            if (!ex) {
+                do_register = false;                          // user-assigned global
+            } else if (ex == elem) {
+                do_register = false;                          // already bound to this element
+            } else if (js_dom_node_is_connected((DomNode*)ex)) {
+                do_register = false;                          // a connected element already owns this id
+            }
+            // else: existing binding is a stale/detached wrapper → refresh it
+        }
+        if (do_register) {
             Item wrapped = js_dom_wrap_element(elem);
             js_property_set(global, key, wrapped);
             log_debug("js_dom: registered element id='%s' on global object", elem->id);
