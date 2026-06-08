@@ -604,9 +604,11 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
 
     if (elem->id && elem->id[0] != '\0') {
         Item key = (Item){.item = s2it(heap_create_name(elem->id))};
-        Item wrapped = js_dom_wrap_element(elem);
-        js_property_set(global, key, wrapped);
-        log_debug("js_dom: registered element id='%s' on global object", elem->id);
+        if (!it2b(js_has_own_property(global, key))) {
+            Item wrapped = js_dom_wrap_element(elem);
+            js_property_set(global, key, wrapped);
+            log_debug("js_dom: registered element id='%s' on global object", elem->id);
+        }
     }
 
     DomNode* child = elem->first_child;

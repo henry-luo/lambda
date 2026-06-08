@@ -24,6 +24,15 @@
 
 #define DEBUG_RENDER_BLOCK 0
 
+static bool render_block_clip_empty(const Bound* clip) {
+    return !clip || clip->right <= clip->left || clip->bottom <= clip->top;
+}
+
+static bool render_block_fully_transparent(ViewBlock* block) {
+    return block && block->in_line &&
+        block->in_line->opacity >= 0.0f && block->in_line->opacity <= 0.0005f;
+}
+
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->has_dirty_union) return false;
 
@@ -346,6 +355,19 @@ typedef struct RenderBlockPaintResult {
 } RenderBlockPaintResult;
 
 static bool render_block_skip_paint(RenderContext* rdcon, ViewBlock* block) {
+    if (!rdcon || !block) {
+        return true;
+    }
+    if (render_block_clip_empty(&rdcon->block.clip)) {
+        log_debug("render_block_skip_paint: empty inherited clip for %s",
+                  block->node_name());
+        return true;
+    }
+    if (render_block_fully_transparent(block)) {
+        log_debug("render_block_skip_paint: opacity zero for %s",
+                  block->node_name());
+        return true;
+    }
     if (render_block_viewport_misses(rdcon, block)) {
         return true;
     }

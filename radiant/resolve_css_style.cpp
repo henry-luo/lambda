@@ -25,6 +25,31 @@ static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
 }
 
+static BackgroundProp* parent_computed_background(LayoutContext* lycon) {
+    if (!lycon || !lycon->view || !lycon->view->is_element()) return nullptr;
+    DomElement* element = lam::dom_require_element(lycon->view);
+    DomElement* parent = dom_parent_element(element);
+    return (parent && parent->bound) ? parent->bound->background : nullptr;
+}
+
+static void ensure_span_background(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+    }
+    if (!span->bound->background) {
+        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+    }
+}
+
+static Color inherit_background_color(LayoutContext* lycon) {
+    BackgroundProp* parent_bg = parent_computed_background(lycon);
+    Color color = {};
+    if (parent_bg) {
+        color = parent_bg->color;
+    }
+    return color;
+}
+
 static bool css_custom_property_name_matches(const char* stored_name, const char* lookup_name) {
     if (!stored_name || !lookup_name) return false;
     if (strcmp(stored_name, lookup_name) == 0) return true;
@@ -5927,11 +5952,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_COLOR: {
             log_debug("[CSS] Processing background-color property (value type=%d)", value->type);
-            if (!span->bound) {
-                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-            }
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            ensure_span_background(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_INHERIT) {
+                span->bound->background->color = inherit_background_color(lycon);
+                log_debug("[CSS] background-color: inherit -> #%02x%02x%02x%02x",
+                          span->bound->background->color.r,
+                          span->bound->background->color.g,
+                          span->bound->background->color.b,
+                          span->bound->background->color.a);
+                break;
             }
             span->bound->background->color = resolve_color_value(lycon, value);
             break;
@@ -12285,15 +12315,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // var() didn't resolve — fall through (will be logged as unimplemented)
             }
 
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_INHERIT) {
+                ensure_span_background(lycon, span);
+                BackgroundProp* parent_bg = parent_computed_background(lycon);
+                if (parent_bg) {
+                    *span->bound->background = *parent_bg;
+                } else {
+                    memset(span->bound->background, 0, sizeof(BackgroundProp));
+                }
+                log_debug("[Lambda CSS Shorthand] background: inherit");
+                return;
+            }
+
             // Handle 'background: none' → transparent background (CSS spec: background-image: none)
             if (value->type == CSS_VALUE_TYPE_KEYWORD &&
                 (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
-                if (!span->bound) {
-                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                }
-                if (!span->bound->background) {
-                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                }
+                ensure_span_background(lycon, span);
                 span->bound->background->color.r = 0;
                 span->bound->background->color.g = 0;
                 span->bound->background->color.b = 0;
