@@ -793,16 +793,6 @@ typedef struct CssComputedStyle {
     AvlTree* properties;      // Tree of CssStyleNode
     Pool* pool;               // Memory pool for allocations
 
-    // Cached frequently accessed properties
-    CssValue* display;
-    CssValue* position;
-    CssValue* width;
-    CssValue* height;
-    CssValue* color;
-    CssValue* background_color;
-    CssValue* font_size;
-    CssValue* font_family;
-
     // Inheritance chain
     struct CssComputedStyle* parent;
     bool is_root;
@@ -958,13 +948,11 @@ CssComputedStyle* css_computed_style_create(Pool* pool);
 void css_computed_style_destroy(CssComputedStyle* style);
 
 // Property management
-bool css_style_set_property(CssComputedStyle* style, CssPropertyId property_id, CssValue* value);
 CssValue* css_style_get_property(CssComputedStyle* style, CssPropertyId property_id);
 bool css_style_has_property(CssComputedStyle* style, CssPropertyId property_id);
 void css_style_remove_property(CssComputedStyle* style, CssPropertyId property_id);
 
 // Declaration management
-bool css_style_add_declaration(CssComputedStyle* style, CssDeclaration* declaration);
 void css_style_cascade_resolve(CssComputedStyle* style);
 
 // Value creation and manipulation
