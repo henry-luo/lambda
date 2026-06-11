@@ -57,8 +57,9 @@ void script_runner_set_execute_external_scripts(bool execute);
 
 /**
  * Collect and compile inline event handler attributes (onclick, onmouseover, etc.)
- * from the DomElement* tree. Uses the retained MIR context from execute_document_scripts()
- * so that handler code can reference functions defined in <script> blocks.
+ * from the DomElement* tree, then install them into the normal EventTarget
+ * IDL slots. Uses the retained MIR context from execute_document_scripts()
+ * so handler code can reference functions defined in <script> blocks.
  *
  * Must be called AFTER execute_document_scripts() and only if dom_doc->js_mir_ctx is set.
  *
@@ -68,7 +69,7 @@ void collect_and_compile_event_handlers(DomDocument* dom_doc);
 
 /**
  * Clean up retained JS compilation state on a DomDocument.
- * Destroys the MIR context, runtime pools, and event handler registry.
+ * Destroys the MIR context and runtime pools.
  * Called during document teardown.
  *
  * @param dom_doc  DomDocument to clean up

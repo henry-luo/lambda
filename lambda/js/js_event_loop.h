@@ -22,6 +22,7 @@ extern "C" {
 
 void js_event_loop_init(void);
 int  js_event_loop_drain(void);
+void js_event_loop_shutdown(void);
 void js_event_loop_set_auto_close_mode(bool enabled);
 bool js_event_loop_auto_close_mode(void);
 
@@ -54,6 +55,7 @@ Item js_setInterval_args(Item callback, Item delay, Item args_array);
 void js_clearTimeout(Item timer_id);
 void js_clearInterval(Item timer_id);
 void js_event_loop_cancel_document_timers(void* dom_doc);
+void js_event_loop_abandon_document_timers(void* dom_doc);
 
 // Helper: pack 1-4 items into a JS array (used by transpiler for timer extra args)
 Item js_pack_args_1(Item a1);

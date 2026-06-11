@@ -241,7 +241,11 @@ static void destroy_video_resources(ViewTree* tree) {
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
-    js_event_loop_cancel_document_timers(doc);
+    if (script_runner_js_batch_cleanup_unsafe()) {
+        js_event_loop_abandon_document_timers(doc);
+    } else {
+        js_event_loop_cancel_document_timers(doc);
+    }
 
     // Clean up retained JS state (MIR context, event registry, runtime heap)
     // before destroying the document that owns the pointers.

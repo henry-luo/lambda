@@ -479,6 +479,22 @@ static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_n
     }
 }
 
+extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
+                                                  const char* attr_name,
+                                                  Item fn) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !attr_name || get_type_id(fn) != LMD_TYPE_FUNC) return false;
+
+    char prop_name[64];
+    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
+
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    if (exp_map.item == ITEM_NULL) return false;
+
+    js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+    return true;
+}
+
 // ------------------------------------------------------------------
 // HTML form-control IDL helpers (Phase 4 click activation).
 // `checked` and `disabled` are boolean IDL attributes that must be

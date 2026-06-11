@@ -192,6 +192,13 @@ Item js_dom_get_property(Item elem, Item prop_name);
 Item js_dom_set_property(Item elem, Item prop_name, Item value);
 
 /**
+ * Install a compiled event handler function into the DOM element's IDL
+ * handler slot, e.g. "onclick". This is used for initial HTML attributes
+ * after they are compiled by the document script runner.
+ */
+bool js_dom_set_event_handler_function(void* dom_elem, const char* attr_name, Item fn);
+
+/**
  * Set a CSS inline style property on a DOM element.
  * Converts camelCase JS property names to CSS hyphenated form.
  * E.g., "fontFamily" → "font-family", "display" → "display"
