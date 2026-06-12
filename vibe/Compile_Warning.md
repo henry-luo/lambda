@@ -243,6 +243,89 @@ Remaining **1,199** warnings, none of which represent a defect to fix in this pa
 
 **`cmdedit.c` tab completion (resolved):** the live dispatch table is `enhanced_bindings` (via `find_key_handler`), and it previously did **not** map `KEY_TAB` — so `handle_tab_completion` was unreachable and the duplicate `default_bindings` table was dead. Fixed by adding `{KEY_TAB, handle_tab_completion}` to `enhanced_bindings` and deleting the dead `default_bindings` table (its other handlers all already live in `enhanced_bindings`). TAB now reaches the handler; full completion still requires the REPL to register a provider (`rl_attempted_completion_function`), otherwise TAB inserts a literal tab. REPL tests (`test_lambda_repl_gtest.exe`) pass 38/38.
 
+### Phase 7 — Targeted defect/portability wave (2026-06-06)
+
+A clean rebuild (`make build`, debug_native) showed **1,112** warnings (the prior 1,199 had already dropped via unrelated code churn — notably `-Wdeprecated-declarations` 44→12, `-Wc11-extensions` 26→1, `-Wsign-compare` 119→91). This wave fixed the remaining small categories that are genuine defects or portability issues. Result: **1,112 → 1,104**, 0 errors; Lambda baseline **2943/2943** green.
+
+| Flag | Fixed | Root cause & fix |
+|------|------:|------------------|
+| `-Wdeprecated-declarations` (`sprintf`) | 5 → **0** (of 12) | `lambda/js/js_runtime.cpp` JS `Function()` constructor built its wrapper string with deprecated `sprintf`. Switched to `snprintf` with a tracked `bufsz`/remaining-size; behavior identical for the bounded constant fragments it writes. The other 7 are `CVDisplayLink*` (macOS 15 deprecation, needs Swift-style `NSView.displayLink` migration — left on, see below). |
+| `-Wmicrosoft-redeclare-static` | 2 → **0** | `content_type_to_extension` (`lambda/input/input_http.cpp`) and `js_module_cache_reset` (`lambda/js/js_runtime.cpp`) were defined `static` but declared non-static in their headers and called from other TUs (`main.cpp`, `js_runtime_state.cpp`). clang's MS extension silently gave them external linkage to match. Removed `static` so the definition matches the header. |
+| `-Wc11-extensions` | 1 → **0** | `lambda/serve/serve_utils.cpp` (a C++ TU) used the C11 keyword `_Thread_local`. Switched to the C++ `thread_local` keyword — identical semantics. |
+
+### Deliberately left on (Phase 7 stance)
+
+Per the "keep the warning visible rather than mask it" preference, the following were **not** silenced:
+
+| Flag | Count | Why left on |
+|------|------:|-------------|
+| `-Wcast-function-type-mismatch` | 996 | Intentional type-erasure: `FPTR()` registry in `sys_func_registry.c` (952) plus the JIT call-site casts from `fn_ptr` (`void *(*)()`) to concrete `Item`-returning signatures in `lambda-eval.cpp`/`render_map.cpp`/`event.cpp`/`template_registry.cpp`. Same design, not a bug. |
+| `-Wsign-compare` | 91 | Phase 5 stance — mostly benign `size_t`/`int` comparisons; a broad sweep is risky for little gain. Fix per-file when touching the code. *(Superseded — swept in Phase 8.)* |
+| `-Wdeprecated-declarations` (`CVDisplayLink*`) | 7 | macOS 15 deprecation in `radiant/frame_clock.cpp`; needs migration to `NSView/NSWindow/NSScreen.displayLink`. Left visible rather than `-Wno-`'d so the migration stays on the radar. |
+| `-Wundefined-bool-conversion` | 7 | `if (!this) return …;` defensive null-receiver convention in `lambda/lambda-data.cpp` (deferred since Phase 2; call-site-wide refactor). |
+| `-Wunused-variable` | 3 | Platform/config-gated (`g_old_sigwinch`, `linux_font_dirs`, `dst_offset`). |
+
+### Phase 8 — `-Wsign-compare` full sweep (2026-06-06)
+
+The whole `-Wsign-compare` class (the largest non-intentional remainder) was swept in one pass, file by file. Result: **1,104 → 1,013**, 0 errors; Lambda baseline **2943/2943** green and the Radiant **layout** baseline (baseline/wpt-css-text/form/markdown/page-suite/view) all 0-failed. All 91 sites were signed loop-indices/lengths compared against unsigned counts (`size_t`/`uint32_t`/`uint64_t`) or vice-versa; every fix is a behavior-preserving cast that makes the existing implicit integer conversion explicit (no edge-case semantics changed).
+
+| File(s) | Sites | Fix pattern |
+|---------|------:|-------------|
+| `lambda/lambda-eval-num.cpp` | 16 | `size_t i < arr->length` / `list->length` (`int64_t`) → cast length to `(size_t)`. |
+| `lambda/js/js_runtime.cpp` | 19 | 16 namespace-cache `static int *_epoch = -1` caches compared against `uint64_t js_heap_epoch` → **changed the caches to `uint64_t` (sentinel `(uint64_t)-1`)** — the proper fix, since the old `int` truncated the epoch on assignment. Plus 2 `int i < name->len` loops (cast `(int)`) and one `sb->length == (int)s->len` (→ `(size_t)`). |
+| `lambda/input/html5/html5_parser.cpp` | 12 | `size_t` loop index vs `int64_t ->length` → cast length to `(size_t)`. |
+| `lambda/input/html5/html5_tree_builder.cpp` | 8 | Same as above. |
+| `lambda/input/markup/block/*` (link_def, paragraph, quote, list, document) | 12 | `size_t` line indices vs `int line_count`/`current_line`; plus `current_line` vs `size_t lazy_lines_count`, and a `size_t i < int64_t length` loop → casts (`line_count` is always ≥0). |
+| `lib/log.c` | 6 | `int len` (guarded `> 0`) vs `size_t remaining` → `(size_t)len`. |
+| `lambda/lambda-proc.cpp` | 3 | `int i < arg->len` (`uint32_t`) → `(int)arg->len`. |
+| `lambda/input/css/*` (engine, formatter ×2, parser, value_parser) | 5 | `int`/`size_t` index vs the other-signed `count`/`property_count`/`rule_count` field → cast to match. |
+| `lambda/build_ast.cpp` | 2 | `(int)name->length == ->len` (`uint32_t`) → `(int)` on the RHS. |
+| `lambda/js/js_globals.cpp` | 2 | `int on_len == rn->len` (`uint32_t`) → `(int)rn->len`. |
+| `lambda/input/input-jsx.cpp` | 2 | `int i < text->len` (`uint32_t`) → `(int)text->len`. |
+| `lambda/emit_sexpr.cpp` | 1 | `size_t length == (int64_t)f->name->len` → `(size_t)`. |
+| `lambda/input/input-csv.cpp` | 1 | `size_t i < headers->length` (`int64_t`) → `(size_t)`. |
+| `lambda/js/js_clipboard.cpp` | 1 | `int i < s->len` (`uint32_t`) → `(int)s->len`. |
+| `lib/url.c` | 1 | `int slen = strlen(...)` → `size_t slen` (matches the `size_t` loop var). |
+
+`-Werror=sign-compare` was **not** added: a few of these sites (and future ones) are genuinely benign and the cast convention is project-by-project; promoting would force a cast on every incidental `size_t`/`int` loop. Left as plain warnings so they stay visible without blocking builds.
+
+**Pre-existing Radiant UI-Automation failures (not caused by this work):** `test_ui_automation_gtest.exe` reports 187 failing (e.g. `test_state_store_refactor`, 19/20 assertions). Verified by `git stash` + clean rebuild that these fail **identically on `master` without any of these changes** — they are environment/GUI-driven and orthogonal to the warning cleanup. The layout baseline (what the CSS/HTML/markup edits actually touch) passes 100%.
+
+### Phase 9 — Scope-silence the registry type-erasure (2026-06-06)
+
+The 952 `-Wcast-function-type-mismatch` in `lambda/sys_func_registry.c` are the `FPTR()`/`NPTR()`
+macro casting every system function to the uniform `fn_ptr` (`void*(*)()`) for the MIR JIT import
+registry — the matching ABI is stored per-row and MIR calls each through its real prototype at
+dispatch (sound by construction; see the `fn_ptr` round-trip note above). They were 94% of all
+remaining warnings, drowning out the rest.
+
+Rather than a global `-Wno-` (which would hide *new* mismatches anywhere) or a per-file build flag
+(which would touch `generate_premake.py` and be invisible to a reader of the file), the two registry
+tables (`sys_func_defs[]` + `jit_runtime_imports[]`) are now wrapped in:
+
+```c
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+... tables ...
+#pragma clang diagnostic pop
+```
+
+with an explanatory comment at the push. The flag stays **on globally**, so the 44 call-back casts
+elsewhere (`lambda-eval.cpp` ×38, `event.cpp`/`render_map.cpp` ×2, `template_registry.cpp`,
+`lambda-data-runtime.cpp`) and any future mismatch still warn. A diagnostic pragma is codegen-neutral
+(object code byte-identical), so no baseline re-run was needed.
+
+Result: **1,013 → 61** warnings, 0 errors.
+
+### Remaining after Phase 9 — 61 warnings, all intentional or out-of-scope
+
+| Flag | Count | Why left on |
+|------|------:|-------------|
+| `-Wcast-function-type-mismatch` | 44 | Intentional `fn_ptr` **call-back** casts (JIT arity dispatch in `lambda-eval.cpp`, `template_body_fn` in `render_map.cpp`/`template_registry.cpp`, etc.). Left visible by choice; the 952 *registry* casts are now scope-silenced (Phase 9). |
+| `-Wundefined-bool-conversion` | 7 | Deliberate null-receiver convention in `lambda/lambda-data.cpp` (needs call-site refactor). |
+| `-Wdeprecated-declarations` | 7 | `CVDisplayLink*` macOS 15 deprecation in `radiant/frame_clock.cpp` (needs `NSView.displayLink` migration). |
+| `-Wunused-variable` | 3 | Platform/config-gated (`g_old_sigwinch`, `linux_font_dirs`, `dst_offset`). |
+
 ## Success Criteria
 
 - Clean debug build emits **< 100 warnings** after Phase 1. ⚠️ Actual: 2,837 (the remaining ~2,700 are Category C, deferred to Phase 5).
