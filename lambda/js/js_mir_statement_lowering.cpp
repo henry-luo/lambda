@@ -215,7 +215,8 @@ static void jm_define_global_var_property_for_main_var(JsMirTranspiler* mt,
     if (!mt || !decl || !id || !id->name || !value) return;
     if (decl->kind != JS_VAR_VAR || !mt->in_main || mt->is_module) return;
     MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-    jm_call_void_2(mt, "js_define_global_var_property",
+    jm_call_void_3(mt, "js_define_global_property_v",
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
     jm_call_void_2(mt, "js_set_global_var_property_fast",
@@ -342,7 +343,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_reg_op(mt->ctx, boxed_val)));
                         }
                         if (mt->in_main) {
-                            jm_call_void_2(mt, "js_define_global_var_property",
+                            jm_call_void_3(mt, "js_define_global_property_v",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                             jm_call_void_2(mt, "js_set_global_var_property_fast",
@@ -400,7 +402,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         }
                         if (var->kind == JS_VAR_VAR && mt->in_main) {
                             MIR_reg_t key_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
-                            jm_call_void_2(mt, "js_define_global_var_property",
+                            jm_call_void_3(mt, "js_define_global_property_v",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                             jm_call_void_2(mt, "js_set_global_var_property_fast",

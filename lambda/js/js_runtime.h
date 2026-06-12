@@ -68,10 +68,11 @@ Item js_equal(Item left, Item right);           // == (with coercion)
 Item js_strict_equal(Item left, Item right);    // ===
 // Tune8 §2.1: js_not_equal / js_strict_not_equal removed — transpiler emits
 // the eq variant followed by inline MIR_XOR-with-1 on the boxed result.
-Item js_less_than(Item left, Item right);       // <
-Item js_less_equal(Item left, Item right);      // <=
-Item js_greater_than(Item left, Item right);    // >
-Item js_greater_equal(Item left, Item right);   // >=
+Item js_less_than(Item left, Item right);       // < (C wrapper around js_compare)
+Item js_greater_than(Item left, Item right);    // > (C wrapper around js_compare)
+// Tune8 §2.1: js_less_equal / js_greater_equal removed — transpiler emits
+// js_compare(op, l, r) where op encodes LT/LE/GT/GE.
+Item js_compare(int64_t op, Item left, Item right);
 
 // =============================================================================
 // Logical Operators
@@ -110,8 +111,11 @@ Item js_new_object(void);
 Item js_property_get(Item object, Item key);
 Item js_property_set(Item object, Item key, Item value);
 Item js_property_set_strict(Item object, Item key, Item value);
-Item js_private_property_set(Item object, Item key, Item value);
-Item js_private_property_set_strict(Item object, Item key, Item value);
+// Tune8 §2.2: dispatcher for JIT-emitted dynamic-strict property sets.
+Item js_property_set_v(Item object, Item key, Item value, int64_t strict);
+// Tune8 §2.2: js_private_property_set takes strict flag (4-arg);
+// js_private_property_set_strict removed.
+Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 Item js_create_data_property(Item object, Item key, Item value);
 Item js_property_access(Item object, Item key);
 

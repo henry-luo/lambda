@@ -4,7 +4,79 @@ Date: 2026-06-12
 Status: rev 5 — Phase 0 (safety gate) + Phase A (telemetry-driven §3 deletions) + Phase D first fold (§2.1 inverse-pair `_ne_` → `_eq_` + XOR) **landed**.
 Baseline: `test/js262/results/release_run_006` (39,258 pass / 516.889 s summed wall-clock / commit `2192fd58d`)
 Working baseline (master HEAD `5627cbb6a`): 39,255 fully passing (3 batch-unstable tests dropped by harness `--update-baseline` since release_run_006; not caused by Tune8)
-Current: **459 `js_*` registry entries (−88 = −16.1%); test262 aggregate 466.833 s; 39,255 / 39,255 pass / 0 regressions; test_js_gtest 169 / 169 pass.**
+Current: **452 `js_*` registry entries with `JS_TEST262_FAST_PATHS=1` (default); test262 aggregate ~480 s median; 39,255 / 39,255 pass / 0 regressions; test_js_gtest 169 / 169 pass.**
+
+A non-test262 production build (`-UJS_TEST262_FAST_PATHS`) would drop the 15 §4 entries → **437 entries (−110 from original, −20.1%)**. See §4 caveat below — the matching transpiler-side gate is not landed.
+
+---
+
+## Attempts reverted, skipped, or reshaped
+
+This table is the post-mortem of folds and deletions that were tried during Tune8 but did not stay in the final state. Knowing *why* something was reverted is more useful than knowing it was tried — these are the boundary cases of the per-Q2 fold rules.
+
+### Reverted (touched code, then rolled back due to gate failure)
+
+| Attempt | What was changed | Failure mode | Resolution |
+|---|---|---|---|
+| **§3 DOM/web-API entries (13 entries from Phase A)** | Initial Phase A removed all 91 strictly-safe entries from the telemetry-driven worklist, including 13 with DOM-flavor names: `js_dom_contains`, `js_dom_get_property`, `js_dom_set_property`, `js_dom_wrap_element`, `js_dom_unwrap_element`, `js_document_proxy_get_property`, `js_document_proxy_method`, `js_document_proxy_set_property`, `js_is_document_proxy`, `js_dataview_method`, `js_event_loop_drain`, `js_event_loop_init`, `js_microtask_enqueue`. | Not a gate failure — user redirected scope to "pure JS only" after a Radiant baseline run showed pre-existing issues that would have made a clean comparison impossible. | **13 entries restored.** Phase A final count: 78 pure-JS deletions, not 91. |
+| **§2.5 `js_uri_decode_equals_from_char_code` retired** | Removed both lowering fast-path blocks (decodeURI/decodeURIComponent eq detection), the 3 supporting matcher helpers (`jm_match_uri_decode_call`, `jm_match_string_from_char_code2`, `jm_uri_compare_arg_is_simple`), and the registry entry. | **2 hard test262 timeouts** (`built_ins_decodeURIComponent_S15_1_3_2_A2_5_T1_js`, `built_ins_decodeURI_S15_1_3_1_A2_5_T1_js` — `result=4 msg=test timed out`). The generic eq path is ~100× slower per loop iteration than the specialized helper; decoder stress tests exceeded the harness's 5 s per-batch timeout. | **Fully restored** — fast-path blocks, matcher helpers, and registry entry all back in place. |
+| **§2.5 `js_string_fromCharCode2` retired** | Removed the `argc == 2` branch in the `String.fromCharCode` lowering; 2-arg case fell through to the multi-arg array path. | **8 batch-unstable** decodeURI/decodeURIComponent tests (all passed only on harness Phase 4 individual retry). Aggregate per-test sum jumped from ~475 s to ~520 s in two consecutive runs. The harness's regression check reported 0 regressions (because retries passed), but the quality degradation was real and consistent. | **Fully restored** — `argc == 2` branch back, registry entry back. |
+| **§2.5 `js_string_replace_nonws_global_fast_no_dollar` retired** | Removed the `str.replace(/\S+/g, "literal")` detection block in the lowering. | Contributed to the same 8 batch-unstable decoder tests above (Unicode whitespace stress paths). Reverted together with `js_string_fromCharCode2`. | **Fully restored** — detection block back, registry entry back. |
+
+### Skipped (analyzed and deliberately not attempted)
+
+| Attempt | Reason skipped |
+|---|---|
+| **§2.1 `js_bitwise_and` / `_or` / `_xor` → `js_bitop(op,…)`** | Per Q2 ("keep specialized if few"). Microbench showed these run at ~3.3 ns/op — the JIT inlines them past the runtime call via `\|0` coercion, so the runtime function is barely invoked. Folding would not affect emitted MIR cost. |
+| **§2.1 `js_left_shift` / `_right_shift` / `_unsigned_right_shift` → `js_shift(op,…)`** | Same reasoning as bitwise-and-friends. |
+| **§2.2 `js_super_property_get` + `js_super_instance_method_get` fold** | Substantially different code paths: `js_super_property_get` uses `js_super_lookup_base(receiver)`; `js_super_instance_method_get` walks `receiver.__proto__.__proto__` manually. Folding requires interleaving two >100-line function bodies for a single −1 entry. Not worth the complexity. |
+| **§2.3 `js_throw_const_assign` fold into `js_throw_named_error`** | Different signature: takes `const char* name, int name_len` instead of `Item`. Folding would either need a separate dispatcher (no savings) or require the lowering to build a `String` Item at every emit site (allocation cost on the throw hot path). |
+| **§2.3 `js_new_aggregate_error`, `js_error_set_cause`** | Each is a distinct cold helper with a unique signature; no shared fold pattern. Individual cleanups would yield −0 net (same number of entries). |
+| **§2.4 `js_with_push` / `js_with_pop`** | Asymmetric signatures (push takes `Item`, pop takes nothing). Folding into `js_with_op(op, item)` would force the no-arg pop to carry a dummy arg at every call site, increasing emit-site complexity for the −1 savings. |
+| **§2.4 `js_eval_private_push_frame` / `_pop_frame`** | Symmetric pair (both `void()`), but only 52 emissions each. The fold cost (extra register operand at every emit site) exceeds the −1 entry savings. |
+| **§2.4 `js_private_field_init_begin` / `_end`** | Trivial one-line runtime bodies (`g_flag = true / false`). With 10 emit sites and 30K+ emissions, adding a runtime branch and a register operand at every callsite is a net loss vs the −1 entry saved. |
+| **§2.4 `js_eval_env_*` triple** | Three different signatures: `push(void)`, `pop(void)`, `bind(Item, Item)`. Not a clean dispatcher target. |
+| **§2.6 dead type-specialized variants** | Telemetry confirmed all 8 candidates (`js_math_pow_d` 4.2K, `js_math_ceil_d` 0, `js_math_round_item` 13, `js_string_fromCharCode_int` 66, `js_string_fromCharCode_array` 2, `js_setTimeout_args` 0, `js_setInterval_args` 0) are either still emitted at runtime or quoted in MIR lowering. None deletable. The original proposal estimate of "−10 entries" turned out to be optimistic. |
+| **§4 transpiler-side `#ifdef` gating** | Two-sided change: 15 transpiler emit detection blocks must also be wrapped. Mechanical but substantial. Savings only materialize in a hypothetical non-test262 production build. Currently registry-side only; the macro defaults to `1` so the default build is unchanged. |
+
+### Reshaped (kept the change but in a different form than originally planned)
+
+| Attempt | What changed |
+|---|---|
+| **§2.2 `js_property_set` strict fold** | Original plan: fold `js_property_set` + `js_property_set_strict` into one entry with strict flag. **Reshaped** because `js_property_set` (3-arg) has hundreds of C-side callers — changing its signature would break massive amounts of unrelated runtime code. **Final form:** added a new `js_property_set_v(obj, key, val, strict)` dispatcher that routes to the two existing C functions. Only the 2 cold strict-mode JIT sites use the dispatcher; the 200K-emission hot non-strict path stays direct. Net registry: −1 (deleted `js_property_set_strict` entry) + 1 (added `_v` entry) = **0 entries**. The change is a code-shape consolidation, not a count reduction. Microbench: +1 ns on strict path (within budget); hot path unchanged. |
+| **§2.5 retire-shortcuts batch** | Original plan from rev 6: retire 4 cold shortcuts. **Reshaped** to 1 (only `js_array_indexOf_int`, the 0-emission entry) after the other 3 caused decoder timeout / batch-unstable regressions. |
+| **§4 build-flag gate** | Original plan: two-sided `#ifdef JS_TEST262_FAST_PATHS` in both registry and transpiler. **Reshaped** to registry-side only (15 entries gated) with explicit deferral of the transpiler side. Default macro=1 keeps everything compiling; a `-DJS_TEST262_FAST_PATHS=0` build currently fails at link because the transpiler still emits the gated names. Documents the gate without delivering the actual production reduction. |
+
+---
+
+**Rev 8 — §2.2 hot-path folds + §2.5 retire + §4 registry-side gate:**
+
+| Fold | Description | Δ entries |
+|---|---|---:|
+| §2.2 property_set strict dispatcher | Hot bare `js_property_set` (200K emissions) stays direct. The 2 ternary strict-mode lowering sites (1.6K emissions) now call `js_property_set_v(obj,key,val,strict)` which dispatches to `js_property_set` or `js_property_set_strict` internally. Both C-side names retained for many C runtime callers. **Net 0** — replaces one entry with another, but consolidates the strict path under the v-dispatcher pattern for future folds; +1 ns measured on strict path (within budget). | 0 |
+| §2.2 define_global fold | `js_define_global_var_property` (538K), `js_define_global_eval_var_property` (cold), `js_define_global_function_property` (96K) → `js_define_global_property_v(kind, key, value)`. 10 emit sites updated by Python script. Runtime switches on kind (3 cases). Hot var-property branch is well-predicted; microbench did not measure regression. | **−2** |
+| §2.5 array_indexOf_int retired | 0 telemetry emissions; the only fast path with no test262 timeout impact. Lowering fast-path detection block removed. | **−1** |
+| §2.5 attempted retirements | `js_uri_decode_equals_from_char_code`, `js_string_fromCharCode2`, `js_string_replace_nonws_global_fast_no_dollar` — all 3 attempted, all 3 caused 2 hard test262 timeouts and 8 batch-unstable decodeURI/decodeURIComponent stress tests. Slow path is ~100× slower per loop iteration. **All 3 reverted.** | 0 |
+| §4 test262 build-flag gate (registry side only) | 15 framework helpers (`js_assert_*`, `js_test262_*`, `js_donotevaluate`, `js_verify_property`, `js_decimal_to_percent_hex_string`, `js_validate_native_function_source`, `js_compare_array`, `js_is_constructor`) wrapped in `#if JS_TEST262_FAST_PATHS`. Macro defaults to 1; `-DJS_TEST262_FAST_PATHS=0` (or `#undef`) gates them out. **Caveat:** the matching transpiler-side gate is not landed — turning the macro off today would emit MIR calls to absent imports and fail at link. So this is a documentation/preparation step, not an actual production reduction yet. | 0 in default build; **−15 in `JS_TEST262_FAST_PATHS=0` build (currently broken)** |
+
+
+
+**Rev 7 — additional low-risk folds:**
+
+| Fold | Description | Δ entries |
+|---|---|---:|
+| §2.1 box-compare fold | `js_less_than` / `js_less_equal` / `js_greater_than` / `js_greater_equal` → `js_compare(op, l, r)`. Same constant-operand pattern as `js_cmp_raw`. `js_less_than` and `js_greater_than` retained as C wrappers for two internal callers in `js_runtime.cpp`. | −3 |
+| §2.2 private setter fold | `js_private_property_set` + `_strict` → unified with strict constant flag. Three lowering sites updated; the runtime branches once on flag to gate the proxy-strict-throw extra work. | −1 |
+
+**Folds attempted and skipped** (per Q2 "keep specialized if the fold cost exceeds the savings"):
+- **`js_super_property_get` / `js_super_instance_method_get`** — substantially different code paths (one uses `js_super_lookup_base`, the other walks prototypes manually). Folding requires complicating both functions for a single −1 entry.
+- **`js_with_push` / `js_with_pop`** — asymmetric signatures (push takes `Item`, pop takes none). Folding would force the no-arg pop to carry a dummy arg.
+- **`js_eval_private_push_frame` / `_pop_frame`** — same-signature pair but only 52 emissions each; fold cost (extra register operand per call site) exceeds the −1 savings.
+- **`js_private_field_init_begin` / `_end`** — trivial one-line runtime bodies (`set boolean to true/false`). Adding a runtime branch and a register operand at every callsite (10 sites, ~30K emissions) costs more than the −1 entry saves.
+- **`js_eval_env_push_frame` / `_pop_frame` / `_bind`** — three different signatures; not a clean triple-fold target.
+- **§2.5 retire-shortcuts** (`js_array_indexOf_int` etc.) — still quoted in MIR lowering. To retire properly, both the emit sites AND the registry entries must go. The lowering side is more invasive than the proposal anticipated; defer to a follow-up.
+
+
 
 **Rev 6 — recommended-order folds landed (per user "continue with your recommended order"):**
 
@@ -97,6 +169,21 @@ Method: built a release `lambda.exe` with `-DJS_MIR_EMIT_TELEMETRY`, ran the tes
 
 The strictly-safe deletion list lives at `temp/tune8_safe_to_delete.txt`. The full unused candidates list (154 entries, before MIR-quoted filtering) is at `temp/tune8_unused_entries.txt`. The 63 entries that are telemetry-unused but ARE quoted in MIR lowering (e.g. `js_classlist_method`, `js_dom_style_method`) need cross-workload verification before deletion — they're emitted for DOM code paths the test262 sweep doesn't exercise.
 
+---
+
+## Outstanding work after rev 8
+
+| Cluster | Δ entries achievable | Risk / blocker |
+|---|---:|---|
+| **§4 transpiler-side gate** to make `JS_TEST262_FAST_PATHS=0` actually link | −15 in production-only build | Mechanical: wrap ~15 transpiler emit detection blocks in `js_mir_*.cpp` with matching `#if JS_TEST262_FAST_PATHS`. No test262 regression risk (default macro=1). |
+| **§3 DOM/web-API set** (24 entries still in registry) | up to −24 | Parked per user directive ("pure JS only"). Needs a clean Radiant baseline gate before any deletion. |
+| **§2.5 string fast paths** (`js_string_fromCharCode2`, `js_uri_decode_equals_from_char_code`, `js_string_replace_nonws_global_fast_no_dollar`) | 0 (must stay) | Reverted — retiring caused test262 timeouts. Would only become deletable if the generic dispatcher is sped up. |
+| **§2.2 hot fold of `js_property_set` family** | −1 | Reshaped into `_v` dispatcher (net 0). True −1 would need migrating ~hundreds of C-side `js_property_set` callers to a new 4-arg signature. Out of scope for Tune8. |
+| **§2.4 scope-frame folds** (with_push/pop, eval_private push/pop, private_field init begin/end, eval_env triple) | −5 to −7 if all attempted | All skipped — emit-site cost or signature asymmetry exceeds savings. Could revisit if the proposal's emit-volume measurement infrastructure improves. |
+
+**Net achievable beyond rev 8 (without scope expansion):** ~−15 entries (the §4 transpiler-side gate). Anything beyond that requires either lifting the pure-JS-only constraint (§3) or accepting C-API breakage (§2.2 hot fold).
+
+---
 
 Scope: `lambda/sys_func_registry.c` JS section, `lambda/js/js_mir_*.cpp` lowering, and the JS↔MIR runtime ABI
 

@@ -184,13 +184,17 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_event_loop.h"
 #include "js/js_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
-extern Item js_array_indexOf_int(Item arr, int64_t search);
+// Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
+// arr.indexOf(int) flows through the generic array method dispatcher now.
 extern Item js_string_concat(Item left, Item right);
 extern Item js_string_get_int(Item str_item, int64_t index);
 extern Item js_string_replace_nonws_global_fast(Item str, Item replacement);
 extern Item js_string_replace_nonws_global_fast_no_dollar(Item str, Item replacement);
 extern Item js_string_fromCharCode2(Item first_item, Item second_item);
 extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, Item second_item, int64_t component);
+// Tune8 §2.5: only js_array_indexOf_int retired (0 telemetry emissions, no
+// observable test262 impact). The string-shortcut retirements were reverted
+// after they made 8 decodeURI/decodeURIComponent tests batch-unstable.
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
 extern void js_validate_native_function_source(Item source_item);
@@ -891,9 +895,10 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_set_class_ctor_shape_metadata(Item class_item, const char** prop_names, const int* prop_lens, int count);
-extern void js_define_global_var_property(Item key, Item value);
-extern void js_define_global_eval_var_property(Item key, Item value);
-extern void js_define_global_function_property(Item key, Item value);
+// Tune8 §2.2: define_global_{var,eval_var,function}_property collapsed into
+// js_define_global_property_v(kind, key, value). C functions kept as named
+// symbols; only the JIT import is unified.
+extern void js_define_global_property_v(int64_t kind, Item key, Item value);
 extern void js_global_lexical_declare(Item key, Item value, int64_t immutable);
 extern int64_t js_global_lexical_binding_exists(Item key);
 extern Item js_global_lexical_get_or_fallback(Item key, Item fallback);
@@ -1355,10 +1360,10 @@ JitImport jit_runtime_imports[] = {
     {"js_power", FPTR(js_power)},
     {"js_equal", FPTR(js_equal)},
     {"js_strict_equal", FPTR(js_strict_equal)},
-    {"js_less_than", FPTR(js_less_than)},
-    {"js_less_equal", FPTR(js_less_equal)},
-    {"js_greater_than", FPTR(js_greater_than)},
-    {"js_greater_equal", FPTR(js_greater_equal)},
+    // Tune8 §2.1: js_less_than/_equal/js_greater_than/_equal collapsed into
+    // js_compare(op, l, r). js_less_than and js_greater_than survive as
+    // C-side thin wrappers for callers in js_runtime.cpp.
+    {"js_compare", FPTR(js_compare)},
     {"js_logical_and", FPTR(js_logical_and)},
     {"js_logical_or", FPTR(js_logical_or)},
     {"js_logical_not", FPTR(js_logical_not)},
@@ -1388,9 +1393,11 @@ JitImport jit_runtime_imports[] = {
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
     {"js_property_set", FPTR(js_property_set)},
-    {"js_property_set_strict", FPTR(js_property_set_strict)},
+    // Tune8 §2.2: strict-mode setter routes through js_property_set_v
+    // dispatcher; the 3-arg js_property_set_strict is still used by C-side
+    // callers (in js_globals.cpp and js_runtime.cpp) but no longer JIT-imported.
+    {"js_property_set_v", FPTR(js_property_set_v)},
     {"js_private_property_set", FPTR(js_private_property_set)},
-    {"js_private_property_set_strict", FPTR(js_private_property_set_strict)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
     {"js_super_property_get", FPTR(js_super_property_get)},
@@ -1409,6 +1416,29 @@ JitImport jit_runtime_imports[] = {
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
     {"js_throw_const_assign", FPTR(js_throw_const_assign)},
+    // ========================================================================
+    // Tune8 §4: test262 framework fast paths.
+    //
+    // These 13 entries are emitted by the transpiler when it recognises test262
+    // harness idioms (assert.sameValue, assert.compareArray, $DONOTEVALUATE,
+    // verifyProperty, etc.). They are emitted thousands of times during a
+    // test262 sweep — `js_assert_same_value` alone is 91K emissions in a
+    // single run, `js_assert_base` 55K, `js_verify_property` 18K — so they
+    // cannot be dropped from a test262 build.
+    //
+    // The transpiler-side emission code (in js_mir_*.cpp) is NOT yet gated.
+    // A production-only build that #undef's JS_TEST262_FAST_PATHS today would
+    // still call the transpiler's emit code, which would fail at MIR link
+    // time. The full §4 gate needs matching #ifdef wrappers around the emit
+    // sites — deferred.
+    //
+    // Default: ON. Disable only when explicitly preparing a non-test262
+    // production binary.
+    // ========================================================================
+#ifndef JS_TEST262_FAST_PATHS
+#define JS_TEST262_FAST_PATHS 1
+#endif
+#if JS_TEST262_FAST_PATHS
     {"js_assert_same_value", FPTR(js_assert_same_value)},
     {"js_assert_not_same_value", FPTR(js_assert_not_same_value)},
     {"js_assert_compare_array", FPTR(js_assert_compare_array)},
@@ -1421,6 +1451,7 @@ JitImport jit_runtime_imports[] = {
     {"js_is_constructor", FPTR(js_is_constructor)},
     {"js_decimal_to_percent_hex_string", FPTR(js_decimal_to_percent_hex_string)},
     {"js_test262_build_string", FPTR(js_test262_build_string)},
+#endif
     {"js_discard_value", FPTR(js_discard_value)},
     // always available: emitted unconditionally by JS class transpiler
     {"js_private_field_init_begin", FPTR(js_private_field_init_begin)},
@@ -1459,7 +1490,6 @@ JitImport jit_runtime_imports[] = {
     {"js_get_slot_i", FPTR(js_get_slot_i)},
     {"js_set_slot_f", FPTR(js_set_slot_f)},
     {"js_set_slot_i", FPTR(js_set_slot_i)},
-    {"js_array_indexOf_int", FPTR(js_array_indexOf_int)},
     {"js_string_concat", FPTR(js_string_concat)},
     {"js_string_get_int", FPTR(js_string_get_int)},
     {"js_array_get_int", FPTR(js_array_get_int)},
@@ -1494,9 +1524,12 @@ JitImport jit_runtime_imports[] = {
     {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
+#if JS_TEST262_FAST_PATHS
+    // Tune8 §4: 3 more test262-specific fast paths. See block above.
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
     {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
+#endif
     {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},
     {"js_math_apply", FPTR(js_math_apply)},
@@ -1703,9 +1736,7 @@ JitImport jit_runtime_imports[] = {
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_set_class_ctor_shape_metadata", FPTR(js_set_class_ctor_shape_metadata)},
-    {"js_define_global_var_property", FPTR(js_define_global_var_property)},
-    {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
-    {"js_define_global_function_property", FPTR(js_define_global_function_property)},
+    {"js_define_global_property_v", FPTR(js_define_global_property_v)},
     {"js_global_lexical_declare", FPTR(js_global_lexical_declare)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},

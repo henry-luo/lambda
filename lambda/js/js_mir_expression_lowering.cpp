@@ -710,12 +710,31 @@ MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_
     MIR_reg_t result = value;
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
-        result = jm_call_3(mt, ref->is_private ?
-            (ref->strict ? "js_private_property_set_strict" : "js_private_property_set") :
-            (ref->strict ? "js_property_set_strict" : "js_property_set"), MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        // Tune8 §2.2: js_private_property_set absorbs the _strict variant
+        // (4-arg form: obj, key, val, strict).
+        if (ref->is_private) {
+            result = jm_call_4(mt, "js_private_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+        } else if (ref->strict) {
+            // Tune8 §2.2: strict-mode setter goes through js_property_set_v
+            // dispatcher so we don't need a separate js_property_set_strict
+            // registry entry; the runtime branches once on the constant flag.
+            result = jm_call_4(mt, "js_property_set_v", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+        } else {
+            // Hot path: 200K-emission bare non-strict setter — direct call,
+            // no dispatcher overhead.
+            result = jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        }
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
         if (ref->uninitialized_this) {
@@ -1411,6 +1430,10 @@ static bool jm_identifier_matches(String* name, const char* expected, int expect
     return name && (int)name->len == expected_len && strncmp(name->chars, expected, expected_len) == 0;
 }
 
+// Tune8 §2.5 attempted to retire jm_match_uri_decode_call and friends, but
+// removing the js_uri_decode_equals_from_char_code fast path caused test262
+// timeouts on decodeURI / decodeURIComponent stress tests (the generic eq
+// path is ~100× slower per loop iteration). Restored for that reason.
 static bool jm_match_uri_decode_call(JsMirTranspiler* mt, JsAstNode* node,
                                      JsAstNode** uri_arg, int64_t* component) {
     (void)mt;
@@ -1678,6 +1701,8 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         }
     }
 
+    // Tune8 §2.5: retiring this caused timeouts on decodeURI/decodeURIComponent
+    // stress tests (generic path ~100× slower per loop iteration). Keep.
     if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
         JsAstNode* uri_arg = NULL;
         JsAstNode* first_arg = NULL;
@@ -2106,6 +2131,7 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     // preserved by the XOR-with-1.
     const char* fn_name = NULL;
     bool invert_box = false;
+    int compare_op = -1;   // 0=LT, 1=GT, 2=LE, 3=GE; -1 = not a compare
     switch (bin->op) {
     case JS_OP_ADD:        fn_name = "js_add"; break;
     case JS_OP_SUB:        fn_name = "js_subtract"; break;
@@ -2117,10 +2143,12 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     case JS_OP_NE:         fn_name = "js_equal"; invert_box = true; break;
     case JS_OP_STRICT_EQ:  fn_name = "js_strict_equal"; break;
     case JS_OP_STRICT_NE:  fn_name = "js_strict_equal"; invert_box = true; break;
-    case JS_OP_LT:         fn_name = "js_less_than"; break;
-    case JS_OP_LE:         fn_name = "js_less_equal"; break;
-    case JS_OP_GT:         fn_name = "js_greater_than"; break;
-    case JS_OP_GE:         fn_name = "js_greater_equal"; break;
+    // Tune8 §2.1: js_less_than / _equal / js_greater_than / _equal folded into
+    // js_compare(op, l, r) with op as compile-time constant operand.
+    case JS_OP_LT:         fn_name = "js_compare"; compare_op = 0; break;
+    case JS_OP_LE:         fn_name = "js_compare"; compare_op = 2; break;
+    case JS_OP_GT:         fn_name = "js_compare"; compare_op = 1; break;
+    case JS_OP_GE:         fn_name = "js_compare"; compare_op = 3; break;
     case JS_OP_AND:        fn_name = "js_logical_and"; break;
     case JS_OP_OR:         fn_name = "js_logical_or"; break;
     case JS_OP_BIT_AND:    fn_name = "js_bitwise_and"; break;
@@ -2191,9 +2219,18 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     if (left_spill_slot >= 0) {
         jm_gen_spill_load(mt, left, left_spill_slot);
     }
-    MIR_reg_t result = jm_call_2(mt, fn_name, MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    MIR_reg_t result;
+    if (compare_op >= 0) {
+        // Tune8 §2.1: js_compare(op, l, r) takes an extra constant op operand.
+        result = jm_call_3(mt, fn_name, MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, compare_op),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    } else {
+        result = jm_call_2(mt, fn_name, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
+    }
     if (invert_box) {
         // Tune8 §2.1 inverse-pair fold: flip the bool stored in bit 0 of the
         // boxed result. b2it packs `(LMD_TYPE_BOOL << 56) | bool_val`, so XOR
@@ -2964,12 +3001,27 @@ static void jm_emit_destructure_put_reference(JsMirTranspiler* mt, const JsMirRe
     }
     switch (ref->kind) {
     case JS_MIR_REF_PROPERTY:
-        jm_call_3(mt, ref->is_private ?
-            (ref->strict ? "js_private_property_set_strict" : "js_private_property_set") :
-            (ref->strict ? "js_property_set_strict" : "js_property_set"), MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        // Tune8 §2.2: js_private_property_set absorbs the _strict variant (4-arg form).
+        if (ref->is_private) {
+            jm_call_4(mt, "js_private_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ref->strict ? 1 : 0));
+        } else if (ref->strict) {
+            // Tune8 §2.2: strict goes through dispatcher.
+            jm_call_4(mt, "js_property_set_v", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+        } else {
+            // Hot path: direct call.
+            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ref->base_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        }
         jm_emit_exc_propagate_check(mt);
         break;
     case JS_MIR_REF_SUPER_PROPERTY:
@@ -3447,10 +3499,12 @@ void jm_emit_destructure_target(JsMirTranspiler* mt, JsAstNode* target, MIR_reg_
         } else {
             prop_key = jm_transpile_box_item(mt, member->property);
         }
-        jm_call_3(mt, "js_private_property_set", MIR_T_I64,
+        // Tune8 §2.2: js_private_property_set now takes strict flag (always sloppy here).
+        jm_call_4(mt, "js_private_property_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
     }
 }
 
@@ -7783,6 +7837,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     return jm_call_1(mt, "js_string_fromCharCode", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, code));
                 } else if (argc == 2) {
+                    // Tune8 §2.5: retirement of this fast path caused 8
+                    // decodeURI/decodeURIComponent tests to become batch-
+                    // unstable. The 2-arg case is hot enough on those stress
+                    // tests that the array path overhead pushes them past the
+                    // 5 s batch timeout. Restored.
                     MIR_reg_t first = jm_transpile_box_item(mt, call->arguments);
                     MIR_reg_t second = jm_transpile_box_item(mt, call->arguments->next);
                     return jm_call_2(mt, "js_string_fromCharCode2", MIR_T_I64,
@@ -8086,6 +8145,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
             // Hot path for test262-style single-character scans:
             // str.replace(/\S+/g, "literal-without-dollar").
+            // Tune8 §2.5 attempted to retire this but the slow path pushes
+            // decoder stress tests over the batch timeout. Restored.
             if (prop->name->len == 7 && strncmp(prop->name->chars, "replace", 7) == 0 &&
                 arg_count == 2 && call->arguments &&
                 call->arguments->node_type == JS_AST_NODE_REGEX &&
@@ -8107,10 +8168,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     repl_fast->literal_type == JS_LITERAL_STRING && !repl_has_dollar) {
                     MIR_reg_t recv_fast = jm_transpile_box_item(mt, m->object);
                     MIR_reg_t repl_reg = jm_transpile_box_item(mt, call->arguments->next);
-                    // The literal replacement has already been checked for '$'
-                    // patterns above, so call the narrower helper.  This path
-                    // is used by Unicode whitespace stress tests where the same
-                    // replacement is applied tens of thousands of times.
                     return jm_call_2(mt, "js_string_replace_nonws_global_fast_no_dollar", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_fast),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, repl_reg));
@@ -8537,17 +8594,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // at compile time, skip the runtime type cascade and call directly.
             TypeId recv_type = jm_get_effective_type(mt, m->object);
 
-            if ((recv_type == LMD_TYPE_ARRAY || jm_get_js_array_var(mt, m->object)) &&
-                prop->name->len == 7 &&
-                strncmp(prop->name->chars, "indexOf", 7) == 0 &&
-                arg_count == 1 && call->arguments &&
-                jm_get_effective_type(mt, call->arguments) == LMD_TYPE_INT) {
-                MIR_reg_t recv_fast = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t search_fast = jm_transpile_as_native(mt, call->arguments, LMD_TYPE_INT, LMD_TYPE_INT);
-                return jm_call_2(mt, "js_array_indexOf_int", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_fast),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, search_fast));
-            }
+            // Tune8 §2.5: js_array_indexOf_int fast path retired. Telemetry
+            // showed 0 emissions across the test262 sweep; arr.indexOf(int)
+            // calls now go through the generic array method dispatcher.
 
             bool p3_allow_immediate_callback_env = false;
             if (!m->computed && prop && prop->name &&
@@ -12206,6 +12255,7 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
                 return jm_transpile_expression(mt, expr);
             }
 
+            // Tune8 §2.5: kept — see comment above the box-binary-op path.
             if (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE) {
                 JsAstNode* uri_arg = NULL;
                 JsAstNode* first_arg = NULL;

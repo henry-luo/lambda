@@ -20,8 +20,9 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
-extern "C" Item js_private_property_set(Item object, Item key, Item value);
-extern "C" Item js_private_property_set_strict(Item object, Item key, Item value);
+// Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
+// 1 = strict with proxy-throw); js_private_property_set_strict removed.
+extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
 extern "C" void js_dom_collection_before_property_get(Item object, Item key);
 extern "C" void js_dom_options_collection_before_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_number_wrapper(Item arg);
@@ -5816,6 +5817,17 @@ extern "C" Item js_property_set_strict(Item object, Item key, Item value) {
     return result;
 }
 
+// Tune8 §2.2: dispatcher used by JIT lowering at sites that pick strict/sloppy
+// dynamically. `js_property_set` and `js_property_set_strict` stay as C-side
+// functions for direct callers (200K-emission bare js_property_set sites are
+// untouched; the C runtime keeps its 3-arg API). Only the 2 ternary lowering
+// sites switch to this dispatcher, dropping the js_property_set_strict
+// registry entry.
+extern "C" Item js_property_set_v(Item object, Item key, Item value, int64_t strict) {
+    return strict ? js_property_set_strict(object, key, value)
+                  : js_property_set(object, key, value);
+}
+
 static Item js_private_property_set_checked(Item object, Item key, Item value) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
@@ -5840,11 +5852,15 @@ static Item js_private_property_set_checked(Item object, Item key, Item value) {
     return js_property_set(object, key, value);
 }
 
-extern "C" Item js_private_property_set(Item object, Item key, Item value) {
-    return js_private_property_set_checked(object, key, value);
-}
-
-extern "C" Item js_private_property_set_strict(Item object, Item key, Item value) {
+// Tune8 §2.2: js_private_property_set absorbs js_private_property_set_strict.
+// The strict path saves/restores js_strict_mode, runs the standard checked
+// set, and adds proxy-strict-throw handling. The non-strict path is one
+// `return js_private_property_set_checked(...)`. One branch on the constant
+// flag operand picks between them.
+extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict) {
+    if (!strict) {
+        return js_private_property_set_checked(object, key, value);
+    }
     bool saved_strict = js_strict_mode;
     js_strict_mode = true;
     Item result = js_private_property_set_checked(object, key, value);
