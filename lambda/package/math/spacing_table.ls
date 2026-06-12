@@ -69,9 +69,9 @@ pub fn get_spacing(left_type, right_type, style) {
 // CSS class for a given spacing value
 pub fn spacing_class(spacing_em) {
     if (spacing_em == 0.0) null
-    else if (spacing_em < 0.0) "ML__negativethinspace"
-    else if (spacing_em <= THIN_SPACE) "ML__thinspace"
-    else if (spacing_em <= MEDIUM_SPACE) "ML__mediumspace"
-    else if (spacing_em <= THICK_SPACE) "ML__thickspace"
+    else if (spacing_em < 0.0) "lm_negativethinspace"
+    else if (spacing_em <= THIN_SPACE) "lm_thinspace"
+    else if (spacing_em <= MEDIUM_SPACE) "lm_mediumspace"
+    else if (spacing_em <= THICK_SPACE) "lm_thickspace"
     else null
 }

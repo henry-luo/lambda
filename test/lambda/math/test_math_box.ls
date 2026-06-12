@@ -6,7 +6,7 @@ import box: lambda.package.math.box
 "===== MATH BOX TESTS ====="
 
 // ---- text_box ----
-let tb = box.text_box("x", "ML__mathit", "mord")
+let tb = box.text_box("x", "lm_mathit", "mord")
 "1. text_box type:"; tb.type
 "2. text_box height:"; tb.height
 "3. text_box depth:"; tb.depth
@@ -16,7 +16,7 @@ let tb = box.text_box("x", "ML__mathit", "mord")
 "7. text_box el text:"; tb.element[0]
 
 // ---- text_box multi-char ----
-let tb2 = box.text_box("abc", "ML__cmr", "mord")
+let tb2 = box.text_box("abc", "lm_cmr", "mord")
 "8. text_box 3ch width:"; tb2.width
 "9. text_box 3ch class:"; tb2.element.class
 

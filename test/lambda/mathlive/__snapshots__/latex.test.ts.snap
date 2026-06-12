@@ -1,0 +1,239 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`ARGUMENTS 0/ "\\\\frac" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.5em"></span><span class="lm_strut--bottom" style="height:1.19em;vertical-align:-0.68em"></span><span class="lm_base"><span class="lm_mfrac"><span class="lm_nulldelimiter lm_open" style="width:0.12em"></span><span class="lm_vlist-t lm_vlist-t2"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.5em"><span class="lm_center" style="top:-2.31em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0;display:inline-block"> </span></span><span style="top:-3.23em"><span class="lm_pstrut" style="height:3em"></span><span class="lm_frac-line" style="height:0.04em;display:inline-block"></span></span><span class="lm_center" style="top:-3.5em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0;display:inline-block"> </span></span></span><span class="lm_vlist-s">​</span></span><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.69em"></span></span></span><span class="lm_nulldelimiter lm_close" style="width:0.12em"></span></span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`ARGUMENTS 1/ "\\\\frac{}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.5em"></span><span class="lm_strut--bottom" style="height:1.19em;vertical-align:-0.68em"></span><span class="lm_base"><span class="lm_mfrac"><span class="lm_nulldelimiter lm_open" style="width:0.12em"></span><span class="lm_vlist-t lm_vlist-t2"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.5em"><span class="lm_center" style="top:-2.31em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0;display:inline-block"> </span></span><span style="top:-3.23em"><span class="lm_pstrut" style="height:3em"></span><span class="lm_frac-line" style="height:0.04em;display:inline-block"></span></span><span class="lm_center" style="top:-3.5em"><span class="lm_pstrut" style="height:3em"></span><span style="height:0;display:inline-block"></span></span></span><span class="lm_vlist-s">​</span></span><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.69em"></span></span></span><span class="lm_nulldelimiter lm_close" style="width:0.12em"></span></span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`ARGUMENTS 2/ "\\\\frac{}{}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.5em"></span><span class="lm_strut--bottom" style="height:1.19em;vertical-align:-0.68em"></span><span class="lm_base"><span class="lm_mfrac"><span class="lm_nulldelimiter lm_open" style="width:0.12em"></span><span class="lm_vlist-t lm_vlist-t2"><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.5em"><span class="lm_center" style="top:-1.33em"><span class="lm_pstrut" style="height:2.02em"></span><span style="height:0;display:inline-block"></span></span><span style="top:-2.25em"><span class="lm_pstrut" style="height:2.02em"></span><span class="lm_frac-line" style="height:0.04em;display:inline-block"></span></span><span class="lm_center" style="top:-2.52em"><span class="lm_pstrut" style="height:2.02em"></span><span style="height:0;display:inline-block"></span></span></span><span class="lm_vlist-s">​</span></span><span class="lm_vlist-r"><span class="lm_vlist" style="height:0.69em"></span></span></span><span class="lm_nulldelimiter lm_close" style="width:0.12em"></span></span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 0/ "x" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_base"><span class="lm_mathit">x</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 1/ " x " renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_base"><span class="lm_mathit">x</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 2/ "%" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0"></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 3/ "% comment" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0"></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 4/ "x % comment" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_base"><span class="lm_mathit">x</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 5/ "x" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_base"><span class="lm_mathit">x</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 6/ "-12" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.65em"></span><span class="lm_strut--bottom" style="height:0.73em;vertical-align:-0.08em"></span><span class="lm_base"><span class="lm_cmr">−12</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 7/ "1234|/@.\`abcdefgzABCDEFGZ" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.75em"></span><span class="lm_strut--bottom" style="height:1em;vertical-align:-0.25em"></span><span class="lm_base"><span class="lm_cmr">1234∣/@.‘</span><span class="lm_mathit">abcde</span><span class="lm_mathit" style="margin-right:0.11em">f</span><span class="lm_mathit" style="margin-right:0.04em">g</span><span class="lm_mathit" style="margin-right:0.05em">z</span><span class="lm_mathit">A</span><span class="lm_mathit" style="margin-right:0.06em">B</span><span class="lm_mathit" style="margin-right:0.08em">C</span><span class="lm_mathit" style="margin-right:0.03em">D</span><span class="lm_mathit" style="margin-right:0.06em">E</span><span class="lm_mathit" style="margin-right:0.14em">F</span><span class="lm_mathit">G</span><span class="lm_mathit" style="margin-right:0.08em">Z</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 8/ "a b" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">ab</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 9/ "ab" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">ab</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 10/ "a~b" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">a</span><span class="lm_cmr"> </span><span class="lm_mathit">b</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 11/ "a\\\\space b" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">a</span><span class="lm_mediumspace"></span><span class="lm_mathit">b</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 12/ "{a}b" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">a</span><span class="lm_mathit">b</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 13/ "{-}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.59em"></span><span class="lm_strut--bottom" style="height:0.67em;vertical-align:-0.08em"></span><span class="lm_base"><span class="lm_cmr">−</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 14/ "-a" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.59em"></span><span class="lm_strut--bottom" style="height:0.67em;vertical-align:-0.08em"></span><span class="lm_base"><span class="lm_cmr">−</span><span class="lm_mathit">a</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 15/ "a-" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.59em"></span><span class="lm_strut--bottom" style="height:0.67em;vertical-align:-0.08em"></span><span class="lm_base"><span class="lm_mathit">a</span><span style="display:inline-block;width:0.23em"></span><span class="lm_cmr">−</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 16/ "a-b" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_strut--bottom" style="height:0.78em;vertical-align:-0.08em"></span><span class="lm_base"><span class="lm_mathit">a</span><span style="display:inline-block;width:0.23em"></span><span class="lm_cmr">−</span><span style="display:inline-block;width:0.23em"></span><span class="lm_mathit">b</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 17/ "a\\nb" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_mathit">ab</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 18/ "a=1}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.65em"></span><span class="lm_base"><span class="lm_mathit">a</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">=</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">1</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`BASIC PARSING 19/ "a=1{" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.65em"></span><span class="lm_base"><span class="lm_mathit">a</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">=</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">1</span></span></span>",
+  "unbalanced-braces",
+]
+`;
+
+exports[`BASIC PARSING 20/ "a=1{}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.65em"></span><span class="lm_base"><span class="lm_mathit">a</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">=</span><span style="display:inline-block;width:0.28em"></span><span class="lm_cmr">1</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 0/ "\\\\bf{425}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.65em"></span><span class="lm_base"><span class="lm_mathbf">425</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 1/ "\\\\it{text}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.62em"></span><span class="lm_base"><span class="lm_mathit">text</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 2/ "\\\\bfseries{bold}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_text lm_bold">bold</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 3/ "\\\\mdseries{medium}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_text">medium</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 4/ "\\\\upshape{upright}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_strut--bottom" style="height:0.89em;vertical-align:-0.19em"></span><span class="lm_base"><span class="lm_text">upright</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 5/ "\\\\slshape{slanted}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_base"><span class="lm_text lm_shape_sl">slanted</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 6/ "\\\\scshape{small caps}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_strut--bottom" style="height:0.89em;vertical-align:-0.19em"></span><span class="lm_base"><span class="lm_text lm_shape_sc">small caps</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 7/ "\\\\rmfamily{roman}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_base"><span class="lm_cmr">roman</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 8/ "\\\\sffamily{sans-serif}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.7em"></span><span class="lm_strut--bottom" style="height:0.9em;vertical-align:-0.2em"></span><span class="lm_base"><span class="lm_sans">sans</span><span style="display:inline-block;width:0.23em"></span><span class="lm_sans">−</span><span style="display:inline-block;width:0.23em"></span><span class="lm_sans">se</span><span class="lm_sans" style="margin-right:0.02em">r</span><span class="lm_sans">i</span><span class="lm_sans" style="margin-right:0.07em">f</span></span></span>",
+  "no-error",
+]
+`;
+
+exports[`REST* ARGUMENT COMMANDS (issue #2570) 9/ "\\\\ttfamily{monospace}" renders correctly 1`] = `
+[
+  "<span class="lm_latex"><span class="lm_strut" style="height:0.44em"></span><span class="lm_strut--bottom" style="height:0.66em;vertical-align:-0.22em"></span><span class="lm_base"><span class="lm_tt">monospace</span></span></span>",
+  "no-error",
+]
+`;

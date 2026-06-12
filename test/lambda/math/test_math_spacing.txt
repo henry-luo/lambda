@@ -46,4 +46,4 @@
 0.22222
 "24. ord-rel text:"
 0.27778
-"25. class 0:26. class thin:ML__thinspace27. class medium:ML__mediumspace28. class thick:ML__thickspace29. class negative:ML__negativethinspace===== ALL SPACING TESTS DONE ====="
+"25. class 0:26. class thin:lm_thinspace27. class medium:lm_mediumspace28. class thick:lm_thickspace29. class negative:lm_negativethinspace===== ALL SPACING TESTS DONE ====="
