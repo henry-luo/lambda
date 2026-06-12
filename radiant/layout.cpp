@@ -2586,6 +2586,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_debug("layout html doc - start");
     if (!is_reflow && !doc->root && doc->view_tree && doc->view_tree->root) {
         log_debug("layout html doc - using prebuilt view tree");
+        doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;
     }
     if (is_reflow) {
@@ -2678,4 +2679,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());
     log_layout_timing_summary();
     log_info("[TIMING] layout_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    if (!is_reflow && doc->view_tree && doc->view_tree->root) {
+        doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
+    }
 }

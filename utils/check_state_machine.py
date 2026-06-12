@@ -14,10 +14,27 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEADER_PATH = os.path.join(ROOT, "radiant", "state_schema.hpp")
+STATE_STORE_HEADER_PATH = os.path.join(ROOT, "radiant", "state_store.hpp")
 SOURCE_PATH = os.path.join(ROOT, "radiant", "state_schema.cpp")
 
 
 COMPLETE_FAMILIES = {
+    "SM_FAMILY_DOCUMENT": {
+        "label": "document",
+        "state_enum": "DocLifecycleState",
+        "active_states": [
+            "DOC_LIFECYCLE_UNINITIALIZED",
+            "DOC_LIFECYCLE_LOADING",
+            "DOC_LIFECYCLE_COMMITTED",
+            "DOC_LIFECYCLE_UNLOADED",
+        ],
+        "initial_states": ["DOC_LIFECYCLE_UNINITIALIZED"],
+        "events": [
+            "SM_EV_DOC_LOAD",
+            "SM_EV_DOC_COMMIT",
+            "SM_EV_DOC_UNLOAD",
+        ],
+    },
     "SM_FAMILY_FOCUS": {
         "label": "focus",
         "state_enum": "FocusFsmState",
@@ -540,7 +557,7 @@ def validate(enums, rules, invariant_bindings):
 
 def main():
     try:
-        header_text = read_text(HEADER_PATH)
+        header_text = read_text(HEADER_PATH) + "\n" + read_text(STATE_STORE_HEADER_PATH)
         source_text = read_text(SOURCE_PATH)
         enums = parse_enums(header_text)
         arrays = parse_to_state_arrays(source_text)

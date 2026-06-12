@@ -122,7 +122,10 @@ typedef enum ContextMenuFsmState {
 } ContextMenuFsmState;
 
 typedef enum SmEvent {
-    SM_EV_COLLAPSE_TO_BOUNDARY = 0,
+    SM_EV_DOC_LOAD = 0,
+    SM_EV_DOC_COMMIT,
+    SM_EV_DOC_UNLOAD,
+    SM_EV_COLLAPSE_TO_BOUNDARY,
     SM_EV_START_POINTER_SELECTION,
     SM_EV_UI_START_POINTER_SELECTION,
     SM_EV_END_POINTER_SELECTION,

@@ -1167,53 +1167,9 @@ static bool radiant_state_validate_interaction_schema(DocState* state,
     return !report || report->ok;
 }
 
-static bool radiant_state_validate_interaction_legacy(DocState* state,
-                                                      StateValidationReport* report) {
-    report_init(report);
-
-    if (!state) {
-        return true;
-    }
-
-    validate_focused_target_state(state, report);
-    validate_focus_invariants(state, report);
-    validate_hover_invariants(state, report);
-    validate_active_invariants(state, report);
-    validate_drag_invariants(state, report);
-    validate_editing_interaction_invariants(state, report);
-    validate_view_state_registry(state, report);
-    validate_caret_projection_state(state, report);
-    validate_selection_projection_state(state, report);
-    validate_text_control_focus_state(state, report);
-    validate_dropdown_overlay_state(state, report);
-    validate_context_menu_overlay_state(state, report);
-    validate_dirty_tracking_state(state, report);
-    validate_selection_invariants(state, report);
-
-    return !report || report->ok;
-}
-
 bool radiant_state_validate_interaction(DocState* state,
                                         StateValidationReport* report) {
-    StateValidationReport legacy_report;
-    bool legacy_ok = radiant_state_validate_interaction_legacy(state, &legacy_report);
-
-#ifndef NDEBUG
-    StateValidationReport schema_report;
-    bool schema_ok = radiant_state_validate_interaction_schema(state, &schema_report);
-    bool same_message = legacy_report.message[0] == '\0' ||
-        strcmp(legacy_report.message, schema_report.message) == 0;
-    if (legacy_ok != schema_ok || !same_message) {
-        log_error("state_schema: invariant parity mismatch legacy=%d schema=%d legacy_msg=%s schema_msg=%s",
-            legacy_ok ? 1 : 0, schema_ok ? 1 : 0,
-            legacy_report.message[0] ? legacy_report.message : "(none)",
-            schema_report.message[0] ? schema_report.message : "(none)");
-        assert(false && "Radiant state schema invariant parity mismatch");
-    }
-#endif
-
-    if (report) *report = legacy_report;
-    return legacy_ok;
+    return radiant_state_validate_interaction_schema(state, report);
 }
 
 void radiant_state_assert_valid(DocState* state, const char* context) {
