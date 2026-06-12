@@ -3047,21 +3047,40 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
             }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
-                if (dv && dv->buffer && dv->buffer->detached) {
-                    js_throw_type_error("DataView buffer is detached");
+                // Js54 P2: throw on detached or OOB. Length-tracking views
+                // return the live buffer remainder; fixed-length views return
+                // the recorded byte_length after confirming the window still
+                // fits inside the buffer.
+                if (!dv || !dv->buffer) { *out_result = (Item){.item = ITEM_NULL}; return true; }
+                if (dv->buffer->detached || dv->buffer->byte_length < dv->byte_offset) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
                     *out_result = ItemNull;
                     return true;
                 }
-                *out_result = dv ? (Item){.item = i2it(dv->byte_length)} : (Item){.item = ITEM_NULL};
+                if (dv->length_tracking) {
+                    int avail = dv->buffer->byte_length - dv->byte_offset;
+                    *out_result = (Item){.item = i2it(avail > 0 ? avail : 0)};
+                    return true;
+                }
+                if (dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
+                    *out_result = ItemNull;
+                    return true;
+                }
+                *out_result = (Item){.item = i2it(dv->byte_length)};
                 return true;
             }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
-                if (dv && dv->buffer && dv->buffer->detached) {
-                    js_throw_type_error("DataView buffer is detached");
+                if (!dv || !dv->buffer) { *out_result = (Item){.item = ITEM_NULL}; return true; }
+                if (dv->buffer->detached ||
+                    dv->buffer->byte_length < dv->byte_offset ||
+                    (!dv->length_tracking &&
+                     dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
                     *out_result = ItemNull;
                     return true;
                 }
-                *out_result = dv ? (Item){.item = i2it(dv->byte_offset)} : (Item){.item = ITEM_NULL};
+                *out_result = (Item){.item = i2it(dv->byte_offset)};
                 return true;
             }
             if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
@@ -11537,15 +11556,32 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
                 return js_arraybuffer_wrap(dv->buffer);
             }
             if (len == 14 && strncmp(name, "get byteLength", 14) == 0) {
-                if (dv->buffer && dv->buffer->detached) {
-                    js_throw_type_error("DataView buffer is detached");
+                // Js54 P2: spec §25.3.4.1 throws on OOB (detached or shrunk
+                // past view start); for length-tracking views the live
+                // byteLength is buffer->byte_length - byte_offset, clamped at 0.
+                if (!dv->buffer || dv->buffer->detached ||
+                    dv->buffer->byte_length < dv->byte_offset) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
+                    return ItemNull;
+                }
+                if (dv->length_tracking) {
+                    int avail = dv->buffer->byte_length - dv->byte_offset;
+                    return (Item){.item = i2it(avail > 0 ? avail : 0)};
+                }
+                if (dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
                     return ItemNull;
                 }
                 return (Item){.item = i2it(dv->byte_length)};
             }
             if (len == 14 && strncmp(name, "get byteOffset", 14) == 0) {
-                if (dv->buffer && dv->buffer->detached) {
-                    js_throw_type_error("DataView buffer is detached");
+                // Js54 P2: spec §25.3.4.2 throws on OOB; otherwise returns the
+                // recorded byte_offset (does NOT track resize).
+                if (!dv->buffer || dv->buffer->detached ||
+                    dv->buffer->byte_length < dv->byte_offset ||
+                    (!dv->length_tracking &&
+                     dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
+                    js_throw_type_error("DataView buffer is detached or out of bounds");
                     return ItemNull;
                 }
                 return (Item){.item = i2it(dv->byte_offset)};

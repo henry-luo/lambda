@@ -9981,25 +9981,34 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                MIR_reg_t h_data, MIR_reg_t h_len) {
     // P4h: use hoisted data pointer and length when available
     MIR_reg_t data_ptr, ta_len;
-    MIR_reg_t ta_ptr = 0;
     if (h_data && h_len) {
         data_ptr = h_data;
         ta_len = h_len;
     } else {
-        // Load JsTypedArray* from Map.data (offset 16)
-        ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
+        // Js54 P0: Map.data at offset 16 holds JsTypedArray* only in the
+        // original layout. After any user property write (e.g. ta.foo='bar',
+        // ta.__proto__=X), js_upgrade_native_backed_map_for_properties moves
+        // the JsTypedArray* into the __ta__ slot and overwrites m->data with
+        // the property-storage buffer. Direct offset-16 load would then
+        // dereference garbage — SIGSEGV on the next ta->data read. Route
+        // through the runtime helper which checks data_cap and reads __ta__
+        // when upgraded.
+        (void)jm_call_1(mt, "js_get_typed_array_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
         // Use the runtime current-length helper so length-tracking views over
         // ArrayBuffer/SharedArrayBuffer do not read the stale stored length.
         ta_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
-        // Load ta->data pointer (offset 16)
-        data_ptr = jm_new_reg(mt, "ta_data", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, ta_ptr, 0, 1)));
+        // Js54 P3: ask the runtime for the live data pointer. For TAs over an
+        // ArrayBuffer the data lives at ab->data + byte_offset, and ab->data
+        // can be replaced by ArrayBuffer.prototype.resize() reallocating —
+        // the cached ta->data would point at the freed/stale backing store.
+        // The helper returns NULL for OOB / detached, which the bounds check
+        // below treats like idx-out-of-range.
+        data_ptr = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
     }
 
     // Bounds check: if idx < 0 || idx >= ta_length → undefined
@@ -10008,20 +10017,12 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     MIR_label_t l_oob = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
-    if (ta_ptr) {
-        MIR_reg_t buf_ptr = jm_new_reg(mt, "ta_buf", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, buf_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 24, ta_ptr, 0, 1)));
-        MIR_label_t l_not_detached = jm_new_label(mt);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_not_detached),
-            MIR_new_reg_op(mt->ctx, buf_ptr)));
-        MIR_reg_t detached = jm_new_reg(mt, "ta_det", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, detached),
-            MIR_new_mem_op(mt->ctx, MIR_T_U8, 12, buf_ptr, 0, 1)));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
-            MIR_new_reg_op(mt->ctx, detached)));
-        jm_emit_label(mt, l_not_detached);
-    }
+    // Js54 P3: data_ptr == NULL means OOB/detached — short-circuit to undefined.
+    // Applies to both hoisted and non-hoisted paths: the hoist also goes through
+    // the resize-aware helper which returns NULL when the TA is OOB at hoist
+    // time, and dereferencing NULL data later would crash.
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_oob),
+        MIR_new_reg_op(mt->ctx, data_ptr)));
 
     // idx < 0
     MIR_reg_t neg_check = jm_new_reg(mt, "neg_ck", MIR_T_I64);
@@ -10145,15 +10146,14 @@ MIR_reg_t jm_transpile_typed_array_get_native(JsMirTranspiler* mt, MIR_reg_t arr
     if (h_data) {
         data_ptr = h_data;
     } else {
-        // Load JsTypedArray* from Map.data (offset 16)
-        MIR_reg_t ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
-
-        // Load ta->data pointer (offset 16)
-        data_ptr = jm_new_reg(mt, "ta_data", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, ta_ptr, 0, 1)));
+        // Js54 P0: route through js_get_typed_array_ptr (see comment in
+        // jm_transpile_typed_array_get) to handle the upgraded Map layout.
+        // Js54 P3: use the live data pointer helper (handles resize realloc
+        // and returns NULL for OOB / detached views).
+        (void)jm_call_1(mt, "js_get_typed_array_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
+        data_ptr = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
     }
 
     // Compute element address: data_ptr + idx * elem_size
@@ -10221,25 +10221,36 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         data_ptr = h_data;
         ta_len = h_len;
     } else {
-        // Load JsTypedArray* from Map.data (offset 16)
-        MIR_reg_t ta_ptr = jm_new_reg(mt, "ta_ptr", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ta_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_reg, 0, 1)));
+        // Js54 P0: route through js_get_typed_array_ptr (see comment in
+        // jm_transpile_typed_array_get) to handle the upgraded Map layout.
+        // Without this, an indexed write after a user property write (e.g.
+        // ta.foo='bar', ta.__proto__=X) reads garbage from the property
+        // storage buffer as the JsTypedArray* and stores into wild memory —
+        // the SIGSEGV in built-ins/TypedArray/out-of-bounds-behaves-like-detached.js.
+        // Note: ta_ptr is queried for its side effect of triggering the upgrade
+        // check; the data pointer below comes from the resize-aware helper.
+        (void)jm_call_1(mt, "js_get_typed_array_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
         // Use the runtime current-length helper so length-tracking views over
         // ArrayBuffer/SharedArrayBuffer do not read the stale stored length.
         ta_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
-        // Load ta->data pointer (offset 16)
-        data_ptr = jm_new_reg(mt, "ta_data", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, ta_ptr, 0, 1)));
+        // Js54 P3: live data pointer (handles resize realloc + detached/OOB →
+        // NULL). Treating NULL as OOB short-circuits the write to a no-op.
+        data_ptr = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
     }
 
     // Bounds check
     MIR_label_t l_ok = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
+
+    // Js54 P3: data_ptr == NULL → OOB / detached → silent no-op (applies to
+    // both hoisted and non-hoisted paths; same rationale as the GET path).
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, data_ptr)));
 
     MIR_reg_t neg_check = jm_new_reg(mt, "neg_ck", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, neg_check),

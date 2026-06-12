@@ -454,7 +454,7 @@ extern const StateInvariantBinding RADIANT_INVARIANTS[] = {
 extern const uint32_t RADIANT_INVARIANT_COUNT =
     (uint32_t)(sizeof(RADIANT_INVARIANTS) / sizeof(RADIANT_INVARIANTS[0]));
 
-static const char* sm_family_name(SmFamily family) {
+[[maybe_unused]] static const char* sm_family_name(SmFamily family) {
     switch (family) {
         case SM_FAMILY_DOCUMENT: return "document";
         case SM_FAMILY_FOCUS: return "focus";
@@ -474,7 +474,7 @@ static const char* sm_family_name(SmFamily family) {
     }
 }
 
-static const char* sm_event_name(SmEvent event) {
+[[maybe_unused]] static const char* sm_event_name(SmEvent event) {
     switch (event) {
         case SM_EV_DOC_LOAD: return "doc_load";
         case SM_EV_DOC_COMMIT: return "doc_commit";
@@ -706,7 +706,7 @@ static bool sm_rule_matches(const StateTransitionRule* rule,
     return true;
 }
 
-static const StateTransitionRule* sm_find_rule(SmFamily family,
+[[maybe_unused]] static const StateTransitionRule* sm_find_rule(SmFamily family,
                                                SmViewClass view_class,
                                                int from_state,
                                                SmEvent event) {
@@ -719,7 +719,7 @@ static const StateTransitionRule* sm_find_rule(SmFamily family,
     return NULL;
 }
 
-static bool sm_rule_allows_to_state(const StateTransitionRule* rule,
+[[maybe_unused]] static bool sm_rule_allows_to_state(const StateTransitionRule* rule,
                                     int from_state,
                                     int to_state) {
     if (!rule) return false;
