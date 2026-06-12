@@ -14991,6 +14991,27 @@ extern "C" void js_set_global_property_strict_prechecked(Item key, Item value, i
     }
     js_set_global_property_impl(key, value, true);
 }
+// Tune8 §2.2: dispatcher for JIT-emitted define-global-property calls. The
+// three existing C functions (var / eval-var / function) have substantially
+// different bodies, so the fold is a runtime switch routing to the originals.
+// Net registry: 3 entries → 1 (the C functions stay as named symbols for any
+// other internal use). Cost: one well-predicted switch on the constant kind
+// operand.
+//
+//   kind = 0  → var-property      (cached, non-configurable; module-init hot path)
+//   kind = 1  → eval-var-property (configurable, special undefined handling)
+//   kind = 2  → function-property (complex existing-check + descriptor merge)
+extern "C" void js_define_global_var_property(Item key, Item value);
+extern "C" void js_define_global_eval_var_property(Item key, Item value);
+extern "C" void js_define_global_function_property(Item key, Item value);
+extern "C" void js_define_global_property_v(int64_t kind, Item key, Item value) {
+    switch (kind) {
+    case 0: js_define_global_var_property(key, value); break;
+    case 1: js_define_global_eval_var_property(key, value); break;
+    case 2: js_define_global_function_property(key, value); break;
+    }
+}
+
 extern "C" void js_define_global_var_property(Item key, Item value) {
     Item global = js_get_global_this();
     uint64_t epoch = js_get_heap_epoch();

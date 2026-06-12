@@ -1704,36 +1704,51 @@ static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst) {
 }
 
 // ES spec §13.10.1: < operator — undefined from ARC becomes false
+// Tune8 §2.1: box-returning comparison dispatcher.
+// Replaces 4 separate runtime entries (js_less_than / js_less_equal /
+// js_greater_than / js_greater_equal) with one. The JIT lowering passes a
+// constant op operand at every call site.
+//
+//   op = 0: LT (a <  b)
+//   op = 1: GT (a >  b)
+//   op = 2: LE (a <= b)
+//   op = 3: GE (a >= b)
+extern "C" Item js_compare(int64_t op, Item left, Item right) {
+    switch (op) {
+    case 0: {  // LT — Abstract Relational Comparison (left, right, leftFirst=true)
+        Item result = js_abstract_relational_lt(left, right);
+        if (js_exception_pending) return make_js_undefined();
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return result;
+    }
+    case 1: {  // GT — a > b => ARC(right, left, leftFirst=false)
+        Item result = js_abstract_relational_lt(right, left, false);
+        if (js_exception_pending) return make_js_undefined();
+        if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return result;
+    }
+    case 2: {  // LE — a <= b => !(b < a); NaN → false
+        Item gt = js_abstract_relational_lt(right, left, false);
+        if (js_exception_pending) return make_js_undefined();
+        if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(!it2b(gt))};
+    }
+    case 3: {  // GE — a >= b => !(a < b); NaN → false
+        Item lt = js_abstract_relational_lt(left, right);
+        if (js_exception_pending) return make_js_undefined();
+        if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
+        return (Item){.item = b2it(!it2b(lt))};
+    }
+    default: return (Item){.item = b2it(false)};
+    }
+}
+
+// C wrappers retained for direct callers in js_runtime.cpp.
 extern "C" Item js_less_than(Item left, Item right) {
-    Item result = js_abstract_relational_lt(left, right);
-    if (js_exception_pending) return make_js_undefined();
-    if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-    return result;
+    return js_compare(0, left, right);
 }
-
-extern "C" Item js_less_equal(Item left, Item right) {
-    // a <= b is !(b < a); if ARC returns undefined (NaN), result is false
-    // leftFirst=false: args are swapped, right arg is the left source operand
-    Item gt = js_abstract_relational_lt(right, left, false);
-    if (js_exception_pending) return make_js_undefined();
-    if (gt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(!it2b(gt))};
-}
-
 extern "C" Item js_greater_than(Item left, Item right) {
-    // leftFirst=false: args are swapped (right, left), right arg is the left source operand
-    Item result = js_abstract_relational_lt(right, left, false);
-    if (js_exception_pending) return make_js_undefined();
-    // ES spec §13.10.1: if Abstract Relational Comparison returns undefined (NaN), > returns false
-    if (result.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-    return result;
-}
-
-extern "C" Item js_greater_equal(Item left, Item right) {
-    Item lt = js_abstract_relational_lt(left, right);
-    if (js_exception_pending) return make_js_undefined();
-    if (lt.item == ITEM_JS_UNDEFINED) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(!it2b(lt))};
+    return js_compare(1, left, right);
 }
 
 // =============================================================================

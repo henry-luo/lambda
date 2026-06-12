@@ -3983,7 +3983,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     const char* js_name = mce->name;
                     if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
                     MIR_reg_t key_reg = jm_box_string_literal(mt, js_name, strlen(js_name));
-                    jm_call_void_2(mt, "js_define_global_var_property",
+                    jm_call_void_3(mt, "js_define_global_property_v",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, init_val));
                     // Top-level `var` is an object-environment binding. Register
@@ -4075,12 +4076,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_emit_label(mt, global_preinit);
                 jm_call_void_1(mt, "js_eval_env_track_global_binding",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
-                jm_call_void_2(mt, "js_define_global_eval_var_property",
+                jm_call_void_3(mt, "js_define_global_property_v",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
                 jm_emit_label(mt, preinit_done);
             } else {
-                jm_call_void_2(mt, "js_define_global_var_property",
+                jm_call_void_3(mt, "js_define_global_property_v",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
             }
@@ -4181,7 +4184,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_new_reg_op(mt->ctx, evalscript_local_active)));
                         // evalScript executes as a Script, not ordinary eval; even
                         // with an eval-local frame, the function binding is global.
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         jm_emit_label(mt, skip_evalscript_global);
@@ -4197,7 +4201,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // $262.evalScript performs Script global declaration instantiation,
                         // so function declarations create non-configurable globals. Ordinary
                         // direct eval keeps the usual configurable eval bindings.
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -4212,7 +4217,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     if (!mt->is_module && !mt->is_eval_direct) {
                         MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                     }
@@ -4457,7 +4463,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_new_reg_op(mt->ctx, evalscript_local_active)));
                         // evalScript executes as a Script, not ordinary eval; even
                         // with an eval-local frame, the function binding is global.
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         jm_emit_label(mt, skip_evalscript_global);
@@ -4473,7 +4480,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         // $262.evalScript performs Script global declaration instantiation,
                         // so function declarations create non-configurable globals. Ordinary
                         // direct eval keeps the usual configurable eval bindings.
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
@@ -4488,7 +4496,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     if (!mt->is_module && !mt->is_eval_direct) {
                         MIR_reg_t fk = jm_box_string_literal(mt, fn->name->chars, (int)fn->name->len);
-                        jm_call_void_2(mt, "js_define_global_function_property",
+                        jm_call_void_3(mt, "js_define_global_property_v",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, 2),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
                     }
@@ -5317,7 +5326,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_new_reg_op(mt->ctx, evalscript_local_active)));
             // evalScript var declarations use Script global binding semantics
             // even when the harness has an eval-local frame active.
-            jm_call_void_2(mt, "js_define_global_var_property",
+            jm_call_void_3(mt, "js_define_global_property_v",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
             jm_emit_label(mt, skip_evalscript_global);
@@ -5331,7 +5341,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_new_reg_op(mt->ctx, evalscript_active)));
             // $262.evalScript runs script-level global declaration instantiation;
             // var declarations create non-configurable bindings, unlike ordinary eval.
-            jm_call_void_2(mt, "js_define_global_var_property",
+            jm_call_void_3(mt, "js_define_global_property_v",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, global_define_done)));
