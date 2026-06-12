@@ -23,9 +23,9 @@ let SPACING_TABLE = [
 ]
 
 // Spacing values in em (mu = 1/18 em)
-let THIN_SPACE = 0.16667       // 3mu = 3/18 em
-let MEDIUM_SPACE = 0.22222     // 4mu = 4/18 em
-let THICK_SPACE = 0.27778      // 5mu = 5/18 em
+let THIN_SPACE = 0.17          // MathLive snapshot value for 3mu
+let MEDIUM_SPACE = 0.23        // MathLive snapshot value for 4mu
+let THICK_SPACE = 0.28         // MathLive snapshot value for 5mu
 
 // atom type name → index
 pub fn atom_type_index(atom_type) {

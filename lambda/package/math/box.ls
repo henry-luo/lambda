@@ -45,13 +45,49 @@ pub fn box_styled(cls, style, height, depth, width, box_type) => {
 
 // create a box from a text string (leaf node)
 pub fn text_box(text, cls, box_type) => {
-    element: (if (cls) <span class: cls; text> else <span; text>),
-    height: met.DEFAULT_CHAR_HEIGHT,
-    depth: met.DEFAULT_CHAR_DEPTH,
+    element: text_element(text, cls),
+    height: text_height(text),
+    depth: text_depth(text),
     width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
     type: box_type,
     italic: 0.0,
     skew: 0.0
+}
+
+fn text_element(text, cls) {
+    let style = text_style(text, cls)
+    if (cls and style != null) {
+        <span class: cls, style: style; text>
+    } else if (cls) {
+        <span class: cls; text>
+    } else if (style != null) {
+        <span style: style; text>
+    } else {
+        <span; text>
+    }
+}
+
+fn text_style(text, cls) {
+    if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
+    else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
+    else null
+}
+
+fn text_has_tall_delim(text) {
+    contains(text, "(") or contains(text, ")") or
+    contains(text, "[") or contains(text, "]") or
+    contains(text, "{") or contains(text, "}") or
+    contains(text, "|")
+}
+
+fn text_height(text) {
+    if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
+}
+
+fn text_depth(text) {
+    if (text_has_tall_delim(text)) 0.25
+    else if (text == "," or text == ";") 0.19
+    else 0.08
 }
 
 // create an empty skip box (horizontal spacer)
@@ -92,7 +128,7 @@ pub fn hbox(boxes) {
     let max_depth = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.depth))
     {
-        element: <span;
+        element: <span class: css.BASE;
             for (child in children) child
         >,
         height: max_height,

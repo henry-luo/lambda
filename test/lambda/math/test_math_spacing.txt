@@ -19,21 +19,21 @@
 "10. ord-ord display:"
 0
 "11. ord-op display:"
-0.16667
+0.17
 "12. ord-bin display:"
-0.22222
+0.23
 "13. ord-rel display:"
-0.27778
+0.28
 "14. ord-open display:"
 0
 "15. bin-ord display:"
-0.22222
+0.23
 "16. rel-ord display:"
-0.27778
+0.28
 "17. op-op display:"
-0.16667
+0.17
 "18. close-bin display:"
-0.22222
+0.23
 "19. ord-bin script:"
 0
 "20. ord-rel script:"
@@ -41,9 +41,9 @@
 "21. bin-ord script:"
 0
 "22. op-op script:"
-0.16667
+0.17
 "23. ord-bin text:"
-0.22222
+0.23
 "24. ord-rel text:"
-0.27778
+0.28
 "25. class 0:26. class thin:lm_thinspace27. class medium:lm_mediumspace28. class thick:lm_thickspace29. class negative:lm_negativethinspace===== ALL SPACING TESTS DONE ====="

@@ -53,6 +53,7 @@ pub RULE = "lm_rule"
 pub NULLDELIMITER = "lm_nulldelimiter"
 pub MTABLE = "lm_mtable"
 pub ERROR = "lm_error"
+pub OP_GROUP = "lm_op-group"
 
 // ============================================================
 // Class builder helpers
@@ -106,6 +107,7 @@ pub fn get_stylesheet() {
     ".lm_script{font-family:KaTeX_Script}" ++
     ".lm_sans{font-family:KaTeX_SansSerif}" ++
     ".lm_text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;white-space:pre}" ++
+    ".lm_op-group{display:inline-block}" ++
     ".lm_bold{font-weight:700}" ++
     ".lm_it{font-style:italic}" ++
     ".lm_mfrac{display:inline-block}" ++

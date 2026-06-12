@@ -95,7 +95,7 @@ fn render_math_root(node, context) {
 
 fn render_group(node, context) {
     let children = render_children(node, context)
-    box.hbox(children)
+    transparent_hbox(children)
 }
 
 // ============================================================
@@ -124,7 +124,10 @@ fn render_number(node, context) {
 
 fn render_operator(node, context) {
     let text = get_text(node)
-    box.text_box(text, css.CMR, "mbin")
+    let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
+        else if (text == ")" or text == "]" or text == "}") "mclose"
+        else "mbin"
+    box.text_box(text, css.CMR, atom_type)
 }
 
 fn render_relation(node, context) {
@@ -134,7 +137,10 @@ fn render_relation(node, context) {
 
 fn render_punct(node, context) {
     let text = get_text(node)
-    box.text_box(text, css.CMR, "mpunct")
+    let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
+        else if (text == ")" or text == "]" or text == "}") "mclose"
+        else "mpunct"
+    box.text_box(text, css.CMR, atom_type)
 }
 
 fn render_text(text, context) {
@@ -156,7 +162,7 @@ fn render_command(node, context) {
              slice(cmd_text, 1, len(cmd_text)) else cmd_text
         let op_name = sym.get_operator_name(name_str)
         if (op_name != null) {
-            box.text_box(op_name, css.CMR, "mop")
+            box.with_class(box.text_box(op_name, css.CMR, "mop"), css.OP_GROUP)
         } else {
             box.text_box(cmd_text, css.ERROR, "mord")
         }
@@ -386,11 +392,91 @@ fn render_children(node, context) {
     if (n == 0) {
         []
     } else {
-        (for (i in 0 to (n - 1),
-              let child = node[i]
-              where child != null)
-         render_node(child, context))
+        render_children_scan(node, context, 0, [])
     }
+}
+
+fn transparent_hbox(children) {
+    let hb = box.hbox(children)
+    let filtered = (for (b in children where b != null) b)
+    if (len(filtered) == 0) hb
+    else
+        (let last_idx = len(filtered) - 1,
+         let last = filtered[last_idx],
+         box_with_type(hb, last.type))
+}
+
+fn render_children_scan(node, context, i, acc) {
+    if (i >= len(node)) acc
+    else if (is_textcolor_sequence(node, i))
+        (let rendered = render_textcolor_sequence(node, context, i),
+         render_children_scan(node, context, i + 8, acc ++ [rendered]))
+    else
+        (let child = node[i],
+         let next_acc = if (child != null) acc ++ [render_node(child, context)] else acc,
+         render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn child_is_text(node, i, text) {
+    if (i >= len(node)) false
+    else
+        (let child = node[i],
+         if (child is string) string(child) == text else false)
+}
+
+fn is_text_command_node(child) {
+    if (child is element and name(child) == 'text_command') {
+        child.cmd != null and string(child.cmd) == "\\text"
+    } else false
+}
+
+fn is_textcolor_sequence(node, i) {
+    if (i + 7 >= len(node)) false
+    else
+        (let cmd = node[i],
+         let color_arg = node[i + 6],
+         let content_arg = node[i + 7],
+         is_text_command_node(cmd) and
+         child_is_text(node, i + 1, "c") and
+         child_is_text(node, i + 2, "o") and
+         child_is_text(node, i + 3, "l") and
+         child_is_text(node, i + 4, "o") and
+         child_is_text(node, i + 5, "r") and
+         color_arg is element and name(color_arg) == 'group' and
+         content_arg is element and name(content_arg) == 'group')
+}
+
+fn render_textcolor_sequence(node, context, i) {
+    let color_arg = node[i + 6]
+    let content_arg = node[i + 7]
+    let color_value = color.resolve_raw(plain_text(color_arg))
+    let children = render_children(content_arg, context)
+    let spaced = apply_spacing(children, context)
+    let hb = transparent_hbox(spaced)
+    let elements = (for (b in spaced) b.element)
+    {
+        element: <span style: "color:" ++ color_value;
+            for (el in elements) el
+        >,
+        height: hb.height,
+        depth: hb.depth,
+        width: hb.width,
+        type: hb.type,
+        italic: hb.italic,
+        skew: hb.skew
+    }
+}
+
+fn plain_text(node) {
+    if (node is string) string(node)
+    else if (node is symbol) string(node)
+    else if (node is element) plain_text_element(node, 0, "")
+    else string(node)
+}
+
+fn plain_text_element(node, i, acc) {
+    if (i >= len(node)) acc
+    else plain_text_element(node, i + 1, acc ++ plain_text(node[i]))
 }
 
 // get text content of a node
@@ -413,24 +499,55 @@ fn get_text_from_element(node) {
 // Inter-atom spacing
 // ============================================================
 
-// recursive helper for building spaced box list
-fn build_spaced(filtered, i, prev_type, acc, context) {
+fn bin_as_ord_after(prev_type) {
+    prev_type == null or prev_type == "mbin" or prev_type == "mopen" or
+    prev_type == "mrel" or prev_type == "mpunct" or prev_type == "mop"
+}
+
+fn box_with_type(bx, atom_type) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew
+}
+
+fn normalize_bin_atom(bx, prev_type) {
+    if (bx.type == "mbin" and bin_as_ord_after(prev_type)) box_with_type(bx, "mord")
+    else bx
+}
+
+fn build_normalized(filtered, i, prev_type, acc) {
     if (i >= len(filtered)) acc
     else
-        (let current = filtered[i],
+        (let current = normalize_bin_atom(filtered[i], prev_type),
+         build_normalized(filtered, i + 1, current.type, acc ++ [current]))
+}
+
+fn normalize_atom_types(filtered) {
+    build_normalized(filtered, 0, null, [])
+}
+
+// recursive helper for building spaced box list
+fn build_spaced(normalized, i, prev_type, acc, context) {
+    if (i >= len(normalized)) acc
+    else
+        (let current = normalized[i],
          let space = sp_table.get_spacing(prev_type, current.type, context.style),
-         let space_cls = sp_table.spacing_class(space),
-         let with_space = if (space_cls != null)
-             acc ++ [box.box_cls(space_cls, 0.0, 0.0, space, "skip"), current]
+         let with_space = if (space != 0.0)
+             acc ++ [box.skip_box(space), current]
          else
              acc ++ [current],
-         build_spaced(filtered, i + 1, current.type, with_space, context))
+         build_spaced(normalized, i + 1, current.type, with_space, context))
 }
 
 // apply inter-atom spacing between boxes
 fn apply_spacing(boxes, context) {
     let filtered = (for (b in boxes where b != null) b)
     if (len(filtered) <= 1) filtered
-    else build_spaced(filtered, 1, filtered[0].type, [filtered[0]], context)
+    else
+        (let normalized = normalize_atom_types(filtered),
+         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
 }
-

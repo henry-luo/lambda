@@ -94,8 +94,12 @@ fn resolve_named_color(raw) {
     else resolve_by_name(raw)
 }
 
+pub fn resolve_raw(raw) {
+    resolve_named_color(raw)
+}
+
 fn resolve_by_name(name) {
-    if (name == "red") "#d32f2f"
+    if (name == "red") "#d7170b"
     else if (name == "blue") "#1976d2"
     else if (name == "green") "#388e3c"
     else if (name == "black") "#000000"
