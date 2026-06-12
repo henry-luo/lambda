@@ -455,7 +455,7 @@ extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
 }
 
 extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
-                                           int from, bool reverse, bool same_value_zero) {
+                                           int from, int bound, bool reverse, bool same_value_zero) {
     if (!js_typed_array_raw_fast_enabled()) return -2;
     if (!js_is_typed_array(ta_item)) return -2;
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
@@ -471,10 +471,21 @@ extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
     } else if (search_type == LMD_TYPE_FLOAT) {
         needle = it2d(search_value);
     } else {
-        return -1;
+        // Js54 P4: non-numeric search (undefined, null, string, ...) — fall
+        // through to the slow path. Callers iterate with the spec-captured
+        // length, and Get() returns undefined for post-resize OOB positions,
+        // so includes(undefined, ...) can still match. Returning -1 here
+        // would falsely shortcut callers to "not found".
+        return -2;
     }
 
-    int len = js_typed_array_current_length(ta);
+    // Js54 P4: clamp to the spec-captured bound the caller provided. Spec
+    // §23.2.3.{18,20,15} (indexOf/lastIndexOf/includes) capture len BEFORE
+    // any coercion callback; if a callback grew the buffer, our current
+    // length would be larger and the fast path could find new (zero-initialised)
+    // elements outside the spec-required range.
+    int current_len = js_typed_array_current_length(ta);
+    int len = bound < current_len ? bound : current_len;
     if (len <= 0) return -1;
     if (from < 0 || from >= len) return -1;
     char* data = (char*)js_typed_array_current_data(ta);
