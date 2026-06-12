@@ -16,13 +16,13 @@
     {"type": "mouse_move", "target": {"selector": "#bio", "offset_x": 44, "offset_y": 30}},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 9},
-    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "max_r": 170, "min_b": 150},
+    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "min_r": 170, "max_r": 190, "min_g": 205, "max_g": 225, "min_b": 245},
     {"type": "mouse_up", "target": {"selector": "#bio", "offset_x": 44, "offset_y": 30}, "button": "left"},
     {"type": "wait", "ms": 80},
 
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 9},
-    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "max_r": 170, "min_b": 150},
+    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "min_r": 170, "max_r": 190, "min_g": 205, "max_g": 225, "min_b": 245},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_selection_render_final.mark"}
   ]
 }

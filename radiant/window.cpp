@@ -616,6 +616,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     event.scroll.x = xpos;
     event.scroll.y = ypos;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+    do_redraw = 1;
     log_leave();
 }
 

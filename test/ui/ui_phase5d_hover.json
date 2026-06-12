@@ -6,7 +6,10 @@
     { "type": "log", "message": "=== Phase 5d: Hover state tests ===" },
 
     { "type": "log", "message": "--- Test 1: hover on #btn ---" },
+    { "type": "assert_pixel", "target": { "selector": "#btn", "offset_x": 12, "offset_y": 12 }, "min_r": 45, "max_r": 65, "min_g": 140, "max_g": 165, "min_b": 205, "max_b": 230 },
     { "type": "mouse_move", "target": { "selector": "#btn" } },
+    { "type": "render_pending" },
+    { "type": "assert_pixel", "target": { "selector": "#btn", "offset_x": 12, "offset_y": 12 }, "force_render": false, "min_r": 30, "max_r": 50, "min_g": 115, "max_g": 140, "min_b": 170, "max_b": 200 },
     { "type": "wait", "ms": 50 },
     { "type": "assert_state", "target": { "selector": "#btn" }, "state": ":hover", "value": true },
 

@@ -23,11 +23,6 @@ typedef struct SelectionPaintCtx {
     float          iframe_offset_y;
 } SelectionPaintCtx;
 
-typedef struct TextControlSelectionOverlayCtx {
-    SelectionPaintCtx base;
-    ViewBlock* block;
-} TextControlSelectionOverlayCtx;
-
 static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     View* focused = focus_get_visible(state);
     if (!focused) return;
@@ -194,29 +189,6 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
 }
 
-static void text_control_selection_paint_rect_cb(float x, float y, float w, float h, void* ud) {
-    TextControlSelectionOverlayCtx* tc_ctx = (TextControlSelectionOverlayCtx*)ud;
-    if (!tc_ctx || !tc_ctx->block || w <= 0 || h <= 0) return;
-
-    float ax = x;
-    float ay = y;
-    if (tc_ctx->block->form) {
-        ax -= tc_ctx->block->form->scroll_x;
-        ay -= tc_ctx->block->form->scroll_y;
-    }
-    for (View* parent = tc_ctx->block->parent; parent; parent = parent->parent) {
-        if (parent->view_type == RDT_VIEW_BLOCK ||
-            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
-            parent->view_type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* pblock = lam::view_require_block(parent);
-            ax += pblock->x;
-            ay += pblock->y;
-        }
-    }
-
-    selection_paint_rect_cb(ax, ay, w, h, &tc_ctx->base);
-}
-
 static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
                                           SelectionPaintCtx* paint) {
     if (!rdcon || !range || !paint) return false;
@@ -227,16 +199,9 @@ static bool render_text_control_selection(RenderContext* rdcon, DomRange* range,
     if (!tc_is_text_control(elem)) return false;
     if (range->start.offset == range->end.offset) return true;
 
-    TextControlSelectionOverlayCtx tc_ctx;
-    memset(&tc_ctx, 0, sizeof(tc_ctx));
-    tc_ctx.base = *paint;
-    tc_ctx.block = lam::view_require_block(static_cast<View*>(elem));
-    bool ok = editing_geometry_text_control_for_each_selection_rect(
-        rdcon->ui_context, elem, range->start.offset, range->end.offset,
-        text_control_selection_paint_rect_cb, &tc_ctx);
-    if (!ok) {
-        log_debug("[SELECTION] skipped text-control overlay; geometry unavailable");
-    }
+    // Form controls paint their own selection inside render_form_control().
+    // Painting it again as a document overlay offsets the highlight a second
+    // time in embedded/scrolled documents.
     return true;
 }
 

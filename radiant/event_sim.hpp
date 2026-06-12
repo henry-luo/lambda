@@ -147,6 +147,7 @@ enum SimEventType {
     // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
+    SIM_EVENT_RENDER_PENDING,  // render only if current document already has pending visual work
     SIM_EVENT_DUMP_CARET,      // dump caret state to file
     // Webview commands
     SIM_EVENT_WEBVIEW_EVAL_JS,      // execute JS in a webview element

@@ -1710,6 +1710,9 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "render_pending") == 0) {
+        ev->type = SIM_EVENT_RENDER_PENDING;
+    }
     else if (strcmp(type_str, "dump_caret") == 0) {
         ev->type = SIM_EVENT_DUMP_CARET;
         const char* file = reader.get("file").cstring();
@@ -2898,6 +2901,26 @@ static void force_render_surface(UiContext* uicon) {
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) doc_state_clear_render_flags(state);
     }
+}
+
+static void render_pending_surface(UiContext* uicon) {
+    if (!uicon || !uicon->document || !uicon->document->view_tree) return;
+    DocState* state = (DocState*)uicon->document->state;
+    if (!state) return;
+    bool pending = state->is_dirty || state->needs_repaint ||
+        state->needs_reflow || state->dirty_tracker.full_repaint ||
+        state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker);
+    if (!pending) return;
+    if (state->needs_reflow) {
+        reflow_process_pending(state);
+        if (state->needs_reflow) {
+            extern void reflow_html_doc(DomDocument* doc);
+            reflow_html_doc(uicon->document);
+            doc_state_clear_reflow(state);
+        }
+    }
+    render_html_doc(uicon, uicon->document->view_tree, nullptr);
+    doc_state_clear_render_flags(state);
 }
 
 static bool pixel_component_in_range(const char* name, int value, int min_value, int max_value) {
@@ -4950,6 +4973,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     render_uicontext_to_png(uicon, ev->file_path);
                 }
             }
+            break;
+
+        case SIM_EVENT_RENDER_PENDING:
+            log_info("event_sim: render_pending");
+            render_pending_surface(uicon);
             break;
 
         case SIM_EVENT_DUMP_CARET:

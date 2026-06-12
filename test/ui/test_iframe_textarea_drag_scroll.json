@@ -1,0 +1,18 @@
+{
+  "html": "test/ui/test_iframe_textarea_drag_scroll.html",
+  "description": "Textarea drag selection inside a scrolled iframe reaches the second line and paints only one highlight.",
+  "events": [
+    {"type": "scroll", "x": 40, "y": 40, "dx": 0, "dy": -3},
+    {"type": "assert_state_store", "target": {"selector": "#frame"}, "view_scroll_y": 150, "tolerance": 5},
+
+    {"type": "mouse_down", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 32}, "button": "left"},
+    {"type": "mouse_move", "target": {"selector": "#frame", "offset_x": 78, "offset_y": 58}},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 24, "offset_y": 56}, "force_render": false, "max_r": 190, "min_b": 140},
+    {"type": "mouse_up", "target": {"selector": "#frame", "offset_x": 78, "offset_y": 58}, "button": "left"},
+
+    {"type": "switch_frame", "selector": "#frame"},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 22}
+  ]
+}

@@ -105,8 +105,15 @@ static bool editing_geometry_find_document_offset(View* view,
         if (block->embed && block->embed->doc) {
             DomDocument* embed_doc = block->embed->doc;
             if (embed_doc == target_doc) {
-                if (out_x) *out_x = here_x;
-                if (out_y) *out_y = here_y;
+                float scroll_x = 0.0f;
+                float scroll_y = 0.0f;
+                if (block->scroller && block->scroller->pane) {
+                    DocState* state = block->doc ? block->doc->state : NULL;
+                    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+                        block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                }
+                if (out_x) *out_x = here_x - scroll_x;
+                if (out_y) *out_y = here_y - scroll_y;
                 return true;
             }
             if (embed_doc->view_tree && embed_doc->view_tree->root &&

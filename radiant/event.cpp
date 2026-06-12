@@ -554,6 +554,83 @@ static DomDocument* event_context_target_document(EventContext* evcon) {
         : (evcon->ui_context ? evcon->ui_context->document : NULL);
 }
 
+static void restore_embedded_document_scroll_model(DomDocument* doc) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root ||
+        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
+        return;
+    }
+
+    ViewBlock* root = lam::view_require_block(doc->view_tree->root);
+    if (!root->scroller) return;
+
+    if (root->content_height > root->height) {
+        root->height = root->content_height;
+    }
+    root->scroller = NULL;
+}
+
+static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
+                                         View* iframe_container) {
+    if (!evcon || !evcon->ui_context || !doc) return;
+
+    UiContext* uicon = evcon->ui_context;
+    DomDocument* saved_doc = uicon->document;
+    float saved_window_width = uicon->window_width;
+    float saved_window_height = uicon->window_height;
+    int saved_viewport_width = uicon->viewport_width;
+    int saved_viewport_height = uicon->viewport_height;
+
+    uicon->document = doc;
+
+    if (iframe_container &&
+        (iframe_container->view_type == RDT_VIEW_BLOCK ||
+         iframe_container->view_type == RDT_VIEW_INLINE_BLOCK)) {
+        ViewBlock* block = lam::view_require_block(iframe_container);
+        if (block->width > 0) {
+            uicon->window_width = block->width;
+            uicon->viewport_width = (int)block->width; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
+        }
+        if (block->height > 0) {
+            uicon->window_height = block->height;
+            uicon->viewport_height = (int)block->height; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
+        }
+    }
+
+    layout_html_doc(uicon, doc, true);
+    if (iframe_container) {
+        restore_embedded_document_scroll_model(doc);
+    }
+
+    uicon->document = saved_doc;
+    uicon->window_width = saved_window_width;
+    uicon->window_height = saved_window_height;
+    uicon->viewport_width = saved_viewport_width;
+    uicon->viewport_height = saved_viewport_height;
+}
+
+static bool process_event_target_document_reflow(EventContext* evcon) {
+    if (!evcon || !evcon->ui_context || !evcon->target_document ||
+        evcon->target_document == evcon->ui_context->document) {
+        return false;
+    }
+
+    DomDocument* doc = evcon->target_document;
+    DocState* state = (DocState*)doc->state;
+    if (!state || !state->needs_reflow) return false;
+
+    log_debug("Processing pending iframe reflow before parent repaint");
+    reflow_process_pending(state);
+
+    if (!state->needs_reflow) return false;
+
+    layout_event_document_reflow(evcon, doc, evcon->iframe_container);
+    doc_state_clear_reflow(state);
+    reflow_clear(state);
+    doc_state_mark_dirty(state);
+    doc_state_request_repaint(state);
+    return true;
+}
+
 static void clear_document_interaction_state_before_detach(DomDocument* doc) {
     if (!doc || !doc->state) return;
 
@@ -4628,6 +4705,7 @@ void update_hover_state(EventContext* evcon, View* new_target) {
     hover_transition(state, HOVER_TRANSITION_SET_TARGET, &hover_args);
 
     sync_hover_pseudo_state_after_transition(state, prev_hover, new_target);
+    evcon->need_repaint = true;
 
     if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
 
@@ -4893,6 +4971,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
 
         log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
         doc_state_request_repaint(state);
+        evcon->need_repaint = true;
         return true;
     }
 
@@ -4919,6 +4998,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
 
             log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
             doc_state_request_repaint(state);
+            evcon->need_repaint = true;
         }
         return true;
     }
@@ -8625,6 +8705,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // Refresh viewport scroll snapshot after the event mutates scroll panes.
     // Reflow consumes `pending_viewport_scroll_*`, so keep it synchronized.
     sync_viewport_scroll_state(&evcon);
+
+    bool target_doc_reflowed = process_event_target_document_reflow(&evcon);
+    if (target_doc_reflowed) {
+        evcon.need_repaint = true;
+    }
 
     // Process pending reflows if any state changes require relayout
     DocState* state = (DocState*)uicon->document->state;

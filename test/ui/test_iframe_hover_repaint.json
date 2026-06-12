@@ -1,0 +1,13 @@
+{
+  "html": "test/ui/test_iframe_hover_repaint.html",
+  "description": "Hover inside an iframe must relayout the iframe document and repaint the parent surface.",
+  "events": [
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}, "min_r": 230, "min_g": 230, "min_b": 230},
+    {"type": "mouse_move", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 20}, "force_render": false, "min_r": 105, "max_r": 135, "min_g": 165, "max_g": 195, "min_b": 225, "max_b": 255},
+    {"type": "scroll", "x": 40, "y": 40, "dx": 0, "dy": -2},
+    {"type": "assert_state_store", "target": {"selector": "#frame"}, "view_scroll_y": 100, "tolerance": 5},
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 20, "offset_y": 40}, "force_render": false, "min_r": 55, "max_r": 85, "min_g": 145, "max_g": 175, "min_b": 80, "max_b": 115}
+  ]
+}

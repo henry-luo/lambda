@@ -1,0 +1,10 @@
+{
+  "html": "test/ui/test_iframe_checkbox_repaint.html",
+  "description": "Clicking a checkbox inside an iframe must dirty the parent surface so the checkmark appears on the first click.",
+  "events": [
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 22, "offset_y": 24}, "min_r": 240, "min_g": 240, "min_b": 240},
+    {"type": "click", "target": {"selector": "#frame", "offset_x": 19, "offset_y": 19}},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "target": {"selector": "#frame", "offset_x": 22, "offset_y": 24}, "force_render": false, "max_r": 90, "max_g": 90, "max_b": 90}
+  ]
+}
