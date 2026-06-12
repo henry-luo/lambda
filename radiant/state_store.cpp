@@ -16,6 +16,7 @@
 #include "text_edit.hpp"
 #include "editing.hpp"
 #include "state_machine.hpp"
+#include "state_schema.hpp"
 #include "retained_display_list.hpp"
 #include "../lambda/ast.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -1692,10 +1693,10 @@ void editing_interaction_set_composing(DocState* state,
     state->editing.composing = composing;
 }
 
-void editing_interaction_begin_composition(DocState* state,
-                                           const EditingSurface* surface,
-                                           View* anchor_view,
-                                           int anchor_offset) {
+static void editing_interaction_begin_composition_raw(DocState* state,
+                                                      const EditingSurface* surface,
+                                                      View* anchor_view,
+                                                      int anchor_offset) {
     if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
     editing_interaction_set_active_surface(state, surface);
     state->editing.composing = true;
@@ -1711,16 +1712,27 @@ void editing_interaction_begin_composition(DocState* state,
     state->editing.composition.canceled = false;
 }
 
-void editing_interaction_update_composition(DocState* state,
-                                            const EditingSurface* surface,
-                                            uint32_t preedit_len,
-                                            uint32_t caret) {
+void editing_interaction_begin_composition(DocState* state,
+                                           const EditingSurface* surface,
+                                           View* anchor_view,
+                                           int anchor_offset) {
+    if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_IME, SM_EV_COMPOSITION_START,
+                               surface ? surface->view : NULL);
+    editing_interaction_begin_composition_raw(state, surface, anchor_view, anchor_offset);
+    sm_guard.commit();
+}
+
+static void editing_interaction_update_composition_raw(DocState* state,
+                                                       const EditingSurface* surface,
+                                                       uint32_t preedit_len,
+                                                       uint32_t caret) {
     if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
     if (!state->editing.composition.active) {
         View* anchor_view = surface->view;
         int anchor_offset = 0;
-        editing_interaction_begin_composition(state, surface,
-                                              anchor_view, anchor_offset);
+        editing_interaction_begin_composition_raw(state, surface,
+                                                  anchor_view, anchor_offset);
     } else {
         editing_interaction_set_active_surface(state, surface);
         state->editing.composition.surface = *surface;
@@ -1733,10 +1745,21 @@ void editing_interaction_update_composition(DocState* state,
     state->editing.composition.canceled = false;
 }
 
-void editing_interaction_end_composition(DocState* state,
-                                         const EditingSurface* surface,
-                                         uint32_t commit_len,
-                                         bool canceled) {
+void editing_interaction_update_composition(DocState* state,
+                                            const EditingSurface* surface,
+                                            uint32_t preedit_len,
+                                            uint32_t caret) {
+    if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_IME, SM_EV_COMPOSITION_UPDATE,
+                               surface ? surface->view : NULL);
+    editing_interaction_update_composition_raw(state, surface, preedit_len, caret);
+    sm_guard.commit();
+}
+
+static void editing_interaction_end_composition_raw(DocState* state,
+                                                    const EditingSurface* surface,
+                                                    uint32_t commit_len,
+                                                    bool canceled) {
     if (!state) return;
     if (surface && surface->kind != EDIT_SURFACE_NONE) {
         editing_interaction_set_active_surface(state, surface);
@@ -1749,6 +1772,20 @@ void editing_interaction_end_composition(DocState* state,
     state->editing.composition.caret = 0;
     state->editing.composition.committed = !canceled && commit_len > 0;
     state->editing.composition.canceled = canceled;
+}
+
+void editing_interaction_end_composition(DocState* state,
+                                         const EditingSurface* surface,
+                                         uint32_t commit_len,
+                                         bool canceled) {
+    if (!state) return;
+    View* target = surface && surface->kind != EDIT_SURFACE_NONE
+        ? surface->view : state->editing.composition.surface.view;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_IME,
+                               canceled ? SM_EV_COMPOSITION_CANCEL : SM_EV_COMPOSITION_COMMIT,
+                               target);
+    editing_interaction_end_composition_raw(state, surface, commit_len, canceled);
+    sm_guard.commit();
 }
 
 void editing_interaction_sync_projection(DocState* state) {
