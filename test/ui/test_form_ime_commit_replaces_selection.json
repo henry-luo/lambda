@@ -48,6 +48,7 @@
     {"type": "ime_compose", "phase": "update", "preedit": "ば", "caret": 1},
     {"type": "ime_compose", "phase": "commit", "commit": "改ざん"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_value", "target": {"selector": "#readonly-fld"}, "equals": "locked"}
+    {"type": "assert_value", "target": {"selector": "#readonly-fld"}, "equals": "locked"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_ime_commit_replaces_selection_final.mark"}
   ]
 }

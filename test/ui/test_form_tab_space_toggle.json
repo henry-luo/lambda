@@ -51,6 +51,7 @@
     {"type": "key_press", "key": "space"},
     {"type": "wait", "ms": 60},
     {"type": "assert_checked", "target": {"selector": "#radio-b"}, "checked": true},
-    {"type": "assert_checked", "target": {"selector": "#radio-a"}, "checked": false}
+    {"type": "assert_checked", "target": {"selector": "#radio-a"}, "checked": false},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_tab_space_toggle_final.mark"}
   ]
 }

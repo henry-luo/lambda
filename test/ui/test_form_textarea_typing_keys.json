@@ -12,6 +12,7 @@
 
     {"type": "type", "target": {"selector": "#bio"}, "text": "first"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "first"}
+    {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "first"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_typing_keys_final.mark"}
   ]
 }

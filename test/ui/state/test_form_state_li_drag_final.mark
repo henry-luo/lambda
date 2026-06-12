@@ -1,0 +1,26 @@
+<doc caret: {
+    target: "html.body.2.div.3.ul.3.li.7",
+    offset: 5
+  }, selection: {
+    anchor: {
+      node: "html.body.2.div.3.ul.3.li.1",
+      offset: 5
+    },
+    focus: {
+      node: "html.body.2.div.3.ul.3.li.7",
+      offset: 5
+    }
+  }, hover: "html.body.2.div.3.ul.3.li.7", active: "html.body.2.div.3.ul.3.li.1", render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 1
+  }, editing: {
+    pointer_selecting: true
+  }
+  <html flags: ['hover', 'active']
+    <body index: 2, flags: ['hover', 'active']
+      <div index: 3, flags: ['hover', 'active']
+        <ul index: 3, flags: ['hover', 'active']
+          <li index: 1, flags: ['active']>
+          <li index: 7, flags: ['hover']>>>>>>

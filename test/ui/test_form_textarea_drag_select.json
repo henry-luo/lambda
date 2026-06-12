@@ -24,6 +24,7 @@
     {"type": "key_combo", "key": "x", "mods_str": "super"},
     {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "contains": "line"},
-    {"type": "assert_clipboard", "contains": "\n"}
+    {"type": "assert_clipboard", "contains": "\n"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_drag_select_final.mark"}
   ]
 }

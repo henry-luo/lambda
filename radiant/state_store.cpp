@@ -17,13 +17,27 @@
 #include "editing.hpp"
 #include "state_machine.hpp"
 #include "retained_display_list.hpp"
+#include "../lambda/ast.hpp"
+#include "../lambda/mark_builder.hpp"
 // str.h included via view.hpp
 #include "view.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/arraylist.h"
 
+#include <errno.h>
+#include <inttypes.h>
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+
+#ifdef _WIN32
+  #include <direct.h>
+  #include <process.h>
+  #define getpid _getpid
+#else
+  #include <unistd.h>
+#endif
 
 // Declared in event.cpp
 extern bool is_view_focusable(View* view);
@@ -34,6 +48,61 @@ HASHMAP_DEFINE_FIELD2_KEY(state_key, StateEntry, key.node, key.name)
 HASHMAP_DEFINE_INTKEY(view_state_entry, ViewStateEntry, view_id)
 
 static void view_state_release_payload(ViewState* view_state);
+static FormControlProp* form_prop_for_view(View* view);
+static bool view_element_has_attr(View* view, const char* attr_name);
+static int form_default_selected_index_from_tree(View* view);
+static float form_default_range_value(View* view, FormControlProp* form);
+
+typedef struct DumpNodeState {
+    void* node;
+    uint64_t flags;
+    bool has_value;
+    Item value;
+    bool has_sel_start;
+    bool has_sel_end;
+    int64_t sel_start;
+    int64_t sel_end;
+} DumpNodeState;
+
+HASHMAP_DEFINE_PTRKEY(dump_node_state, DumpNodeState, node)
+
+typedef struct StateDumpLog {
+    FILE* out;
+    char path[512];
+    char doc_id[96];
+    int pid;
+    uint64_t seq;
+    bool enabled;
+} StateDumpLog;
+
+enum {
+    DUMP_FLAG_HOVER             = 1ull << 0,
+    DUMP_FLAG_ACTIVE            = 1ull << 1,
+    DUMP_FLAG_FOCUS             = 1ull << 2,
+    DUMP_FLAG_FOCUS_VISIBLE     = 1ull << 3,
+    DUMP_FLAG_FOCUS_WITHIN      = 1ull << 4,
+    DUMP_FLAG_CHECKED           = 1ull << 5,
+    DUMP_FLAG_DISABLED          = 1ull << 6,
+    DUMP_FLAG_SELECTED          = 1ull << 7,
+    DUMP_FLAG_TARGET            = 1ull << 8,
+    DUMP_FLAG_PLACEHOLDER_SHOWN = 1ull << 9,
+    DUMP_FLAG_VISITED           = 1ull << 10,
+    DUMP_FLAG_INDETERMINATE     = 1ull << 11,
+    DUMP_FLAG_ENABLED           = 1ull << 12,
+    DUMP_FLAG_READONLY          = 1ull << 13,
+    DUMP_FLAG_VALID             = 1ull << 14,
+    DUMP_FLAG_INVALID           = 1ull << 15,
+    DUMP_FLAG_REQUIRED          = 1ull << 16,
+    DUMP_FLAG_OPTIONAL          = 1ull << 17,
+    DUMP_FLAG_EMPTY             = 1ull << 18,
+};
+
+typedef struct DumpBuildContext {
+    DocState* state;
+    Input* input;
+    MarkBuilder* builder;
+    HashMap* by_node;
+} DumpBuildContext;
 
 static void view_state_release_all_payloads(HashMap* view_state_map) {
     if (!view_state_map) return;
@@ -126,6 +195,680 @@ void radiant_state_cleanup_interned_names(void) {
     }
     s_interned_count = 0;
     s_interned_initialized = false;
+}
+
+// ============================================================================
+// Mark State Dump
+// ============================================================================
+
+static void state_dump_make_temp_dir(void) {
+#if defined(_WIN32) && !defined(__MINGW32__)
+    _mkdir("temp");
+    _mkdir("temp\\state");
+#elif defined(_WIN32)
+    mkdir("temp");
+    mkdir("temp/state");
+#else
+    mkdir("temp", 0755);
+    mkdir("temp/state", 0755);
+#endif
+}
+
+static void state_dump_sanitize_doc_name(const char* in, char* out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!in || !*in) {
+        snprintf(out, out_sz, "doc");
+        return;
+    }
+
+    const char* base = in;
+    for (const char* p = in; *p; p++) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+
+    size_t i = 0;
+    for (const char* p = base; *p && i + 1 < out_sz && i < 64; p++) {
+        char c = *p;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') {
+            out[i++] = c;
+        } else {
+            out[i++] = '_';
+        }
+    }
+    if (i == 0) {
+        snprintf(out, out_sz, "doc");
+    } else {
+        out[i] = '\0';
+    }
+}
+
+StateDumpLog* radiant_state_dump_open(const char* doc_name) {
+    state_dump_make_temp_dir();
+
+    StateDumpLog* dump = (StateDumpLog*)mem_calloc(1, sizeof(StateDumpLog), MEM_CAT_SYSTEM);
+    if (!dump) return NULL;
+
+    dump->pid = (int)getpid();
+    state_dump_sanitize_doc_name(doc_name, dump->doc_id, sizeof(dump->doc_id));
+    snprintf(dump->path, sizeof(dump->path), "./temp/state/state_%d_%s.mark",
+             dump->pid, dump->doc_id);
+
+    dump->out = fopen(dump->path, "w");
+    if (!dump->out) {
+        log_error("state_dump: failed to open %s: %s", dump->path, strerror(errno));
+        mem_free(dump);
+        return NULL;
+    }
+
+    dump->enabled = true;
+    log_info("state_dump: opened %s (doc_id=%s)", dump->path, dump->doc_id);
+    return dump;
+}
+
+void radiant_state_dump_close(StateDumpLog* dump) {
+    if (!dump) return;
+    if (dump->out) {
+        fflush(dump->out);
+        fclose(dump->out);
+    }
+    dump->out = NULL;
+    dump->enabled = false;
+    mem_free(dump);
+}
+
+bool radiant_state_dump_enabled(StateDumpLog* dump) {
+    return dump && dump->enabled && dump->out;
+}
+
+const char* radiant_state_dump_path(StateDumpLog* dump) {
+    return radiant_state_dump_enabled(dump) ? dump->path : NULL;
+}
+
+void radiant_state_set_dump_log(DocState* state, StateDumpLog* dump) {
+    if (state) state->state_dump_log = dump;
+}
+
+static int state_dump_child_index(const DomNode* node) {
+    if (!node || !node->parent || !node->parent->as_element()) return 0;
+    int index = 0;
+    const DomNode* scan = node->parent->as_element()->first_child;
+    while (scan && scan != node) {
+        index++;
+        scan = scan->next_sibling;
+    }
+    return index;
+}
+
+static void state_dump_node_ref(const DomNode* node, char* buf, size_t buf_sz) {
+    if (!buf || buf_sz == 0) return;
+    buf[0] = '\0';
+    if (!node) return;
+
+    const DomElement* el = node->as_element();
+    if (el && el->id && el->id[0]) {
+        snprintf(buf, buf_sz, "#%s", el->id);
+        return;
+    }
+
+    const DomNode* chain[64];
+    int depth = 0;
+    const DomNode* cur = node;
+    while (cur && depth < 64) {
+        chain[depth++] = cur;
+        cur = cur->parent;
+    }
+
+    size_t pos = 0;
+    for (int i = depth - 1; i >= 0; i--) {
+        const DomNode* n = chain[i];
+        if (!n->is_element()) continue;
+        const char* name = n->node_name();
+        if (!name || !name[0]) name = "node";
+        int written = 0;
+        if (n->parent) {
+            written = snprintf(buf + pos, pos < buf_sz ? buf_sz - pos : 0,
+                               "%s%s.%d", pos == 0 ? "" : ".", name,
+                               state_dump_child_index(n));
+        } else {
+            written = snprintf(buf + pos, pos < buf_sz ? buf_sz - pos : 0,
+                               "%s%s", pos == 0 ? "" : ".", name);
+        }
+        if (written < 0) break;
+        if ((size_t)written >= (pos < buf_sz ? buf_sz - pos : 0)) {
+            pos = buf_sz - 1;
+            break;
+        }
+        pos += (size_t)written;
+    }
+    buf[buf_sz - 1] = '\0';
+}
+
+static bool state_dump_float_changed(float value) {
+    return fabsf(value) > 0.0001f;
+}
+
+static bool state_dump_float_differs(float a, float b) {
+    return fabsf(a - b) > 0.0001f;
+}
+
+static bool state_dump_item_truthy(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_NULL || item.item == ItemNull.item) return false;
+    if (type == LMD_TYPE_BOOL) return item.bool_val != 0;
+    return true;
+}
+
+static bool state_dump_item_int(Item item, int64_t* out_value) {
+    if (!out_value) return false;
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
+        *out_value = item.int_val;
+        return true;
+    }
+    if (type == LMD_TYPE_INT64 && item.int64_ptr) {
+        *out_value = *(int64_t*)(uintptr_t)item.int64_ptr;
+        return true;
+    }
+    return false;
+}
+
+static uint64_t state_dump_flag_for_name(const char* name) {
+    if (!name || name[0] != ':') return 0;
+    if (strcmp(name, STATE_HOVER) == 0) return DUMP_FLAG_HOVER;
+    if (strcmp(name, STATE_ACTIVE) == 0) return DUMP_FLAG_ACTIVE;
+    if (strcmp(name, STATE_FOCUS) == 0) return DUMP_FLAG_FOCUS;
+    if (strcmp(name, STATE_FOCUS_VISIBLE) == 0) return DUMP_FLAG_FOCUS_VISIBLE;
+    if (strcmp(name, STATE_FOCUS_WITHIN) == 0) return DUMP_FLAG_FOCUS_WITHIN;
+    if (strcmp(name, STATE_CHECKED) == 0) return DUMP_FLAG_CHECKED;
+    if (strcmp(name, STATE_DISABLED) == 0) return DUMP_FLAG_DISABLED;
+    if (strcmp(name, STATE_SELECTED) == 0) return DUMP_FLAG_SELECTED;
+    if (strcmp(name, STATE_TARGET) == 0) return DUMP_FLAG_TARGET;
+    if (strcmp(name, STATE_PLACEHOLDER) == 0) return DUMP_FLAG_PLACEHOLDER_SHOWN;
+    if (strcmp(name, STATE_VISITED) == 0) return DUMP_FLAG_VISITED;
+    if (strcmp(name, STATE_INDETERMINATE) == 0) return DUMP_FLAG_INDETERMINATE;
+    if (strcmp(name, STATE_ENABLED) == 0) return DUMP_FLAG_ENABLED;
+    if (strcmp(name, STATE_READONLY) == 0) return DUMP_FLAG_READONLY;
+    if (strcmp(name, STATE_VALID) == 0) return DUMP_FLAG_VALID;
+    if (strcmp(name, STATE_INVALID) == 0) return DUMP_FLAG_INVALID;
+    if (strcmp(name, STATE_REQUIRED) == 0) return DUMP_FLAG_REQUIRED;
+    if (strcmp(name, STATE_OPTIONAL) == 0) return DUMP_FLAG_OPTIONAL;
+    if (strcmp(name, STATE_EMPTY) == 0) return DUMP_FLAG_EMPTY;
+    return 0;
+}
+
+static DumpNodeState* state_dump_get_node_state(HashMap* by_node, void* node, bool create) {
+    if (!by_node || !node) return NULL;
+    DumpNodeState query;
+    memset(&query, 0, sizeof(query));
+    query.node = node;
+    DumpNodeState* found = (DumpNodeState*)hashmap_get(by_node, &query);
+    if (found || !create) return found;
+    hashmap_set(by_node, &query);
+    return (DumpNodeState*)hashmap_get(by_node, &query);
+}
+
+static void state_dump_collect_state_map(DocState* state, HashMap* by_node) {
+    if (!state || !state->state_map || !by_node) return;
+
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(state->state_map, &iter, &item)) {
+        StateEntry* entry = (StateEntry*)item;
+        if (!entry || !entry->key.node || !entry->key.name) continue;
+
+        DumpNodeState* ns = state_dump_get_node_state(by_node, entry->key.node, true);
+        if (!ns) continue;
+
+        uint64_t flag = state_dump_flag_for_name(entry->key.name);
+        if (flag != 0) {
+            if (state_dump_item_truthy(entry->value)) ns->flags |= flag;
+            continue;
+        }
+
+        if (strcmp(entry->key.name, STATE_VALUE) == 0 &&
+            entry->value.item != ItemNull.item) {
+            ns->has_value = true;
+            ns->value = entry->value;
+            continue;
+        }
+
+        int64_t ivalue = 0;
+        if (strcmp(entry->key.name, STATE_SELECTION_START) == 0 &&
+            state_dump_item_int(entry->value, &ivalue)) {
+            ns->has_sel_start = true;
+            ns->sel_start = ivalue;
+        } else if (strcmp(entry->key.name, STATE_SELECTION_END) == 0 &&
+                   state_dump_item_int(entry->value, &ivalue)) {
+            ns->has_sel_end = true;
+            ns->sel_end = ivalue;
+        }
+    }
+}
+
+static void state_dump_append_flag(ArrayBuilder& arr, MarkBuilder* builder,
+                                   uint64_t flags, uint64_t bit,
+                                   const char* name) {
+    if ((flags & bit) == 0) return;
+    arr.append(builder->createSymbolItem(name));
+}
+
+static Item state_dump_flags_item(DumpBuildContext* ctx, uint64_t flags) {
+    ArrayBuilder arr = ctx->builder->array();
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_HOVER, "hover");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_ACTIVE, "active");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_FOCUS, "focus");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_FOCUS_VISIBLE, "focus-visible");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_FOCUS_WITHIN, "focus-within");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_CHECKED, "checked");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_DISABLED, "disabled");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_SELECTED, "selected");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_TARGET, "target");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_PLACEHOLDER_SHOWN, "placeholder-shown");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_VISITED, "visited");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_INDETERMINATE, "indeterminate");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_ENABLED, "enabled");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_READONLY, "readonly");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_VALID, "valid");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_INVALID, "invalid");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_REQUIRED, "required");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_OPTIONAL, "optional");
+    state_dump_append_flag(arr, ctx->builder, flags, DUMP_FLAG_EMPTY, "empty");
+    return arr.final();
+}
+
+static bool state_dump_string_differs(const char* value, uint32_t value_len,
+                                      const char* base) {
+    uint32_t base_len = base ? (uint32_t)strlen(base) : 0;
+    if (!value) value_len = 0;
+    if (value_len != base_len) return true;
+    if (value_len == 0) return false;
+    return memcmp(value, base, value_len) != 0;
+}
+
+static Item state_dump_scroll_item(DumpBuildContext* ctx, const ViewState* vs, bool* out_any) {
+    *out_any = false;
+    if (!vs || vs->kind != VIEW_STATE_SCROLL) return ItemNull;
+
+    const ViewState* s = vs;
+    bool changed = state_dump_float_changed(s->data.scroll.x) ||
+        state_dump_float_changed(s->data.scroll.y) ||
+        s->data.scroll.h_dragging || s->data.scroll.v_dragging ||
+        s->data.scroll.h_hovered || s->data.scroll.v_hovered;
+    if (!changed) return ItemNull;
+
+    MapBuilder map = ctx->builder->map();
+    if (state_dump_float_changed(s->data.scroll.x)) map.put("x", (double)s->data.scroll.x);
+    if (state_dump_float_changed(s->data.scroll.y)) map.put("y", (double)s->data.scroll.y);
+    if (state_dump_float_changed(s->data.scroll.max_x)) map.put("max_x", (double)s->data.scroll.max_x);
+    if (state_dump_float_changed(s->data.scroll.max_y)) map.put("max_y", (double)s->data.scroll.max_y);
+    if (s->data.scroll.h_dragging) map.put("h_dragging", true);
+    if (s->data.scroll.v_dragging) map.put("v_dragging", true);
+    *out_any = true;
+    return map.final();
+}
+
+static Item state_dump_form_item(DumpBuildContext* ctx, View* view,
+                                 const ViewState* vs, uint64_t* io_flags,
+                                 bool* out_any) {
+    *out_any = false;
+    if (!view || !vs || vs->kind != VIEW_STATE_FORM_CONTROL) return ItemNull;
+
+    FormControlProp* form = form_prop_for_view(view);
+    const ViewState* s = vs;
+    bool checked_default = view_element_has_attr(view, "checked");
+    bool disabled_default = view_element_has_attr(view, "disabled");
+    bool readonly_default = view_element_has_attr(view, "readonly");
+    bool required_default = view_element_has_attr(view, "required");
+    int selected_default = form_default_selected_index_from_tree(view);
+    float range_default = form_default_range_value(view, form);
+
+    if ((s->data.form.checked != 0) != checked_default) *io_flags |= DUMP_FLAG_CHECKED;
+    if ((s->data.form.disabled != 0) != disabled_default) *io_flags |= DUMP_FLAG_DISABLED;
+    if ((s->data.form.readonly != 0) != readonly_default) *io_flags |= DUMP_FLAG_READONLY;
+    if ((s->data.form.required != 0) != required_default) *io_flags |= DUMP_FLAG_REQUIRED;
+
+    MapBuilder map = ctx->builder->map();
+    bool any = false;
+    if (s->data.form.selected_index != selected_default) {
+        map.put("selected_index", (int64_t)s->data.form.selected_index);
+        any = true;
+    }
+    if (state_dump_float_differs(s->data.form.range_value, range_default)) {
+        map.put("range_value", (double)s->data.form.range_value);
+        any = true;
+    }
+    if (s->data.form.dropdown_open) {
+        map.put("dropdown_open", true);
+        any = true;
+    }
+    if (s->data.form.hover_index != -1) {
+        map.put("hover_index", (int64_t)s->data.form.hover_index);
+        any = true;
+    }
+    if (s->data.form.has_current_value) {
+        const char* base = NULL;
+        if (view->is_element()) {
+            DomElement* elem = lam::dom_require_element(view);
+            base = elem ? elem->get_attribute("value") : NULL;
+        }
+        if (state_dump_string_differs(s->data.form.current_value,
+                                      s->data.form.current_value_len, base)) {
+            map.put("value", ctx->builder->createStringItem(
+                s->data.form.current_value ? s->data.form.current_value : "",
+                s->data.form.current_value_len));
+            any = true;
+        }
+    }
+    if (s->data.form.selection_start != 0 || s->data.form.selection_end != 0) {
+        ArrayBuilder sel = ctx->builder->array();
+        sel.append((int64_t)s->data.form.selection_start);
+        sel.append((int64_t)s->data.form.selection_end);
+        map.put("sel", sel.final());
+        any = true;
+    }
+
+    *out_any = any;
+    return any ? map.final() : ItemNull;
+}
+
+static Item state_dump_pair_item(DumpBuildContext* ctx, int64_t a, int64_t b) {
+    ArrayBuilder arr = ctx->builder->array();
+    arr.append(a);
+    arr.append(b);
+    return arr.final();
+}
+
+static void state_dump_emit_doc_attrs(DumpBuildContext* ctx, ElementBuilder& doc) {
+    DocState* state = ctx->state;
+    char ref[512];
+
+    if (state->focus && state->focus->current) {
+        MapBuilder map = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->focus->current, ref, sizeof(ref));
+        map.put("target", ref);
+        if (state->focus->focus_visible) map.put("visible", true);
+        if (state->focus->from_keyboard) map.put("from_keyboard", true);
+        if (state->focus->from_mouse) map.put("from_mouse", true);
+        doc.attr("focus", map.final());
+    }
+
+    if (state->caret && state->caret->view) {
+        MapBuilder map = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->caret->view, ref, sizeof(ref));
+        map.put("target", ref);
+        map.put("offset", (int64_t)state->caret->char_offset);
+        if (state->caret->line != 0) map.put("line", (int64_t)state->caret->line);
+        if (state->caret->column != 0) map.put("column", (int64_t)state->caret->column);
+        doc.attr("caret", map.final());
+    }
+
+    if (state->selection && !state->selection->is_collapsed) {
+        MapBuilder map = ctx->builder->map();
+        MapBuilder anchor = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->selection->anchor_view, ref, sizeof(ref));
+        anchor.put("node", ref);
+        anchor.put("offset", (int64_t)state->selection->anchor_offset);
+        map.put("anchor", anchor.final());
+        MapBuilder focus = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->selection->focus_view, ref, sizeof(ref));
+        focus.put("node", ref);
+        focus.put("offset", (int64_t)state->selection->focus_offset);
+        map.put("focus", focus.final());
+        doc.attr("selection", map.final());
+    }
+
+    if (state->hover_target) {
+        state_dump_node_ref((const DomNode*)state->hover_target, ref, sizeof(ref));
+        doc.attr("hover", ref);
+    }
+    if (state->active_target) {
+        state_dump_node_ref((const DomNode*)state->active_target, ref, sizeof(ref));
+        doc.attr("active", ref);
+    }
+    if (state->drag_target) {
+        state_dump_node_ref((const DomNode*)state->drag_target, ref, sizeof(ref));
+        doc.attr("drag", ref);
+    }
+    if (state->drag_drop && (state->drag_drop->active || state->drag_drop->pending)) {
+        MapBuilder map = ctx->builder->map();
+        if (state->drag_drop->source_view) {
+            state_dump_node_ref((const DomNode*)state->drag_drop->source_view, ref, sizeof(ref));
+            map.put("source", ref);
+        }
+        if (state->drag_drop->drop_target) {
+            state_dump_node_ref((const DomNode*)state->drag_drop->drop_target, ref, sizeof(ref));
+            map.put("target", ref);
+        }
+        if (state->drag_drop->active) map.put("active", true);
+        if (state->drag_drop->pending) map.put("pending", true);
+        doc.attr("drag_drop", map.final());
+    }
+    if (state->open_dropdown) {
+        MapBuilder map = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->open_dropdown, ref, sizeof(ref));
+        map.put("owner", ref);
+        map.put("x", (double)state->dropdown_x);
+        map.put("y", (double)state->dropdown_y);
+        map.put("w", (double)state->dropdown_width);
+        map.put("h", (double)state->dropdown_height);
+        doc.attr("dropdown", map.final());
+    }
+    if (state->context_menu_target) {
+        MapBuilder map = ctx->builder->map();
+        state_dump_node_ref((const DomNode*)state->context_menu_target, ref, sizeof(ref));
+        map.put("target", ref);
+        if (state->context_menu_hover != -1) map.put("hover", (int64_t)state->context_menu_hover);
+        doc.attr("context_menu", map.final());
+    }
+    if (state_dump_float_changed(state->scroll_x) || state_dump_float_changed(state->scroll_y)) {
+        MapBuilder map = ctx->builder->map();
+        if (state_dump_float_changed(state->scroll_x)) map.put("x", (double)state->scroll_x);
+        if (state_dump_float_changed(state->scroll_y)) map.put("y", (double)state->scroll_y);
+        doc.attr("scroll", map.final());
+    }
+    if (state_dump_float_differs(state->zoom_level, 1.0f)) {
+        doc.attr("zoom", (double)state->zoom_level);
+    }
+    if (state->is_dirty || state->needs_reflow || state->needs_repaint ||
+        state->reflow_scheduler.pending || state->dirty_tracker.dirty_list ||
+        state->dirty_tracker.full_repaint || state->dirty_tracker.full_reflow) {
+        MapBuilder map = ctx->builder->map();
+        if (state->is_dirty) map.put("dirty", true);
+        if (state->needs_reflow || state->dirty_tracker.full_reflow) map.put("reflow", true);
+        if (state->needs_repaint || state->dirty_tracker.full_repaint) map.put("repaint", true);
+        int64_t pending = 0;
+        for (ReflowRequest* req = state->reflow_scheduler.pending; req; req = req->next) pending++;
+        if (pending > 0) map.put("pending", pending);
+        int64_t rects = 0;
+        for (DirtyRect* rect = state->dirty_tracker.dirty_list; rect; rect = rect->next) rects++;
+        if (rects > 0) map.put("rects", rects);
+        doc.attr("render", map.final());
+    }
+    if (state->editing.has_active_surface || state->editing.pointer_selecting ||
+        state->editing.composing || state->editing.autoscroll.active) {
+        MapBuilder map = ctx->builder->map();
+        if (state->editing.has_active_surface) map.put("active_surface", true);
+        if (state->editing.pointer_selecting) map.put("pointer_selecting", true);
+        if (state->editing.composing) map.put("composing", true);
+        if (state->editing.autoscroll.active) map.put("autoscroll", true);
+        doc.attr("editing", map.final());
+    }
+    if (state->visited_links && state->visited_links->url_hash_set &&
+        hashmap_count(state->visited_links->url_hash_set) > 0) {
+        MapBuilder map = ctx->builder->map();
+        map.put("count", (int64_t)hashmap_count(state->visited_links->url_hash_set));
+        doc.attr("visited", map.final());
+    }
+    if (state->has_active_video || state->video_frame_pending ||
+        state->video_controls.hover_video || state->video_controls.is_seeking) {
+        MapBuilder map = ctx->builder->map();
+        if (state->has_active_video) map.put("active", true);
+        if (state->video_frame_pending) map.put("frame_pending", true);
+        if (state->video_controls.hover_video) map.put("controls_hover", true);
+        if (state->video_controls.is_seeking) map.put("seeking", true);
+        if (state_dump_float_changed(state->video_controls.seek_fraction)) {
+            map.put("seek_fraction", (double)state->video_controls.seek_fraction);
+        }
+        doc.attr("video", map.final());
+    }
+}
+
+static Item state_dump_build_element(DumpBuildContext* ctx, DomElement* elem) {
+    if (!ctx || !ctx->builder || !elem) return ItemNull;
+
+    ArrayList* children = arraylist_new(4);
+    bool has_child = false;
+    if (!children) return ItemNull;
+
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        Item child_item = state_dump_build_element(ctx, lam::dom_require_element(child));
+        if (child_item.item != ItemNull.item) {
+            arraylist_append(children, (void*)(uintptr_t)child_item.item);
+            has_child = true;
+        }
+    }
+
+    DumpNodeState* ns = state_dump_get_node_state(ctx->by_node, elem, false);
+    uint64_t flags = ns ? ns->flags : 0;
+
+    ViewState* vs = view_state_get(ctx->state, (View*)elem);
+    if (vs) {
+        if (vs->flags.hovered) flags |= DUMP_FLAG_HOVER;
+        if (vs->flags.active) flags |= DUMP_FLAG_ACTIVE;
+        if (vs->flags.focused) flags |= DUMP_FLAG_FOCUS;
+    }
+
+    bool scroll_any = false;
+    Item scroll_item = state_dump_scroll_item(ctx, vs, &scroll_any);
+    bool form_any = false;
+    Item form_item = state_dump_form_item(ctx, (View*)elem, vs, &flags, &form_any);
+
+    bool has_state = flags != 0 || scroll_any || form_any ||
+        (ns && (ns->has_value || ns->has_sel_start || ns->has_sel_end));
+    if (!has_state && !has_child) {
+        arraylist_free(children);
+        return ItemNull;
+    }
+
+    const char* tag = elem->node_name();
+    if (!tag || !tag[0]) tag = "node";
+    ElementBuilder eb = ctx->builder->element(tag);
+    if (elem->parent) eb.attr("index", (int64_t)state_dump_child_index(elem));
+    if (elem->id && elem->id[0]) eb.attr("id", elem->id);
+
+    if (flags != 0) eb.attr("flags", state_dump_flags_item(ctx, flags));
+    if (scroll_any) eb.attr("scroll", scroll_item);
+    if (form_any) eb.attr("form", form_item);
+    if (ns && ns->has_value) eb.attr("value", ctx->builder->deep_copy(ns->value));
+    if (ns && (ns->has_sel_start || ns->has_sel_end)) {
+        int64_t start = ns->has_sel_start ? ns->sel_start : 0;
+        int64_t end = ns->has_sel_end ? ns->sel_end : start;
+        eb.attr("sel", state_dump_pair_item(ctx, start, end));
+    }
+
+    for (int i = 0; i < children->length; i++) {
+        Item child_item;
+        child_item.item = (uint64_t)(uintptr_t)children->data[i];
+        eb.child(child_item);
+    }
+    arraylist_free(children);
+    return eb.final();
+}
+
+static Item state_dump_build_doc_item(DocState* state, Input* input) {
+    if (!state || !state->owner_store || !state->owner_store->document ||
+        !state->owner_store->document->root || !input) {
+        MarkBuilder builder(input);
+        return builder.element("doc").final();
+    }
+
+    MarkBuilder builder(input);
+    HashMap* by_node = dump_node_state_new(64);
+    state_dump_collect_state_map(state, by_node);
+
+    DumpBuildContext ctx;
+    ctx.state = state;
+    ctx.input = input;
+    ctx.builder = &builder;
+    ctx.by_node = by_node;
+
+    ElementBuilder doc = builder.element("doc");
+    state_dump_emit_doc_attrs(&ctx, doc);
+
+    Item root_item = state_dump_build_element(&ctx, state->owner_store->document->root);
+    if (root_item.item != ItemNull.item) doc.child(root_item);
+
+    if (by_node) hashmap_free(by_node);
+    return doc.final();
+}
+
+StrBuf* radiant_state_dump_mark(DocState* state) {
+    Pool* scratch_pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "state.dump.scratch");
+    if (!scratch_pool) return NULL;
+
+    Input* input = Input::create(scratch_pool, nullptr, nullptr);
+    if (!input) {
+        mem_pool_destroy(scratch_pool);
+        return NULL;
+    }
+
+    Item doc_item = state_dump_build_doc_item(state, input);
+    StrBuf* out = strbuf_new_cap(1024);
+    if (out) print_root_item(out, doc_item);
+
+    if (input->type_list) {
+        arraylist_free(input->type_list);
+        input->type_list = NULL;
+    }
+    mem_pool_destroy(scratch_pool);
+    return out;
+}
+
+bool radiant_state_dump_to_file(DocState* state, const char* path) {
+    if (!state || !path) return false;
+    StrBuf* mark = radiant_state_dump_mark(state);
+    if (!mark) return false;
+
+    FILE* out = fopen(path, "w");
+    if (!out) {
+        log_error("state_dump: failed to write %s: %s", path, strerror(errno));
+        strbuf_free(mark);
+        return false;
+    }
+    if (mark->str && mark->length > 0) fwrite(mark->str, 1, mark->length, out);
+    fclose(out);
+    strbuf_free(mark);
+    return true;
+}
+
+void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id) {
+    if (!state || !radiant_state_dump_enabled(state->state_dump_log)) return;
+
+    StateDumpLog* dump = state->state_dump_log;
+    StrBuf* mark = radiant_state_dump_mark(state);
+    if (!mark) return;
+
+    uint64_t seq = ++dump->seq;
+    uint64_t out_cascade = cascade_id != 0 ? cascade_id : seq;
+    char header[128];
+    int header_len = snprintf(header, sizeof(header),
+                              "<entry cascade:%" PRIu64 ", seq:%" PRIu64 ";\n",
+                              out_cascade, seq);
+    if (header_len > 0) {
+        size_t write_len = (size_t)header_len;
+        if (write_len >= sizeof(header)) write_len = sizeof(header) - 1;
+        fwrite(header, 1, write_len, dump->out);
+    }
+    if (mark->str && mark->length > 0) {
+        fwrite(mark->str, 1, mark->length, dump->out);
+        if (mark->str[mark->length - 1] != '\n') fputc('\n', dump->out);
+    }
+    fwrite(">\n", 1, 2, dump->out);
+    fflush(dump->out);
+    strbuf_free(mark);
 }
 
 // ============================================================================

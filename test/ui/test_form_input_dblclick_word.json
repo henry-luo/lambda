@@ -20,6 +20,7 @@
     {"type": "log", "message": "Cmd+C copies selection to clipboard"},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_clipboard", "equals": "world"}
+    {"type": "assert_clipboard", "equals": "world"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_dblclick_word_final.mark"}
   ]
 }

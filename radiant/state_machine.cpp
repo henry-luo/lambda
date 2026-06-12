@@ -1171,6 +1171,7 @@ bool radiant_state_settle(DocState* state,
 
     emit_validation_record(log, cascade_id, &report);
     emit_state_snapshot(state, log, cascade_id);
+    radiant_state_dump_emit_cascade(state, cascade_id);
 
     if (!ok && report.message[0]) {
         log_error("state_machine: invalid interaction state: %s", report.message);

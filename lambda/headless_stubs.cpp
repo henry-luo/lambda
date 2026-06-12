@@ -151,9 +151,9 @@ int view_doc_in_window(const char* doc_file) {
 
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
-                                    bool enable_event_log) {
+                                    bool enable_event_log, bool enable_state_dump) {
     (void)doc_file; (void)event_file; (void)headless;
-    (void)font_dirs; (void)font_dir_count; (void)enable_event_log;
+    (void)font_dirs; (void)font_dir_count; (void)enable_event_log; (void)enable_state_dump;
     fprintf(stderr, "Error: view command not available in headless CLI build\n");
     return 1;
 }
@@ -161,9 +161,9 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file,
 int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
                                                     const char* event_file, bool headless,
                                                     const char** font_dirs, int font_dir_count,
-                                                    bool enable_event_log) {
+                                                    bool enable_event_log, bool enable_state_dump) {
     (void)script_name; (void)script_source; (void)event_file; (void)headless;
-    (void)font_dirs; (void)font_dir_count; (void)enable_event_log;
+    (void)font_dirs; (void)font_dir_count; (void)enable_event_log; (void)enable_state_dump;
     fprintf(stderr, "Error: view command not available in headless CLI build\n");
     return 1;
 }

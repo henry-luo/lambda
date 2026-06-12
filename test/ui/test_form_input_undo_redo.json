@@ -38,6 +38,7 @@
     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 4},
     {"type": "assert_event_log", "contains": "\"action\":\"push\"", "min": 3},
     {"type": "assert_event_log", "contains": "\"input_type\":\"insertText\"", "min": 3},
-    {"type": "assert_event_log", "contains": "\"owned_by\":\"radiant\"", "min": 4}
+    {"type": "assert_event_log", "contains": "\"owned_by\":\"radiant\"", "min": 4},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_undo_redo_final.mark"}
   ]
 }

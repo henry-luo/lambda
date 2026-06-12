@@ -18,6 +18,7 @@
     {"type": "mouse_move", "target": {"text": "select all text"}},
     {"type": "wait", "ms": 20},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_state_li_drag_final.mark"},
     {"type": "render", "file": "./temp/form_state_li_drag.png"},
     {"type": "mouse_up", "target": {"text": "select all text"}, "button": 0}
   ]

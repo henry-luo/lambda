@@ -324,22 +324,38 @@ static void view_close_event_log() {
     ui_context.event_log = nullptr;
 }
 
+static void view_close_state_dump() {
+    if (!ui_context.state_dump_log) return;
+    radiant_state_dump_close(ui_context.state_dump_log);
+    ui_context.state_dump_log = nullptr;
+}
+
 static void view_attach_event_log(DomDocument* doc, const char* doc_name) {
-    if (!ui_context.event_log_enabled || !doc) return;
+    if ((!ui_context.event_log_enabled && !ui_context.state_dump_enabled) || !doc) return;
 
     view_close_event_log();
+    view_close_state_dump();
 
     const char* href = doc->url ? url_get_href(doc->url) : doc_name;
-    ui_context.event_log = event_state_log_open(doc_name ? doc_name : "document", href);
-    if (!ui_context.event_log) return;
-
-    event_state_log_session_start(ui_context.event_log,
-        (int)ui_context.viewport_width, (int)ui_context.viewport_height,
-        doc->scale > 0 ? doc->scale : 1.0);
-    event_state_log_document(ui_context.event_log, "load_start");
-    event_state_log_document(ui_context.event_log, "load_complete");
+    if (ui_context.event_log_enabled) {
+        ui_context.event_log = event_state_log_open(doc_name ? doc_name : "document", href);
+        if (ui_context.event_log) {
+            event_state_log_session_start(ui_context.event_log,
+                (int)ui_context.viewport_width, (int)ui_context.viewport_height,
+                doc->scale > 0 ? doc->scale : 1.0);
+            event_state_log_document(ui_context.event_log, "load_start");
+            event_state_log_document(ui_context.event_log, "load_complete");
+        }
+    }
+    if (ui_context.state_dump_enabled) {
+        ui_context.state_dump_log = radiant_state_dump_open(doc_name ? doc_name : "document");
+    }
 
     radiant_document_ensure_state(doc, "view_attach_event_log");
+    if (doc->state) {
+        doc->state->active_event_log = ui_context.event_log;
+        radiant_state_set_dump_log(doc->state, ui_context.state_dump_log);
+    }
 }
 
 // update the GLFW window title (safe to call from event handlers)
@@ -883,13 +899,15 @@ int run_layout(const char* html_file) {
 static int view_doc_in_window_with_events_internal(const char* doc_file, const char* doc_source,
                                                    const char* event_file, bool headless,
                                                    const char** font_dirs, int font_dir_count,
-                                                   bool enable_event_log) {
+                                                   bool enable_event_log,
+                                                   bool enable_state_dump) {
     log_init_wrapper();
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
              event_file ? event_file : "NULL", headless);
     ui_context_init(&ui_context, headless);
     ui_context.event_log_enabled = enable_event_log;
+    ui_context.state_dump_enabled = enable_state_dump;
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < font_dir_count; i++) {
@@ -1166,6 +1184,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         if (file_cache) enhanced_cache_destroy(file_cache);
         network_downloader_cleanup_shared();
         view_close_event_log();
+        view_close_state_dump();
         ui_context_cleanup(&ui_context);
         view_cleanup_input_manager();
         lambda_uv_cleanup();
@@ -1344,6 +1363,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     if (file_cache) enhanced_cache_destroy(file_cache);
     network_downloader_cleanup_shared();
     view_close_event_log();
+    view_close_state_dump();
     ui_context_cleanup(&ui_context);
     view_cleanup_input_manager();
     lambda_uv_cleanup();
@@ -1355,22 +1375,24 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
 
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
-                                    bool enable_event_log) {
+                                    bool enable_event_log, bool enable_state_dump) {
     return view_doc_in_window_with_events_internal(doc_file, nullptr, event_file, headless,
-                                                   font_dirs, font_dir_count, enable_event_log);
+                                                   font_dirs, font_dir_count, enable_event_log,
+                                                   enable_state_dump);
 }
 
 int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
                                                     const char* event_file, bool headless,
                                                     const char** font_dirs, int font_dir_count,
-                                                    bool enable_event_log) {
+                                                    bool enable_event_log, bool enable_state_dump) {
     return view_doc_in_window_with_events_internal(script_name, script_source, event_file, headless,
-                                                   font_dirs, font_dir_count, enable_event_log);
+                                                   font_dirs, font_dir_count, enable_event_log,
+                                                   enable_state_dump);
 }
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false);
 }
 
 int window_main(int argc, char* argv[]) {
