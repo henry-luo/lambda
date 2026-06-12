@@ -896,6 +896,7 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
 
     state->pool = pool;
     state->mode = mode;
+    state->lifecycle = DOC_LIFECYCLE_UNINITIALIZED;
     state->version = 1;
     state->zoom_level = 1.0f;
 
@@ -1011,6 +1012,9 @@ StateStore* state_store_create(DomDocument* document) {
     document->state_store = store;
     document->state = store->doc_state;
     store->doc_state->owner_store = store;
+    if (store->doc_state->lifecycle == DOC_LIFECYCLE_UNINITIALIZED) {
+        doc_state_set_lifecycle(store->doc_state, DOC_LIFECYCLE_LOADING);
+    }
     log_debug("state_store_create: created StateStore for document");
     return store;
 }
@@ -1024,6 +1028,7 @@ void state_store_destroy(DomDocument* document) {
     StateStore* store = document->state_store;
     DocState* state = store ? store->doc_state : document->state;
     if (state) {
+        doc_state_set_lifecycle(state, DOC_LIFECYCLE_UNLOADED);
         state->owner_store = NULL;
         radiant_state_destroy(state);
     }
@@ -1851,6 +1856,23 @@ Item state_get(DocState* state, void* node, const char* name) {
 }
 
 static void state_assert_after_mutation(DocState* state, const char* context);
+
+void doc_state_set_lifecycle(DocState* state, DocLifecycleState lifecycle) {
+    if (!state || state->lifecycle == lifecycle) return;
+
+    SmEvent event = SM_EV_DOC_LOAD;
+    if (lifecycle == DOC_LIFECYCLE_COMMITTED) {
+        event = SM_EV_DOC_COMMIT;
+    } else if (lifecycle == DOC_LIFECYCLE_UNLOADED) {
+        event = SM_EV_DOC_UNLOAD;
+    }
+
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DOCUMENT, event, NULL);
+    state->lifecycle = lifecycle;
+    state->version++;
+    sm_guard.commit();
+    state_assert_after_mutation(state, "doc_state_set_lifecycle");
+}
 
 bool state_get_bool(DocState* state, void* node, const char* name) {
     if (state && node && name) {

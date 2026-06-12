@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>State Schema Fuzz</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 16px;
+    }
+    .row {
+      margin: 8px 0;
+    }
+    #pane {
+      width: 280px;
+      height: 90px;
+      overflow: auto;
+      border: 1px solid #888;
+      padding: 8px;
+    }
+    #spacer {
+      height: 280px;
+    }
+  </style>
+</head>
+<body>
+  <label class="row">Name <input id="name" value="seed"></label>
+  <label class="row"><input id="agree" type="checkbox"> Agree</label>
+  <select id="choice" class="row">
+    <option>Alpha</option>
+    <option>Beta</option>
+    <option>Gamma</option>
+  </select>
+  <button id="button">Button</button>
+  <div id="pane">
+    <p>Scrollable text one.</p>
+    <p>Scrollable text two.</p>
+    <p>Scrollable text three.</p>
+    <p>Scrollable text four.</p>
+    <div id="spacer"></div>
+  </div>
+</body>
+</html>

@@ -38,6 +38,13 @@ typedef enum StateUpdateMode {
     STATE_MODE_IMMUTABLE = 1,  // copy-on-write (enables undo/time-travel)
 } StateUpdateMode;
 
+typedef enum DocLifecycleState {
+    DOC_LIFECYCLE_UNINITIALIZED = 0,
+    DOC_LIFECYCLE_LOADING,
+    DOC_LIFECYCLE_COMMITTED,
+    DOC_LIFECYCLE_UNLOADED
+} DocLifecycleState;
+
 /**
  * State key - identifies a state by node and name
  */
@@ -281,6 +288,7 @@ typedef struct DocState {
     
     // Update mode and versioning
     StateUpdateMode mode;
+    DocLifecycleState lifecycle;
     uint64_t version;              // monotonically increasing version number
     struct DocState* prev_version;  // previous version (immutable mode only)
 
@@ -458,6 +466,11 @@ DocState* radiant_document_ensure_state(DomDocument* document, const char* owner
  * Destroy a document's StateStore before its owning pool is released.
  */
 void radiant_document_destroy_state(DomDocument* document);
+
+/**
+ * Move a document through its high-level lifecycle.
+ */
+void doc_state_set_lifecycle(DocState* state, DocLifecycleState lifecycle);
 
 /**
  * Destroy a state store and free all resources

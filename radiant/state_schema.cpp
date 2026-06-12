@@ -14,6 +14,21 @@
 #include <assert.h>
 #endif
 
+static const int SM_TO_DOC_LOADING[] = {
+    DOC_LIFECYCLE_LOADING,
+    SM_STATE_SAME,
+};
+
+static const int SM_TO_DOC_COMMITTED[] = {
+    DOC_LIFECYCLE_COMMITTED,
+    SM_STATE_SAME,
+};
+
+static const int SM_TO_DOC_UNLOADED[] = {
+    DOC_LIFECYCLE_UNLOADED,
+    SM_STATE_SAME,
+};
+
 static const int SM_TO_SELECTION_CARET[] = {
     SEL_CARET_COLLAPSED,
     SM_STATE_SAME,
@@ -190,6 +205,16 @@ static const int SM_TO_CONTEXT_HOVER[] = {
 #define SM_RULE_TO(list_name) list_name, (uint8_t)(sizeof(list_name) / sizeof((list_name)[0]))
 
 static const StateTransitionRule RADIANT_STATE_RULES[] = {
+    { SM_FAMILY_DOCUMENT, SM_VC_ANY, SM_STATE_ANY, SM_EV_DOC_LOAD,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_DOC_LOADING), 0, NULL, 0,
+      "doc.load" },
+    { SM_FAMILY_DOCUMENT, SM_VC_ANY, SM_STATE_ANY, SM_EV_DOC_COMMIT,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_DOC_COMMITTED), 0, NULL, 0,
+      "doc.commit" },
+    { SM_FAMILY_DOCUMENT, SM_VC_ANY, SM_STATE_ANY, SM_EV_DOC_UNLOAD,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_DOC_UNLOADED), 0, NULL, 0,
+      "doc.unload" },
+
     { SM_FAMILY_FOCUS, SM_VC_ANY, SM_STATE_ANY, SM_EV_FOCUS_ELEMENT,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_FOCUS_TARGET_OR_NONE), 0, NULL, 0,
       "focus.element" },
@@ -431,6 +456,7 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
 
 static const char* sm_family_name(SmFamily family) {
     switch (family) {
+        case SM_FAMILY_DOCUMENT: return "document";
         case SM_FAMILY_FOCUS: return "focus";
         case SM_FAMILY_SELECTION: return "selection";
         case SM_FAMILY_IME: return "ime";
@@ -450,6 +476,9 @@ static const char* sm_family_name(SmFamily family) {
 
 static const char* sm_event_name(SmEvent event) {
     switch (event) {
+        case SM_EV_DOC_LOAD: return "doc_load";
+        case SM_EV_DOC_COMMIT: return "doc_commit";
+        case SM_EV_DOC_UNLOAD: return "doc_unload";
         case SM_EV_COLLAPSE_TO_BOUNDARY: return "collapse_to_boundary";
         case SM_EV_START_POINTER_SELECTION: return "start_pointer_selection";
         case SM_EV_UI_START_POINTER_SELECTION: return "ui_start_pointer_selection";
@@ -606,8 +635,14 @@ static int sm_derive_context_menu_state(DocState* state) {
     return state->context_menu_hover >= 0 ? CM_HOVER : CM_OPEN;
 }
 
+static int sm_derive_document_state(DocState* state) {
+    return state ? state->lifecycle : DOC_LIFECYCLE_UNINITIALIZED;
+}
+
 int sm_derive_state(DocState* state, SmFamily family, View* target) {
     switch (family) {
+        case SM_FAMILY_DOCUMENT:
+            return sm_derive_document_state(state);
         case SM_FAMILY_FOCUS:
             return sm_derive_focus_state(state);
         case SM_FAMILY_SELECTION:

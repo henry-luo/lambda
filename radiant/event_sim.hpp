@@ -62,6 +62,7 @@
  *     {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "draggable", "equals": "true"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
+ *     {"type": "fuzz_schema", "steps": 50, "seed": 1234},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
  *   ]
  * }
@@ -101,6 +102,7 @@ enum SimEventType {
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
     SIM_EVENT_EDITING_TEXT_DRAG_DROP, // editing deleteByDrag/insertFromDrop
+    SIM_EVENT_FUZZ_SCHEMA,     // deterministic legal input fuzz + schema assertion
     // F6: clipboard helpers
     SIM_EVENT_PASTE_TEXT,      // seed clipboard, dispatch Cmd+V into focused
     SIM_EVENT_ASSERT_CLIPBOARD, // assert current clipboard text matches
@@ -332,6 +334,9 @@ struct SimEvent {
     int replay_scancode;
     uint32_t replay_codepoint;
     uint32_t replay_preedit_caret;
+    // State schema conformance fuzz fields
+    int fuzz_steps;
+    uint32_t fuzz_seed;
 };
 
 // Event simulation context

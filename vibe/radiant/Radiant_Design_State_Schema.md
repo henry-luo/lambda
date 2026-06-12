@@ -28,19 +28,17 @@ These resolve the original open questions and govern the rest of this document:
    obligation, or an invariant failure is a **hard `assert()` + abort in debug builds**
    (and a `state.invalid` JSON record). Release builds do not run transition-edge checking;
    existing resident validation behavior remains equivalent to today.
-3. **Invariant migration:** **hybrid — keep the nine `validate_*` functions running in
-   parallel with the new table-driven pass during the later invariant migration step, assert
-   the two agree (differential check), then delete the old functions in a dedicated cleanup
-   commit** once parity is proven over the baseline suite (§8).
-4. **Property/fuzz testing (§7.5):** adopted, but scheduled as a **later phase** (Step J),
-   after the schema and runtime checker are in place.
+3. **Invariant migration:** land as a hybrid migration first, then make the table-driven pass
+   the single orchestration path once parity is proven over the baseline suite (§8).
+4. **Property/fuzz testing (§7.5):** adopted after the schema and runtime checker are in
+   place. The first implementation is deterministic `event_sim` fuzz plus replay-input
+   schema assertions.
 5. **Mark/Lambda-authored schema (§9, last bullet):** **documentation-only future
    enhancement** in this proposal; not implemented now.
 6. **First family to land:** **selection + IME only** (both already FSM-shaped and the most
    invariant-dense around carets/composition) — §8 Step C.
-7. **Document-lifecycle family:** defer adding `DocState` lifecycle fields until navigation
-   or document activation work needs them. Keep it in the target schema, but do not increase
-   the blast radius of the first checker landing.
+7. **Document-lifecycle family:** add the `DocState` lifecycle field once navigation/document
+   activation work needs it. It is now part of the complete checker set.
 8. **Table layout:** a **single `RADIANT_STATE_RULES` array** for all families (one file,
    readable top-to-bottom, sectioned by comment banners); the lookup indexes it by
    `[family][event]` at startup if scan cost ever matters — §3.7, §5.3.
@@ -150,7 +148,7 @@ partitioned by **family**:
 
 | Family enum | Backing state in `DocState`/`ViewState` | Source |
 |---|---|---|
-| `SM_FAMILY_DOCUMENT` | document lifecycle (load/active/inactive/unload) | design doc; not yet a field |
+| `SM_FAMILY_DOCUMENT` | `DocLifecycleState lifecycle` | state_store.hpp |
 | `SM_FAMILY_FOCUS` | `FocusState* focus` | [state_store_internal.hpp](../../radiant/state_store_internal.hpp) |
 | `SM_FAMILY_SELECTION` | `DomSelection* dom_selection` + `SelectionState* selection` + `CaretState* caret` | state_store_internal.hpp |
 | `SM_FAMILY_IME` | `EditingInteractionState.composition` | [state_store.hpp:226](../../radiant/state_store.hpp) |
@@ -179,7 +177,8 @@ represents.
 ```cpp
 // radiant/state_schema.hpp
 
-enum DocLifecycleState   { DOC_NONE, DOC_LOADING, DOC_ACTIVE, DOC_INACTIVE, DOC_UNLOADING };
+enum DocLifecycleState   { DOC_LIFECYCLE_UNINITIALIZED, DOC_LIFECYCLE_LOADING,
+                           DOC_LIFECYCLE_COMMITTED, DOC_LIFECYCLE_UNLOADED };
 
 enum FocusFsmState       { FOCUS_NO_DOCUMENT, FOCUS_DOC_INACTIVE, FOCUS_DOC_ACTIVE_NONE,
                            FOCUS_ELEMENT, FOCUS_TEXT_CONTROL, FOCUS_CONTENTEDITABLE,
@@ -648,23 +647,17 @@ green, matching the cadence of the prior phases.
   bypasses. Current implementation uses writer-level hooks for scroll, form controls,
   dropdown, and context menu so existing callers share the same semantic transition boundary.
 - **Step F — expand one family at a time.** After normalization, populate focus, hover/active,
-  drag/drop, scroll, form controls, dropdown, and context menu. Current coverage marks 13
-  families complete in `make check-state-machine`: focus, selection, IME, hover, active,
-  drag/drop, scroll, checkable, select, range, text, dropdown, and context menu.
-- **Step G — invariant table (hybrid migration).** Move the ~96 `report_fail()` checks into
+  drag/drop, scroll, form controls, dropdown, context menu, and document lifecycle. Current
+  coverage marks 14 families complete in `make check-state-machine`: document, focus,
+  selection, IME, hover, active, drag/drop, scroll, checkable, select, range, text, dropdown,
+  and context menu.
+- **Step G — invariant table.** Move the ~96 `report_fail()` checks into
   `RADIANT_INVARIANTS` as predicate primitives + bindings, and add the table-driven pass to
-  `radiant_state_validate_interaction()`. **Crucially, do not delete the nine `validate_*`
-  functions yet** — run both the old imperative validators and the new table loop in debug
-  builds, and add a **differential assertion**: on every validation, the old and new passes
-  must produce the *same* pass/fail verdict (and ideally the same first failure message). A
-  small `make` test or a debug-only cross-check enforces this over the baseline suite. Once
-  parity is demonstrated, **delete the nine `validate_*` functions in a dedicated cleanup
-  commit**, leaving the table as the single source of truth. This keeps the migration
-  behavior-preserving by construction and trivially reversible, then lands the clean
-  end-state. Current implementation has the first hybrid slice: 14 invariant bindings run
-  through the table-driven pass, debug builds assert parity against the legacy pass, and
-  `make check-state-machine` validates the binding table. (See "Replace vs. keep" rationale
-  below.)
+  `radiant_state_validate_interaction()`. This landed in two slices: first, a hybrid
+  migration where the legacy aggregate pass and schema pass ran in parallel with a debug
+  parity assertion; then, after baseline parity, the legacy aggregate path was removed.
+  Current implementation has 14 invariant bindings, `make check-state-machine` validates the
+  binding table, and `radiant_state_validate_interaction()` is table-driven.
 - **Step H — action/effect obligations.** Add observed action/effect recording and wire only
   the writers whose effects are needed by table rules. Current implementation has the first
   narrow slice: `SmTransitionScope` records observed action flags, nested transition scopes
@@ -682,16 +675,18 @@ green, matching the cadence of the prior phases.
   The fifth slice adds UI-level focus events that require `SM_ACT_DISPATCH_BLUR` and, when a
   text control's focus-time value changed, `SM_ACT_DISPATCH_CHANGE`. Future Step H work should
   add action obligations only when new effectful transitions are introduced.
-- **Step I — document lifecycle when needed.** Add the `SM_FAMILY_DOCUMENT` backing field only
-  when navigation/document activation work needs it. Concretely, add a `DocLifecycleState
-  lifecycle;` field plus `doc_state_set_lifecycle()`, then populate
-  `SM_EV_DOC_LOAD`/`SM_EV_DOC_COMMIT`/`SM_EV_DOC_UNLOAD`. Keep this out of the first checker
-  landing.
-- **Step J — property/fuzz conformance (later phase).** Extend `event_sim` to drive random
-  *legal* event sequences and assert schema conformance after every event (the hard-assert
-  checker fires on any undeclared edge or invariant break). Also assert conformance over
-  recorded replay traces. Add a small set of `test/ui/` fixtures. Scheduled after the schema
-  and runtime checker are stable, per the §"Settled decisions".
+- **Step I — document lifecycle.** Add the `SM_FAMILY_DOCUMENT` backing field and lifecycle
+  transitions:
+  - [x] add `DocLifecycleState lifecycle;` to `DocState`
+  - [x] add `doc_state_set_lifecycle()`
+  - [x] populate `SM_EV_DOC_LOAD`/`SM_EV_DOC_COMMIT`/`SM_EV_DOC_UNLOAD`
+  - [x] include document in `make check-state-machine`
+- **Step J — property/fuzz conformance.** Extend `event_sim` to drive random *legal* event
+  sequences and assert schema conformance after every event (the hard-assert checker fires on
+  any undeclared edge or invariant break). Also assert conformance over recorded replay
+  traces. Current implementation adds deterministic `fuzz_schema` events, validates replay
+  inputs when replay state assertion mode is enabled, and includes
+  `test/ui/test_state_schema_fuzz.{html,json}`.
 
 ### Replace vs. keep the `validate_*` functions — rationale
 
@@ -761,17 +756,17 @@ These informed the design above; collecting them so reviewers can weigh each.
 2. **Failure mode** — ✅ hard `assert()` + abort in debug, `state.invalid` JSON, release
    transition-edge checking compiled out while resident validation keeps current behavior
    (§5.3–5.4).
-3. **Invariant migration** — ✅ hybrid keep-in-parallel + differential check, then delete the
-   nine `validate_*` functions during the later invariant-table migration (§8 Step G and
-   "Replace vs. keep").
-4. **Property/fuzz testing** — ✅ adopted as a later phase (§8 Step J).
+3. **Invariant migration** — ✅ table-driven validator is now the single orchestration path
+   (§8 Step G and "Replace vs. keep").
+4. **Property/fuzz testing** — ✅ deterministic `event_sim` fuzz and replay schema assertions
+   are implemented (§8 Step J).
 5. **Mark/Lambda-authored schema** — ✅ documentation-only future enhancement (§9).
 
 ### Resolved (round 2)
 
 6. **Scope of first landing** — ✅ selection + IME only (§8 Step C).
-7. **Document-lifecycle family** — ✅ defer the missing `DocState` lifecycle field until
-   navigation/document activation work needs it (§8 Step I).
+7. **Document-lifecycle family** — ✅ `DocState::lifecycle` is implemented and covered
+   (§8 Step I).
 8. **Table layout** — ✅ a single `RADIANT_STATE_RULES` array, sectioned by comment banners,
    indexed by `[family][event]` at startup only if scan cost matters (§3.7, §5.3).
 9. **Diagram/coverage tooling timing** — ✅ add coverage for implemented families immediately
