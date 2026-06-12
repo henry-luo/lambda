@@ -127,7 +127,7 @@ fn render_operator(node, context) {
     let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
         else if (text == ")" or text == "]" or text == "}") "mclose"
         else "mbin"
-    box.text_box(text, css.CMR, atom_type)
+    box.text_box(operator_display_text(text), css.CMR, atom_type)
 }
 
 fn render_relation(node, context) {
@@ -143,8 +143,13 @@ fn render_punct(node, context) {
     box.text_box(text, css.CMR, atom_type)
 }
 
+fn operator_display_text(text) {
+    if (text == "-") "−" else text
+}
+
 fn render_text(text, context) {
-    box.text_box(text, css.font_class(context.font), "mord")
+    let cls = if (is_plain_number_text(text)) css.CMR else css.font_class(context.font)
+    box.text_box(text, cls, "mord")
 }
 
 // ============================================================
@@ -294,12 +299,40 @@ fn render_delimiter_group(node, context) {
     let right_text = if (node.right != null) string(node.right) else ""
 
     let children = render_children(node, context)
-    let content = box.hbox(children)
-    let content_height = content.height + content.depth
+    let spaced = apply_spacing(children, context)
+    let content = box.hbox(spaced)
 
+    if (content.height + content.depth <= 1.2)
+        render_small_delimiter_group(left_text, right_text, spaced, content)
+    else
+        render_stretchy_delimiter_group(left_text, right_text, content)
+}
+
+fn render_small_delimiter_group(left_text, right_text, spaced, content) {
+    let left_char = delims.resolve_char(left_text)
+    let right_char = delims.resolve_char(right_text)
+    let left_el = <span class: css.classes([css.SMALL_DELIM, css.OPEN]); left_char>
+    let right_el = <span class: css.classes([css.SMALL_DELIM, css.CLOSE]); right_char>
+    let content_elements = box.child_elements(spaced)
+    {
+        element: <span class: css.LEFT_RIGHT, style: "margin-top:-0.08333em;height:0.72777em";
+            left_el
+            for (el in content_elements) el
+            right_el
+        >,
+        height: 0.75,
+        depth: 0.25,
+        width: content.width + 0.8,
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn render_stretchy_delimiter_group(left_text, right_text, content) {
+    let content_height = content.height + content.depth
     let left_box = delims.render_stretchy(left_text, content_height, "mopen")
     let right_box = delims.render_stretchy(right_text, content_height, "mclose")
-
     box.with_class(box.hbox([left_box, content, right_box]), css.LEFT_RIGHT)
 }
 
@@ -493,6 +526,10 @@ fn get_text_from_element(node) {
     else if (node.text != null) string(node.text)
     else if (node.name != null) string(node.name)
     else ""
+}
+
+fn is_plain_number_text(text) {
+    len(text) == 1 and contains("0123456789", text)
 }
 
 // ============================================================

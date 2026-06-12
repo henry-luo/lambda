@@ -87,6 +87,7 @@ fn text_height(text) {
 fn text_depth(text) {
     if (text_has_tall_delim(text)) 0.25
     else if (text == "," or text == ";") 0.19
+    else if (text == "y") 0.19
     else 0.08
 }
 
@@ -121,23 +122,59 @@ pub fn null_delim() {
 // horizontally concatenate boxes into one
 pub fn hbox(boxes) {
     let valid = (for (b in boxes where b != null) b)
-    let children = (for (v in valid) v.element)
+    let children = collect_elements(valid, 0, [])
     let total_width = sum((for (v in valid) v.width))
     let max_height = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.height))
     let max_depth = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.depth))
+    let max_render_height = if (len(valid) == 0) null
+        else max((for (v in valid) if (v.render_height != null) v.render_height else v.height))
+    let max_render_depth = if (len(valid) == 0) null
+        else max((for (v in valid) if (v.render_depth != null) v.render_depth else v.depth))
+    let max_render_total = if (len(valid) == 0) null
+        else max((for (v in valid) if (v.render_total != null) v.render_total
+            else (if (v.render_height != null) v.render_height else v.height) +
+                 (if (v.render_depth != null) v.render_depth else v.depth)))
     {
         element: <span class: css.BASE;
             for (child in children) child
         >,
         height: max_height,
         depth: max_depth,
+        render_height: max_render_height,
+        render_depth: max_render_depth,
+        render_total: max_render_total,
         width: total_width,
         type: "ord",
         italic: 0.0,
         skew: 0.0
     }
+}
+
+pub fn child_elements(boxes) {
+    let valid = (for (b in boxes where b != null) b)
+    collect_elements(valid, 0, [])
+}
+
+pub fn elements_of(bx) {
+    if (bx.elements != null) bx.elements
+    else if (bx.element is element and bx.element.class == css.BASE)
+        element_children(bx.element, 0, [])
+    else [bx.element]
+}
+
+fn element_children(el, i, acc) {
+    if (i >= len(el)) acc
+    else element_children(el, i + 1, acc ++ [el[i]])
+}
+
+fn collect_elements(valid, i, acc) {
+    if (i >= len(valid)) acc
+    else
+        (let v = valid[i],
+         let next = acc ++ elements_of(v),
+         collect_elements(valid, i + 1, next))
 }
 
 // ============================================================
