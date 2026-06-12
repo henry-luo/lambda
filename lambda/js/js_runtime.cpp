@@ -6181,12 +6181,12 @@ static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool
     return js_property_set(receiver, key, value);
 }
 
-extern "C" Item js_super_property_set(Item receiver, Item key, Item value) {
-    return js_super_property_set_impl(receiver, key, value, true);
-}
-
-extern "C" Item js_super_property_set_non_strict(Item receiver, Item key, Item value) {
-    return js_super_property_set_impl(receiver, key, value, false);
+// Tune8 §2.2: super_property_set + super_property_set_non_strict folded into
+// a single entry with an explicit strict flag (passed as a constant operand by
+// the JIT lowering). Both call paths are cold; the runtime branches once on
+// the flag.
+extern "C" Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict) {
+    return js_super_property_set_impl(receiver, key, value, strict != 0);
 }
 
 // v23: Property access with raw C-string key — avoids heap string allocation.
@@ -21196,18 +21196,26 @@ extern "C" Item js_throw_system_error(int uv_errno, const char* syscall, const c
     return ItemNull;
 }
 
-// v20: Helper: throw SyntaxError (for early errors detected during transpilation)
-extern "C" void js_throw_syntax_error(Item message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
+// Tune8 §2.3: js_throw_syntax_error and js_throw_reference_error are now thin
+// C wrappers around js_throw_named_error. The MIR transpiler emits the
+// unified js_throw_named_error directly (saving 1 import-table entry);
+// C-side callers in js_globals.cpp still call the named wrappers.
+//
+//   kind = 0  → SyntaxError    (early errors detected during transpilation)
+//   kind = 1  → ReferenceError (TDZ violations, undefined variables)
+extern "C" void js_throw_named_error(int64_t kind, Item message) {
+    const char* name = (kind == 0) ? "SyntaxError" : "ReferenceError";
+    Item type_name = (Item){.item = s2it(heap_create_name(name))};
     Item error = js_new_error_with_name(type_name, message);
     js_throw_value(error);
 }
 
-// Helper: throw ReferenceError (for TDZ violations, undefined variables)
+extern "C" void js_throw_syntax_error(Item message) {
+    js_throw_named_error(0, message);
+}
+
 extern "C" void js_throw_reference_error(Item message) {
-    Item type_name = (Item){.item = s2it(heap_create_name("ReferenceError"))};
-    Item error = js_new_error_with_name(type_name, message);
-    js_throw_value(error);
+    js_throw_named_error(1, message);
 }
 
 // helper: read array element, checking for accessor properties (getters via defineProperty)

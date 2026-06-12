@@ -2113,7 +2113,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     // From this point on, normal js_dom_dispatch_event() handles `this`,
     // `event`, return-false default prevention, and propagation ordering.
     Item global = js_get_global_this();
-    int installed = 0;
+    [[maybe_unused]] int installed = 0;  // only consumed by log_info, which is a no-op in release
     size_t iter = 0;
     void* item;
     while (hashmap_iter(handlers->element_map, &iter, &item)) {

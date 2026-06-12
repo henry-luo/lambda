@@ -804,11 +804,21 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
     }
 }
 
-// v23b: Comparison facades returning raw int64_t 0/1 for direct use in MIR_BF/BT.
-// Eliminates box→unbox→branch cycle when comparison is used in if/for/while condition.
-// These inline the fast int-vs-int path and fall back to the full boxed comparison.
+// v23b / Tune8 §2.1: Comparison facade returning raw int64_t 0/1 for direct use
+// in MIR_BF/BT. Eliminates the box→unbox→branch cycle when a comparison is used
+// as an if/for/while condition. Inlines the fast int-vs-int path; falls back to
+// the full boxed comparison.
+//
+// Tune8 §2.1 fold: replaces 4 separate runtime entries (js_lt_raw / js_gt_raw /
+// js_le_raw / js_ge_raw) with one dispatcher. The op parameter is a compile-time
+// constant at every JIT call site, so the runtime-side switch resolves to a
+// single predicted branch after the first call. Per Q1, MIR cannot inline
+// through the C import, so the dispatch is paid — measured cost vs the
+// pre-fold 4-entry form is within the microbench noise floor.
+//
+// op codes:  0=LT (a<b)  1=GT (a>b)  2=LE (a<=b)  3=GE (a>=b)
 static Item js_abstract_relational_lt(Item left, Item right, bool leftFirst = true); // forward declaration
-extern "C" int64_t js_lt_raw(Item left, Item right) {
+extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
     TypeId lt = get_type_id(left), rt = get_type_id(right);
     bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
     bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
@@ -816,59 +826,40 @@ extern "C" int64_t js_lt_raw(Item left, Item right) {
         double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
         double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
         if (isnan(l) || isnan(r)) return 0;
-        return l < r ? 1 : 0;
+        switch (op) {
+        case 0: return l <  r ? 1 : 0;
+        case 1: return l >  r ? 1 : 0;
+        case 2: return l <= r ? 1 : 0;
+        case 3: return l >= r ? 1 : 0;
+        default: return 0;
+        }
     }
-    Item result = js_less_than(left, right);
-    if (result.item == ITEM_JS_UNDEFINED) return 0; // NaN comparison
-    return (int64_t)it2b(result);
-}
-
-extern "C" int64_t js_gt_raw(Item left, Item right) {
-    // a > b: spec evaluates left first; use ARC(right, left, leftFirst=false) to match
-    TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-    if (l_num && r_num) {
-        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
-        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
-        if (isnan(l) || isnan(r)) return 0;
-        return l > r ? 1 : 0;
+    // Boxed fallback. The argument order and inversion are op-specific to
+    // preserve original semantics (a > b is !(a < b) with NaN handling; spec
+    // evaluation order matters for the leftFirst flag).
+    switch (op) {
+    case 0: {  // LT — uses public js_less_than path (matches pre-fold js_lt_raw)
+        Item result = js_less_than(left, right);
+        if (result.item == ITEM_JS_UNDEFINED) return 0;
+        return (int64_t)it2b(result);
     }
-    Item result = js_abstract_relational_lt(right, left, false);
-    if (js_exception_pending || result.item == ITEM_JS_UNDEFINED) return 0;
-    return (int64_t)it2b(result);
-}
-
-extern "C" int64_t js_le_raw(Item left, Item right) {
-    // a <= b is !(b < a), but NaN must return false; leftFirst=false since args are swapped
-    TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-    if (l_num && r_num) {
-        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
-        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
-        if (isnan(l) || isnan(r)) return 0;
-        return l <= r ? 1 : 0;
+    case 1: {  // GT — a > b => ARC(b, a, leftFirst=false)
+        Item result = js_abstract_relational_lt(right, left, false);
+        if (js_exception_pending || result.item == ITEM_JS_UNDEFINED) return 0;
+        return (int64_t)it2b(result);
     }
-    Item gt = js_abstract_relational_lt(right, left, false);
-    if (js_exception_pending || gt.item == ITEM_JS_UNDEFINED) return 0;
-    return it2b(gt) ? 0 : 1;
-}
-
-extern "C" int64_t js_ge_raw(Item left, Item right) {
-    // a >= b is !(a < b), but NaN must return false; leftFirst=true since args are in source order
-    TypeId lt = get_type_id(left), rt = get_type_id(right);
-    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
-    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-    if (l_num && r_num) {
-        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
-        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
-        if (isnan(l) || isnan(r)) return 0;
-        return l >= r ? 1 : 0;
+    case 2: {  // LE — a <= b => !(b < a); NaN→false
+        Item gt = js_abstract_relational_lt(right, left, false);
+        if (js_exception_pending || gt.item == ITEM_JS_UNDEFINED) return 0;
+        return it2b(gt) ? 0 : 1;
     }
-    Item lt_result = js_abstract_relational_lt(left, right, true);
-    if (js_exception_pending || lt_result.item == ITEM_JS_UNDEFINED) return 0;
-    return it2b(lt_result) ? 0 : 1;
+    case 3: {  // GE — a >= b => !(a < b); NaN→false
+        Item lt_result = js_abstract_relational_lt(left, right, true);
+        if (js_exception_pending || lt_result.item == ITEM_JS_UNDEFINED) return 0;
+        return it2b(lt_result) ? 0 : 1;
+    }
+    default: return 0;
+    }
 }
 
 extern "C" int64_t js_eq_raw(Item left, Item right) {
@@ -886,16 +877,11 @@ extern "C" int64_t js_eq_raw(Item left, Item right) {
     return (int64_t)it2b(js_strict_equal(left, right));
 }
 
-extern "C" int64_t js_ne_raw(Item left, Item right) {
-    return js_eq_raw(left, right) ? 0 : 1;
-}
+// Tune8 §2.1: js_ne_raw and js_loose_ne_raw removed. The transpiler now emits
+// js_eq_raw / js_loose_eq_raw followed by an inline MIR XOR-with-1 to invert.
 
 extern "C" int64_t js_loose_eq_raw(Item left, Item right) {
     return (int64_t)it2b(js_equal(left, right));
-}
-
-extern "C" int64_t js_loose_ne_raw(Item left, Item right) {
-    return js_loose_eq_raw(left, right) ? 0 : 1;
 }
 
 // js_property_get_str: property access with C string key (avoids string boxing)
@@ -1479,10 +1465,9 @@ extern "C" Item js_equal(Item left, Item right) {
     return (Item){.item = b2it(false)};
 }
 
-extern "C" Item js_not_equal(Item left, Item right) {
-    Item eq = js_equal(left, right);
-    return (Item){.item = b2it(!it2b(eq))};
-}
+// Tune8 §2.1: js_not_equal removed — the transpiler emits js_equal followed
+// by an inline MIR_XOR-with-1 on the boxed result (which inverts the low bit
+// where b2it stores the bool, preserving the high-byte type tag).
 
 extern "C" Item js_strict_equal(Item left, Item right) {
     TypeId left_type = get_type_id(left);
@@ -1544,10 +1529,7 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 }
 
-extern "C" Item js_strict_not_equal(Item left, Item right) {
-    Item eq = js_strict_equal(left, right);
-    return (Item){.item = b2it(!it2b(eq))};
-}
+// Tune8 §2.1: js_strict_not_equal removed — see comment above js_strict_equal.
 
 // Internal: Abstract Relational Comparison (ES spec §7.2.14)
 // Returns true, false, or undefined (for NaN)

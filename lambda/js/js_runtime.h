@@ -65,9 +65,9 @@ Item js_power(Item left, Item right);     // **
 // =============================================================================
 
 Item js_equal(Item left, Item right);           // == (with coercion)
-Item js_not_equal(Item left, Item right);       // !=
 Item js_strict_equal(Item left, Item right);    // ===
-Item js_strict_not_equal(Item left, Item right); // !==
+// Tune8 §2.1: js_not_equal / js_strict_not_equal removed — transpiler emits
+// the eq variant followed by inline MIR_XOR-with-1 on the boxed result.
 Item js_less_than(Item left, Item right);       // <
 Item js_less_equal(Item left, Item right);      // <=
 Item js_greater_than(Item left, Item right);    // >
@@ -434,6 +434,9 @@ Item js_throw_range_error(const char* message);
 Item js_throw_type_error(const char* message);
 void js_throw_syntax_error(Item message);
 void js_throw_reference_error(Item message);
+// Tune8 §2.3: unified entry point for MIR-emitted throws (kind=0:SyntaxError,
+// kind=1:ReferenceError). The named wrappers above are kept for C callers.
+void js_throw_named_error(int64_t kind, Item message);
 
 /** Throw TypeError/RangeError with Node.js error code (e.g. ERR_INVALID_ARG_TYPE). */
 Item js_throw_type_error_code(const char* code, const char* message);
@@ -627,9 +630,11 @@ Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
 Item js_get_global_property_reference(Item key, int64_t strict_reference);
 int64_t js_global_binding_exists(Item key);
-void js_set_global_property(Item key, Item value);
+// Tune8 §2.2: js_set_global_property now takes a strict flag
+// (0 = sloppy implicit global, 1 = strict throw-on-undeclared).
+// js_set_global_property_strict has been removed.
+void js_set_global_property(Item key, Item value, int64_t strict);
 void js_set_global_var_property_fast(Item key, Item value);
-void js_set_global_property_strict(Item key, Item value);
 void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 void js_define_global_var_property(Item key, Item value);
 void js_define_global_eval_var_property(Item key, Item value);

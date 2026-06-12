@@ -187,9 +187,8 @@ Item js_power(Item left, Item right);
 
 // Comparison operators
 Item js_equal(Item left, Item right);
-Item js_not_equal(Item left, Item right);
 Item js_strict_equal(Item left, Item right);
-Item js_strict_not_equal(Item left, Item right);
+// Tune8 §2.1: js_not_equal / js_strict_not_equal removed (see js_runtime.h).
 Item js_less_than(Item left, Item right);
 Item js_less_equal(Item left, Item right);
 Item js_greater_than(Item left, Item right);

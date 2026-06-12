@@ -280,7 +280,9 @@ static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, 
 static MIR_reg_t jm_transpile_default_param_value(JsMirTranspiler* mt, JsFunctionNode* fn, JsAstNode* expr) {
     if (jm_default_param_has_conflicting_direct_eval(fn, expr)) {
         MIR_reg_t msg = jm_box_string_literal(mt, "Invalid direct eval var declaration in parameter initializer", 56);
-        jm_call_void_1(mt, "js_throw_syntax_error", MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+        jm_call_void_2(mt, "js_throw_named_error",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
         jm_emit_exc_propagate_check(mt);
         return jm_emit_undefined(mt);
     }

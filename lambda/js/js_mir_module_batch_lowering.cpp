@@ -4203,9 +4203,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                             MIR_new_label_op(mt->ctx, global_define_done)));
                         jm_emit_label(mt, ordinary_eval_export);
-                        jm_call_void_2(mt, "js_set_global_property",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                        jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                         jm_emit_label(mt, global_define_done);
                         jm_emit_label(mt, export_done);
                     }
@@ -4478,9 +4479,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                             MIR_new_label_op(mt->ctx, global_define_done)));
                         jm_emit_label(mt, ordinary_eval_export);
-                        jm_call_void_2(mt, "js_set_global_property",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                        jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fk),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                         jm_emit_label(mt, global_define_done);
                         jm_emit_label(mt, export_done);
                     }
@@ -4515,8 +4517,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         snprintf(msg, sizeof(msg), "Cannot access '%.*s' before initialization",
                             (int)cls_node->name->len, cls_node->name->chars);
                         MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
-                        jm_call_void_1(mt, "js_throw_reference_error",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                        jm_call_void_2(mt, "js_throw_named_error",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
                         jm_emit_exc_propagate_check(mt);
                     }
                     // Create class object with __class_name__ property
@@ -5333,9 +5336,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, global_define_done)));
             jm_emit_label(mt, ordinary_eval_export);
-            jm_call_void_2(mt, "js_set_global_property",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+            jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
             jm_emit_label(mt, global_define_done);
             jm_call_void_2(mt, "js_eval_local_export_var",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
