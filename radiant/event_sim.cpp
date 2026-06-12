@@ -1604,6 +1604,26 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             ItemReader sy = reader.get("view_scroll_y");
             ev->expected_view_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
         }
+        if (reader.has("dropdown_x")) {
+            ev->has_expected_dropdown_x = true;
+            ItemReader sx = reader.get("dropdown_x");
+            ev->expected_dropdown_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+        }
+        if (reader.has("dropdown_y")) {
+            ev->has_expected_dropdown_y = true;
+            ItemReader sy = reader.get("dropdown_y");
+            ev->expected_dropdown_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+        }
+        if (reader.has("dropdown_width")) {
+            ev->has_expected_dropdown_width = true;
+            ItemReader sw = reader.get("dropdown_width");
+            ev->expected_dropdown_width = (float)(sw.isFloat() ? sw.asFloat() : sw.asInt());
+        }
+        if (reader.has("dropdown_height")) {
+            ev->has_expected_dropdown_height = true;
+            ItemReader sh = reader.get("dropdown_height");
+            ev->expected_dropdown_height = (float)(sh.isFloat() ? sh.asFloat() : sh.asInt());
+        }
         {
             ItemReader st = reader.get("tolerance");
             ev->scroll_tolerance = (float)(st.isFloat() ? st.asFloat() : st.asInt());
@@ -2140,7 +2160,21 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->assert_equals) mem_free(ev->assert_equals);
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
+            if (ev->state_name) mem_free(ev->state_name);
+            if (ev->style_property) mem_free(ev->style_property);
+            if (ev->element_a_selector) mem_free(ev->element_a_selector);
+            if (ev->element_a_text) mem_free(ev->element_a_text);
+            if (ev->element_b_selector) mem_free(ev->element_b_selector);
+            if (ev->element_b_text) mem_free(ev->element_b_text);
+            if (ev->position_relation) mem_free(ev->position_relation);
+            if (ev->navigate_url) mem_free(ev->navigate_url);
+            if (ev->expected_at_selector) mem_free(ev->expected_at_selector);
+            if (ev->expected_at_tag) mem_free(ev->expected_at_tag);
+            if (ev->attribute_name) mem_free(ev->attribute_name);
             if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
+            if (ev->snapshot_reference) mem_free(ev->snapshot_reference);
+            if (ev->snapshot_diff_path) mem_free(ev->snapshot_diff_path);
+            if (ev->snapshot_actual_path) mem_free(ev->snapshot_actual_path);
             if (ev->js_code) mem_free(ev->js_code);
             if (ev->frame_selector) mem_free(ev->frame_selector);
             if (ev->ime_phase) mem_free(ev->ime_phase);
@@ -4683,6 +4717,34 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: assert_state_store FAIL - open dropdown expectation mismatch");
                 passed = false;
             }
+            float tol = ev->scroll_tolerance > 0.0f ? ev->scroll_tolerance : 1.0f;
+            if (state && (ev->has_expected_dropdown_x || ev->has_expected_dropdown_y ||
+                          ev->has_expected_dropdown_width || ev->has_expected_dropdown_height)) {
+                if (ev->has_expected_dropdown_x &&
+                    (state->dropdown_x < ev->expected_dropdown_x - tol || state->dropdown_x > ev->expected_dropdown_x + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - dropdown_x expected %.1f, got %.1f",
+                        ev->expected_dropdown_x, state->dropdown_x);
+                    passed = false;
+                }
+                if (ev->has_expected_dropdown_y &&
+                    (state->dropdown_y < ev->expected_dropdown_y - tol || state->dropdown_y > ev->expected_dropdown_y + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - dropdown_y expected %.1f, got %.1f",
+                        ev->expected_dropdown_y, state->dropdown_y);
+                    passed = false;
+                }
+                if (ev->has_expected_dropdown_width &&
+                    (state->dropdown_width < ev->expected_dropdown_width - tol || state->dropdown_width > ev->expected_dropdown_width + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - dropdown_width expected %.1f, got %.1f",
+                        ev->expected_dropdown_width, state->dropdown_width);
+                    passed = false;
+                }
+                if (ev->has_expected_dropdown_height &&
+                    (state->dropdown_height < ev->expected_dropdown_height - tol || state->dropdown_height > ev->expected_dropdown_height + tol)) {
+                    log_error("event_sim: assert_state_store FAIL - dropdown_height expected %.1f, got %.1f",
+                        ev->expected_dropdown_height, state->dropdown_height);
+                    passed = false;
+                }
+            }
             if (elem && ev->expected_view_state_kind) {
                 const char* actual_kind = "none";
                 if (view_state) {
@@ -4701,7 +4763,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 }
             }
 
-            float tol = ev->scroll_tolerance > 0.0f ? ev->scroll_tolerance : 1.0f;
             if (state && (ev->has_expected_doc_scroll_x || ev->has_expected_doc_scroll_y)) {
                 if (ev->has_expected_doc_scroll_x &&
                     (state->scroll_x < ev->expected_doc_scroll_x - tol || state->scroll_x > ev->expected_doc_scroll_x + tol)) {

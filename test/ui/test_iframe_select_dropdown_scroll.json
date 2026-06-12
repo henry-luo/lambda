@@ -1,0 +1,14 @@
+{
+  "html": "test/ui/test_iframe_select_dropdown_scroll.html",
+  "description": "Select dropdown inside a scrolled iframe is anchored in parent-surface coordinates.",
+  "events": [
+    {"type": "scroll", "x": 40, "y": 40, "dx": 0, "dy": -3},
+    {"type": "assert_state_store", "target": {"selector": "#frame"}, "view_scroll_y": 150, "tolerance": 5},
+
+    {"type": "click", "target": {"selector": "#frame", "offset_x": 60, "offset_y": 34}},
+    {"type": "render_pending"},
+    {"type": "switch_frame", "selector": "#frame"},
+    {"type": "assert_state_store", "target": {"selector": "#fruit"}, "open_dropdown": true,
+      "dropdown_x": 18, "dropdown_y": 48, "dropdown_width": 180, "dropdown_height": 100, "tolerance": 8}
+  ]
+}

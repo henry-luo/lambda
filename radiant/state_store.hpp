@@ -170,6 +170,7 @@ typedef struct ViewState {
 
 typedef struct ViewStateEntry {
     uint32_t view_id;
+    ViewStateKind kind;
     ViewState* state;
 } ViewStateEntry;
 
@@ -266,7 +267,7 @@ typedef struct DocState {
     
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
-    HashMap* view_state_map;       // map from ViewId -> ViewStateEntry
+    HashMap* view_state_map;       // map from (ViewId, ViewStateKind) -> ViewStateEntry
     RetainedDisplayListCache* retained_dl_cache; // cross-frame display-list fragments
     
     // Template reactive state (unified with Lambda template state store)

@@ -45,6 +45,7 @@
 #include "../radiant/graph_to_svg.hpp"
 #include "../radiant/graph_theme.hpp"
 #include "../radiant/state_store.hpp"
+#include "../radiant/clipboard.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
@@ -159,6 +160,7 @@ static void lambda_main_mempool_cleanup_once(void) {
 }
 
 static int lambda_main_finish(int ret_code) {
+    clipboard_store_shutdown();
     css_property_system_cleanup();
     radiant_state_cleanup_interned_names();
     log_finish();

@@ -1108,8 +1108,8 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
         parent = parent->parent;
     }
 
-    float x = abs_x * s;
-    float y = abs_y * s;
+    float x = rdcon->block.x + abs_x * s;
+    float y = rdcon->block.y + abs_y * s;
     float w = select->width * s;
 
     // Option height based on select height

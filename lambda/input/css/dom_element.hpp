@@ -297,13 +297,6 @@ struct DomElement : DomNode {
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
 
-    // Live form state that belongs to the DOM element rather than the
-    // transient layout view/state map. The content attribute remains the
-    // defaultChecked source; this slot is used after user/script checkedness
-    // has diverged from that default.
-    bool live_checkedness_dirty;
-    bool live_checkedness;
-
     // CSS custom properties (CSS variables)
     struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
 

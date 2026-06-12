@@ -1,6 +1,7 @@
 /* Radiant interaction state-machine boundary — Phase 3 implementation. */
 
 #include "state_machine.hpp"
+#include "state_schema.hpp"
 #include "state_store_internal.hpp"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
@@ -71,11 +72,61 @@ static void state_machine_sync_selection_projection(DocState* state) {
     }
 }
 
+static bool caret_kind_to_sm_event(CaretTransitionKind kind, SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
+            *out_event = SM_EV_COLLAPSE_TO_BOUNDARY;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool selection_kind_to_sm_event(SelectionTransitionKind kind, SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case SELECTION_TRANSITION_START_POINTER_SELECTION:
+            *out_event = SM_EV_START_POINTER_SELECTION;
+            return true;
+        case SELECTION_TRANSITION_END_POINTER_SELECTION:
+            *out_event = SM_EV_END_POINTER_SELECTION;
+            return true;
+        case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
+            *out_event = SM_EV_EXTEND_TO_BOUNDARY;
+            return true;
+        case SELECTION_TRANSITION_EXTEND_TO_VIEW:
+            *out_event = SM_EV_EXTEND_TO_VIEW;
+            return true;
+        case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
+            *out_event = SM_EV_SET_BASE_AND_EXTENT;
+            return true;
+        case SELECTION_TRANSITION_SELECT_ALL:
+            *out_event = SM_EV_SELECT_ALL;
+            return true;
+        case SELECTION_TRANSITION_COLLAPSE_TO_START:
+            *out_event = SM_EV_COLLAPSE_TO_START;
+            return true;
+        case SELECTION_TRANSITION_COLLAPSE_TO_END:
+            *out_event = SM_EV_COLLAPSE_TO_END;
+            return true;
+        case SELECTION_TRANSITION_CLEAR_SELECTION:
+            *out_event = SM_EV_CLEAR_SELECTION;
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool caret_transition(DocState* state,
                       CaretTransitionKind kind,
                       CaretTransitionArgs* args) {
     if (!state || !args) return false;
+    SmEvent event;
+    if (!caret_kind_to_sm_event(kind, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION, event,
+                               args ? args->target : NULL);
     transition_enter(state);
     switch (kind) {
         case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
@@ -88,6 +139,7 @@ bool caret_transition(DocState* state,
     transition_leave(state);
     state_machine_sync_selection_projection(state);
     editing_interaction_sync_projection(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "caret_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -96,7 +148,11 @@ bool selection_transition(DocState* state,
                           SelectionTransitionKind kind,
                           SelectionTransitionArgs* args) {
     if (!state) return false;
+    SmEvent event;
+    if (!selection_kind_to_sm_event(kind, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION, event,
+                               args ? args->target : NULL);
     transition_enter(state);
     switch (kind) {
         case SELECTION_TRANSITION_START_POINTER_SELECTION:
@@ -140,6 +196,7 @@ bool selection_transition(DocState* state,
     transition_leave(state);
     state_machine_sync_selection_projection(state);
     editing_interaction_sync_projection(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "selection_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -739,7 +796,7 @@ static void validate_view_state_registry(DocState* state,
         if (state->owner_store && state->owner_store->document) {
             if (!live_view) {
                 report_fail(report, "view state registry id has no live view");
-            } else if (live_view->view_state_ref && live_view->view_state_ref != view_state) {
+            } else if (live_view->view_state_ref && live_view->view_state_ref->view_id != view_state->view_id) {
                 report_fail(report, "live view weak ViewState ref is stale");
             }
         }
@@ -755,6 +812,14 @@ static void validate_view_state_registry(DocState* state,
                     view_state->data.scroll.y > view_state->data.scroll.max_y) {
                     report_fail(report, "view scroll state is out of bounds");
                 }
+                if (live_view && live_view->is_element()) {
+                    DomElement* live_element = lam::dom_require_element(live_view);
+                    if (live_element && live_element->form &&
+                        live_element->form->scroll_state_ref &&
+                        live_element->form->scroll_state_ref != view_state) {
+                        report_fail(report, "form control cached scroll ViewState ref is stale");
+                    }
+                }
                 break;
             case VIEW_STATE_FORM_CONTROL: {
                 if (view_state->data.form.selected_index < -1 || view_state->data.form.hover_index < -1) {
@@ -766,6 +831,9 @@ static void validate_view_state_registry(DocState* state,
                         report_fail(report, "view form state is not attached to a form control");
                     } else {
                         FormControlProp* form = live_element->form;
+                        if (form->form_state_ref && form->form_state_ref != view_state) {
+                            report_fail(report, "form control cached ViewState ref is stale");
+                        }
                         if (form->option_count >= 0) {
                             if (view_state->data.form.selected_index >= form->option_count) {
                                 report_fail(report, "view form state selected index exceeds option count");
