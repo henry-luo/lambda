@@ -1,4 +1,10 @@
-<doc render: {
+<doc focus: {
+    target: "#name",
+    from_mouse: true
+  }, caret: {
+    target: "#name",
+    offset: 5
+  }, render: {
     dirty: true,
     reflow: true,
     repaint: true,
@@ -6,9 +12,9 @@
   }, editing: {
     active_surface: true
   }
-  <html index: 1
-    <body index: 2
-      <input index: 1, id: "name", form: {
+  <html index: 1, flags: ['focus-within']
+    <body index: 2, flags: ['focus-within']
+      <input index: 1, id: "name", flags: ['focus', 'focus-within', 'valid', 'optional'], form: {
           value: "abcdY",
           sel: [5, 5]
         }>>>>

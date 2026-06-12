@@ -2687,6 +2687,30 @@ static bool form_view_is_text_control(View* view) {
     return elem && tc_is_text_control(elem);
 }
 
+static SmFamily form_control_schema_family_for_view(View* view) {
+    FormControlProp* form = form_prop_for_view(view);
+    if (!form) return SM_FAMILY__COUNT;
+    switch (form->control_type) {
+        case FORM_CONTROL_CHECKBOX:
+        case FORM_CONTROL_RADIO:
+            return SM_FAMILY_FORM_CHECKABLE;
+        case FORM_CONTROL_SELECT:
+            return SM_FAMILY_FORM_SELECT;
+        case FORM_CONTROL_RANGE:
+            return SM_FAMILY_FORM_RANGE;
+        case FORM_CONTROL_TEXT:
+        case FORM_CONTROL_TEXTAREA:
+            return SM_FAMILY_FORM_TEXT;
+        default:
+            return SM_FAMILY__COUNT;
+    }
+}
+
+static SmFamily form_control_schema_family_for_readonly(View* view) {
+    SmFamily family = form_control_schema_family_for_view(view);
+    return family == SM_FAMILY_FORM_TEXT ? family : SM_FAMILY__COUNT;
+}
+
 static void form_view_state_store_text_value(ViewState* view_state,
                                              FormControlProp* form) {
     if (!view_state || !form || !form->current_value) return;
@@ -3137,20 +3161,39 @@ bool form_control_get_checked(DocState* state, View* view) {
     return view_element_has_attr(view, "checked");
 }
 
-void form_control_set_checked(DocState* state, View* view, bool checked) {
+static void form_control_set_checked_for_event(DocState* state, View* view, bool checked,
+                                               SmEvent event, uint32_t extra_action) {
     if (!view || !view->is_element()) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_CHECKABLE, event, view);
     FormControlProp* form = form_prop_for_view(view);
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.checked != 0 : view_element_has_attr(view, "checked");
-    if (view_state) {
-        if (old_value == checked) return;
-        view_state->data.form.checked = checked ? 1 : 0;
-    }
+    if (!view_state) return;
+
+    bool old_value = view_state->data.form.checked != 0;
+    if (old_value == checked) return;
+    view_state->data.form.checked = checked ? 1 : 0;
+    sm_observe_action(state, SM_ACT_WRITE_CHECKED);
+    if (extra_action != SM_ACT_NONE) sm_observe_action(state, extra_action);
 
     if (form) form->state_ref = state;
 
     view_state_log_bool_transition(state, view, "form.checked", old_value, checked);
+    sm_guard.commit();
     form_state_mark_dirty(state);
+}
+
+void form_control_set_checked(DocState* state, View* view, bool checked) {
+    form_control_set_checked_for_event(state, view, checked,
+                                       SM_EV_FORM_SET_CHECKED,
+                                       SM_ACT_NONE);
+}
+
+void form_control_uncheck_radio_group_peer(DocState* state, View* view) {
+    FormControlProp* form = form_prop_for_view(view);
+    if (!form || form->control_type != FORM_CONTROL_RADIO) return;
+    form_control_set_checked_for_event(state, view, false,
+                                       SM_EV_FORM_UNCHECK_RADIO_GROUP,
+                                       SM_ACT_UNCHECK_RADIO_GROUP);
 }
 
 static void scroll_state_attach(DocState* state, void* pane_ptr) {
@@ -3190,6 +3233,7 @@ void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
 
     if (h_max < 0.0f) h_max = 0.0f;
     if (v_max < 0.0f) v_max = 0.0f;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLL_SET_MAX, view);
 
     ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
     float old_x = pane->h_scroll_position;
@@ -3225,6 +3269,7 @@ void scroll_state_set_max_for_view(DocState* state, View* view, void* pane_ptr,
             pane->h_scroll_position, pane->v_scroll_position,
             pane->h_max_scroll, pane->v_max_scroll);
     }
+    if (state) sm_guard.commit();
 }
 
 void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_ptr,
@@ -3238,6 +3283,7 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
     if (v_pos < 0.0f) v_pos = 0.0f;
     if (h_pos > pane->h_max_scroll) h_pos = pane->h_max_scroll;
     if (v_pos > pane->v_max_scroll) v_pos = pane->v_max_scroll;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLL_SET_POSITION, view);
 
     float old_x = pane->h_scroll_position;
     float old_y = pane->v_scroll_position;
@@ -3270,6 +3316,7 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
             state->scroll_y = v_pos;
         }
         state->version++;
+        sm_guard.commit();
         state_assert_after_mutation(state, "scroll_state_set_position_for_view");
     }
 }
@@ -3323,6 +3370,7 @@ void scroll_state_set_hover_for_view(DocState* state, View* view, void* pane_ptr
     if (!state || !view) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     if (pane) scroll_state_attach(state, pane_ptr);
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLLBAR_HOVER, view);
 
     ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
     if (!view_state) return;
@@ -3336,6 +3384,7 @@ void scroll_state_set_hover_for_view(DocState* state, View* view, void* pane_ptr
     view_state_log_bool_transition(state, view, "scroll.h_hovered", old_h, h_hovered);
     view_state_log_bool_transition(state, view, "scroll.v_hovered", old_v, v_hovered);
     scroll_interaction_mark_dirty(state);
+    sm_guard.commit();
     state_assert_after_mutation(state, "scroll_state_set_hover_for_view");
 }
 
@@ -3346,6 +3395,7 @@ void scroll_state_begin_drag_for_view(DocState* state, View* view, void* pane_pt
     if (!state || !view) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     if (pane) scroll_state_attach(state, pane_ptr);
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLLBAR_BEGIN_DRAG, view);
 
     ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
     if (!view_state) return;
@@ -3362,6 +3412,7 @@ void scroll_state_begin_drag_for_view(DocState* state, View* view, void* pane_pt
     view_state_log_bool_transition(state, view, "scroll.h_dragging", old_h, horizontal);
     view_state_log_bool_transition(state, view, "scroll.v_dragging", old_v, !horizontal);
     scroll_interaction_mark_dirty(state);
+    sm_guard.commit();
     state_assert_after_mutation(state, "scroll_state_begin_drag_for_view");
 }
 
@@ -3369,6 +3420,7 @@ void scroll_state_clear_drag_for_view(DocState* state, View* view, void* pane_pt
     if (!state || !view) return;
     ScrollPane* pane = (ScrollPane*)pane_ptr;
     if (pane) scroll_state_attach(state, pane_ptr);
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SCROLL, SM_EV_SCROLLBAR_CLEAR_DRAG, view);
 
     ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
     if (!view_state) return;
@@ -3392,6 +3444,7 @@ void scroll_state_clear_drag_for_view(DocState* state, View* view, void* pane_pt
     view_state_log_bool_transition(state, view, "scroll.h_dragging", old_h, false);
     view_state_log_bool_transition(state, view, "scroll.v_dragging", old_v, false);
     scroll_interaction_mark_dirty(state);
+    sm_guard.commit();
     state_assert_after_mutation(state, "scroll_state_clear_drag_for_view");
 }
 
@@ -3494,6 +3547,7 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT, SM_EV_FORM_SET_VALUE, view);
 
     DomElement* elem = lam::dom_require_element(block);
     block->form->state_ref = state;
@@ -3532,6 +3586,7 @@ void form_control_set_value(DocState* state, View* view, const char* value, uint
         }
     }
 
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3576,6 +3631,7 @@ void form_control_get_selection(DocState* state, View* view,
 void form_control_set_selection(DocState* state, View* view,
                                 uint32_t start, uint32_t end, uint8_t direction) {
     if (!view) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT, SM_EV_FORM_SET_SELECTION, view);
 
     if (view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
@@ -3591,6 +3647,7 @@ void form_control_set_selection(DocState* state, View* view,
                 view_state->data.form.selection_end = form->selection_end;
                 view_state->data.form.selection_direction = form->selection_direction;
             }
+            sm_guard.commit();
             form_state_mark_dirty(state);
             return;
         }
@@ -3631,6 +3688,7 @@ void form_control_set_selection(DocState* state, View* view,
         }
     }
 
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3690,6 +3748,7 @@ void form_control_set_selected_index(DocState* state, View* view, int index) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_SELECTED_INDEX, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3706,6 +3765,7 @@ void form_control_set_selected_index(DocState* state, View* view, int index) {
     }
 
     view_state_log_int_transition(state, view, "form.selected_index", old_index, index);
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3722,6 +3782,7 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_RANGE, SM_EV_FORM_SET_RANGE_VALUE, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3738,6 +3799,7 @@ void form_control_set_range_value(DocState* state, View* view, float value) {
     }
 
     view_state_log_float_transition(state, view, "form.range_value", old_value, value);
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3758,6 +3820,8 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmFamily family = form_control_schema_family_for_view(view);
+    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_DISABLED, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3768,6 +3832,7 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled) {
         view_state->data.form.disabled = disabled ? 1 : 0;
     }
     view_state_log_bool_transition(state, view, "form.disabled", old_value, disabled);
+    if (family != SM_FAMILY__COUNT) sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3784,6 +3849,8 @@ void form_control_set_readonly(DocState* state, View* view, bool readonly) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmFamily family = form_control_schema_family_for_readonly(view);
+    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_READONLY, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3794,6 +3861,7 @@ void form_control_set_readonly(DocState* state, View* view, bool readonly) {
         view_state->data.form.readonly = readonly ? 1 : 0;
     }
     view_state_log_bool_transition(state, view, "form.readonly", old_value, readonly);
+    if (family != SM_FAMILY__COUNT) sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3810,6 +3878,8 @@ void form_control_set_required(DocState* state, View* view, bool required) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmFamily family = form_control_schema_family_for_view(view);
+    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_REQUIRED, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3820,6 +3890,7 @@ void form_control_set_required(DocState* state, View* view, bool required) {
         view_state->data.form.required = required ? 1 : 0;
     }
     view_state_log_bool_transition(state, view, "form.required", old_value, required);
+    if (family != SM_FAMILY__COUNT) sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3839,6 +3910,7 @@ void doc_state_open_dropdown(DocState* state, View* view) {
 
     View* old_owner = state->open_dropdown;
     if (old_owner == view && form_control_is_dropdown_open(state, view)) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DROPDOWN, SM_EV_DROPDOWN_OPEN, view);
 
     if (old_owner && old_owner != view) {
         state->open_dropdown = NULL;
@@ -3853,6 +3925,7 @@ void doc_state_open_dropdown(DocState* state, View* view) {
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_open_dropdown");
 }
 
@@ -3862,6 +3935,7 @@ void doc_state_close_dropdown(DocState* state, View* view) {
     View* old_owner = state->open_dropdown;
     View* target = view ? view : old_owner;
     if (!target) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DROPDOWN, SM_EV_DROPDOWN_CLOSE, target);
 
     bool owner_changed = old_owner == target || !view;
     if (owner_changed) {
@@ -3876,6 +3950,7 @@ void doc_state_close_dropdown(DocState* state, View* view) {
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_close_dropdown");
 }
 
@@ -3889,6 +3964,8 @@ void doc_state_set_dropdown_geometry(DocState* state,
         state->dropdown_width == width && state->dropdown_height == height) {
         return;
     }
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DROPDOWN, SM_EV_DROPDOWN_SET_GEOMETRY,
+                               state->open_dropdown);
 
     state->dropdown_x = x;
     state->dropdown_y = y;
@@ -3897,6 +3974,7 @@ void doc_state_set_dropdown_geometry(DocState* state,
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_set_dropdown_geometry");
 }
 
@@ -3905,6 +3983,7 @@ void doc_state_open_context_menu(DocState* state, View* target,
     if (!state || !target) return;
     if (width < 0.0f) width = 0.0f;
     if (height < 0.0f) height = 0.0f;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_CONTEXT_MENU, SM_EV_CONTEXT_MENU_OPEN, target);
 
     View* old_target = state->context_menu_target;
     int old_hover = state->context_menu_hover;
@@ -3921,6 +4000,7 @@ void doc_state_open_context_menu(DocState* state, View* target,
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_open_context_menu");
 }
 
@@ -3929,6 +4009,7 @@ void doc_state_close_context_menu(DocState* state) {
 
     View* old_target = state->context_menu_target;
     int old_hover = state->context_menu_hover;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_CONTEXT_MENU, SM_EV_CONTEXT_MENU_CLOSE, old_target);
 
     state->context_menu_target = NULL;
     state->context_menu_hover = -1;
@@ -3938,6 +4019,7 @@ void doc_state_close_context_menu(DocState* state) {
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_close_context_menu");
 }
 
@@ -3947,12 +4029,15 @@ void doc_state_set_context_menu_hover(DocState* state, int hover_index) {
 
     int old_hover = state->context_menu_hover;
     if (old_hover == hover_index) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_CONTEXT_MENU, SM_EV_CONTEXT_MENU_HOVER,
+                               state->context_menu_target);
 
     state->context_menu_hover = hover_index;
     doc_state_log_context_menu_hover_transition(state, old_hover, hover_index);
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
+    sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_set_context_menu_hover");
 }
 
@@ -3961,6 +4046,7 @@ void form_control_open_dropdown(DocState* state, View* view) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_OPEN, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3974,6 +4060,7 @@ void form_control_open_dropdown(DocState* state, View* view) {
     }
     view_state_log_bool_transition(state, view, "form.dropdown_open", old_open, true);
     view_state_log_int_transition(state, view, "form.hover_index", old_hover, selected_index);
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -3982,6 +4069,7 @@ void form_control_close_dropdown(DocState* state, View* view) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_CLOSE, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -3994,6 +4082,7 @@ void form_control_close_dropdown(DocState* state, View* view) {
     }
     view_state_log_bool_transition(state, view, "form.dropdown_open", old_open, false);
     view_state_log_int_transition(state, view, "form.hover_index", old_hover, -1);
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 
@@ -4002,6 +4091,7 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->form) return;
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_HOVER_INDEX, view);
 
     FormControlProp* form = block->form;
     form->state_ref = state;
@@ -4018,6 +4108,7 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
     }
 
     view_state_log_int_transition(state, view, "form.hover_index", old_index, index);
+    sm_guard.commit();
     form_state_mark_dirty(state);
 }
 

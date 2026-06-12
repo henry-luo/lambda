@@ -875,7 +875,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                             const char* sn = se->get_attribute("name");
                             if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
                                 if (form_control_get_checked(state, search)) {
-                                    form_control_set_checked(state, search, false);
+                                    form_control_uncheck_radio_group_peer(state, search);
                                 }
                             }
                         }

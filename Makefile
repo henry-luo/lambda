@@ -486,7 +486,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-radiant-casts check-radiant-ownership check-string-scan docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-state-machine check-radiant-casts check-radiant-ownership check-string-scan docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -559,6 +559,7 @@ help:
 	@echo "  test-benchmark- Run performance benchmark tests"
 	@echo "  fuzz-lambda    - Run fuzzy tests (5 minutes, mutation + random generation)"
 	@echo "  fuzz-lambda-extended - Run extended fuzzy tests (1 hour)"
+	@echo "  check-state-machine - Validate Radiant state-machine schema coverage"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 
@@ -2017,6 +2018,10 @@ check-state-store:
 	else \
 		echo "✅ StateStore migration invariants hold"; \
 	fi
+
+# Check declarative Radiant state-machine coverage for fully migrated families.
+check-state-machine:
+	@$(PYTHON) utils/check_state_machine.py
 
 # Check for (int) casts in Radiant layout code that may truncate float dimensions.
 # All layout positions/sizes (x, y, width, height, padding, margin, border, gap,
