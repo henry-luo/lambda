@@ -44,8 +44,11 @@ typedef struct JsArrayBuffer {
 typedef struct JsDataView {
     JsArrayBuffer* buffer;  // backing ArrayBuffer
     int byte_offset;         // offset into buffer
-    int byte_length;         // view byte length
+    int byte_length;         // view byte length (ignored when length_tracking)
     uint64_t buffer_item;    // original ArrayBuffer Item for identity-preserving .buffer access
+    bool length_tracking;    // Js54 P2: true when constructed without explicit byteLength —
+                             // current byte_length re-derives from buffer->byte_length - byte_offset
+                             // on every access so resizable-buffer views see live length.
 } JsDataView;
 
 typedef struct JsTypedArray {
@@ -87,6 +90,7 @@ int  js_typed_array_byte_offset(Item ta);
 Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
+void* js_typed_array_current_data_ptr(Item ta_item);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
 Item js_typed_array_slice(Item ta, int start, int end);
 Item js_typed_array_set_from(Item ta, Item source, int offset);

@@ -1276,6 +1276,10 @@ extern "C" int js_arraybuffer_max_byte_length(Item val) {
     if (!js_is_arraybuffer(val)) return 0;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return 0;
+    // Js54 P1: spec §25.1.5.3 get ArrayBuffer.prototype.maxByteLength step 4:
+    // "If IsDetachedBuffer(O) is true, return +0𝔽." The detach path zeros
+    // byte_length but not max_byte_length, so the check is needed here.
+    if (ab->detached) return 0;
     return ab->max_byte_length;
 }
 
@@ -2065,6 +2069,19 @@ extern "C" int js_typed_array_length(Item ta_item) {
     return js_typed_array_current_length(ta);
 }
 
+// Js54 P3: live data pointer for the typed array's element storage.
+// Used by the MIR JIT inline indexed get/set paths so resizable-buffer-backed
+// views see the current ab->data after a resize() reallocs the backing store
+// (the cached ta->data would point to the freed-or-stale buffer otherwise).
+// Returns NULL for OOB or detached views — callers must treat NULL as a
+// short-circuit on the access path.
+extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return NULL;
+    Map* m = ta_item.map;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
+    return js_typed_array_current_data(ta);
+}
+
 extern "C" int js_typed_array_byte_length(Item ta_item) {
     if (!js_is_typed_array(ta_item)) return 0;
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
@@ -2446,6 +2463,10 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
 
     int byte_length;
     TypeId lt = get_type_id(length_item);
+    // Js54 P2: length_tracking when constructor called without explicit byteLength.
+    // The recorded byte_length is the initial value; readers re-derive from the
+    // buffer's current byte_length on every access for length-tracking views.
+    bool length_tracking = (lt == LMD_TYPE_UNDEFINED) && ab->resizable;
     if (lt == LMD_TYPE_UNDEFINED) {
         byte_length = ab->byte_length - byte_offset;
     } else {
@@ -2462,6 +2483,7 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     dv->byte_offset = byte_offset;
     dv->byte_length = byte_length;
     dv->buffer_item = buffer.item;
+    dv->length_tracking = length_tracking;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -2475,9 +2497,46 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     return view;
 }
 
+// Js54 P2: current byte_length honoring length-tracking views over resizable
+// buffers. For non-length-tracking views the stored byte_length is authoritative;
+// for length-tracking views we re-derive from the buffer's current size.
+static inline int dv_current_byte_length(JsDataView* dv) {
+    if (!dv || !dv->buffer) return 0;
+    if (dv->length_tracking) {
+        int avail = dv->buffer->byte_length - dv->byte_offset;
+        return avail > 0 ? avail : 0;
+    }
+    return dv->byte_length;
+}
+
+// Js54 P2: a DataView is out-of-bounds when the buffer is detached, or when the
+// recorded view window no longer fits (resize shrank the buffer below
+// byte_offset + byte_length, or below byte_offset for length-tracking views).
+static inline bool dv_is_out_of_bounds(JsDataView* dv) {
+    if (!dv || !dv->buffer) return false;
+    if (dv->buffer->detached) return true;
+    if (dv->length_tracking) {
+        return dv->buffer->byte_length < dv->byte_offset;
+    }
+    return dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length;
+}
+
+// Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.
+// Returns true on success (in-bounds), false on throw — caller should propagate.
+static inline bool dv_validate_or_throw(JsDataView* dv) {
+    if (dv_is_out_of_bounds(dv)) {
+        js_throw_type_error("DataView buffer is detached or out of bounds");
+        return false;
+    }
+    return true;
+}
+
 // Helper: get raw pointer into DataView's buffer at given offset
+// Js54 P2: bounds-check against the CURRENT view length so length-tracking
+// views see live shrink/grow, not the cached construction-time byte_length.
 static inline uint8_t* dv_ptr(JsDataView* dv, int offset, int size) {
-    if (offset < 0 || offset + size > dv->byte_length) return NULL;
+    int current_len = dv_current_byte_length(dv);
+    if (offset < 0 || offset + size > current_len) return NULL;
     return (uint8_t*)dv->buffer->data + dv->byte_offset + offset;
 }
 
@@ -2536,9 +2595,11 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
     Item offset_item = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
     if (!js_dataview_to_index(offset_item, &offset)) return ItemNull;
     bool is_set_method = (ml >= 3 && mn[0] == 's' && mn[1] == 'e' && mn[2] == 't');
-    if (!is_set_method && dv->buffer->detached) {
-        return js_throw_type_error("DataView buffer is detached");
-    }
+    // Js54 P2: get-methods validate up front (spec: TypeError on detached or OOB).
+    // set-methods perform ToNumber/ToBigInt on the value first (those calls can
+    // observe side effects that resize the buffer), so per spec the OOB check
+    // moves into each individual setter after the value coercion.
+    if (!is_set_method && !dv_validate_or_throw(dv)) return ItemNull;
     bool sys_le = is_little_endian_system();
 
     // Getter methods
@@ -2638,7 +2699,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -2649,7 +2710,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
@@ -2660,7 +2721,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2673,7 +2734,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2686,7 +2747,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2699,7 +2760,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2712,7 +2773,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item val_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double number_value = 0.0;
         if (!js_dataview_to_number_value(val_item, &number_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2727,7 +2788,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item val_item2 = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         double d = 0.0;
         if (!js_dataview_to_number_value(val_item2, &d)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2741,7 +2802,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
         if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
@@ -2756,7 +2817,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         Item bigint_value;
         if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
-        if (dv->buffer->detached) return js_throw_type_error("DataView buffer is detached");
+        if (!dv_validate_or_throw(dv)) return ItemNull;
         uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;

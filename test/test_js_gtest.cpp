@@ -675,6 +675,44 @@ TEST(JavaScriptFuzz, FuzzScopeClosureShadowDoesNotCrash) {
     ASSERT_EQ(status, 0) << output;
 }
 
+// Js54 P0: indexed write on a typed array after a user property write used to
+// SIGSEGV because the MIR JIT loaded Map.data at offset 16 as a JsTypedArray*
+// without checking data_cap — after the upgrade triggered by the property
+// write, that load returns the property-storage buffer and the next sized
+// store writes into wild memory. Closes the crash test
+// built-ins/TypedArray/out-of-bounds-behaves-like-detached.js.
+TEST(JavaScriptRegression, Js54P0TypedArrayProtoSwapDoesNotSigsegv) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p0_typed_array_proto_swap_sigsegv.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
+// Js54 P2: DataView OOB-aware accessors. Fixed-length views throw on
+// shrink-past-end; length-tracking views update their byteLength live with the
+// buffer; OOB and detached buffers throw TypeError on every accessor.
+TEST(JavaScriptRegression, Js54P2DataViewOobAccessors) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p2_dataview_oob.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
+// Js54 P3: TypedArray length-tracking + OOB indexed access. Length-tracking
+// views update their length live on resize; OOB and detached buffers report
+// length 0, return undefined on indexed read, and silently no-op on write.
+// Critically, the JIT must re-read the data pointer each access — the buffer
+// resize reallocs ab->data and any cached snapshot would be stale.
+TEST(JavaScriptRegression, Js54P3TypedArrayLengthTracking) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p3_typed_array_length_tracking.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

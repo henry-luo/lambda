@@ -98,7 +98,7 @@ static const StateTransitionRule RADIANT_STATE_RULES[] = {
 static const uint32_t RADIANT_STATE_RULE_COUNT =
     (uint32_t)(sizeof(RADIANT_STATE_RULES) / sizeof(RADIANT_STATE_RULES[0]));
 
-static const char* sm_family_name(SmFamily family) {
+[[maybe_unused]] static const char* sm_family_name(SmFamily family) {
     switch (family) {
         case SM_FAMILY_SELECTION: return "selection";
         case SM_FAMILY_IME: return "ime";
@@ -106,7 +106,7 @@ static const char* sm_family_name(SmFamily family) {
     }
 }
 
-static const char* sm_event_name(SmEvent event) {
+[[maybe_unused]] static const char* sm_event_name(SmEvent event) {
     switch (event) {
         case SM_EV_COLLAPSE_TO_BOUNDARY: return "collapse_to_boundary";
         case SM_EV_START_POINTER_SELECTION: return "start_pointer_selection";
@@ -180,7 +180,7 @@ static bool sm_rule_matches(const StateTransitionRule* rule,
     return true;
 }
 
-static const StateTransitionRule* sm_find_rule(SmFamily family,
+[[maybe_unused]] static const StateTransitionRule* sm_find_rule(SmFamily family,
                                                SmViewClass view_class,
                                                int from_state,
                                                SmEvent event) {
@@ -193,7 +193,7 @@ static const StateTransitionRule* sm_find_rule(SmFamily family,
     return NULL;
 }
 
-static bool sm_rule_allows_to_state(const StateTransitionRule* rule,
+[[maybe_unused]] static bool sm_rule_allows_to_state(const StateTransitionRule* rule,
                                     int from_state,
                                     int to_state) {
     if (!rule) return false;

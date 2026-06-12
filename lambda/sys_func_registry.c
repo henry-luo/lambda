@@ -1685,6 +1685,8 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_get", FPTR(js_typed_array_get)},
     {"js_typed_array_length", FPTR(js_typed_array_length)},
     {"js_is_typed_array", FPTR(js_is_typed_array)},
+    {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
+    {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},
     {"js_typed_array_construct", FPTR(js_typed_array_construct)},
     {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
     {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
