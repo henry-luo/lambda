@@ -286,10 +286,18 @@ struct SimEvent {
     bool has_expected_doc_scroll_y;
     bool has_expected_view_scroll_x;
     bool has_expected_view_scroll_y;
+    bool has_expected_dropdown_x;
+    bool has_expected_dropdown_y;
+    bool has_expected_dropdown_width;
+    bool has_expected_dropdown_height;
     float expected_doc_scroll_x;
     float expected_doc_scroll_y;
     float expected_view_scroll_x;
     float expected_view_scroll_y;
+    float expected_dropdown_x;
+    float expected_dropdown_y;
+    float expected_dropdown_width;
+    float expected_dropdown_height;
     // Phase 7: assert_snapshot fields
     char* snapshot_reference;    // path to reference PNG
     float snapshot_threshold;    // max mismatch %, default 1.0
