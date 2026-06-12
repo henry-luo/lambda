@@ -17,6 +17,7 @@ struct DomDocument;
 struct EventStateLog;
 struct StateDumpLog;
 struct SelectorMatcher;
+struct SmTransitionScope;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -292,6 +293,7 @@ typedef struct DocState {
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition
+    SmTransitionScope* sm_active_transition; // debug schema action/effect recorder
     
     // Global interaction states
     CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)
@@ -902,6 +904,11 @@ bool form_control_get_checked(DocState* state, View* view);
  * This is the only supported writer path for checked state transitions.
  */
 void form_control_set_checked(DocState* state, View* view, bool checked);
+
+/**
+ * Uncheck a radio because another member of the same name group was selected.
+ */
+void form_control_uncheck_radio_group_peer(DocState* state, View* view);
 
 /**
  * Set a concrete view's scroll max values through ViewState.scroll.

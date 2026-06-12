@@ -637,19 +637,20 @@ green, matching the cadence of the prior phases.
   `selection_transition`, and the IME composition path, and keep action checking disabled
   except for effects already observable from final state. Fix undeclared-transition findings
   as either real bugs or missing rows.
-- **Step D — early coverage + diagram tooling for implemented families.** Add
-  `make check-state-machine` for the families currently in the table. The check should accept
-  partial global coverage but require total coverage inside families marked complete. Add
-  `make state-machine-diagram` at the same time or immediately after; the diagram is useful
-  once the first slice exists.
+- **Step D — early coverage tooling for implemented families.** Add
+  `make check-state-machine` for the families currently in the table. The check accepts
+  partial global coverage but requires total coverage inside families marked complete.
+  Mermaid/Graphviz diagram generation is deferred to a later step; the diagram remains useful
+  once the schema grows beyond the first complete family set.
 - **Step E — transition API normalization.** Add thin semantic transition wrappers, or
   writer-level schema hooks, for families that currently mutate directly through StateStore
   writers: form controls, scroll, dropdown, context menu, and any remaining hover/active/focus
-  bypasses. This is the point where the target `SmEvent` vocabulary becomes fully backed by
-  code.
+  bypasses. Current implementation uses writer-level hooks for scroll, form controls,
+  dropdown, and context menu so existing callers share the same semantic transition boundary.
 - **Step F — expand one family at a time.** After normalization, populate focus, hover/active,
-  drag/drop, scroll, form controls, dropdown, and context menu. Each family lands with derive
-  state, table rows, coverage, and tests in the same slice.
+  drag/drop, scroll, form controls, dropdown, and context menu. Current coverage marks 13
+  families complete in `make check-state-machine`: focus, selection, IME, hover, active,
+  drag/drop, scroll, checkable, select, range, text, dropdown, and context menu.
 - **Step G — invariant table (hybrid migration).** Move the ~96 `report_fail()` checks into
   `RADIANT_INVARIANTS` as predicate primitives + bindings, and add the table-driven pass to
   `radiant_state_validate_interaction()`. **Crucially, do not delete the nine `validate_*`
@@ -660,10 +661,27 @@ green, matching the cadence of the prior phases.
   parity is demonstrated, **delete the nine `validate_*` functions in a dedicated cleanup
   commit**, leaving the table as the single source of truth. This keeps the migration
   behavior-preserving by construction and trivially reversible, then lands the clean
-  end-state. (See "Replace vs. keep" rationale below.)
-- **Step H — action/effect obligations.** Add `SmObservedEffects` and wire only the writers
-  whose effects are needed by table rules. Start with effects that are hard to infer from
-  final state, such as blur/selectstart/input/change dispatch and radio-group unchecking.
+  end-state. Current implementation has the first hybrid slice: 14 invariant bindings run
+  through the table-driven pass, debug builds assert parity against the legacy pass, and
+  `make check-state-machine` validates the binding table. (See "Replace vs. keep" rationale
+  below.)
+- **Step H — action/effect obligations.** Add observed action/effect recording and wire only
+  the writers whose effects are needed by table rules. Current implementation has the first
+  narrow slice: `SmTransitionScope` records observed action flags, nested transition scopes
+  restore correctly, `make check-state-machine` validates action enum references in
+  `RADIANT_STATE_RULES`, and `form_checkable.set_checked` requires the centralized
+  `ViewState.data.form.checked` write (`SM_ACT_WRITE_CHECKED`) before the transition can
+  commit. The second slice adds `form_checkable.uncheck_radio_group`, a dedicated semantic
+  event for unchecking the previously selected radio in a same-name group, and requires both
+  the checked-state write and `SM_ACT_UNCHECK_RADIO_GROUP`. The third slice adds
+  `form_text.replace_text` for browser-style text-control replacement and `form_text.history`
+  for undo/redo, requiring both `SM_ACT_DISPATCH_BEFOREINPUT` and `SM_ACT_DISPATCH_INPUT`
+  around committed mutations. The fourth slice adds `selection.ui_start_pointer`, a UI-level
+  pointer-selection event that requires `SM_ACT_DISPATCH_SELECTSTART` while leaving the
+  lower-level `selection.start_pointer` event available for programmatic selection writes.
+  The fifth slice adds UI-level focus events that require `SM_ACT_DISPATCH_BLUR` and, when a
+  text control's focus-time value changed, `SM_ACT_DISPATCH_CHANGE`. Future Step H work should
+  add action obligations only when new effectful transitions are introduced.
 - **Step I — document lifecycle when needed.** Add the `SM_FAMILY_DOCUMENT` backing field only
   when navigation/document activation work needs it. Concretely, add a `DocLifecycleState
   lifecycle;` field plus `doc_state_set_lifecycle()`, then populate
