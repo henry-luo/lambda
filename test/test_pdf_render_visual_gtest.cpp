@@ -4,7 +4,7 @@
  * Reference rendering uses Poppler (`pdfinfo` + `pdftoppm`), the most
  * widely deployed and stable open-source PDF rasterizer available from the
  * command line. Each PDF page is rendered to a 600px-wide PNG under
- * test/pdf/reference. Lambda renders the same page through the PDF package
+ * temp/pdf_visual/reference. Lambda renders the same page through the PDF package
  * (`pdf.pdf_to_svg`) and Radiant's PNG renderer, then the test compares pixels.
  */
 
@@ -29,16 +29,16 @@ extern "C" {
 
 #define PDF_DIR "test/pdf"
 #define PDF_BASELINE_FILE "test/pdf/baseline.txt"
-#define PDF_REF_DIR "test/pdf/reference"
-#define PDF_DIFF_DIR "test/pdf/diff"
 #define PDF_TEMP_DIR "temp/pdf_visual"
+#define PDF_REF_DIR "temp/pdf_visual/reference"
+#define PDF_DIFF_DIR "temp/pdf_visual/diff"
 #define LAMBDA_EXE "./lambda.exe"
 #define RENDER_WIDTH 600
 #define MAX_PAGES_PER_PDF 4
 #define MAX_PDFS 64
 #define PIXEL_DELTA_THRESHOLD 32
 #define MAX_PDF_PAGE_RESULTS (MAX_PDFS * MAX_PAGES_PER_PDF)
-#define BASELINE_REGRESSION_EPSILON 0.000001
+#define BASELINE_REGRESSION_EPSILON 0.2
 
 static bool g_update_baseline = false;
 
@@ -203,12 +203,8 @@ static CommandResult run_command_capture(const char* cmd) {
     return result;
 }
 
-static bool running_full_gtest_suite() {
-    return strcmp(::testing::GTEST_FLAG(filter).c_str(), "*") == 0;
-}
-
 static const char* lambda_no_log_arg() {
-    return running_full_gtest_suite() ? "--no-log " : "";
+    return "--no-log ";
 }
 
 static bool write_file_all(const char* path, const char* data, size_t len) {

@@ -17,7 +17,8 @@ pub fn display_context() {
         color: null,
         font: "mathit",
         cramped: false,
-        phantom: false
+        phantom: false,
+        script_container: false
     }
 }
 
@@ -29,7 +30,8 @@ pub fn text_context() {
         color: null,
         font: "mathit",
         cramped: false,
-        phantom: false
+        phantom: false,
+        script_container: false
     }
 }
 
@@ -45,7 +47,8 @@ pub fn derive(ctx, overrides) {
         color: if (overrides.color != null) overrides.color else ctx.color,
         font: if (overrides.font != null) overrides.font else ctx.font,
         cramped: if (overrides.cramped != null) overrides.cramped else ctx.cramped,
-        phantom: if (overrides.phantom != null) overrides.phantom else ctx.phantom
+        phantom: if (overrides.phantom != null) overrides.phantom else ctx.phantom,
+        script_container: if (overrides.script_container != null) overrides.script_container else ctx.script_container
     }
 }
 
@@ -79,7 +82,7 @@ pub fn sup_context(ctx) {
         case "script": "scriptscript"
         default: "scriptscript"
     }
-    derive(ctx, {style: new_style})
+    derive(ctx, {style: new_style, script_container: true})
 }
 
 // derive context for subscript
@@ -90,7 +93,7 @@ pub fn sub_context(ctx) {
         case "script": "scriptscript"
         default: "scriptscript"
     }
-    derive(ctx, {style: new_style, cramped: true})
+    derive(ctx, {style: new_style, cramped: true, script_container: true})
 }
 
 // ============================================================

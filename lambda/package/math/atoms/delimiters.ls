@@ -166,7 +166,7 @@ fn render_svg_delim(ch, target_height, atom_type) {
 // ============================================================
 
 // resolve a delimiter command to its display character
-fn resolve_char(delim) {
+pub fn resolve_char(delim) {
     let mapped = DELIM_CHARS[delim]
     if (mapped != null) mapped else delim
 }

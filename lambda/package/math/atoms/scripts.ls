@@ -95,9 +95,22 @@ fn render_scripts(node, context, render_fn) {
              render_sub_only(base_box, sub_box, init_sub_shift, x_height, si,
                              is_char, sub_font_scale)
          else
-             render_sup_only(sup_box, init_sup_shift, min_sup_shift, x_height,
+             render_sup_only(base_box, sup_box, init_sup_shift, min_sup_shift, x_height,
                              sup_font_scale),
-         box.hbox([base_box, box.with_class(supsub_box, css.MSUBSUP)]))
+         script_pair(base_box, box.with_class(supsub_box, css.MSUBSUP)))
+}
+
+fn script_pair(base_box, script_box) {
+    {
+        element: box.hbox([base_box, script_box]).element,
+        elements: [base_box.element, script_box.element],
+        height: max(base_box.height, script_box.height),
+        depth: max(base_box.depth, script_box.depth),
+        width: base_box.width + script_box.width,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // ============================================================
@@ -175,19 +188,70 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
 // Case C: Superscript only
 // ============================================================
 
-fn render_sup_only(sup_box, init_sup, min_sup, x_height, font_scale) {
-    let sup_shift = max(init_sup, max(min_sup, sup_box.depth + 0.25 * x_height))
-    let scale_str = util.fmt_pct(font_scale)
-    let style = "display:inline-block;vertical-align:" ++ util.fmt_em(sup_shift) ++ ";font-size:" ++ scale_str
-    let inner = sup_box.element
-    let el = <span style: style; inner>
+fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, font_scale) {
+    let tall_script = sup_box.height > 0.72
+    let tall_base = base_box.height > 0.72
+    let script_height = script_inner_height(sup_box, tall_script)
+    let vlist_height = if (tall_script) 1.16 else if (tall_base) 0.94 else 0.72
+    let top = 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
+    let inner_style = "height:" ++ util.fmt_em(script_height) ++ ";display:inline-block;font-size: 70%"
+    let sup_elements = merge_script_elements(box.elements_of(sup_box))
+    let el = <span class: css.VLIST_T;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
+                <span style: "top:" ++ util.fmt_em(top) ++ ";margin-right:0.05em";
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span style: inner_style;
+                        for (el in sup_elements) el
+                    >
+                >
+            >
+        >
+    >
     {
         element: el,
-        height: sup_shift + sup_box.height * font_scale,
+        height: vlist_height,
         depth: 0.0,
         width: sup_box.width * font_scale,
         type: "ord",
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn script_inner_height(sup_box, tall_script) {
+    if (tall_script) 1.05
+    else if (sup_box.element is element and sup_box.element.class == css.CMR) 0.46
+    else 0.31
+}
+
+fn can_merge_script_text(a, b) {
+    if (not (a is element) or not (b is element)) false
+    else if (len(a) != 1 or len(b) != 1) false
+    else if (not (a[0] is string) or not (b[0] is string)) false
+    else a.class == b.class and a.style == null and b.style == null
+}
+
+fn merge_script_two(a, b) {
+    let txt = string(a[0]) ++ string(b[0])
+    <span class: a.class; txt>
+}
+
+fn merge_script_scan(items, i, acc) {
+    if (i >= len(items)) acc
+    else
+        (let curr = items[i],
+         let last_idx = len(acc) - 1,
+         let prev = acc[last_idx],
+         if (can_merge_script_text(prev, curr))
+             (let combined = merge_script_two(prev, curr),
+              let head = if (last_idx > 0) slice(acc, 0, last_idx) else [],
+              merge_script_scan(items, i + 1, head ++ [combined]))
+         else
+              merge_script_scan(items, i + 1, acc ++ [curr]))
+}
+
+fn merge_script_elements(items) {
+    if (len(items) <= 1) items
+    else merge_script_scan(items, 1, [items[0]])
 }
