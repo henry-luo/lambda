@@ -33,7 +33,8 @@
     {"type": "log", "message": "--- E. Disabled select ignores Space activation ---"},
     {"type": "focus", "target": {"selector": "select#country"}},
     {"type": "wait", "ms": 60},
-    {"type": "assert_focus", "target": {"selector": "select#country"}}
+    {"type": "assert_focus", "target": {"selector": "select#country"}},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_select_keyboard_final.mark"}
   ]
 }
 

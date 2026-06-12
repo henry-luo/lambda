@@ -1,0 +1,29 @@
+<doc focus: {
+    target: "html.body.2.div.23.div.5.textarea.5",
+    from_mouse: true
+  }, caret: {
+    target: "html.body.2.div.23.div.5.textarea.5",
+    offset: 5
+  }, hover: "html.body.2.div.23.div.5.textarea.5", scroll: {
+    y: 2278.859375
+  }, render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 2
+  }, editing: {
+    active_surface: true
+  }
+  <html flags: ['hover', 'focus-within'], scroll: {
+      y: 2278.859375,
+      max_y: 4312.359375
+    }
+    <body index: 2, flags: ['hover', 'focus-within']
+      <div index: 23, flags: ['hover', 'focus-within']
+        <div index: 5, flags: ['hover', 'focus-within']
+          <textarea index: 5, flags: ['hover', 'focus', 'focus-within', 'valid', 'optional'], form: {
+              sel: [5, 5]
+            }>>>
+      <div index: 27
+        <div index: 5
+          <input index: 5, flags: ['placeholder-shown', 'valid', 'optional']>>>>>>

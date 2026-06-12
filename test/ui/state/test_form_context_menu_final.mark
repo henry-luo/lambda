@@ -1,0 +1,36 @@
+<doc focus: {
+    target: "#name",
+    from_mouse: true
+  }, caret: {
+    target: "#name",
+    offset: 7
+  }, hover: "#name", render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 1
+  }, editing: {
+    active_surface: true
+  }
+  <html flags: ['hover', 'focus-within']
+    <body index: 2, flags: ['hover', 'focus-within']
+      <form index: 3, id: "the-form", flags: ['hover', 'focus-within']
+        <div index: 1, flags: ['hover', 'focus-within']
+          <input index: 3, id: "name", flags: ['hover', 'focus', 'focus-within', 'valid', 'optional'], form: {
+              value: "ctxmenu",
+              sel: [7, 7]
+            }>>
+        <div index: 3
+          <input index: 3, id: "code", flags: ['valid', 'optional']>>
+        <div index: 5
+          <input index: 3, id: "pwd", flags: ['valid', 'optional']>>
+        <div index: 7
+          <input index: 3, id: "readonly-fld", flags: ['valid', 'optional'], form: {
+              sel: [6, 6]
+            }>>
+        <div index: 9
+          <input index: 3, id: "disabled-fld", flags: ['readonly', 'valid', 'optional'], form: {
+              sel: [3, 3]
+            }>>
+        <div index: 11
+          <textarea index: 3, id: "bio", flags: ['valid', 'optional']>>>>>>

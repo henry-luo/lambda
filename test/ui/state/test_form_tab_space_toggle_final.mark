@@ -1,0 +1,30 @@
+<doc focus: {
+    target: "#radio-b",
+    visible: true,
+    from_keyboard: true
+  }, hover: "#email", render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 1
+  }
+  <html flags: ['hover', 'focus-within']
+    <body index: 2, flags: ['hover', 'focus-within']
+      <div index: 5, flags: ['hover']
+        <input index: 3, id: "email", flags: ['hover', 'valid', 'optional'], form: {
+            sel: [11, 11]
+          }>>
+      <div index: 7
+        <input index: 3, id: "name", flags: ['valid', 'optional'], form: {
+            sel: [5, 5]
+          }>>
+      <div index: 9
+        <input index: 3, id: "empty", flags: ['valid', 'optional']>>
+      <div index: 11
+        <label index: 3
+          <input index: 0, id: "newsletter", flags: ['checked']>>>
+      <div index: 13, flags: ['focus-within']
+        <label index: 1
+          <input index: 0, id: "radio-a", flags: ['checked']>>
+        <label index: 3, flags: ['focus-within']
+          <input index: 0, id: "radio-b", flags: ['focus', 'focus-visible', 'focus-within', 'checked']>>>>>>

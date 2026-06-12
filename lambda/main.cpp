@@ -220,11 +220,13 @@ int cmd_render_batch(int argc, char** argv);
 extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
-                                           bool enable_event_log = false);
+                                           bool enable_event_log = false,
+                                           bool enable_state_dump = false);
 extern int view_lambda_script_source_in_window_with_events(const char* script_name, const char* script_source,
                                                            const char* event_file, bool headless,
                                                            const char** font_dirs = nullptr, int font_dir_count = 0,
-                                                           bool enable_event_log = false);
+                                                           bool enable_event_log = false,
+                                                           bool enable_state_dump = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 
@@ -2653,6 +2655,7 @@ int main(int argc, char *argv[]) {
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("  %s view page.html --event-file events.json  # Automated testing\n", argv[0]);
             printf("  %s view page.html --event-file events.json --headless  # Headless testing (no window)\n", argv[0]);
+            printf("  --state-dump  Emit per-cascade Mark state-store dump under ./temp/state/\n");
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
             printf("  Q          Quit viewer\n");
@@ -2664,6 +2667,7 @@ int main(int argc, char *argv[]) {
         const char* event_file = NULL;
         bool headless = false;
         bool event_log = false;
+        bool state_dump = false;
         const char* font_dirs[16];
         int font_dir_count = 0;
 
@@ -2674,6 +2678,8 @@ int main(int argc, char *argv[]) {
                 headless = true;
             } else if (strcmp(argv[i], "--event-log") == 0) {
                 event_log = true;
+            } else if (strcmp(argv[i], "--state-dump") == 0) {
+                state_dump = true;
             } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
                 if (font_dir_count < 16) {
                     font_dirs[font_dir_count++] = argv[++i];
@@ -2864,7 +2870,8 @@ int main(int argc, char *argv[]) {
             // View the temp SVG file
             log_info("Opening graph SVG in viewer: %s", temp_svg);
             exit_code = view_doc_in_window_with_events(temp_svg, event_file, headless,
-                                                       font_dirs, font_dir_count, event_log);
+                                                       font_dirs, font_dir_count, event_log,
+                                                       state_dump);
 
             // Clean up temp file after viewing
             file_delete(temp_svg);
@@ -2896,7 +2903,7 @@ int main(int argc, char *argv[]) {
             // bridge-file I/O.
             exit_code = view_lambda_script_source_in_window_with_events(
                 filename, pdf_bridge_source, event_file, headless,
-                font_dirs, font_dir_count, event_log);
+                font_dirs, font_dir_count, event_log, state_dump);
 
             mem_free(pdf_bridge_source);
             if (temp_file_path) {
@@ -2925,7 +2932,8 @@ int main(int argc, char *argv[]) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
             exit_code = view_doc_in_window_with_events(filename, event_file, headless,
-                                                       font_dirs, font_dir_count, event_log);
+                                                       font_dirs, font_dir_count, event_log,
+                                                       state_dump);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");

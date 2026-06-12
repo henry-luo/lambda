@@ -35,6 +35,7 @@
 
     {"type": "key_press", "key": "Right"},
     {"type": "wait", "ms": 60},
-    {"type": "assert_caret", "char_offset": 5}
+    {"type": "assert_caret", "char_offset": 5},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_caret_navigation_final.mark"}
   ]
 }

@@ -1627,6 +1627,16 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "assert_state_dump") == 0) {
+        ev->type = SIM_EVENT_ASSERT_STATE_DUMP;
+        const char* ref = reader.get("reference").cstring();
+        if (ref) ev->state_dump_reference = mem_strdup(ref, MEM_CAT_LAYOUT);
+        else {
+            log_error("event_sim: assert_state_dump requires 'reference' field");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "assert_editing_event") == 0) {
         ev->type = SIM_EVENT_ASSERT_EDITING_EVENT;
         const char* event_type = reader.get("event").cstring();
@@ -2138,6 +2148,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->editing_operation) mem_free(ev->editing_operation);
             if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
             if (ev->replay_event_name) mem_free(ev->replay_event_name);
+            if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
@@ -2303,6 +2314,177 @@ static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEve
     }
 
     mem_free(content);
+}
+
+static bool sim_state_dump_update_enabled(void) {
+    const char* env = getenv("RADIANT_UPDATE_STATE_DUMPS");
+    return env && (strcmp(env, "1") == 0 || strcasecmp(env, "true") == 0 ||
+                   strcasecmp(env, "yes") == 0);
+}
+
+static StrBuf* sim_normalize_state_dump_text(const char* text) {
+    StrBuf* out = strbuf_new_cap(text ? strlen(text) + 1 : 1);
+    if (!out) return NULL;
+    if (!text) return out;
+
+    const char* p = text;
+    while (*p) {
+        const char* end = strchr(p, '\n');
+        if (!end) end = p + strlen(p);
+
+        const char* trim = end;
+        if (trim > p && trim[-1] == '\r') trim--;
+        while (trim > p && (trim[-1] == ' ' || trim[-1] == '\t')) trim--;
+
+        for (const char* q = p; q < trim; q++) {
+            if (*q != '\r') strbuf_append_char(out, *q);
+        }
+        if (*end == '\n') {
+            strbuf_append_char(out, '\n');
+            p = end + 1;
+        } else {
+            p = end;
+        }
+    }
+
+    while (out->length > 0) {
+        char c = out->str[out->length - 1];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+        out->length--;
+    }
+    if (out->str) out->str[out->length] = '\0';
+    return out;
+}
+
+static size_t sim_first_diff_offset(const char* a, const char* b) {
+    if (!a) a = "";
+    if (!b) b = "";
+    size_t i = 0;
+    while (a[i] && b[i] && a[i] == b[i]) i++;
+    return i;
+}
+
+static int sim_line_number_at(const char* text, size_t offset) {
+    if (!text) return 1;
+    int line = 1;
+    for (size_t i = 0; text[i] && i < offset; i++) {
+        if (text[i] == '\n') line++;
+    }
+    return line;
+}
+
+static void sim_copy_line_at(const char* text, size_t offset, char* out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!text) return;
+
+    size_t len = strlen(text);
+    if (offset > len) offset = len;
+    size_t start = offset;
+    while (start > 0 && text[start - 1] != '\n') start--;
+    size_t end = offset;
+    while (text[end] && text[end] != '\n') end++;
+
+    size_t copy_len = end > start ? end - start : 0;
+    if (copy_len >= out_sz) copy_len = out_sz - 1;
+    memcpy(out, text + start, copy_len);
+    out[copy_len] = '\0';
+}
+
+static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    if (!ctx || !uicon || !ev) return;
+    DomDocument* doc = uicon->document;
+    if (!doc) {
+        log_error("event_sim: assert_state_dump FAIL - no document");
+        ctx->fail_count++;
+        return;
+    }
+
+    DocState* state = doc->state ? (DocState*)doc->state :
+        radiant_document_ensure_state(doc, "event_sim:assert_state_dump");
+    if (!state) {
+        log_error("event_sim: assert_state_dump FAIL - document has no DocState");
+        ctx->fail_count++;
+        return;
+    }
+
+    StrBuf* actual = radiant_state_dump_mark(state);
+    if (!actual) {
+        log_error("event_sim: assert_state_dump FAIL - could not build state dump");
+        ctx->fail_count++;
+        return;
+    }
+
+    StrBuf* actual_norm = sim_normalize_state_dump_text(actual->str ? actual->str : "");
+    strbuf_free(actual);
+    if (!actual_norm) {
+        log_error("event_sim: assert_state_dump FAIL - could not normalize actual dump");
+        ctx->fail_count++;
+        return;
+    }
+
+    const char* ref_path = ev->state_dump_reference;
+    bool update = sim_state_dump_update_enabled();
+    char* expected_text = file_exists(ref_path) ? read_text_file(ref_path) : NULL;
+    if (!expected_text) {
+        if (update) {
+            int rc = write_text_file_atomic(ref_path, actual_norm->str ? actual_norm->str : "");
+            if (rc == 0) {
+                log_info("event_sim: assert_state_dump UPDATE - wrote %s", ref_path);
+                ctx->pass_count++;
+            } else {
+                log_error("event_sim: assert_state_dump FAIL - could not write %s", ref_path);
+                ctx->fail_count++;
+            }
+        } else {
+            log_error("event_sim: assert_state_dump FAIL - cannot read '%s'", ref_path);
+            ctx->fail_count++;
+        }
+        strbuf_free(actual_norm);
+        return;
+    }
+
+    StrBuf* expected_norm = sim_normalize_state_dump_text(expected_text);
+    mem_free(expected_text);
+    if (!expected_norm) {
+        log_error("event_sim: assert_state_dump FAIL - could not normalize fixture '%s'", ref_path);
+        strbuf_free(actual_norm);
+        ctx->fail_count++;
+        return;
+    }
+
+    const char* actual_str = actual_norm->str ? actual_norm->str : "";
+    const char* expected_str = expected_norm->str ? expected_norm->str : "";
+    bool same = strcmp(actual_str, expected_str) == 0;
+    if (!same && update) {
+        int rc = write_text_file_atomic(ref_path, actual_str);
+        if (rc == 0) {
+            log_info("event_sim: assert_state_dump UPDATE - refreshed %s", ref_path);
+            same = true;
+        } else {
+            log_error("event_sim: assert_state_dump FAIL - could not refresh %s", ref_path);
+        }
+    }
+
+    if (same) {
+        log_info("event_sim: assert_state_dump PASS - %s", ref_path);
+        ctx->pass_count++;
+    } else {
+        size_t offset = sim_first_diff_offset(expected_str, actual_str);
+        int line = sim_line_number_at(expected_str, offset);
+        char expected_line[256];
+        char actual_line[256];
+        sim_copy_line_at(expected_str, offset, expected_line, sizeof(expected_line));
+        sim_copy_line_at(actual_str, offset, actual_line, sizeof(actual_line));
+        log_error("event_sim: assert_state_dump FAIL - mismatch in %s at line %d",
+                  ref_path, line);
+        log_error("event_sim: assert_state_dump expected: %s", expected_line);
+        log_error("event_sim: assert_state_dump actual:   %s", actual_line);
+        ctx->fail_count++;
+    }
+
+    strbuf_free(expected_norm);
+    strbuf_free(actual_norm);
 }
 
 static void assert_editing_event_impl(EventSimContext* ctx, UiContext* uicon,
@@ -4582,6 +4764,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_ASSERT_EDITING_EVENT: {
             assert_editing_event_impl(ctx, uicon, ev);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_STATE_DUMP: {
+            assert_state_dump_impl(ctx, uicon, ev);
             break;
         }
 

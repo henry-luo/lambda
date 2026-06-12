@@ -1,0 +1,23 @@
+<doc focus: {
+    target: "#btn-submit",
+    visible: true,
+    from_keyboard: true
+  }, hover: "#email", render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 1
+  }
+  <html flags: ['hover', 'focus-within']
+    <body index: 2, flags: ['hover', 'focus-within']
+      <div index: 5, flags: ['hover']
+        <input index: 3, id: "email", flags: ['hover', 'valid', 'optional'], form: {
+            sel: [11, 11]
+          }>>
+      <div index: 7
+        <input index: 3, id: "name", flags: ['valid', 'optional'], form: {
+            sel: [5, 5]
+          }>>
+      <div index: 9
+        <input index: 3, id: "empty", flags: ['valid', 'optional']>>
+      <button index: 15, id: "btn-submit", flags: ['focus', 'focus-visible', 'focus-within']>>>>

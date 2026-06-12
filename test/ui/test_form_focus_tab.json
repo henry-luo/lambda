@@ -39,6 +39,7 @@
 
     {"type": "key_press", "key": "tab", "mods_str": "shift"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_focus", "target": {"selector": "#readonly-fld"}}
+    {"type": "assert_focus", "target": {"selector": "#readonly-fld"}},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_focus_tab_final.mark"}
   ]
 }

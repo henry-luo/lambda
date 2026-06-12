@@ -1,0 +1,30 @@
+<doc caret: {
+    target: "html.body.2.div.27.p.3",
+    offset: 14
+  }, selection: {
+    anchor: {
+      node: "html.body.2.div.27.p.3",
+      offset: 5
+    },
+    focus: {
+      node: "html.body.2.div.27.p.3",
+      offset: 14
+    }
+  }, hover: "html.body.2.div.27", active: "html.body.2.div.27.p.3", scroll: {
+    y: 72
+  }, render: {
+    dirty: true,
+    reflow: true,
+    repaint: true,
+    rects: 2
+  }, editing: {
+    pointer_selecting: true,
+    autoscroll: true
+  }
+  <html flags: ['hover', 'active'], scroll: {
+      y: 72,
+      max_y: 3757.2060546875
+    }
+    <body index: 2, flags: ['hover', 'active']
+      <div index: 27, flags: ['hover', 'active']
+        <p index: 3, flags: ['active']>>>>>

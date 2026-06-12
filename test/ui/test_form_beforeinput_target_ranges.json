@@ -17,6 +17,7 @@
     {"type": "type", "target": {"selector": "#name"}, "text": "Y"},
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#before-status"}, "equals": "before:insertText|1|name|4-4|Y"},
-    {"type": "assert_text", "target": {"selector": "#input-status"}, "equals": "input:insertText|Y|abcdY"}
+    {"type": "assert_text", "target": {"selector": "#input-status"}, "equals": "input:insertText|Y|abcdY"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_beforeinput_target_ranges_final.mark"}
   ]
 }

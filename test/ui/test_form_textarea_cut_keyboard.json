@@ -22,6 +22,7 @@
     {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "equals": "c"},
     {"type": "assert_value", "target": {"selector": "#bio"}, "equals": "ab\nd"},
-    {"type": "assert_caret", "char_offset": 3}
+    {"type": "assert_caret", "char_offset": 3},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_cut_keyboard_final.mark"}
   ]
 }

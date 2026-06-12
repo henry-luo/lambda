@@ -3,6 +3,7 @@
 
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
+#include "../lib/strbuf.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/template_state.h"
 #include "../lambda/render_map.h"
@@ -14,6 +15,7 @@ struct AnimationScheduler;
 struct DomElement;
 struct DomDocument;
 struct EventStateLog;
+struct StateDumpLog;
 struct SelectorMatcher;
 
 /**
@@ -285,6 +287,7 @@ typedef struct DocState {
     // state.transition records without threading log handles through every
     // legacy call site.
     EventStateLog* active_event_log;
+    StateDumpLog* state_dump_log;
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition
@@ -462,6 +465,19 @@ void radiant_state_destroy(DocState* state);
  * Free process-global interned state-name strings at shutdown.
  */
 void radiant_state_cleanup_interned_names(void);
+
+/**
+ * Open/close the Mark state-store dump stream.
+ * Output path: ./temp/state/state_${pid}_${sanitized_doc_name}.mark
+ */
+StateDumpLog* radiant_state_dump_open(const char* doc_name);
+void radiant_state_dump_close(StateDumpLog* dump);
+bool radiant_state_dump_enabled(StateDumpLog* dump);
+const char* radiant_state_dump_path(StateDumpLog* dump);
+void radiant_state_set_dump_log(DocState* state, StateDumpLog* dump);
+StrBuf* radiant_state_dump_mark(DocState* state);
+void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id);
+bool radiant_state_dump_to_file(DocState* state, const char* path);
 
 /**
  * Reset state store, clearing all states but keeping allocation

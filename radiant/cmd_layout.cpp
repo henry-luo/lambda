@@ -15,6 +15,7 @@
  *   --format FORMAT                Output format: json, text (default: text)
  *   --debug                        Enable debug output
  *   --event-log                    Emit per-document JSONL event/state log under ./temp/
+ *   --state-dump                   Emit per-cascade Mark state-store dump under ./temp/state/
  *   --flavor FLAVOR                LaTeX rendering pipeline: latex-js (default), tex-proper
  */
 
@@ -5909,6 +5910,7 @@ struct LayoutOptions {
     int viewport_height;
     bool debug;
     bool event_log;
+    bool state_dump;
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
     const char* timing_output_file;              // optional JSONL phase timing output
@@ -5927,6 +5929,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
     opts->event_log = false;
+    opts->state_dump = false;
     opts->continue_on_error = false;
     opts->summary = false;
     opts->timing_output_file = nullptr;
@@ -5989,6 +5992,9 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "--event-log") == 0) {
             opts->event_log = true;
+        }
+        else if (strcmp(argv[i], "--state-dump") == 0) {
+            opts->state_dump = true;
         }
         else if (strcmp(argv[i], "--continue-on-error") == 0) {
             opts->continue_on_error = true;
@@ -6116,6 +6122,7 @@ static bool layout_single_file(
     Url* cwd,
     bool track_source_lines = false,
     bool enable_event_log = false,
+    bool enable_state_dump = false,
     FILE* timing_file = nullptr,
     bool auto_close = false
 ) {
@@ -6149,6 +6156,10 @@ static bool layout_single_file(
             event_state_log_session_start(event_log, viewport_width, viewport_height, 1.0);
             event_state_log_document(event_log, "load_start");
         }
+    }
+    StateDumpLog* state_dump = nullptr;
+    if (enable_state_dump && input_url) {
+        state_dump = radiant_state_dump_open(input_file);
     }
 
     // For HTTP URLs without clear extension, fetch and determine type from Content-Type
@@ -6184,6 +6195,10 @@ static bool layout_single_file(
             if (event_log) {
                 event_state_log_document(event_log, "load_failed");
                 event_state_log_close(event_log);
+            }
+            if (state_dump) {
+                radiant_state_dump_close(state_dump);
+                state_dump = nullptr;
             }
             js_event_loop_set_auto_close_mode(previous_auto_close_mode);
             pool_destroy(pool);
@@ -6288,6 +6303,10 @@ static bool layout_single_file(
             event_state_log_document(event_log, "load_failed");
             event_state_log_close(event_log);
         }
+        if (state_dump) {
+            radiant_state_dump_close(state_dump);
+            state_dump = nullptr;
+        }
         pool_destroy(pool);
         return false;
     }
@@ -6302,6 +6321,10 @@ static bool layout_single_file(
             event_state_log_document(event_log, "load_failed");
             event_state_log_close(event_log);
         }
+        if (state_dump) {
+            radiant_state_dump_close(state_dump);
+            state_dump = nullptr;
+        }
         script_runner_cleanup_js_state(doc);
         dom_document_destroy(doc);
         ui_context->document = nullptr;
@@ -6315,6 +6338,7 @@ static bool layout_single_file(
     if (event_log) {
         event_state_log_document(event_log, "load_complete");
     }
+    radiant_state_set_dump_log(state, state_dump);
 
     uint64_t layout_cascade_id = state_begin_event_cascade(
         state,
@@ -6413,7 +6437,7 @@ static bool layout_single_file(
     // Failing to free them leaks pools/arenas across batch files, which can cause
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
 
-    if (event_log) {
+    if (event_log || state_dump) {
         state_end_event_cascade(
             doc && doc->state ? (DocState*)doc->state : nullptr,
             event_log,
@@ -6448,6 +6472,10 @@ static bool layout_single_file(
         event_state_log_document(event_log, "unload_complete");
         event_state_log_close(event_log);
         event_log = nullptr;
+    }
+    if (state_dump) {
+        radiant_state_dump_close(state_dump);
+        state_dump = nullptr;
     }
 
     // Free the input URL (dom_document_destroy doesn't own it)
@@ -6748,6 +6776,7 @@ int cmd_layout(int argc, char** argv) {
                 cwd,
                 opts.debug,
                 opts.event_log,
+                opts.state_dump,
                 timing_file,
                 auto_close
             );
@@ -6771,6 +6800,7 @@ int cmd_layout(int argc, char** argv) {
                     cwd,
                     opts.debug,
                     opts.event_log,
+                    opts.state_dump,
                     timing_file,
                     auto_close
                 );

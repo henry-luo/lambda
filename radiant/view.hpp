@@ -1445,6 +1445,7 @@ struct SelectionState;
 struct FocusState;
 struct BrowsingSession;  // Browsing session for web navigation
 struct EventStateLog;    // per-document JSONL event/state log
+struct StateDumpLog;     // per-document Mark state-store dump
 
 struct StateStore;
 typedef struct StateStore StateStore;
@@ -1494,7 +1495,9 @@ typedef struct UiContext {
     struct BrowsingSession* browsing_session;  // web browsing session with history
     struct WebViewManager* webview_mgr;  // native web view manager (NULL until first <webview> element)
     struct EventStateLog* event_log;  // view-mode per-document event/state log owner
+    struct StateDumpLog* state_dump_log;  // view-mode per-document Mark state dump owner
     bool event_log_enabled; // true when --event-log is active for view mode
+    bool state_dump_enabled; // true when --state-dump is active for view mode
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).

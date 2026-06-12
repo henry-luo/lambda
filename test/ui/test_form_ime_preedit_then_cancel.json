@@ -32,6 +32,7 @@
     {"type": "log", "message": "After cancel, plain typing still works"},
     {"type": "type", "target": {"selector": "#name"}, "text": "!"},
     {"type": "wait", "ms": 60},
-    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi!"}
+    {"type": "assert_value", "target": {"selector": "#name"}, "equals": "hi!"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_ime_preedit_then_cancel_final.mark"}
   ]
 }

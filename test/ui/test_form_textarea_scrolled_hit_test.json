@@ -13,6 +13,7 @@
     {"type": "mouse_up", "x": 58, "y": 45, "button": "left"},
     {"type": "wait", "ms": 80},
 
-    {"type": "assert_form_selection", "target": {"selector": ".focus-textarea"}, "start": 5, "end": 5}
+    {"type": "assert_form_selection", "target": {"selector": ".focus-textarea"}, "start": 5, "end": 5},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_scrolled_hit_test_final.mark"}
   ]
 }

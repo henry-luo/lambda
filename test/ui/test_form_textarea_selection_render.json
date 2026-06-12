@@ -22,6 +22,7 @@
 
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 9},
-    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "max_r": 170, "min_b": 150}
+    {"type": "assert_pixel", "target": {"selector": "#bio", "offset_x": 12, "offset_y": 30}, "max_r": 170, "min_b": 150},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_textarea_selection_render_final.mark"}
   ]
 }

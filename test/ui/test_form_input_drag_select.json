@@ -24,6 +24,7 @@
     {"type": "log", "message": "Cmd+C copies selection — verifies form->selection_* mirror"},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_clipboard", "contains": "hel"}
+    {"type": "assert_clipboard", "contains": "hel"},
+    {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_drag_select_final.mark"}
   ]
 }
