@@ -3868,8 +3868,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             jm_transpile_box_item(mt, fo->left);
             jm_emit_exc_propagate_check(mt);
             MIR_reg_t msg = jm_box_string_literal(mt, "Invalid left-hand side in assignment", 36);
-            jm_call_void_1(mt, "js_throw_reference_error",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
+            jm_call_void_2(mt, "js_throw_named_error",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
             jm_emit_exc_propagate_check(mt);
         } else {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -3903,9 +3904,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 } else if (!mc && !is_function_local) {
                     // Implicit global only when no function-local binding exists.
                     MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
-                    jm_call_void_2(mt, "js_set_global_property",
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
+                    jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                 }
             }
             jm_scope_env_mark_and_writeback(mt, wb_vname, loop_var);
@@ -4109,7 +4111,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
             MIR_new_reg_op(mt->ctx, lhs_call_exc)));
         MIR_reg_t msg = jm_box_string_literal(mt, "Invalid left-hand side in assignment", 36);
-        jm_call_void_1(mt, "js_throw_reference_error",
+        jm_call_void_2(mt, "js_throw_named_error",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg));
         MIR_reg_t lhs_ref_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_iter_exc),
@@ -4137,9 +4140,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
             } else if (!mc && !is_function_local) {
                 MIR_reg_t name_reg = jm_box_string_literal(mt, var_name, var_len);
-                jm_call_void_2(mt, "js_set_global_property",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
+                jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
             }
         }
         jm_scope_env_mark_and_writeback(mt, wb_vname, loop_var);
@@ -4540,9 +4544,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_new_label_op(mt->ctx, local_set),
                                 MIR_new_reg_op(mt->ctx, bridged_binding)));
                             jm_emit_label(mt, global_set);
-                            jm_call_void_2(mt, "js_set_global_property",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                            jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, set_done)));
                             jm_emit_label(mt, local_set);
                             jm_call_void_2(mt, "js_eval_local_export_var",
@@ -4550,9 +4555,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
                             jm_emit_label(mt, set_done);
                         } else {
-                            jm_call_void_2(mt, "js_set_global_property",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                            jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                         }
                     }
                 } else {
@@ -4591,9 +4597,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_new_label_op(mt->ctx, local_set),
                                     MIR_new_reg_op(mt->ctx, bridged_binding)));
                                 jm_emit_label(mt, global_set);
-                                jm_call_void_2(mt, "js_set_global_property",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                                jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, set_done)));
                                 jm_emit_label(mt, local_set);
                                 jm_call_void_2(mt, "js_eval_local_export_var",
@@ -4601,9 +4608,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
                                 jm_emit_label(mt, set_done);
                             } else {
-                                jm_call_void_2(mt, "js_set_global_property",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                                jm_call_void_3(mt, "js_set_global_property",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                             }
                         }
                     }
@@ -4636,8 +4644,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         snprintf(msg, sizeof(msg), "Cannot access '%.*s' before initialization",
                             (int)cls_node->name->len, cls_node->name->chars);
                         MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
-                        jm_call_void_1(mt, "js_throw_reference_error",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                        jm_call_void_2(mt, "js_throw_named_error",
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
                         jm_emit_exc_propagate_check(mt);
                     }
                     // Create class object with __class_name__ property

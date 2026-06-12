@@ -38,8 +38,9 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 // super property access (js_runtime.cpp)
 extern Item js_super_property_get(Item receiver, Item key);
 extern Item js_super_instance_method_get(Item receiver, Item key);
-extern Item js_super_property_set(Item receiver, Item key, Item value);
-extern Item js_super_property_set_non_strict(Item receiver, Item key, Item value);
+// Tune8 §2.2: super_property_set takes an explicit strict flag; the
+// non_strict variant has been removed.
+extern Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_async_iterator_step_result(Item iterator);
@@ -877,9 +878,10 @@ extern int64_t js_set_last_with_binding_if_valid(Item key, Item value, int64_t s
 extern int64_t js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 extern Item js_delete_identifier_with_binding(Item key, int64_t declared_binding);
 extern int64_t js_global_binding_exists(Item key);
-extern void js_set_global_property(Item key, Item value);
+// Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict
+// (strict is now an explicit constant operand).
+extern void js_set_global_property(Item key, Item value, int64_t strict);
 extern void js_set_global_var_property_fast(Item key, Item value);
-extern void js_set_global_property_strict(Item key, Item value);
 extern void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 extern void js_register_global_var_module_binding(Item key, int64_t index);
 extern void js_mark_private_method_non_writable(Item object, Item name);
@@ -960,15 +962,13 @@ extern int64_t js_typeof_is(Item value, const char* type_str);
 extern Item js_property_get_str(Item object, const char* key, int key_len);
 extern Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
 extern Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
-// v23b: Comparison facades returning raw int64_t 0/1
-extern int64_t js_lt_raw(Item left, Item right);
-extern int64_t js_gt_raw(Item left, Item right);
-extern int64_t js_le_raw(Item left, Item right);
-extern int64_t js_ge_raw(Item left, Item right);
+// v23b: Comparison facades returning raw int64_t 0/1.
+// Tune8 §2.1:
+//   - ne/loose_ne removed — the transpiler emits eq + XOR-with-1 inline.
+//   - lt/gt/le/ge collapsed into js_cmp_raw(op, l, r); op is a constant operand.
+extern int64_t js_cmp_raw(int64_t op, Item left, Item right);
 extern int64_t js_eq_raw(Item left, Item right);
-extern int64_t js_ne_raw(Item left, Item right);
 extern int64_t js_loose_eq_raw(Item left, Item right);
-extern int64_t js_loose_ne_raw(Item left, Item right);
 extern int64_t js_discard_value(Item value);
 
 // native test262 harness functions for batch performance
@@ -1354,9 +1354,7 @@ JitImport jit_runtime_imports[] = {
     {"js_modulo", FPTR(js_modulo)},
     {"js_power", FPTR(js_power)},
     {"js_equal", FPTR(js_equal)},
-    {"js_not_equal", FPTR(js_not_equal)},
     {"js_strict_equal", FPTR(js_strict_equal)},
-    {"js_strict_not_equal", FPTR(js_strict_not_equal)},
     {"js_less_than", FPTR(js_less_than)},
     {"js_less_equal", FPTR(js_less_equal)},
     {"js_greater_than", FPTR(js_greater_than)},
@@ -1382,14 +1380,9 @@ JitImport jit_runtime_imports[] = {
     {"bigint_from_string", FPTR(bigint_from_string)},
     {"js_typeof", FPTR(js_typeof)},
     {"js_typeof_is", FPTR(js_typeof_is)},
-    {"js_lt_raw", FPTR(js_lt_raw)},
-    {"js_gt_raw", FPTR(js_gt_raw)},
-    {"js_le_raw", FPTR(js_le_raw)},
-    {"js_ge_raw", FPTR(js_ge_raw)},
+    {"js_cmp_raw", FPTR(js_cmp_raw)},
     {"js_eq_raw", FPTR(js_eq_raw)},
-    {"js_ne_raw", FPTR(js_ne_raw)},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw)},
-    {"js_loose_ne_raw", FPTR(js_loose_ne_raw)},
     {"js_new_object", FPTR(js_new_object)},
     {"js_property_get", FPTR(js_property_get)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
@@ -1400,23 +1393,18 @@ JitImport jit_runtime_imports[] = {
     {"js_private_property_set_strict", FPTR(js_private_property_set_strict)},
     {"js_create_data_property", FPTR(js_create_data_property)},
     {"js_property_access", FPTR(js_property_access)},
-    {"js_key_is_symbol_c", FPTR(js_key_is_symbol_c)},
     {"js_super_property_get", FPTR(js_super_property_get)},
     {"js_super_instance_method_get", FPTR(js_super_instance_method_get)},
     {"js_super_property_set", FPTR(js_super_property_set)},
-    {"js_super_property_set_non_strict", FPTR(js_super_property_set_non_strict)},
     {"js_super_call_class", FPTR(js_super_call_class)},
     {"js_check_class_heritage_constructor", FPTR(js_check_class_heritage_constructor)},
     {"js_check_class_prototype_parent", FPTR(js_check_class_prototype_parent)},
     {"js_super_call_native", FPTR(js_super_call_native)},
     {"js_super_apply_native", FPTR(js_super_apply_native)},
-    {"js_property_get_str", FPTR(js_property_get_str)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_build_arguments_object", FPTR(js_build_arguments_object)},
     {"js_set_arguments_info", FPTR(js_set_arguments_info)},
-    {"js_create_arguments", FPTR(js_create_arguments)},
-    {"js_build_template_object", FPTR(js_build_template_object)},
     {"js_build_template_object_cached", FPTR(js_build_template_object_cached)},
     {"js_new_check_constructor_return", FPTR(js_new_check_constructor_return)},
     {"js_check_tdz", FPTR(js_check_tdz)},
@@ -1449,11 +1437,8 @@ JitImport jit_runtime_imports[] = {
     {"js_args_save", FPTR(js_args_save)},
     {"js_args_restore", FPTR(js_args_restore)},
     {"js_call_function", FPTR(js_call_function)},
-    {"js_function_get_ptr", FPTR(js_function_get_ptr)},
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_apply_constructor", FPTR(js_apply_constructor)},
-    {"js_bind_function", FPTR(js_bind_function)},
-    {"js_func_bind", FPTR(js_func_bind)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
     {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},
@@ -1464,11 +1449,7 @@ JitImport jit_runtime_imports[] = {
     {"js_url_can_parse", FPTR(js_url_can_parse)},
     {"js_readable_stream_new", FPTR(js_readable_stream_new)},
     {"js_writable_stream_new", FPTR(js_writable_stream_new)},
-    {"js_regex_test", FPTR(js_regex_test)},
-    {"js_regex_exec", FPTR(js_regex_exec)},
-    {"js_constructor_create_object", FPTR(js_constructor_create_object)},
     {"js_new_from_class_object", FPTR(js_new_from_class_object)},
-    {"js_new_object_with_shape", FPTR(js_new_object_with_shape)},
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
     {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
@@ -1501,25 +1482,21 @@ JitImport jit_runtime_imports[] = {
     {"js_check_exception", FPTR(js_check_exception)},
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
-    {"js_throw_syntax_error", FPTR(js_throw_syntax_error)},
-    {"js_throw_reference_error", FPTR(js_throw_reference_error)},
-    {"js_new_error", FPTR(js_new_error)},
-    {"js_new_error_with_name", FPTR(js_new_error_with_name)},
+    // Tune8 §2.3: js_throw_syntax_error / _reference_error replaced by
+    // js_throw_named_error(kind, msg). C wrappers in js_runtime.cpp preserve
+    // direct-call semantics for js_globals.cpp.
+    {"js_throw_named_error", FPTR(js_throw_named_error)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
-    {"js_error_captureStackTrace", FPTR(js_error_captureStackTrace)},
-    // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
-    {"js_string_replace_nonws_global_fast", FPTR(js_string_replace_nonws_global_fast)},
     {"js_string_replace_nonws_global_fast_no_dollar", FPTR(js_string_replace_nonws_global_fast_no_dollar)},
     {"js_string_fromCharCode2", FPTR(js_string_fromCharCode2)},
     {"js_uri_decode_equals_from_char_code", FPTR(js_uri_decode_equals_from_char_code)},
     {"js_test262_decimal_to_percent_hex_string", FPTR(js_test262_decimal_to_percent_hex_string)},
     {"js_test262_concat_percent_hex", FPTR(js_test262_concat_percent_hex)},
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
-    {"js_array_method", FPTR(js_array_method)},
     {"js_array_method_direct", FPTR(js_array_method_direct)},
     {"js_math_method", FPTR(js_math_method)},
     {"js_math_apply", FPTR(js_math_apply)},
@@ -1539,7 +1516,6 @@ JitImport jit_runtime_imports[] = {
     {"js_document_proxy_get_property", FPTR(js_document_proxy_get_property)},
     {"js_document_proxy_set_property", FPTR(js_document_proxy_set_property)},
     {"js_number_method", FPTR(js_number_method)},
-    {"js_get_length", FPTR(js_get_length)},
     {"js_get_length_item", FPTR(js_get_length_item)},
     // DOM API
     {"js_document_method", FPTR(js_document_method)},
@@ -1563,17 +1539,12 @@ JitImport jit_runtime_imports[] = {
     {"js_parseFloat", FPTR(js_parseFloat)},
     {"js_isNaN", FPTR(js_isNaN)},
     {"js_isFinite", FPTR(js_isFinite)},
-    {"js_toFixed", FPTR(js_toFixed)},
-    {"js_string_charCodeAt", FPTR(js_string_charCodeAt)},
     {"js_string_fromCharCode", FPTR(js_string_fromCharCode)},
     {"js_string_fromCharCode_int", FPTR(js_string_fromCharCode_int)},
     {"js_string_fromCharCode_array", FPTR(js_string_fromCharCode_array)},
     {"js_string_fromCodePoint", FPTR(js_string_fromCodePoint)},
     {"js_string_fromCodePoint_array", FPTR(js_string_fromCodePoint_array)},
-    {"js_string_raw", FPTR(js_string_raw)},
     {"js_constructor_static_property", FPTR(js_constructor_static_property)},
-    {"js_array_fill", FPTR(js_array_fill)},
-    {"js_array_slice_from", FPTR(js_array_slice_from)},
     {"js_console_log_multi", FPTR(js_console_log_multi)},
     // additional operators
     {"js_instanceof", FPTR(js_instanceof)},
@@ -1612,7 +1583,6 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_strict_func", FPTR(js_mark_strict_func)},
     {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
-    {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
     {"js_reflect_own_keys", FPTR(js_reflect_own_keys)},
@@ -1623,7 +1593,6 @@ JitImport jit_runtime_imports[] = {
     {"js_object_set_prototype_of", FPTR(js_object_set_prototype_of)},
     {"js_reflect_prevent_extensions", FPTR(js_reflect_prevent_extensions)},
     {"js_reflect_apply", FPTR(js_reflect_apply)},
-    {"js_reflect_get", FPTR(js_reflect_get)},
     {"js_reflect_get_with_receiver", FPTR(js_reflect_get_with_receiver)},
     {"js_reflect_has", FPTR(js_reflect_has)},
     {"js_reflect_get_prototype_of", FPTR(js_reflect_get_prototype_of)},
@@ -1645,14 +1614,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_spread_into", FPTR(js_object_spread_into)},
     {"js_has_own_property", FPTR(js_has_own_property)},
     {"js_object_has_own", FPTR(js_object_has_own)},
-    {"js_object_prototype_has_own_property", FPTR(js_object_prototype_has_own_property)},
     {"js_object_freeze", FPTR(js_object_freeze)},
     {"js_object_is_frozen", FPTR(js_object_is_frozen)},
-    {"js_object_seal", FPTR(js_object_seal)},
-    {"js_object_is_sealed", FPTR(js_object_is_sealed)},
-    {"js_object_prevent_extensions", FPTR(js_object_prevent_extensions)},
-    {"js_object_is_extensible", FPTR(js_object_is_extensible)},
-    // v9: Number static methods
     {"js_number_is_integer", FPTR(js_number_is_integer)},
     {"js_number_is_finite", FPTR(js_number_is_finite)},
     {"js_number_is_nan", FPTR(js_number_is_nan)},
@@ -1682,44 +1645,22 @@ JitImport jit_runtime_imports[] = {
     {"js_map_collection_new_from", FPTR(js_map_collection_new_from)},
     {"js_set_collection_new", FPTR(js_set_collection_new)},
     {"js_set_collection_new_from", FPTR(js_set_collection_new_from)},
-    {"js_collection_method", FPTR(js_collection_method)},
     {"js_map_method", FPTR(js_map_method)},
     // shims
     {"js_alert", FPTR(js_alert)},
     // typed arrays
-    {"js_typed_array_new", FPTR(js_typed_array_new)},
     {"js_typed_array_get", FPTR(js_typed_array_get)},
-    {"js_typed_array_set", FPTR(js_typed_array_set)},
     {"js_typed_array_length", FPTR(js_typed_array_length)},
-    {"js_typed_array_fill", FPTR(js_typed_array_fill)},
     {"js_is_typed_array", FPTR(js_is_typed_array)},
     {"js_typed_array_construct", FPTR(js_typed_array_construct)},
-    {"js_typed_array_new_from_buffer", FPTR(js_typed_array_new_from_buffer)},
-    {"js_typed_array_new_from_array", FPTR(js_typed_array_new_from_array)},
-    {"js_typed_array_subarray", FPTR(js_typed_array_subarray)},
-    {"js_typed_array_slice", FPTR(js_typed_array_slice)},
-    {"js_typed_array_set_from", FPTR(js_typed_array_set_from)},
-    // ArrayBuffer
-    {"js_arraybuffer_new", FPTR(js_arraybuffer_new)},
-    {"js_arraybuffer_construct", FPTR(js_arraybuffer_construct)},
     {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
-    {"js_is_arraybuffer", FPTR(js_is_arraybuffer)},
-    {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
-    {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},
     {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
     // Buffer constructor
     {"js_buffer_construct", FPTR(js_buffer_construct)},
-    {"js_arraybuffer_wrap", FPTR(js_arraybuffer_wrap)},
-    // DataView
     {"js_dataview_new", FPTR(js_dataview_new)},
-    {"js_is_dataview", FPTR(js_is_dataview)},
     {"js_dataview_method", FPTR(js_dataview_method)},
     // SharedArrayBuffer
-    {"js_sharedarraybuffer_construct", FPTR(js_sharedarraybuffer_construct)},
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
-    {"js_is_sharedarraybuffer", FPTR(js_is_sharedarraybuffer)},
-    {"js_sharedarraybuffer_method", FPTR(js_sharedarraybuffer_method)},
-    // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding)},
@@ -1737,7 +1678,6 @@ JitImport jit_runtime_imports[] = {
     {"js_native_sha384", FPTR(js_native_sha384)},
     {"js_native_sha512", FPTR(js_native_sha512)},
     {"js_get_global_this", FPTR(js_get_global_this)},
-    {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
     {"js_get_global_property_strict", FPTR(js_get_global_property_strict)},
     {"js_get_global_property_reference", FPTR(js_get_global_property_reference)},
@@ -1746,7 +1686,6 @@ JitImport jit_runtime_imports[] = {
     {"js_with_pop", FPTR(js_with_pop)},
     {"js_with_save_depth", FPTR(js_with_save_depth)},
     {"js_with_restore_depth", FPTR(js_with_restore_depth)},
-    {"js_with_depth_active", FPTR(js_with_depth_active)},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
     {"js_get_last_with_binding_base_or_undefined", FPTR(js_get_last_with_binding_base_or_undefined)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
@@ -1757,7 +1696,6 @@ JitImport jit_runtime_imports[] = {
     {"js_global_binding_exists", FPTR(js_global_binding_exists)},
     {"js_set_global_property", FPTR(js_set_global_property)},
     {"js_set_global_var_property_fast", FPTR(js_set_global_var_property_fast)},
-    {"js_set_global_property_strict", FPTR(js_set_global_property_strict)},
     {"js_set_global_property_strict_prechecked", FPTR(js_set_global_property_strict_prechecked)},
     {"js_mark_private_method_non_writable", FPTR(js_mark_private_method_non_writable)},
     {"js_init_class_instance_fields", FPTR(js_init_class_instance_fields)},
@@ -1769,9 +1707,6 @@ JitImport jit_runtime_imports[] = {
     {"js_define_global_eval_var_property", FPTR(js_define_global_eval_var_property)},
     {"js_define_global_function_property", FPTR(js_define_global_function_property)},
     {"js_global_lexical_declare", FPTR(js_global_lexical_declare)},
-    {"js_global_lexical_binding_exists", FPTR(js_global_lexical_binding_exists)},
-    {"js_global_lexical_get_or_fallback", FPTR(js_global_lexical_get_or_fallback)},
-    {"js_global_lexical_set_if_exists", FPTR(js_global_lexical_set_if_exists)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},
     {"js_evalscript_check_global_function_decl", FPTR(js_evalscript_check_global_function_decl)},
     {"js_evalscript_check_global_lex_decl", FPTR(js_evalscript_check_global_lex_decl)},
@@ -1789,13 +1724,10 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_private_push_frame", FPTR(js_eval_private_push_frame)},
     {"js_eval_private_pop_frame", FPTR(js_eval_private_pop_frame)},
     {"js_eval_private_bind", FPTR(js_eval_private_bind)},
-    {"js_eval_private_resolve", FPTR(js_eval_private_resolve)},
     {"js_eval_local_get_binding_or_fallback", FPTR(js_eval_local_get_binding_or_fallback)},
     {"js_eval_local_export_var", FPTR(js_eval_local_export_var)},
     {"js_eval_local_note_lexical_binding", FPTR(js_eval_local_note_lexical_binding)},
-    {"js_eval_local_has_lexical_binding", FPTR(js_eval_local_has_lexical_binding)},
     {"js_eval_local_note_immutable_binding", FPTR(js_eval_local_note_immutable_binding)},
-    {"js_eval_local_has_immutable_binding", FPTR(js_eval_local_has_immutable_binding)},
     {"js_check_unresolved_capture", FPTR(js_check_unresolved_capture)},
     {"js_resolve_unresolved_binding", FPTR(js_resolve_unresolved_binding)},
     {"js_262_eval_script_is_active", FPTR(js_262_eval_script_is_active)},
@@ -1803,7 +1735,6 @@ JitImport jit_runtime_imports[] = {
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},
-    {"js_symbol_to_string", FPTR(js_symbol_to_string)},
     {"js_symbol_well_known", FPTR(js_symbol_well_known)},
     // v12: DOM extensions
     {"js_classlist_method", FPTR(js_classlist_method)},
@@ -1816,10 +1747,6 @@ JitImport jit_runtime_imports[] = {
     {"js_dom_style_method", FPTR(js_dom_style_method)},
     // v14: Generator runtime
     {"js_generator_create", FPTR(js_generator_create)},
-    {"js_generator_next", FPTR(js_generator_next)},
-    {"js_generator_return", FPTR(js_generator_return)},
-    {"js_generator_throw", FPTR(js_generator_throw)},
-    // v15: Generator state machine helper
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
     {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
     {"js_gen_is_return_signal", FPTR(js_gen_is_return_signal)},
@@ -1838,14 +1765,6 @@ JitImport jit_runtime_imports[] = {
     {"js_promise_create", FPTR(js_promise_create)},
     {"js_promise_resolve", FPTR(js_promise_resolve)},
     {"js_promise_reject", FPTR(js_promise_reject)},
-    {"js_promise_then", FPTR(js_promise_then)},
-    {"js_promise_catch", FPTR(js_promise_catch)},
-    {"js_promise_finally", FPTR(js_promise_finally)},
-    {"js_promise_all", FPTR(js_promise_all)},
-    {"js_promise_race", FPTR(js_promise_race)},
-    {"js_promise_any", FPTR(js_promise_any)},
-    {"js_promise_all_settled", FPTR(js_promise_all_settled)},
-    // v14: Event loop & timers
     {"js_setTimeout", FPTR(js_setTimeout)},
     {"js_setTimeout_args", FPTR(js_setTimeout_args)},
     {"js_setInterval", FPTR(js_setInterval)},
@@ -1869,11 +1788,8 @@ JitImport jit_runtime_imports[] = {
     // Phase 8C: Image() constructor — `new Image(w?, h?)` creates <img>
     {"js_image_construct", FPTR(js_image_construct)},
     // v14: ES Module runtime
-    {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
-    {"js_module_namespace_create", FPTR(js_module_namespace_create)},
     {"js_get_active_module_namespace", FPTR(js_get_active_module_namespace)},
-    {"js_set_active_module_namespace", FPTR(js_set_active_module_namespace)},
     {"js_get_import_meta", FPTR(js_get_import_meta)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
@@ -1882,8 +1798,6 @@ JitImport jit_runtime_imports[] = {
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers
-    {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
-    // Phase 5: Async/Await sync fast path
     {"js_await_sync", FPTR(js_await_sync)},
     // Phase 6: Async state machine runtime
     {"js_async_must_suspend", FPTR(js_async_must_suspend)},
@@ -1893,10 +1807,7 @@ JitImport jit_runtime_imports[] = {
     {"js_async_get_promise", FPTR(js_async_get_promise)},
     // Phase 3: TextEncoder / TextDecoder
     {"js_text_encoder_new", FPTR(js_text_encoder_new)},
-    {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
     {"js_text_decoder_new", FPTR(js_text_decoder_new)},
-    {"js_text_decoder_decode", FPTR(js_text_decoder_decode)},
-    // OffscreenCanvas (Canvas text measurement via lib/font)
     {"js_offscreen_canvas_new", FPTR(js_offscreen_canvas_new)},
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
@@ -1907,16 +1818,11 @@ JitImport jit_runtime_imports[] = {
     {"js_proxy_new", FPTR(js_proxy_new)},
     {"js_proxy_revocable", FPTR(js_proxy_revocable)},
     // prototype chain
-    {"js_get_prototype", FPTR(js_get_prototype)},
     {"js_set_prototype", FPTR(js_set_prototype)},
     {"js_object_proto_setter", FPTR(js_object_proto_setter)},
-    {"js_link_base_prototype", FPTR(js_link_base_prototype)},
-    {"js_prototype_lookup", FPTR(js_prototype_lookup)},
     {"js_mark_non_enumerable", FPTR(js_mark_non_enumerable)},
     {"js_mark_non_writable", FPTR(js_mark_non_writable)},
-    {"js_func_init_property", FPTR(js_func_init_property)},
     {"js_mark_all_non_enumerable", FPTR(js_mark_all_non_enumerable)},
-    {"js_new_number_wrapper", FPTR(js_new_number_wrapper)},
     {"js_new_number_checked", FPTR(js_new_number_checked)},
     {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
     {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},

@@ -14948,10 +14948,12 @@ static void js_set_global_property_impl(Item key, Item value, bool strict) {
     js_property_set(global, key, value);
 }
 
-// js_set_global_property: write a property to the global object by name string
-// Used for implicit global assignments (sloppy mode: assigning to undeclared variables)
-extern "C" void js_set_global_property(Item key, Item value) {
-    js_set_global_property_impl(key, value, false);
+// Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict.
+// The JIT passes `strict` as a constant operand (0 = sloppy implicit global,
+// 1 = strict throw-on-undeclared). The hot variant js_set_global_var_property_fast
+// stays direct because it has a substantially different fast-path body.
+extern "C" void js_set_global_property(Item key, Item value, int64_t strict) {
+    js_set_global_property_impl(key, value, strict != 0);
 }
 
 extern "C" void js_set_global_var_property_fast(Item key, Item value) {
@@ -14978,9 +14980,9 @@ extern "C" void js_set_global_var_property_fast(Item key, Item value) {
     js_set_global_property_impl(key, value, false);
 }
 
-extern "C" void js_set_global_property_strict(Item key, Item value) {
-    js_set_global_property_impl(key, value, true);
-}
+// Tune8 §2.2: js_set_global_property_strict removed — call
+// js_set_global_property(key, value, 1) instead. No C-side callers existed.
+
 
 extern "C" void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs) {
     if (!binding_exists_at_lhs) {

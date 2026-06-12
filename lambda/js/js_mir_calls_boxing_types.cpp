@@ -1,11 +1,104 @@
 #include "js_mir_internal.hpp"
 
 // ============================================================================
+// Tune8 Phase 0 §1.3: opt-in emit telemetry
+//
+// Build with -DJS_MIR_EMIT_TELEMETRY to enable.
+// Counts, per `name` argument to jm_ensure_import, how many times each runtime
+// function is referenced from JIT'd code over the lifetime of the process.
+// Dumped to ./temp/jit_emit_stats.tsv at exit.
+//
+// The counter records ALL calls to jm_ensure_import (cache hits + misses), so
+// the totals reflect emission volume — i.e. how many MIR call insns get
+// produced — not just the unique-name set. Names with count 0 are absent
+// from the dump entirely; cross-reference with sys_func_defs[] to find
+// registry entries that are never imported by JIT'd code.
+// ============================================================================
+#ifdef JS_MIR_EMIT_TELEMETRY
+#include "../../lib/hashmap.h"
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+struct JsEmitTelemetryRow {
+    char name[96];
+    uint64_t count;
+};
+
+static uint64_t jm_telemetry_hash(const void* item, uint64_t s0, uint64_t s1) {
+    const JsEmitTelemetryRow* r = (const JsEmitTelemetryRow*)item;
+    return hashmap_sip(r->name, strlen(r->name), s0, s1);
+}
+
+static int jm_telemetry_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    return strcmp(((const JsEmitTelemetryRow*)a)->name,
+                  ((const JsEmitTelemetryRow*)b)->name);
+}
+
+static struct hashmap* g_jm_telemetry = NULL;
+static pthread_mutex_t g_jm_telemetry_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void jm_telemetry_dump(void) {
+    pthread_mutex_lock(&g_jm_telemetry_mu);
+    if (g_jm_telemetry) {
+        // each lambda.exe process writes to its own file under
+        // ./temp/jit_emit_stats/<pid>.tsv so concurrent test262 workers
+        // don't clobber each other. JS_MIR_EMIT_STATS_DIR overrides the dir.
+        const char* dir = getenv("JS_MIR_EMIT_STATS_DIR");
+        if (!dir) dir = "./temp/jit_emit_stats";
+        mkdir(dir, 0755); // best-effort; ignore EEXIST
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)getpid());
+        FILE* f = fopen(path, "w");
+        if (f) {
+            fprintf(f, "name\tcount\n");
+            size_t iter = 0;
+            void* item = NULL;
+            while (hashmap_iter(g_jm_telemetry, &iter, &item)) {
+                JsEmitTelemetryRow* r = (JsEmitTelemetryRow*)item;
+                fprintf(f, "%s\t%llu\n", r->name, (unsigned long long)r->count);
+            }
+            fclose(f);
+        }
+    }
+    pthread_mutex_unlock(&g_jm_telemetry_mu);
+}
+
+static void jm_telemetry_record(const char* name) {
+    pthread_mutex_lock(&g_jm_telemetry_mu);
+    if (!g_jm_telemetry) {
+        g_jm_telemetry = hashmap_new(sizeof(JsEmitTelemetryRow), 1024, 0, 0,
+            jm_telemetry_hash, jm_telemetry_cmp, NULL, NULL);
+        atexit(jm_telemetry_dump);
+    }
+    JsEmitTelemetryRow probe;
+    memset(&probe, 0, sizeof(probe));
+    snprintf(probe.name, sizeof(probe.name), "%s", name);
+    JsEmitTelemetryRow* existing =
+        (JsEmitTelemetryRow*)hashmap_get(g_jm_telemetry, &probe);
+    if (existing) {
+        existing->count++;
+    } else {
+        probe.count = 1;
+        hashmap_set(g_jm_telemetry, &probe);
+    }
+    pthread_mutex_unlock(&g_jm_telemetry_mu);
+}
+#endif // JS_MIR_EMIT_TELEMETRY
+
+// ============================================================================
 // Import management
 // ============================================================================
 
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
+#ifdef JS_MIR_EMIT_TELEMETRY
+    jm_telemetry_record(name);
+#endif
     JsImportCacheEntry key;
     memset(&key, 0, sizeof(key));
     int key_len = snprintf(key.name, sizeof(key.name), "%s#r%d#n%d#a%d",
