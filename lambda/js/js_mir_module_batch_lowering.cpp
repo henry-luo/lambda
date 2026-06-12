@@ -2574,6 +2574,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsFunctionNode* iife_fn = jm_find_iife_function_expr(expr);
             if (!iife_fn || !iife_fn->body) { stmt = stmt->next; continue; }
 
+            // Js53 P3 Bug C-1 fix: async (and generator) IIFEs have their own
+            // state-machine env-slot storage for locals. Promoting their `var`
+            // declarations to module-vars (the sync-IIFE optimization below)
+            // causes the await fast-path's resolved value to be lost when the
+            // module-var slot is written from inside the state machine. Skip
+            // the IIFE-modvar promotion for async/generator IIFEs.
+            if (iife_fn->is_async || iife_fn->is_generator) { stmt = stmt->next; continue; }
+
             bool self_referencing_named_iife = false;
             if (iife_fn->name) {
                 char self_name[128];

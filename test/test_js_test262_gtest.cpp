@@ -167,14 +167,14 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // "array-find-from-last",                     // SUPPORTED (findLast, findLastIndex)
 
     // === ES2024 features ===
-    "Atomics.waitAsync",                          // Atomics.waitAsync proposal
-    "resizable-arraybuffer",                      // Resizable/growable ArrayBuffers
+    // "Atomics.waitAsync",                       // SUPPORTED (Js53 P3)
+    "resizable-arraybuffer",                      // Resizable/growable ArrayBuffers (deferred to Js54 — see Transpile_Js_53_Es2024.md §11 P4)
     "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
-    "regexp-v-flag",                              // Unicode sets (/v flag)
+    "regexp-v-flag",                              // Unicode sets (/v flag) (deferred to Js54 — see Transpile_Js_53_Es2024.md §11 P6)
     // "promise-with-resolvers",                  // SUPPORTED
     // "array-grouping",                          // SUPPORTED
-    "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
-    "String.prototype.toWellFormed",
+    // "String.prototype.isWellFormed",           // SUPPORTED (Js53 P1)
+    // "String.prototype.toWellFormed",           // SUPPORTED (Js53 P1)
 
     // === ES2025 features ===
     "import-attributes", "import-assertions",     // Import attributes
@@ -677,6 +677,7 @@ static std::vector<Test262Param> discover_all_tests() {
         {"statementList", "statementList"},
         {"identifier-resolution", "identifier_resolution"},
         {"future-reserved-words", "future_reserved_words"},
+        {"module-code", "module_code"},
     };
     for (auto& cat : language_cats) {
         std::string dir = std::string(TEST262_ROOT) + "/test/language/" + cat.subdir;
@@ -841,6 +842,36 @@ static bool has_unsupported_feature_for_test(const Test262Metadata& meta, const 
 
 static bool is_js51_es2022_async_admission_test(const std::string& test_name) {
     return test_name == "language_expressions_class_elements_after_same_line_method_rs_static_async_method_privatename_identifier_alt_js";
+}
+
+// Js53 P3-revisit (2026-06-12): admit the 20 Atomics.waitAsync tests that
+// were unblocked by Bug C-1 (async-IIFE await value preservation) and Bug C-2
+// (waitAsync agent_slot timeout scheduling). Each is async-flagged and needs
+// explicit allowlist entry; the existing baseline doesn't yet contain them.
+static bool is_js53_waitasync_admission_test(const std::string& test_name) {
+    static const std::set<std::string> names = {
+        "built_ins_Atomics_waitAsync_good_views_js",
+        "built_ins_Atomics_waitAsync_bigint_good_views_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_no_operation_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_add_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_and_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_compareExchange_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_exchange_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_or_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_store_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_sub_js",
+        "built_ins_Atomics_waitAsync_no_spurious_wakeup_on_xor_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_no_operation_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_add_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_and_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_compareExchange_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_exchange_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_or_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_store_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_sub_js",
+        "built_ins_Atomics_waitAsync_bigint_no_spurious_wakeup_on_xor_js",
+    };
+    return names.count(test_name) > 0;
 }
 
 static std::string unsupported_feature_skip_message(const Test262Metadata& meta) {
@@ -2262,6 +2293,7 @@ static void prepare_all_tests(
             }
             if (meta.is_async && !(async_test_is_enabled(p.test_name) ||
                     (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
+                    (g_run_async && is_js53_waitasync_admission_test(p.test_name)) ||
                     (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
                         is_es2021_module_test(p.test_path, meta))))) {
                 p.skip_result = T262_SKIP;
@@ -4238,6 +4270,7 @@ int main(int argc, char** argv) {
                     p.skip_message = "raw flag";
                 } else if (p.is_async && !(async_test_is_enabled(p.test_name) ||
                         (g_run_async && is_js51_es2022_async_admission_test(p.test_name)) ||
+                        (g_run_async && is_js53_waitasync_admission_test(p.test_name)) ||
                         (g_run_async && (is_dynamic_import_script_test(p.test_path, meta) ||
                             is_es2021_module_test(p.test_path, meta))))) {
                     p.skip_result = T262_SKIP;
