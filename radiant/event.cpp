@@ -4,6 +4,7 @@
 #include "state_store.hpp"
 #include "animation.h"
 #include "state_machine.hpp"
+#include "state_schema.hpp"
 #include "scroller.hpp"
 #include "form_control.hpp"
 #include "text_control.hpp"
@@ -2350,10 +2351,18 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
                                       &prevented);
     if (prevented) {
-        form_control_set_selection(state, target,
-                                   saved_selection_start,
-                                   saved_selection_end,
-                                   saved_selection_direction);
+        if (input_type == INPUT_INTENT_INSERT_TEXT &&
+            saved_selection_start != saved_selection_end) {
+            form_control_set_selection(state, target,
+                                       saved_selection_end,
+                                       saved_selection_end,
+                                       0);
+        } else {
+            form_control_set_selection(state, target,
+                                       saved_selection_start,
+                                       saved_selection_end,
+                                       saved_selection_direction);
+        }
         log_debug("dispatch_form_text_replace: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
         return true;
@@ -2384,6 +2393,10 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     }
     tc_ensure_init(live_elem);
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
+                               SM_EV_FORM_REPLACE_TEXT, live_target);
+    sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
+
     uint32_t old_len = event_log_text_len(live_elem->form ? live_elem->form->value : nullptr);
     const char* previous_history_input_type =
         te_history_input_type_set(input_intent_type_name(input_type));
@@ -2406,8 +2419,22 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
                                     "replaceCollapse",
                                     caret_offset, caret_offset);
         editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+        sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
+        sm_guard.commit();
     }
     return ok;
+}
+
+static void restore_form_text_focus_after_input(DocState* state,
+                                                DomDocument* doc,
+                                                const char* id) {
+    if (!state || focus_get(state) || !doc || !doc->root || !id || !id[0]) {
+        return;
+    }
+    DomElement* live_elem = find_element_by_author_id(
+        static_cast<DomNode*>(doc->root), id);
+    if (!live_elem || !tc_is_text_control(live_elem)) return;
+    focus_set(state, static_cast<View*>(live_elem), false);
 }
 
 static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
@@ -2703,8 +2730,11 @@ static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
     uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
     if (offset > value_len) offset = value_len;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
+                               SM_EV_UI_START_POINTER_SELECTION, target);
     dispatch_selectstart(evcon, target);
     selection_start(state, target, (int)offset); // INT_CAST_OK: StateStore selection API uses int offsets.
+    sm_guard.commit();
     tc_sync_legacy_to_form(elem, state);
     event_log_editing_selection(state, &surface, nullptr,
                                 operation ? operation : "start",
@@ -2814,9 +2844,12 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     hooks.copy_selection = dispatch_editing_copy_selection;
     hooks.user = nullptr;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
+                               SM_EV_FORM_HISTORY, target);
     bool prevented = false;
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
                                       &prevented);
+    sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
     if (prevented) {
         log_debug("dispatch_form_history: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
@@ -2846,6 +2879,8 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
         dispatch_form_history_restore_selection(elem, state, target,
                                                 &surface, &intent);
         editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+        sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
+        sm_guard.commit();
     }
     return did;
 }
@@ -3380,6 +3415,8 @@ static void dispatch_selectstart(EventContext* evcon, View* target) {
     if (dispatch_lambda_handler(evcon, target, "selectstart")) {
         evcon->need_repaint = true;
     }
+    sm_observe_action(event_context_target_state(evcon),
+                      SM_ACT_DISPATCH_SELECTSTART);
 }
 
 static void dispatch_selectionchange(EventContext* evcon, DocState* state, View* target) {
@@ -4795,7 +4832,7 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Doc
             if (elem_name && strcmp(elem_name, name) == 0) {
                 // Uncheck this radio button
                 if (state_get_pseudo_state(state, current, PSEUDO_STATE_CHECKED)) {
-                    form_control_set_checked(state, current, false);
+                    form_control_uncheck_radio_group_peer(state, current);
                     sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
                     log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
                 }
@@ -5339,6 +5376,39 @@ bool is_view_focusable(View* view) {
     return false;
 }
 
+static bool prepare_previous_focus_blur(EventContext* evcon,
+                                        DocState* state,
+                                        View* prev_focus) {
+    if (!evcon || !state || !prev_focus || !prev_focus->is_element()) {
+        return false;
+    }
+    DomElement* prev_elem = lam::dom_require_element(prev_focus);
+    if (te_password_reveal_clear(prev_elem)) {
+        doc_state_request_repaint(state);
+        evcon->need_repaint = true;
+    }
+    return te_blur_should_dispatch_change(prev_elem);
+}
+
+static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
+    if (!evcon || !target) return;
+    dispatch_lambda_handler(evcon, target, "change");
+    radiant_dispatch_simple_event(evcon, target, "change", true, false);
+    sm_observe_action(event_context_target_state(evcon),
+                      SM_ACT_DISPATCH_CHANGE);
+}
+
+static void dispatch_focus_blur_observed(EventContext* evcon,
+                                         View* target,
+                                         View* related_target) {
+    if (!evcon || !target) return;
+    dispatch_lambda_handler(evcon, target, "blur");
+    radiant_dispatch_focus_event(evcon, target, "blur", related_target);
+    sm_observe_action(event_context_target_state(evcon),
+                      SM_ACT_DISPATCH_BLUR);
+    radiant_dispatch_focus_event(evcon, target, "focusout", related_target);
+}
+
 /**
  * Update focus state when an element gains/loses focus
  * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
@@ -5350,31 +5420,24 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
     View* prev_focus = focus_get(state);
 
     if (prev_focus == new_focus) return;  // no change
+    bool should_dispatch_change =
+        prepare_previous_focus_blur(evcon, state, prev_focus);
 
     // Use the focus API to handle all state updates
     if (new_focus) {
-        focus_set(state, new_focus, from_keyboard);
-
-        // Sync DOM pseudo-states for previous focus
         if (prev_focus) {
-            // F1 (Radiant_Design_Form_Input.md §3.1): if the blurred element
-            // is a text control whose value differs from the focus-time
-            // snapshot, dispatch `change` before `blur` (HTML §4.10.5.5).
-            if (prev_focus->is_element()) {
-                DomElement* prev_elem = lam::dom_require_element(prev_focus);
-                if (te_password_reveal_clear(prev_elem)) {
-                    doc_state_request_repaint(state);
-                    evcon->need_repaint = true;
-                }
-                if (te_blur_should_dispatch_change(prev_elem)) {
-                    dispatch_lambda_handler   (evcon, prev_focus, "change");
-                    radiant_dispatch_simple_event(evcon, prev_focus, "change", true, false);
-                }
+            SmTransitionGuard sm_guard(state, SM_FAMILY_FOCUS,
+                should_dispatch_change ? SM_EV_UI_FOCUS_WITH_CHANGE :
+                                         SM_EV_UI_FOCUS_WITH_BLUR,
+                new_focus);
+            focus_set(state, new_focus, from_keyboard);
+            if (should_dispatch_change) {
+                dispatch_focus_change_observed(evcon, prev_focus);
             }
-            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
-            dispatch_lambda_handler(evcon, prev_focus, "blur");
-            radiant_dispatch_focus_event(evcon, prev_focus, "blur", new_focus);
-            radiant_dispatch_focus_event(evcon, prev_focus, "focusout", new_focus);
+            dispatch_focus_blur_observed(evcon, prev_focus, new_focus);
+            sm_guard.commit();
+        } else {
+            focus_set(state, new_focus, from_keyboard);
         }
 
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
@@ -5405,25 +5468,19 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         log_debug("update_focus_state: set focus on %p (keyboard=%d, focus-visible=%d)",
                   new_focus, from_keyboard, from_keyboard);
     } else {
-        focus_clear(state);
-
         if (prev_focus) {
-            // F1: same `change` dispatch on focus-cleared path.
-            if (prev_focus->is_element()) {
-                DomElement* prev_elem = lam::dom_require_element(prev_focus);
-                if (te_password_reveal_clear(prev_elem)) {
-                    doc_state_request_repaint(state);
-                    evcon->need_repaint = true;
-                }
-                if (te_blur_should_dispatch_change(prev_elem)) {
-                    dispatch_lambda_handler   (evcon, prev_focus, "change");
-                    radiant_dispatch_simple_event(evcon, prev_focus, "change", true, false);
-                }
+            SmTransitionGuard sm_guard(state, SM_FAMILY_FOCUS,
+                should_dispatch_change ? SM_EV_UI_BLUR_WITH_CHANGE :
+                                         SM_EV_UI_BLUR_WITH_BLUR,
+                prev_focus);
+            focus_clear(state);
+            if (should_dispatch_change) {
+                dispatch_focus_change_observed(evcon, prev_focus);
             }
-            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
-            dispatch_lambda_handler(evcon, prev_focus, "blur");
-            radiant_dispatch_focus_event(evcon, prev_focus, "blur", nullptr);
-            radiant_dispatch_focus_event(evcon, prev_focus, "focusout", nullptr);
+            dispatch_focus_blur_observed(evcon, prev_focus, nullptr);
+            sm_guard.commit();
+        } else {
+            focus_clear(state);
         }
 
         log_debug("update_focus_state: cleared focus");
@@ -6701,8 +6758,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 // Start new selection if shift not pressed, otherwise extend
                 if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                    SmTransitionGuard sm_guard(state, SM_FAMILY_SELECTION,
+                        SM_EV_UI_START_POINTER_SELECTION, evcon.target);
                     dispatch_selectstart(&evcon, evcon.target);
                     selection_start(state, evcon.target, char_offset);
+                    sm_guard.commit();
                     dispatch_rich_selection_snapshot(&evcon, state, evcon.target,
                         "mouseDown", nullptr);
 
@@ -7679,6 +7739,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 const char* value = form_control_live_value(focus_elem, &live_value_len);
                 int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = form_caret_offset;
+                if (cur < 0) cur = 0;
+                if (cur > value_len) cur = value_len;
                 bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
                 bool ctrl = (key_event->mods & RDT_MOD_CTRL)  != 0;
                 bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
@@ -7930,14 +7992,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
                         !form_control_is_disabled(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
-                        // Lambda handler deleted char before caret; move caret back by 1 char
+                        // Lambda handler already deleted before the caret; clamp to the post-delete offset.
                         int base_off = had_keydown_caret ? keydown_caret_offset : cur;
+                        if (base_off < 0) base_off = 0;
+                        if (base_off > value_len) base_off = value_len;
                         if (base_off > 0 && value) {
-                            int new_off = base_off - 1;
-                            while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
-                                new_off--;
                             int new_len = form_control_live_value_len_int(focus_elem);
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(base_off <= new_len ? base_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaDeleteBackward");
                         }
@@ -8005,6 +8066,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 const char* value = form_control_live_value(focus_elem, &live_value_len);
                 int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = textarea_caret_offset;
+                if (cur < 0) cur = 0;
+                if (cur > value_len) cur = value_len;
 
                 // helper: compute line start offset and line length for a given line
                 auto line_start_off = [&](int line) -> int {
@@ -8336,13 +8399,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaDeleteSelection");
                         } else if ((had_keydown_caret ? keydown_caret_offset : cur) > 0 && value) {
-                            // single char delete: move caret back by 1 UTF-8 char
+                            // single char delete: collapse at the post-delete offset
                             int base_off = had_keydown_caret ? keydown_caret_offset : cur;
-                            int new_off = base_off - 1;
-                            while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
-                                new_off--;
+                            if (base_off < 0) base_off = 0;
+                            if (base_off > value_len) base_off = value_len;
                             int new_len = form_control_live_value_len_int(focus_elem);
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
+                            uint32_t collapse_off = (uint32_t)(base_off <= new_len ? base_off : new_len);
                             dispatch_form_caret_collapse(&evcon, focus_elem, state,
                                 focused, collapse_off, "lambdaDeleteBackward");
                         }
@@ -8568,9 +8630,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             had_input_selection = true;
             selection_get_range(state, &input_sel_start, &input_sel_end);
         }
-        int input_caret_offset = 0;
-        bool had_input_caret = caret_get_offset(state, &input_caret_offset);
-
         // Rich-text text insertion is driven through beforeinput/insertText.
         // This avoids the legacy contenteditable TODO path and lets Lambda
         // commands own source-tree mutation.
@@ -8606,25 +8665,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // dispatch "input" event to Lambda template handler if registered
-        // (e.g. todo.ls). When a handler ran it has already mutated the
-        // form value via the "char" payload; we then only advance the
-        // caret. When no handler ran (plain HTML form input), we insert
-        // the typed character ourselves via te_replace_byte_range.
-        bool had_lambda_handler = false;
-        if (focused) {
-            if (dispatch_lambda_handler(&evcon, focused, "input")) {
-                evcon.need_repaint = true;
-                had_lambda_handler = true;
-            }
-        }
-
         // Re-fetch focused element (dispatch may have rebuilt the DOM)
         focused = focus_get(state);
 
-        // For form text inputs and textareas, either insert the character
-        // ourselves (no Lambda handler) or just advance the caret to match
-        // the value the Lambda handler already produced.
+        // For form text inputs and textareas, insert through the shared form
+        // edit path. It dispatches beforeinput before mutation and input after
+        // mutation, so inline oninput handlers observe the updated value.
         bool is_form_input = false;
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
@@ -8636,28 +8682,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
                     !form_control_is_disabled(state, static_cast<View*>(elem));
                 int caret_offset = 0;
-                if (had_lambda_handler) {
-                    // legacy path: handler mutated value; just advance caret.
-                    if (had_input_caret || caret_get_offset(state, &caret_offset)) {
-                        uint32_t cp = text_event->codepoint;
-                        int char_bytes = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
-                        int new_off;
-                        if (had_input_selection) {
-                            new_off = input_sel_start + char_bytes;
-                        } else {
-                            new_off = (had_input_caret ? input_caret_offset : caret_offset) + char_bytes;
-                        }
-                        const char* val = elem->form->value;
-                        int val_len = val ? (int)strlen(val) : 0;
-                        uint32_t collapse_off = (uint32_t)(new_off <= val_len ? new_off : val_len);
-                        dispatch_form_caret_collapse(&evcon, elem, state,
-                            focused, collapse_off, "lambdaInsertText");
-                    }
-                } else if (editable && caret_get_offset(state, &caret_offset)) {
-                    // No Lambda handler — insert directly into the form
-                    // value buffer. te_replace_byte_range handles caret
-                    // placement, undo history, selection clear, and the
-                    // beforeinput/input dispatch hooks.
+                if (editable && caret_get_offset(state, &caret_offset)) {
                     uint32_t a, b;
                     if (had_input_selection) {
                         a = (uint32_t)input_sel_start;
@@ -8668,9 +8693,27 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     char utf8_buf[5];
                     size_t utf8_len = utf8_encode_z(text_event->codepoint, utf8_buf);
                     if (utf8_len > 0) {
-                        dispatch_form_text_replace(&evcon, elem, state, focused,
-                                                   a, b, utf8_buf, (uint32_t)utf8_len,
-                                                   INPUT_INTENT_INSERT_TEXT);
+                        if (dispatch_lambda_handler(&evcon, focused, "input")) {
+                            evcon.need_repaint = true;
+                            View* live_focus = focus_get(state);
+                            if (live_focus && live_focus->is_element()) {
+                                DomElement* live_elem = lam::dom_require_element(live_focus);
+                                if (tc_is_text_control(live_elem)) {
+                                    uint32_t next_offset = a + (uint32_t)utf8_len;
+                                    dispatch_form_caret_collapse(&evcon, live_elem, state,
+                                        live_focus, next_offset, "lambdaInsertText");
+                                }
+                            }
+                        } else {
+                            DomDocument* restore_doc = elem->doc;
+                            const char* restore_id = elem->id;
+                            bool replaced = dispatch_form_text_replace(&evcon, elem, state, focused,
+                                a, b, utf8_buf, (uint32_t)utf8_len,
+                                INPUT_INTENT_INSERT_TEXT);
+                            if (replaced) {
+                                restore_form_text_focus_after_input(state, restore_doc, restore_id);
+                            }
+                        }
                     }
                 }
             }

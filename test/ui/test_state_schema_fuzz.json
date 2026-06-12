@@ -1,0 +1,11 @@
+{
+  "name": "State schema fuzz conformance",
+  "html": "test/ui/test_state_schema_fuzz.html",
+  "viewport": {"width": 480, "height": 360},
+  "default_timeout": 500,
+  "events": [
+    {"type": "wait", "ms": 80},
+    {"type": "fuzz_schema", "steps": 36, "seed": "random"},
+    {"type": "assert_state_store"}
+  ]
+}

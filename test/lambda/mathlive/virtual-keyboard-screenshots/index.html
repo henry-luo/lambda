@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mathfield Keyboard</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+    <link rel="stylesheet" href="../style.css" />
+    <link rel="icon" href="data:," />
+    <style>
+      body > header {
+        height: 60px;
+      }
+      body {
+        /* --keyboard-background: linear-gradient(#e66465, #9198e5); */
+        /* --keyboard-background: linear-gradient(white, #cacfd7); */
+      }
+      header h1 {
+        text-align: center;
+      }
+      main {
+        padding-top: 0;
+        display: flex;
+        align-content: center;
+      }
+      math-field,
+      textarea {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        border-radius: 8px;
+        font-size: 24px;
+        padding: 8px;
+        min-width: 300px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Mathfield Keyboard</h1>
+    </header>
+    <main>
+      <math-field id="mf-1">x=\frac{-b\pm \sqrt{b^2-4ac}}{2a}</math-field>
+    </main>
+
+    <script type="module">
+      import { MathfieldElement } from '/dist/mathlive.mjs';
+
+      const kbd = window.mathVirtualKeyboard;
+      // kbd.layouts = 'compact';
+      // k.addEventListener('virtual-keyboard-toggle', (ev) =>
+      //   console.log('toggling ', ev)
+      // );
+    </script>
+  </body>
+</html>

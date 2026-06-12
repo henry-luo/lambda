@@ -17,6 +17,7 @@ struct DomDocument;
 struct EventStateLog;
 struct StateDumpLog;
 struct SelectorMatcher;
+struct SmTransitionScope;
 
 /**
  * Radiant State Store - Centralized UI state management
@@ -36,6 +37,13 @@ typedef enum StateUpdateMode {
     STATE_MODE_IN_PLACE = 0,   // direct mutation (faster, no history)
     STATE_MODE_IMMUTABLE = 1,  // copy-on-write (enables undo/time-travel)
 } StateUpdateMode;
+
+typedef enum DocLifecycleState {
+    DOC_LIFECYCLE_UNINITIALIZED = 0,
+    DOC_LIFECYCLE_LOADING,
+    DOC_LIFECYCLE_COMMITTED,
+    DOC_LIFECYCLE_UNLOADED
+} DocLifecycleState;
 
 /**
  * State key - identifies a state by node and name
@@ -280,6 +288,7 @@ typedef struct DocState {
     
     // Update mode and versioning
     StateUpdateMode mode;
+    DocLifecycleState lifecycle;
     uint64_t version;              // monotonically increasing version number
     struct DocState* prev_version;  // previous version (immutable mode only)
 
@@ -292,6 +301,7 @@ typedef struct DocState {
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
     uint32_t transition_depth;     // nonzero while state_machine.cpp applies a transition
+    SmTransitionScope* sm_active_transition; // debug schema action/effect recorder
     
     // Global interaction states
     CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)
@@ -456,6 +466,11 @@ DocState* radiant_document_ensure_state(DomDocument* document, const char* owner
  * Destroy a document's StateStore before its owning pool is released.
  */
 void radiant_document_destroy_state(DomDocument* document);
+
+/**
+ * Move a document through its high-level lifecycle.
+ */
+void doc_state_set_lifecycle(DocState* state, DocLifecycleState lifecycle);
 
 /**
  * Destroy a state store and free all resources
@@ -902,6 +917,11 @@ bool form_control_get_checked(DocState* state, View* view);
  * This is the only supported writer path for checked state transitions.
  */
 void form_control_set_checked(DocState* state, View* view, bool checked);
+
+/**
+ * Uncheck a radio because another member of the same name group was selected.
+ */
+void form_control_uncheck_radio_group_peer(DocState* state, View* view);
 
 /**
  * Set a concrete view's scroll max values through ViewState.scroll.

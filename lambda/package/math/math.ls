@@ -30,14 +30,15 @@ pub fn render_math(ast, options) {
     // coalesce adjacent spans with identical classes
     let result_box = opt.coalesce(raw_box)
 
-    // wrap with struts and ML__latex class
-    let content_with_struts = box.make_struts(result_box)
-    // set explicit height on the ML__latex span so flex measurement sees it
-    let total_h = result_box.height + result_box.depth
-    let latex_el = if (total_h > 0.0)
-        <span class: css.LATEX, style: "height:" ++ util.fmt_em(total_h); content_with_struts>
-    else
-        <span class: css.LATEX; content_with_struts>
+    // wrap with struts and lm_latex class
+    let h = result_box.height
+    let d = result_box.depth
+    let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
+    let latex_el = <span class: css.LATEX;
+        <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
+        <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
+        result_box.element
+    >
 
     // optionally wrap with stylesheet for standalone HTML
     if (is_standalone) css.wrap_standalone(latex_el)

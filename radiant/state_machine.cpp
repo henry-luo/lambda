@@ -30,11 +30,35 @@ static void transition_leave(DocState* state) {
     if (state && state->transition_depth > 0) state->transition_depth--;
 }
 
+static bool focus_kind_to_sm_event(FocusTransitionKind kind,
+                                   FocusTransitionArgs* args,
+                                   SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case FOCUS_TRANSITION_FOCUS_ELEMENT:
+            *out_event = args && args->target ? SM_EV_FOCUS_ELEMENT : SM_EV_BLUR_CURRENT;
+            return true;
+        case FOCUS_TRANSITION_BLUR_CURRENT:
+            *out_event = SM_EV_BLUR_CURRENT;
+            return true;
+        case FOCUS_TRANSITION_MOVE:
+            if (!args) return false;
+            *out_event = args->forward ? SM_EV_FOCUS_MOVE_FWD : SM_EV_FOCUS_MOVE_BACK;
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool focus_transition(DocState* state,
                       FocusTransitionKind kind,
                       FocusTransitionArgs* args) {
     if (!state) return false;
+    SmEvent event;
+    if (!focus_kind_to_sm_event(kind, args, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_FOCUS, event,
+                               args ? args->target : NULL);
     transition_enter(state);
     switch (kind) {
         case FOCUS_TRANSITION_FOCUS_ELEMENT:
@@ -57,6 +81,7 @@ bool focus_transition(DocState* state,
     }
     transition_leave(state);
     editing_interaction_sync_projection(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "focus_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -201,11 +226,28 @@ bool selection_transition(DocState* state,
     return radiant_state_validate_interaction(state, NULL);
 }
 
+static bool hover_kind_to_sm_event(HoverTransitionKind kind,
+                                   HoverTransitionArgs* args,
+                                   SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case HOVER_TRANSITION_SET_TARGET:
+            *out_event = args && args->target ? SM_EV_HOVER_SET : SM_EV_HOVER_CLEAR;
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool hover_transition(DocState* state,
                       HoverTransitionKind kind,
                       HoverTransitionArgs* args) {
     if (!state) return false;
+    SmEvent event;
+    if (!hover_kind_to_sm_event(kind, args, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_HOVER, event,
+                               args ? args->target : NULL);
     transition_enter(state);
     switch (kind) {
         case HOVER_TRANSITION_SET_TARGET:
@@ -216,15 +258,33 @@ bool hover_transition(DocState* state,
             return false;
     }
     transition_leave(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "hover_transition");
     return radiant_state_validate_interaction(state, NULL);
+}
+
+static bool active_kind_to_sm_event(ActiveTransitionKind kind,
+                                    ActiveTransitionArgs* args,
+                                    SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case ACTIVE_TRANSITION_SET_TARGET:
+            *out_event = args && args->target ? SM_EV_ACTIVE_SET : SM_EV_ACTIVE_CLEAR;
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool active_transition(DocState* state,
                        ActiveTransitionKind kind,
                        ActiveTransitionArgs* args) {
     if (!state) return false;
+    SmEvent event;
+    if (!active_kind_to_sm_event(kind, args, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_ACTIVE, event,
+                               args ? args->target : NULL);
     transition_enter(state);
     switch (kind) {
         case ACTIVE_TRANSITION_SET_TARGET:
@@ -235,15 +295,58 @@ bool active_transition(DocState* state,
             return false;
     }
     transition_leave(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "active_transition");
     return radiant_state_validate_interaction(state, NULL);
+}
+
+static bool drag_kind_to_sm_event(DragTransitionKind kind, SmEvent* out_event) {
+    if (!out_event) return false;
+    switch (kind) {
+        case DRAG_TRANSITION_SET_STATE:
+            *out_event = SM_EV_DRAG_SET_STATE;
+            return true;
+        case DRAG_TRANSITION_BEGIN_DROP:
+            *out_event = SM_EV_DRAG_BEGIN_DROP;
+            return true;
+        case DRAG_TRANSITION_UPDATE_DROP_MOTION:
+            *out_event = SM_EV_DRAG_UPDATE_MOTION;
+            return true;
+        case DRAG_TRANSITION_SET_DROP_ACTIVE:
+            *out_event = SM_EV_DRAG_SET_DROP_ACTIVE;
+            return true;
+        case DRAG_TRANSITION_SET_DROP_TARGET:
+            *out_event = SM_EV_DRAG_SET_DROP_TARGET;
+            return true;
+        case DRAG_TRANSITION_CLEAR_DROP:
+            *out_event = SM_EV_DRAG_CLEAR_DROP;
+            return true;
+        default:
+            return false;
+    }
+}
+
+static View* drag_transition_target(DragTransitionKind kind, DragTransitionArgs* args) {
+    if (!args) return NULL;
+    switch (kind) {
+        case DRAG_TRANSITION_BEGIN_DROP:
+            return args->source;
+        case DRAG_TRANSITION_SET_DROP_TARGET:
+            return args->drop_target;
+        default:
+            return args->target;
+    }
 }
 
 bool drag_transition(DocState* state,
                      DragTransitionKind kind,
                      DragTransitionArgs* args) {
     if (!state) return false;
+    SmEvent event;
+    if (!drag_kind_to_sm_event(kind, &event)) return false;
 
+    SmTransitionGuard sm_guard(state, SM_FAMILY_DRAG_DROP, event,
+                               drag_transition_target(kind, args));
     transition_enter(state);
     switch (kind) {
         case DRAG_TRANSITION_SET_STATE:
@@ -275,6 +378,7 @@ bool drag_transition(DocState* state,
             return false;
     }
     transition_leave(state);
+    sm_guard.commit();
     radiant_state_assert_valid(state, "drag_transition");
     return radiant_state_validate_interaction(state, NULL);
 }
@@ -868,82 +972,76 @@ static void validate_view_state_registry(DocState* state,
     }
 }
 
-bool radiant_state_validate_interaction(DocState* state,
-                                        StateValidationReport* report) {
-    report_init(report);
-
-    if (!state) {
-        return true;
+static void validate_focused_target_state(DocState* state,
+                                          StateValidationReport* report) {
+    if (!state || !state->focus || !state->focus->current) return;
+    if (!is_view_focusable(state->focus->current)) {
+        report_fail(report, "focused target is not focusable");
     }
-
-    if (state->focus && state->focus->current) {
-        if (!is_view_focusable(state->focus->current)) {
-            report_fail(report, "focused target is not focusable");
-        }
-        if (state->focus->current->is_element()) {
-            validate_text_control_form_state(state, lam::dom_require_element(state->focus->current), report);
-        }
+    if (state->focus->current->is_element()) {
+        validate_text_control_form_state(state, lam::dom_require_element(state->focus->current), report);
     }
+}
 
-    validate_focus_invariants(state, report);
-    validate_hover_invariants(state, report);
-    validate_active_invariants(state, report);
-    validate_drag_invariants(state, report);
-    validate_editing_interaction_invariants(state, report);
-    validate_view_state_registry(state, report);
-
-    if (state->caret) {
-        if (state->caret->visible && !state->caret->view) {
-            report_fail(report, "visible caret has no target view");
-        }
-        if (state->caret->char_offset < 0) {
-            report_fail(report, "caret offset is negative");
-        }
-        if (state->caret->view &&
-            (uint32_t)state->caret->char_offset > legacy_view_offset_limit(state->caret->view)) {
-            report_fail(report, "caret offset exceeds target length");
-        }
-        bool composition_active = state->editing.composition.active;
-        if (!composition_active && state->caret->visible &&
-            state->caret->view && state->caret->view->is_element() &&
-            state->focus && state->focus->current &&
-            state->caret->view != state->focus->current) {
-            report_fail(report, "caret target differs from focus target");
-        }
-        if (state->caret->view && state->caret->view->is_element()) {
-            DomElement* elem = lam::dom_require_element(state->caret->view);
-            if (!tc_is_text_control(elem) && state->caret->visible) {
-                report_fail(report, "visible element caret target is not editable");
-            }
+static void validate_caret_projection_state(DocState* state,
+                                            StateValidationReport* report) {
+    if (!state || !state->caret) return;
+    if (state->caret->visible && !state->caret->view) {
+        report_fail(report, "visible caret has no target view");
+    }
+    if (state->caret->char_offset < 0) {
+        report_fail(report, "caret offset is negative");
+    }
+    if (state->caret->view &&
+        (uint32_t)state->caret->char_offset > legacy_view_offset_limit(state->caret->view)) {
+        report_fail(report, "caret offset exceeds target length");
+    }
+    bool composition_active = state->editing.composition.active;
+    if (!composition_active && state->caret->visible &&
+        state->caret->view && state->caret->view->is_element() &&
+        state->focus && state->focus->current &&
+        state->caret->view != state->focus->current) {
+        report_fail(report, "caret target differs from focus target");
+    }
+    if (state->caret->view && state->caret->view->is_element()) {
+        DomElement* elem = lam::dom_require_element(state->caret->view);
+        if (!tc_is_text_control(elem) && state->caret->visible) {
+            report_fail(report, "visible element caret target is not editable");
         }
     }
+}
 
-    if (state->selection) {
-        SelectionState* sel = state->selection;
-        if (sel->anchor_offset < 0 || sel->focus_offset < 0) {
-            report_fail(report, "selection offset is negative");
-        }
-        if (sel->anchor_view &&
-            (uint32_t)sel->anchor_offset > legacy_view_offset_limit(sel->anchor_view)) {
-            report_fail(report, "selection anchor offset exceeds target length");
-        }
-        if (sel->focus_view &&
-            (uint32_t)sel->focus_offset > legacy_view_offset_limit(sel->focus_view)) {
-            report_fail(report, "selection focus offset exceeds target length");
-        }
-        if (!sel->is_collapsed && (!sel->anchor_view || !sel->focus_view)) {
-            report_fail(report, "non-collapsed selection has missing endpoints");
-        }
-        if (sel->is_collapsed && sel->anchor_view && sel->focus_view &&
-            !same_view_position(sel->anchor_view, sel->anchor_offset,
-                                sel->focus_view, sel->focus_offset)) {
-            report_fail(report, "collapsed selection endpoints differ");
-        }
-        if (sel->is_selecting && !sel->anchor_view) {
-            report_fail(report, "active selection has no anchor");
-        }
+static void validate_selection_projection_state(DocState* state,
+                                                StateValidationReport* report) {
+    if (!state || !state->selection) return;
+    SelectionState* sel = state->selection;
+    if (sel->anchor_offset < 0 || sel->focus_offset < 0) {
+        report_fail(report, "selection offset is negative");
     }
+    if (sel->anchor_view &&
+        (uint32_t)sel->anchor_offset > legacy_view_offset_limit(sel->anchor_view)) {
+        report_fail(report, "selection anchor offset exceeds target length");
+    }
+    if (sel->focus_view &&
+        (uint32_t)sel->focus_offset > legacy_view_offset_limit(sel->focus_view)) {
+        report_fail(report, "selection focus offset exceeds target length");
+    }
+    if (!sel->is_collapsed && (!sel->anchor_view || !sel->focus_view)) {
+        report_fail(report, "non-collapsed selection has missing endpoints");
+    }
+    if (sel->is_collapsed && sel->anchor_view && sel->focus_view &&
+        !same_view_position(sel->anchor_view, sel->anchor_offset,
+                            sel->focus_view, sel->focus_offset)) {
+        report_fail(report, "collapsed selection endpoints differ");
+    }
+    if (sel->is_selecting && !sel->anchor_view) {
+        report_fail(report, "active selection has no anchor");
+    }
+}
 
+static void validate_text_control_focus_state(DocState* state,
+                                              StateValidationReport* report) {
+    if (!state) return;
     DomElement* active_text_control = tc_get_active_element(state);
     View* focused = state->focus ? state->focus->current : NULL;
     DomElement* focused_element = focused && focused->is_element() ? lam::dom_require_element(focused) : NULL;
@@ -954,45 +1052,124 @@ bool radiant_state_validate_interaction(DocState* state,
     } else if (active_text_control) {
         report_fail(report, "active text control exists without text-control focus");
     }
+}
 
-    if (state->open_dropdown) {
-        validate_transient_ui_target(state->open_dropdown, "open dropdown target is detached", report);
-        if (!state->open_dropdown->is_element()) {
-            report_fail(report, "open dropdown target is not an element");
-        } else {
-            DomElement* elem = lam::dom_require_element(state->open_dropdown);
-            if (!elem->form || !form_control_is_dropdown_open(state, state->open_dropdown)) {
-                report_fail(report, "open dropdown state disagrees with form control");
-            }
-        }
-        if (state->dropdown_width < 0 || state->dropdown_height < 0) {
-            report_fail(report, "open dropdown has negative dimensions");
+static void validate_dropdown_overlay_state(DocState* state,
+                                            StateValidationReport* report) {
+    if (!state || !state->open_dropdown) return;
+    validate_transient_ui_target(state->open_dropdown, "open dropdown target is detached", report);
+    if (!state->open_dropdown->is_element()) {
+        report_fail(report, "open dropdown target is not an element");
+    } else {
+        DomElement* elem = lam::dom_require_element(state->open_dropdown);
+        if (!elem->form || !form_control_is_dropdown_open(state, state->open_dropdown)) {
+            report_fail(report, "open dropdown state disagrees with form control");
         }
     }
-
-    if (state->context_menu_target) {
-        validate_transient_ui_target(state->context_menu_target, "context menu target is detached", report);
-        if (!state->context_menu_target->is_element() ||
-            !tc_is_text_control(lam::dom_require_element(state->context_menu_target))) {
-            report_fail(report, "context menu target is not a text control");
-        }
-        if (state->context_menu_width < 0 || state->context_menu_height < 0) {
-            report_fail(report, "context menu has negative dimensions");
-        }
-        if (state->context_menu_hover < -1) {
-            report_fail(report, "context menu hover index is invalid");
-        }
+    if (state->dropdown_width < 0 || state->dropdown_height < 0) {
+        report_fail(report, "open dropdown has negative dimensions");
     }
+}
 
+static void validate_context_menu_overlay_state(DocState* state,
+                                                StateValidationReport* report) {
+    if (!state || !state->context_menu_target) return;
+    validate_transient_ui_target(state->context_menu_target, "context menu target is detached", report);
+    if (!state->context_menu_target->is_element() ||
+        !tc_is_text_control(lam::dom_require_element(state->context_menu_target))) {
+        report_fail(report, "context menu target is not a text control");
+    }
+    if (state->context_menu_width < 0 || state->context_menu_height < 0) {
+        report_fail(report, "context menu has negative dimensions");
+    }
+    if (state->context_menu_hover < -1) {
+        report_fail(report, "context menu hover index is invalid");
+    }
+}
+
+static void validate_dirty_tracking_state(DocState* state,
+                                          StateValidationReport* report) {
+    if (!state) return;
     if ((state->selection_layout_dirty || state->dirty_tracker.full_repaint ||
          state->dirty_tracker.full_reflow || dirty_has_regions(&state->dirty_tracker)) &&
         !state->needs_repaint && !state->needs_reflow) {
         report_fail(report, "dirty tracking is set without repaint or reflow flag");
     }
+}
 
-    validate_selection_invariants(state, report);
+static void validate_schema_invariant_primitive(DocState* state,
+                                                SmInvariantId invariant,
+                                                StateValidationReport* report) {
+    switch (invariant) {
+        case SM_INV_FOCUSED_TARGET:
+            validate_focused_target_state(state, report);
+            break;
+        case SM_INV_FOCUS_GRAPH:
+            validate_focus_invariants(state, report);
+            break;
+        case SM_INV_HOVER_GRAPH:
+            validate_hover_invariants(state, report);
+            break;
+        case SM_INV_ACTIVE_GRAPH:
+            validate_active_invariants(state, report);
+            break;
+        case SM_INV_DRAG_GRAPH:
+            validate_drag_invariants(state, report);
+            break;
+        case SM_INV_EDITING_INTERACTION:
+            validate_editing_interaction_invariants(state, report);
+            break;
+        case SM_INV_VIEW_STATE_REGISTRY:
+            validate_view_state_registry(state, report);
+            break;
+        case SM_INV_CARET_PROJECTION:
+            validate_caret_projection_state(state, report);
+            break;
+        case SM_INV_SELECTION_PROJECTION:
+            validate_selection_projection_state(state, report);
+            break;
+        case SM_INV_TEXT_CONTROL_FOCUS:
+            validate_text_control_focus_state(state, report);
+            break;
+        case SM_INV_DROPDOWN_OVERLAY:
+            validate_dropdown_overlay_state(state, report);
+            break;
+        case SM_INV_CONTEXT_MENU_OVERLAY:
+            validate_context_menu_overlay_state(state, report);
+            break;
+        case SM_INV_DIRTY_TRACKING:
+            validate_dirty_tracking_state(state, report);
+            break;
+        case SM_INV_DOM_SELECTION:
+            validate_selection_invariants(state, report);
+            break;
+        default:
+            break;
+    }
+}
 
+static bool schema_invariant_binding_applies(DocState* state,
+                                             const StateInvariantBinding* binding) {
+    if (!binding) return false;
+    if (binding->state == SM_STATE_ANY) return true;
+    return sm_derive_state(state, binding->family, NULL) == binding->state;
+}
+
+static bool radiant_state_validate_interaction_schema(DocState* state,
+                                                      StateValidationReport* report) {
+    report_init(report);
+    if (!state) return true;
+    for (uint32_t i = 0; i < RADIANT_INVARIANT_COUNT; i++) {
+        const StateInvariantBinding* binding = &RADIANT_INVARIANTS[i];
+        if (!schema_invariant_binding_applies(state, binding)) continue;
+        validate_schema_invariant_primitive(state, binding->invariant, report);
+    }
     return !report || report->ok;
+}
+
+bool radiant_state_validate_interaction(DocState* state,
+                                        StateValidationReport* report) {
+    return radiant_state_validate_interaction_schema(state, report);
 }
 
 void radiant_state_assert_valid(DocState* state, const char* context) {

@@ -56,9 +56,78 @@ typedef enum ImeFsmState {
     IME_COMMITTED
 } ImeFsmState;
 
+typedef enum FocusFsmState {
+    FOCUS_NO_DOCUMENT = 0,
+    FOCUS_DOC_INACTIVE,
+    FOCUS_DOC_ACTIVE_NONE,
+    FOCUS_ELEMENT,
+    FOCUS_TEXT_CONTROL,
+    FOCUS_CONTENTEDITABLE,
+    FOCUS_SUBDOCUMENT
+} FocusFsmState;
+
+typedef enum HoverFsmState {
+    HOVER_NONE = 0,
+    HOVER_TARGET
+} HoverFsmState;
+
+typedef enum ActiveFsmState {
+    ACTIVE_NONE = 0,
+    ACTIVE_PRESSED
+} ActiveFsmState;
+
+typedef enum DragFsmState {
+    DRAG_IDLE = 0,
+    DRAG_PENDING,
+    DRAG_ACTIVE,
+    DRAG_OVER_TARGET
+} DragFsmState;
+
+typedef enum ScrollFsmState {
+    SCROLL_IDLE = 0,
+    SCROLL_BAR_HOVER,
+    SCROLL_BAR_DRAGGING
+} ScrollFsmState;
+
+typedef enum CheckableFsmState {
+    CHK_UNCHECKED = 0,
+    CHK_CHECKED,
+    CHK_INDETERMINATE
+} CheckableFsmState;
+
+typedef enum SelectFsmState {
+    SELCTL_CLOSED = 0,
+    SELCTL_OPEN
+} SelectFsmState;
+
+typedef enum RangeFsmState {
+    RANGE_VALUE = 0
+} RangeFsmState;
+
+typedef enum TextFsmState {
+    TEXT_EMPTY = 0,
+    TEXT_VALUE,
+    TEXT_SELECTION
+} TextFsmState;
+
+typedef enum DropdownFsmState {
+    DD_CLOSED = 0,
+    DD_OPEN
+} DropdownFsmState;
+
+typedef enum ContextMenuFsmState {
+    CM_CLOSED = 0,
+    CM_OPEN,
+    CM_HOVER
+} ContextMenuFsmState;
+
 typedef enum SmEvent {
-    SM_EV_COLLAPSE_TO_BOUNDARY = 0,
+    SM_EV_DOC_LOAD = 0,
+    SM_EV_DOC_COMMIT,
+    SM_EV_DOC_UNLOAD,
+    SM_EV_COLLAPSE_TO_BOUNDARY,
     SM_EV_START_POINTER_SELECTION,
+    SM_EV_UI_START_POINTER_SELECTION,
     SM_EV_END_POINTER_SELECTION,
     SM_EV_EXTEND_TO_BOUNDARY,
     SM_EV_EXTEND_TO_VIEW,
@@ -71,6 +140,47 @@ typedef enum SmEvent {
     SM_EV_COMPOSITION_UPDATE,
     SM_EV_COMPOSITION_COMMIT,
     SM_EV_COMPOSITION_CANCEL,
+    SM_EV_FOCUS_ELEMENT,
+    SM_EV_BLUR_CURRENT,
+    SM_EV_FOCUS_MOVE_FWD,
+    SM_EV_FOCUS_MOVE_BACK,
+    SM_EV_UI_FOCUS_WITH_BLUR,
+    SM_EV_UI_FOCUS_WITH_CHANGE,
+    SM_EV_UI_BLUR_WITH_BLUR,
+    SM_EV_UI_BLUR_WITH_CHANGE,
+    SM_EV_HOVER_SET,
+    SM_EV_HOVER_CLEAR,
+    SM_EV_ACTIVE_SET,
+    SM_EV_ACTIVE_CLEAR,
+    SM_EV_DRAG_SET_STATE,
+    SM_EV_DRAG_BEGIN_DROP,
+    SM_EV_DRAG_UPDATE_MOTION,
+    SM_EV_DRAG_SET_DROP_ACTIVE,
+    SM_EV_DRAG_SET_DROP_TARGET,
+    SM_EV_DRAG_CLEAR_DROP,
+    SM_EV_SCROLL_SET_POSITION,
+    SM_EV_SCROLL_SET_MAX,
+    SM_EV_SCROLLBAR_HOVER,
+    SM_EV_SCROLLBAR_BEGIN_DRAG,
+    SM_EV_SCROLLBAR_CLEAR_DRAG,
+    SM_EV_FORM_SET_CHECKED,
+    SM_EV_FORM_UNCHECK_RADIO_GROUP,
+    SM_EV_FORM_SET_VALUE,
+    SM_EV_FORM_REPLACE_TEXT,
+    SM_EV_FORM_HISTORY,
+    SM_EV_FORM_SET_SELECTION,
+    SM_EV_FORM_SET_SELECTED_INDEX,
+    SM_EV_FORM_SET_RANGE_VALUE,
+    SM_EV_FORM_SET_HOVER_INDEX,
+    SM_EV_FORM_SET_DISABLED,
+    SM_EV_FORM_SET_READONLY,
+    SM_EV_FORM_SET_REQUIRED,
+    SM_EV_DROPDOWN_OPEN,
+    SM_EV_DROPDOWN_CLOSE,
+    SM_EV_DROPDOWN_SET_GEOMETRY,
+    SM_EV_CONTEXT_MENU_OPEN,
+    SM_EV_CONTEXT_MENU_CLOSE,
+    SM_EV_CONTEXT_MENU_HOVER,
     SM_EV__COUNT
 } SmEvent;
 
@@ -79,8 +189,34 @@ typedef enum SmGuardId {
 } SmGuardId;
 
 typedef enum SmInvariantId {
-    SM_INV_NONE = 0
+    SM_INV_NONE = 0,
+    SM_INV_FOCUSED_TARGET,
+    SM_INV_FOCUS_GRAPH,
+    SM_INV_HOVER_GRAPH,
+    SM_INV_ACTIVE_GRAPH,
+    SM_INV_DRAG_GRAPH,
+    SM_INV_EDITING_INTERACTION,
+    SM_INV_VIEW_STATE_REGISTRY,
+    SM_INV_CARET_PROJECTION,
+    SM_INV_SELECTION_PROJECTION,
+    SM_INV_TEXT_CONTROL_FOCUS,
+    SM_INV_DROPDOWN_OVERLAY,
+    SM_INV_CONTEXT_MENU_OVERLAY,
+    SM_INV_DIRTY_TRACKING,
+    SM_INV_DOM_SELECTION,
+    SM_INV__COUNT
 } SmInvariantId;
+
+typedef enum SmActionFlag {
+    SM_ACT_NONE = 0,
+    SM_ACT_WRITE_CHECKED = 1u << 0,
+    SM_ACT_UNCHECK_RADIO_GROUP = 1u << 1,
+    SM_ACT_DISPATCH_BEFOREINPUT = 1u << 2,
+    SM_ACT_DISPATCH_INPUT = 1u << 3,
+    SM_ACT_DISPATCH_SELECTSTART = 1u << 4,
+    SM_ACT_DISPATCH_BLUR = 1u << 5,
+    SM_ACT_DISPATCH_CHANGE = 1u << 6
+} SmActionFlag;
 
 #define SM_STATE_ANY  (-1)
 #define SM_STATE_SAME (-2)
@@ -99,6 +235,16 @@ typedef struct StateTransitionRule {
     const char* name;
 } StateTransitionRule;
 
+typedef struct StateInvariantBinding {
+    SmFamily family;
+    int state;
+    SmInvariantId invariant;
+    const char* name;
+} StateInvariantBinding;
+
+extern const StateInvariantBinding RADIANT_INVARIANTS[];
+extern const uint32_t RADIANT_INVARIANT_COUNT;
+
 typedef struct SmTransitionScope {
     DocState* state;
     SmFamily family;
@@ -106,6 +252,8 @@ typedef struct SmTransitionScope {
     SmViewClass view_class;
     View* target;
     int from_state;
+    uint32_t observed_actions;
+    struct SmTransitionScope* previous_scope;
     bool committed;
 } SmTransitionScope;
 
@@ -116,6 +264,7 @@ void sm_transition_scope_begin(SmTransitionScope* scope,
                                View* target);
 void sm_transition_scope_commit(SmTransitionScope* scope);
 void sm_transition_scope_end(SmTransitionScope* scope);
+void sm_observe_action(DocState* state, uint32_t action);
 
 int sm_derive_state(DocState* state, SmFamily family, View* target);
 SmViewClass sm_classify_view(View* view);

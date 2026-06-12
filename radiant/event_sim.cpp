@@ -6,6 +6,7 @@
 #include "event.hpp"
 #include "event_state_log.hpp"
 #include "state_store.hpp"
+#include "state_machine.hpp"
 #include "dom_range.hpp"
 #include "editing.hpp"
 #include "form_control.hpp"
@@ -875,7 +876,7 @@ static void sim_toggle_checkbox_radio(View* input, DocState* state) {
                             const char* sn = se->get_attribute("name");
                             if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
                                 if (form_control_get_checked(state, search)) {
-                                    form_control_set_checked(state, search, false);
+                                    form_control_uncheck_radio_group_peer(state, search);
                                 }
                             }
                         }
@@ -1132,6 +1133,21 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             mem_free(ev);
             return NULL;
         }
+    }
+    else if (strcmp(type_str, "fuzz_schema") == 0) {
+        ev->type = SIM_EVENT_FUZZ_SCHEMA;
+        if (reader.has("steps")) ev->fuzz_steps = reader.get("steps").asInt32();
+        if (reader.has("seed")) {
+            const char* seed_text = reader.get("seed").cstring();
+            if (seed_text &&
+                (strcmp(seed_text, "random") == 0 || strcmp(seed_text, "time") == 0)) {
+                ev->fuzz_seed = 0;
+            } else {
+                int seed = reader.get("seed").asInt32();
+                ev->fuzz_seed = (uint32_t)seed; // INT_CAST_OK: optional replay seed is stored as unsigned LCG state.
+            }
+        }
+        if (ev->fuzz_steps <= 0) ev->fuzz_steps = 32;
     }
     else if (strcmp(type_str, "key_press") == 0) {
         ev->type = SIM_EVENT_KEY_PRESS;
@@ -3135,6 +3151,110 @@ static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEven
     }
 }
 
+static uint32_t sim_fuzz_next(uint32_t* state) {
+    *state = (*state * 1664525u) + 1013904223u;
+    return *state;
+}
+
+static uint32_t sim_fuzz_time_seed() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint32_t seed = (uint32_t)time(NULL); // INT_CAST_OK: fuzz seed intentionally folds wall-clock seconds.
+    seed ^= (uint32_t)ts.tv_sec; // INT_CAST_OK: fuzz seed intentionally folds monotonic seconds.
+    seed ^= (uint32_t)ts.tv_nsec; // INT_CAST_OK: fuzz seed intentionally folds monotonic nanoseconds.
+    if (seed == 0) seed = 0x5eed1234u;
+    return seed;
+}
+
+static bool event_sim_assert_schema(EventSimContext* ctx, UiContext* uicon,
+                                    const char* phase) {
+    DomDocument* doc = uicon ? uicon->document : NULL;
+    DocState* state = doc ? doc->state : NULL;
+    if (!state) {
+        log_error("event_sim: schema conformance FAIL - no document state (%s)",
+                  phase ? phase : "unknown");
+        if (ctx) ctx->fail_count++;
+        return false;
+    }
+    StateValidationReport report;
+    bool ok = radiant_state_validate_interaction(state, &report);
+    if (!ok) {
+        log_error("event_sim: schema conformance FAIL after %s: %s",
+                  phase ? phase : "event",
+                  report.message[0] ? report.message : "interaction invariant failed");
+        if (ctx) ctx->fail_count++;
+        return false;
+    }
+    log_info("event_sim: schema conformance PASS after %s", phase ? phase : "event");
+    if (ctx) ctx->pass_count++;
+    return true;
+}
+
+static void event_sim_fuzz_schema(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
+    if (!ctx || !uicon || !ev) return;
+    DomDocument* doc = uicon->document;
+    if (!doc || !doc->state) {
+        log_error("event_sim: fuzz_schema FAIL - no document state");
+        ctx->fail_count++;
+        return;
+    }
+
+    uint32_t rng = ev->fuzz_seed ? ev->fuzz_seed : sim_fuzz_time_seed();
+    int steps = ev->fuzz_steps > 0 ? ev->fuzz_steps : 32;
+    int width = uicon->viewport_width > 0 ? uicon->viewport_width : 800;
+    int height = uicon->viewport_height > 0 ? uicon->viewport_height : 600;
+    if (width < 1) width = 1;
+    if (height < 1) height = 1;
+
+    log_info("event_sim: fuzz_schema begin steps=%d seed=%u viewport=%dx%d",
+             steps, rng, width, height);
+    for (int step = 0; step < steps; step++) {
+        uint32_t op = sim_fuzz_next(&rng) % 7u;
+        int x = (int)(sim_fuzz_next(&rng) % (uint32_t)width); // INT_CAST_OK: event coordinates are integer CSS pixels.
+        int y = (int)(sim_fuzz_next(&rng) % (uint32_t)height); // INT_CAST_OK: event coordinates are integer CSS pixels.
+
+        switch (op) {
+            case 0:
+                log_info("event_sim: fuzz_schema[%d] mouse_move (%d,%d)", step, x, y);
+                sim_mouse_move(uicon, x, y);
+                break;
+            case 1:
+                log_info("event_sim: fuzz_schema[%d] click (%d,%d)", step, x, y);
+                sim_mouse_move(uicon, x, y);
+                sim_mouse_button(uicon, x, y, 0, 0, true);
+                sim_mouse_button(uicon, x, y, 0, 0, false);
+                break;
+            case 2: {
+                float dy = (sim_fuzz_next(&rng) & 1u) ? 3.0f : -3.0f;
+                log_info("event_sim: fuzz_schema[%d] scroll (%d,%d) dy=%.1f", step, x, y, dy);
+                sim_scroll(uicon, x, y, 0.0f, dy);
+                break;
+            }
+            case 3:
+                log_info("event_sim: fuzz_schema[%d] key_tab", step);
+                sim_key(uicon, GLFW_KEY_TAB, 0, true);
+                sim_key(uicon, GLFW_KEY_TAB, 0, false);
+                break;
+            case 4:
+                log_info("event_sim: fuzz_schema[%d] key_right", step);
+                sim_key(uicon, GLFW_KEY_RIGHT, 0, true);
+                sim_key(uicon, GLFW_KEY_RIGHT, 0, false);
+                break;
+            case 5:
+                log_info("event_sim: fuzz_schema[%d] text_input", step);
+                sim_text_input(uicon, (uint32_t)('a' + (sim_fuzz_next(&rng) % 26u)));
+                break;
+            default:
+                log_info("event_sim: fuzz_schema[%d] key_backspace", step);
+                sim_key(uicon, GLFW_KEY_BACKSPACE, 0, true);
+                sim_key(uicon, GLFW_KEY_BACKSPACE, 0, false);
+                break;
+        }
+
+        if (!event_sim_assert_schema(ctx, uicon, "fuzz_schema")) return;
+    }
+}
+
 // Process a single simulated event
 static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     switch (ev->type) {
@@ -3334,6 +3454,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             force_render_surface(uicon);
             break;
         }
+
+        case SIM_EVENT_FUZZ_SCHEMA:
+            event_sim_fuzz_schema(ctx, uicon, ev);
+            break;
 
         case SIM_EVENT_KEY_PRESS:
             log_info("event_sim: key_press key=%d mods=%d", ev->key, ev->mods);
@@ -5253,6 +5377,9 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
     process_sim_event_with_retry(ctx, ev, uicon, window);
+    if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
+        event_sim_assert_schema(ctx, uicon, "replay_input");
+    }
 
     // Calculate wait time for next event
     int wait_ms = 50;  // default 50ms between events
