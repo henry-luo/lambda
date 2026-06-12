@@ -1009,3 +1009,40 @@ Files touched in P6:
 | [temp/js53_p6_rollback_guard.tsv](../../temp/js53_p6_rollback_guard.tsv) | new — empty (0 regressions post-rollback) |
 
 **Js54 follow-up candidate (recorded for future planning):** implement ES2024 `/v` flag semantics via the transpiler path. The probe artifacts above are the scoping document: 76 wins available immediately on first opening the gate (covering parse-time and metadata coverage of `/v`), plus three named work-clusters (string-properties, set ops, `\q{...}`) for the systematic generated-test admissions. Sub-commits should land in the order specified in [Transpile_Js_53_Es2024.md §3 Gate E](../../vibe/jube/Transpile_Js_53_Es2024.md): property tables first (data-only), then set-op IR, then `\q{...}` parsing — three reviewable steps with their own guards.
+
+#### P6-revisit (2026-06-12) — confirmed Js54 deferral with deeper diagnosis
+
+After P3-revisit's success (two narrow bug fixes landed all 20 Atomics.waitAsync tests), P6 was re-examined to see if a similar narrow-fix approach could land the 111 `/v` failures. **It can't.** P3-revisit's bugs were correctness gaps in existing code paths — single lines. P6 requires implementing **missing language features**.
+
+Deeper investigation found three distinct fix surfaces, each requiring substantial work:
+
+**Layer 1 — JS source validator** ([lambda/js/js_regex_wrapper.cpp:878–1106](../../lambda/js/js_regex_wrapper.cpp)). The validator's inside-class branch (lines 1016–1102) treats nested `[` as a literal character. Pattern `[[0-9]--_]` is parsed as `[`, `0-9` range, `]` (ending the inner class), then `-`, `-`, `_`, `]` — the final `]` is then standalone outside-class, which line 984 rejects with "standalone `]` illegal under `u`". The error then surfaces as `"Annex B legacy syntax not allowed under \`u\` flag"` (caller's error formatter). So every nested-class `/v` test fails at validation, **before** reaching the rewriter. Fix surface: ~50–100 LOC adding `/v`-aware nested-class tracking, `--`/`&&` operator parsing, and `\q{...}` recognition.
+
+**Layer 2 — Pattern rewriter** ([lambda/js/js_regex_wrapper.cpp:410+](../../lambda/js/js_regex_wrapper.cpp) `rewrite_pattern`). Even with validation fixed, RE2 will reject every `[A--B]` / `[A&&B]` / `[\q{...}]` because RE2 has no set-op or quoted-string-alt syntax. The rewriter needs to:
+- Parse the operands A, B as code-point sets (each can be a single char, range `a-z`, char class escape `\d`/`\w`/etc., property escape `\p{...}`, nested set-op class, OR `\q{...}` string list).
+- Compute the difference/intersection over code-point ranges.
+- Emit a flat RE2-compatible character class for the result.
+- For `\q{...}`: rewrite the entire enclosing class as `(?:lit1|lit2|...|[remaining-chars])` outer alternation.
+
+Estimated scope: ~200–300 LOC of careful regex IR work, including a code-point range list helper (insert/union/diff/intersect/sort), test cases for every operand combination, and care to preserve flag interactions (case-insensitivity, Unicode-aware matching).
+
+**Layer 3 — String-valued Unicode property tables** ([lambda/js/js_regex_generated_property_tables.inc](../../lambda/js/js_regex_generated_property_tables.inc)). ES2024 introduces 7 string properties: `Basic_Emoji`, `Emoji_Keycap_Sequence`, `RGI_Emoji`, `RGI_Emoji_Flag_Sequence`, `RGI_Emoji_Modifier_Sequence`, `RGI_Emoji_Tag_Sequence`, `RGI_Emoji_ZWJ_Sequence`. Unlike code-point properties, these match **multi-codepoint sequences** (e.g. flag sequences are 2 code points; ZWJ sequences are 3+). They cannot be emitted as a character class; they must become alternation of the contained string sequences. Source data: Unicode CLDR / `emoji-test.txt` for the relevant Unicode version. Estimated table size: 5–10 KB across the 7 properties (RGI_Emoji alone has ~3,000+ sequences). Estimated scope: data generator script + ~2 KLOC of generated tables + ~100 LOC of property-table lookup integration in the rewriter.
+
+**Estimated total for full P6**: ~400 LOC of regex-engine code + 5–10 KB of Unicode data + test-vector validation across the 187 tests. Easily a 2–3 session piece of work, not a single revisit.
+
+**Probe-with-gate-open results (re-confirmed 2026-06-12 with both P3-revisit fixes active):** 76 / 187 passed, 111 failed. Identical breakdown to the original P6 probe — neither C-1 (async-IIFE) nor C-2 (waitAsync timer) interact with the regex pipeline.
+
+**Sub-cluster sizes for Js54 planning:**
+
+| Cluster | Failures | Layer needed | Approx fix LOC |
+|---|---:|---|---:|
+| `[A--B]` / `[A--Y]` set difference | 34 | 1 + 2 | ~250 |
+| `[A&&B]` set intersection | 27 | 1 + 2 | ~50 (reuses layer-2 ranges helper) |
+| `\p{StringProperty}` outside class | ~14 | 1 + 2 + 3 | ~300 + 5KB data |
+| `\p{StringProperty}` inside class | ~7 | 1 + 2 + 3 | (subset of above) |
+| `[\q{...}]` quoted-string alt | ~10 | 1 + 2 | ~100 |
+| Mixed / secondary | ~19 | combinations | — |
+
+**Hand-off note**: the layers are not independent. Layer 1 must land first (no test admits without validator parsing the nested classes). Then Layer 2 unlocks set-op tests. Layer 3 unlocks string-property tests. The proposal §3 Gate E's three sub-commit order (property tables, set ops, `\q{...}`) remains correct but property-tables-first only works if Layer 1 is already done as a prerequisite.
+
+**Decision retained**: deferred to Js54. P6 stays in the deferred bucket; final Js53 tally below is updated to reflect P3-revisit gains.
