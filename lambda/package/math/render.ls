@@ -165,13 +165,36 @@ fn render_command(node, context) {
     } else {
         let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
              slice(cmd_text, 1, len(cmd_text)) else cmd_text
-        let op_name = sym.get_operator_name(name_str)
-        if (op_name != null) {
-            box.with_class(box.text_box(op_name, css.CMR, "mop"), css.OP_GROUP)
+        if (name_str == "pdiff") {
+            render_pdiff(node, context)
         } else {
-            box.text_box(cmd_text, css.ERROR, "mord")
+            let op_name = sym.get_operator_name(name_str)
+            if (op_name != null) {
+            box.with_class(box.text_box(op_name, css.CMR, "mop"), css.OP_GROUP)
+            } else {
+                box.text_box(cmd_text, css.ERROR, "mord")
+            }
         }
     }
+}
+
+fn render_pdiff(node, context) {
+    let n = len(node)
+    let func_node = if (n > 0) node[0] else null
+    let var_node = if (n > 1) node[1] else null
+    let numer_box = box.hbox([partial_box(), render_node(func_node, context)])
+    let denom_box = box.hbox([partial_box(), render_node(var_node, context)])
+    fraction.render_boxes(numer_box, denom_box, context)
+}
+
+fn partial_box() => {
+    element: "∂",
+    height: 0.7,
+    depth: 0.08,
+    width: 0.45,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0
 }
 
 // ============================================================

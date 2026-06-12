@@ -70,6 +70,7 @@ fn text_element(text, cls) {
 fn text_style(text, cls) {
     if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
+    else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
     else null
 }
 

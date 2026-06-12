@@ -195,7 +195,7 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, font_scale) {
     let vlist_height = if (tall_script) 1.16 else if (tall_base) 0.94 else 0.72
     let top = 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
     let inner_style = "height:" ++ util.fmt_em(script_height) ++ ";display:inline-block;font-size: 70%"
-    let sup_elements = box.elements_of(sup_box)
+    let sup_elements = merge_script_elements(box.elements_of(sup_box))
     let el = <span class: css.VLIST_T;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
@@ -223,4 +223,35 @@ fn script_inner_height(sup_box, tall_script) {
     if (tall_script) 1.05
     else if (sup_box.element is element and sup_box.element.class == css.CMR) 0.46
     else 0.31
+}
+
+fn can_merge_script_text(a, b) {
+    if (not (a is element) or not (b is element)) false
+    else if (len(a) != 1 or len(b) != 1) false
+    else if (not (a[0] is string) or not (b[0] is string)) false
+    else a.class == b.class and a.style == null and b.style == null
+}
+
+fn merge_script_two(a, b) {
+    let txt = string(a[0]) ++ string(b[0])
+    <span class: a.class; txt>
+}
+
+fn merge_script_scan(items, i, acc) {
+    if (i >= len(items)) acc
+    else
+        (let curr = items[i],
+         let last_idx = len(acc) - 1,
+         let prev = acc[last_idx],
+         if (can_merge_script_text(prev, curr))
+             (let combined = merge_script_two(prev, curr),
+              let head = if (last_idx > 0) slice(acc, 0, last_idx) else [],
+              merge_script_scan(items, i + 1, head ++ [combined]))
+         else
+              merge_script_scan(items, i + 1, acc ++ [curr]))
+}
+
+fn merge_script_elements(items) {
+    if (len(items) <= 1) items
+    else merge_script_scan(items, 1, [items[0]])
 }

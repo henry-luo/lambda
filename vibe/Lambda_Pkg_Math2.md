@@ -133,13 +133,13 @@ This extracts 206 runnable markup snapshot formulas from the mirrored MathLive s
 
 Current phase checkpoint:
 
-- Full MathLive markup adapter: 16/206 exact snapshot matches.
+- Full MathLive markup adapter: 23/206 exact snapshot matches.
 - `BINARY OPERATORS`: 10/10 exact matches.
-- `FRACTIONS`: 2/9 exact matches.
-- `SUPERSCRIPT/SUBSCRIPT`: 1/2 exact matches.
+- `FRACTIONS`: 8/9 exact matches.
+- `SUPERSCRIPT/SUBSCRIPT`: 2/2 exact matches.
 - `LEFT/RIGHT`: 2/55 exact matches.
-- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, simple superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, and MathLive-style vlist output for simple bar fractions.
-- Next blocker: port nested/scriptscript fraction metrics and richer grouped script contents; the remaining superscript case is dominated by scaled nested fraction structure and script content metrics.
+- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, MathLive-style vlist output for simple/tall/nested bar fractions, binomial/no-bar vlist output, `\dbinom`/`\tbinom`/infix `\choose` command preservation, and `\pdiff` expansion.
+- Next blocker: port display math delimiters, large-operator limits, text-mode math re-entry, and the remaining script spacing metrics needed by the final complex `FRACTIONS` snapshot.
 
 ### P1: Structural Rendering Fidelity
 
