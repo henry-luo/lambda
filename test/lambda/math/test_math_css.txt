@@ -1,10 +1,10 @@
-"===== MATH CSS TESTS =====1. LATEX:ML__latex2. BASE:ML__base3. STRUT:ML__strut4. MATHIT:ML__mathit5. CMR:ML__cmr6. MATHBF:ML__mathbf7. MFRAC:ML__mfrac8. SQRT:ML__sqrt9. MSUBSUP:ML__msubsup10. NULLDELIMITER:ML__nulldelimiter11. ERROR:ML__error12. THIN:ML__thinspace13. MEDIUM:ML__mediumspace14. THICK:ML__thickspace15. QUAD:ML__quad16. QQUAD:ML__qquad17. classes 2:ML__mathit ML__bold18. classes with null:ML__cmr ML__it19. classes single:ML__text20. classes empty:21. font mathit:ML__mathit22. font cmr:ML__cmr23. font mathbf:ML__mathbf24. font bb:ML__bb25. font cal:ML__cal26. font frak:ML__frak27. font tt:ML__tt28. font text:ML__text29. font unknown:ML__mathit30. stylesheet is string:"
+"===== MATH CSS TESTS =====1. LATEX:lm_latex2. BASE:lm_base3. STRUT:lm_strut4. MATHIT:lm_mathit5. CMR:lm_cmr6. MATHBF:lm_mathbf7. MFRAC:lm_mfrac8. SQRT:lm_sqrt9. MSUBSUP:lm_msubsup10. NULLDELIMITER:lm_nulldelimiter11. ERROR:lm_error12. THIN:lm_thinspace13. MEDIUM:lm_mediumspace14. THICK:lm_thickspace15. QUAD:lm_quad16. QQUAD:lm_qquad17. classes 2:lm_mathit lm_bold18. classes with null:lm_cmr lm_it19. classes single:lm_text20. classes empty:21. font mathit:lm_mathit22. font cmr:lm_cmr23. font mathbf:lm_mathbf24. font bb:lm_bb25. font cal:lm_cal26. font frak:lm_frak27. font tt:lm_tt28. font text:lm_text29. font unknown:lm_mathit30. stylesheet is string:"
 true
-"31. stylesheet has ML__latex:"
+"31. stylesheet has lm_latex:"
 true
-"32. stylesheet has ML__mathit:"
+"32. stylesheet has lm_mathit:"
 true
-"33. stylesheet has ML__mfrac:"
+"33. stylesheet has lm_mfrac:"
 true
 "34. wrap tag:"
 'span'

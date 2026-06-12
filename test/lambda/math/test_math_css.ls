@@ -24,9 +24,9 @@ import css: lambda.package.math.css
 "16. QQUAD:"; css.QQUAD
 
 // ---- classes() helper ----
-"17. classes 2:"; css.classes(["ML__mathit", "ML__bold"])
-"18. classes with null:"; css.classes(["ML__cmr", null, "ML__it"])
-"19. classes single:"; css.classes(["ML__text"])
+"17. classes 2:"; css.classes(["lm_mathit", "lm_bold"])
+"18. classes with null:"; css.classes(["lm_cmr", null, "lm_it"])
+"19. classes single:"; css.classes(["lm_text"])
 "20. classes empty:"; css.classes([])
 
 // ---- font_class() ----
@@ -40,12 +40,12 @@ import css: lambda.package.math.css
 "28. font text:"; css.font_class("text")
 "29. font unknown:"; css.font_class("unknown")
 
-// ---- get_stylesheet() returns a string with ML__latex ----
+// ---- get_stylesheet() returns a string with lm_latex ----
 let ss = css.get_stylesheet()
 "30. stylesheet is string:"; ss is string
-"31. stylesheet has ML__latex:"; contains(ss, ".ML__latex")
-"32. stylesheet has ML__mathit:"; contains(ss, ".ML__mathit")
-"33. stylesheet has ML__mfrac:"; contains(ss, ".ML__mfrac")
+"31. stylesheet has lm_latex:"; contains(ss, ".lm_latex")
+"32. stylesheet has lm_mathit:"; contains(ss, ".lm_mathit")
+"33. stylesheet has lm_mfrac:"; contains(ss, ".lm_mfrac")
 
 // ---- wrap_standalone() ----
 let wrapped = css.wrap_standalone(<span; "x">)

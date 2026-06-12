@@ -5,54 +5,55 @@
 // CSS class name constants
 // ============================================================
 
-pub LATEX = "ML__latex"
-pub BASE = "ML__base"
-pub STRUT = "ML__strut"
-pub STRUT_BOTTOM = "ML__strut--bottom"
-pub MATHIT = "ML__mathit"
-pub CMR = "ML__cmr"
-pub MATHBF = "ML__mathbf"
-pub AMS = "ML__ams"
-pub BB = "ML__bb"
-pub CAL = "ML__cal"
-pub FRAK = "ML__frak"
-pub TT = "ML__tt"
-pub SCRIPT = "ML__script"
-pub SANS = "ML__sans"
-pub TEXT = "ML__text"
-pub BOLD = "ML__bold"
-pub IT = "ML__it"
-pub MFRAC = "ML__mfrac"
-pub FRAC_LINE = "ML__frac-line"
-pub SQRT = "ML__sqrt"
-pub SQRT_SIGN = "ML__sqrt-sign"
-pub SQRT_LINE = "ML__sqrt-line"
-pub SQRT_INDEX = "ML__sqrt-index"
-pub VLIST_T = "ML__vlist-t"
-pub VLIST_T2 = "ML__vlist-t ML__vlist-t2"
-pub VLIST_R = "ML__vlist-r"
-pub VLIST = "ML__vlist"
-pub VLIST_S = "ML__vlist-s"
-pub PSTRUT = "ML__pstrut"
-pub MSUBSUP = "ML__msubsup"
-pub LEFT_RIGHT = "ML__left-right"
-pub SMALL_DELIM = "ML__small-delim"
-pub DELIM_SIZE1 = "ML__delim-size1"
-pub DELIM_SIZE2 = "ML__delim-size2"
-pub DELIM_SIZE3 = "ML__delim-size3"
-pub DELIM_SIZE4 = "ML__delim-size4"
-pub ACCENT_BODY = "ML__accent-body"
-pub NEG_THIN = "ML__negativethinspace"
-pub THIN = "ML__thinspace"
-pub MEDIUM = "ML__mediumspace"
-pub THICK = "ML__thickspace"
-pub ENSPACE = "ML__enspace"
-pub QUAD = "ML__quad"
-pub QQUAD = "ML__qquad"
-pub RULE = "ML__rule"
-pub NULLDELIMITER = "ML__nulldelimiter"
-pub MTABLE = "ML__mtable"
-pub ERROR = "ML__error"
+pub LATEX = "lm_latex"
+pub BASE = "lm_base"
+pub STRUT = "lm_strut"
+pub STRUT_BOTTOM = "lm_strut--bottom"
+pub MATHIT = "lm_mathit"
+pub CMR = "lm_cmr"
+pub MATHBF = "lm_mathbf"
+pub AMS = "lm_ams"
+pub BB = "lm_bb"
+pub CAL = "lm_cal"
+pub FRAK = "lm_frak"
+pub TT = "lm_tt"
+pub SCRIPT = "lm_script"
+pub SANS = "lm_sans"
+pub TEXT = "lm_text"
+pub BOLD = "lm_bold"
+pub IT = "lm_it"
+pub MFRAC = "lm_mfrac"
+pub FRAC_LINE = "lm_frac-line"
+pub SQRT = "lm_sqrt"
+pub SQRT_SIGN = "lm_sqrt-sign"
+pub SQRT_LINE = "lm_sqrt-line"
+pub SQRT_INDEX = "lm_sqrt-index"
+pub VLIST_T = "lm_vlist-t"
+pub VLIST_T2 = "lm_vlist-t lm_vlist-t2"
+pub VLIST_R = "lm_vlist-r"
+pub VLIST = "lm_vlist"
+pub VLIST_S = "lm_vlist-s"
+pub PSTRUT = "lm_pstrut"
+pub MSUBSUP = "lm_msubsup"
+pub LEFT_RIGHT = "lm_left-right"
+pub SMALL_DELIM = "lm_small-delim"
+pub DELIM_SIZE1 = "lm_delim-size1"
+pub DELIM_SIZE2 = "lm_delim-size2"
+pub DELIM_SIZE3 = "lm_delim-size3"
+pub DELIM_SIZE4 = "lm_delim-size4"
+pub ACCENT_BODY = "lm_accent-body"
+pub NEG_THIN = "lm_negativethinspace"
+pub THIN = "lm_thinspace"
+pub MEDIUM = "lm_mediumspace"
+pub THICK = "lm_thickspace"
+pub ENSPACE = "lm_enspace"
+pub QUAD = "lm_quad"
+pub QQUAD = "lm_qquad"
+pub RULE = "lm_rule"
+pub NULLDELIMITER = "lm_nulldelimiter"
+pub MTABLE = "lm_mtable"
+pub ERROR = "lm_error"
+pub OP_GROUP = "lm_op-group"
 
 // ============================================================
 // Class builder helpers
@@ -93,46 +94,47 @@ pub fn font_class(font_name) {
 // ============================================================
 
 pub fn get_stylesheet() {
-    let s = ".ML__latex{display:inline-block;direction:ltr;text-align:left;text-indent:0;text-rendering:auto;font-family:inherit;font-style:normal;letter-spacing:normal;line-height:1.2;word-wrap:normal;word-spacing:normal;white-space:nowrap}" ++
-    ".ML__base{display:inline-block;position:relative;padding:0;margin:0;box-sizing:content-box;border:0;outline:0;vertical-align:baseline;text-decoration:none}" ++
-    ".ML__strut,.ML__strut--bottom{display:inline-block;min-height:0.5em}" ++
-    ".ML__mathit{font-family:KaTeX_Math;font-style:italic}" ++
-    ".ML__cmr{font-family:KaTeX_Main;font-style:normal}" ++
-    ".ML__mathbf{font-family:KaTeX_Main;font-weight:bold}" ++
-    ".ML__ams,.ML__bb{font-family:KaTeX_AMS}" ++
-    ".ML__cal{font-family:KaTeX_Caligraphic}" ++
-    ".ML__frak{font-family:KaTeX_Fraktur}" ++
-    ".ML__tt{font-family:KaTeX_Typewriter}" ++
-    ".ML__script{font-family:KaTeX_Script}" ++
-    ".ML__sans{font-family:KaTeX_SansSerif}" ++
-    ".ML__text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;white-space:pre}" ++
-    ".ML__bold{font-weight:700}" ++
-    ".ML__it{font-style:italic}" ++
-    ".ML__mfrac{display:inline-block}" ++
-    ".ML__frac-line{display:block;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
-    ".ML__sqrt{display:inline-block}" ++
-    ".ML__sqrt-sign{display:inline-block;position:relative}" ++
-    ".ML__sqrt-line{display:inline-block;height:1px;width:100%;background:currentColor}" ++
-    ".ML__sqrt-index{margin-left:0.27778em;margin-right:-0.55556em}" ++
-    ".ML__msubsup{text-align:left}" ++
-    ".ML__left-right{display:inline-block}" ++
-    ".ML__small-delim{font-family:KaTeX_Main}" ++
-    ".ML__delim-size1{font-family:KaTeX_Size1}" ++
-    ".ML__delim-size2{font-family:KaTeX_Size2}" ++
-    ".ML__delim-size3{font-family:KaTeX_Size3}" ++
-    ".ML__delim-size4{font-family:KaTeX_Size4}" ++
-    ".ML__accent-body{font-family:KaTeX_Main}" ++
-    ".ML__negativethinspace{display:inline-block;margin-left:-0.16667em;height:0.71em}" ++
-    ".ML__thinspace{display:inline-block;width:0.16667em;height:0.71em}" ++
-    ".ML__mediumspace{display:inline-block;width:0.22222em;height:0.71em}" ++
-    ".ML__thickspace{display:inline-block;width:0.27778em;height:0.71em}" ++
-    ".ML__enspace{display:inline-block;width:0.5em;height:0.71em}" ++
-    ".ML__quad{display:inline-block;width:1em;height:0.71em}" ++
-    ".ML__qquad{display:inline-block;width:2em;height:0.71em}" ++
-    ".ML__nulldelimiter{display:inline-block;width:0.12em}" ++
-    ".ML__rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
-    ".ML__mtable{display:inline-flex;flex-direction:column;vertical-align:middle}" ++
-    ".ML__error{color:#bc2612}"
+    let s = ".lm_latex{display:inline-block;direction:ltr;text-align:left;text-indent:0;text-rendering:auto;font-family:inherit;font-style:normal;letter-spacing:normal;line-height:1.2;word-wrap:normal;word-spacing:normal;white-space:nowrap}" ++
+    ".lm_base{display:inline-block;position:relative;padding:0;margin:0;box-sizing:content-box;border:0;outline:0;vertical-align:baseline;text-decoration:none}" ++
+    ".lm_strut,.lm_strut--bottom{display:inline-block;min-height:0.5em}" ++
+    ".lm_mathit{font-family:KaTeX_Math;font-style:italic}" ++
+    ".lm_cmr{font-family:KaTeX_Main;font-style:normal}" ++
+    ".lm_mathbf{font-family:KaTeX_Main;font-weight:bold}" ++
+    ".lm_ams,.lm_bb{font-family:KaTeX_AMS}" ++
+    ".lm_cal{font-family:KaTeX_Caligraphic}" ++
+    ".lm_frak{font-family:KaTeX_Fraktur}" ++
+    ".lm_tt{font-family:KaTeX_Typewriter}" ++
+    ".lm_script{font-family:KaTeX_Script}" ++
+    ".lm_sans{font-family:KaTeX_SansSerif}" ++
+    ".lm_text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;white-space:pre}" ++
+    ".lm_op-group{display:inline-block}" ++
+    ".lm_bold{font-weight:700}" ++
+    ".lm_it{font-style:italic}" ++
+    ".lm_mfrac{display:inline-block}" ++
+    ".lm_frac-line{display:block;height:1px;min-height:1px;background:currentColor;margin:0.1em 0}" ++
+    ".lm_sqrt{display:inline-block}" ++
+    ".lm_sqrt-sign{display:inline-block;position:relative}" ++
+    ".lm_sqrt-line{display:inline-block;height:1px;width:100%;background:currentColor}" ++
+    ".lm_sqrt-index{margin-left:0.27778em;margin-right:-0.55556em}" ++
+    ".lm_msubsup{text-align:left}" ++
+    ".lm_left-right{display:inline-block}" ++
+    ".lm_small-delim{font-family:KaTeX_Main}" ++
+    ".lm_delim-size1{font-family:KaTeX_Size1}" ++
+    ".lm_delim-size2{font-family:KaTeX_Size2}" ++
+    ".lm_delim-size3{font-family:KaTeX_Size3}" ++
+    ".lm_delim-size4{font-family:KaTeX_Size4}" ++
+    ".lm_accent-body{font-family:KaTeX_Main}" ++
+    ".lm_negativethinspace{display:inline-block;margin-left:-0.16667em;height:0.71em}" ++
+    ".lm_thinspace{display:inline-block;width:0.16667em;height:0.71em}" ++
+    ".lm_mediumspace{display:inline-block;width:0.22222em;height:0.71em}" ++
+    ".lm_thickspace{display:inline-block;width:0.27778em;height:0.71em}" ++
+    ".lm_enspace{display:inline-block;width:0.5em;height:0.71em}" ++
+    ".lm_quad{display:inline-block;width:1em;height:0.71em}" ++
+    ".lm_qquad{display:inline-block;width:2em;height:0.71em}" ++
+    ".lm_nulldelimiter{display:inline-block;width:0.12em}" ++
+    ".lm_rule{display:inline-block;border:solid 0;position:relative;box-sizing:border-box}" ++
+    ".lm_mtable{display:inline-flex;flex-direction:column;vertical-align:middle}" ++
+    ".lm_error{color:#bc2612}"
     s
 }
 

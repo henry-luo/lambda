@@ -21,7 +21,7 @@ let r1 = opt.coalesce(box1)
 
 // ---- two mergeable spans ----
 let box2 = {
-    element: <span class: "ML__mathit"
+    element: <span class: "lm_mathit"
         <span class: "mord" "x">
         <span class: "mord" "y">>,
     height: 0.7, depth: 0.0, width: 1.0,
@@ -33,7 +33,7 @@ let r2 = opt.coalesce(box2)
 
 // ---- non-mergeable spans (different classes) ----
 let box3 = {
-    element: <span class: "ML__mathit"
+    element: <span class: "lm_mathit"
         <span class: "mord" "x">
         <span class: "mbin" "+">>,
     height: 0.7, depth: 0.0, width: 1.2,
@@ -44,7 +44,7 @@ let r3 = opt.coalesce(box3)
 
 // ---- span with style (should not merge) ----
 let box4 = {
-    element: <span class: "ML__mathit"
+    element: <span class: "lm_mathit"
         <span class: "mord", style: "color:red" "a">
         <span class: "mord" "b">>,
     height: 0.7, depth: 0.0, width: 1.0,
@@ -68,7 +68,7 @@ let r5 = opt.coalesce(box5)
 
 // ---- three mergeable spans ----
 let box6 = {
-    element: <span class: "ML__cmr"
+    element: <span class: "lm_cmr"
         <span class: "mord" "a">
         <span class: "mord" "b">
         <span class: "mord" "c">>,

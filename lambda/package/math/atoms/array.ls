@@ -245,7 +245,7 @@ fn wrap_delimiters(table_box, env_name) {
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))
-    // report real height/depth for the box model; min-height on the ML__latex
+    // report real height/depth for the box model; min-height on the lm_latex
     // wrapper (set in math.ls) ensures the display equation container sizes correctly
     {
         element: <span style: "display:inline-flex;align-items:center;vertical-align:middle";
