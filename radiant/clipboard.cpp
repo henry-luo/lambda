@@ -176,6 +176,17 @@ ClipboardBackend* clipboard_backend_inmemory(void) {
     return g_inmem_backend;
 }
 
+static void clipboard_backend_inmemory_shutdown(void) {
+    if (!g_inmem_backend) return;
+    if (g_inmem_backend->clear) g_inmem_backend->clear(g_inmem_backend);
+    if (g_inmem_backend->opaque) {
+        mem_free(g_inmem_backend->opaque);
+        g_inmem_backend->opaque = NULL;
+    }
+    mem_free(g_inmem_backend);
+    g_inmem_backend = NULL;
+}
+
 // ---------------------------------------------------------------------------
 // GLFW plain-text backend (legacy bridge)
 // ---------------------------------------------------------------------------
@@ -237,6 +248,8 @@ void clipboard_store_shutdown(void) {
     if (g_store.items) { items_free(g_store.items); g_store.items = NULL; }
     mem_free(g_store.cached_text);
     g_store.cached_text = NULL;
+    g_store.backend = NULL;
+    clipboard_backend_inmemory_shutdown();
 }
 
 void clipboard_store_set_backend(ClipboardBackend* backend) {

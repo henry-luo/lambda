@@ -554,11 +554,6 @@ static bool _get_checkedness(DomElement* elem) {
 }
 
 static void _set_checkedness(DomElement* elem, bool v) {
-    if (elem) {
-        elem->live_checkedness_dirty = true;
-        elem->live_checkedness = v;
-    }
-
     DocState* state = _state_for_element(elem);
     if (state) {
         form_control_set_checked(state, (View*)elem, v);
@@ -4228,8 +4223,6 @@ static void _reset_form_control(DomElement* elem) {
             // checked := defaultChecked (presence of "checked" content attr)
             bool default_checked = dom_element_has_attribute(elem, "checked");
             _set_checkedness(elem, default_checked);
-            elem->live_checkedness = default_checked;
-            elem->live_checkedness_dirty = false;
             // Clear dirty checkedness flag.
             Item exp = expando_get_map((DomNode*)elem);
             if (exp.item != ITEM_NULL) {
@@ -6710,10 +6703,6 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             dirty = v.item != ITEM_NULL && !is_js_undefined(v) && js_is_truthy(v);
         }
         if (!dirty) _set_checkedness(elem, t);
-        if (!dirty) {
-            elem->live_checkedness = t;
-            elem->live_checkedness_dirty = false;
-        }
         return value;
     }
 

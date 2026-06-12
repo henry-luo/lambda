@@ -5,6 +5,7 @@
 
 struct DomElement;
 struct FontProp;
+struct ViewState;
 
 // Forward decl from text_edit.hpp (avoids circular include).
 struct EditHistory;
@@ -116,6 +117,8 @@ namespace FormDefaults {
 struct FormControlProp {
     // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
     struct DocState* state_ref;
+    ViewState* form_state_ref;
+    ViewState* scroll_state_ref;
 
     FormControlType control_type;
     const char* input_type;     // Original type attribute value
@@ -251,7 +254,7 @@ struct FormControlProp {
     uint32_t preedit_caret;
 
     // Constructor
-    FormControlProp() : state_ref(nullptr),
+    FormControlProp() : state_ref(nullptr), form_state_ref(nullptr), scroll_state_ref(nullptr),
         control_type(FORM_CONTROL_NONE), input_type(nullptr),
         value(nullptr), placeholder(nullptr), name(nullptr),
         size(FormDefaults::TEXT_SIZE_CHARS), cols(FormDefaults::TEXTAREA_COLS),

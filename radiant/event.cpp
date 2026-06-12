@@ -7050,11 +7050,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                         PSEUDO_STATE_CHECKED);
                     click_check_radio_changed = after != click_check_radio_before;
                     if (evcon.default_prevented && click_check_radio_changed) {
-                        if (click_check_radio->is_element()) {
-                            DomElement* elem = lam::dom_require_element(click_check_radio);
-                            elem->live_checkedness_dirty = true;
-                            elem->live_checkedness = click_check_radio_before;
-                        }
                         form_control_set_checked(click_check_radio_state,
                                                  click_check_radio,
                                                  click_check_radio_before);

@@ -45,9 +45,10 @@ extern bool is_view_focusable(View* view);
 static void focus_sync_text_control_state(DocState* state, View* view);
 
 HASHMAP_DEFINE_FIELD2_KEY(state_key, StateEntry, key.node, key.name)
-HASHMAP_DEFINE_INTKEY(view_state_entry, ViewStateEntry, view_id)
+HASHMAP_DEFINE_FIELD2_KEY(view_state_entry, ViewStateEntry, view_id, kind)
 
 static void view_state_release_payload(ViewState* view_state);
+static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewStateKind kind);
 static FormControlProp* form_prop_for_view(View* view);
 static bool view_element_has_attr(View* view, const char* attr_name);
 static int form_default_selected_index_from_tree(View* view);
@@ -734,7 +735,8 @@ static Item state_dump_build_element(DumpBuildContext* ctx, DomElement* elem) {
     DumpNodeState* ns = state_dump_get_node_state(ctx->by_node, elem, false);
     uint64_t flags = ns ? ns->flags : 0;
 
-    ViewState* vs = view_state_get(ctx->state, (View*)elem);
+    View* elem_view = (View*)elem;
+    ViewState* vs = view_state_get(ctx->state, elem_view);
     if (vs) {
         if (vs->flags.hovered) flags |= DUMP_FLAG_HOVER;
         if (vs->flags.active) flags |= DUMP_FLAG_ACTIVE;
@@ -742,9 +744,11 @@ static Item state_dump_build_element(DumpBuildContext* ctx, DomElement* elem) {
     }
 
     bool scroll_any = false;
-    Item scroll_item = state_dump_scroll_item(ctx, vs, &scroll_any);
+    ViewState* scroll_vs = view_state_get_for_kind(ctx->state, elem_view, VIEW_STATE_SCROLL);
+    Item scroll_item = state_dump_scroll_item(ctx, scroll_vs, &scroll_any);
     bool form_any = false;
-    Item form_item = state_dump_form_item(ctx, (View*)elem, vs, &flags, &form_any);
+    ViewState* form_vs = view_state_get_for_kind(ctx->state, elem_view, VIEW_STATE_FORM_CONTROL);
+    Item form_item = state_dump_form_item(ctx, elem_view, form_vs, &flags, &form_any);
 
     bool has_state = flags != 0 || scroll_any || form_any ||
         (ns && (ns->has_value || ns->has_sel_start || ns->has_sel_end));
@@ -1981,20 +1985,44 @@ static void state_transition_write_anchor(JsonWriter* w, DocState* state, View* 
     jw_obj_end(w);
 }
 
-ViewState* view_state_get(DocState* state, View* view) {
+static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewStateKind kind) {
     if (!state || !view) return NULL;
 
     uint32_t view_id = view_state_resolve_id(view);
     if (view_id == 0 || !state->view_state_map) return NULL;
 
-    ViewStateEntry query = { .view_id = view_id, .state = NULL };
+    ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
     const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-    if (!found) {
-        view->view_state_ref = NULL;
-        return NULL;
+    return found ? found->state : NULL;
+}
+
+static ViewState* view_state_primary_cache(View* view, ViewState* view_state) {
+    if (!view || !view_state) return view_state;
+    if (view_state->kind == VIEW_STATE_FORM_CONTROL ||
+        !view->view_state_ref ||
+        view->view_state_ref->kind == VIEW_STATE_BASE) {
+        view->view_state_ref = view_state;
     }
-    view->view_state_ref = found->state;
-    return found->state;
+    return view_state;
+}
+
+ViewState* view_state_get(DocState* state, View* view) {
+    if (!state || !view) return NULL;
+
+    ViewState* form_state = view_state_get_for_kind(state, view, VIEW_STATE_FORM_CONTROL);
+    if (form_state) return view_state_primary_cache(view, form_state);
+
+    ViewState* scroll_state = view_state_get_for_kind(state, view, VIEW_STATE_SCROLL);
+    if (scroll_state) return view_state_primary_cache(view, scroll_state);
+
+    ViewState* base_state = view_state_get_for_kind(state, view, VIEW_STATE_BASE);
+    if (base_state) return view_state_primary_cache(view, base_state);
+
+    ViewState* custom_state = view_state_get_for_kind(state, view, VIEW_STATE_CUSTOM);
+    if (custom_state) return view_state_primary_cache(view, custom_state);
+
+    view->view_state_ref = NULL;
+    return NULL;
 }
 
 static void doc_state_detach_transient_owner(DocState* state, View* view) {
@@ -2052,14 +2080,24 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
     uint32_t view_id = view->id;
     doc_state_detach_transient_owner(state, view);
     if (view_id != 0 && state->view_state_map) {
-        ViewStateEntry query = { .view_id = view_id, .state = NULL };
-        const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-        if (found) view_state_release_payload(found->state);
-        if (hashmap_delete(state->view_state_map, &query)) {
-            removed++;
+        for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
+            ViewStateKind kind = (ViewStateKind)kind_int;
+            ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
+            const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
+            if (found) view_state_release_payload(found->state);
+            if (hashmap_delete(state->view_state_map, &query)) {
+                removed++;
+            }
         }
     }
     view->view_state_ref = NULL;
+    if (view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && elem->form) {
+            elem->form->form_state_ref = NULL;
+            elem->form->scroll_state_ref = NULL;
+        }
+    }
 
     if (node->is_element()) {
         DomElement* element = lam::dom_require_element(node);
@@ -2194,7 +2232,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
             View* key_live = view_state_find_live_id(root, entry->view_id);
             View* state_live = view_state_find_live_id(root, state_view_id);
             if (!entry->state || !key_live || !state_live) {
-                ViewStateEntry query = { .view_id = entry->view_id, .state = NULL };
+                ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };
                 view_state_release_payload(entry->state);
                 hashmap_delete(state->view_state_map, &query);
                 removed++;
@@ -2229,13 +2267,9 @@ uint32_t view_state_detach_subtree(DocState* state, DomNode* root) {
 
 static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStateKind kind) {
     if (!state || !view || !state->arena || !state->view_state_map) return NULL;
-    ViewState* existing = view_state_get(state, view);
-    if (existing) {
-        if (existing->kind == VIEW_STATE_BASE && kind != VIEW_STATE_BASE) {
-            existing->kind = kind;
-        }
-        return existing;
-    }
+    ViewState* existing = view_state_get_for_kind(state, view, kind);
+    if (existing) return view_state_primary_cache(view, existing);
+    ViewState* primary = view_state_get(state, view);
 
     uint32_t view_id = view_state_resolve_id(view);
     if (view_id == 0) return NULL;
@@ -2245,14 +2279,18 @@ static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStat
     memset(created, 0, sizeof(ViewState));
     created->view_id = view_id;
     created->kind = kind;
-    created->data.form.selected_index = -1;
-    created->data.form.hover_index = -1;
-    created->data.form.range_value = 0.5f;
+    if (primary && primary->view_id == view_id) {
+        created->flags = primary->flags;
+    }
+    if (kind == VIEW_STATE_FORM_CONTROL) {
+        created->data.form.selected_index = -1;
+        created->data.form.hover_index = -1;
+        created->data.form.range_value = 0.5f;
+    }
 
-    ViewStateEntry entry = { .view_id = view_id, .state = created };
+    ViewStateEntry entry = { .view_id = view_id, .kind = kind, .state = created };
     hashmap_set(state->view_state_map, &entry);
-    view->view_state_ref = created;
-    return created;
+    return view_state_primary_cache(view, created);
 }
 
 static void view_state_log_bool_transition(DocState* state, View* view,
@@ -2580,8 +2618,11 @@ static float form_default_range_value(View* view, FormControlProp* form) {
 }
 
 static ViewState* form_view_state_get(DocState* state, View* view) {
-    ViewState* view_state = view_state_get(state, view);
-    if (!view_state || view_state->kind != VIEW_STATE_FORM_CONTROL) return NULL;
+    ViewState* view_state = view_state_get_for_kind(state, view, VIEW_STATE_FORM_CONTROL);
+    if (view_state && view && view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && elem->form) elem->form->form_state_ref = view_state;
+    }
     return view_state;
 }
 
@@ -2630,20 +2671,16 @@ static void form_view_state_store_text_value(ViewState* view_state,
 
 static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
     if (!state || !view || !form) return NULL;
-    ViewState* view_state = view_state_get(state, view);
+    ViewState* view_state = form_view_state_get(state, view);
     bool should_seed_from_form = false;
     if (view_state) {
-        if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_FORM_CONTROL) {
-            log_error("form_view_state_get_or_create: incompatible ViewState kind %d", view_state->kind);
-            return NULL;
-        }
-        if (view_state->kind == VIEW_STATE_FORM_CONTROL) return view_state;
-        view_state->kind = VIEW_STATE_FORM_CONTROL;
-        should_seed_from_form = true;
+        form->form_state_ref = view_state;
+        return view_state;
     } else {
         view_state = view_state_get_or_create(state, view, VIEW_STATE_FORM_CONTROL);
         if (!view_state) return NULL;
         should_seed_from_form = true;
+        form->form_state_ref = view_state;
     }
 
     if (should_seed_from_form) {
@@ -3058,11 +3095,6 @@ void state_set_bool(DocState* state, void* node, const char* name, bool value) {
 
 bool form_control_get_checked(DocState* state, View* view) {
     if (!view || !view->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(view);
-    if (elem && elem->live_checkedness_dirty) {
-        return elem->live_checkedness;
-    }
-
     ViewState* view_state = form_view_state_get(state, view);
     if (view_state) return view_state->data.form.checked != 0;
     return view_element_has_attr(view, "checked");
@@ -3070,12 +3102,6 @@ bool form_control_get_checked(DocState* state, View* view) {
 
 void form_control_set_checked(DocState* state, View* view, bool checked) {
     if (!view || !view->is_element()) return;
-    DomElement* elem = lam::dom_require_element(view);
-    if (elem) {
-        elem->live_checkedness_dirty = true;
-        elem->live_checkedness = checked;
-    }
-
     FormControlProp* form = form_prop_for_view(view);
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     bool old_value = view_state ? view_state->data.form.checked != 0 : view_element_has_attr(view, "checked");
@@ -3098,27 +3124,24 @@ static void scroll_state_attach(DocState* state, void* pane_ptr) {
 
 static ViewState* scroll_view_state_get_or_create(DocState* state, View* view, ScrollPane* pane) {
     if (!state || !view || !pane) return NULL;
-    ViewState* view_state = view_state_get(state, view);
-    if (view_state) {
-        if (view_state->kind != VIEW_STATE_BASE && view_state->kind != VIEW_STATE_SCROLL) {
-            // Form controls keep their live value/selection in ViewState.form.
-            // Their internal scroll panes cannot share the union-backed state, so
-            // they fall back to pane-local scroll fields.
-            log_debug("scroll_view_state_get_or_create: using pane-local scroll for ViewState kind %d",
-                      view_state->kind);
-            return NULL;
-        }
-        if (view_state->kind == VIEW_STATE_SCROLL) return view_state;
-        view_state->kind = VIEW_STATE_SCROLL;
-    } else {
+    ViewState* view_state = view_state_get_for_kind(state, view, VIEW_STATE_SCROLL);
+    bool created = false;
+    if (!view_state) {
         view_state = view_state_get_or_create(state, view, VIEW_STATE_SCROLL);
         if (!view_state) return NULL;
+        created = true;
+    }
+    if (view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        if (elem && elem->form) elem->form->scroll_state_ref = view_state;
     }
 
-    view_state->data.scroll.x = pane->h_scroll_position;
-    view_state->data.scroll.y = pane->v_scroll_position;
-    view_state->data.scroll.max_x = pane->h_max_scroll;
-    view_state->data.scroll.max_y = pane->v_max_scroll;
+    if (created) {
+        view_state->data.scroll.x = pane->h_scroll_position;
+        view_state->data.scroll.y = pane->v_scroll_position;
+        view_state->data.scroll.max_x = pane->h_max_scroll;
+        view_state->data.scroll.max_y = pane->v_max_scroll;
+    }
     return view_state;
 }
 
@@ -3239,7 +3262,7 @@ void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_
     if (out_h_max) *out_h_max = 0.0f;
     if (out_v_max) *out_v_max = 0.0f;
 
-    ViewState* view_state = state && view ? view_state_get(state, view) : NULL;
+    ViewState* view_state = state && view ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : NULL;
     if (view_state && view_state->kind == VIEW_STATE_SCROLL) {
         if (out_h_pos) *out_h_pos = view_state->data.scroll.x;
         if (out_v_pos) *out_v_pos = view_state->data.scroll.y;
@@ -3339,7 +3362,7 @@ void scroll_state_get_interaction_for_view(DocState* state, View* view,
                                            ScrollInteractionState* out_state) {
     if (!out_state) return;
     memset(out_state, 0, sizeof(ScrollInteractionState));
-    ViewState* view_state = state && view ? view_state_get(state, view) : NULL;
+    ViewState* view_state = state && view ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : NULL;
     if (!view_state || view_state->kind != VIEW_STATE_SCROLL) return;
 
     out_state->h_hovered = view_state->data.scroll.h_hovered != 0;
@@ -3423,6 +3446,7 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
     if (form->selection_direction > 2) form->selection_direction = 0;
     form->tc_initialized = 1;
     form->state_ref = state;
+    form->form_state_ref = view_state;
     form->value = form->current_value;
     view->view_state_ref = view_state;
     return true;

@@ -739,7 +739,7 @@ static void validate_view_state_registry(DocState* state,
         if (state->owner_store && state->owner_store->document) {
             if (!live_view) {
                 report_fail(report, "view state registry id has no live view");
-            } else if (live_view->view_state_ref && live_view->view_state_ref != view_state) {
+            } else if (live_view->view_state_ref && live_view->view_state_ref->view_id != view_state->view_id) {
                 report_fail(report, "live view weak ViewState ref is stale");
             }
         }
@@ -755,6 +755,14 @@ static void validate_view_state_registry(DocState* state,
                     view_state->data.scroll.y > view_state->data.scroll.max_y) {
                     report_fail(report, "view scroll state is out of bounds");
                 }
+                if (live_view && live_view->is_element()) {
+                    DomElement* live_element = lam::dom_require_element(live_view);
+                    if (live_element && live_element->form &&
+                        live_element->form->scroll_state_ref &&
+                        live_element->form->scroll_state_ref != view_state) {
+                        report_fail(report, "form control cached scroll ViewState ref is stale");
+                    }
+                }
                 break;
             case VIEW_STATE_FORM_CONTROL: {
                 if (view_state->data.form.selected_index < -1 || view_state->data.form.hover_index < -1) {
@@ -766,6 +774,9 @@ static void validate_view_state_registry(DocState* state,
                         report_fail(report, "view form state is not attached to a form control");
                     } else {
                         FormControlProp* form = live_element->form;
+                        if (form->form_state_ref && form->form_state_ref != view_state) {
+                            report_fail(report, "form control cached ViewState ref is stale");
+                        }
                         if (form->option_count >= 0) {
                             if (view_state->data.form.selected_index >= form->option_count) {
                                 report_fail(report, "view form state selected index exceeds option count");
