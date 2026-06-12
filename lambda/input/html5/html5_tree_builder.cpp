@@ -521,7 +521,7 @@ Element* html5_fragment_get_body(Html5Parser* parser) {
     if (!parser || !parser->html_element) return nullptr;
 
     // Body is the second child of html (after head if present, or first if no head)
-    for (size_t i = 0; i < parser->html_element->length; i++) {
+    for (size_t i = 0; i < (size_t)parser->html_element->length; i++) {
         TypeId type = get_type_id(parser->html_element->items[i]);
         if (type == LMD_TYPE_ELEMENT) {
             Element* child = parser->html_element->items[i].element;
@@ -1144,7 +1144,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // Per WHATWG spec: if there's a template on the stack, ignore
             // Otherwise, merge attributes from token onto the html element
             bool has_template = false;
-            for (size_t i = 0; i < parser->open_elements->length; i++) {
+            for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
                 Element* el = (Element*)parser->open_elements->items[i].element;
                 const char* el_tag = ((TypeElmt*)el->type)->name.str;
                 if (strcmp(el_tag, "template") == 0) {
@@ -1182,7 +1182,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             // If only one element on stack, or second element isn't body, ignore
             // Otherwise, merge attributes from token onto the body element
             bool has_template = false;
-            for (size_t i = 0; i < parser->open_elements->length; i++) {
+            for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
                 Element* el = (Element*)parser->open_elements->items[i].element;
                 const char* el_tag = ((TypeElmt*)el->type)->name.str;
                 if (strcmp(el_tag, "template") == 0) {
@@ -1544,7 +1544,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 existing_a = html5_find_formatting_element(parser, "a");
                 if (existing_a >= 0) {
                     // Remove from active formatting
-                    for (size_t i = existing_a; i < parser->active_formatting->length - 1; i++) {
+                    for (size_t i = existing_a; i < (size_t)(parser->active_formatting->length - 1); i++) {
                         parser->active_formatting->items[i] = parser->active_formatting->items[i + 1];
                     }
                     parser->active_formatting->length--;
@@ -1557,7 +1557,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
                     if (parser->foster_parenting) {
                         // Find the <a> element but don't remove it yet
-                        for (size_t i = 0; i < parser->open_elements->length; i++) {
+                        for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
                             Element* elem = (Element*)parser->open_elements->items[i].element;
                             if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0) {
                                 elem_to_remove = elem;
@@ -1574,16 +1574,16 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
 
                     // Now remove the old <a> from open elements if we were in foster parenting mode
                     if (parser->foster_parenting && elem_to_remove != nullptr) {
-                        for (size_t j = elem_to_remove_idx; j < parser->open_elements->length - 1; j++) {
+                        for (size_t j = elem_to_remove_idx; j < (size_t)(parser->open_elements->length - 1); j++) {
                             parser->open_elements->items[j] = parser->open_elements->items[j + 1];
                         }
                         parser->open_elements->length--;
                     } else if (!parser->foster_parenting) {
                         // Normal case: remove from open elements
-                        for (size_t i = 0; i < parser->open_elements->length; i++) {
+                        for (size_t i = 0; i < (size_t)parser->open_elements->length; i++) {
                             Element* elem = (Element*)parser->open_elements->items[i].element;
                             if (elem && strcmp(((TypeElmt*)elem->type)->name.str, "a") == 0 && elem != new_elem) {
-                                for (size_t j = i; j < parser->open_elements->length - 1; j++) {
+                                for (size_t j = i; j < (size_t)(parser->open_elements->length - 1); j++) {
                                     parser->open_elements->items[j] = parser->open_elements->items[j + 1];
                                 }
                                 parser->open_elements->length--;

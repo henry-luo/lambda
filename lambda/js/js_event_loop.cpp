@@ -255,6 +255,8 @@ static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
 static int timer_handle_count = 0;
 static int64_t next_timer_id = 1;
 
+static void close_all_timer_handles(void);
+
 typedef struct JsTimerRuntimeScope {
     EvalContext runtime_ctx;
     EvalContext* saved_context;
@@ -958,11 +960,44 @@ extern "C" void js_event_loop_cancel_document_timers(void* dom_doc) {
     }
 }
 
+extern "C" void js_event_loop_abandon_document_timers(void* dom_doc) {
+    if (!dom_doc) return;
+
+    for (int i = 0; i < timer_handle_count; ) {
+        JsTimerHandle *th = timer_handles[i];
+        if (!th || th->runtime_doc != dom_doc) {
+            i++;
+            continue;
+        }
+
+        log_debug("[JS_TIMER_ABANDON] detaching timer %lld for unsafe document %p",
+                  (long long)th->id, dom_doc);
+        th->runtime_doc = nullptr;
+        th->runtime_heap = nullptr;
+        th->runtime_nursery = nullptr;
+        th->runtime_name_pool = nullptr;
+        th->runtime_pool = nullptr;
+        th->roots_registered = false;
+        th->callback = ItemNull;
+        for (int j = 0; j < th->extra_count; j++) {
+            th->extra_args[j] = ItemNull;
+        }
+        th->extra_count = 0;
+        timer_handles[i] = timer_handles[timer_handle_count - 1];
+        timer_handles[timer_handle_count - 1] = nullptr;
+        timer_handle_count--;
+    }
+}
+
 // =============================================================================
 // Event Loop Lifecycle
 // =============================================================================
 
 extern "C" void js_event_loop_init(void) {
+    if (timer_handle_count > 0) {
+        js_event_loop_shutdown();
+    }
+
     // reset task queues — zero ring buffers to prevent GC scanning stale Items
     memset(next_tick_ring, 0, sizeof(next_tick_ring));
     memset(microtask_ring, 0, sizeof(microtask_ring));
@@ -998,6 +1033,37 @@ extern "C" void js_event_loop_init(void) {
 
     // register task drain to run at libuv phase checkpoints
     lambda_uv_set_microtask_drain(js_microtask_flush);
+}
+
+extern "C" void js_event_loop_shutdown(void) {
+    uv_loop_t* loop = lambda_uv_loop();
+
+    close_all_timer_handles();
+    if (loop) {
+        int safety = MAX_TIMER_HANDLES + 16;
+        while (timer_handle_count > 0 && safety-- > 0) {
+            uv_run(loop, UV_RUN_NOWAIT);
+        }
+    }
+
+    if (timer_handle_count > 0) {
+        log_error("event_loop: shutdown left %d timer handle(s) pending close",
+                  timer_handle_count);
+    }
+
+    memset(next_tick_ring, 0, sizeof(next_tick_ring));
+    memset(microtask_ring, 0, sizeof(microtask_ring));
+    memset(raf_callback_ring, 0, sizeof(raf_callback_ring));
+    memset(raf_id_ring, 0, sizeof(raf_id_ring));
+    next_tick_head = 0;
+    next_tick_tail = 0;
+    next_tick_count = 0;
+    microtask_head = 0;
+    microtask_tail = 0;
+    microtask_count = 0;
+    raf_head = 0;
+    raf_tail = 0;
+    raf_count = 0;
 }
 
 // Recovery mechanism for SIGSEGV during event loop drain.

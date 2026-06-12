@@ -3216,7 +3216,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    // Step 2e: Collect and compile inline event handlers (onclick, onmouseover, etc.)
+    // Step 2e: Install inline event handler attributes into EventTarget slots.
     // Must happen after execute_document_scripts so function definitions are available.
     collect_and_compile_event_handlers(dom_doc);
 
@@ -6459,6 +6459,7 @@ static bool layout_single_file(
     pool_destroy(pool);
 
     if (!script_runner_js_batch_cleanup_unsafe()) {
+        js_event_loop_shutdown();
         // Reset JS runtime state to avoid cross-document leakage in batch mode.
         // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
         // global Items (js_input, js_exception_value, etc.) that reference the

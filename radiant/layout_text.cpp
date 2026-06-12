@@ -910,7 +910,7 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
     if (handle) {
         FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
         LoadedGlyph* glyph = font_load_glyph(handle, &sd, codepoint, false);
-        if (glyph && glyph->advance_x > 0.0f) {
+        if (glyph) {
             float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
                 ? lycon->ui_context->pixel_ratio : 1.0f;
             // CSS text-spacing-trim uses the OpenType 'halt' data to remove
@@ -2083,7 +2083,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
                 float line_right = lycon->line.has_float_intrusion ?
                                    lycon->line.effective_right : lycon->line.right;
-                if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right) {
+                if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right + 0.001f) {
                     return has_break_opportunity ? RDT_LINE_NOT_FILLED : RDT_LINE_FILLED;
                 }
                 continue;
@@ -2150,7 +2150,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
                            lycon->line.effective_right : lycon->line.right;
         // CSS Text 3 §8: letter-spacing is not applied at end of a line.
         // Subtract the trailing letter-spacing in the overflow check.
-        if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right) { // line filled up
+        if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right + 0.001f) { // line filled up
             // CSS Text 3 §5.2: If a break opportunity (hyphen, soft hyphen, ZWSP,
             // CJK) existed before the overflow, the text can be split during actual
             // layout at that break point.  Don't signal LINE_FILLED — let the text

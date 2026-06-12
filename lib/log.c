@@ -240,7 +240,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                 case 'T': // time
                     if (format->show_timestamp && timestamp[0]) {
                         int len = snprintf(out, remaining, "%s", timestamp);
-                        if (len > 0 && len < remaining) {
+                        if (len > 0 && (size_t)len < remaining) {
                             out += len;
                             remaining -= len;
                         }
@@ -249,7 +249,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                 case 'F': // full timestamp with date
                     if (format->show_timestamp && timestamp[0]) {
                         int len = snprintf(out, remaining, "%s", timestamp);
-                        if (len > 0 && len < remaining) {
+                        if (len > 0 && (size_t)len < remaining) {
                             out += len;
                             remaining -= len;
                         }
@@ -258,7 +258,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                 case 'L': // log level
                     {
                         int len = snprintf(out, remaining, "%s[%s]%s", color, level_str, reset_color);
-                        if (len > 0 && len < remaining) {
+                        if (len > 0 && (size_t)len < remaining) {
                             out += len;
                             remaining -= len;
                         }
@@ -269,7 +269,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                         // Hide default category if configured
                         if (!(format->hide_default_category && strcmp(category_name, "default") == 0)) {
                             int len = snprintf(out, remaining, "[%s]", category_name);
-                            if (len > 0 && len < remaining) {
+                            if (len > 0 && (size_t)len < remaining) {
                                 out += len;
                                 remaining -= len;
                             }
@@ -280,7 +280,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                     {
                         const char *indent = get_indentation_string();
                         int len = snprintf(out, remaining, "%s", indent);
-                        if (len > 0 && len < remaining) {
+                        if (len > 0 && (size_t)len < remaining) {
                             out += len;
                             remaining -= len;
                         }
@@ -289,7 +289,7 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                 case 'm': // message
                     {
                         int len = snprintf(out, remaining, "%s", message);
-                        if (len > 0 && len < remaining) {
+                        if (len > 0 && (size_t)len < remaining) {
                             out += len;
                             remaining -= len;
                         }

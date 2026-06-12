@@ -14,6 +14,7 @@ typedef struct Heap {
 
 void heap_init();
 void heap_init_with_pool(Pool* pool);  // reuse existing pool (batch mode)
+extern "C" void heap_finalize_gc_objects(struct gc_heap* gc);
 void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)

@@ -479,6 +479,22 @@ static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_n
     }
 }
 
+extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
+                                                  const char* attr_name,
+                                                  Item fn) {
+    DomElement* elem = (DomElement*)dom_elem;
+    if (!elem || !attr_name || get_type_id(fn) != LMD_TYPE_FUNC) return false;
+
+    char prop_name[64];
+    if (!js_dom_event_attr_name(attr_name, prop_name, sizeof(prop_name))) return false;
+
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    if (exp_map.item == ITEM_NULL) return false;
+
+    js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+    return true;
+}
+
 // ------------------------------------------------------------------
 // HTML form-control IDL helpers (Phase 4 click activation).
 // `checked` and `disabled` are boolean IDL attributes that must be
@@ -604,9 +620,31 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
 
     if (elem->id && elem->id[0] != '\0') {
         Item key = (Item){.item = s2it(heap_create_name(elem->id))};
-        Item wrapped = js_dom_wrap_element(elem);
-        js_property_set(global, key, wrapped);
-        log_debug("js_dom: registered element id='%s' on global object", elem->id);
+        // HTML named-property access on Window reflects the *current* element
+        // with this id. Register when there is no own property yet, and also
+        // refresh a stale auto-registered wrapper whose element was detached
+        // (e.g. after `innerHTML` replaced the subtree). Do NOT clobber a
+        // genuine user-assigned global, and keep the first connected element in
+        // tree order when ids collide within the current document.
+        bool do_register = true;
+        if (it2b(js_has_own_property(global, key))) {
+            DomNode* exn = static_cast<DomNode*>(
+                js_dom_unwrap_element(js_property_get(global, key)));
+            DomElement* ex = (exn && exn->is_element()) ? exn->as_element() : nullptr;
+            if (!ex) {
+                do_register = false;                          // user-assigned global
+            } else if (ex == elem) {
+                do_register = false;                          // already bound to this element
+            } else if (js_dom_node_is_connected((DomNode*)ex)) {
+                do_register = false;                          // a connected element already owns this id
+            }
+            // else: existing binding is a stale/detached wrapper → refresh it
+        }
+        if (do_register) {
+            Item wrapped = js_dom_wrap_element(elem);
+            js_property_set(global, key, wrapped);
+            log_debug("js_dom: registered element id='%s' on global object", elem->id);
+        }
     }
 
     DomNode* child = elem->first_child;
@@ -5740,6 +5778,10 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
          _is_tag(elem, "option"))) {
         return (Item){.item = b2it(dom_element_has_attribute(elem, "disabled"))};
     }
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+        const char* v = dom_element_get_attribute(elem, "value");
+        return (Item){.item = s2it(heap_create_name(v ? v : ""))};
+    }
 
     // ------------------------------------------------------------------
     // HTML form text-control (HTMLInputElement / HTMLTextAreaElement)
@@ -6846,6 +6888,16 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
             else dom_element_remove_attribute(elem, "selected");
             return value;
         }
+    }
+    if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+        const char* s = fn_to_cstr(value);
+        if (!s) s = "";
+        dom_element_set_attribute(elem, "value", s);
+        if (elem->form) {
+            elem->form->value = dom_element_get_attribute(elem, "value");
+        }
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
     }
 
     // ------------------------------------------------------------------

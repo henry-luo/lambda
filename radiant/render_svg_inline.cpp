@@ -930,13 +930,13 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
 
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
-    // determine width
+    // determine width. A viewBox provides a coordinate system and aspect ratio,
+    // but not an explicit intrinsic width/height attribute.
     if (width_attr && *width_attr) {
         size.width = parse_svg_length(width_attr, 300);
         size.has_intrinsic_width = true;
     } else if (vb.has_viewbox && vb.width > 0) {
         size.width = vb.width;
-        size.has_intrinsic_width = true;
     }
 
     // determine height
@@ -945,11 +945,12 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
         size.has_intrinsic_height = true;
     } else if (vb.has_viewbox && vb.height > 0) {
         size.height = vb.height;
-        size.has_intrinsic_height = true;
     }
 
     // calculate aspect ratio
-    if (size.height > 0) {
+    if (vb.has_viewbox && vb.width > 0 && vb.height > 0) {
+        size.aspect_ratio = vb.width / vb.height;
+    } else if (size.height > 0) {
         size.aspect_ratio = size.width / size.height;
     }
 

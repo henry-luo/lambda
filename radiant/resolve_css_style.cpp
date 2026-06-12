@@ -2,6 +2,7 @@
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "retained_fields.hpp"
+#include "css_temp_decl.hpp"
 #include "font_face.h"  // for FontFaceDescriptor
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
@@ -25,6 +26,40 @@ static DomElement* dom_parent_element(DomElement* element) {
     return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
 }
 
+static BackgroundProp* parent_computed_background(LayoutContext* lycon) {
+    if (!lycon || !lycon->view || !lycon->view->is_element()) return nullptr;
+    DomElement* element = lam::dom_require_element(lycon->view);
+    DomElement* parent = dom_parent_element(element);
+    return (parent && parent->bound) ? parent->bound->background : nullptr;
+}
+
+static void ensure_span_background(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->bound) {
+        span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+    }
+    if (!span->bound->background) {
+        span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+    }
+}
+
+static Color inherit_background_color(LayoutContext* lycon) {
+    BackgroundProp* parent_bg = parent_computed_background(lycon);
+    Color color = {};
+    if (parent_bg) {
+        color = parent_bg->color;
+    }
+    return color;
+}
+
+static bool css_custom_property_name_matches(const char* stored_name, const char* lookup_name) {
+    if (!stored_name || !lookup_name) return false;
+    if (strcmp(stored_name, lookup_name) == 0) return true;
+
+    const char* stored_body = strncmp(stored_name, "--", 2) == 0 ? stored_name + 2 : stored_name;
+    const char* lookup_body = strncmp(lookup_name, "--", 2) == 0 ? lookup_name + 2 : lookup_name;
+    return strcmp(stored_body, lookup_body) == 0;
+}
+
 /**
  * Look up a CSS custom property (variable) value
  * Searches current element and ancestors (CSS variables inherit)
@@ -43,7 +78,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
         if (element->css_variables) {
             CssCustomProp* var = element->css_variables;
             while (var) {
-                if (var->name && strcmp(var->name, var_name) == 0) {
+                if (css_custom_property_name_matches(var->name, var_name)) {
                     return var->value;
                 }
                 var = var->next;
@@ -334,10 +369,8 @@ static void resolve_background_url_function(LayoutContext* lycon, const CssDecla
         return;
     }
 
-    CssDeclaration img_decl = *decl;
-    img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
-    img_decl.value = (CssValue*)value;
-    resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
+    lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)value);
+    img_decl.resolve(lycon);
 }
 
 static const CssValue* css_find_background_function(const CssValue* value,
@@ -1523,7 +1556,13 @@ DisplayValue resolve_display_value(void* child) {
                 return none_display;
             }
         }
-        if (dom_elem && dom_elem->display.inner != CSS_VALUE_NONE &&
+        bool has_specified_display = false;
+        if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
+            has_specified_display =
+                avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY) != nullptr;
+        }
+        if (dom_elem && !has_specified_display &&
+            dom_elem->display.inner != CSS_VALUE_NONE &&
             dom_elem->display.inner != 0 && dom_elem->styles_resolved) {
             log_debug("[CSS] Using pre-set display from element: outer=%d, inner=%d",
                 dom_elem->display.outer, dom_elem->display.inner);
@@ -5912,11 +5951,16 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_COLOR: {
             log_debug("[CSS] Processing background-color property (value type=%d)", value->type);
-            if (!span->bound) {
-                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-            }
-            if (!span->bound->background) {
-                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            ensure_span_background(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_INHERIT) {
+                span->bound->background->color = inherit_background_color(lycon);
+                log_debug("[CSS] background-color: inherit -> #%02x%02x%02x%02x",
+                          span->bound->background->color.r,
+                          span->bound->background->color.g,
+                          span->bound->background->color.b,
+                          span->bound->background->color.a);
+                break;
             }
             span->bound->background->color = resolve_color_value(lycon, value);
             break;
@@ -12262,23 +12306,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 value->data.function->name && strcmp(value->data.function->name, "var") == 0) {
                 const CssValue* resolved = resolve_var_function(lycon, value);
                 if (resolved && resolved != value) {
-                    CssDeclaration resolved_decl = *decl;
-                    resolved_decl.value = const_cast<CssValue*>(resolved);
-                    resolve_css_property(CSS_PROPERTY_BACKGROUND, &resolved_decl, lycon);
+                    lam::CssTempDecl resolved_decl(decl, CSS_PROPERTY_BACKGROUND, const_cast<CssValue*>(resolved));
+                    resolved_decl.resolve(lycon);
                     return;
                 }
                 // var() didn't resolve — fall through (will be logged as unimplemented)
             }
 
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_INHERIT) {
+                ensure_span_background(lycon, span);
+                BackgroundProp* parent_bg = parent_computed_background(lycon);
+                if (parent_bg) {
+                    *span->bound->background = *parent_bg;
+                } else {
+                    memset(span->bound->background, 0, sizeof(BackgroundProp));
+                }
+                log_debug("[Lambda CSS Shorthand] background: inherit");
+                return;
+            }
+
             // Handle 'background: none' → transparent background (CSS spec: background-image: none)
             if (value->type == CSS_VALUE_TYPE_KEYWORD &&
                 (value->data.keyword == CSS_VALUE_NONE || value->data.keyword == CSS_VALUE_TRANSPARENT)) {
-                if (!span->bound) {
-                    span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                }
-                if (!span->bound->background) {
-                    span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
-                }
+                ensure_span_background(lycon, span);
                 span->bound->background->color.r = 0;
                 span->bound->background->color.g = 0;
                 span->bound->background->color.b = 0;
@@ -12365,20 +12416,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     const CssValue* url_layer = css_find_background_url_layer(layer);
 
                     if (radial_layer) {
-                        CssDeclaration gradient_decl = *decl;
-                        gradient_decl.value = (CssValue*)radial_layer;
+                        lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)radial_layer);
                         log_debug("[Lambda CSS Background] Processing radial gradient layer %d", i);
-                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                        gradient_decl.resolve(lycon);
 
                         if (bg->radial_gradient && bg->radial_layer_count < radial_count) {
                             bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
                             bg->radial_gradient = nullptr;
                         }
                     } else if (linear_layer) {
-                        CssDeclaration gradient_decl = *decl;
-                        gradient_decl.value = (CssValue*)linear_layer;
+                        lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)linear_layer);
                         log_debug("[Lambda CSS Background] Processing linear gradient layer %d", i);
-                        resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                        gradient_decl.resolve(lycon);
 
                         if (bg->linear_gradient && bg->linear_layer_count < linear_count) {
                             bg->linear_layers[bg->linear_layer_count++] = bg->linear_gradient;
@@ -12387,20 +12436,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         }
                     } else if (conic_layer) {
                         if (!bg->conic_gradient) {
-                            CssDeclaration gradient_decl = *decl;
-                            gradient_decl.value = (CssValue*)conic_layer;
+                            lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, (CssValue*)conic_layer);
                             log_debug("[Lambda CSS Background] Processing conic gradient layer %d", i);
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                            gradient_decl.resolve(lycon);
                         }
                     } else if (url_layer) {
                         // url() image layer — route to background-image handler.
                         // Currently we only retain the topmost url() (single image slot).
                         if (!bg->image) {
-                            CssDeclaration img_decl = *decl;
-                            img_decl.property_id = CSS_PROPERTY_BACKGROUND_IMAGE;
-                            img_decl.value = (CssValue*)url_layer;
+                            lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)url_layer);
                             log_debug("[Lambda CSS Background] Processing url image layer %d", i);
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND_IMAGE, &img_decl, lycon);
+                            img_decl.resolve(lycon);
                         }
                     }
                 }
@@ -12439,50 +12485,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             break;
                         }
                         if (size_count > 0) {
-                            CssDeclaration size_decl = *decl;
-                            size_decl.property_id = CSS_PROPERTY_BACKGROUND_SIZE;
-                            if (size_count == 1) {
-                                size_decl.value = size_values[0];
-                            } else {
-                                CssValue size_list = {};
-                                size_list.type = CSS_VALUE_TYPE_LIST;
-                                size_list.data.list.values = size_values;
-                                size_list.data.list.count = size_count;
-                                size_decl.value = &size_list;
-                                resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
-                                i = j - 1;
-                                continue;
-                            }
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
+                            lam::CssTempListDecl<2> size_decl(decl, CSS_PROPERTY_BACKGROUND_SIZE);
+                            for (int k = 0; k < size_count; k++) size_decl.append(size_values[k]);
+                            size_decl.resolve(lycon);
                             i = j - 1;
                         }
                         continue;
                     }
 
                     if (css_value_is_background_position_candidate(item)) {
-                        CssValue* position_values[2] = {};
-                        CssValue position_list = {};
-                        int position_count = 1;
-                        position_values[0] = item;
+                        lam::CssTempListDecl<2> position_decl(decl, CSS_PROPERTY_BACKGROUND_POSITION);
+                        position_decl.append(item);
                         if (i + 1 < value->data.list.count) {
                             CssValue* next_item = value->data.list.values[i + 1];
                             if (css_value_is_background_position_candidate(next_item)) {
-                                position_values[position_count++] = next_item;
+                                position_decl.append(next_item);
+                                i++;
                             }
                         }
-
-                        CssDeclaration position_decl = *decl;
-                        position_decl.property_id = CSS_PROPERTY_BACKGROUND_POSITION;
-                        if (position_count == 1) {
-                            position_decl.value = position_values[0];
-                        } else {
-                            position_list.type = CSS_VALUE_TYPE_LIST;
-                            position_list.data.list.values = position_values;
-                            position_list.data.list.count = position_count;
-                            position_decl.value = &position_list;
-                        }
-                        resolve_css_property(CSS_PROPERTY_BACKGROUND_POSITION, &position_decl, lycon);
-                        if (position_count == 2) i++;
+                        position_decl.resolve(lycon);
                         continue;
                     }
 
@@ -12496,33 +12517,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                    str_ieq_const(func_name, func_len, "radial-gradient") ||
                                    str_ieq_const(func_name, func_len, "repeating-radial-gradient") ||
                                    str_ieq_const(func_name, func_len, "conic-gradient")) {
-                            CssDeclaration gradient_decl = *decl;
-                            gradient_decl.value = item;
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND, &gradient_decl, lycon);
+                            lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, item);
+                            gradient_decl.resolve(lycon);
                         } else if (css_value_is_background_color_candidate(item)) {
-                            CssDeclaration color_decl = *decl;
-                            color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
-                            color_decl.value = item;
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                            lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, item);
+                            color_decl.resolve(lycon);
                         }
                     } else if (css_value_is_background_color_candidate(item)) {
-                        CssDeclaration color_decl = *decl;
-                        color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
-                        color_decl.value = item;
-                        resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                        lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, item);
+                        color_decl.resolve(lycon);
                     } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
                         CssEnum keyword = item->data.keyword;
                         if (keyword == CSS_VALUE_REPEAT || keyword == CSS_VALUE_NO_REPEAT ||
                             keyword == CSS_VALUE_ROUND || keyword == CSS_VALUE_SPACE) {
-                            CssDeclaration repeat_decl = *decl;
-                            repeat_decl.property_id = CSS_PROPERTY_BACKGROUND_REPEAT;
-                            repeat_decl.value = item;
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND_REPEAT, &repeat_decl, lycon);
+                            lam::CssTempDecl repeat_decl(decl, CSS_PROPERTY_BACKGROUND_REPEAT, item);
+                            repeat_decl.resolve(lycon);
                         } else if (keyword == CSS_VALUE_COVER || keyword == CSS_VALUE_CONTAIN) {
-                            CssDeclaration size_decl = *decl;
-                            size_decl.property_id = CSS_PROPERTY_BACKGROUND_SIZE;
-                            size_decl.value = item;
-                            resolve_css_property(CSS_PROPERTY_BACKGROUND_SIZE, &size_decl, lycon);
+                            lam::CssTempDecl size_decl(decl, CSS_PROPERTY_BACKGROUND_SIZE, item);
+                            size_decl.resolve(lycon);
                         }
                     }
                 }
@@ -12531,10 +12543,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // simple case: single color value (e.g., "background: green;")
             if (css_value_is_background_color_candidate(value)) {
-                CssDeclaration color_decl = *decl;
-                color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
+                lam::CssTempDecl color_decl(decl, CSS_PROPERTY_BACKGROUND_COLOR, value);
                 log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
-                resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                color_decl.resolve(lycon);
                 return;
             }
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name &&
@@ -13114,26 +13125,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // single value - use for both row-gap and column-gap
                 log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
-                CssDeclaration gap_decl = *decl;
-                gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
-                gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
+                lam::CssTempDecl row_gap_decl(decl, CSS_PROPERTY_ROW_GAP, decl->value);
+                row_gap_decl.resolve(lycon);
+                lam::CssTempDecl col_gap_decl(decl, CSS_PROPERTY_COLUMN_GAP, decl->value);
+                col_gap_decl.resolve(lycon);
                 return;
             } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
                 // two values: row-gap column-gap
                 log_debug("[Lambda CSS Shorthand] Expanding two-value gap");
                 CssValue** values = value->data.list.values;
 
-                CssDeclaration row_gap_decl = *decl;
-                row_gap_decl.value = values[0];
-                row_gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
+                lam::CssTempDecl row_gap_decl(decl, CSS_PROPERTY_ROW_GAP, values[0]);
+                row_gap_decl.resolve(lycon);
 
-                CssDeclaration col_gap_decl = *decl;
-                col_gap_decl.value = values[1];
-                col_gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
+                lam::CssTempDecl col_gap_decl(decl, CSS_PROPERTY_COLUMN_GAP, values[1]);
+                col_gap_decl.resolve(lycon);
                 return;
             }
             log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");

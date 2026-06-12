@@ -322,7 +322,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
     // TODO: Implement nesting detection using CssSelectorGroup* format
 
     // Check for custom properties and other features
-    for (int i = 0; i < rule->property_count; i++) {
+    for (int i = 0; i < (int)rule->property_count; i++) {
         CssValue* value = rule->property_values[i];
         if (value) {
 

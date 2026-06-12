@@ -14,6 +14,7 @@
 #include "lambda-stack.h"
 #include "module_registry.h"
 #include "js/js_runtime.h"
+#include "js/js_event_loop.h"
 #include "input/css/css_style.hpp"
 #include "template_registry.h"
 #include "../lib/file.h"
@@ -1446,6 +1447,7 @@ void runtime_cleanup(Runtime* runtime) {
     module_registry_cleanup();
     template_registry_destroy(g_template_registry);
     js_eval_preamble_cache_reset();
+    js_event_loop_shutdown();
     lambda_uv_cleanup();
     lambda_stack_cleanup();
 

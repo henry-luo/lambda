@@ -1891,6 +1891,7 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         }
         if (runtime.heap && runtime.heap->gc) {
             Pool* reuse_pool = runtime.heap->gc->pool;
+            heap_finalize_gc_objects(runtime.heap->gc);
             runtime.heap->gc->pool = NULL;
             gc_heap_destroy(runtime.heap->gc);
             mem_free(runtime.heap);
@@ -1948,55 +1949,68 @@ static const struct {
     {nullptr,        nullptr}
 };
 
-// Linked list of compiled event handlers for a single element
-#include "event_handler_registry.h"
+typedef struct InlineHandlerInstallEntry {
+    DomElement* element;
+    const char* event_type;
+    const char* function_name;
+    struct InlineHandlerInstallEntry* next;
+} InlineHandlerInstallEntry;
+
+typedef struct InlineHandlerInstallCollection {
+    struct hashmap* element_map;
+    int count;
+    Pool* pool;
+} InlineHandlerInstallCollection;
 
 // hashmap callbacks for DomElement* keys
-HASHMAP_DEFINE_PTRKEY(js_handler, JsEventHandler, element)
+HASHMAP_DEFINE_PTRKEY(inline_handler_install, InlineHandlerInstallEntry, element)
 
-static void collect_handlers_recursive(DomElement* elem, JsEventRegistry* registry,
+static void collect_handlers_recursive(DomElement* elem,
+                                        InlineHandlerInstallCollection* handlers,
                                         StrBuf* compile_buf, int* handler_id, int depth) {
     if (!elem || depth > 100) return;
 
     for (int i = 0; EVENT_HANDLER_ATTRS[i].attr_name; i++) {
         const char* attr_val = dom_element_get_attribute(elem, EVENT_HANDLER_ATTRS[i].attr_name);
         if (attr_val && attr_val[0]) {
-            // allocate handler entry from registry pool
-            JsEventHandler* handler = (JsEventHandler*)pool_calloc(registry->pool, sizeof(JsEventHandler));
+            // Allocate handler entry from the transient collection pool.
+            InlineHandlerInstallEntry* handler =
+                (InlineHandlerInstallEntry*)pool_calloc(handlers->pool, sizeof(InlineHandlerInstallEntry));
             handler->element = elem;
             handler->event_type = EVENT_HANDLER_ATTRS[i].event_type;
-            handler->handler_source = attr_val;
-            handler->compiled_func = nullptr;
 
-            // generate wrapper function with the element as `this`.
+            // Generate an IDL-handler-shaped function. The EventTarget
+            // dispatcher calls it with `this` set to the target element and
+            // the real Event as the first argument.
             int id = (*handler_id)++;
             char func_name[64];
             snprintf(func_name, sizeof(func_name), "__evt_handler_%d", id);
 
             strbuf_append_str(compile_buf, "function ");
             strbuf_append_str(compile_buf, func_name);
-            strbuf_append_str(compile_buf, "(__evt_this) { return (function(event) { ");
+            strbuf_append_str(compile_buf, "(event) { ");
             strbuf_append_str(compile_buf, attr_val);
-            strbuf_append_str(compile_buf, " }).call(__evt_this, event); }\n");
+            strbuf_append_str(compile_buf, " }\n");
 
             // store func_name on pool for later lookup
-            char* stored_name = (char*)pool_alloc(registry->pool, strlen(func_name) + 1);
+            char* stored_name = (char*)pool_alloc(handlers->pool, strlen(func_name) + 1);
             strcpy(stored_name, func_name);
-            handler->handler_source = stored_name; // reuse for func name lookup
+            handler->function_name = stored_name;
 
-            // link into registry: find existing chain or create new
-            JsEventHandler key = {};
+            // Link into collection: find existing chain or create new.
+            InlineHandlerInstallEntry key = {};
             key.element = elem;
-            JsEventHandler* existing = (JsEventHandler*)hashmap_get(registry->element_map, &key);
+            InlineHandlerInstallEntry* existing =
+                (InlineHandlerInstallEntry*)hashmap_get(handlers->element_map, &key);
             if (existing) {
                 // append to linked list
-                JsEventHandler* tail = existing;
+                InlineHandlerInstallEntry* tail = existing;
                 while (tail->next) tail = tail->next;
                 tail->next = handler;
             } else {
-                hashmap_set(registry->element_map, handler);
+                hashmap_set(handlers->element_map, handler);
             }
-            registry->count++;
+            handlers->count++;
 
             log_debug("collect_handlers: %s on <%s> → %s()",
                       EVENT_HANDLER_ATTRS[i].attr_name,
@@ -2009,7 +2023,7 @@ static void collect_handlers_recursive(DomElement* elem, JsEventRegistry* regist
     DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            collect_handlers_recursive(lam::dom_require_element(child), registry, compile_buf, handler_id, depth + 1);
+            collect_handlers_recursive(lam::dom_require_element(child), handlers, compile_buf, handler_id, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -2020,28 +2034,29 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         return;
     }
 
-    // create registry
-    Pool* reg_pool = pool_create_mmap();
-    JsEventRegistry* registry = (JsEventRegistry*)pool_calloc(reg_pool, sizeof(JsEventRegistry));
-    registry->pool = reg_pool;
-    registry->element_map = js_handler_new(32);
-    registry->count = 0;
+    // Create a transient collection used only during compile/install.
+    Pool* handlers_pool = pool_create_mmap();
+    InlineHandlerInstallCollection* handlers =
+        (InlineHandlerInstallCollection*)pool_calloc(handlers_pool, sizeof(InlineHandlerInstallCollection));
+    handlers->pool = handlers_pool;
+    handlers->element_map = inline_handler_install_new(32);
+    handlers->count = 0;
 
-    // collect all inline event handler attributes
+    // Collect all inline event handler attributes.
     StrBuf* compile_buf = strbuf_new_cap(4096);
     int handler_id = 0;
-    collect_handlers_recursive(dom_doc->root, registry, compile_buf, &handler_id, 0);
+    collect_handlers_recursive(dom_doc->root, handlers, compile_buf, &handler_id, 0);
 
-    if (registry->count == 0) {
+    if (handlers->count == 0) {
         log_debug("collect_and_compile_event_handlers: no event handlers found");
         strbuf_free(compile_buf);
-        hashmap_free(registry->element_map);
-        pool_destroy(reg_pool);
+        hashmap_free(handlers->element_map);
+        pool_destroy(handlers_pool);
         return;
     }
 
     log_info("collect_and_compile_event_handlers: found %d handlers, policy=handler-eager, compiling",
-             registry->count);
+             handlers->count);
 
     // Compile handler wrapper functions using the retained MIR preamble context.
     // The with_preamble call creates a new MIR context that can see preamble-defined
@@ -2073,59 +2088,60 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
                                                              "<event-handlers>", preamble);
     strbuf_free(compile_buf);
 
-    // Get the new MIR context before restoring the old eval context.
-    // The handler functions were compiled in this new context.
-    MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
-
-    context = saved_ctx;
-
     TypeId result_type = get_type_id(compile_result);
     if (result_type == LMD_TYPE_ERROR) {
         log_error("collect_and_compile_event_handlers: compilation failed");
-        hashmap_free(registry->element_map);
-        pool_destroy(reg_pool);
+        context = saved_ctx;
+        hashmap_free(handlers->element_map);
+        pool_destroy(handlers_pool);
         return;
     }
 
+    // Get the new MIR context before restoring the old eval context.
+    // The handler functions were compiled in this new context and must be
+    // retained for the Function Items installed below.
+    MIR_context_t handler_mir_ctx = (MIR_context_t)jm_get_last_deferred_mir_ctx();
     if (!handler_mir_ctx) {
         log_error("collect_and_compile_event_handlers: no deferred MIR context found");
-        hashmap_free(registry->element_map);
-        pool_destroy(reg_pool);
+        context = saved_ctx;
+        hashmap_free(handlers->element_map);
+        pool_destroy(handlers_pool);
         return;
     }
 
-    // Resolve compiled function pointers via find_func_prefix in the handler MIR context
-#ifndef NDEBUG
-    int resolved = 0;
-#endif
+    // Install the compiled functions into each element's on<type> IDL slot.
+    // From this point on, normal js_dom_dispatch_event() handles `this`,
+    // `event`, return-false default prevention, and propagation ordering.
+    Item global = js_get_global_this();
+    int installed = 0;
     size_t iter = 0;
     void* item;
-    while (hashmap_iter(registry->element_map, &iter, &item)) {
-        JsEventHandler* h = (JsEventHandler*)item;
+    while (hashmap_iter(handlers->element_map, &iter, &item)) {
+        InlineHandlerInstallEntry* h = (InlineHandlerInstallEntry*)item;
         while (h) {
-            // handler_source stores the base function name (e.g., "__evt_handler_0").
-            // The JS transpiler mangles it to "_js___evt_handler_0_<byte_offset>".
-            // Use prefix matching to find the compiled function.
-            char prefix[128];
-            snprintf(prefix, sizeof(prefix), "_js_%s_", h->handler_source);
-            void* fn_ptr = find_func_prefix(handler_mir_ctx, prefix);
-        if (fn_ptr) {
-            h->compiled_func = fn_ptr;
-#ifndef NDEBUG
-            resolved++;
-#endif
-            log_debug("collect_and_compile_event_handlers: resolved %s → %p",
-                      h->handler_source, fn_ptr);
+            Item fn_key = (Item){.item = s2it(heap_create_name(h->function_name))};
+            Item fn_item = js_property_get(global, fn_key);
+            char attr_name[64];
+            snprintf(attr_name, sizeof(attr_name), "on%s", h->event_type);
+            if (get_type_id(fn_item) == LMD_TYPE_FUNC &&
+                js_dom_set_event_handler_function(h->element, attr_name, fn_item)) {
+                installed++;
+                log_debug("collect_and_compile_event_handlers: installed %s on <%s>",
+                          attr_name,
+                          h->element && h->element->tag_name ? h->element->tag_name : "?");
             } else {
-                log_error("collect_and_compile_event_handlers: failed to resolve %s",
-                          h->handler_source);
+                log_error("collect_and_compile_event_handlers: failed to install %s on <%s>",
+                          attr_name,
+                          h->element && h->element->tag_name ? h->element->tag_name : "?");
             }
             h = h->next;
         }
     }
 
-    log_info("collect_and_compile_event_handlers: resolved %d/%d handler functions",
-             resolved, registry->count);
+    context = saved_ctx;
+
+    log_info("collect_and_compile_event_handlers: installed %d/%d handlers into EventTarget path",
+             installed, handlers->count);
 
     // Update retained state (heap/nursery may have grown during compilation)
     dom_doc->js_runtime_heap = runtime.heap;
@@ -2133,7 +2149,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     dom_doc->js_runtime_name_pool = runtime.name_pool;
     dom_doc->js_runtime_type_list = runtime.type_list;
 
-    dom_doc->js_event_registry = registry;
+    hashmap_free(handlers->element_map);
+    pool_destroy(handlers_pool);
 }
 
 // ============================================================================
@@ -2142,19 +2159,6 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 
 extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!dom_doc) return;
-
-    // Destroy event handler registry
-    if (dom_doc->js_event_registry) {
-        JsEventRegistry* registry = (JsEventRegistry*)dom_doc->js_event_registry;
-        if (registry->element_map) {
-            hashmap_free(registry->element_map);
-        }
-        Pool* reg_pool = registry->pool;
-        if (reg_pool) {
-            pool_destroy(reg_pool);
-        }
-        dom_doc->js_event_registry = nullptr;
-    }
 
     // Destroy retained MIR context via preamble_state_destroy
     if (dom_doc->js_preamble_state) {
@@ -2168,6 +2172,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (dom_doc->js_runtime_heap) {
         Heap* heap = (Heap*)dom_doc->js_runtime_heap;
         if (heap->gc) {
+            heap_finalize_gc_objects(heap->gc);
             heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
             gc_heap_destroy(heap->gc);
             // pool is destroyed separately below

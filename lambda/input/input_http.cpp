@@ -74,7 +74,7 @@ static bool init_curl() {
 
 // Map HTTP Content-Type to file extension for routing
 // Delegates to lib/mime-detect; defaults to ".html" for unknown types
-static const char* content_type_to_extension(const char* content_type) {
+const char* content_type_to_extension(const char* content_type) {
     const char* ext = mime_extension_from_content_type(content_type);
     if (ext) return ext;
     if (content_type) {

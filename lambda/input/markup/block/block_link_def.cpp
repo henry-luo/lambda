@@ -135,7 +135,7 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
         // End of line but label not closed - continue to next line if available
         if (*p == '\n' || *p == '\r' || *p == '\0') {
             size_t next_line_idx = parser->current_line + label_lines_consumed + 1;
-            if (next_line_idx >= parser->line_count) {
+            if (next_line_idx >= (size_t)parser->line_count) {
                 return false;  // no more lines, label not closed
             }
             const char* next_line = parser->lines[next_line_idx];
@@ -173,7 +173,7 @@ label_done:
     if (*p == '\n' || *p == '\r' || *p == '\0') {
         // Check if URL is on next line
         size_t next_line_idx = parser->current_line + lines_consumed + 1;
-        if (next_line_idx >= parser->line_count) {
+        if (next_line_idx >= (size_t)parser->line_count) {
             mem_free(label_copy);
             return false;  // no more lines
         }
@@ -255,7 +255,7 @@ label_done:
     if (*p == '\n' || *p == '\r' || *p == '\0') {
         // Title might be on next line
         size_t next_line_idx = parser->current_line + lines_consumed + 1;
-        if (next_line_idx < parser->line_count) {
+        if (next_line_idx < (size_t)parser->line_count) {
             const char* next_line = parser->lines[next_line_idx];
             const char* np = next_line;
             while (*np == ' ' || *np == '\t') np++;
@@ -317,7 +317,7 @@ label_done:
             } else if (*p == '\n' || *p == '\r' || *p == '\0') {
                 // Line break or end of line - continue to next line if available
                 size_t check_line = parser->current_line + lines_consumed + extra_lines + 1;
-                if (check_line >= parser->line_count) {
+                if (check_line >= (size_t)parser->line_count) {
                     // No more lines, title not closed
                     break;
                 }

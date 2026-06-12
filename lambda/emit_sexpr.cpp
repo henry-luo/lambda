@@ -1810,7 +1810,7 @@ static void emit_object_fields(const char* source, AstObjectTypeNode* obj_type) 
             if (type_obj) {
                 ShapeEntry* se = type_obj->shape;
                 while (se) {
-                    if (se->name && se->name->length == (int64_t)f->name->len &&
+                    if (se->name && se->name->length == (size_t)f->name->len &&
                         memcmp(se->name->str, f->name->chars, f->name->len) == 0) {
                         if (se->default_value) {
                             printf(" :init ");

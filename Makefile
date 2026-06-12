@@ -2053,6 +2053,33 @@ check-int-cast:
 		echo "✅ No unmarked (int) casts in Radiant layout files"; \
 	fi
 
+# Check for fragile CSS shorthand temporary-declaration patterns in Radiant CSS
+# resolution code (vibe/Memory_Safety_Template4.md §7). Shorthand expansion must
+# route longhand components through the lam::CssTempDecl / lam::CssTempListDecl<N>
+# helpers in radiant/css_temp_decl.hpp, not by hand-copying a CssDeclaration and
+# pointing its value at a narrower-scope stack CssValue.
+# Flagged patterns in radiant/resolve_css_style.cpp:
+#   - "CssDeclaration <name> = *decl" raw declaration copies
+#   - ".value = &<local>" address-of-stack assignments
+# Audited exceptions must be marked with a trailing "// CSS_TEMP_DECL_OK: <reason>".
+check-css-temp-decl:
+	@echo "Checking for fragile CSS shorthand temporary declarations..."
+	@VIOLATIONS=$$(grep -nE 'CssDeclaration[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\*decl|\.value[[:space:]]*=[[:space:]]*&' \
+		radiant/resolve_css_style.cpp \
+		| grep -v 'CSS_TEMP_DECL_OK' \
+		|| true); \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo ""; \
+		echo "❌ Found raw CSS shorthand temporary declarations (use lam::CssTempDecl / lam::CssTempListDecl<N>, or mark with '// CSS_TEMP_DECL_OK: <reason>'):"; \
+		echo "$$VIOLATIONS"; \
+		echo ""; \
+		VCOUNT=$$(echo "$$VIOLATIONS" | wc -l | tr -d ' '); \
+		echo "Total: $$VCOUNT raw temporary declaration(s)"; \
+		exit 1; \
+	else \
+		echo "✅ No raw CSS shorthand temporary declarations in resolve_css_style.cpp"; \
+	fi
+
 # Check for unsafe open-coded string scanning (lib/str.h §17).
 # Flags strchr(set, *p) membership (matches '\0') and ctype on char* (UB for
 # bytes >= 0x80). Suppress intentional local parsers with a trailing

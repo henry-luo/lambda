@@ -295,7 +295,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                         // If the argument is a list, format it with space separators
                         // (not commas, since commas separate function arguments, not list items within an argument)
                         if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.values) {
-                            for (size_t j = 0; j < arg->data.list.count; j++) {
+                            for (size_t j = 0; j < (size_t)arg->data.list.count; j++) {
                                 if (j > 0) {
                                     if (arg->data.list.comma_separated) {
                                         stringbuf_append_str(formatter->output, ", ");
@@ -337,7 +337,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             if (value->data.list.values) {
                 bool use_comma = value->data.list.comma_separated ||
                     property_uses_comma_separated_list(property_id);
-                for (size_t i = 0; i < value->data.list.count; i++) {
+                for (size_t i = 0; i < (size_t)value->data.list.count; i++) {
                     if (i > 0) {
                         if (use_comma) {
                             stringbuf_append_str(formatter->output, ", ");

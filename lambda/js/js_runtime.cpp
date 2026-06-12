@@ -8930,7 +8930,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 strbuf_append_str_n(psb, "function ", 9);
                 if (pfn->name && ((uintptr_t)pfn->name & 3) == 0 && (uintptr_t)pfn->name >= 0x1000 && pfn->name->len > 0) {
                     int pn_len = pfn->name->len;
-                    for (int i = 0; i < pfn->name->len; i++) {
+                    for (int i = 0; i < (int)pfn->name->len; i++) {
                         if (pfn->name->chars[i] == ' ') { pn_len = i; break; }
                     }
                     strbuf_append_str_n(psb, pfn->name->chars, pn_len);
@@ -8965,7 +8965,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // NativeFunction syntax allows only a single IdentifierName (no spaces).
                 // Bound functions have names like "bound f" — use only first word.
                 int name_len = fn->name->len;
-                for (int i = 0; i < fn->name->len; i++) {
+                for (int i = 0; i < (int)fn->name->len; i++) {
                     if (fn->name->chars[i] == ' ') { name_len = i; break; }
                 }
                 strbuf_append_str_n(sb, fn->name->chars, name_len);
@@ -19628,7 +19628,7 @@ static Item js_string_simple_case_map(Item str, bool to_upper) {
         if (!js_unicode_is_case_ignorable(cp)) last_non_ignorable_cased = js_unicode_is_cased(cp);
         pos += width;
     }
-    if (!changed && sb->length == (int)s->len) {
+    if (!changed && sb->length == (size_t)s->len) {
         strbuf_free(sb);
         return str;
     }
@@ -29288,7 +29288,7 @@ static void js_ensure_active_module_namespace_rooted() {
 }
 
 // called by js_batch_reset() to clear module cache between batch scripts
-static void js_module_cache_reset() {
+void js_module_cache_reset() {
     js_module_count_v14 = 0;
     js_ensure_active_module_namespace_rooted();
     js_active_module_namespace = ItemNull;
@@ -29469,15 +29469,16 @@ static Item js_vm_compileFunction(Item code, Item params) {
 
     // If params array provided, build "function(p1,p2,...) { body }" string
     // For now, just wrap body as a function with no params
-    char* buf = (char*)mem_alloc(code_str->len + 256, MEM_CAT_TEMP);
-    memset(buf, 0, code_str->len + 256);
+    size_t bufsz = code_str->len + 256;
+    char* buf = (char*)mem_alloc(bufsz, MEM_CAT_TEMP);
+    memset(buf, 0, bufsz);
     if (params.item != 0 && params.item != ITEM_NULL && params.item != ITEM_UNDEFINED) {
         // Extract param names from array
         int nparams = (int)js_array_length(params);
         int off = 0;
-        off += sprintf(buf + off, "(function(");
+        off += snprintf(buf + off, bufsz - off, "(function(");
         for (int i = 0; i < nparams; i++) {
-            if (i > 0) off += sprintf(buf + off, ",");
+            if (i > 0) off += snprintf(buf + off, bufsz - off, ",");
             Item p = js_array_get_int(params, i);
             if (get_type_id(p) == LMD_TYPE_STRING) {
                 String* ps = it2s(p);
@@ -29485,12 +29486,12 @@ static Item js_vm_compileFunction(Item code, Item params) {
                 off += (int)ps->len;
             }
         }
-        off += sprintf(buf + off, "){");
+        off += snprintf(buf + off, bufsz - off, "){");
         memcpy(buf + off, code_str->chars, code_str->len);
         off += (int)code_str->len;
-        sprintf(buf + off, "})");
+        snprintf(buf + off, bufsz - off, "})");
     } else {
-        sprintf(buf, "(function(){%.*s})", (int)code_str->len, code_str->chars);
+        snprintf(buf, bufsz, "(function(){%.*s})", (int)code_str->len, code_str->chars);
     }
     Item eval_code = (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
     return js_builtin_eval(eval_code, 1);
@@ -29933,7 +29934,7 @@ static Item js_ah_executionAsyncResource(void) {
 
 extern "C" Item js_get_async_hooks_namespace(void) {
     static Item ah_ns = {0};
-    static int ah_epoch = -1;
+    static uint64_t ah_epoch = (uint64_t)-1;
     if (ah_ns.item == 0 || ah_epoch != js_heap_epoch) {
         ah_epoch = js_heap_epoch;
         ah_ns = js_new_object();
@@ -29993,7 +29994,7 @@ extern "C" Item js_get_async_hooks_namespace(void) {
 
 extern "C" Item js_get_vm_namespace(void) {
     static Item vm_ns = {0};
-    static int vm_epoch = -1;
+    static uint64_t vm_epoch = (uint64_t)-1;
     if (vm_ns.item == 0 || vm_epoch != js_heap_epoch) {
         vm_epoch = js_heap_epoch;
         vm_ns = js_new_object();
@@ -30305,7 +30306,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 11 && memcmp(spec->chars, "node:timers", 11) == 0)) {
         // return a namespace with setTimeout/setInterval/etc
         static Item timers_ns = {0};
-        static int timers_epoch = -1;
+        static uint64_t timers_epoch = (uint64_t)-1;
         if (timers_ns.item == 0 || timers_epoch != js_heap_epoch) {
             timers_epoch = js_heap_epoch;
             extern Item js_setTimeout(Item, Item);
@@ -30348,7 +30349,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 20 && memcmp(spec->chars, "node:timers/promises", 20) == 0)) {
         // return a namespace with promisified setTimeout
         static Item tp_ns = {0};
-        static int tp_epoch = -1;
+        static uint64_t tp_epoch = (uint64_t)-1;
         if (tp_ns.item == 0 || tp_epoch != js_heap_epoch) {
             tp_epoch = js_heap_epoch;
             tp_ns = js_new_object();
@@ -30387,7 +30388,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 9 && memcmp(spec->chars, "module.js", 9) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:module", 11) == 0)) {
         static Item module_ns = {0};
-        static int module_epoch = -1;
+        static uint64_t module_epoch = (uint64_t)-1;
         if (module_ns.item == 0 || module_epoch != js_heap_epoch) {
             module_epoch = js_heap_epoch;
             module_ns = js_new_object();
@@ -30438,7 +30439,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 17 && memcmp(spec->chars, "worker_threads.js", 17) == 0) ||
         (spec->len == 19 && memcmp(spec->chars, "node:worker_threads", 19) == 0)) {
         static Item wt_ns = {0};
-        static int wt_epoch = -1;
+        static uint64_t wt_epoch = (uint64_t)-1;
         if (wt_ns.item == 0 || wt_epoch != js_heap_epoch) {
             wt_epoch = js_heap_epoch;
             wt_ns = js_new_object();
@@ -30475,7 +30476,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 10 && memcmp(spec->chars, "cluster.js", 10) == 0) ||
         (spec->len == 12 && memcmp(spec->chars, "node:cluster", 12) == 0)) {
         static Item cl_ns = {0};
-        static int cl_epoch = -1;
+        static uint64_t cl_epoch = (uint64_t)-1;
         if (cl_ns.item == 0 || cl_epoch != js_heap_epoch) {
             cl_epoch = js_heap_epoch;
             cl_ns = js_new_object();
@@ -30503,7 +30504,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 13 && memcmp(spec->chars, "perf_hooks.js", 13) == 0) ||
         (spec->len == 15 && memcmp(spec->chars, "node:perf_hooks", 15) == 0)) {
         static Item ph_ns = {0};
-        static int ph_epoch = -1;
+        static uint64_t ph_epoch = (uint64_t)-1;
         if (ph_ns.item == 0 || ph_epoch != js_heap_epoch) {
             ph_epoch = js_heap_epoch;
             ph_ns = js_new_object();
@@ -30563,7 +30564,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 22 && memcmp(spec->chars, "diagnostics_channel.js", 22) == 0) ||
         (spec->len == 24 && memcmp(spec->chars, "node:diagnostics_channel", 24) == 0)) {
         static Item dc_ns = {0};
-        static int dc_epoch = -1;
+        static uint64_t dc_epoch = (uint64_t)-1;
         if (dc_ns.item == 0 || dc_epoch != js_heap_epoch) {
             dc_epoch = js_heap_epoch;
             dc_ns = js_new_object();
@@ -30594,7 +30595,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 5 && memcmp(spec->chars, "v8.js", 5) == 0) ||
         (spec->len == 7 && memcmp(spec->chars, "node:v8", 7) == 0)) {
         static Item v8_ns = {0};
-        static int v8_epoch = -1;
+        static uint64_t v8_epoch = (uint64_t)-1;
         if (v8_ns.item == 0 || v8_epoch != js_heap_epoch) {
             v8_epoch = js_heap_epoch;
             v8_ns = js_new_object();
@@ -30628,7 +30629,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 6 && memcmp(spec->chars, "tty.js", 6) == 0) ||
         (spec->len == 8 && memcmp(spec->chars, "node:tty", 8) == 0)) {
         static Item tty_ns = {0};
-        static int tty_epoch = -1;
+        static uint64_t tty_epoch = (uint64_t)-1;
         if (tty_ns.item == 0 || tty_epoch != js_heap_epoch) {
             tty_epoch = js_heap_epoch;
             tty_ns = js_new_object();
@@ -30647,7 +30648,7 @@ extern "C" Item js_module_get(Item specifier) {
     if ((spec->len == 11 && memcmp(spec->chars, "fs/promises", 11) == 0) ||
         (spec->len == 16 && memcmp(spec->chars, "node:fs/promises", 16) == 0)) {
         static Item fsp_ns = {0};
-        static int fsp_epoch = -1;
+        static uint64_t fsp_epoch = (uint64_t)-1;
         if (fsp_ns.item == 0 || fsp_epoch != js_heap_epoch) {
             fsp_epoch = js_heap_epoch;
             // get the fs namespace and wrap sync methods as promise-returning functions
@@ -30693,7 +30694,7 @@ extern "C" Item js_module_get(Item specifier) {
     // internal/test/binding — provides internalBinding() for Node.js tests
     if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0)) {
         static Item itb_ns = {0};
-        static int itb_epoch = -1;
+        static uint64_t itb_epoch = (uint64_t)-1;
         if (itb_ns.item == 0 || itb_epoch != js_heap_epoch) {
             itb_epoch = js_heap_epoch;
             itb_ns = js_new_object();
@@ -30714,7 +30715,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 7 && memcmp(spec->chars, "repl.js", 7) == 0) ||
         (spec->len == 9 && memcmp(spec->chars, "node:repl", 9) == 0)) {
         static Item repl_ns = {0};
-        static int repl_epoch = -1;
+        static uint64_t repl_epoch = (uint64_t)-1;
         if (repl_ns.item == 0 || repl_epoch != js_heap_epoch) {
             repl_epoch = js_heap_epoch;
             repl_ns = js_new_object();
@@ -30748,7 +30749,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 11 && memcmp(spec->chars, "punycode.js", 11) == 0) ||
         (spec->len == 13 && memcmp(spec->chars, "node:punycode", 13) == 0)) {
         static Item pc_ns = {0};
-        static int pc_epoch = -1;
+        static uint64_t pc_epoch = (uint64_t)-1;
         if (pc_ns.item == 0 || pc_epoch != js_heap_epoch) {
             pc_epoch = js_heap_epoch;
             pc_ns = js_new_object();
@@ -30774,7 +30775,7 @@ extern "C" Item js_module_get(Item specifier) {
         (spec->len == 9 && memcmp(spec->chars, "domain.js", 9) == 0) ||
         (spec->len == 11 && memcmp(spec->chars, "node:domain", 11) == 0)) {
         static Item dom_ns = {0};
-        static int dom_epoch = -1;
+        static uint64_t dom_epoch = (uint64_t)-1;
         if (dom_ns.item == 0 || dom_epoch != js_heap_epoch) {
             dom_epoch = js_heap_epoch;
             dom_ns = js_new_object();

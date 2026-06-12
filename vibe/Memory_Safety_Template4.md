@@ -13,6 +13,36 @@
 
 ---
 
+## 0. Implementation Status
+
+The CSS shorthand temporary-lifetime work (the doc's titled subject, §1–§11) is
+**implemented and verified**. The JS/serve/render sections (§12–§17) document
+bugs that were already fixed at the time of writing and propose optional
+regression lints; those lints are **not yet added**.
+
+| Item | Status | Artifact |
+|---|---|---|
+| §10 Phase 1 — `CssTempDecl` / `CssTempListDecl<N>` helpers + unit test | ✅ Done | `radiant/css_temp_decl.hpp`, `test/css/test_css_temp_decl_gtest.cpp` (7 tests pass) |
+| §10 Phase 2 — migrate background + gap shorthand expansion | ✅ Done | `radiant/resolve_css_style.cpp` (all `= *decl` / `.value = &` sites removed) |
+| §10 Phase 3 — `make check-css-temp-decl` gate | ✅ Done | `Makefile` target (passes clean; catches injected violations) |
+| §10 Phase 4 — persistent CSS value retention audit | ✅ Done | `vibe/CSS_Value_Retention_Audit.md` + in-code lifetime contracts |
+| §12–§17 regression lints (JS/serve/render) | ⬜ Not started | bugs already fixed; lints optional |
+
+Verification: `make build` clean; `make test-radiant-baseline` 5716/5716 (incl.
+the Layout Page Suite that carried the original ASan failure); helper unit tests
+7/7; `test_css_system` 33/33 and `test_css_dom_crud` 63/63 (clone/subset paths).
+
+Phase 4 outcome in brief: all CSS-value retention reachable in production is
+pool/arena-stable (SAFE). Computed-style cache fields are dead (never assigned).
+The one concern is a latent, **test-only** cross-pool aliasing in
+`style_tree_clone` / `style_tree_create_subset` (declarations/values owned by the
+source pool, retained in a tree backed by a different `target_pool`); refcounting
+does not protect across pools. Now made explicit via in-code lifetime contracts
+rather than fixed with a speculative deep `CssValue` copy on an unreached path.
+See `vibe/CSS_Value_Retention_Audit.md`.
+
+---
+
 ## 1. Concrete Bug: Background Shorthand Stack Lifetime
 
 The page-suite ASan failure came from background shorthand expansion in
@@ -331,7 +361,10 @@ Do not let a resolve-only helper call a retain API.
 
 ## 10. Suggested Phasing
 
-### Phase 1: Add helpers and tests
+> Status: Phases 1–4 are **implemented and verified** (see §0). The notes below
+> are the original plan, annotated with what shipped.
+
+### Phase 1: Add helpers and tests  ✅ Done
 
 1. Add `radiant/css_temp_decl.hpp`.
 2. Add a small compile/runtime test covering:
@@ -341,7 +374,7 @@ Do not let a resolve-only helper call a retain API.
    - capacity overflow returns false.
 3. Do not change `CssDeclaration` ABI.
 
-### Phase 2: Migrate high-risk shorthand expansion
+### Phase 2: Migrate high-risk shorthand expansion  ✅ Done (background + gap)
 
 Convert manual copied-declaration call sites in `resolve_css_style.cpp`,
 starting with:
@@ -355,7 +388,16 @@ starting with:
 Keep each conversion behavior-preserving. Do not reinterpret CSS syntax while
 doing the safety migration.
 
-### Phase 3: Add the check target
+Shipped: every `CssDeclaration … = *decl` copy and both `.value = &local`
+sites in `resolve_css_style.cpp` were migrated — the two synthetic-list sites
+(`background-size`, `background-position`, the actual stack-lifetime bug class)
+to `CssTempListDecl<2>`, and the background var()/multi-layer/url/color/repeat
+routing plus `gap` (single + two-value) to `CssTempDecl`. `font` and
+border/padding/margin did not have raw copied-declaration list synthesis in this
+file, so no migration was needed there; the `check-css-temp-decl` gate keeps the
+file clean going forward.
+
+### Phase 3: Add the check target  ✅ Done
 
 Add `make check-css-temp-decl` and run it in the same spirit as
 `make check-int-cast`.
@@ -366,7 +408,11 @@ Initial policy:
 2. allow only `CSS_TEMP_DECL_OK` markers for legacy exceptions;
 3. prefer replacing exceptions with `CssTempDecl` helpers.
 
-### Phase 4: Persistent CSS value audit
+Shipped: `make check-css-temp-decl` flags both `CssDeclaration … = *decl` raw
+copies and `.value = &` address-of assignments in `resolve_css_style.cpp`,
+allowing audited exceptions via a trailing `// CSS_TEMP_DECL_OK: <reason>`.
+
+### Phase 4: Persistent CSS value audit  ✅ Done
 
 After shorthand temporaries are contained, audit retained CSS value storage:
 
@@ -377,6 +423,17 @@ After shorthand temporaries are contained, audit retained CSS value storage:
 5. computed-style caches.
 
 Use the domain model from `Memory_Safety_Template.md` for retained values.
+
+Shipped: full audit in `vibe/CSS_Value_Retention_Audit.md`. All production
+retention is pool/arena-stable (SAFE); inline-style, JS/CSSOM mutation, and
+animation keyframes all allocate from `doc->pool` / `rule->pool` /
+`doc->arena`. Computed-style cache fields are dead (never assigned). The single
+finding is a latent, test-only cross-pool aliasing in `style_tree_clone` /
+`style_tree_create_subset`, now documented with explicit in-code lifetime
+contracts (`css_style_node.cpp`, `dom_element.cpp`) instead of a speculative
+deep-copy on an unreached path. A `check-` lint was intentionally not added:
+the residual risk is semantic cross-pool aliasing through `void* value`, not a
+grep-able pattern.
 
 ---
 

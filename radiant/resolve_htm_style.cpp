@@ -1636,23 +1636,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
             new (block->form) FormControlProp();  // placement new for constructor
 
-            // Parse type attribute
-            const char* type = block->get_attribute("type");
-            block->form->input_type = type;
-            block->form->control_type = get_input_control_type(type);
-
-            // Parse common attributes
-            block->form->value = block->get_attribute("value");
-            block->form->placeholder = block->get_attribute("placeholder");
-            block->form->name = block->get_attribute("name");
-
-            // Parse size attribute for text inputs
-            const char* size_attr = block->get_attribute("size");
-            if (size_attr) {
-                block->form->size = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
-                if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
-            }
-
             // Parse state attributes and seed canonical StateStore state.
             DocState* state = (DocState*)lycon->doc->state;
             block->form->state_ref = state;
@@ -1668,6 +1651,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (block->has_attribute("required")) {
                 form_control_set_required(state, block, true);
             }
+        }
+
+        // JS DOM helpers may create FormControlProp before HTML style resolution
+        // runs. Refresh attribute-backed metadata every pass so the form control
+        // type and default value reflect the current DOM attributes.
+        const char* type = block->get_attribute("type");
+        block->form->input_type = type;
+        block->form->control_type = get_input_control_type(type);
+        block->form->value = block->get_attribute("value");
+        block->form->placeholder = block->get_attribute("placeholder");
+        block->form->name = block->get_attribute("name");
+
+        const char* size_attr = block->get_attribute("size");
+        block->form->size = FormDefaults::TEXT_SIZE_CHARS;
+        if (size_attr) {
+            block->form->size = (int)str_to_int64_default(size_attr, strlen(size_attr), 0); // INT_CAST_OK: HTML size attribute is a character count
+            if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
         }
 
         // Set display and intrinsic size based on control type
