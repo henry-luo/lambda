@@ -415,6 +415,86 @@ static void editing_dispatch_commit_phase(DocState* state,
     radiant_state_assert_valid(state, context);
 }
 
+static bool editing_dispatch_surface_same(const EditingSurface* a,
+                                          const EditingSurface* b) {
+    return a && b &&
+        a->kind == b->kind &&
+        a->mode == b->mode &&
+        a->owner == b->owner &&
+        a->view == b->view;
+}
+
+static bool editing_dispatch_surface_contains_dom_boundary(
+        const EditingSurface* surface,
+        const DomBoundary* boundary) {
+    if (!surface || !boundary || !boundary->node) return false;
+
+    EditingBoundary edit_boundary;
+    editing_boundary_clear(&edit_boundary);
+    edit_boundary.kind = EDITING_BOUNDARY_DOM;
+    edit_boundary.surface = *surface;
+    edit_boundary.dom = *boundary;
+    edit_boundary.view = static_cast<View*>(boundary->node);
+    return editing_geometry_surface_contains_boundary(surface, &edit_boundary);
+}
+
+static bool editing_dispatch_live_surface_from_selection(DocState* state,
+                                                         EditingSurface* out) {
+    if (out) editing_surface_clear(out);
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0) {
+        return false;
+    }
+
+    DomSelection* selection = state->dom_selection;
+    DomBoundary anchor = dom_selection_anchor_boundary(selection);
+    DomBoundary focus = dom_selection_focus_boundary(selection);
+    DomBoundary target = focus.node ? focus : anchor;
+    if (!target.node) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(target.node), &surface) ||
+        !editing_surface_is_rich(&surface) ||
+        surface.target_in_false_island) {
+        return false;
+    }
+    if (!editing_dispatch_surface_contains_dom_boundary(&surface, &anchor) ||
+        !editing_dispatch_surface_contains_dom_boundary(&surface, &focus)) {
+        return false;
+    }
+
+    if (out) *out = surface;
+    return true;
+}
+
+static bool editing_dispatch_sync_rich_transaction_to_selection(
+        DocState* state,
+        EditingSurface* surface,
+        View** tx_target) {
+    if (!state || !surface || !tx_target ||
+        !editing_surface_is_rich(surface)) {
+        return false;
+    }
+
+    EditingSurface live_surface;
+    if (!editing_dispatch_live_surface_from_selection(state, &live_surface)) {
+        return false;
+    }
+    if (editing_dispatch_surface_same(surface, &live_surface) &&
+        *tx_target == live_surface.view) {
+        return false;
+    }
+
+    *surface = live_surface;
+    *tx_target = live_surface.view;
+    editing_interaction_set_active_surface(state, &live_surface);
+    if (state->editing.rich_transaction_phase != EDITING_RICH_TX_IDLE) {
+        state->editing.rich_transaction_target = live_surface.view;
+    }
+    log_debug("editing_dispatch: synced rich transaction target after selection handoff");
+    return true;
+}
+
 static bool editing_dispatch_target_ranges_are_valid(DocState* state,
                                                      const EditingSurface* surface,
                                                      const EditingIntent* intent) {
@@ -711,22 +791,26 @@ bool editing_run_transaction(EventContext* evcon,
         run_tx = &normalized_tx;
     }
 
+    EditingSurface current_surface = *run_tx->surface;
+    EditingTransaction current_tx = *run_tx;
+    current_tx.surface = &current_surface;
+
     DocState* state = editing_dispatch_doc_state(evcon);
     EditingTargetRangeStatus target_ranges =
-        editing_dispatch_target_range_status(state, run_tx->surface,
-                                             run_tx->intent);
+        editing_dispatch_target_range_status(state, current_tx.surface,
+                                             current_tx.intent);
     EditingSelectionSnapshot selection_before =
         editing_dispatch_selection_snapshot(state);
     uint64_t transaction_id = editing_dispatch_next_transaction_id();
-    editing_log_transaction(evcon, run_tx, transaction_id, &target_ranges,
+    editing_log_transaction(evcon, &current_tx, transaction_id, &target_ranges,
                             &selection_before, nullptr, "begin",
                             false, false, false, false);
     EditingTargetRangeScope target_range_scope(evcon, &target_ranges);
-    View* tx_target = run_tx->surface->view;
+    View* tx_target = current_surface.view;
     if (state) {
-        editing_interaction_set_active_surface(state, run_tx->surface);
+        editing_interaction_set_active_surface(state, current_tx.surface);
         editing_dispatch_set_rich_target_ranges(state, &target_ranges,
-                                                run_tx->intent);
+                                                current_tx.intent);
     }
 
     editing_dispatch_commit_phase(state, SM_EV_EDIT_TX_BEGIN, tx_target,
@@ -739,18 +823,23 @@ bool editing_run_transaction(EventContext* evcon,
     if (state) {
         SmTransitionGuard before_guard(state, SM_FAMILY_RICH_EDIT,
                                        SM_EV_EDIT_BEFOREINPUT, tx_target);
-        dispatched = editing_dispatch_beforeinput_ex(evcon, run_tx->surface,
-            run_tx->intent, run_tx->hooks, false, &prevented, &lambda_handled);
+        uint32_t beforeinput_selection_seq = state->selection_mutation_seq;
+        dispatched = editing_dispatch_beforeinput_ex(evcon, current_tx.surface,
+            current_tx.intent, current_tx.hooks, false, &prevented, &lambda_handled);
         if (dispatched) {
             sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
+            if (state->selection_mutation_seq != beforeinput_selection_seq) {
+                editing_dispatch_sync_rich_transaction_to_selection(
+                    state, &current_surface, &tx_target);
+            }
             editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_BEFOREINPUT,
                                             tx_target);
             before_guard.commit();
             radiant_state_assert_valid(state, "editing_transaction_beforeinput");
         }
     } else {
-        dispatched = editing_dispatch_beforeinput_ex(evcon, run_tx->surface,
-            run_tx->intent, run_tx->hooks, false, &prevented, &lambda_handled);
+        dispatched = editing_dispatch_beforeinput_ex(evcon, current_tx.surface,
+            current_tx.intent, current_tx.hooks, false, &prevented, &lambda_handled);
     }
     if (!dispatched) {
         editing_dispatch_commit_phase(state, SM_EV_EDIT_TX_ABORT, tx_target,
@@ -758,7 +847,7 @@ bool editing_run_transaction(EventContext* evcon,
                                       "editing_transaction_abort");
         EditingSelectionSnapshot selection_after =
             editing_dispatch_selection_snapshot(state);
-        editing_log_transaction(evcon, run_tx, transaction_id,
+        editing_log_transaction(evcon, &current_tx, transaction_id,
                                 &target_ranges, &selection_before,
                                 &selection_after, "abort", prevented,
                                 lambda_handled, false, false);
@@ -769,12 +858,12 @@ bool editing_run_transaction(EventContext* evcon,
 
     bool mutated = false;
     uint32_t selection_seq_before = state ? state->selection_mutation_seq : 0;
-    if (!prevented && !lambda_handled && run_tx->mutate) {
+    if (!prevented && !lambda_handled && current_tx.mutate) {
         if (state) {
             SmTransitionGuard mutate_guard(state, SM_FAMILY_RICH_EDIT,
                                            SM_EV_EDIT_MUTATE_DOM, tx_target);
-            mutated = run_tx->mutate(evcon, state, run_tx->surface,
-                                     run_tx->intent, run_tx->mutate_user);
+            mutated = current_tx.mutate(evcon, state, current_tx.surface,
+                                        current_tx.intent, current_tx.mutate_user);
             if (mutated) {
                 sm_observe_action(state, SM_ACT_MUTATE_DOM);
                 editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_MUTATED,
@@ -783,8 +872,8 @@ bool editing_run_transaction(EventContext* evcon,
                 radiant_state_assert_valid(state, "editing_transaction_mutate");
             }
         } else {
-            mutated = run_tx->mutate(evcon, state, run_tx->surface,
-                                     run_tx->intent, run_tx->mutate_user);
+            mutated = current_tx.mutate(evcon, state, current_tx.surface,
+                                        current_tx.intent, current_tx.mutate_user);
         }
     }
 
@@ -797,23 +886,23 @@ bool editing_run_transaction(EventContext* evcon,
                                       "editing_transaction_set_selection");
     }
 
-    bool should_input = input_intent_is_dispatchable(run_tx->intent->type) &&
+    bool should_input = input_intent_is_dispatchable(current_tx.intent->type) &&
         !prevented &&
-        (lambda_handled || mutated || run_tx->dispatch_input_without_mutation);
+        (lambda_handled || mutated || current_tx.dispatch_input_without_mutation);
     if (should_input) {
         if (state) {
             SmTransitionGuard input_guard(state, SM_FAMILY_RICH_EDIT,
                                           SM_EV_EDIT_INPUT, tx_target);
-            editing_dispatch_input(evcon, run_tx->surface, run_tx->intent,
-                                   run_tx->hooks);
+            editing_dispatch_input(evcon, current_tx.surface, current_tx.intent,
+                                   current_tx.hooks);
             sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
             editing_dispatch_set_rich_phase(state, EDITING_RICH_TX_INPUT,
                                             tx_target);
             input_guard.commit();
             radiant_state_assert_valid(state, "editing_transaction_input");
         } else {
-            editing_dispatch_input(evcon, run_tx->surface, run_tx->intent,
-                                   run_tx->hooks);
+            editing_dispatch_input(evcon, current_tx.surface, current_tx.intent,
+                                   current_tx.hooks);
         }
     }
 
@@ -822,7 +911,7 @@ bool editing_run_transaction(EventContext* evcon,
                                   "editing_transaction_commit");
     EditingSelectionSnapshot selection_after =
         editing_dispatch_selection_snapshot(state);
-    editing_log_transaction(evcon, run_tx, transaction_id, &target_ranges,
+    editing_log_transaction(evcon, &current_tx, transaction_id, &target_ranges,
                             &selection_before, &selection_after,
                             prevented ? "cancel" : "commit",
                             prevented, lambda_handled, mutated, should_input);

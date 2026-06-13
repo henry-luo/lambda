@@ -589,6 +589,11 @@ static void event_set_item(Item event, const char* key, Item value) {
     js_property_set(event, k, value);
 }
 
+static void event_mark_non_writable(Item event, const char* key) {
+    Item k = (Item){.item = s2it(heap_create_name(key))};
+    js_mark_non_writable(event, k);
+}
+
 // Get the current event flag values from per-event slots stored on the event
 // object itself (so nested dispatches don't trample each other).
 static bool event_flag_get(Item event, const char* key) {
@@ -1157,9 +1162,8 @@ extern "C" Item js_create_native_composition_event(const char* type,
 // constructor. Per Input Events Level 2 / DOM, a StaticRange is an
 // immutable snapshot of {startContainer, startOffset, endContainer,
 // endOffset}; `collapsed` is derived. We expose the four fields and
-// `collapsed` directly on the constructed object — the snapshot semantic
-// (does not update under DOM mutation) is intrinsic since the fields are
-// plain captured Items and offsets.
+// `collapsed` directly on the constructed object, then mark those data
+// properties non-writable so script cannot mutate the snapshot.
 extern "C" Item js_ctor_static_range_fn(Item init) {
     Item obj = js_new_object();
     Item start_container = init_item(init, "startContainer");
@@ -1173,6 +1177,11 @@ extern "C" Item js_ctor_static_range_fn(Item init) {
     bool collapsed = (start_container.item == end_container.item) &&
                      (start_offset == end_offset);
     event_set_bool(obj, "collapsed", collapsed);
+    event_mark_non_writable(obj, "startContainer");
+    event_mark_non_writable(obj, "startOffset");
+    event_mark_non_writable(obj, "endContainer");
+    event_mark_non_writable(obj, "endOffset");
+    event_mark_non_writable(obj, "collapsed");
     stamp_class(obj, "StaticRange");
     return obj;
 }
@@ -1305,8 +1314,26 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     if (get_type_id(ev) != LMD_TYPE_MAP) return js_array_new(0);
     Item key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
     Item stashed = js_property_get(ev, key);
-    if (get_type_id(stashed) == LMD_TYPE_ARRAY) return stashed;
-    return js_array_new(0);
+    Item ranges = js_array_new(0);
+    if (get_type_id(stashed) != LMD_TYPE_ARRAY) return ranges;
+
+    int64_t len = js_array_length(stashed);
+    for (int64_t i = 0; i < len; i++) {
+        Item range = js_array_get_int(stashed, i);
+        if (get_type_id(range) != LMD_TYPE_MAP) continue;
+
+        Item init = js_new_object();
+        event_set_item(init, "startContainer",
+            js_property_get(range, (Item){.item = s2it(heap_create_name("startContainer"))}));
+        event_set_int(init, "startOffset",
+            init_int(range, "startOffset", 0));
+        event_set_item(init, "endContainer",
+            js_property_get(range, (Item){.item = s2it(heap_create_name("endContainer"))}));
+        event_set_int(init, "endOffset",
+            init_int(range, "endOffset", 0));
+        js_array_push(ranges, js_ctor_static_range_fn(init));
+    }
+    return ranges;
 }
 
 extern "C" Item js_create_native_input_event(const char* type,

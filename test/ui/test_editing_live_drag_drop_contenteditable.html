@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Live drag drop contenteditable</title>
+  <style>
+    body { font: 16px Arial, sans-serif; padding: 16px; }
+    #drag-src {
+      display: inline-block;
+      padding: 10px 14px;
+      border: 1px solid #555;
+      background: #e8f0ff;
+      cursor: grab;
+      margin-right: 24px;
+    }
+    #drop-host {
+      display: inline-block;
+      min-width: 180px;
+      min-height: 36px;
+      padding: 10px 14px;
+      border: 1px dashed #555;
+    }
+    #before-log, #input-log { margin-top: 8px; font: 13px monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="drag-src" draggable="true" dragdata="ZZ">Drag ZZ</div>
+  <div id="drop-host" contenteditable="true" dropzone="copy" tabindex="0">abcd</div>
+  <div id="before-log">before:none</div>
+  <div id="input-log">input:none</div>
+  <script>
+    var host = document.getElementById('drop-host');
+    var beforeLog = document.getElementById('before-log');
+    var inputLog = document.getElementById('input-log');
+
+    function summarizeTransfer(event) {
+      var dt = event.dataTransfer;
+      if (!dt) return 'dt:none';
+      var types = [];
+      if (dt.types) {
+        for (var i = 0; i < dt.types.length; i++) types.push(dt.types[i]);
+      }
+      var plain = dt.getData ? dt.getData('text/plain') : '';
+      var html = dt.getData ? dt.getData('text/html') : '';
+      return 'dt:' + types.join(',') + ':plain=' + plain + ':html=' + html;
+    }
+
+    function summarize(event) {
+      var ranges = event.getTargetRanges();
+      var text = ranges.length ? ranges[0].startOffset + '-' + ranges[0].endOffset : 'empty';
+      return event.inputType + '|' + (event.data || '') + '|' +
+        ranges.length + '|' + text + '|' + summarizeTransfer(event);
+    }
+
+    host.addEventListener('beforeinput', function(event) {
+      beforeLog.textContent = 'before:' + summarize(event);
+    });
+    host.addEventListener('input', function(event) {
+      inputLog.textContent = 'input:' + summarize(event) + '|' + host.textContent;
+    });
+  </script>
+</body>
+</html>

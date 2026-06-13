@@ -20,7 +20,8 @@ Item js_dom_get_selection(void);
 // constructor. Per Input Events Level 2, `StaticRange` is an immutable
 // snapshot of {startContainer, startOffset, endContainer, endOffset} that
 // does not update under DOM mutation — used by InputEvent.getTargetRanges().
-// Stub implementation: copies the dictionary fields and computes `collapsed`.
+// The constructor copies the dictionary fields, computes `collapsed`, and
+// exposes them as non-writable snapshot properties.
 Item js_ctor_static_range_fn(Item init);
 
 // Wrap an existing native DomRange* into a JS Range object (used by

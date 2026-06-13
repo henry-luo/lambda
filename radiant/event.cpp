@@ -1454,17 +1454,32 @@ static void collapse_active_text_control_selection_for_rich_target(DocState* sta
     log_debug("collapse_active_text_control_selection_for_rich_target: collapsed text control to %u", end);
 }
 
+static View* canonical_selection_focus_target(DocState* state) {
+    if (!state) return nullptr;
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        return static_cast<View*>(state->sel.control);
+    }
+
+    state_store_refresh_editing_selection_shadow(state);
+    if (state->sel.kind != EDIT_SEL_DOM_RANGE || !state->sel.range) {
+        return nullptr;
+    }
+
+    DomRange* range = state->sel.range;
+    DomBoundary focus = state->sel.direction == DOM_SEL_DIR_BACKWARD
+        ? range->start
+        : range->end;
+    return focus.node ? static_cast<View*>(focus.node) : nullptr;
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
-    if (!state || !selection_has(state)) return false;
-    View* surface_target = nullptr;
-    selection_get_focus_snapshot(state, &surface_target, nullptr,
-                                 nullptr, nullptr, nullptr);
-    if (!surface_target) surface_target = caret_get_view(state);
+    if (!state) return false;
+    View* surface_target = canonical_selection_focus_target(state);
 
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event.temp");
     Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_TEMP, "event.arena");
-    char* text = extract_selected_text(state, temp_arena);
-    char* html = extract_selected_html(state, temp_arena);
+    char* text = state_store_extract_selection_text(state, temp_arena);
+    char* html = state_store_extract_selection_html(state, temp_arena);
     bool copied = false;
     if (html && html[0] && text) {
         clipboard_copy_rich(html, text);
@@ -3460,7 +3475,8 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
                                               View* range_view,
                                               uint32_t start,
                                               uint32_t end,
-                                              const char* payload) {
+                                              const char* payload,
+                                              const char* html_payload) {
     if (!evcon || !surface || !range_view) return false;
     DocState* state = event_context_target_state(evcon);
     if (!state) return false;
@@ -3479,8 +3495,64 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
     memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_INSERT_FROM_DROP;
     intent.data = text;
+    intent.html_data = html_payload && html_payload[0] ? html_payload : nullptr;
+    intent.data_mime = intent.html_data ? "text/html" : "text/plain";
     return dispatch_rich_transaction_defaultable(evcon, range_view, &intent,
         range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+}
+
+static bool rich_drop_fallback_from_boundary(const DomBoundary* boundary,
+                                             View** out_view,
+                                             int* out_offset) {
+    if (out_view) *out_view = nullptr;
+    if (out_offset) *out_offset = 0;
+    if (!boundary || !boundary->node) return false;
+
+    if (out_view) *out_view = static_cast<View*>(boundary->node);
+    if (!out_offset) return true;
+    if (boundary->node->is_text()) {
+        DomText* text = lam::dom_require_text(boundary->node);
+        *out_offset = (int)dom_text_utf16_to_utf8(text, boundary->offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    } else {
+        *out_offset = (int)boundary->offset; // INT_CAST_OK: StateStore caret API uses int offsets.
+    }
+    return true;
+}
+
+static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
+                                                    View* target,
+                                                    const DomBoundary* start,
+                                                    const DomBoundary* end,
+                                                    const char* payload) {
+    if (!evcon || !target || !start || !end ||
+        !start->node || !end->node) {
+        return false;
+    }
+    DocState* state = event_context_target_state(evcon);
+    if (!state) return false;
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = INPUT_INTENT_INSERT_FROM_DROP;
+    intent.data = payload ? payload : "";
+    intent.data_mime = "text/plain";
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, start, end, &exc)) {
+        log_debug("dispatch_rich_drop_transaction_at_range: drop range rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+    selection_transition(state, SELECTION_TRANSITION_END_POINTER_SELECTION,
+                         nullptr);
+    dispatch_rich_selection_snapshot(evcon, state, target, "dropTarget",
+                                     &intent);
+
+    View* fallback_view = nullptr;
+    int fallback_offset = 0;
+    rich_drop_fallback_from_boundary(end, &fallback_view, &fallback_offset);
+    return dispatch_rich_transaction_defaultable(evcon, target, &intent,
+        fallback_view, fallback_offset);
 }
 
 extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
@@ -3491,6 +3563,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          uint32_t target_start,
                                                          uint32_t target_end,
                                                          const char* payload,
+                                                         const char* html_payload,
                                                          bool move) {
     if (!uicon || !uicon->document || !source || !target) return false;
     DocState* state = (DocState*)uicon->document->state;
@@ -3554,7 +3627,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
         ok = editing_text_drag_dispatch_insert(&evcon, &target_surface,
                                                target_range_view,
                                                target_start, target_end,
-                                               drop_text);
+                                               drop_text, html_payload);
     }
     if (owned_payload) mem_free(owned_payload);
     state->needs_repaint = true;
@@ -6620,13 +6693,41 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
-                // dispatch dragover/dragleave on drop target changes
-                if (new_drop_target != dd->drop_target) {
-                    if (dd->drop_target) {
-                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                bool has_drop_range = false;
+                DomBoundary drop_start = {};
+                DomBoundary drop_end = {};
+                if (new_drop_target) {
+                    EditingSurface drop_surface;
+                    EditingBoundary hit_boundary;
+                    DomDocument* drag_doc = event_context_target_document(&evcon);
+                    bool has_surface = editing_surface_from_target(new_drop_target,
+                        &drop_surface) && editing_surface_is_rich(&drop_surface);
+                    bool has_boundary = has_surface && drag_doc &&
+                        drag_doc->view_tree && drag_doc->view_tree->root &&
+                        editing_geometry_hit_test_boundary(evcon.ui_context,
+                            static_cast<View*>(drag_doc->view_tree->root),
+                            &drop_surface, (float)motion->x, (float)motion->y,
+                            EDITING_CLAMP_SKIP_TEXT_CONTROLS, &hit_boundary);
+                    if (has_boundary && hit_boundary.dom.node) {
+                        drop_start = hit_boundary.dom;
+                        drop_end = hit_boundary.dom;
+                        has_drop_range = true;
                     }
-                    DragTransitionArgs target_args = { .drop_target = new_drop_target };
-                    drag_transition(state, DRAG_TRANSITION_SET_DROP_TARGET, &target_args);
+                }
+
+                // dispatch dragover/dragleave on drop target changes
+                bool drop_target_changed = new_drop_target != dd->drop_target;
+                if (drop_target_changed && dd->drop_target) {
+                    dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                }
+                DragTransitionArgs target_args = {};
+                target_args.drop_target = new_drop_target;
+                target_args.has_drop_range = has_drop_range;
+                target_args.drop_start = drop_start;
+                target_args.drop_end = drop_end;
+                drag_transition(state, DRAG_TRANSITION_SET_DROP_TARGET,
+                                &target_args);
+                if (drop_target_changed) {
                     if (dd->drop_target) {
                         dispatch_lambda_handler(&evcon, dd->drop_target, "dragover");
                     }
@@ -7386,18 +7487,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         log_debug("DRAG DROP: source=%p target=%p", dd->source_view, dd->drop_target);
                         dispatch_lambda_handler(&evcon, dd->drop_target, "drop");
 
-                        // CE-5 (Radiant_Design_Content_Editable.md §8): lower
-                        // drop-on-editable to beforeinput {insertFromDrop}.
-                        // If both source and target sit inside editing hosts
-                        // (move within / across hosts), pair it with a
-                        // deleteByDrag on the source host — per spec, the
-                        // consumer may collapse to a single `move` op or
-                        // apply them independently.
+                        // CE-5 / ED2-2: lower drop-on-editable to
+                        // beforeinput {insertFromDrop}. When dragover stored
+                        // a DOM target range, run the same defaultable rich
+                        // transaction path used by simulated text drop.
                         if (editing_host_lookup(static_cast<DomNode*>(dd->drop_target),
                                                 nullptr)) {
-                            // deleteByDrag on the source host first, so the
-                            // consumer sees the deletion intent before the
-                            // insertion intent (matches WPT ordering).
+                            // Source deletion for element drag remains a
+                            // consumer intent until live drag state carries a
+                            // source text range; defaulting without one would
+                            // guess at what to remove.
                             if (dd->source_view &&
                                 editing_host_lookup(static_cast<DomNode*>(dd->source_view),
                                                     nullptr)) {
@@ -7405,15 +7504,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 del.type = INPUT_INTENT_DELETE_BY_DRAG;
                                 dispatch_rich_beforeinput(&evcon, dd->source_view, &del);
                             }
-                            InputIntent ins = {};
-                            ins.type = INPUT_INTENT_INSERT_FROM_DROP;
-                            // §8: pass drag_data as the textual payload. Full
-                            // DataTransfer object (multi-MIME, files) deferred
-                            // — uses the same clipboard Phase 9 transport.
-                            // The plaintext-only filter is implicit since we
-                            // only carry text today.
-                            ins.data = dd->drag_data ? dd->drag_data : "";
-                            dispatch_rich_beforeinput(&evcon, dd->drop_target, &ins);
+                            bool inserted = dd->has_drop_range &&
+                                dispatch_rich_drop_transaction_at_range(&evcon,
+                                    dd->drop_target, &dd->drop_start,
+                                    &dd->drop_end,
+                                    dd->drag_data ? dd->drag_data : "");
+                            if (!inserted) {
+                                InputIntent ins = {};
+                                ins.type = INPUT_INTENT_INSERT_FROM_DROP;
+                                // §8: pass drag_data as the textual payload.
+                                // radiant_dispatch_input_event builds the
+                                // InputEvent DataTransfer from this intent data.
+                                // Files/custom drag item stores are still
+                                // deferred.
+                                ins.data = dd->drag_data ? dd->drag_data : "";
+                                dispatch_rich_beforeinput(&evcon, dd->drop_target, &ins);
+                            }
                         }
                     }
                     // dispatch "dragend" to source
