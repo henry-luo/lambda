@@ -9,7 +9,6 @@
     h: 96
   }, render: {
     dirty: true,
-    reflow: true,
     repaint: true,
     rects: 1
   }

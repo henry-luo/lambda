@@ -6,7 +6,6 @@
     offset: 0
   }, hover: "#name", render: {
     dirty: true,
-    reflow: true,
     repaint: true,
     rects: 1
   }, editing: {

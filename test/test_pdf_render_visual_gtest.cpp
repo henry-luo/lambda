@@ -1345,6 +1345,9 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
         int pages = pdf_page_count(files[i].path);
         ASSERT_GT(pages, 0) << "pdfinfo did not report pages for " << files[i].path;
         int render_pages = pages > MAX_PAGES_PER_PDF ? MAX_PAGES_PER_PDF : pages;
+        fprintf(stderr, "[pdf-render] Comparing %s (%d page%s, rendering %d)\n",
+                files[i].path, pages, pages == 1 ? "" : "s", render_pages);
+        fflush(stderr);
 
         for (int page = 1; page <= render_pages; page++) {
             ASSERT_LT(result_count, MAX_PDF_PAGE_RESULTS);
@@ -1353,6 +1356,8 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
             char diff_png[PATH_MAX];
             char test_id[512];
             make_page_test_id(&files[i], page, test_id, sizeof(test_id));
+            fprintf(stderr, "[pdf-render]   page %d/%d: %s\n", page, render_pages, test_id);
+            fflush(stderr);
             snprintf(diff_png, sizeof(diff_png), "%s/%s_page_%02d_diff.png",
                      PDF_DIFF_DIR, files[i].base, page);
             if (!render_reference_page(&files[i], page, ref_png, sizeof(ref_png))) {
@@ -1394,6 +1399,9 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
             ASSERT_NE(page_result, nullptr);
 
             compared_pages++;
+            fprintf(stderr, "[pdf-render]   done %s diff=%.6f%% mean_delta=%.3f\n",
+                    test_id, mismatch_percent, mean_abs_delta);
+            fflush(stderr);
         }
     }
 

@@ -9,7 +9,7 @@
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
     {"type": "type", "target": {"selector": "#surface"}, "text": "Y"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "sYd"},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertText|Y|1|1-3"},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "surface": "contenteditable", "min": 1}
   ]

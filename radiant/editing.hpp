@@ -2,7 +2,8 @@
 #define RADIANT_EDITING_HPP
 
 // shared editing surface resolver for form text controls and contenteditable.
-// see vibe/radiant/Radiant_Design_Editing.md.
+// canonical design: vibe/radiant/Radiant_Design_Editing2.md (§4.2).
+// vibe/radiant/Radiant_Design_Editing.md is phased out (historical E1-E7 record).
 
 #include "../lambda/input/css/dom_node.hpp"
 
