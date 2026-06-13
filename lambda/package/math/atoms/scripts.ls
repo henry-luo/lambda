@@ -37,8 +37,9 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let display_text = if (unicode != null) unicode
         else if (is_text_op != null) is_text_op
         else cmd
-    let op_font = if (is_text_op != null) css.CMR else css.CMR
-    let op_box = box.text_box(display_text, op_font, "mop")
+    let op_box = if (is_text_op != null)
+        box.text_box(display_text, css.CMR, "mop")
+    else large_op_symbol_box(display_text)
     let scaled_op = box.with_scale(op_box, 1.5)
 
     let has_sub = node.sub != null
@@ -55,6 +56,19 @@ fn render_big_op_limits(base, node, context, render_fn) {
         parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
     else parts2
     box.vbox(parts3)
+}
+
+fn large_op_symbol_box(text) => {
+    element: <span class: "lm_op-symbol lm_large-op"; text>,
+    height: 1.07,
+    depth: 0.0,
+    render_height: 1.07,
+    render_depth: 0.0,
+    render_total: 1.07,
+    width: 0.6,
+    type: "mop",
+    italic: 0.0,
+    skew: 0.0
 }
 
 // render normal inline subscript/superscript

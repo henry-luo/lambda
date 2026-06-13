@@ -127,7 +127,10 @@ fn render_symbol_command(node, context) {
     let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
     let cls = symbol_font_class(cmd_text, context)
-    box.text_box(display_text, cls, atom_type)
+    if (unicode != null and sym.is_limit_op(cmd_text))
+        render_limit_operator_symbol(display_text, context)
+    else
+        box.text_box(display_text, cls, atom_type)
 }
 
 fn render_number(node, context) {
@@ -208,7 +211,10 @@ fn render_command(node, context) {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
-        box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
+        if (sym.is_limit_op(cmd_text))
+            render_limit_operator_symbol(unicode, context)
+        else
+            box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
     } else {
         if (name_str == "pdiff") {
             render_pdiff(node, context)
@@ -229,6 +235,25 @@ fn render_command(node, context) {
             }
         }
     }
+    }
+}
+
+fn render_limit_operator_symbol(text, context) {
+    let op_size = if (ctx.is_display(context)) "lm_large-op" else "lm_small-op"
+    let op_cls = css.classes(["lm_op-symbol", op_size])
+    {
+        element: <span class: css.OP_GROUP;
+            <span class: op_cls; text>
+        >,
+        height: if (ctx.is_display(context)) 1.61 else 0.9,
+        depth: if (ctx.is_display(context)) 0.2 else 0.1,
+        render_height: if (ctx.is_display(context)) 1.61 else 0.9,
+        render_depth: if (ctx.is_display(context)) 0.2 else 0.1,
+        render_total: if (ctx.is_display(context)) 1.81 else 1.0,
+        width: 0.6,
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
     }
 }
 
