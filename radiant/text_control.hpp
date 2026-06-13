@@ -52,13 +52,14 @@ void tc_set_selection_range(DomElement* elem,
 void tc_notify_selection_changed(DomElement* elem);
 
 // Text-control selection projection sync ---------------------------------
-// DomSelection is canonical. form->selection_* mirrors it for JS
-// observability; StateStore projection fields preserve existing renderer and
-// event helper contracts.
+// StateStore's EditingSelection is canonical for text controls.
+// form->selection_* remains the HTML-facing mirror for JS observability;
+// StateStore projection fields preserve existing renderer and event helper
+// contracts.
 
-// Read state->caret + state->selection (UTF-8 byte offsets into form->value)
-// and write form->selection_start/_end/_direction (UTF-16 code units).
-// Called at the end of every text-control mouse/keyboard handler in event.cpp.
+// Publish the active text-control selection into StateStore. Older event paths
+// can still call this after legacy caret/selection projection changes; when
+// state->sel already targets the control, it is treated as source of truth.
 void tc_sync_legacy_to_form(DomElement* elem, DocState* state);
 
 // Selection accessor for Selection.toString() integration ----------------

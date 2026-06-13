@@ -226,7 +226,7 @@ function splitDelimiterPair(body) {
 }
 
 function unescapeSnapshotText(text) {
-  return text.replace(/\\\\/g, '\\');
+  return text.replace(/\\\\n/g, ' ').replace(/\\\\/g, '\\');
 }
 
 function lambdaString(value) {

@@ -192,16 +192,29 @@ typedef enum DomSelectionDirection {
     DOM_SEL_DIR_BACKWARD = 2,  // anchor after focus
 } DomSelectionDirection;
 
+typedef enum EditingSelectionKind {
+    EDIT_SEL_NONE = 0,
+    EDIT_SEL_DOM_RANGE,
+    EDIT_SEL_TEXT_CONTROL
+} EditingSelectionKind;
+
+typedef struct EditingSelection {
+    EditingSelectionKind kind;
+    DomSelectionDirection direction;
+    DomRange* range;
+    DomElement* control;
+    uint32_t start_u16;
+    uint32_t end_u16;
+    uint32_t mutation_seq;
+} EditingSelection;
+
 #define DOM_SELECTION_MAX_RANGES 1   // see comment above
 
 typedef struct DomSelection {
     DocState* state;
     DomRange*     ranges[DOM_SELECTION_MAX_RANGES];
     uint32_t      range_count;          // 0 or 1
-    DomBoundary   anchor;               // valid iff range_count > 0
-    DomBoundary   focus;
     DomSelectionDirection direction;
-    bool          is_collapsed;         // mirrors range[0].collapsed when present
 
     // Document root captured when the current range was added (or its
     // boundaries first set). Used by Range mutators to detect the
@@ -219,6 +232,8 @@ typedef struct DomSelection {
 DomSelection* dom_selection_create(DocState* state);
 
 // Accessors
+DomBoundary dom_selection_anchor_boundary(const DomSelection* s);
+DomBoundary dom_selection_focus_boundary (const DomSelection* s);
 DomNode* dom_selection_anchor_node  (const DomSelection* s);
 uint32_t dom_selection_anchor_offset(const DomSelection* s);
 DomNode* dom_selection_focus_node   (const DomSelection* s);

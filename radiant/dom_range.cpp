@@ -29,16 +29,25 @@
 #include <stdlib.h>
 #include <limits.h>
 
-// Single source of truth: after every selection-state mutation inside this
-// file, ask StateStore to refresh its private projection structs so older
-// renderer/event paths reflect spec-driven and JS-driven changes. Implemented
-// in state_store.cpp; declared here as a forward to avoid pulling in
-// state_store.hpp (which transitively includes GLFW). A weak default
-// no-op is provided so unit-test targets that don't link state_store.cpp
-// (e.g. test_dom_range_gtest) still link successfully — the strong
-// definition in state_store.cpp wins for the full binary.
-extern "C" void legacy_sync_from_dom_selection(struct DocState* state);
-extern "C" __attribute__((weak)) void legacy_sync_from_dom_selection(struct DocState* /*state*/) {
+// Selection mutations are noted in StateStore so the DOM-facing selection,
+// shadow EditingSelection, legacy projection cache, and selectionchange
+// coalescing all share one mutation sequence. Weak defaults let DOM-only
+// range tests link without the full StateStore/render stack.
+extern "C" void state_store_note_selection_mutation(struct DocState* state);
+extern "C" __attribute__((weak)) void state_store_note_selection_mutation(
+        struct DocState* /*state*/) {
+    // weak fallback for test targets without state_store
+}
+
+extern "C" void state_store_refresh_editing_selection_shadow(struct DocState* state);
+extern "C" __attribute__((weak)) void state_store_refresh_editing_selection_shadow(
+        struct DocState* /*state*/) {
+    // weak fallback for test targets without state_store
+}
+
+extern "C" void state_store_refresh_caret_projection(struct DocState* state);
+extern "C" __attribute__((weak)) void state_store_refresh_caret_projection(
+        struct DocState* /*state*/) {
     // weak fallback for test targets without state_store
 }
 
@@ -551,35 +560,48 @@ DomSelection* dom_selection_create(DocState* state) {
     if (!s) return NULL;
     memset(s, 0, sizeof(*s));
     s->state = state;
-    s->is_collapsed = true;
     // Ensure StateStore projection storage exists. Strong def in
     // state_store.cpp; weak no-op for DOM-only unit tests.
     dom_selection_attach_legacy_storage(s, state);
     return s;
 }
 
+DomBoundary dom_selection_anchor_boundary(const DomSelection* s) {
+    DomBoundary boundary = { NULL, 0 };
+    if (!s || s->range_count == 0 || !s->ranges[0]) return boundary;
+    DomRange* r = s->ranges[0];
+    return s->direction == DOM_SEL_DIR_BACKWARD ? r->end : r->start;
+}
+
+DomBoundary dom_selection_focus_boundary(const DomSelection* s) {
+    DomBoundary boundary = { NULL, 0 };
+    if (!s || s->range_count == 0 || !s->ranges[0]) return boundary;
+    DomRange* r = s->ranges[0];
+    return s->direction == DOM_SEL_DIR_BACKWARD ? r->start : r->end;
+}
+
 DomNode* dom_selection_anchor_node(const DomSelection* s) {
-    return (s && s->range_count > 0) ? s->anchor.node : NULL;
+    return dom_selection_anchor_boundary(s).node;
 }
 uint32_t dom_selection_anchor_offset(const DomSelection* s) {
-    return (s && s->range_count > 0) ? s->anchor.offset : 0;
+    return dom_selection_anchor_boundary(s).offset;
 }
 DomNode* dom_selection_focus_node(const DomSelection* s) {
-    return (s && s->range_count > 0) ? s->focus.node : NULL;
+    return dom_selection_focus_boundary(s).node;
 }
 uint32_t dom_selection_focus_offset(const DomSelection* s) {
-    return (s && s->range_count > 0) ? s->focus.offset : 0;
+    return dom_selection_focus_boundary(s).offset;
 }
 bool dom_selection_is_collapsed(const DomSelection* s) {
     if (!s || s->range_count == 0) return true;  // spec: empty => true
-    return s->is_collapsed;
+    return dom_range_collapsed(s->ranges[0]);
 }
 uint32_t dom_selection_range_count(const DomSelection* s) {
     return s ? s->range_count : 0;
 }
 const char* dom_selection_type(const DomSelection* s) {
     if (!s || s->range_count == 0) return "None";
-    return s->is_collapsed ? "Caret" : "Range";
+    return dom_selection_is_collapsed(s) ? "Caret" : "Range";
 }
 
 DomRange* dom_selection_get_range_at(DomSelection* s, uint32_t index, const char** out_exception) {
@@ -604,39 +626,27 @@ extern "C" __attribute__((weak)) void js_dom_queue_selectionchange(DomSelection*
 
 static inline void notify_selection_changed(DomSelection* s) {
     if (!s) return;
+    state_store_note_selection_mutation(s->state);
+    state_store_refresh_editing_selection_shadow(s->state);
     js_dom_queue_selectionchange(s);
 }
 
-// Sync anchor/focus/is_collapsed from ranges[0] given a direction. If
-// `set_forward` is true, anchor=start, focus=end; otherwise anchor=end,
-// focus=start. Used by the boundary mutators below.
+// Sync direction/is_collapsed from ranges[0]. Anchor/focus are derived from
+// ranges[0] + direction by the public accessors.
 static void sync_anchor_focus(DomSelection* s, bool forward) {
     if (s->range_count == 0) {
-        s->anchor.node = s->focus.node = NULL;
-        s->anchor.offset = s->focus.offset = 0;
         s->direction = DOM_SEL_DIR_NONE;
-        s->is_collapsed = true;
-        if (s->state) legacy_sync_from_dom_selection(s->state);
         notify_selection_changed(s);
+        if (s->state) state_store_refresh_caret_projection(s->state);
         return;
     }
     DomRange* r = s->ranges[0];
-    if (forward) {
-        s->anchor = r->start;
-        s->focus  = r->end;
-    } else {
-        s->anchor = r->end;
-        s->focus  = r->start;
-    }
-    s->is_collapsed = dom_range_collapsed(r);
-    if (s->is_collapsed) s->direction = DOM_SEL_DIR_NONE;
+    bool collapsed = dom_range_collapsed(r);
+    if (collapsed) s->direction = DOM_SEL_DIR_NONE;
     else s->direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
 
-    // Phase 6: mirror DOM selection into legacy state for the renderer.
-    // Re-entry guarded inside legacy_sync_from_dom_selection so it's a no-op
-    // when invoked transitively from a legacy→DOM sync.
-    if (s->state) legacy_sync_from_dom_selection(s->state);
     notify_selection_changed(s);
+    if (s->state) state_store_refresh_caret_projection(s->state);
 }
 
 void dom_selection_add_range(DomSelection* s, DomRange* range) {
@@ -762,7 +772,7 @@ bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const
         set_exception(out_exception, "IndexSizeError"); return false;
     }
     DomBoundary new_focus = { node, offset };
-    DomBoundary anchor = s->anchor;
+    DomBoundary anchor = dom_selection_anchor_boundary(s);
 
     // Compute new boundaries first, then replace the existing range with a
     // freshly-allocated one (per WHATWG: extend must replace the range, not
@@ -2675,8 +2685,8 @@ bool dom_selection_modify(DomSelection* s, const char* alter,
 
     DomRange* r = s->ranges[0];
     if (!r) return true;
-    DomBoundary anchor{ s->anchor.node, s->anchor.offset };
-    DomBoundary focus { s->focus.node,  s->focus.offset  };
+    DomBoundary anchor = dom_selection_anchor_boundary(s);
+    DomBoundary focus = dom_selection_focus_boundary(s);
     DomBoundary new_focus;
     if (paragraph_boundary) {
         // Move to the start (backward) or end (forward) of the nearest

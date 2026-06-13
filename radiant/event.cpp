@@ -65,7 +65,7 @@ extern "C" Item js_clear_exception(void);
 extern "C" const char* js_get_exception_message(void);
 void to_repaint();
 void update_window_title(const char* title);
-extern "C" void legacy_sync_from_dom_selection(DocState* state);
+extern "C" void state_store_refresh_caret_projection(DocState* state);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
@@ -1362,7 +1362,7 @@ static DomText* rich_find_text_descendant(DomNode* node, bool last) {
 static bool rich_selection_is_host_child_range(const EditingSurface* surface,
                                                const DomSelection* selection) {
     if (!surface || !surface->owner || !selection || selection->range_count == 0 ||
-        selection->is_collapsed || !selection->ranges[0]) {
+        dom_selection_is_collapsed(selection) || !selection->ranges[0]) {
         return false;
     }
 
@@ -1382,7 +1382,7 @@ static bool rich_selection_single_text_range(const DomSelection* selection,
     if (out_text) *out_text = nullptr;
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
-    if (!selection || selection->range_count == 0 || selection->is_collapsed ||
+    if (!selection || selection->range_count == 0 || dom_selection_is_collapsed(selection) ||
         !selection->ranges[0]) {
         return false;
     }
@@ -1409,17 +1409,17 @@ static bool rich_selection_single_text_range(const DomSelection* selection,
 
 static bool rich_delete_dom_selection(DocState* state, DomSelection* selection) {
     if (!state || !selection || selection->range_count == 0 ||
-        selection->is_collapsed || !selection->ranges[0]) {
+        dom_selection_is_collapsed(selection) || !selection->ranges[0]) {
         return false;
     }
 
     dom_selection_delete_from_document(selection);
     DomRange* range = selection->ranges[0];
     if (range && range->start.node) {
+        DomBoundary caret = range->start;
         const char* exc = nullptr;
-        dom_selection_collapse(selection, range->start.node, range->start.offset, &exc);
+        state_store_set_selection(state, &caret, &caret, &exc);
     }
-    legacy_sync_from_dom_selection(state);
     doc_state_request_reflow(state);
     state->needs_repaint = true;
     return true;
@@ -1666,16 +1666,18 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     {
         DocState* st2 = doc->state ? (DocState*)doc->state : nullptr;
         DomSelection* ds = st2 ? st2->dom_selection : nullptr;
-        if (ds && ds->anchor.node) {
+        DomBoundary anchor_boundary = dom_selection_anchor_boundary(ds);
+        if (anchor_boundary.node) {
             SourcePosC anchor_pos;
-            if (source_pos_from_dom_boundary(&ds->anchor, &anchor_pos)) {
+            if (source_pos_from_dom_boundary(&anchor_boundary, &anchor_pos)) {
                 if (!event_uses_hit_source_pos) {
                     mb.put("source_pos",
                            source_pos_to_item(builder, &anchor_pos));
                 }
-                if (!ds->is_collapsed && ds->focus.node) {
+                DomBoundary focus_boundary = dom_selection_focus_boundary(ds);
+                if (!dom_selection_is_collapsed(ds) && focus_boundary.node) {
                     SourcePosC head_pos;
-                    if (source_pos_from_dom_boundary(&ds->focus, &head_pos)) {
+                    if (source_pos_from_dom_boundary(&focus_boundary, &head_pos)) {
                         mb.put("source_selection",
                                source_text_selection_to_item(
                                    builder, &anchor_pos, &head_pos));
@@ -2208,7 +2210,7 @@ static bool rich_text_default_replace(EventContext* evcon,
     uint32_t end = 0;
     DomSelection* dom_selection = state->dom_selection;
     if (dom_selection && dom_selection->range_count > 0 &&
-        dom_selection->ranges[0] && !dom_selection->is_collapsed) {
+        dom_selection->ranges[0] && !dom_selection_is_collapsed(dom_selection)) {
         EditingSurface surface;
         if (rich_selection_single_text_range(dom_selection, &text, &start, &end)) {
             // replace the selected text below
@@ -2334,13 +2336,10 @@ static bool rich_text_default_replace(EventContext* evcon,
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT && state->dom_selection) {
         const char* exc = nullptr;
         uint32_t caret_u16 = dom_text_utf8_to_utf16(live_text, caret_offset);
-        if (!dom_selection_collapse(state->dom_selection,
-                                    static_cast<DomNode*>(live_text),
-                                    caret_u16, &exc)) {
+        DomBoundary caret = { static_cast<DomNode*>(live_text), caret_u16 };
+        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
             log_debug("rich_text_default_replace: cut collapse rejected: %s",
                       exc ? exc : "?");
-        } else {
-            legacy_sync_from_dom_selection(state);
         }
     }
     EditingSurface live_surface;
@@ -2417,8 +2416,13 @@ static void rich_select_all_sync_descendant_text_controls(DocState* state,
     DomElement* elem = lam::dom_require_element(node);
     if (tc_is_text_control(elem)) {
         tc_ensure_init(elem);
-        uint32_t len = elem->form ? elem->form->current_value_u16_len : 0;
-        form_control_set_selection(state, static_cast<View*>(elem), 0, len, 1);
+        FormControlProp* form = elem->form;
+        if (!form) return;
+        uint32_t len = form->current_value_u16_len;
+        form->selection_start = 0;
+        form->selection_end = len;
+        form->selection_direction = len > 0 ? 1 : 0;
+        form_control_sync_text_control_state(state, static_cast<View*>(elem));
         return;
     }
 
@@ -2463,7 +2467,7 @@ static bool dispatch_rich_select_all_default(EventContext* evcon,
                   exc ? exc : "?");
         return false;
     }
-    legacy_sync_from_dom_selection(state);
+    state_store_refresh_caret_projection(state);
     rich_select_all_sync_descendant_text_controls(state, owner_node);
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
@@ -6163,7 +6167,7 @@ TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
 static bool text_point_inside_existing_selection(DocState* state, View* view, int char_offset) {
     if (!state || !state->dom_selection || !view || view->view_type != RDT_VIEW_TEXT) return false;
     DomSelection* selection = state->dom_selection;
-    if (selection->range_count == 0 || selection->is_collapsed || !selection->ranges[0]) return false;
+    if (selection->range_count == 0 || dom_selection_is_collapsed(selection) || !selection->ranges[0]) return false;
 
     DomText* text = lam::dom_require_text(view);
     uint32_t offset = char_offset < 0 ? 0 : dom_text_utf8_to_utf16(text, (uint32_t)char_offset);
@@ -7622,8 +7626,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomElement* tc_elem = lam::dom_require_element(tc_focused);
                 if (tc_is_text_control(tc_elem)) {
                     tc_sync_legacy_to_form(tc_elem, tc_state);
-                    tc_set_active_element(state, tc_elem);
-                    tc_set_last_focused_text_control(state, tc_elem);
+                    tc_set_active_element(tc_state, tc_elem);
+                    tc_set_last_focused_text_control(tc_state, tc_elem);
                 }
             }
         }

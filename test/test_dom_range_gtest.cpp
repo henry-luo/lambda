@@ -358,8 +358,8 @@ TEST_F(DomRangeTest, SelectionExtendBackwardSetsBackwardDirection) {
     ASSERT_TRUE(dom_selection_extend(s, hello, 1, &exc));
     EXPECT_FALSE(dom_selection_is_collapsed(s));
     EXPECT_EQ(s->direction, DOM_SEL_DIR_BACKWARD);
-    EXPECT_EQ(s->anchor.offset, 4u);
-    EXPECT_EQ(s->focus.offset, 1u);
+    EXPECT_EQ(dom_selection_anchor_offset(s), 4u);
+    EXPECT_EQ(dom_selection_focus_offset(s), 1u);
     // range stored in min/max order:
     EXPECT_EQ(s->ranges[0]->start.offset, 1u);
     EXPECT_EQ(s->ranges[0]->end.offset, 4u);
@@ -1035,4 +1035,3 @@ TEST_F(DomResolverTest, ForEachRectEmitsSingleRectForSameNodeRange) {
     EXPECT_EQ(c.count, 1);
     EXPECT_FLOAT_EQ(c.total_w, 60.0f);
 }
-
