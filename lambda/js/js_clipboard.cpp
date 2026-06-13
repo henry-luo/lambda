@@ -46,6 +46,7 @@ extern "C" Item js_promise_all(Item iterable);
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 extern "C" void js_set_prototype(Item object, Item prototype);
+extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 
 // Forward decls for sibling fns within this file (used before their definition).
 extern "C" Item js_lambda_clipboard_write_records(Item arr);
@@ -63,6 +64,9 @@ static inline Item make_str(const char* s) {
 }
 static inline Item make_str_n(const char* s, size_t n) {
     return (Item){.item = s2it(heap_create_name(s, (int)n))};
+}
+static inline Item make_js_undefined(void) {
+    return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 // Stamp class identity. A3-T3b: dual-write the legacy `__class_name__`
@@ -533,8 +537,11 @@ extern "C" Item js_clipboard_event_new(Item type_item, Item init_item) {
 // data-transfer-file-list-change-reference-updates WPT case.
 
 extern "C" Item js_dt_items_add(Item data_arg, Item type_arg);
+extern "C" Item js_dt_items_item(Item idx_arg);
 extern "C" Item js_dt_items_remove(Item idx_arg);
 extern "C" Item js_dt_items_clear(void);
+extern "C" Item js_dt_item_get_as_file(void);
+extern "C" Item js_dt_item_get_as_string(Item callback);
 extern "C" Item js_dt_files_item(Item idx_arg);
 extern "C" Item js_dt_set_data(Item type_item, Item data_item);
 extern "C" Item js_dt_get_data(Item type_item);
@@ -546,6 +553,15 @@ static bool dt_is_class(Item v, const char* name, size_t name_len) {
     if (get_type_id(cn) != LMD_TYPE_STRING) return false;
     String* s = it2s(cn);
     return s && s->len == name_len && strncmp(s->chars, name, name_len) == 0;
+}
+
+static bool dt_record_kind_is(Item r, const char* kind, size_t kind_len) {
+    if (get_type_id(r) != LMD_TYPE_MAP) return false;
+    Item k = js_property_get(r, make_str("kind"));
+    if (get_type_id(k) != LMD_TYPE_STRING) return false;
+    String* s = it2s(k);
+    return s && (size_t)s->len == kind_len &&
+        strncmp(s->chars, kind, kind_len) == 0;
 }
 
 // Lowercase and copy in-place. Returns false if input does not fit.
@@ -593,13 +609,14 @@ static void dt_recompute_views(Item dt) {
         Item proxy = js_new_object();
         js_property_set(proxy, make_str("kind"), kind);
         js_property_set(proxy, make_str("type"), type);
+        js_property_set(proxy, make_str("_record"), r);
+        js_property_set(proxy, make_str("getAsFile"),
+            js_new_function((void*)js_dt_item_get_as_file, 0));
+        js_property_set(proxy, make_str("getAsString"),
+            js_new_function((void*)js_dt_item_get_as_string, 1));
         js_array_push(items, proxy);
 
-        bool is_file = false;
-        if (get_type_id(kind) == LMD_TYPE_STRING) {
-            String* ks = it2s(kind);
-            is_file = (ks && ks->len == 4 && strncmp(ks->chars, "file", 4) == 0);
-        }
+        bool is_file = dt_record_kind_is(r, "file", 4);
         if (is_file) {
             has_files = true;
             Item f = js_property_get(r, make_str("file"));
@@ -623,6 +640,27 @@ static void dt_recompute_views(Item dt) {
         }
     }
     if (has_files) js_array_push(types, make_str("Files"));
+}
+
+extern "C" Item js_dt_item_get_as_file(void) {
+    Item item = js_get_this();
+    if (get_type_id(item) != LMD_TYPE_MAP) return ItemNull;
+    Item record = js_property_get(item, make_str("_record"));
+    if (!dt_record_kind_is(record, "file", 4)) return ItemNull;
+    Item file = js_property_get(record, make_str("file"));
+    return file.item == 0 ? ItemNull : file;
+}
+
+extern "C" Item js_dt_item_get_as_string(Item callback) {
+    Item item = js_get_this();
+    if (get_type_id(item) != LMD_TYPE_MAP) return make_js_undefined();
+    Item record = js_property_get(item, make_str("_record"));
+    if (!dt_record_kind_is(record, "string", 6)) return make_js_undefined();
+    if (get_type_id(callback) != LMD_TYPE_FUNC) return make_js_undefined();
+    Item value = js_property_get(record, make_str("value"));
+    if (get_type_id(value) != LMD_TYPE_STRING) value = make_str("");
+    js_call_function(callback, make_js_undefined(), &value, 1);
+    return make_js_undefined();
 }
 
 // items.add(data, type?) — DataTransferItemList.add
@@ -686,6 +724,16 @@ extern "C" Item js_dt_items_add(Item data_arg, Item type_arg) {
     Item items_view = js_property_get(dt, make_str("items"));
     int64_t ln = js_array_length(items_view);
     return (ln > 0) ? js_array_get_int(items_view, ln - 1) : ItemNull;
+}
+
+extern "C" Item js_dt_items_item(Item idx_arg) {
+    Item items = js_get_this();
+    if (get_type_id(items) != LMD_TYPE_ARRAY) return ItemNull;
+    int idx = -1;
+    if (get_type_id(idx_arg) == LMD_TYPE_INT) idx = (int)it2i(idx_arg);
+    int64_t n = js_array_length(items);
+    if (idx < 0 || idx >= n) return ItemNull;
+    return js_array_get_int(items, idx);
 }
 
 extern "C" Item js_dt_items_remove(Item idx_arg) {
@@ -866,6 +914,8 @@ static Item js_make_data_transfer_object(void) {
     js_property_set(files, make_str("_owner"), dt);
     js_property_set(items, make_str("add"),
         js_new_function((void*)js_dt_items_add, 2));
+    js_property_set(items, make_str("item"),
+        js_new_function((void*)js_dt_items_item, 1));
     js_property_set(items, make_str("remove"),
         js_new_function((void*)js_dt_items_remove, 1));
     js_property_set(items, make_str("clear"),

@@ -1,0 +1,5 @@
+items: 2|string|text/plain|hello|unchanged
+files: 1|note.txt|note.txt|text/plain|3
+types: text/plain,Files
+nulls: true|true|true
+returns: true|true
