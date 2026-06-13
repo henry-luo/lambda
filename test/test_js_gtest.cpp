@@ -730,6 +730,34 @@ TEST(JavaScriptRegression, Js54P4TypedArrayPrototypeOob) {
     ASSERT_EQ(status, 0) << output;
 }
 
+// Js54 P5: Array.prototype methods called on TypedArray receivers. Methods
+// like every/forEach/slice/indexOf/... share JS_BUILTIN_ARR_* between Array
+// and TypedArray, but spec-diverge on OOB: TypedArray.prototype.X throws via
+// ValidateTypedArray, Array.prototype.X uses LengthOfArrayLike (0 for OOB) and
+// silently no-ops. js_call_function and js_invoke_fn now flip
+// js_dispatch_as_array_method based on the calling fn's TYPED_ARRAY_METHOD
+// flag; the per-method OOB-throw blocks in js_map_method gate on it.
+TEST(JavaScriptRegression, Js54P5ArrayProtoOnTypedArray) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p5_array_proto_on_ta.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
+// Js54 P6: Extend the P5 dispatch-mode gating into the runtime helpers
+// js_typed_array_fill / js_typed_array_set_from / js_typed_array_slice, which
+// had their own ValidateTypedArray-style OOB throws that fired regardless of
+// dispatch mode. Array.prototype.{fill,set,slice}.call(ta_oob, ...) now
+// silently no-op as the spec's LengthOfArrayLike path prescribes.
+TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p6_array_proto_fill_set_slice.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
