@@ -264,7 +264,7 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
     if (!state) return;
 
     DomSelection* ds = state->dom_selection;
-    bool use_dom = ds && ds->range_count > 0 && !ds->is_collapsed;
+    bool use_dom = ds && ds->range_count > 0 && !dom_selection_is_collapsed(ds);
     if (!use_dom) {
         return;
     }

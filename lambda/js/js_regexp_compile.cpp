@@ -215,7 +215,8 @@ bool js_regexp_compile_frontend(const char* pattern, int pattern_len,
     }
 
     int fi = 0;
-    static const char flag_order[] = "dgimsuy";
+    // ES2024 §22.2.5.4 canonical flag order: d g i m s u v y
+    static const char flag_order[] = "dgimsuvy";
     for (int oi = 0; flag_order[oi]; oi++) {
         for (int si = 0; si < flags_len; si++) {
             if (flags[si] == flag_order[oi]) {

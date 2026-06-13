@@ -88,13 +88,7 @@ bool focus_transition(DocState* state,
 
 static void state_machine_sync_selection_projection(DocState* state) {
     if (!state) return;
-    if (state->selection && !state->selection->is_collapsed) {
-        dom_selection_sync_from_legacy_selection(state);
-        legacy_sync_from_dom_selection(state);
-    } else if (state->caret && state->caret->view) {
-        dom_selection_sync_from_legacy_caret(state);
-        legacy_sync_from_dom_selection(state);
-    }
+    state_store_refresh_caret_projection(state);
 }
 
 static bool caret_kind_to_sm_event(CaretTransitionKind kind, SmEvent* out_event) {
@@ -797,18 +791,95 @@ static void validate_editing_interaction_invariants(DocState* state,
 
 static void validate_selection_invariants(DocState* state,
                                           StateValidationReport* report) {
-    if (!state || !state->dom_selection) return;
+    if (!state) return;
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        if (!state_store_editing_selection_shadow_matches(state)) {
+            report_fail(report, "editing selection shadow disagrees with text control selection");
+        }
+        // Text-control and DOM-range selection must be mutually exclusive.
+        if (state->dom_selection && state->dom_selection->range_count > 0) {
+            report_fail(report, "text control selection coexists with a non-empty DOM selection");
+        }
+        DomElement* control = state->sel.control;
+        if (!control || !tc_is_text_control(control)) {
+            report_fail(report, "text control selection has invalid control");
+            return;
+        }
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        if (!form) {
+            report_fail(report, "text control selection has no form state");
+            return;
+        }
+        if (state->sel.start_u16 > state->sel.end_u16 ||
+            state->sel.end_u16 > form->current_value_u16_len) {
+            report_fail(report, "text control selection offsets are out of range");
+        }
+        DomSelectionDirection expected_direction =
+            state->sel.start_u16 == state->sel.end_u16 ? DOM_SEL_DIR_NONE :
+            (form->selection_direction == 2 ? DOM_SEL_DIR_BACKWARD : DOM_SEL_DIR_FORWARD);
+        if (state->sel.direction != expected_direction) {
+            report_fail(report, "text control selection direction is inconsistent");
+        }
+
+        uint32_t start_byte = tc_utf16_to_utf8_offset(
+            form->current_value ? form->current_value : "",
+            form->current_value ? form->current_value_len : 0,
+            state->sel.start_u16);
+        uint32_t end_byte = tc_utf16_to_utf8_offset(
+            form->current_value ? form->current_value : "",
+            form->current_value ? form->current_value_len : 0,
+            state->sel.end_u16);
+        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
+        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: legacy projection stores text-control byte offsets as int.
+        bool backward = state->sel.direction == DOM_SEL_DIR_BACKWARD;
+        int anchor_offset = backward ? end_offset : start_offset;
+        int focus_offset = backward ? start_offset : end_offset;
+        bool collapsed = state->sel.start_u16 == state->sel.end_u16;
+        View* view = static_cast<View*>(control);
+
+        if (!state->selection) {
+            report_fail(report, "legacy text control selection projection is missing");
+        } else {
+            SelectionState* legacy = state->selection;
+            if (legacy->anchor_view != view ||
+                legacy->focus_view != view ||
+                legacy->view != view ||
+                legacy->anchor_offset != anchor_offset ||
+                legacy->focus_offset != focus_offset ||
+                legacy->is_collapsed != collapsed) {
+                report_fail(report, "legacy text control selection projection is stale");
+            }
+        }
+
+        if (state->caret && collapsed) {
+            if (state->caret->view != view ||
+                state->caret->char_offset != focus_offset) {
+                report_fail(report, "legacy text control caret projection is stale");
+            }
+        }
+        return;
+    }
+
+    if (!state->dom_selection) {
+        if (!state_store_editing_selection_shadow_matches(state)) {
+            report_fail(report, "editing selection shadow disagrees with empty DOM selection");
+        }
+        return;
+    }
 
     DomSelection* selection = state->dom_selection;
+    if (!state_store_editing_selection_shadow_matches(state)) {
+        report_fail(report, "editing selection shadow disagrees with DOM selection");
+    }
     if (selection->range_count > 1) {
         report_fail(report, "DOM selection has more than one range");
         return;
     }
 
     if (selection->range_count == 0) {
-        if (selection->anchor.node || selection->focus.node || !selection->is_collapsed ||
-            selection->direction != DOM_SEL_DIR_NONE) {
-            report_fail(report, "empty DOM selection has stale anchor/focus state");
+        if (!dom_selection_is_collapsed(selection) || selection->direction != DOM_SEL_DIR_NONE) {
+            report_fail(report, "empty DOM selection has stale scalar state");
         }
         return;
     }
@@ -819,15 +890,17 @@ static void validate_selection_invariants(DocState* state,
         return;
     }
 
-    if (!dom_boundary_is_valid(&selection->anchor) ||
-        !dom_boundary_is_valid(&selection->focus) ||
+    DomBoundary anchor = dom_selection_anchor_boundary(selection);
+    DomBoundary focus = dom_selection_focus_boundary(selection);
+    if (!dom_boundary_is_valid(&anchor) ||
+        !dom_boundary_is_valid(&focus) ||
         !dom_boundary_is_valid(&range->start) ||
         !dom_boundary_is_valid(&range->end)) {
         report_fail(report, "DOM selection contains invalid boundary");
     }
 
-    DomNode* anchor_root = boundary_root(&selection->anchor);
-    DomNode* focus_root = boundary_root(&selection->focus);
+    DomNode* anchor_root = boundary_root(&anchor);
+    DomNode* focus_root = boundary_root(&focus);
     DomNode* start_root = boundary_root(&range->start);
     DomNode* end_root = boundary_root(&range->end);
     if (!anchor_root || !focus_root || !start_root || !end_root ||
@@ -836,18 +909,19 @@ static void validate_selection_invariants(DocState* state,
     }
 
     bool range_collapsed = dom_range_collapsed(range);
-    if (selection->is_collapsed != range_collapsed) {
+    bool selection_collapsed = dom_selection_is_collapsed(selection);
+    if (selection_collapsed != range_collapsed) {
         report_fail(report, "DOM selection collapsed flag disagrees with range");
     }
-    if (selection->is_collapsed) {
+    if (selection_collapsed) {
         if (selection->direction != DOM_SEL_DIR_NONE) {
             report_fail(report, "collapsed DOM selection has non-none direction");
         }
-        if (dom_boundary_compare(&selection->anchor, &selection->focus) != DOM_BOUNDARY_EQUAL) {
+        if (dom_boundary_compare(&anchor, &focus) != DOM_BOUNDARY_EQUAL) {
             report_fail(report, "collapsed DOM selection endpoints differ");
         }
     } else {
-        DomBoundaryOrder anchor_focus = dom_boundary_compare(&selection->anchor, &selection->focus);
+        DomBoundaryOrder anchor_focus = dom_boundary_compare(&anchor, &focus);
         if (selection->direction == DOM_SEL_DIR_NONE) {
             report_fail(report, "non-collapsed DOM selection has no direction");
         } else if (selection->direction == DOM_SEL_DIR_FORWARD && anchor_focus == DOM_BOUNDARY_AFTER) {
@@ -859,11 +933,11 @@ static void validate_selection_invariants(DocState* state,
 
     if (state->selection) {
         SelectionState* legacy = state->selection;
-        if (static_cast<DomNode*>(legacy->anchor_view) != selection->anchor.node ||
-            static_cast<DomNode*>(legacy->focus_view) != selection->focus.node ||
-            legacy->anchor_offset != boundary_legacy_offset(&selection->anchor) ||
-            legacy->focus_offset != boundary_legacy_offset(&selection->focus) ||
-            legacy->is_collapsed != selection->is_collapsed) {
+        if (static_cast<DomNode*>(legacy->anchor_view) != anchor.node ||
+            static_cast<DomNode*>(legacy->focus_view) != focus.node ||
+            legacy->anchor_offset != boundary_legacy_offset(&anchor) ||
+            legacy->focus_offset != boundary_legacy_offset(&focus) ||
+            legacy->is_collapsed != selection_collapsed) {
             report_fail(report, "legacy selection projection is stale");
         }
         if (legacy->is_selecting && selection->range_count == 0) {
@@ -871,9 +945,9 @@ static void validate_selection_invariants(DocState* state,
         }
     }
 
-    if (state->caret && selection->is_collapsed) {
-        if (static_cast<DomNode*>(state->caret->view) != selection->focus.node ||
-            state->caret->char_offset != boundary_legacy_offset(&selection->focus)) {
+    if (state->caret && selection_collapsed) {
+        if (static_cast<DomNode*>(state->caret->view) != focus.node ||
+            state->caret->char_offset != boundary_legacy_offset(&focus)) {
             report_fail(report, "legacy caret projection is stale");
         }
     }
@@ -1159,6 +1233,7 @@ static bool radiant_state_validate_interaction_schema(DocState* state,
                                                       StateValidationReport* report) {
     report_init(report);
     if (!state) return true;
+    state_store_refresh_caret_projection(state);
     for (uint32_t i = 0; i < RADIANT_INVARIANT_COUNT; i++) {
         const StateInvariantBinding* binding = &RADIANT_INVARIANTS[i];
         if (!schema_invariant_binding_applies(state, binding)) continue;

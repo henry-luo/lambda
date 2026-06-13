@@ -4393,6 +4393,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                                 {"multiline",  9, JS_BUILTIN_REGEXP_GET_MULTILINE},
                                 {"dotAll",     6, JS_BUILTIN_REGEXP_GET_DOTALL},
                                 {"unicode",    7, JS_BUILTIN_REGEXP_GET_UNICODE},
+                                {"unicodeSets", 11, JS_BUILTIN_REGEXP_GET_UNICODE_SETS},
                                 {"sticky",     6, JS_BUILTIN_REGEXP_GET_STICKY},
                                 {"hasIndices", 10, JS_BUILTIN_REGEXP_GET_HASINDICES},
                                 {NULL, 0, 0}
@@ -10593,6 +10594,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_REGEXP_GET_MULTILINE:
     case JS_BUILTIN_REGEXP_GET_DOTALL:
     case JS_BUILTIN_REGEXP_GET_UNICODE:
+    case JS_BUILTIN_REGEXP_GET_UNICODE_SETS:
     case JS_BUILTIN_REGEXP_GET_STICKY:
     case JS_BUILTIN_REGEXP_GET_HASINDICES: {
         // ES2023 §22.2.5.x: get RegExp.prototype.<flag>
@@ -10611,7 +10613,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 {"multiline",  9, 'm'},
                 {"dotAll",     6, 's'},
                 {"unicode",    7, 'u'},
-                // unicodeSets 'v' — skip for now
+                {"unicodeSets", 11, 'v'},
                 {"sticky",     6, 'y'},
                 {NULL, 0, 0}
             };
@@ -10649,6 +10651,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 case JS_BUILTIN_REGEXP_GET_MULTILINE:  prop = "multiline";  prop_len = 9; break;
                 case JS_BUILTIN_REGEXP_GET_DOTALL:     prop = "dotAll";     prop_len = 6; break;
                 case JS_BUILTIN_REGEXP_GET_UNICODE:    prop = "unicode";    prop_len = 7; break;
+                case JS_BUILTIN_REGEXP_GET_UNICODE_SETS: prop = "unicodeSets"; prop_len = 11; break;
                 case JS_BUILTIN_REGEXP_GET_STICKY:     prop = "sticky";     prop_len = 6; break;
                 case JS_BUILTIN_REGEXP_GET_HASINDICES:
                     return (Item){.item = b2it(js_regex_internal_has_indices(this_val) ? BOOL_TRUE : BOOL_FALSE)};
@@ -10957,6 +10960,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return js_throw_type_error("ArrayBuffer.prototype.maxByteLength requires an ArrayBuffer receiver");
         }
         return (Item){.item = i2it(js_arraybuffer_max_byte_length(this_val))};
+    }
+    case JS_BUILTIN_ARRAYBUFFER_GET_DETACHED: {
+        // Js54 P8: ES2024 §25.1.5.5 — get ArrayBuffer.prototype.detached.
+        // TypeError on non-ArrayBuffer receivers and on SharedArrayBuffer.
+        if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
+            return js_throw_type_error("ArrayBuffer.prototype.detached requires an ArrayBuffer receiver");
+        }
+        return (Item){.item = b2it(js_arraybuffer_is_detached(this_val) ? BOOL_TRUE : BOOL_FALSE)};
     }
     case JS_BUILTIN_SHAREDARRAYBUFFER_SLICE: {
         Item method_name = (Item){.item = s2it(heap_create_name("slice", 5))};
@@ -12145,6 +12156,7 @@ struct JsRegexCacheEntry {
     bool dot_all;
     bool has_indices;
     bool has_unicode;
+    bool has_unicode_sets;       // Js54: /v flag set
 };
 
 static std::unordered_map<uint64_t, JsRegexCacheEntry> g_regex_compile_cache;
@@ -12557,6 +12569,30 @@ static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, in
 }
 
 #include "js_regex_generated_property_tables.inc"
+
+// Js54: expose property-table lookup to the /v-flag rewriter (js_regex_wrapper.cpp).
+// Returns the number of ranges written to out_pairs (each pair is {lo, hi},
+// inclusive). Returns 0 if the property name is not found. The caller must
+// provide enough space — currently every generated table fits in 16K pairs.
+extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int name_len,
+                                                       int* out_pairs, int max_pairs) {
+    if (!name || name_len <= 0 || !out_pairs || max_pairs <= 0) return 0;
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    for (int i = 0; i < table_count; i++) {
+        const JsRegexGeneratedPropertyTable& t = js_regex_generated_property_tables[i];
+        if (js_regex_match_property_name(name, name_len, t.name)) {
+            int n = t.count;
+            if (n > max_pairs) n = max_pairs;
+            for (int k = 0; k < n; k++) {
+                out_pairs[k * 2 + 0] = t.ranges[k].first;
+                out_pairs[k * 2 + 1] = t.ranges[k].last;
+            }
+            return n;
+        }
+    }
+    return 0;
+}
 
 static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
     if (pattern && pattern_len == 5 && pattern[0] == '^' && pattern[1] == '\\' &&
@@ -13151,6 +13187,7 @@ static bool js_regex_match_special_property(int special_kind, const char* input,
 struct Re2PermanentEntry {
     re2::RE2* re2;              // new-allocated, never freed
     bool global, ignore_case, multiline, sticky, dot_all, has_unicode;
+    bool has_unicode_sets;      // Js54: /v flag
     bool has_indices;
     char* canonical_flags;      // new-allocated, never freed
     int canonical_flags_len;
@@ -13702,8 +13739,15 @@ static Item js_regex_build_object_from_cache(const JsRegexCacheEntry& ce) {
     js_regex_put_fresh(regex_obj, "dotAll", 6, (Item){.item = b2it(ce.dot_all ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
-    js_regex_put_fresh(regex_obj, "unicode", 7, (Item){.item = b2it(ce.has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    // Per ES §22.2.5.6: .unicode is true only when the `u` flag was set.
+    // /v sets .unicodeSets but NOT .unicode.
+    bool js_unicode = ce.has_unicode && !ce.has_unicode_sets;
+    js_regex_put_fresh(regex_obj, "unicode", 7, (Item){.item = b2it(js_unicode ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, uni_key);
+    // Js54: ES2024 unicodeSets ('v' flag) own property
+    Item uniset_key = (Item){.item = s2it(heap_create_name("unicodeSets"))};
+    js_regex_put_fresh(regex_obj, "unicodeSets", 11, (Item){.item = b2it(ce.has_unicode_sets ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_enumerable(regex_obj, uniset_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_regex_put_fresh(regex_obj, "sticky", 6, (Item){.item = b2it(rd->sticky ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_enumerable(regex_obj, sticky_key);
@@ -14242,7 +14286,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             rd->special_property_kind = special_property_kind;
             rd->has_indices = has_indices;
             JsRegexCacheEntry ce = {rd, pattern, pattern_len, canonical_flags,
-                                    canonical_flags_len, false, has_indices, has_unicode};
+                                    canonical_flags_len, false, has_indices, has_unicode, false};
             return js_regex_build_object_from_cache(ce);
         }
     }
@@ -14297,7 +14341,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         rd->literal_pattern = literal_buf;
         rd->literal_pattern_len = literal_len;
         static const char empty_flags[] = "";
-        JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false, false};
+        JsRegexCacheEntry ce = {rd, pattern, pattern_len, empty_flags, 0, false, false, false, false};
         return js_regex_build_object_from_cache(ce);
     }
 
@@ -14325,7 +14369,7 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 rd->has_indices = pe.has_indices;
                 rd->unicode = pe.has_unicode;
                 JsRegexCacheEntry ce = {rd, pattern, pattern_len, pe.canonical_flags, pe.canonical_flags_len,
-                                        pe.dot_all, pe.has_indices, pe.has_unicode};
+                                        pe.dot_all, pe.has_indices, pe.has_unicode, pe.has_unicode_sets};
                 g_regex_compile_cache[cache_key] = ce;
                 return js_regex_build_object_from_cache(ce);
             }
@@ -14360,8 +14404,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             && rewritten) {
             v_processed.assign(rewritten, rewritten_len);
             free(rewritten);
-            // log_debug("js regex /v runtime rewrite: '%.*s' -> %d bytes",
-            //     vpat_len, vpat, (int)v_processed.size());
             effective_pattern = v_processed.c_str();
             effective_pattern_len = (int)v_processed.size();
         }
@@ -15198,9 +15240,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     js_mark_non_writable(regex_obj, da_key);
     js_mark_non_enumerable(regex_obj, da_key);
     Item uni_key = (Item){.item = s2it(heap_create_name("unicode"))};
-    js_property_set(regex_obj, uni_key, (Item){.item = b2it(has_unicode ? BOOL_TRUE : BOOL_FALSE)});
+    // Per ES §22.2.5.6: only `u` (not `v`) sets .unicode.
+    js_property_set(regex_obj, uni_key, (Item){.item = b2it(compile_info.unicode ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_writable(regex_obj, uni_key);
     js_mark_non_enumerable(regex_obj, uni_key);
+    // Js54: ES2024 unicodeSets ('v' flag) own property
+    Item uniset_key = (Item){.item = s2it(heap_create_name("unicodeSets"))};
+    js_property_set(regex_obj, uniset_key, (Item){.item = b2it(compile_info.unicode_sets ? BOOL_TRUE : BOOL_FALSE)});
+    js_mark_non_writable(regex_obj, uniset_key);
+    js_mark_non_enumerable(regex_obj, uniset_key);
     Item sticky_key = (Item){.item = s2it(heap_create_name("sticky"))};
     js_property_set(regex_obj, sticky_key, (Item){.item = b2it(has_sticky ? BOOL_TRUE : BOOL_FALSE)});
     js_mark_non_writable(regex_obj, sticky_key);
@@ -15228,13 +15276,15 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         char* perm_flags = new char[flags_len + 1];
         memcpy(perm_flags, flg_buf, flags_len + 1);
         g_re2_permanent_cache[perm_key] = {perm_re2, global, !opts.case_sensitive(), multiline, sticky,
-                                            dot_all, has_unicode, compile_info.has_indices, perm_flags,
+                                            dot_all, has_unicode, compile_info.unicode_sets,
+                                            compile_info.has_indices, perm_flags,
                                             (int)strlen(perm_flags), pattern_len};
     }
     // Store in regex compilation cache for future reuse
     if (special_property_kind == 0) {
         g_regex_compile_cache[cache_key] = {rd, pattern, pattern_len, flg_buf,
-                                             (int)strlen(flg_buf), dot_all, compile_info.has_indices, has_unicode};
+                                             (int)strlen(flg_buf), dot_all, compile_info.has_indices,
+                                             has_unicode, compile_info.unicode_sets};
     }
     return regex_obj;
 }

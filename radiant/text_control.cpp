@@ -262,6 +262,10 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->tc_initialized = 1;
     f->value = buf;
     form_control_sync_text_control_state(state, (View*)elem);
+    if (state) {
+        state_store_set_text_control_selection(state, elem,
+            f->selection_start, f->selection_end, f->selection_direction);
+    }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
     // selection was past the new length and got clamped). Suppress on
@@ -305,6 +309,10 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_end = end;
     f->selection_direction = dir;
     form_control_sync_text_control_state(state, (View*)elem);
+    if (state) {
+        state_store_set_text_control_selection(state, elem,
+            f->selection_start, f->selection_end, f->selection_direction);
+    }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {
         tc_notify_selection_changed(elem);
@@ -319,7 +327,6 @@ void tc_set_selection_range(DomElement* elem,
 // DOM). Caller passes the *known* DomElement so we don't have to dispatch.
 
 void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
-    // Only derive text-control fields from DomSelection; never update DomSelection from projection fields.
     if (!elem || !state) return;
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
@@ -336,32 +343,64 @@ void tc_sync_legacy_to_form(DomElement* elem, DocState* state) {
     uint32_t blen = f->current_value_len;
     f->value = f->current_value;
     f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, blen);
-    // Derive selection fields from DomSelection (canonical)
-    DomSelection* ds = state->dom_selection;
-    if (ds && ds->range_count > 0 && ds->anchor.node == ds->focus.node) {
-        // Text control selection: anchor/focus on same node
-        int a = ds->anchor.offset;
-        int b = ds->focus.offset;
-        if (a < 0) a = 0; if (b < 0) b = 0;
-        if ((uint32_t)a > blen) a = (int)blen;
-        if ((uint32_t)b > blen) b = (int)blen;
-        uint32_t lo = a < b ? (uint32_t)a : (uint32_t)b;
-        uint32_t hi = a < b ? (uint32_t)b : (uint32_t)a;
-        f->selection_start = tc_utf8_to_utf16_offset(f->current_value, blen, lo);
-        f->selection_end   = tc_utf8_to_utf16_offset(f->current_value, blen, hi);
-        f->selection_direction = (a <= b) ? 1 : 2;
-    } else {
-        // Collapsed or no selection
-        int caret_byte = 0;
-        caret_get_offset(state, &caret_byte);
-        if (caret_byte < 0) caret_byte = 0;
-        if ((uint32_t)caret_byte > blen) caret_byte = (int)blen;
-        uint32_t u16 = tc_utf8_to_utf16_offset(f->current_value, blen, (uint32_t)caret_byte);
-        f->selection_start = u16;
-        f->selection_end = u16;
-        f->selection_direction = 0;
+
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control == elem) {
+        uint8_t direction = f->selection_direction;
+        if (state->sel.start_u16 != state->sel.end_u16) {
+            direction = state->sel.direction == DOM_SEL_DIR_BACKWARD ? 2 : 1;
+        }
+        state_store_set_text_control_selection(state, elem,
+            state->sel.start_u16, state->sel.end_u16, direction);
+        return;
     }
-    form_control_sync_text_control_state(state, (View*)elem);
+
+    bool have_legacy_range = false;
+    int anchor_byte = 0;
+    int focus_byte = 0;
+    View* view = (View*)elem;
+    View* anchor_view = nullptr;
+    View* focus_view = nullptr;
+    if (selection_get_anchor_snapshot(state, &anchor_view, &anchor_byte, nullptr) &&
+        selection_get_focus_snapshot(state, &focus_view, &focus_byte,
+            nullptr, nullptr, nullptr) &&
+        anchor_view == view && focus_view == view) {
+        have_legacy_range = true;
+    } else if (caret_get_position(state, &focus_view, &focus_byte) &&
+               focus_view == view) {
+        anchor_byte = focus_byte;
+        have_legacy_range = true;
+    } else if (state->dom_selection && state->dom_selection->range_count > 0) {
+        DomSelection* ds = state->dom_selection;
+        DomBoundary anchor = dom_selection_anchor_boundary(ds);
+        DomBoundary focus = dom_selection_focus_boundary(ds);
+        if (anchor.node == (DomNode*)elem && focus.node == (DomNode*)elem) {
+            anchor_byte = static_cast<int>(anchor.offset); // INT_CAST_OK: fallback DomSelection text-control offsets are bytes.
+            focus_byte = static_cast<int>(focus.offset); // INT_CAST_OK: fallback DomSelection text-control offsets are bytes.
+            have_legacy_range = true;
+        }
+    }
+
+    if (!have_legacy_range) {
+        form_control_sync_text_control_state(state, (View*)elem);
+        return;
+    }
+
+    if (anchor_byte < 0) anchor_byte = 0;
+    if (focus_byte < 0) focus_byte = 0;
+    if ((uint32_t)anchor_byte > blen) anchor_byte = static_cast<int>(blen); // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
+    if ((uint32_t)focus_byte > blen) focus_byte = static_cast<int>(blen); // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
+    uint32_t lo = anchor_byte < focus_byte ? (uint32_t)anchor_byte : (uint32_t)focus_byte;
+    uint32_t hi = anchor_byte < focus_byte ? (uint32_t)focus_byte : (uint32_t)anchor_byte;
+    uint8_t direction = 0;
+    if (anchor_byte < focus_byte) {
+        direction = 1;
+    } else if (anchor_byte > focus_byte) {
+        direction = 2;
+    }
+    uint32_t start_u16 = tc_utf8_to_utf16_offset(f->current_value, blen, lo);
+    uint32_t end_u16 = tc_utf8_to_utf16_offset(f->current_value, blen, hi);
+    state_store_set_text_control_selection(state, elem, start_u16, end_u16, direction);
 }
 
 // ---- public: focus tracker ---------------------------------------------
@@ -374,6 +413,7 @@ static DocState* tc_resolve_state(DocState* state, DomElement* elem) {
 void tc_set_active_element(DocState* state, DomElement* elem) {
     DocState* resolved = tc_resolve_state(state, elem);
     if (!resolved) return;
+    if (elem && focus_get(resolved) != (View*)elem) return;
     resolved->active_text_control = elem;
 }
 

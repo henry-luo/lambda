@@ -365,6 +365,8 @@ const JsBuiltinMethodSpec JS_ARRAYBUFFER_ACCESSOR_SPECS[] = {
     {"byteLength", 10, JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
     {"resizable", 9, JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE, 0, "get resizable"},
     {"maxByteLength", 13, JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
+    // Js54 P8: ES2024 ArrayBuffer.prototype.detached accessor
+    {"detached", 8, JS_BUILTIN_ARRAYBUFFER_GET_DETACHED, 0, "get detached"},
     {NULL, 0, 0, 0}
 };
 

@@ -1000,7 +1000,7 @@ extern "C" Item js_dom_selection_get_property(Item obj, Item key) {
         // the Selection API spec (proposed). 'none' for collapsed or empty
         // selections (also for click-driven selections that browsers treat
         // as directionless).
-        if (s->range_count == 0 || s->is_collapsed) return make_str("none");
+        if (s->range_count == 0 || dom_selection_is_collapsed(s)) return make_str("none");
         switch (s->direction) {
             case DOM_SEL_DIR_FORWARD:  return make_str("forward");
             case DOM_SEL_DIR_BACKWARD: return make_str("backward");
@@ -1209,13 +1209,13 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     DocState* state = sel->state;
     // Coalesce before touching the document runtime. In tight DOM-only loops
     // (e.g. WPT collapse), repeated js_dom_set_document() dominates runtime.
-    if (state->dom_selection_sync_depth > 0) return;
-    state->selection_mutation_seq++;
     if (state->selectionchange_pending) return;
 
+    DomBoundary anchor = dom_selection_anchor_boundary(sel);
+    DomBoundary focus = dom_selection_focus_boundary(sel);
     DomDocument* doc = nullptr;
-    if (sel->anchor.node) doc = node_owning_doc(sel->anchor.node);
-    if (!doc && sel->focus.node) doc = node_owning_doc(sel->focus.node);
+    if (anchor.node) doc = node_owning_doc(anchor.node);
+    if (!doc && focus.node) doc = node_owning_doc(focus.node);
     if (!doc) doc = (DomDocument*)js_dom_get_document();
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
@@ -1271,6 +1271,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
     FormControlProp* f = elem->form;
     if (!f) return;
+    if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;

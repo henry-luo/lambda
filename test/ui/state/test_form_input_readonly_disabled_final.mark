@@ -1,6 +1,9 @@
 <doc focus: {
     target: "#readonly-fld",
     from_mouse: true
+  }, caret: {
+    target: "#readonly-fld",
+    offset: 6
   }, hover: "#disabled-fld", render: {
     dirty: true,
     repaint: true,
@@ -18,7 +21,9 @@
         <div index: 5
           <input index: 3, id: "pwd", flags: ['valid', 'optional']>>
         <div index: 7, flags: ['focus-within']
-          <input index: 3, id: "readonly-fld", flags: ['focus', 'focus-within', 'valid', 'optional']>>
+          <input index: 3, id: "readonly-fld", flags: ['focus', 'focus-within', 'valid', 'optional'], form: {
+              sel: [6, 6]
+            }>>
         <div index: 9, flags: ['hover']
           <input index: 3, id: "disabled-fld", flags: ['hover', 'readonly', 'valid', 'optional'], form: {
               sel: [3, 3]
