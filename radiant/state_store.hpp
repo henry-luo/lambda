@@ -245,6 +245,20 @@ typedef struct EditingCompositionState {
     bool canceled;
 } EditingCompositionState;
 
+typedef enum EditingRichTransactionPhase {
+    EDITING_RICH_TX_IDLE = 0,
+    EDITING_RICH_TX_OPEN,
+    EDITING_RICH_TX_BEFOREINPUT,
+    EDITING_RICH_TX_MUTATED,
+    EDITING_RICH_TX_SELECTION_SET,
+    EDITING_RICH_TX_INPUT
+} EditingRichTransactionPhase;
+
+typedef struct EditingTargetRangeSnapshot {
+    DomBoundary start;
+    DomBoundary end;
+} EditingTargetRangeSnapshot;
+
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
@@ -255,6 +269,15 @@ typedef struct EditingInteractionState {
     bool composing;
     EditingCompositionState composition;
     EditingScrollState autoscroll;
+    EditingRichTransactionPhase rich_transaction_phase;
+    View* rich_transaction_target;
+    bool rich_transaction_target_ranges_active;
+    bool rich_transaction_target_ranges_required;
+    bool rich_transaction_target_ranges_valid;
+    uint32_t rich_transaction_input_type;
+    uint32_t rich_transaction_selection_seq;
+    uint32_t rich_transaction_target_range_count;
+    EditingTargetRangeSnapshot rich_transaction_target_ranges[4];
 } EditingInteractionState;
 
 /**
@@ -324,11 +347,12 @@ typedef struct DocState {
     // radiant/dom_range.hpp and vibe/radiant/Radiant_Design_Selection.md.
     // ------------------------------------------------------------------
     struct DomSelection* dom_selection;     // lazy; created on first read/write
-    // ED2-1 canonical StateStore selection. For DOM ranges it shadows
-    // dom_selection (references the live ranges[0], no boundary copy); for text
-    // controls it is the canonical store (form->selection_* mirrors it). The two
-    // kinds are mutually exclusive. See state_store_set_text_control_selection
-    // and state_store_refresh_editing_selection_shadow.
+    // ED2-1 canonical StateStore selection for the active editing surface.
+    // For DOM ranges it shadows dom_selection (references the live ranges[0], no
+    // boundary copy); for text controls it is the canonical store
+    // (form->selection_* mirrors it). Note a focused text control's selection
+    // can coexist with a separate, non-empty document dom_selection (browser
+    // semantics). See state_store_set_text_control_selection.
     EditingSelection     sel;
     struct DomRange*     live_ranges;       // doubly-linked list head
     uint32_t             next_range_id;     // monotonic id (debug)
@@ -592,7 +616,7 @@ void state_begin_batch(DocState* state);
  */
 void state_end_batch(DocState* state);
 
-// ED2-1A shadow selection: derived from DomSelection until writers flip.
+// ED2-1 selection authority/projection API.
 #ifdef __cplusplus
 extern "C" {
 #endif

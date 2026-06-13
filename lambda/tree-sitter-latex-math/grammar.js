@@ -56,6 +56,7 @@ module.exports = grammar({
       $.operator,            // +, -, *, /
       $.relation,            // =, <, >, !, \uparrow, \downarrow
       $.ascii_operator,      // <=, ->, xx, +-, etc. (ASCII math)
+      $.escaped_symbol,      // \#, \%, \&, \$, \_
       $.punctuation,         // , ; : . ( ) [ ] | ...
       $.quoted_text,         // "quoted text" (ASCII math)
       $.group,               // { ... }
@@ -152,9 +153,11 @@ module.exports = grammar({
       '(', ')',
       '[', ']',
       '|',
-      '\\{', '\\}',
       '\'',
     )),
+
+    // Escaped math punctuation that should render as ordinary text glyphs.
+    escaped_symbol: $ => token(/\\[#%&$_{}]/),
 
     // NEW: Quoted text for ASCII math
     quoted_text: $ => seq('"', /[^"]*/, '"'),
@@ -261,7 +264,7 @@ module.exports = grammar({
     )),
 
     // Delimiter token: collapsed ASCII delimiters into regex + command tokens
-    _delim_char: $ => token(/[()\[\]|.]|\\[{}|]/),
+    _delim_char: $ => token(/[()\[\]|.<>]|\\[{}|]/),
 
     delimiter: $ => choice(
       $._delim_char,
@@ -333,7 +336,7 @@ module.exports = grammar({
       optional(field('arg', choice(prec(1, $.text_group), $.group))),
     )),
 
-    text_group: $ => seq('{', optional($.text_content), '}'),
+    text_group: $ => seq('{', repeat(choice($.text_content, $.text_group)), '}'),
     text_content: $ => /[^{}]+/,
 
     // ========================================================================

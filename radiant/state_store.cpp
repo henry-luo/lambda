@@ -1105,27 +1105,13 @@ extern "C" void state_store_refresh_editing_selection_shadow(DocState* state) {
     if (!state) return;
 
     EditingSelection* shadow = &state->sel;
-    DomSelection* dom_selection = state->dom_selection;
-    bool dom_has_range = dom_selection && dom_selection->range_count > 0;
-
-    // Text-control and DOM-range selection are mutually exclusive (a text
-    // control owns its own selection; the document DomSelection is separate).
-    // A DOM-selection notification (e.g. removeAllRanges) must not clobber an
-    // active text-control selection while the document range is empty —
-    // state_store_set_text_control_selection clears any document range when a
-    // text control takes the selection, so dom_has_range here means the
-    // document genuinely owns the selection again.
-    if (shadow->kind == EDIT_SEL_TEXT_CONTROL && !dom_has_range) {
-        shadow->mutation_seq = state->selection_mutation_seq;
-        return;
-    }
-
     memset(shadow, 0, sizeof(*shadow));
     shadow->kind = EDIT_SEL_NONE;
     shadow->direction = DOM_SEL_DIR_NONE;
     shadow->mutation_seq = state->selection_mutation_seq;
 
-    if (!dom_has_range) return;
+    DomSelection* dom_selection = state->dom_selection;
+    if (!dom_selection || dom_selection->range_count == 0) return;
 
     shadow->kind = EDIT_SEL_DOM_RANGE;
     shadow->direction = dom_selection->direction;
@@ -1207,10 +1193,6 @@ extern "C" bool state_store_set_selection(DocState* state,
         ok = dom_selection_set_base_and_extent(selection,
             anchor->node, anchor->offset, focus->node, focus->offset, out_exception);
     }
-    // The dom mutators above already refresh via sync_anchor_focus; this call is
-    // an idempotent safety net (no-op when selection_projection_seq is current),
-    // covering any mutator path that does not reach sync_anchor_focus.
-    if (ok) state_store_refresh_caret_projection(state);
     return ok;
 }
 
@@ -1236,15 +1218,6 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
     if (end_u16 > max_u16) end_u16 = max_u16;
     if (start_u16 > end_u16) start_u16 = end_u16;
     direction &= 3;
-
-    // Mutual exclusion: a text control taking the selection clears any document
-    // range so the two canonical stores can't both be non-empty (matching the
-    // browser behavior where focusing an input drops the document highlight).
-    // This runs before we write `sel` so the removeAllRanges → shadow refresh
-    // cannot leave a stale EDIT_SEL_DOM_RANGE behind.
-    if (state->dom_selection && state->dom_selection->range_count > 0) {
-        dom_selection_remove_all_ranges(state->dom_selection);
-    }
 
     DomSelectionDirection editing_direction =
         editing_direction_from_text_control(start_u16, end_u16, direction);
@@ -1906,6 +1879,16 @@ void radiant_state_reset(DocState* state) {
     state->editing.autoscroll.pointer_y = 0.0f;
     state->editing.autoscroll.tick_last_time = 0.0;
     state->editing.autoscroll.caret_blink_elapsed = 0.0;
+    state->editing.rich_transaction_phase = EDITING_RICH_TX_IDLE;
+    state->editing.rich_transaction_target = NULL;
+    state->editing.rich_transaction_target_ranges_active = false;
+    state->editing.rich_transaction_target_ranges_required = false;
+    state->editing.rich_transaction_target_ranges_valid = true;
+    state->editing.rich_transaction_input_type = 0;
+    state->editing.rich_transaction_selection_seq = 0;
+    state->editing.rich_transaction_target_range_count = 0;
+    memset(state->editing.rich_transaction_target_ranges, 0,
+           sizeof(state->editing.rich_transaction_target_ranges));
 
     // Reset dirty state
     state->is_dirty = false;

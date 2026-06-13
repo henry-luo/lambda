@@ -53,6 +53,10 @@
           "named": true
         },
         {
+          "type": "escaped_symbol",
+          "named": true
+        },
+        {
           "type": "frac_like",
           "named": true
         },
@@ -200,6 +204,10 @@
           "named": true
         },
         {
+          "type": "escaped_symbol",
+          "named": true
+        },
+        {
           "type": "frac_like",
           "named": true
         },
@@ -296,6 +304,10 @@
         },
         {
           "type": "environment",
+          "named": true
+        },
+        {
+          "type": "escaped_symbol",
           "named": true
         },
         {
@@ -492,6 +504,10 @@
           "named": true
         },
         {
+          "type": "escaped_symbol",
+          "named": true
+        },
+        {
           "type": "frac_like",
           "named": true
         },
@@ -587,6 +603,10 @@
             "named": true
           },
           {
+            "type": "escaped_symbol",
+            "named": true
+          },
+          {
             "type": "frac_like",
             "named": true
           },
@@ -670,6 +690,10 @@
           },
           {
             "type": "environment",
+            "named": true
+          },
+          {
+            "type": "escaped_symbol",
             "named": true
           },
           {
@@ -771,6 +795,10 @@
           "named": true
         },
         {
+          "type": "escaped_symbol",
+          "named": true
+        },
+        {
           "type": "frac_like",
           "named": true
         },
@@ -867,6 +895,10 @@
         },
         {
           "type": "environment",
+          "named": true
+        },
+        {
+          "type": "escaped_symbol",
           "named": true
         },
         {
@@ -999,6 +1031,10 @@
         },
         {
           "type": "environment",
+          "named": true
+        },
+        {
+          "type": "escaped_symbol",
           "named": true
         },
         {
@@ -1199,6 +1235,10 @@
             "named": true
           },
           {
+            "type": "escaped_symbol",
+            "named": true
+          },
+          {
             "type": "frac_like",
             "named": true
           },
@@ -1358,11 +1398,15 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
         {
           "type": "text_content",
+          "named": true
+        },
+        {
+          "type": "text_group",
           "named": true
         }
       ]
@@ -1485,14 +1529,6 @@
     "named": false
   },
   {
-    "type": "\\{",
-    "named": false
-  },
-  {
-    "type": "\\}",
-    "named": false
-  },
-  {
     "type": "]",
     "named": false
   },
@@ -1522,6 +1558,10 @@
   },
   {
     "type": "end_cmd",
+    "named": true
+  },
+  {
+    "type": "escaped_symbol",
     "named": true
   },
   {

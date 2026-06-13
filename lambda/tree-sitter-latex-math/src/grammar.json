@@ -61,6 +61,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "escaped_symbol"
+        },
+        {
+          "type": "SYMBOL",
           "name": "punctuation"
         },
         {
@@ -325,17 +329,16 @@
           },
           {
             "type": "STRING",
-            "value": "\\{"
-          },
-          {
-            "type": "STRING",
-            "value": "\\}"
-          },
-          {
-            "type": "STRING",
             "value": "'"
           }
         ]
+      }
+    },
+    "escaped_symbol": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\[#%&$_{}]"
       }
     },
     "quoted_text": {
@@ -850,7 +853,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "[()\\[\\]|.]|\\\\[{}|]"
+        "value": "[()\\[\\]|.<>]|\\\\[{}|]"
       }
     },
     "delimiter": {
@@ -1200,16 +1203,20 @@
           "value": "{"
         },
         {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "text_content"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "text_content"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "text_group"
+              }
+            ]
+          }
         },
         {
           "type": "STRING",

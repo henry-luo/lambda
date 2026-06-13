@@ -34,6 +34,37 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "dom_range.hpp"
+#include "state_store.hpp"
+
+// The full Radiant binary links state_store.cpp and uses the canonical writer.
+// Source-position bridge unit tests link this file without the full StateStore
+// stack, so provide a weak compatibility fallback for that narrower target.
+extern "C" bool state_store_set_selection(DocState* state,
+                                           const DomBoundary* anchor,
+                                           const DomBoundary* focus,
+                                           const char** out_exception);
+extern "C" __attribute__((weak)) bool state_store_set_selection(
+        DocState* state,
+        const DomBoundary* anchor,
+        const DomBoundary* focus,
+        const char** out_exception) {
+    if (!state || !state->dom_selection) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+    DomSelection* selection = state->dom_selection;
+    if (!anchor || !focus || !anchor->node || !focus->node) {
+        dom_selection_remove_all_ranges(selection);
+        return true;
+    }
+    if (dom_boundary_compare(anchor, focus) == DOM_BOUNDARY_EQUAL) {
+        return dom_selection_collapse(selection, anchor->node, anchor->offset,
+                                      out_exception);
+    }
+    return dom_selection_set_base_and_extent(selection,
+        anchor->node, anchor->offset, focus->node, focus->offset,
+        out_exception);
+}
 
 extern "C" {
 
@@ -534,6 +565,17 @@ DomNode* dom_node_from_source_path(DomNode* dom_root, const SourcePathC* path) {
     return b.node;
 }
 
+uint32_t source_selection_child_count(DomNode* node) {
+    uint32_t child_count = 0;
+    if (node && node->is_element()) {
+        for (DomNode* child = node->as_element()->first_child; child;
+             child = child->next_sibling) {
+            child_count++;
+        }
+    }
+    return child_count;
+}
+
 } // namespace
 
 extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
@@ -566,9 +608,8 @@ extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
         source_pos_free(&anchor_pos);
         source_pos_free(&head_pos);
         if (!ok || !anchor_b.node || !head_b.node) return false;
-        return dom_selection_set_base_and_extent(ds,
-            anchor_b.node, anchor_b.offset,
-            head_b.node,   head_b.offset, &exc);
+        if (!ds->state) return false;
+        return state_store_set_selection(ds->state, &anchor_b, &head_b, &exc);
     }
 
     if (strcmp(kind_str, "node") == 0) {
@@ -577,11 +618,17 @@ extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
         DomNode* node = dom_node_from_source_path(dom_root, &path);
         source_path_free(&path);
         if (!node) return false;
-        return dom_selection_select_all_children(ds, node, &exc);
+        if (!ds->state) return false;
+        DomBoundary start = { node, 0 };
+        DomBoundary end = { node, source_selection_child_count(node) };
+        return state_store_set_selection(ds->state, &start, &end, &exc);
     }
 
     if (strcmp(kind_str, "all") == 0) {
-        return dom_selection_select_all_children(ds, dom_root, &exc);
+        if (!ds->state) return false;
+        DomBoundary start = { dom_root, 0 };
+        DomBoundary end = { dom_root, source_selection_child_count(dom_root) };
+        return state_store_set_selection(ds->state, &start, &end, &exc);
     }
 
     return false;

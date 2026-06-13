@@ -409,7 +409,7 @@ fn wrap_default_fraction(frac_box) {
         render_depth: frac_box.render_depth,
         render_total: frac_box.render_total,
         width: frac_box.width + 0.24,
-        type: "mord",
+        type: "minner",
         italic: 0.0,
         skew: 0.0
     }
@@ -433,7 +433,7 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
         render_depth: combined.render_depth,
         render_total: combined.render_total,
         width: combined.width,
-        type: "mord",
+        type: "minner",
         italic: 0.0,
         skew: 0.0
     }

@@ -1319,6 +1319,8 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_PASTE_TEXT;
         const char* text = reader.get("text").cstring();
         if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        const char* html = reader.get("html").cstring();
+        if (html) ev->clipboard_html = mem_strdup(html, MEM_CAT_LAYOUT);
         parse_target(reader, ev);
     }
     else if (strcmp(type_str, "assert_clipboard") == 0) {
@@ -2191,6 +2193,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
             if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
+            if (ev->clipboard_html) mem_free(ev->clipboard_html);
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
             if (ev->state_name) mem_free(ev->state_name);
@@ -3824,7 +3827,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             const char* text = ev->input_text ? ev->input_text : "";
             log_info("event_sim: paste_text len=%zu", strlen(text));
-            clipboard_copy_text(text);
+            if (ev->clipboard_html) {
+                clipboard_store_write_html(ev->clipboard_html, text);
+            } else {
+                clipboard_copy_text(text);
+            }
             #ifdef __APPLE__
             sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, true);
             sim_key(uicon, GLFW_KEY_V, RDT_MOD_SUPER, false);
