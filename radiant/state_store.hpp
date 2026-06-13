@@ -238,6 +238,7 @@ typedef struct EditingCompositionState {
     View* anchor_view;
     int anchor_offset;
     uint32_t preedit_len;
+    uint32_t dom_preedit_len;
     uint32_t commit_len;
     uint32_t caret;
     uint32_t update_count;

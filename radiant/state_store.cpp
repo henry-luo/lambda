@@ -1868,6 +1868,7 @@ void radiant_state_reset(DocState* state) {
     state->editing.composition.anchor_view = NULL;
     state->editing.composition.anchor_offset = 0;
     state->editing.composition.preedit_len = 0;
+    state->editing.composition.dom_preedit_len = 0;
     state->editing.composition.commit_len = 0;
     state->editing.composition.caret = 0;
     state->editing.composition.update_count = 0;
@@ -2001,6 +2002,7 @@ static void editing_interaction_begin_composition_raw(DocState* state,
     state->editing.composition.anchor_view = anchor_view;
     state->editing.composition.anchor_offset = anchor_offset;
     state->editing.composition.preedit_len = 0;
+    state->editing.composition.dom_preedit_len = 0;
     state->editing.composition.commit_len = 0;
     state->editing.composition.caret = 0;
     state->editing.composition.update_count = 0;
@@ -2065,6 +2067,7 @@ static void editing_interaction_end_composition_raw(DocState* state,
     state->editing.composition.active = false;
     state->editing.composition.commit_len = commit_len;
     state->editing.composition.preedit_len = 0;
+    state->editing.composition.dom_preedit_len = 0;
     state->editing.composition.caret = 0;
     state->editing.composition.committed = !canceled && commit_len > 0;
     state->editing.composition.canceled = canceled;
