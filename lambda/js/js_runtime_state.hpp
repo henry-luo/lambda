@@ -44,6 +44,18 @@ struct JsRuntimeState {
     Item* pending_call_args = NULL;
     int pending_call_argc = 0;
     Item array_method_real_this = {0};
+    // Js54 P5: true when the currently-dispatched builtin was invoked through
+    // an Array.prototype function object (no JS_FUNC_FLAG_TYPED_ARRAY_METHOD).
+    // Several methods (every, fill, slice, forEach, ...) share the same
+    // JS_BUILTIN_ARR_* id between Array.prototype and TypedArray.prototype.
+    // TypedArray.prototype.X on an OOB receiver throws via ValidateTypedArray;
+    // Array.prototype.X.call(ta_oob, ...) must NOT throw — it uses
+    // LengthOfArrayLike which yields 0 and the method silently no-ops.
+    // Default is false (i.e. TA-mode) so that the direct-method-call fast
+    // path used by the MIR JIT (which bypasses js_call_function and calls
+    // js_map_method directly) still throws on OOB. js_call_function /
+    // js_invoke_fn flip this to true when the calling fn lacks the TA flag.
+    bool dispatch_as_array_method = false;
     Map* cached_object_proto = NULL;
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
@@ -88,6 +100,7 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_pending_call_args (js_runtime_state.pending_call_args)
 #define js_pending_call_argc (js_runtime_state.pending_call_argc)
 #define js_array_method_real_this (js_runtime_state.array_method_real_this)
+#define js_dispatch_as_array_method (js_runtime_state.dispatch_as_array_method)
 #define js_cached_object_proto (js_runtime_state.cached_object_proto)
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)

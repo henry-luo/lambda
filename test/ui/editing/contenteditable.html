@@ -21,11 +21,26 @@
     }
     #auto-rich {
       background: #f8fbff;
-      height: 680px;
+      box-sizing: border-box;
+      min-height: 760px;
       padding: 8px;
       width: 620px;
     }
-    .auto-gap { height: 500px; }
+    #auto-rich p { margin: 0 0 10px; }
+    #auto-rich ul { margin: 0 0 12px 20px; padding: 0; }
+    #auto-rich table {
+      border-collapse: collapse;
+      margin: 0 0 12px;
+      width: 560px;
+    }
+    #auto-rich th,
+    #auto-rich td {
+      border: 1px solid #9aa7b3;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    #auto-rich th { background: #e9f1fb; }
+    .auto-gap { height: 260px; }
     .log { margin-top: 8px; font: 13px monospace; white-space: pre-wrap; }
   </style>
 </head>
@@ -33,7 +48,21 @@
   <div id="surface" contenteditable="true" tabindex="0">seed</div>
   <div id="auto-scroll">
     <div id="auto-rich" contenteditable="true" tabindex="0">
-      <p><span id="auto-rich-start">Rich start text</span> inside the scroll container.</p>
+      <p><span id="auto-rich-start">Rich start text</span> inside the scroll container with <strong>bold emphasis</strong> and <em>italic detail</em>.</p>
+      <p>This paragraph mixes <b>strong labels</b>, <i>inline notes</i>, and editable text before the internal scroll gap.</p>
+      <ul>
+        <li>First rich list item with <strong>bold text</strong>.</li>
+        <li>Second rich list item with <em>italic text</em>.</li>
+      </ul>
+      <table>
+        <thead>
+          <tr><th>Kind</th><th>Sample</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Inline</td><td><strong>bold</strong> and <em>italic</em></td></tr>
+          <tr><td>Block</td><td>list and table content</td></tr>
+        </tbody>
+      </table>
       <div class="auto-gap"></div>
       <p><span id="auto-rich-end">Rich end text</span> after internal scrolling.</p>
     </div>

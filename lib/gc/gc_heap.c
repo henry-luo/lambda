@@ -1311,7 +1311,18 @@ static void gc_sweep(gc_heap_t* gc) {
 // Conservative stack scanning: scan C stack for potential Item values.
 // Treats each aligned 8-byte value as a potential tagged pointer and checks
 // if it points to a GC-managed object.
-static void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_current) {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define GC_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(GC_NO_SANITIZE_ADDRESS)
+#define GC_NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+#endif
+#ifndef GC_NO_SANITIZE_ADDRESS
+#define GC_NO_SANITIZE_ADDRESS
+#endif
+static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_current) {
     if (stack_base == 0 || stack_current == 0) return;
     if (stack_current >= stack_base) return;  // stack grows down; current < base
 

@@ -1289,8 +1289,15 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
             log_debug("[EVENT_SKIP_NIL_VIEW] skipping uninitialized event stack entry");
             continue;
         }
-        if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
-            view->view_type == RDT_VIEW_LIST_ITEM) {
+        if (view->view_type == RDT_VIEW_BLOCK ||
+            view->view_type == RDT_VIEW_INLINE_BLOCK ||
+            view->view_type == RDT_VIEW_LIST_ITEM ||
+            view->view_type == RDT_VIEW_TABLE ||
+            view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+            view->view_type == RDT_VIEW_TABLE_ROW ||
+            view->view_type == RDT_VIEW_TABLE_CELL ||
+            view->view_type == RDT_VIEW_TABLE_COLUMN_GROUP ||
+            view->view_type == RDT_VIEW_TABLE_COLUMN) {
             fire_block_event(evcon, lam::view_require_block(view));
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
@@ -1334,6 +1341,22 @@ static DomElement* rich_editable_from_target(View* target) {
     EditingSurface surface;
     if (!editing_surface_from_target(target, &surface)) return nullptr;
     return editing_surface_is_rich(&surface) ? surface.owner : nullptr;
+}
+
+static DomText* rich_find_text_descendant(DomNode* node, bool last) {
+    if (!node) return nullptr;
+    if (node->is_text()) return lam::dom_require_text(node);
+    if (!node->is_element()) return nullptr;
+
+    DomElement* elem = lam::dom_require_element(node);
+    DomText* found = nullptr;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        DomText* text = rich_find_text_descendant(child, last);
+        if (!text) continue;
+        if (!last) return text;
+        found = text;
+    }
+    return found;
 }
 
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
@@ -6653,11 +6676,32 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // toolbar controls use this to keep text-control selection active.
             if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
                 update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
-            } else if (!evcon.default_prevented && evcon.iframe_container &&
-                       evcon.target->view_type == RDT_VIEW_TEXT) {
+            } else if (!evcon.default_prevented) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
                 if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
                     update_focus_state(&evcon, static_cast<View*>(rich_host), false);
+                }
+            }
+
+            if (!evcon.default_prevented && evcon.target->view_type != RDT_VIEW_TEXT &&
+                !is_view_focusable(evcon.target)) {
+                DomElement* rich_host = rich_editable_from_target(evcon.target);
+                DomText* fallback_text = rich_find_text_descendant(
+                    rich_host ? static_cast<DomNode*>(rich_host) : nullptr, true);
+                if (fallback_text) {
+                    uint32_t fallback_len = fallback_text->length > 0
+                        ? (uint32_t)fallback_text->length
+                        : (uint32_t)strlen(fallback_text->text ? fallback_text->text : "");
+                    caret_set(state, static_cast<View*>(fallback_text),
+                              (int)fallback_len); // INT_CAST_OK: StateStore caret API uses int offsets.
+                    EditingSurface surface;
+                    if (editing_surface_from_target(static_cast<View*>(fallback_text), &surface) &&
+                        editing_surface_is_rich(&surface)) {
+                        editing_interaction_set_active_surface(state, &surface);
+                    }
+                    log_debug("rich_mouse_blank_caret: host=%p text=%p offset=%u",
+                              (void*)rich_host, (void*)fallback_text, fallback_len);
+                    evcon.need_repaint = true;
                 }
             }
 
