@@ -5898,7 +5898,17 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
+    // Set _lambda_rt for the duration of module execution. Template literals
+    // (and many other JIT-emitted code paths) read it via the import resolver
+    // to obtain the runtime pool. Without this, _lambda_rt stays at whatever
+    // the previous test left it as — NULL on first run, stale otherwise —
+    // and the template-literal path crashes dereferencing rt->pool. This
+    // mirrors transpile_js_to_mir_core_len which sets it before its js_main.
+    extern Context* _lambda_rt;
+    Context* prev_lambda_rt = _lambda_rt;
+    _lambda_rt = (Context*)context;
     namespace_obj = js_main((Context*)context);
+    _lambda_rt = prev_lambda_rt;
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
