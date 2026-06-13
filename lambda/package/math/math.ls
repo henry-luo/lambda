@@ -50,7 +50,7 @@ pub fn render_math(ast, options) {
     }
 
     // optionally wrap with stylesheet for standalone HTML
-    if (is_standalone) css.wrap_standalone(latex_el)
+    if (is_standalone) css.wrap_standalone(latex_el, options)
     else latex_el
 }
 
@@ -64,4 +64,4 @@ pub fn render_inline(ast) { render_math(ast, {display: false}) }
 pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true}) }
 
 // get the CSS stylesheet string
-pub fn stylesheet() { css.get_stylesheet() }
+pub fn stylesheet(options = null) { css.get_stylesheet(options) }

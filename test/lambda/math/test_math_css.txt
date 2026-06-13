@@ -6,10 +6,22 @@ true
 true
 "33. stylesheet has lm_mfrac:"
 true
-"34. wrap tag:"
+"34. stylesheet default uses local main font:"
+true
+"35. stylesheet default uses local typewriter font:"
+true
+"36. stylesheet default keeps available size font:"
+true
+"37. stylesheet katex uses KaTeX math:"
+true
+"38. stylesheet katex uses KaTeX typewriter:"
+true
+"39. stylesheet katex omits local main font:"
+true
+"40. wrap tag:"
 'span'
-"35. wrap has style child:"
+"41. wrap has style child:"
 'style'
-"36. wrap has content:"
+"42. wrap has content:"
 'span'
 "===== ALL CSS TESTS DONE ====="

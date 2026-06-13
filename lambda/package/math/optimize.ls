@@ -43,7 +43,7 @@ fn build_merged(el) {
         (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
-         <span class: el.class, style: el.style;
+         <span class: el.class, style: el.style, id: el.id;
              for (c in items) c
          >)
 }

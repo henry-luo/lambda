@@ -669,7 +669,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
-        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--full-document]\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--full-document] [--font-option default|katex]\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
@@ -681,6 +681,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* output_file = NULL;  // Required
     bool full_document = false;      // For LaTeX to HTML: generate complete HTML with CSS
     const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
+    const char* font_option = NULL;  // LaTeX math fonts: default or katex
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -707,6 +708,23 @@ int exec_convert(int argc, char* argv[]) {
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
             full_document = true;
+        } else if (strcmp(argv[i], "--font-option") == 0) {
+            if (i + 1 < argc) {
+                font_option = argv[++i];
+                if (strcmp(font_option, "default") != 0 && strcmp(font_option, "katex") != 0) {
+                    printf("Error: --font-option must be 'default' or 'katex'\n");
+                    return 1;
+                }
+            } else {
+                printf("Error: --font-option requires an argument (default|katex)\n");
+                return 1;
+            }
+        } else if (strncmp(argv[i], "--font-option=", 14) == 0) {
+            font_option = argv[i] + 14;
+            if (strcmp(font_option, "default") != 0 && strcmp(font_option, "katex") != 0) {
+                printf("Error: --font-option must be 'default' or 'katex'\n");
+                return 1;
+            }
         } else if (strcmp(argv[i], "--pipeline") == 0) {
             if (i + 1 < argc) {
                 pipeline = argv[++i];
@@ -905,7 +923,15 @@ int exec_convert(int argc, char* argv[]) {
                 // Build a Lambda script that imports the LaTeX package
                 // and renders the file to HTML
                 char script_buf[4096];
-                const char* standalone_opt = full_document ? ", {standalone: true}" : ", null";
+                const char* standalone_opt = ", null";
+                char options_buf[128];
+                if (full_document || font_option) {
+                    snprintf(options_buf, sizeof(options_buf),
+                             ", {standalone: %s, font_option: \"%s\"}",
+                             full_document ? "true" : "false",
+                             font_option ? font_option : "default");
+                    standalone_opt = options_buf;
+                }
                 snprintf(script_buf, sizeof(script_buf),
                     "import latex: .lambda.package.latex.latex\n"
                     "let ast^err = input(\"%s\", {type: \"latex\"})\n"
@@ -2063,12 +2089,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Format Converter v1.0\n\n");
-            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output>\n", argv[0]);
+            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--full-document] [--font-option default|katex]\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  -f <from>      Input format (auto-detect if omitted)\n");
-            printf("  -t <to>        Output format (required)\n");
-            printf("  -o <output>    Output file path (required)\n");
-            printf("  -h, --help     Show this help message\n");
+            printf("  -f <from>            Input format (auto-detect if omitted)\n");
+            printf("  -t <to>              Output format (required)\n");
+            printf("  -o <output>          Output file path (required)\n");
+            printf("  --full-document      For LaTeX to HTML, generate complete HTML with CSS\n");
+            printf("  --font-option <opt>  LaTeX math fonts: default or katex\n");
+            printf("  -h, --help           Show this help message\n");
             printf("Supported Formats:\n");
             printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
             printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml\n");

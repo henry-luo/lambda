@@ -157,17 +157,18 @@ pub fn hbox(boxes) {
     let children = collect_elements(valid, 0, [])
     let total_width = sum((for (v in valid) v.width))
     let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
+    let suppress_operator_height = has_suppress_hbox_operator_render_height(valid, 0)
     let max_height = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.height))
     let max_depth = if (len(valid) == 0) 0.0
         else max((for (v in valid) hbox_depth_of(v, suppress_text_depth)))
     let max_render_height = if (len(valid) == 0) null
-        else max((for (v in valid) if (v.render_height != null) v.render_height else v.height))
+        else max((for (v in valid) hbox_render_height_of(v, suppress_operator_height)))
     let max_render_depth = if (len(valid) == 0) null
         else max((for (v in valid) hbox_render_depth_of(v, suppress_text_depth)))
     let max_render_total = if (len(valid) == 0) null
         else max((for (v in valid) if (v.render_total != null) v.render_total
-            else (if (v.render_height != null) v.render_height else v.height) +
+            else hbox_render_height_of(v, suppress_operator_height) +
                  hbox_render_depth_of(v, suppress_text_depth)))
     {
         element: <span class: css.BASE;
@@ -216,9 +217,21 @@ fn has_suppress_hbox_text_depth(items, i) {
     else has_suppress_hbox_text_depth(items, i + 1)
 }
 
+fn has_suppress_hbox_operator_render_height(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].suppress_hbox_operator_render_height == true) true
+    else has_suppress_hbox_operator_render_height(items, i + 1)
+}
+
 fn hbox_depth_of(bx, suppress_text_depth) {
     if (suppress_text_depth and is_depthless_text_box(bx)) 0.0
     else bx.depth
+}
+
+fn hbox_render_height_of(bx, suppress_operator_height) {
+    if (suppress_operator_height and is_binary_operator_text_box(bx)) 0.65
+    else if (bx.render_height != null) bx.render_height
+    else bx.height
 }
 
 fn hbox_render_depth_of(bx, suppress_text_depth) {
@@ -231,6 +244,13 @@ fn is_depthless_text_box(bx) {
     bx.element is element and len(bx.element) == 1 and
     bx.element.class == css.MATHIT and
     bx.element[0] is string
+}
+
+fn is_binary_operator_text_box(bx) {
+    bx.element is element and len(bx.element) == 1 and
+    bx.element.class == css.CMR and
+    bx.element[0] is string and
+    (string(bx.element[0]) == "+" or string(bx.element[0]) == "−")
 }
 
 // ============================================================
