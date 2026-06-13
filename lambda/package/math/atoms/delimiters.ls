@@ -34,8 +34,10 @@ let SIZED_DELIMS = {
     '{': true, '}': true,
     '\\{': true, '\\}': true,
     '\\lbrace': true, '\\rbrace': true,
+    '\\lbrack': true, '\\rbrack': true,
     '|': true, '\\vert': true,
-    '‖': true, '\\Vert': true, '\\|': true,
+    '∥': true, '\\Vert': true, '\\|': true, '\\lVert': true, '\\rVert': true,
+    '\\lvert': true, '\\rvert': true,
     '\\lfloor': true, '\\rfloor': true,
     '\\lceil': true, '\\rceil': true,
     '⟨': true, '⟩': true,
@@ -49,7 +51,9 @@ let SIZED_DELIMS = {
 let DELIM_CHARS = {
     '\\{': "{", '\\}': "}",
     '\\lbrace': "{", '\\rbrace': "}",
-    '\\vert': "|", '\\|': "‖", '\\Vert': "‖",
+    '\\lbrack': "[", '\\rbrack': "]",
+    '\\vert': "∣", '\\lvert': "∣", '\\rvert': "∣",
+    '\\|': "∥", '\\Vert': "∥", '\\lVert': "∥", '\\rVert': "∥",
     '\\lfloor': "⌊", '\\rfloor': "⌋",
     '\\lceil': "⌈", '\\rceil': "⌉",
     '\\langle': "⟨", '\\rangle': "⟩",
@@ -86,7 +90,7 @@ let SVG_DELIM_DATA = {
 // Returns a box
 pub fn render_stretchy(delim, content_height, atom_type) {
     if (delim == null or delim == "" or delim == ".") {
-        box.null_delim()
+        render_null_delim(atom_type)
     } else {
         let display_char = resolve_char(delim)
         let level = select_size_level(content_height)
@@ -101,14 +105,14 @@ pub fn render_stretchy(delim, content_height, atom_type) {
 // scale: the size factor (1.2, 1.8, 2.4, 3.0)
 pub fn render_at_scale(delim, scale, atom_type) {
     if (delim == null or delim == "" or delim == ".") {
-        box.null_delim()
+        render_null_delim(atom_type)
     } else {
         let display_char = resolve_char(delim)
         let cls = scale_to_class(scale)
         let h = scale * 0.5
         let d = scale * 0.3
         box.make_box(
-            <span class: cls; display_char>,
+            sized_delim_el(cls, display_char, atom_type),
             h, d, 0.4 * scale, atom_type
         )
     }
@@ -124,9 +128,35 @@ fn render_sized(ch, level, atom_type) {
     let h = scale * 0.5
     let d = scale * 0.3
     box.make_box(
-        <span class: cls; ch>,
+        sized_delim_el(cls, ch, atom_type),
         h, d, 0.4 * scale, atom_type
     )
+}
+
+fn sized_delim_el(cls, ch, atom_type) {
+    let side = side_class(atom_type)
+    let all_cls = css.classes([side, cls])
+    <span class: all_cls; ch>
+}
+
+fn render_null_delim(atom_type) {
+    let side = side_class(atom_type)
+    let cls = css.classes([css.NULLDELIMITER, side])
+    {
+        element: <span class: cls, style: "width:0.12em">,
+        height: 0.0,
+        depth: 0.0,
+        width: 0.12,
+        type: atom_type,
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn side_class(atom_type) {
+    if (atom_type == "mopen") css.OPEN
+    else if (atom_type == "mclose") css.CLOSE
+    else null
 }
 
 fn level_to_class(level) {
@@ -167,8 +197,52 @@ fn render_svg_delim(ch, target_height, atom_type) {
 
 // resolve a delimiter command to its display character
 pub fn resolve_char(delim) {
-    let mapped = DELIM_CHARS[delim]
-    if (mapped != null) mapped else delim
+    let explicit = resolve_escaped_char(delim)
+    if (explicit != null) explicit
+    else if (delim == "|") "∣"
+    else
+        (let mapped = DELIM_CHARS[delim],
+         if (mapped != null) mapped else delim)
+}
+
+fn resolve_escaped_char(delim) {
+    if (is_backslash_prefixed(delim))
+        resolve_command_delim(slice(delim, 1, len(delim)))
+    else null
+}
+
+fn is_backslash_prefixed(delim) {
+    (len(delim) > 1) and slice(delim, 0, 1) == "\\"
+}
+
+fn resolve_command_delim(name) {
+    if (name == "{") "{"
+    else if (name == "}") "}"
+    else if (name == "lbrace") "{"
+    else if (name == "rbrace") "}"
+    else if (name == "lbrack") "["
+    else if (name == "rbrack") "]"
+    else if (name == "vert") "∣"
+    else if (name == "lvert") "∣"
+    else if (name == "rvert") "∣"
+    else if (name == "|") "∣"
+    else if (name == "Vert") "∥"
+    else if (name == "lVert") "∥"
+    else if (name == "rVert") "∥"
+    else if (name == "lfloor") "⌊"
+    else if (name == "rfloor") "⌋"
+    else if (name == "lceil") "⌈"
+    else if (name == "rceil") "⌉"
+    else if (name == "langle") "⟨"
+    else if (name == "rangle") "⟩"
+    else if (name == "uparrow") "↑"
+    else if (name == "downarrow") "↓"
+    else if (name == "updownarrow") "↕"
+    else if (name == "Uparrow") "⇑"
+    else if (name == "Downarrow") "⇓"
+    else if (name == "Updownarrow") "⇕"
+    else if (name == "backslash") "∖"
+    else null
 }
 
 // select size level based on content height

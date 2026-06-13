@@ -4,6 +4,8 @@
 #include "editing_target_range.hpp"
 #include "event_state_log.hpp"
 #include "handler.hpp"
+#include "state_machine.hpp"
+#include "state_schema.hpp"
 #include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
@@ -121,10 +123,98 @@ static void editing_log_record(EventContext* evcon,
     event_state_log_finish_record(state->active_event_log, &w);
 }
 
+static void editing_log_transaction(EventContext* evcon,
+                                    const EditingTransaction* tx,
+                                    const char* phase,
+                                    bool prevented,
+                                    bool lambda_handled,
+                                    bool mutated,
+                                    bool committed) {
+    DocState* state = editing_dispatch_doc_state(evcon);
+    if (!state || !event_state_log_enabled(state->active_event_log)) return;
+
+    const EditingSurface* surface = tx ? tx->surface : nullptr;
+    const EditingIntent* intent = tx ? tx->intent : nullptr;
+    char buf[4096];
+    JsonWriter w;
+    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
+        "editing.transaction", state->active_cascade_id);
+    jw_key(&w, "data");
+    jw_obj_begin(&w);
+        jw_kv_str(&w, "phase", phase ? phase : "");
+        jw_kv_str(&w, "operation",
+                  tx && tx->operation ? tx->operation : "default");
+        editing_log_write_surface(&w, surface);
+        editing_log_write_intent(&w, surface, intent);
+        jw_kv_bool(&w, "prevented", prevented);
+        jw_kv_bool(&w, "lambda_handled", lambda_handled);
+        jw_kv_bool(&w, "mutated", mutated);
+        jw_kv_bool(&w, "committed", committed);
+        jw_kv_bool(&w, "dispatch_input_without_mutation",
+                   tx ? tx->dispatch_input_without_mutation : false);
+    jw_obj_end(&w);
+    event_state_log_finish_record(state->active_event_log, &w);
+}
+
 void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent) {
     editing_log_record(evcon, surface, intent, "editing.intent", false, false);
+}
+
+bool editing_run_transaction(EventContext* evcon,
+                             const EditingTransaction* tx,
+                             bool* out_prevented,
+                             bool* out_mutated,
+                             bool* out_lambda_handled) {
+    if (out_prevented) *out_prevented = false;
+    if (out_mutated) *out_mutated = false;
+    if (out_lambda_handled) *out_lambda_handled = false;
+    if (!evcon || !tx || !tx->surface || !tx->intent || !tx->hooks ||
+        tx->intent->type == INPUT_INTENT_NONE) {
+        return false;
+    }
+
+    editing_log_transaction(evcon, tx, "begin", false, false, false, false);
+
+    DocState* state = editing_dispatch_doc_state(evcon);
+    SmTransitionGuard sm_guard(state, SM_FAMILY_RICH_EDIT,
+                               SM_EV_RICH_TRANSACTION, tx->surface->view);
+
+    bool prevented = false;
+    bool lambda_handled = false;
+    bool dispatched = editing_dispatch_beforeinput_ex(evcon, tx->surface,
+        tx->intent, tx->hooks, false, &prevented, &lambda_handled);
+    if (dispatched) sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
+    if (!dispatched) {
+        editing_log_transaction(evcon, tx, "abort", prevented,
+                                lambda_handled, false, false);
+        if (out_prevented) *out_prevented = prevented;
+        if (out_lambda_handled) *out_lambda_handled = lambda_handled;
+        return false;
+    }
+
+    bool mutated = false;
+    if (!prevented && !lambda_handled && tx->mutate) {
+        mutated = tx->mutate(evcon, state, tx->surface, tx->intent,
+                             tx->mutate_user);
+    }
+
+    bool should_input = !prevented &&
+        (lambda_handled || mutated || tx->dispatch_input_without_mutation);
+    if (should_input) {
+        editing_dispatch_input(evcon, tx->surface, tx->intent, tx->hooks);
+        sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
+    }
+
+    sm_guard.commit();
+    radiant_state_assert_valid(state, "editing_run_transaction");
+    editing_log_transaction(evcon, tx, prevented ? "cancel" : "commit",
+                            prevented, lambda_handled, mutated, should_input);
+    if (out_prevented) *out_prevented = prevented;
+    if (out_mutated) *out_mutated = mutated;
+    if (out_lambda_handled) *out_lambda_handled = lambda_handled;
+    return true;
 }
 
 bool editing_dispatch_beforeinput(EventContext* evcon,

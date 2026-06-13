@@ -168,13 +168,18 @@ fn render_text(text, context) {
 
 fn render_command(node, context) {
     let cmd_text = get_text(node)
-    let unicode = sym.lookup_symbol(cmd_text)
-    if (unicode != null) {
+    let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+         slice(cmd_text, 1, len(cmd_text)) else cmd_text
+    if (name_str == "ne" or name_str == "neq") {
+        render_not_overlay("=")
+    } else if (name_str == "not") {
+        render_not_command(node)
+    } else {
+        let unicode = sym.lookup_symbol(cmd_text)
+        if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
         box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
     } else {
-        let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
-             slice(cmd_text, 1, len(cmd_text)) else cmd_text
         if (name_str == "pdiff") {
             render_pdiff(node, context)
         } else if (name_str == "colorbox") {
@@ -194,6 +199,81 @@ fn render_command(node, context) {
             }
         }
     }
+    }
+}
+
+fn render_not_command(node) {
+    if (len(node) > 0 and not_group_text(node[0]) != "")
+        render_not_overlay_group_text(not_group_text(node[0]))
+    else render_not_slash()
+}
+
+fn not_group_text(child) {
+    if (child is element and (name(child) == 'group' or name(child) == 'brack_group') and len(child) > 0)
+        plain_text(child)
+    else ""
+}
+
+fn render_not_overlay_group_text(base_text) {
+    let cls = if (is_alpha_text(base_text)) css.MATHIT else css.CMR
+    render_not_overlay_text(base_text, cls, "mord")
+}
+
+fn render_not_slash() {
+    {
+        element: <span class: css.CMR; "\uE020">,
+        height: 0.7,
+        depth: 0.19,
+        render_height: 0.7,
+        render_depth: 0.19,
+        render_total: 0.89,
+        width: 0.5,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn render_not_overlay(base_text) {
+    render_not_overlay_text(base_text, css.CMR, "mrel")
+}
+
+fn render_not_overlay_text(base_text, cls, atom_type) {
+    let base_box = box.text_box(base_text, cls, atom_type)
+    let overlay_el = <span class: css.BASE;
+        <span class: "lm_rlap";
+            <span class: "lm_inner";
+                <span class: css.CMR; "\uE020">
+            >
+            <span class: "lm_fix">
+        >
+        <span class: cls; base_text>
+    >
+    {
+        element: overlay_el,
+        height: 0.7,
+        depth: 0.19,
+        render_height: 0.7,
+        render_depth: 0.19,
+        render_total: 0.89,
+        width: base_box.width,
+        type: atom_type,
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn is_alpha_text(text) {
+    (len(text) > 0) and is_alpha_text_at(text, 0)
+}
+
+fn is_alpha_text_at(text, i) {
+    if (i >= len(text)) true
+    else
+        (let ch = slice(text, i, i + 1),
+         if (contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", ch))
+            is_alpha_text_at(text, i + 1)
+         else false)
 }
 
 fn render_generic_rule_command(node, context) {
@@ -739,25 +819,38 @@ fn render_delimiter_group(node, context) {
 fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     let left_char = delims.resolve_char(left_text)
     let right_char = delims.resolve_char(right_text)
-    let left_el = <span class: css.classes([css.SMALL_DELIM, css.OPEN]); left_char>
-    let right_el = <span class: css.classes([css.SMALL_DELIM, css.CLOSE]); right_char>
+    let left_el = small_delim_el(left_char, css.OPEN)
+    let right_el = small_delim_el(right_char, css.CLOSE)
     let content_elements = box.child_elements(spaced)
     let style_attr = if (has_suppressed_text_depth(spaced, 0))
         "margin-top:0em;height:0.69444em"
+    else if (has_middle_delim(spaced, 0))
+        "margin-top:-0.25em;height:1em"
     else
         "margin-top:-0.08333em;height:0.72777em"
+    let both_null = left_char == "." and right_char == "."
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             left_el
             for (el in content_elements) el
             right_el
         >,
-        height: 0.75,
-        depth: 0.25,
+        height: if (both_null) 0.65 else 0.75,
+        depth: if (both_null) content.depth else 0.25,
         width: content.width + 0.8,
         type: "minner",
         italic: 0.0,
         skew: 0.0
+    }
+}
+
+fn small_delim_el(ch, side_class) {
+    if (ch == ".") {
+        let cls = css.classes([css.NULLDELIMITER, side_class])
+        <span class: cls, style: "width:0.12em">
+    } else {
+        let cls = css.classes([css.SMALL_DELIM, side_class])
+        <span class: cls; ch>
     }
 }
 
@@ -767,11 +860,40 @@ fn has_suppressed_text_depth(items, i) {
     else has_suppressed_text_depth(items, i + 1)
 }
 
+fn has_middle_delim(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_middle_delim == true) true
+    else has_middle_delim(items, i + 1)
+}
+
 fn render_stretchy_delimiter_group(left_text, right_text, content) {
     let content_height = content.height + content.depth
     let left_box = delims.render_stretchy(left_text, content_height, "mopen")
     let right_box = delims.render_stretchy(right_text, content_height, "mclose")
-    box.with_class(box.hbox([left_box, content, right_box]), css.LEFT_RIGHT)
+    let parts = [left_box, content, right_box]
+    let elements = box.child_elements(parts)
+    let style_attr = stretchy_left_right_style(content)
+    {
+        element: <span class: css.LEFT_RIGHT, style: style_attr;
+            for (el in elements) el
+        >,
+        height: content.height,
+        depth: content.depth,
+        width: sum((for (p in parts where p != null) p.width)),
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn stretchy_left_right_style(content) {
+    let render_depth = if (content.render_depth != null) content.render_depth else content.depth
+    let render_total = if (content.render_total != null) content.render_total else content.height + content.depth
+    "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
+}
+
+fn fmt_delim_em(v) {
+    util.fmt_num(v, 6) ++ "em"
 }
 
 // ============================================================
@@ -793,7 +915,18 @@ fn render_sized_delim(node, context) {
 
 fn render_middle_delim(node, context) {
     let delim_text = if (node.delim != null) string(node.delim) else "|"
-    box.text_box(delim_text, css.SMALL_DELIM, "mrel")
+    let display_char = delims.resolve_char(delim_text)
+    let bx = box.text_box(display_char, css.SMALL_DELIM, "mord")
+    {
+        element: bx.element,
+        height: bx.height,
+        depth: bx.depth,
+        width: bx.width,
+        type: bx.type,
+        italic: bx.italic,
+        skew: bx.skew,
+        is_middle_delim: true
+    }
 }
 
 // ============================================================
@@ -1043,6 +1176,14 @@ fn transparent_hbox(children) {
 
 fn render_children_scan(node, context, i, acc) {
     if (i >= len(node)) acc
+    else if (is_empty_not_target_sequence(node, i))
+        (let collected = collect_empty_not_targets(node, i, ""),
+         let rendered = render_empty_not_targets(collected[0]),
+         render_children_scan(node, context, collected[1], acc ++ [rendered]))
+    else if (is_not_target_sequence(node, i))
+        (let target_text = not_target_text(node[i + 1]),
+         let rendered = render_not_overlay(target_text),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else if (is_colorbox_sibling_sequence(node, i))
         (let rendered = render_colorbox_sibling_sequence(node, context, i),
          let rest = colorbox_sibling_rest(node, i),
@@ -1065,6 +1206,86 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_empty_not_target_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         let target = node[i + 1],
+         is_empty_not_command(child) and not_target_text(target) != null)
+}
+
+fn collect_empty_not_targets(node, i, text) {
+    if (is_empty_not_target_sequence(node, i)) {
+        let target_text = not_target_text(node[i + 1])
+        collect_empty_not_targets(node, i + 2, text ++ "\uE020" ++ target_text)
+    } else {
+        [text, i]
+    }
+}
+
+fn render_empty_not_targets(text) {
+    let bx = box.text_box(text, css.CMR, "mrel")
+    {
+        element: bx.element,
+        height: 0.7,
+        depth: 0.19,
+        render_height: 0.7,
+        render_depth: 0.19,
+        render_total: 0.89,
+        width: bx.width,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn is_not_target_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         let target = node[i + 1],
+         is_not_command_for_sequence(child) and not_target_text(target) != null)
+}
+
+fn is_empty_not_command(child) {
+    child is element and name(child) == 'command' and command_name(child) == "not" and
+    len(child) == 1 and is_empty_group(child[0])
+}
+
+fn is_not_command_for_sequence(child) {
+    child is element and name(child) == 'command' and command_name(child) == "not" and
+    (len(child) == 0 or (len(child) == 1 and is_empty_group(child[0])))
+}
+
+fn command_name(child) {
+    let cmd_text = get_text(child)
+    if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+        slice(cmd_text, 1, len(cmd_text))
+    else cmd_text
+}
+
+fn is_empty_group(child) {
+    child is element and (name(child) == 'group' or name(child) == 'brack_group') and len(child) == 0
+}
+
+fn not_target_text(target) {
+    if (not (target is element)) null
+    else
+        (let tag = name(target),
+         if (tag == 'relation') relation_display_text(get_text(target))
+         else if (tag == 'command' or tag == 'symbol_command')
+            (let cmd_text = get_text(target),
+             let unicode = sym.lookup_symbol(cmd_text),
+             if (unicode != null) unicode else null)
+         else null)
+}
+
+fn relation_display_text(text) {
+    if (text == "<") "<"
+    else if (text == ">") ">"
+    else text
 }
 
 fn is_dollar_error(child) {

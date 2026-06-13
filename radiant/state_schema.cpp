@@ -202,6 +202,11 @@ static const int SM_TO_CONTEXT_HOVER[] = {
     SM_STATE_SAME,
 };
 
+static const int SM_TO_RICH_EDIT_SAME[] = {
+    RICH_EDIT_IDLE,
+    SM_STATE_SAME,
+};
+
 #define SM_RULE_TO(list_name) list_name, (uint8_t)(sizeof(list_name) / sizeof((list_name)[0]))
 
 static const StateTransitionRule RADIANT_STATE_RULES[] = {
@@ -427,6 +432,11 @@ static const StateTransitionRule RADIANT_STATE_RULES[] = {
     { SM_FAMILY_CONTEXT_MENU, SM_VC_ANY, SM_STATE_ANY, SM_EV_CONTEXT_MENU_HOVER,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_CONTEXT_HOVER), 0, NULL, 0,
       "context_menu.hover" },
+
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, SM_STATE_ANY, SM_EV_RICH_TRANSACTION,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_EDIT_SAME),
+      SM_ACT_DISPATCH_BEFOREINPUT, NULL, 0,
+      "rich_edit.transaction" },
 };
 
 #undef SM_RULE_TO
@@ -449,6 +459,10 @@ extern const StateInvariantBinding RADIANT_INVARIANTS[] = {
     { SM_FAMILY_CONTEXT_MENU, SM_STATE_ANY, SM_INV_CONTEXT_MENU_OVERLAY, "context_menu.overlay" },
     { SM_FAMILY_DOCUMENT, SM_STATE_ANY, SM_INV_DIRTY_TRACKING, "dirty.tracking" },
     { SM_FAMILY_SELECTION, SM_STATE_ANY, SM_INV_DOM_SELECTION, "selection.dom" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_INTERACTION, "rich_edit.interaction" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_CARET_PROJECTION, "rich_edit.caret" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_SELECTION_PROJECTION, "rich_edit.selection" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_DOM_SELECTION, "rich_edit.dom_selection" },
 };
 
 extern const uint32_t RADIANT_INVARIANT_COUNT =
@@ -470,6 +484,7 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
         case SM_FAMILY_FORM_TEXT: return "form_text";
         case SM_FAMILY_DROPDOWN: return "dropdown";
         case SM_FAMILY_CONTEXT_MENU: return "context_menu";
+        case SM_FAMILY_RICH_EDIT: return "rich_edit";
         default: return "unknown";
     }
 }
@@ -535,6 +550,7 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
         case SM_EV_CONTEXT_MENU_OPEN: return "context_menu_open";
         case SM_EV_CONTEXT_MENU_CLOSE: return "context_menu_close";
         case SM_EV_CONTEXT_MENU_HOVER: return "context_menu_hover";
+        case SM_EV_RICH_TRANSACTION: return "rich_transaction";
         default: return "unknown";
     }
 }
@@ -644,6 +660,11 @@ static int sm_derive_document_state(DocState* state) {
     return state ? state->lifecycle : DOC_LIFECYCLE_UNINITIALIZED;
 }
 
+static int sm_derive_rich_edit_state(DocState* state) {
+    (void)state;
+    return RICH_EDIT_IDLE;
+}
+
 int sm_derive_state(DocState* state, SmFamily family, View* target) {
     switch (family) {
         case SM_FAMILY_DOCUMENT:
@@ -674,6 +695,8 @@ int sm_derive_state(DocState* state, SmFamily family, View* target) {
             return sm_derive_dropdown_state(state);
         case SM_FAMILY_CONTEXT_MENU:
             return sm_derive_context_menu_state(state);
+        case SM_FAMILY_RICH_EDIT:
+            return sm_derive_rich_edit_state(state);
         default:
             return 0;
     }
