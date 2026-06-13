@@ -49,6 +49,7 @@ let SIZED_DELIMS = {
 
 // Map command names to display characters
 let DELIM_CHARS = {
+    '<': "⟨", '>': "⟩",
     '\\{': "{", '\\}': "}",
     '\\lbrace': "{", '\\rbrace': "}",
     '\\lbrack': "[", '\\rbrack': "]",

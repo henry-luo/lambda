@@ -73,6 +73,7 @@ fn text_style(text, cls) {
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
+    else if (cls == css.CMR and text == "_") "margin-right:0.03em"
     else null
 }
 
@@ -100,6 +101,7 @@ fn text_depth(text) {
     if (text_has_tall_delim(text)) 0.25
     else if (text == "■" or text == "▲") 0.0
     else if (is_number_text(text)) 0.0
+    else if (text == "_") 0.31
     else if (text == "x") 0.0
     else if (text == "o") 0.0
     else if (text == "," or text == ";") 0.19
