@@ -155,7 +155,10 @@ let operator_names = {
 // ============================================================
 
 let delim_sizes = {
-    big: 1.2, Big: 1.8, bigg: 2.4, Bigg: 3.0
+    big: 1.2, bigl: 1.2, bigr: 1.2, bigm: 1.2,
+    Big: 1.8, Bigl: 1.8, Bigr: 1.8, Bigm: 1.8,
+    bigg: 2.4, biggl: 2.4, biggr: 2.4, biggm: 2.4,
+    Bigg: 3.0, Biggl: 3.0, Biggr: 3.0, Biggm: 3.0
 }
 
 // ============================================================

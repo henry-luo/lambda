@@ -238,6 +238,8 @@ fn render_class_command(node, context) {
             render_height: content_box.render_height,
             render_depth: content_box.render_depth,
             render_total: content_box.render_total,
+            left_right_render_depth: content_box.left_right_render_depth,
+            left_right_render_total: content_box.left_right_render_total,
             width: content_box.width,
             type: content_box.type,
             italic: content_box.italic,
@@ -260,6 +262,8 @@ fn render_css_id_command(node, context) {
             render_height: content_box.render_height,
             render_depth: content_box.render_depth,
             render_total: content_box.render_total,
+            left_right_render_depth: content_box.left_right_render_depth,
+            left_right_render_total: content_box.left_right_render_total,
             width: content_box.width,
             type: content_box.type,
             italic: content_box.italic,
@@ -507,6 +511,8 @@ fn render_ensuremath_text(content) {
             render_height: inner_box.render_height,
             render_depth: inner_box.render_depth,
             render_total: inner_box.render_total,
+            left_right_render_depth: inner_box.left_right_render_depth,
+            left_right_render_total: inner_box.left_right_render_total,
             width: inner_box.width,
             type: "mord",
             italic: 0.0,
@@ -1089,14 +1095,21 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     else
         "margin-top:-0.08333em;height:0.72777em"
     let both_null = left_char == "." and right_char == "."
+    let has_corner = delims.is_corner_delim(left_char) or delims.is_corner_delim(right_char)
+    let has_surd = delims.is_surd_delim(left_char) or delims.is_surd_delim(right_char)
+    let small_height = if (has_surd) 0.8 else if (has_corner) 0.65 else if (both_null) 0.65 else 0.75
+    let small_depth = if (has_surd) 0.2
+        else if (has_corner) 0.15
+        else if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
+        0.24 else 0.25
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             left_el
             for (el in content_elements) el
             right_el
         >,
-        height: if (both_null) 0.65 else 0.75,
-        depth: if (both_null) content.depth else 0.25,
+        height: small_height,
+        depth: if (both_null) content.depth else small_depth,
         width: content.width + 0.8,
         type: "minner",
         italic: 0.0,
@@ -1104,10 +1117,17 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     }
 }
 
+fn is_shallow_small_delim(ch) {
+    ch == "⟮" or ch == "⟯" or ch == "⎰" or ch == "⎱"
+}
+
 fn small_delim_el(ch, side_class) {
     if (ch == ".") {
         let cls = css.classes([css.NULLDELIMITER, side_class])
         <span class: cls, style: "width:0.12em">
+    } else if (delims.is_corner_delim(ch)) {
+        let cls = css.classes([css.SMALL_DELIM, side_class])
+        <span class: cls, style: "top:0.08em;font-size: 70%"; ch>
     } else {
         let cls = css.classes([css.SMALL_DELIM, side_class])
         <span class: cls; ch>
@@ -1127,9 +1147,8 @@ fn has_middle_delim(items, i) {
 }
 
 fn render_stretchy_delimiter_group(left_text, right_text, content) {
-    let content_height = content.height + content.depth
-    let left_box = delims.render_stretchy(left_text, content_height, "mopen")
-    let right_box = delims.render_stretchy(right_text, content_height, "mclose")
+    let left_box = delims.render_left_right(left_text, content.height, content.depth, "mopen")
+    let right_box = delims.render_left_right(right_text, content.height, content.depth, "mclose")
     let parts = [left_box, content, right_box]
     let elements = box.child_elements(parts)
     let style_attr = stretchy_left_right_style(content)
@@ -1142,18 +1161,29 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
         width: sum((for (p in parts where p != null) p.width)),
         type: "minner",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        strut_total: left_right_strut_total(content)
     }
 }
 
 fn stretchy_left_right_style(content) {
-    let render_depth = if (content.render_depth != null) content.render_depth else content.depth
-    let render_total = if (content.render_total != null) content.render_total else content.height + content.depth
+    let render_depth = if (content.left_right_render_depth != null) content.left_right_render_depth
+        else if (content.render_depth != null) content.render_depth
+        else content.depth
+    let render_total = if (content.left_right_render_total != null) content.left_right_render_total
+        else if (content.render_total != null) content.render_total
+        else content.height + content.depth
     "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
 }
 
+fn left_right_strut_total(content) {
+    if (content.left_right_render_total != null) round(content.left_right_render_total * 100.0) / 100.0
+    else if (content.render_total != null) round(content.render_total * 100.0) / 100.0
+    else null
+}
+
 fn fmt_delim_em(v) {
-    util.fmt_num(v, 6) ++ "em"
+    util.fmt_fixed(v, 6) ++ "em"
 }
 
 // ============================================================
@@ -1165,8 +1195,87 @@ fn render_sized_delim(node, context) {
     let size_cmd = if (node.size != null) string(node.size) else ""
     let size_name = if (len(size_cmd) > 0 and slice(size_cmd, 0, 1) == "\\")
         slice(size_cmd, 1, len(size_cmd)) else size_cmd
+    render_sized_delim_text(size_name, delim_text)
+}
+
+fn render_sized_delim_text(size_name, delim_text) {
     let scale = if (sym.get_delim_size(size_name) != null) sym.get_delim_size(size_name) else 1.0
-    delims.render_at_scale(delim_text, scale, "mord")
+    if (is_valid_sized_delim_text(delim_text))
+        delims.render_at_scale(delim_text, scale, "mord")
+    else
+        delims.render_at_scale("", scale, "mord")
+}
+
+fn is_valid_sized_delim_text(delim_text) {
+    delim_text == "(" or delim_text == ")" or
+    delim_text == "[" or delim_text == "]" or
+    delim_text == "{" or delim_text == "}" or
+    delim_text == "\\{" or delim_text == "\\}" or
+    delim_text == "|" or delim_text == "\\|" or
+    delim_text == "\\vert" or delim_text == "\\Vert" or
+    delim_text == "\\lvert" or delim_text == "\\rvert" or
+    delim_text == "\\lVert" or delim_text == "\\rVert" or
+    delim_text == "<" or delim_text == ">" or
+    delim_text == "\\langle" or delim_text == "\\rangle"
+}
+
+fn is_sized_delim_pair(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'sized_delimiter' and child.delim == null and
+         child.size != null and sized_pair_text(node[i + 1]) != null)
+}
+
+fn render_sized_delim_pair(cmd_node, delim_node, context) {
+    let size_name = string(cmd_node.size)
+    let delim_text = sized_pair_text(delim_node)
+    if (is_unknown_sized_letter(size_name, delim_text))
+        render_unknown_command("\\\\" ++ size_name ++ delim_text)
+    else
+        box_with_type(render_sized_delim_text(size_name, delim_text), sized_delim_atom_type(size_name))
+}
+
+fn sized_delim_atom_type(size_name) {
+    if (sized_command_suffix(size_name) == "l" or sized_command_suffix(size_name) == "r") "mopen"
+    else "mord"
+}
+
+fn sized_command_suffix(size_name) {
+    if (len(size_name) == 0) ""
+    else slice(size_name, len(size_name) - 1, len(size_name))
+}
+
+fn sized_pair_text(node) {
+    if (node is string) slice(string(node), 0, 1)
+    else if (node is element and (name(node) == 'punctuation' or name(node) == 'operator' or name(node) == 'relation'))
+        get_text(node)
+    else null
+}
+
+fn is_unknown_sized_letter(size_name, delim_text) {
+    is_plain_sized_command(size_name) and is_single_alpha_delim(delim_text)
+}
+
+fn is_plain_sized_command(size_name) {
+    size_name == "big" or size_name == "Big" or size_name == "bigg" or size_name == "Bigg"
+}
+
+fn is_single_alpha_delim(text) {
+    len(text) == 1 and is_alpha_text(text)
+}
+
+fn render_unknown_command(cmd) {
+    {
+        element: <span class: css.classes([css.ERROR, css.CMR]); cmd>,
+        height: 0.7,
+        depth: 0.0,
+        width: 0.4 * float(len(cmd)),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        mathlive_error: "unknown-command"
+    }
 }
 
 // ============================================================
@@ -1174,18 +1283,30 @@ fn render_sized_delim(node, context) {
 // ============================================================
 
 fn render_middle_delim(node, context) {
-    let delim_text = if (node.delim != null) string(node.delim) else "|"
-    let display_char = delims.resolve_char(delim_text)
-    let bx = box.text_box(display_char, css.SMALL_DELIM, "mord")
-    {
-        element: bx.element,
-        height: bx.height,
-        depth: bx.depth,
-        width: bx.width,
-        type: bx.type,
-        italic: bx.italic,
-        skew: bx.skew,
-        is_middle_delim: true
+    if (node.delim == null) {
+        {
+            element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
+            height: 0.0,
+            depth: 0.0,
+            width: 0.12,
+            type: "mord",
+            italic: 0.0,
+            skew: 0.0
+        }
+    } else {
+        let delim_text = string(node.delim)
+        let display_char = delims.resolve_char(delim_text)
+        let bx = box.text_box(display_char, css.SMALL_DELIM, "mord")
+        {
+            element: bx.element,
+            height: bx.height,
+            depth: bx.depth,
+            width: bx.width,
+            type: bx.type,
+            italic: bx.italic,
+            skew: bx.skew,
+            is_middle_delim: true
+        }
     }
 }
 
@@ -1459,6 +1580,12 @@ fn render_children_scan(node, context, i, acc) {
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
          render_children_scan(node, context, i + 2, acc ++ spacer ++ [rendered]))
+    else if (is_sized_delim_pair(node, i))
+        (let rendered = render_sized_delim_pair(node[i], node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_null_middle_sequence(node, i))
+        (let rendered = render_middle_delim(node[i], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
          let next_acc = if (child == null) acc
@@ -1466,6 +1593,13 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_null_middle_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'middle_delim' and child.delim == null)
 }
 
 fn is_empty_not_target_sequence(node, i) {
@@ -1813,10 +1947,14 @@ fn box_with_type(bx, atom_type) => {
     render_height: bx.render_height,
     render_depth: bx.render_depth,
     render_total: bx.render_total,
+    left_right_render_depth: bx.left_right_render_depth,
+    left_right_render_total: bx.left_right_render_total,
     width: bx.width,
     type: atom_type,
     italic: bx.italic,
-    skew: bx.skew
+    skew: bx.skew,
+    strut_total: bx.strut_total,
+    strut_depth_em: bx.strut_depth_em
 }
 
 fn normalize_bin_atom(bx, prev_type) {

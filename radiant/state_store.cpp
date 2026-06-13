@@ -3262,11 +3262,31 @@ void doc_state_set_drag_drop_active(DocState* state, bool active) {
     state_assert_after_mutation(state, "doc_state_set_drag_drop_active");
 }
 
-void doc_state_set_drag_drop_target(DocState* state, View* drop_target) {
+void doc_state_set_drag_drop_target(DocState* state, View* drop_target,
+                                    const DomBoundary* drop_start,
+                                    const DomBoundary* drop_end) {
     if (!state || !state->drag_drop) return;
     DragDropState* drag_drop = state->drag_drop;
-    if (drag_drop->drop_target == drop_target) return;
+    bool has_range = drop_start && drop_end &&
+        drop_start->node && drop_end->node;
+    bool range_changed = drag_drop->has_drop_range != has_range;
+    if (has_range && !range_changed) {
+        range_changed =
+            drag_drop->drop_start.node != drop_start->node ||
+            drag_drop->drop_start.offset != drop_start->offset ||
+            drag_drop->drop_end.node != drop_end->node ||
+            drag_drop->drop_end.offset != drop_end->offset;
+    }
+    if (drag_drop->drop_target == drop_target && !range_changed) return;
     drag_drop->drop_target = drop_target;
+    drag_drop->has_drop_range = has_range;
+    if (has_range) {
+        drag_drop->drop_start = *drop_start;
+        drag_drop->drop_end = *drop_end;
+    } else {
+        memset(&drag_drop->drop_start, 0, sizeof(drag_drop->drop_start));
+        memset(&drag_drop->drop_end, 0, sizeof(drag_drop->drop_end));
+    }
     state->is_dirty = true;
     state->needs_repaint = true;
     state->version++;
@@ -7651,6 +7671,98 @@ char* extract_html_from_view(View* view, Arena* arena) {
 
     strbuf_free(sb);
     return result;
+}
+
+static char* extract_dom_range_html_to_arena(DomRange* range, Arena* arena) {
+    if (!range || !arena) return NULL;
+    StrBuf* sb = strbuf_new_cap(256);
+    if (!sb) return NULL;
+    DomText* text = first_text_in_range_for_clipboard(range);
+    while (text) {
+        DomBoundary text_start{ static_cast<DomNode*>(text), 0 };
+        DomBoundary text_end{ static_cast<DomNode*>(text), dom_text_utf16_length(text) };
+        if (!boundary_before_or_equal(&text_start, &range->end)) break;
+
+        DomBoundary slice_start = text_start;
+        DomBoundary slice_end = text_end;
+        if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
+        if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
+        if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
+            slice_start.offset < slice_end.offset) {
+            append_selected_text_html(sb, text, slice_start.offset, slice_end.offset);
+        }
+        if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
+        text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
+    }
+    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
+    strbuf_free(sb);
+    return result;
+}
+
+static char* extract_text_control_selection_to_arena(DocState* state,
+                                                     Arena* arena) {
+    if (!state || !arena || state->sel.kind != EDIT_SEL_TEXT_CONTROL ||
+        !state->sel.control) {
+        return NULL;
+    }
+    DomElement* control = state->sel.control;
+    if (!tc_is_text_control(control)) return NULL;
+    tc_ensure_init(control);
+    FormControlProp* form = control->form;
+    if (!form) return NULL;
+
+    uint32_t start_u16 = state->sel.start_u16;
+    uint32_t end_u16 = state->sel.end_u16;
+    if (start_u16 > form->current_value_u16_len) start_u16 = form->current_value_u16_len;
+    if (end_u16 > form->current_value_u16_len) end_u16 = form->current_value_u16_len;
+    if (end_u16 <= start_u16) return NULL;
+
+    const char* value = form->current_value ? form->current_value :
+        (form->value ? form->value : "");
+    uint32_t value_len = form->current_value ? form->current_value_len :
+        (uint32_t)strlen(value);
+    uint32_t start_byte = tc_utf16_to_utf8_offset(value, value_len, start_u16);
+    uint32_t end_byte = tc_utf16_to_utf8_offset(value, value_len, end_u16);
+    if (end_byte <= start_byte || end_byte > value_len) return NULL;
+
+    uint32_t len = end_byte - start_byte;
+    char* result = (char*)arena_alloc(arena, len + 1);
+    if (!result) return NULL;
+    memcpy(result, value + start_byte, len);
+    result[len] = '\0';
+    return result;
+}
+
+char* state_store_extract_selection_text(DocState* state, Arena* arena) {
+    if (!state || !arena) return NULL;
+
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        return extract_text_control_selection_to_arena(state, arena);
+    }
+
+    state_store_refresh_editing_selection_shadow(state);
+    if (state->sel.kind == EDIT_SEL_DOM_RANGE && state->sel.range &&
+        !dom_range_collapsed(state->sel.range)) {
+        return extract_dom_range_text_to_arena(state->sel.range, arena);
+    }
+
+    return NULL;
+}
+
+char* state_store_extract_selection_html(DocState* state, Arena* arena) {
+    if (!state || !arena) return NULL;
+
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        return NULL;
+    }
+
+    state_store_refresh_editing_selection_shadow(state);
+    if (state->sel.kind == EDIT_SEL_DOM_RANGE && state->sel.range &&
+        !dom_range_collapsed(state->sel.range)) {
+        return extract_dom_range_html_to_arena(state->sel.range, arena);
+    }
+
+    return NULL;
 }
 
 char* extract_selected_text(DocState* state, Arena* arena) {

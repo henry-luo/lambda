@@ -1,0 +1,15 @@
+{
+  "name": "Editing InputEvent getTargetRanges returns immutable snapshots",
+  "html": "test/ui/test_editing_inputevent_ranges_immutable.html",
+  "viewport": {"width": 520, "height": 260},
+  "events": [
+    {"type": "log", "message": "=== editing_inputevent_ranges_immutable ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 1, "end": 3},
+    {"type": "type", "target": {"selector": "#surface"}, "text": "Y"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#range-log"}, "equals": "ranges:1-3:1-3|1:1-3:1-3|1:1-3"},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertText|sYd|1-3"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "sYd"}
+  ]
+}

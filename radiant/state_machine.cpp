@@ -366,7 +366,10 @@ bool drag_transition(DocState* state,
             doc_state_set_drag_drop_active(state, args ? args->active : false);
             break;
         case DRAG_TRANSITION_SET_DROP_TARGET:
-            doc_state_set_drag_drop_target(state, args ? args->drop_target : NULL);
+            doc_state_set_drag_drop_target(state,
+                args ? args->drop_target : NULL,
+                args && args->has_drop_range ? &args->drop_start : NULL,
+                args && args->has_drop_range ? &args->drop_end : NULL);
             break;
         case DRAG_TRANSITION_CLEAR_DROP:
             doc_state_clear_drag_drop(state);

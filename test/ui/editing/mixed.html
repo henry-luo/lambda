@@ -50,6 +50,22 @@
     var historyLog = document.getElementById('history-log');
     var compositionEvents = [];
 
+    function summarizeTransfer(event) {
+      var dt = event.dataTransfer;
+      if (!dt) {
+        return 'dt:none';
+      }
+      var types = [];
+      if (dt.types) {
+        for (var i = 0; i < dt.types.length; i++) {
+          types.push(dt.types[i]);
+        }
+      }
+      var plainText = dt.getData ? dt.getData('text/plain') : '';
+      var htmlText = dt.getData ? dt.getData('text/html') : '';
+      return 'dt:' + types.join(',') + ':plain=' + plainText + ':html=' + htmlText;
+    }
+
     function summarize(event) {
       var ranges = event.getTargetRanges();
       var rangeText = 'none';
@@ -58,7 +74,7 @@
         rangeText = ranges[0].startOffset + '-' + ranges[0].endOffset;
       }
       return event.inputType + '|' + (event.data || '') + '|' +
-        rangeCount + '|' + rangeText;
+        rangeCount + '|' + rangeText + '|' + summarizeTransfer(event);
     }
 
     surface.onbeforeinput = function(event) {
@@ -81,8 +97,11 @@
       }
     };
     surface.oninput = function(event) {
+      var summary = summarize(event);
+      var summaryParts = summary.split('|');
       inputLog.textContent = 'input:' + event.inputType + '|' +
-        (event.data || '') + '|' + surface.textContent;
+        (event.data || '') + '|' + surface.textContent + '|ranges:' +
+        summaryParts[2] + '|' + summaryParts[3] + '|' + summaryParts[4];
       if (event.inputType === 'insertCompositionText' ||
           event.inputType === 'insertFromComposition' ||
           event.inputType === 'deleteCompositionText') {

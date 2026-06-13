@@ -1,0 +1,19 @@
+{
+  "name": "Editing live drag/drop - contenteditable uses default drop transaction",
+  "html": "test/ui/test_editing_live_drag_drop_contenteditable.html",
+  "viewport": {"width": 560, "height": 220},
+  "events": [
+    {"type": "log", "message": "=== editing_live_drag_drop_contenteditable ==="},
+    {"type": "wait", "ms": 200},
+    {"type": "drag_and_drop",
+     "target": {"selector": "#drag-src"},
+     "to_target": {"selector": "#drop-host"}},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|ZZ|1|"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "dt:text/plain:plain=ZZ:html="},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|ZZ|1|"},
+    {"type": "assert_text", "target": {"selector": "#drop-host"}, "contains": "ZZ"},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromDrop", "surface": "contenteditable", "operation": "default", "min": 2},
+    {"type": "assert_event_log", "contains": "\"boundary_reason\":\"drop\"", "min": 1}
+  ]
+}
