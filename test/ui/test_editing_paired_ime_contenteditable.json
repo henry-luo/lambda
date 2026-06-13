@@ -11,6 +11,8 @@
     {"type": "ime_compose", "phase": "commit", "commit": "done"},
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#composition-log"}, "contains": "compositionstart:|compositionupdate:pre|beforeinput:insertCompositionText:pre:1|input:insertCompositionText:pre:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertCompositionText", "surface": "contenteditable", "operation": "default", "min": 2},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromComposition", "surface": "contenteditable", "operation": "default", "min": 2},
     {"type": "assert_event_log", "contains": "\"type\":\"editing.composition\"", "min": 2}
   ]
 }

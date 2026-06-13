@@ -190,6 +190,22 @@ static inline DomSelection* selection_from(Item obj) {
 static inline DomRange*     range_from_this()     { return range_from(js_get_this()); }
 static inline DomSelection* selection_from_this() { return selection_from(js_get_this()); }
 
+static bool selection_state_set(DomSelection* s,
+                                const DomBoundary* anchor,
+                                const DomBoundary* focus,
+                                const char** out_exception) {
+    if (!s || !s->state) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+    return state_store_set_selection(s->state, anchor, focus, out_exception);
+}
+
+static bool selection_state_clear(DomSelection* s,
+                                  const char** out_exception) {
+    return selection_state_set(s, nullptr, nullptr, out_exception);
+}
+
 static void set_wrapper_prototype(Item obj, const char* ctor_name) {
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, make_key(ctor_name));
@@ -702,14 +718,22 @@ extern "C" Item js_selection_remove_range(Item range_v) {
 
 extern "C" Item js_selection_remove_all_ranges(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
-    dom_selection_remove_all_ranges(s);
+    const char* exc = nullptr;
+    if (!selection_state_clear(s, &exc)) {
+        throw_from_dom_exc(exc, "removeAllRanges failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
 
 extern "C" Item js_selection_empty(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
-    dom_selection_empty(s);
+    const char* exc = nullptr;
+    if (!selection_state_clear(s, &exc)) {
+        throw_from_dom_exc(exc, "empty failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
@@ -719,7 +743,11 @@ extern "C" Item js_selection_collapse(Item node_v, Item offset_v) {
     DomNode* n = node_arg(node_v);
     // per spec: collapse(null) clears the selection
     if (!n && get_type_id(node_v) == LMD_TYPE_NULL) {
-        dom_selection_remove_all_ranges(s);
+        const char* exc = nullptr;
+        if (!selection_state_clear(s, &exc)) {
+            throw_from_dom_exc(exc, "Selection.collapse(null) failed");
+            return make_undef();
+        }
         selection_sync_props(js_get_this(), s);
         return make_undef();
     }
@@ -743,7 +771,8 @@ extern "C" Item js_selection_collapse(Item node_v, Item offset_v) {
         return make_undef();
     }
     const char* exc = nullptr;
-    if (!dom_selection_collapse(s, n, off, &exc)) {
+    DomBoundary caret = { n, off };
+    if (!selection_state_set(s, &caret, &caret, &exc)) {
         throw_from_dom_exc(exc, "Selection.collapse failed");
         return make_undef();
     }
@@ -757,18 +786,32 @@ extern "C" Item js_selection_set_position(Item node_v, Item offset_v) {
 
 extern "C" Item js_selection_collapse_to_start(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    if (s->range_count == 0 || !s->ranges[0]) {
+        throw_from_dom_exc("InvalidStateError", "collapseToStart failed");
+        return make_undef();
+    }
+    DomBoundary start = s->ranges[0]->start;
     const char* exc = nullptr;
-    dom_selection_collapse_to_start(s, &exc);
-    if (exc) { throw_from_dom_exc(exc, "collapseToStart failed"); return make_undef(); }
+    if (!selection_state_set(s, &start, &start, &exc)) {
+        throw_from_dom_exc(exc, "collapseToStart failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
 
 extern "C" Item js_selection_collapse_to_end(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
+    if (s->range_count == 0 || !s->ranges[0]) {
+        throw_from_dom_exc("InvalidStateError", "collapseToEnd failed");
+        return make_undef();
+    }
+    DomBoundary end = s->ranges[0]->end;
     const char* exc = nullptr;
-    dom_selection_collapse_to_end(s, &exc);
-    if (exc) { throw_from_dom_exc(exc, "collapseToEnd failed"); return make_undef(); }
+    if (!selection_state_set(s, &end, &end, &exc)) {
+        throw_from_dom_exc(exc, "collapseToEnd failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
@@ -781,8 +824,32 @@ extern "C" Item js_selection_extend(Item node_v, Item offset_v) {
     if (!node_in_active_document(n)) {
         return make_undef();
     }
+    if (s->range_count == 0 || !s->ranges[0]) {
+        throw_from_dom_exc("InvalidStateError", "Selection.extend failed");
+        return make_undef();
+    }
+    if (n->node_type == DOM_NODE_DOCTYPE) {
+        throw_dom_exception("InvalidNodeTypeError",
+                            "Selection.extend: node must not be a DocumentType");
+        return make_undef();
+    }
+    uint32_t off = (uint32_t)item_to_int(offset_v);
+    if (off > dom_node_boundary_length(n)) {
+        throw_dom_exception("IndexSizeError",
+                            "Selection.extend: offset is out of bounds");
+        return make_undef();
+    }
     const char* exc = nullptr;
-    if (!dom_selection_extend(s, n, (uint32_t)item_to_int(offset_v), &exc)) {
+    DomBoundary anchor = dom_selection_anchor_boundary(s);
+    DomBoundary focus = { n, off };
+    DomBoundaryOrder order = dom_boundary_compare(&anchor, &focus);
+    bool ok = false;
+    if (order == DOM_BOUNDARY_DISJOINT) {
+        ok = selection_state_set(s, &focus, &focus, &exc);
+    } else {
+        ok = selection_state_set(s, &anchor, &focus, &exc);
+    }
+    if (!ok) {
         throw_from_dom_exc(exc, "Selection.extend failed");
         return make_undef();
     }
@@ -808,13 +875,18 @@ extern "C" Item js_selection_set_base_and_extent(Item anchor_node_v, Item anchor
     // Per spec: if either node isn't a descendant of the document, abort
     // (selection is left empty — do not add a range).
     if (!node_in_active_document(an) || !node_in_active_document(fn)) {
-        dom_selection_remove_all_ranges(s);
+        const char* exc = nullptr;
+        if (!selection_state_clear(s, &exc)) {
+            throw_from_dom_exc(exc, "setBaseAndExtent clear failed");
+            return make_undef();
+        }
         selection_sync_props(js_get_this(), s);
         return make_undef();
     }
     const char* exc = nullptr;
-    if (!dom_selection_set_base_and_extent(s, an, (uint32_t)item_to_int(anchor_off_v),
-                                              fn, (uint32_t)item_to_int(focus_off_v), &exc)) {
+    DomBoundary anchor = { an, (uint32_t)item_to_int(anchor_off_v) };
+    DomBoundary focus = { fn, (uint32_t)item_to_int(focus_off_v) };
+    if (!selection_state_set(s, &anchor, &focus, &exc)) {
         throw_from_dom_exc(exc, "setBaseAndExtent failed");
         return make_undef();
     }
@@ -837,8 +909,16 @@ extern "C" Item js_selection_select_all_children(Item node_v) {
     if (!node_in_active_document(n)) {
         return make_undef();
     }
+    uint32_t child_count = 0;
+    if (n->is_element()) {
+        for (DomNode* c = n->as_element()->first_child; c; c = c->next_sibling) {
+            child_count++;
+        }
+    }
     const char* exc = nullptr;
-    if (!dom_selection_select_all_children(s, n, &exc)) {
+    DomBoundary start = { n, 0 };
+    DomBoundary end = { n, child_count };
+    if (!selection_state_set(s, &start, &end, &exc)) {
         throw_from_dom_exc(exc, "selectAllChildren failed");
         return make_undef();
     }

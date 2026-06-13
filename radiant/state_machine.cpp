@@ -1747,6 +1747,8 @@ static void write_editing_interaction_snapshot(JsonWriter* w,
             }
             jw_kv_uint(w, "preedit_len",
                        editing->composition.preedit_len);
+            jw_kv_uint(w, "dom_preedit_len",
+                       editing->composition.dom_preedit_len);
             jw_kv_uint(w, "commit_len",
                        editing->composition.commit_len);
             jw_kv_uint(w, "caret", editing->composition.caret);
