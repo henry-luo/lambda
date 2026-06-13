@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 94 cases passing when this
+# One snapshot key per line. These are the 99 cases passing when this
 # baseline was created.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -21,6 +21,11 @@ BINARY OPERATORS 6/ \\sin+b renders corectly 1
 BINARY OPERATORS 7/ , +b renders corectly 1
 BINARY OPERATORS 8/ \\textcolor{red}{a}+b renders corectly 1
 BINARY OPERATORS 9/ \\textcolor{red}{a=}+b renders corectly 1
+BOX 0/ -\\bbox{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 1/ -\\bbox[border:solid 1px red]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 2/ -\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 3/ -\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 4/ -\\bbox[ yellow , border: 1px solid red, 4 em ]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
 BOX 5/ \\rlap{x}o renders correctly 1
 BOX 6/ \\mathrlap{x}o renders correctly 1
 BOX 7/ \\llap{x}o renders correctly 1
