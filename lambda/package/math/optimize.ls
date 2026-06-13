@@ -41,17 +41,21 @@ fn build_merged(el) {
     if (n == 0) el
     else
         (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
-         let merged = if (has_direct_color_child(kids, 0)) kids else merge_list(kids),
+         let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
          <span class: el.class, style: el.style;
              for (c in items) c
          >)
 }
 
-fn has_direct_color_child(items, i) {
+fn has_direct_merge_boundary_child(items, i) {
     if (i >= len(items)) false
-    else if (items[i] is element and starts_with_color_style(items[i].style)) true
-    else has_direct_color_child(items, i + 1)
+    else if (items[i] is element and is_merge_boundary_child(items[i])) true
+    else has_direct_merge_boundary_child(items, i + 1)
+}
+
+fn is_merge_boundary_child(el) {
+    starts_with_color_style(el.style) or el.class == "lm_rlap"
 }
 
 fn starts_with_color_style(style) {
