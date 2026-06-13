@@ -1300,6 +1300,9 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         _lambda_recovery_armed = 0;
         log_debug("after main func, result type_id=%d", get_type_id(result));
     }
+    if (context->heap) {
+        context->heap->result_root = context->result.item;
+    }
 
     // Preserve runtime error before runner goes out of scope
     // context points to runner's stack-allocated EvalContext, so we need to copy the error

@@ -133,16 +133,17 @@ This extracts 206 runnable markup snapshot formulas from the mirrored MathLive s
 
 Current phase checkpoint:
 
-- Full MathLive markup adapter: 42/206 exact snapshot matches.
+- Last successful monolithic MathLive markup adapter run before this phase: 42/206 exact snapshot matches. After the color/background work, focused category runs indicate at least 65 exact matches, but the current 206-case generated batch trips an ASan GC stack-scan crash during the Lambda debug run and needs runtime/harness follow-up before using the monolithic count again.
 - `ACCENTS`: 10/10 exact matches.
 - `BINARY OPERATORS`: 10/10 exact matches.
 - `FRACTIONS`: 8/9 exact matches.
 - `OVER/UNDERLINE`: 2/2 exact matches.
-- `SPACING AND KERN`: 8/10 exact matches.
+- `SPACING AND KERN`: 9/10 exact matches.
+- `COLORS`: 22/32 exact matches.
 - `SUPERSCRIPT/SUBSCRIPT`: 2/2 exact matches.
 - `LEFT/RIGHT`: 2/55 exact matches.
-- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, MathLive-style vlist output for simple/tall/nested bar fractions, binomial/no-bar vlist output, `\dbinom`/`\tbinom`/infix `\choose` command preservation, `\pdiff` expansion, MathLive-style accent vlist output, overline/underline rule vlist wrappers, primitive dimension spacing via `lm_mspace`, packed `+-` atom normalization, and sibling `\scriptstyle` switches for simple atoms.
-- Next blocker: port MathLive-style radical/placeholder vlist output, colorbox/background wrappers, display math delimiters, large-operator limits, text-mode math re-entry, `\not` overlays, and the remaining script spacing metrics needed by the final complex `FRACTIONS` snapshot.
+- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, MathLive-style vlist output for simple/tall/nested bar fractions, binomial/no-bar vlist output, `\dbinom`/`\tbinom`/infix `\choose` command preservation, `\pdiff` expansion, MathLive-style accent vlist output, overline/underline rule vlist wrappers, primitive dimension spacing via `lm_mspace`, packed `+-` atom normalization, sibling `\scriptstyle` switches for simple atoms, `\colorbox` command/background wrappers, foreground `\textcolor` normalization, short/mixed-case hex, valid/invalid `rgb(...)` handling, simple xcolor hex mixes, core xcolor named table, and AMS black square/triangle symbols.
+- Next blocker: port MathLive-style radical/placeholder vlist output, display math delimiters, large-operator limits, text-mode math re-entry, `\not` overlays, scoped `\color` exact atomization, colorbox/fraction metric parity, complex xcolor complement mixes, the monolithic adapter GC crash, and the remaining script spacing metrics needed by the final complex `FRACTIONS` snapshot.
 
 ### P1: Structural Rendering Fidelity
 
@@ -198,8 +199,8 @@ Outstanding work:
 | --- | --- |
 | Size commands | Implement `\tiny` through `\Huge`, including text/math interaction |
 | Font variants | Complete MathLive variant repertoire for upright, bold, italic, fraktur, script, sans, monospace, blackboard |
-| Xcolor names | Add the full named color table used by MathLive snapshots |
-| Color formats | Parse and validate `rgb(...)`, short/long hex, and xcolor mixes like `#111!50!#fff` |
+| Xcolor names | Core snapshot table is present; remaining work is exact scoped `\color` atomization and parser whitespace artifacts in the large square table |
+| Color formats | Short/long hex, mixed-case hex, valid/invalid `rgb(...)`, and simple hex xcolor mixes are implemented; remaining work is complement/named mixes such as `-green!40!yellow` |
 | `\bbox` options | Parse padding, border, background, and dimension options |
 | HTML extensions | Implement `\htmlData`, `\class`, `\cssId`, `\htmlStyle`, and eventually `\href` with validation |
 

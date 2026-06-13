@@ -2145,6 +2145,8 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         log_error("dom_text_set_content: failed to get child index");
         return false;
     }
+    DomNode* saved_prev = text_node->prev_sibling;
+    DomNode* saved_next = text_node->next_sibling;
 
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
@@ -2183,7 +2185,19 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
             new_dt->rect = text_node->rect;
             new_dt->font = text_node->font;
             new_dt->color = text_node->color;
-            // dom_relink_children already set parent/siblings on new_dt
+            new_dt->parent = parent;
+            new_dt->prev_sibling = saved_prev;
+            new_dt->next_sibling = saved_next;
+            if (new_dt->prev_sibling) {
+                new_dt->prev_sibling->next_sibling = new_dt;
+            } else {
+                parent->first_child = new_dt;
+            }
+            if (new_dt->next_sibling) {
+                new_dt->next_sibling->prev_sibling = new_dt;
+            } else {
+                parent->last_child = new_dt;
+            }
         }
     }
 

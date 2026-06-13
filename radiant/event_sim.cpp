@@ -32,6 +32,7 @@
 #include "../lambda/input/css/css_value.hpp"
 #include "../lib/image.h"
 #include "animation.h"
+#include "clipboard.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
@@ -380,9 +381,22 @@ static bool sim_selector_visitor(View* view, void* udata) {
     return true;
 }
 
+static void sim_flush_pending_reflow(DomDocument* doc) {
+    if (!doc || !doc->state) return;
+    DocState* state = (DocState*)doc->state;
+    if (!state->needs_reflow) return;
+    reflow_process_pending(state);
+    if (state->needs_reflow) {
+        extern void reflow_html_doc(DomDocument* doc);
+        reflow_html_doc(doc);
+        doc_state_clear_reflow(state);
+    }
+}
+
 // Find nth element matching a CSS selector in the document (0-based index)
 static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index = 0) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
+    sim_flush_pending_reflow(doc);
 
     Pool* pool = doc->pool;
     if (!pool) return NULL;
@@ -1313,6 +1327,8 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
         const char* contains = reader.get("contains").cstring();
         if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        const char* mime = reader.get("mime").cstring();
+        if (mime) ev->clipboard_mime = mem_strdup(mime, MEM_CAT_LAYOUT);
     }
     // F7 (Radiant_Design_Form_Input.md §4.1): IME composition driver.
     //   {"type":"ime_compose","phase":"begin"}
@@ -2174,6 +2190,7 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->input_text) mem_free(ev->input_text);
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
+            if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
             if (ev->option_value) mem_free(ev->option_value);
             if (ev->option_label) mem_free(ev->option_label);
             if (ev->state_name) mem_free(ev->state_name);
@@ -3810,7 +3827,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_ASSERT_CLIPBOARD: {
-            const char* clip = clipboard_get_text();
+            const char* clip = ev->clipboard_mime
+                ? clipboard_store_read_mime(ev->clipboard_mime)
+                : clipboard_get_text();
             if (!clip) clip = "";
             bool passed = true;
             if (ev->assert_equals && strcmp(clip, ev->assert_equals) != 0) {

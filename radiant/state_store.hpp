@@ -1184,6 +1184,13 @@ const char* clipboard_get_text();
  */
 void clipboard_copy_html(const char* html);
 
+/**
+ * Copy HTML plus its plain-text fallback to the clipboard.
+ * @param html The HTML fragment to copy
+ * @param plain_text The plain-text representation of the same selection
+ */
+void clipboard_copy_rich(const char* html, const char* plain_text);
+
 // ============================================================================
 // Dirty Tracking API
 // ============================================================================

@@ -10,7 +10,7 @@
     {"type": "wait", "ms": 80},
     {"type": "assert_clipboard", "equals": "se"},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:deleteByCut||1|0-2"},
-    {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "seed"},
+    {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "ed"},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByCut", "surface": "contenteditable", "prevented": false, "min": 1}
   ]
 }

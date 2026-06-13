@@ -10,6 +10,7 @@
 typedef struct Heap {
     Pool *pool;  // memory pool alias (points to gc->pool for compatibility)
     struct gc_heap *gc;  // GC heap with object tracking (replaces entries ArrayList)
+    uint64_t result_root;  // stable GC root slot for the current script result
 } Heap;
 
 void heap_init();
