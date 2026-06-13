@@ -1,7 +1,7 @@
 # Radiant Editing 2 - StateStore-driven unified editing core
 
 **Date:** 2026-06-13
-**Status:** Proposal
+**Status:** Implementation in progress
 **Layer:** Radiant interaction/editing core, above DOM Range/Selection and
 below form controls, contenteditable hosts, JS DOM events, Lambda
 `edit <...>` templates, and future rich text editor features.
@@ -814,6 +814,70 @@ Exit criteria:
 
 ---
 
+## 11. Implementation Progress
+
+Last updated: 2026-06-13.
+
+### Landed
+
+- **ED2-1 A-D:** `DocState::sel` is the canonical selection record, with DOM
+  selection and legacy caret/selection maintained as projections. Text-control
+  selection is folded into the same selection authority. Legacy selection facade
+  APIs route through StateStore writers for the audited rich-editing paths.
+- **ED2-1 E partial:** JS Selection and rich-editing mutators have been routed
+  through StateStore selection APIs where audited. Remaining work is the final
+  deletion/fencing pass for legacy compatibility wrappers that are still
+  callable by controller, state-machine, and event-sim paths.
+- **ED2-2 substantial:** Rich insertion, deletion, paste/cut, IME, simulated
+  drop, and live pointer drag/drop route through the defaultable transaction
+  path. Live pointer drop stores the drop target boundary/range before commit so
+  it uses the same transaction target snapshot as simulator drop.
+- **ED2-2 runner-only cleanup partial:** The late rich/contenteditable key
+  fallback in `event.cpp` is fenced so legacy select/copy/cut/delete projection
+  writes cannot run for rich surfaces after the controller/transaction path.
+- **ED2-4 substantial:** `InputEvent` now carries stable pre-mutation target
+  ranges, rich paste/drop `dataTransfer`, nullable rich transfer `data`,
+  composition lowering for `insertCompositionText`, and form
+  `beforeinput`/target-range dispatch through the unified editing dispatcher.
+- **ED2-4 residual cleanup:** The legacy text-control weak `beforeinput` bridge
+  (`te_dispatch_beforeinput()` / `js_dom_queue_textcontrol_beforeinput()`) is
+  retired. Legacy text-control mutation helpers only emit post-mutation `input`;
+  live editing must use the unified dispatcher so cancellable `beforeinput` is
+  available.
+- **DataTransfer JS surface:** `DataTransferItemList.item()`,
+  `DataTransferItem.getAsFile()`, `DataTransferItem.getAsString()`,
+  stable `DataTransfer.files`, and stable `DataTransfer.types` are implemented
+  for string/File/Blob items added through `DataTransferItemList.add()`.
+- **Clipboard extraction cleanup:** Clipboard copy/cut extraction has been
+  routed through canonical StateStore selection snapshots for the audited rich
+  and form paths, leaving legacy fallbacks only as compatibility surface while
+  projection migration finishes.
+
+### Still Open
+
+- **ED2-1 facade deletion:** `caret_set`, `selection_set`,
+  `selection_start`, `selection_extend`, and related compatibility APIs remain
+  callable. They must stay fenced as projection/compat wrappers, and new
+  contenteditable code must not add direct legacy writes.
+- **ED2-2 old helper retirement:** `event.cpp` still contains rich-editing
+  helper code and policy branches that should continue shrinking toward
+  surface resolution plus `EditingIntent` creation plus
+  `editing_run_transaction()`.
+- **ED2-2 commit ownership:** Reflow/repaint, selectionchange coalescing, and
+  rich commit side effects are mostly centralized, but the remaining ad-hoc
+  paths in `event.cpp` need one more audit before the cleanup inventory can be
+  marked complete.
+- **Native OS file-drop transport:** The JS `DataTransferItem` File/Blob
+  surface exists, but native drop events still carry string/html payloads
+  through `RdtEvent`; OS file-path/blob transport is not yet wired into rich
+  drop transactions.
+- **ED2-3 schema integration:** State-schema validation at every transaction
+  boundary and cascade settle remains incomplete.
+- **ED2-6 history/logging:** Transaction log richness and history coalescing
+  remain future work.
+
+---
+
 ## 12. Legacy Cleanup Inventory
 
 This phase should explicitly retire or fence the legacy editing paths that make
@@ -849,8 +913,8 @@ shadowed.
 | Editing boundary type | `EditingBoundary` / `EditingBoundaryKind` (`radiant/editing_geometry.hpp`) | Reuse for text-control offsets. Do not introduce a second `EditingBoundary`. |
 | Clipboard copy from current selection | `copy_current_selection_to_clipboard()` depending on mixed legacy/DOM selection extraction | Route through canonical StateStore selection snapshot. Clipboard HTML/plain extraction should use transaction target ranges or canonical selection. |
 | Selection extraction fallback | `extract_selected_text()` / `extract_selected_html()` fallback to `state->selection` | Prefer canonical StateStore selection. Keep legacy fallback only while text-control projection migration is incomplete. |
-| Text-control weak beforeinput bridge | `te_dispatch_beforeinput()` and `js_dom_queue_textcontrol_beforeinput()` | Replace with shared `editing_dispatch_form_beforeinput()` / `InputEvent` path. Remove weak queue once all text-control callers use the unified dispatcher. |
-| Event.cpp rich policy branches | Keyboard, text-input, paste, cut, drop, IME branches that special-case rich editing and manually call mutation/sync helpers | Reduce to surface resolution plus `EditingIntent` creation plus `editing_run_transaction()`. |
+| Text-control weak beforeinput bridge | `te_dispatch_beforeinput()` and `js_dom_queue_textcontrol_beforeinput()` | **Done.** Weak beforeinput queue removed; live text-control beforeinput is owned by `editing_dispatch_form_beforeinput()`. Legacy no-context text mutation helpers emit only post-mutation `input`. |
+| Event.cpp rich policy branches | Keyboard, text-input, paste, cut, drop, IME branches that special-case rich editing and manually call mutation/sync helpers | **Partial.** Main edit paths route through transaction/controller flow; the late rich key fallback is fenced from rich surfaces. Continue reducing the remaining branch code to surface resolution plus `EditingIntent` creation plus `editing_run_transaction()`. |
 | Ad-hoc reflow/repaint after rich mutation | local `doc_state_request_reflow()`, `need_repaint`, `state->needs_repaint` calls in rich mutation helpers | Move to transaction commit so every mutation invalidates layout consistently. |
 | Ad-hoc selectionchange queuing | direct selection-change side effects scattered through DOM selection mutators | Queue from the StateStore canonical selection writer, using revision changes to coalesce. |
 | Event simulation assumptions | assertions that read only legacy caret/selection projection | Update to optionally assert canonical selection revision, DOM facade, and projection agreement. |

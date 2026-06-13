@@ -8660,9 +8660,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
 
             EditingControllerHooks controller_hooks = editing_controller_hooks();
+            EditingSurface caret_surface;
+            bool caret_in_rich_surface =
+                editing_surface_from_target(caret_view, &caret_surface) &&
+                editing_surface_is_rich(&caret_surface);
 
             if (!editing_controller_handle_rich_navigation(&evcon, state,
-                    key_event, &controller_hooks)) {
+                    key_event, &controller_hooks) &&
+                !caret_in_rich_surface) {
+                // Non-rich compatibility branch only. Rich/editable mutation
+                // and selection ownership belongs to the intent transaction
+                // path above plus editing_controller_handle_rich_navigation().
                 switch (key_event->key) {
                     case RDT_KEY_A:
                         // Select all (Ctrl+A / Cmd+A)
@@ -8705,6 +8713,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     default:
                         break;
                 }
+            } else if (caret_in_rich_surface) {
+                log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }
         }
         // Mirror StateStore selection projection into form->selection_* so JS

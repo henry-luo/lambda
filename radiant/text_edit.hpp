@@ -81,7 +81,9 @@ uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 // Replace bytes [start, end) in the form's current_value with `repl`.
 // Updates the buffer via tc_set_value (which handles legacy/JS sync), then
 // places the caret at `start + repl_len`, clears any active selection, and
-// pushes a history entry. Dispatches "input" via the legacy event bus.
+// pushes a history entry. Legacy fallback only: dispatches "input" via the
+// legacy event bus. Cancellable beforeinput is owned by the unified dispatcher
+// in event.cpp/editing_dispatch.cpp.
 //
 // `repl` may be NULL with repl_len=0 to perform a pure deletion. Returns
 // false if `elem` is not a text control or the range is invalid.
@@ -148,11 +150,8 @@ bool te_history_redo(DomElement* elem);
 
 // ---------- F5: events + constraint validation -------------------------
 
-// Queue an `input` / `beforeinput` event for the given text control.
-// Both default to no-ops; the JS DOM bridge overrides them with weak
-// linkage (see text_control.cpp for the matching selectionchange pattern).
-// Calling these in non-JS builds is free.
-void te_dispatch_beforeinput(DomElement* elem);
+// Queue a legacy `input` event for the given text control. Defaults to no-op;
+// the JS DOM bridge overrides it with weak linkage.
 void te_dispatch_input      (DomElement* elem);
 
 // Re-evaluate constraint validation for `elem` and refresh the cached
@@ -174,8 +173,9 @@ void te_validate(DomElement* elem);
 //   - maxlength is enforced by truncating the inserted text at a UTF-8
 //     character boundary so the post-paste codepoint count fits.
 // Returns the number of bytes actually inserted (0 on failure / no-op).
-// Internally invokes te_replace_byte_range, which already fires
-// `beforeinput` / `input` and pushes an undo entry.
+// Internally invokes te_replace_byte_range, which fires the legacy `input`
+// hook and pushes an undo entry. Live editing paste should use the unified
+// dispatcher path so cancellable beforeinput is available.
 uint32_t te_paste(DomElement* elem, DocState* state, void* target,
                   const char* text, uint32_t len);
 

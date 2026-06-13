@@ -280,15 +280,12 @@ bool te_replace_byte_range(DomElement* elem, DocState* state, void* target,
                            const char* repl, uint32_t repl_len) {
     if (!elem || !state || !target) return false;
 
-    // F5: fire `beforeinput` (informational; cancellation is a JS-bridge
-    // concern) before mutating the value so listeners observe pre-state.
-    te_dispatch_beforeinput(elem);
-
     bool ok = te_replace_byte_range_no_events(elem, state, target,
                                               start, end, repl, repl_len);
     if (!ok) return false;
 
-    // F5: dispatch `input` after the mutation is committed.
+    // Legacy callers without an EventContext cannot synthesize cancellable
+    // beforeinput. Live editing routes through dispatch_form_text_replace().
     te_dispatch_input(elem);
     return true;
 }
@@ -526,17 +523,10 @@ bool te_history_redo(DomElement* elem) {
 
 // ---------- F5: events + constraint validation -------------------------
 
-// Weak hooks; the JS DOM bridge overrides these in JS-enabled builds. The
-// no-op default keeps headless / unit-test builds free of any cost.
+// Weak hook for legacy callers that still mutate a text control without an
+// EventContext. Cancellable beforeinput is owned by editing_dispatch.cpp.
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* elem);
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* /*elem*/) {}
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_beforeinput(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_beforeinput(DomElement* /*elem*/) {}
-
-void te_dispatch_beforeinput(DomElement* elem) {
-    if (!elem) return;
-    js_dom_queue_textcontrol_beforeinput(elem);
-}
 
 void te_dispatch_input(DomElement* elem) {
     if (!elem) return;
@@ -752,8 +742,9 @@ uint32_t te_paste(DomElement* elem, DocState* state, void* target,
         return 0;
     }
 
-    // Step 3: replace [sel_a, sel_b) with sanitized. te_replace_byte_range
-    // dispatches beforeinput/input and pushes an undo entry.
+    // Step 3: replace [sel_a, sel_b) with sanitized. Unified live editing
+    // callers use dispatch_form_text_paste(); this fallback only emits the
+    // legacy post-mutation input hook.
     bool ok = te_replace_byte_range(elem, state, target,
                                     sel_a, sel_b, sanitized, s_len);
     mem_free(sanitized);
