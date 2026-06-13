@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 180 cases passing when this
+# One snapshot key per line. These are the 196 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -31,9 +31,11 @@ BOX 6/ \\mathrlap{x}o renders correctly 1
 BOX 7/ \\llap{x}o renders correctly 1
 BOX 8/ \\mathllap{x}o renders correctly 1
 COLORS 0/ color format "aquamarine" renders correctly 1
+COLORS 1/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 1/ color format "rgb(240, 10, 200)" renders correctly 1
 COLORS 2/ color format "#33d" renders correctly 1
 COLORS 3/ color format "#3130da" renders correctly 1
+COLORS 4/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 4/ color format "white" renders correctly 1
 COLORS 5/ color format "Aquamarine" renders correctly 1
 COLORS 6/ a{b\\color{#f00} c}d renders correctly 1
@@ -101,8 +103,14 @@ LEFT/RIGHT Delimiters \\{ \\} 1
 LEFT/RIGHT Delimiters \\{ \\} 2
 LEFT/RIGHT Delimiters \\| | 1
 LEFT/RIGHT Delimiters \\| | 2
+LEFT/RIGHT Delimiters \\Downarrow \\Uparrow 1
+LEFT/RIGHT Delimiters \\Downarrow \\Uparrow 2
+LEFT/RIGHT Delimiters \\Updownarrow \\updownarrow 1
+LEFT/RIGHT Delimiters \\Updownarrow \\updownarrow 2
 LEFT/RIGHT Delimiters \\Vert \\Vert 1
 LEFT/RIGHT Delimiters \\Vert \\Vert 2
+LEFT/RIGHT Delimiters \\downarrow \\vert 1
+LEFT/RIGHT Delimiters \\downarrow \\vert 2
 LEFT/RIGHT Delimiters \\lVert \\rVert 1
 LEFT/RIGHT Delimiters \\lVert \\rVert 2
 LEFT/RIGHT Delimiters \\langle \\rangle 1
@@ -118,17 +126,25 @@ LEFT/RIGHT Delimiters \\lfloor \\rfloor 2
 LEFT/RIGHT Delimiters \\lfloor \\rfloor 3
 LEFT/RIGHT Delimiters \\lfloor \\rfloor 4
 LEFT/RIGHT Delimiters \\lgroup \\rgroup 1
+LEFT/RIGHT Delimiters \\lgroup \\rgroup 2
 LEFT/RIGHT Delimiters \\lmoustache \\rmoustache 1
+LEFT/RIGHT Delimiters \\lmoustache \\rmoustache 2
 LEFT/RIGHT Delimiters \\lvert \\rvert 1
 LEFT/RIGHT Delimiters \\lvert \\rvert 2
 LEFT/RIGHT Delimiters \\surd \\surd 1
 LEFT/RIGHT Delimiters \\surd \\surd 2
 LEFT/RIGHT Delimiters \\ulcorner \\urcorner 1
 LEFT/RIGHT Delimiters \\ulcorner \\urcorner 2
+LEFT/RIGHT Delimiters \\uparrow \\Downarrow 1
+LEFT/RIGHT Delimiters \\uparrow \\Downarrow 2
+LEFT/RIGHT Delimiters \\uparrow \\downarrow 1
+LEFT/RIGHT Delimiters \\uparrow \\downarrow 2
 LEFT/RIGHT Delimiters \\vert \\vert 1
 LEFT/RIGHT Delimiters \\vert \\vert 2
+LEFT/RIGHT Delimiters {(} {)} 1
 LEFT/RIGHT middle delimiters 1
 LEFT/RIGHT middle delimiters 2
+LEFT/RIGHT middle delimiters 3
 MODE SHIFT 0/ \\text{\\ensuremath{\\frac34}} renders correctly 1
 MODE SHIFT 1/ 1+\\textcolor{blue}{$ 2 $}+3+\\textcolor{red}{4}+\\text{5\\textcolor{purple}{6}} renders correctly 1
 NOT 0/ \\not\\in \\not{}\\in \\not{}\\in \\not\\in renders correctly 1

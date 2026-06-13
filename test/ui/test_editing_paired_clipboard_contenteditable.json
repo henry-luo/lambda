@@ -8,8 +8,9 @@
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "clip"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromPaste|clip"},
-    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromPaste|clip|seed"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromPaste||"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "dt:text/plain:plain=clip:html="},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromPaste||seed"},
     {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "seedclip"},
     {"type": "assert_clipboard", "equals": "clip"}
   ]

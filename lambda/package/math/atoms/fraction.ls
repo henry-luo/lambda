@@ -117,21 +117,22 @@ fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx) {
     let numer_style = frac_child_style(spec.numer_child_height, spec.child_font_pct)
     let denom_style = frac_child_style(spec.denom_child_height, spec.child_font_pct)
     let line_style = "height:" ++ util.fmt_em(spec.rule_height) ++ ";display:inline-block"
+    let pstrut_style = "height:" ++ util.fmt_em(if (spec.pstrut != null) spec.pstrut else 3.0)
     let el = <span class: css.VLIST_T2;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
                 <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.denom_top);
-                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: css.PSTRUT, style: pstrut_style>
                     <span style: denom_style;
                         for (el in denom_elements) el
                     >
                 >
                 <span style: "top:" ++ util.fmt_em(spec.line_top);
-                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: css.PSTRUT, style: pstrut_style>
                     <span class: css.FRAC_LINE, style: line_style>
                 >
                 <span class: css.CENTER, style: "top:" ++ util.fmt_em(spec.numer_top);
-                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: css.PSTRUT, style: pstrut_style>
                     <span style: numer_style;
                         for (el in numer_elements) el
                     >
@@ -225,6 +226,54 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: "71.43%",
             rule_height: 0.05
         }
+    } else if (frac_ctx.style == "scriptscript") {
+        {
+            height: 0.97,
+            depth: 0.54,
+            render_height: 0.97,
+            render_depth: 0.54,
+            render_total: 1.51,
+            depth_holder: 0.54,
+            denom_top: -2.46,
+            line_top: -3.22,
+            numer_top: -3.5,
+            numer_child_height: 0.47,
+            denom_child_height: 0.47,
+            child_font_pct: "71.43%",
+            rule_height: 0.05
+        }
+    } else if (frac_ctx.style == "script" and (numer_total >= 0.95 or numer_box.height >= 0.9) and denom_total < 0.75) {
+        {
+            height: 1.36,
+            depth: 0.35,
+            render_height: 1.36,
+            render_depth: 0.35,
+            render_total: 1.71,
+            depth_holder: 0.35,
+            denom_top: -2.65,
+            line_top: -3.23,
+            numer_top: -3.68,
+            numer_child_height: 1.05,
+            denom_child_height: 0.31,
+            child_font_pct: "70%",
+            rule_height: 0.04
+        }
+    } else if ((frac_ctx.style == "script" or frac_ctx.style == "scriptscript") and child_total >= 0.7) {
+        {
+            height: 0.84,
+            depth: 0.41,
+            render_height: 0.84,
+            render_depth: 0.41,
+            render_total: 1.24,
+            depth_holder: 0.41,
+            denom_top: -2.65,
+            line_top: -3.23,
+            numer_top: -3.38,
+            numer_child_height: script_frac_child_height(numer_box, 0.51),
+            denom_child_height: script_frac_child_height(denom_box, 0.55),
+            child_font_pct: "70%",
+            rule_height: 0.04
+        }
     } else if (frac_ctx.style == "script" or frac_ctx.style == "scriptscript") {
         {
             height: 0.84,
@@ -241,23 +290,39 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: "70%",
             rule_height: 0.04
         }
-    } else if (child_total >= 1.15) {
+    } else if (numer_total >= 1.5 and denom_total >= 1.2) {
         {
-            height: 1.57,
-            depth: 1.06,
-            render_height: 1.57,
-            render_depth: 1.06,
-            render_total: 2.64,
-            left_right_render_depth: 1.069108,
-            left_right_render_total: 2.638216,
-            depth_holder: 1.07,
-            denom_top: -2.27,
-            line_top: -3.23,
-            numer_top: -3.73,
-            numer_child_height: 1.18,
-            denom_child_height: 1.18,
+            height: 2.09,
+            depth: 1.12,
+            render_height: 2.09,
+            render_depth: 1.12,
+            render_total: 3.22,
+            depth_holder: 1.13,
+            denom_top: -2.62,
+            line_top: -3.58,
+            numer_top: -4.08,
+            numer_child_height: 1.7,
+            denom_child_height: round(denom_total * 100.0) / 100.0,
             child_font_pct: null,
-            rule_height: 0.04
+            rule_height: 0.04,
+            pstrut: 3.36
+        }
+    } else if (numer_total >= 1.5 and denom_total < 0.95) {
+        {
+            height: 2.09,
+            depth: 0.685,
+            render_height: 2.09,
+            render_depth: 0.68,
+            render_total: 2.78,
+            depth_holder: 0.69,
+            denom_top: -2.66,
+            line_top: -3.58,
+            numer_top: -4.08,
+            numer_child_height: 1.7,
+            denom_child_height: if (denom_box.height < 0.65) denom_box.height else 0.65,
+            child_font_pct: null,
+            rule_height: 0.04,
+            pstrut: 3.36
         }
     } else if (numer_total >= 0.95 and denom_total < 0.95) {
         {
@@ -275,6 +340,22 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: null,
             rule_height: 0.04
         }
+    } else if (denom_total >= 1.2 and numer_total < 0.95) {
+        {
+            height: 1.15,
+            depth: 1.12,
+            render_height: 1.15,
+            render_depth: 1.12,
+            render_total: 2.28,
+            depth_holder: 1.13,
+            denom_top: -2.27,
+            line_top: -3.23,
+            numer_top: -3.5,
+            numer_child_height: 0.65,
+            denom_child_height: round(denom_total * 100.0) / 100.0,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
     } else if (denom_total >= 0.95 and numer_total < 0.95) {
         {
             height: 1.15,
@@ -288,6 +369,24 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             numer_top: -3.5,
             numer_child_height: 0.65,
             denom_child_height: round(denom_total * 100.0) / 100.0,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
+    } else if (child_total >= 1.15) {
+        {
+            height: 1.57,
+            depth: 1.06,
+            render_height: 1.57,
+            render_depth: 1.06,
+            render_total: 2.64,
+            left_right_render_depth: 1.069108,
+            left_right_render_total: 2.638216,
+            depth_holder: 1.07,
+            denom_top: -2.27,
+            line_top: -3.23,
+            numer_top: -3.73,
+            numer_child_height: 1.18,
+            denom_child_height: 1.18,
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -340,6 +439,11 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     }
+}
+
+fn script_frac_child_height(child_box, fallback) {
+    let total = render_total_of(child_box)
+    if (total >= 0.7) fallback else 0.46
 }
 
 fn frac_nobar_spec(frac_ctx, cmd) {

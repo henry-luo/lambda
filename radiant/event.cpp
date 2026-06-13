@@ -21,6 +21,7 @@
 #include "editing_dispatch.hpp"
 #include "editing_geometry.hpp"
 #include "editing_intent.hpp"
+#include "editing_rich_transaction.hpp"
 #include "editing_target_range.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -1343,203 +1344,6 @@ static DomElement* rich_editable_from_target(View* target) {
     return editing_surface_is_rich(&surface) ? surface.owner : nullptr;
 }
 
-static DomText* rich_find_text_descendant(DomNode* node, bool last) {
-    if (!node) return nullptr;
-    if (node->is_text()) return lam::dom_require_text(node);
-    if (!node->is_element()) return nullptr;
-
-    DomElement* elem = lam::dom_require_element(node);
-    DomText* found = nullptr;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        DomText* text = rich_find_text_descendant(child, last);
-        if (!text) continue;
-        if (!last) return text;
-        found = text;
-    }
-    return found;
-}
-
-static bool rich_selection_is_host_child_range(const EditingSurface* surface,
-                                               const DomSelection* selection) {
-    if (!surface || !surface->owner || !selection || selection->range_count == 0 ||
-        dom_selection_is_collapsed(selection) || !selection->ranges[0]) {
-        return false;
-    }
-
-    DomRange* range = selection->ranges[0];
-    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
-    if (range->start.node != owner_node || range->end.node != owner_node) {
-        return false;
-    }
-    if (range->start.offset != 0) return false;
-    return range->end.offset == dom_node_boundary_length(owner_node);
-}
-
-static bool rich_selection_single_text_range(const DomSelection* selection,
-                                             DomText** out_text,
-                                             uint32_t* out_start,
-                                             uint32_t* out_end) {
-    if (out_text) *out_text = nullptr;
-    if (out_start) *out_start = 0;
-    if (out_end) *out_end = 0;
-    if (!selection || selection->range_count == 0 || dom_selection_is_collapsed(selection) ||
-        !selection->ranges[0]) {
-        return false;
-    }
-
-    DomRange* range = selection->ranges[0];
-    if (!range->start.node || range->start.node != range->end.node ||
-        !range->start.node->is_text()) {
-        return false;
-    }
-
-    DomText* text = lam::dom_require_text(range->start.node);
-    uint32_t start = dom_text_utf16_to_utf8(text, range->start.offset);
-    uint32_t end = dom_text_utf16_to_utf8(text, range->end.offset);
-    if (end < start) {
-        uint32_t tmp = start;
-        start = end;
-        end = tmp;
-    }
-    if (out_text) *out_text = text;
-    if (out_start) *out_start = start;
-    if (out_end) *out_end = end;
-    return true;
-}
-
-static bool rich_transaction_delete_dom_range(DocState* state,
-                                              DomSelection* selection) {
-    if (!state || !selection || selection->range_count == 0 ||
-        dom_selection_is_collapsed(selection) || !selection->ranges[0]) {
-        return false;
-    }
-    if (selection != state->dom_selection) return false;
-    const char* exc = nullptr;
-    if (!state_store_delete_selection_from_document(state, &exc)) {
-        log_debug("rich_transaction_delete_dom_range: delete rejected: %s",
-                  exc ? exc : "?");
-        return false;
-    }
-    return true;
-}
-
-static bool rich_transaction_collapse_text_caret(DocState* state,
-                                                 DomText* text,
-                                                 uint32_t byte_offset) {
-    if (!state || !text) return false;
-    uint32_t caret_u16 = dom_text_utf8_to_utf16(text, byte_offset);
-    DomBoundary caret = { static_cast<DomNode*>(text), caret_u16 };
-    const char* exc = nullptr;
-    if (!state_store_set_selection(state, &caret, &caret, &exc)) {
-        log_debug("rich_transaction_collapse_text_caret: collapse rejected: %s",
-                  exc ? exc : "?");
-        return false;
-    }
-    return true;
-}
-
-static bool rich_transaction_caret_from_state(DocState* state,
-                                              DomText** out_text,
-                                              uint32_t* out_byte_offset) {
-    if (out_text) *out_text = nullptr;
-    if (out_byte_offset) *out_byte_offset = 0;
-    if (!state || !state->dom_selection ||
-        state->dom_selection->range_count == 0 ||
-        !state->dom_selection->ranges[0]) {
-        return false;
-    }
-
-    DomRange* range = state->dom_selection->ranges[0];
-    if (!dom_range_collapsed(range) || !range->start.node ||
-        !range->start.node->is_text()) {
-        return false;
-    }
-
-    DomText* text = lam::dom_require_text(range->start.node);
-    if (!text) return false;
-    if (out_text) *out_text = text;
-    if (out_byte_offset) {
-        *out_byte_offset = dom_text_utf16_to_utf8(text, range->start.offset);
-    }
-    return true;
-}
-
-static bool rich_transaction_delete_dom_range_and_read_caret(
-        DocState* state, DomText** out_text, uint32_t* out_byte_offset) {
-    if (!state || !state->dom_selection) return false;
-    if (!rich_transaction_delete_dom_range(state, state->dom_selection)) {
-        return false;
-    }
-    return rich_transaction_caret_from_state(state, out_text, out_byte_offset);
-}
-
-struct RichDefaultSelectionTarget {
-    DomText* text;
-    uint32_t start;
-    uint32_t end;
-    bool mutation_complete;
-};
-
-static void rich_default_selection_target_clear(
-        RichDefaultSelectionTarget* target) {
-    if (!target) return;
-    target->text = nullptr;
-    target->start = 0;
-    target->end = 0;
-    target->mutation_complete = false;
-}
-
-static bool rich_transaction_resolve_selection_target(
-        DocState* state,
-        const EditingSurface* fallback_surface,
-        const InputIntent* intent,
-        DomSelection* selection,
-        RichDefaultSelectionTarget* out) {
-    rich_default_selection_target_clear(out);
-    if (!state || !intent || !selection || !out ||
-        selection->range_count == 0 || !selection->ranges[0] ||
-        dom_selection_is_collapsed(selection)) {
-        return false;
-    }
-
-    if (rich_selection_single_text_range(selection, &out->text,
-            &out->start, &out->end)) {
-        return true;
-    }
-
-    if (intent->type == INPUT_INTENT_DELETE_BY_CUT ||
-        intent->type == INPUT_INTENT_DELETE_BY_DRAG) {
-        out->mutation_complete =
-            rich_transaction_delete_dom_range(state, selection);
-        return out->mutation_complete;
-    }
-
-    if (intent->type == INPUT_INTENT_INSERT_FROM_PASTE ||
-        intent->type == INPUT_INTENT_INSERT_FROM_DROP) {
-        if (!rich_transaction_delete_dom_range_and_read_caret(state,
-                &out->text, &out->start)) {
-            return false;
-        }
-        out->end = out->start;
-        return true;
-    }
-
-    if (!fallback_surface || !editing_surface_is_rich(fallback_surface) ||
-        !rich_selection_is_host_child_range(fallback_surface, selection)) {
-        return false;
-    }
-
-    out->text = rich_find_text_descendant(
-        static_cast<DomNode*>(fallback_surface->owner), true);
-    if (!out->text) return false;
-    const char* selected_text = out->text->text ? out->text->text : "";
-    out->start = out->text->length > 0
-        ? (uint32_t)out->text->length
-        : (uint32_t)strlen(selected_text);
-    out->end = out->start;
-    return true;
-}
-
 static bool dom_node_is_descendant_of(DomNode* node, DomNode* ancestor) {
     for (DomNode* p = node; p; p = p->parent) {
         if (p == ancestor) return true;
@@ -2297,268 +2101,19 @@ static bool dispatch_rich_consumer_transaction(EventContext* evcon,
                                                         "consumer");
 }
 
-static bool rich_text_default_is_composition_intent(
-        const InputIntent* intent) {
-    return intent &&
-        (intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT ||
-         intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
-         intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT);
-}
-
-static uint32_t rich_utf8_byte_offset_for_codepoints(const char* text,
-                                                     uint32_t len,
-                                                     uint32_t codepoints) {
-    if (!text || codepoints == 0) return 0;
-    uint32_t seen = 0;
-    uint32_t i = 0;
-    while (i < len && seen < codepoints) {
-        unsigned char b = (unsigned char)text[i];
-        uint32_t step = 1;
-        if (b >= 0xF0) step = 4;
-        else if (b >= 0xE0) step = 3;
-        else if (b >= 0xC0) step = 2;
-        if (i + step > len) step = 1;
-        i += step;
-        seen++;
-    }
-    return i > len ? len : i;
-}
-
-static bool rich_text_default_composition_range(DocState* state,
-                                                const InputIntent* intent,
-                                                DomText** out_text,
-                                                uint32_t* out_start,
-                                                uint32_t* out_end) {
-    if (out_text) *out_text = nullptr;
-    if (out_start) *out_start = 0;
-    if (out_end) *out_end = 0;
-    if (!state || !intent || !rich_text_default_is_composition_intent(intent)) {
-        return false;
-    }
-    if (!state->editing.composition.active) return false;
-    View* anchor_view = state->editing.composition.anchor_view;
-    if (!anchor_view || !anchor_view->is_text()) return false;
-
-    DomText* text = lam::dom_require_text(static_cast<DomNode*>(anchor_view));
-    if (!text) return false;
-    const char* old_text = text->text ? text->text : "";
-    uint32_t old_len = text->length > 0
-        ? (uint32_t)text->length
-        : (uint32_t)strlen(old_text);
-    uint32_t start = state->editing.composition.anchor_offset < 0
-        ? 0
-        : (uint32_t)state->editing.composition.anchor_offset;
-    if (start > old_len) start = old_len;
-    uint32_t end = start + state->editing.composition.dom_preedit_len;
-    if (end > old_len || end < start) end = old_len;
-
-    if (out_text) *out_text = text;
-    if (out_start) *out_start = start;
-    if (out_end) *out_end = end;
-    return true;
-}
-
-static const char* rich_text_default_mutation_operation(
-        const InputIntent* intent) {
-    if (!intent) return "replace";
-    switch (intent->type) {
-        case INPUT_INTENT_INSERT_TEXT:
-            return "insert";
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:
-            return "replace";
-        case INPUT_INTENT_INSERT_COMPOSITION_TEXT:
-        case INPUT_INTENT_INSERT_FROM_COMPOSITION:
-        case INPUT_INTENT_DELETE_COMPOSITION_TEXT:
-            return "composition";
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-            return "paste";
-        case INPUT_INTENT_INSERT_FROM_DROP:
-            return "drop";
-        case INPUT_INTENT_INSERT_PARAGRAPH:
-        case INPUT_INTENT_INSERT_LINE_BREAK:
-            return "linebreak";
-        case INPUT_INTENT_DELETE_BY_DRAG:
-            return "drag";
-        case INPUT_INTENT_DELETE_BY_CUT:
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
-            return "delete";
-        default:
-            return "replace";
-    }
-}
-
-static bool rich_transaction_default_replace(EventContext* evcon,
-                                             DocState* state,
-                                             const InputIntent* intent,
-                                             View* fallback_view,
-                                             int fallback_offset) {
-    if (!evcon || !state || !intent) return false;
-    if (intent->type != INPUT_INTENT_INSERT_TEXT &&
-        intent->type != INPUT_INTENT_INSERT_REPLACEMENT_TEXT &&
-        intent->type != INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
-        intent->type != INPUT_INTENT_INSERT_FROM_COMPOSITION &&
-        intent->type != INPUT_INTENT_DELETE_COMPOSITION_TEXT &&
-        intent->type != INPUT_INTENT_INSERT_FROM_PASTE &&
-        intent->type != INPUT_INTENT_INSERT_FROM_DROP &&
-        intent->type != INPUT_INTENT_INSERT_PARAGRAPH &&
-        intent->type != INPUT_INTENT_INSERT_LINE_BREAK &&
-        intent->type != INPUT_INTENT_DELETE_BY_CUT &&
-        intent->type != INPUT_INTENT_DELETE_BY_DRAG &&
-        intent->type != INPUT_INTENT_DELETE_CONTENT_BACKWARD &&
-        intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD) {
-        return false;
-    }
-
-    DomText* text = nullptr;
-    uint32_t start = 0;
-    uint32_t end = 0;
-    bool composition_range = rich_text_default_composition_range(state, intent,
-        &text, &start, &end);
-    DomSelection* dom_selection = state->dom_selection;
-    EditingSurface fallback_surface;
-    EditingSurface* fallback_surface_ptr = nullptr;
-    if (fallback_view && editing_surface_from_target(fallback_view,
-            &fallback_surface) && editing_surface_is_rich(&fallback_surface)) {
-        fallback_surface_ptr = &fallback_surface;
-    }
-    if (composition_range) {
-        // replace the current rich DOM preedit range below
-    } else if (dom_selection && dom_selection->range_count > 0 &&
-        dom_selection->ranges[0] && !dom_selection_is_collapsed(dom_selection)) {
-        RichDefaultSelectionTarget target;
-        if (!rich_transaction_resolve_selection_target(state,
-                fallback_surface_ptr, intent, dom_selection, &target)) {
-            return false;
-        }
-        if (target.mutation_complete) return true;
-        text = target.text;
-        start = target.start;
-        end = target.end;
-    } else {
-        if (fallback_view && fallback_view->is_text() &&
-            rich_editable_from_target(fallback_view)) {
-            text = lam::dom_require_text(static_cast<DomNode*>(fallback_view));
-            start = fallback_offset < 0 ? 0 : (uint32_t)fallback_offset;
-        } else {
-            if (!rich_transaction_caret_from_state(state, &text, &start)) {
-                return false;
-            }
-        }
-        end = start;
-    }
-
-    if (!text) return false;
-    if (end < start) {
-        uint32_t tmp = start;
-        start = end;
-        end = tmp;
-    }
-    const char* old_text = text->text ? text->text : "";
-    uint32_t old_len = text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(old_text);
-    if (start > old_len) start = old_len;
-    if (end > old_len) end = old_len;
-
-    const char* data = intent->data ? intent->data : "";
-    if (intent->type == INPUT_INTENT_INSERT_PARAGRAPH ||
-        intent->type == INPUT_INTENT_INSERT_LINE_BREAK) {
-        data = "\n";
-    } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT ||
-               intent->type == INPUT_INTENT_DELETE_BY_DRAG ||
-               intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
-        data = "";
-    } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
-               intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD) {
-        data = "";
-        if (start == end) {
-            if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
-                if (start == 0) return false;
-                uint32_t prev = start - 1;
-                while (prev > 0 &&
-                       (((unsigned char)old_text[prev] & 0xC0) == 0x80)) {
-                    prev--;
-                }
-                start = prev;
-            } else {
-                if (end >= old_len) return false;
-                uint32_t next = end + 1;
-                while (next < old_len &&
-                       (((unsigned char)old_text[next] & 0xC0) == 0x80)) {
-                    next++;
-                }
-                end = next;
-            }
-        }
-    }
-
-    uint32_t data_len = (uint32_t)strlen(data);
-    size_t new_len = (size_t)old_len - (size_t)(end - start) + (size_t)data_len;
-    char* replacement = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
-    if (!replacement) return false;
-
-    if (start > 0) memcpy(replacement, old_text, start);
-    if (data_len > 0) memcpy(replacement + start, data, data_len);
-    if (end < old_len) {
-        memcpy(replacement + start + data_len, old_text + end, old_len - end);
-    }
-    replacement[new_len] = '\0';
-
-    DomElement* text_parent = text->parent && text->parent->is_element()
-        ? lam::dom_require_element(text->parent)
-        : nullptr;
-    int64_t text_child_idx = dom_text_get_child_index(text);
-
-    doc_state_set_hover_target(state, NULL);
-    bool updated = dom_text_set_content(text, replacement);
-    mem_free(replacement);
-    if (!updated) return false;
-
-    DomText* live_text = text;
-    if (text_parent && text_child_idx >= 0) {
-        int64_t idx = 0;
-        for (DomNode* child = text_parent->first_child; child;
-             child = child->next_sibling, idx++) {
-            if (idx == text_child_idx) {
-                if (child->is_text()) live_text = lam::dom_require_text(child);
-                break;
-            }
-        }
-    }
-
-    uint32_t caret_offset = start + data_len;
-    if (composition_range &&
-        intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
-        uint32_t caret_in_preedit = rich_utf8_byte_offset_for_codepoints(
-            data, data_len, intent->composition_caret);
-        caret_offset = start + caret_in_preedit;
-    }
-    if (!rich_transaction_collapse_text_caret(state, live_text, caret_offset)) {
-        return false;
-    }
-    if (composition_range) {
-        state->editing.composition.anchor_view = static_cast<View*>(live_text);
-        state->editing.composition.anchor_offset =
-            (int)start; // INT_CAST_OK: StateStore composition anchor stores byte offsets as int.
-        state->editing.composition.dom_preedit_len =
-            intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT
-                ? data_len
-                : 0;
-    }
-    EditingSurface live_surface;
-    if (editing_surface_from_target(static_cast<View*>(live_text), &live_surface) &&
-        editing_surface_is_rich(&live_surface)) {
-        editing_interaction_set_active_surface(state, &live_surface);
-        uint32_t new_text_len = live_text->length > 0
-            ? (uint32_t)live_text->length
-            : (uint32_t)strlen(live_text->text ? live_text->text : "");
-        event_log_editing_mutation(state, &live_surface, intent,
-                                   rich_text_default_mutation_operation(intent),
-                                   old_len, new_text_len,
-                                   caret_offset, caret_offset);
-    }
-    log_debug("rich_transaction_default_replace: inserted %u bytes at [%u,%u]",
-              data_len, start, end);
-    return true;
+static void rich_transaction_log_mutation(DocState* state,
+                                          const EditingSurface* surface,
+                                          const EditingIntent* intent,
+                                          const char* operation,
+                                          uint32_t old_len,
+                                          uint32_t new_len,
+                                          uint32_t selection_start,
+                                          uint32_t selection_end,
+                                          void* user) {
+    (void)user;
+    event_log_editing_mutation(state, surface, intent, operation,
+                               old_len, new_len,
+                               selection_start, selection_end);
 }
 
 struct RichDefaultTransactionArgs {
@@ -2573,9 +2128,11 @@ static bool rich_transaction_default_mutate(EventContext* evcon,
                                             void* user) {
     (void)surface;
     RichDefaultTransactionArgs* args = (RichDefaultTransactionArgs*)user;
-    return rich_transaction_default_replace(evcon, state, intent,
+    (void)evcon;
+    return editing_rich_default_replace(state, intent,
         args ? args->fallback_view : nullptr,
-        args ? args->fallback_offset : 0);
+        args ? args->fallback_offset : 0,
+        rich_transaction_log_mutation, nullptr);
 }
 
 static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
@@ -4125,7 +3682,7 @@ static bool dispatch_editing_composition_for_controller(EventContext* evcon,
         intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     editing_interaction_set_composing(state, surface, composing);
     bool handled = false;
-    if (rich_text_default_is_composition_intent(intent)) {
+    if (editing_rich_is_composition_intent(intent)) {
         handled = dispatch_rich_transaction_defaultable(evcon, target, intent,
             target, 0);
     } else {
@@ -4883,6 +4440,30 @@ static Item ce_build_static_range_item(const EditingTargetRange* r) {
     return obj;
 }
 
+static bool input_intent_uses_transfer_payload(InputIntentType type) {
+    switch (type) {
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
+        case INPUT_INTENT_INSERT_FROM_DROP:
+        case INPUT_INTENT_DELETE_BY_DRAG:
+        case INPUT_INTENT_DELETE_BY_CUT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static const char* input_event_data_for_surface(const EditingSurface* surface,
+                                                bool has_surface,
+                                                const InputIntent* intent) {
+    if (!intent) return nullptr;
+    if (has_surface && editing_surface_is_rich(surface) &&
+        input_intent_uses_transfer_payload(intent->type)) {
+        return nullptr;
+    }
+    return intent->data;
+}
+
 /**
  * CE-3 (Radiant_Design_Content_Editable.md §6): dispatch a `beforeinput` or
  * `input` event via the JS EventTarget pipeline. `beforeinput` is cancelable;
@@ -4900,11 +4481,14 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     if (!evcon || !target || !type || !intent) return false;
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
+    EditingSurface surface;
+    bool has_surface = editing_surface_from_target(target, &surface);
     JsCtxScope scope;
     if (!radiant_js_ctx_enter(&scope, evcon)) return false;
     auto t_start = std::chrono::high_resolution_clock::now();
     const char* input_type = input_intent_type_name(intent->type);
-    const char* data = intent->data ? intent->data : "";
+    const char* data = input_event_data_for_surface(&surface, has_surface,
+                                                    intent);
 
     EditingTargetRange ranges[1];
     const EditingTargetRange* range_snapshot = nullptr;
@@ -4915,8 +4499,6 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     } else {
         // Non-transaction fallback: compute the StaticRange[] snapshot before
         // dispatch so handlers see the current pre-dispatch ranges.
-        EditingSurface surface;
-        bool has_surface = editing_surface_from_target(target, &surface);
         DocState* state = event_context_target_state(evcon);
         n_ranges = has_surface
             ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
@@ -4931,24 +4513,15 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
         js_array_push(ranges_arr, ce_build_static_range_item(&range_snapshot[i]));
     }
 
-    // CE-3 follow-up (§6.1, §8): for paste/drop intents, attach a
-    // DataTransfer carrying the text/plain (and text/html if present)
-    // payload from the InputIntent. The InputIntent is already populated
-    // from clipboard at intent-build time (`input_intent_from_key_event`
-    // for Cmd-V; the drop path passes drag_data through `intent->data`).
+    // CE-3 follow-up (§6.1, §8): rich paste/drop/cut/drag intents attach a
+    // DataTransfer carrying the text/plain (and text/html if present) payload.
+    // Text controls expose the plain text through `data` and keep dataTransfer
+    // null, matching the Input Events cut/paste WPT surface.
     Item data_transfer = ItemNull;
-    switch (intent->type) {
-        case INPUT_INTENT_INSERT_FROM_PASTE:
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
-        case INPUT_INTENT_INSERT_FROM_DROP:
-        case INPUT_INTENT_DELETE_BY_DRAG:
-        case INPUT_INTENT_DELETE_BY_CUT:
-            data_transfer = js_data_transfer_new_with_strings(
-                intent->data,
-                intent->html_data);
-            break;
-        default:
-            break;
+    if (has_surface && editing_surface_is_rich(&surface) &&
+        input_intent_uses_transfer_payload(intent->type)) {
+        data_transfer = js_data_transfer_new_with_strings(intent->data,
+                                                          intent->html_data);
     }
 
     Item ev = js_create_native_input_event(type, input_type, data,
@@ -7237,7 +6810,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (!evcon.default_prevented && evcon.target->view_type != RDT_VIEW_TEXT &&
                 !is_view_focusable(evcon.target)) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
-                DomText* fallback_text = rich_find_text_descendant(
+                DomText* fallback_text = editing_rich_find_text_descendant(
                     rich_host ? static_cast<DomNode*>(rich_host) : nullptr, true);
                 if (fallback_text) {
                     uint32_t fallback_len = fallback_text->length > 0
@@ -9087,9 +8660,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
 
             EditingControllerHooks controller_hooks = editing_controller_hooks();
+            EditingSurface caret_surface;
+            bool caret_in_rich_surface =
+                editing_surface_from_target(caret_view, &caret_surface) &&
+                editing_surface_is_rich(&caret_surface);
 
             if (!editing_controller_handle_rich_navigation(&evcon, state,
-                    key_event, &controller_hooks)) {
+                    key_event, &controller_hooks) &&
+                !caret_in_rich_surface) {
+                // Non-rich compatibility branch only. Rich/editable mutation
+                // and selection ownership belongs to the intent transaction
+                // path above plus editing_controller_handle_rich_navigation().
                 switch (key_event->key) {
                     case RDT_KEY_A:
                         // Select all (Ctrl+A / Cmd+A)
@@ -9132,6 +8713,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     default:
                         break;
                 }
+            } else if (caret_in_rich_surface) {
+                log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }
         }
         // Mirror StateStore selection projection into form->selection_* so JS

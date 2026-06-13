@@ -71,6 +71,7 @@ fn dispatch_element(node, context) {
         case 'matrix_command':  arr_mod.render_matrix(node, context, render_node)
         case 'env_body':        render_default(node, context)
         case 'matrix_body':     render_default(node, context)
+        case 'ERROR':           render_error_node(node, context)
         case 'phantom_command': enclose.render_phantom(node, context, render_node)
         case 'box_command':     enclose.render_box(node, context, render_node)
         case 'rule_command':    enclose.render_rule(node, context, render_node)
@@ -104,7 +105,8 @@ fn render_group(node, context) {
 
 fn group_spacing_context(context) {
     if ((context.style == "script" or context.style == "scriptscript") and
-        context.script_container != true)
+        context.script_container != true and
+        not (context.fraction_child == true and context.colorbox_content == true))
         ctx.derive(context, {style: "text"})
     else context
 }
@@ -198,6 +200,10 @@ fn render_command(node, context) {
         render_css_id_command(node, context)
     } else if (name_str == "htmlData") {
         render_html_data_command(node, context)
+    } else if (is_math_size_name(name_str)) {
+        box.text_box("", null, "mord")
+    } else if (name_str == "right" and len(node) == 1) {
+        render_malformed_right_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -524,8 +530,9 @@ fn symbol_font_class(cmd_text, context) {
 fn render_colorbox_content(content_arg, context) {
     if (content_arg is string) box.text_box(string(content_arg), css.TEXT, "mord")
     else
-        (let children = render_children(content_arg, context),
-         let spaced = apply_spacing(children, context),
+        (let content_context = ctx.derive(context, {colorbox_content: true}),
+         let children = render_children(content_arg, content_context),
+         let spaced = apply_spacing(children, content_context),
          transparent_hbox(spaced))
 }
 
@@ -1163,8 +1170,8 @@ fn render_delimiter_group(node, context) {
 }
 
 fn render_small_delimiter_group(left_text, right_text, spaced, content) {
-    let left_char = delims.resolve_char(left_text)
-    let right_char = delims.resolve_char(right_text)
+    let left_char = small_left_right_char(left_text)
+    let right_char = small_left_right_char(right_text)
     let left_el = small_delim_el(left_char, css.OPEN)
     let right_el = small_delim_el(right_char, css.CLOSE)
     let content_elements = box.child_elements(spaced)
@@ -1195,6 +1202,17 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn small_left_right_char(delim_text) {
+    if (is_arrow_delimiter_text(delim_text)) "\\\\"
+    else delims.resolve_char(delim_text)
+}
+
+fn is_arrow_delimiter_text(delim_text) {
+    delim_text == "\\uparrow" or delim_text == "\\downarrow" or
+    delim_text == "\\updownarrow" or delim_text == "\\Uparrow" or
+    delim_text == "\\Downarrow" or delim_text == "\\Updownarrow"
 }
 
 fn is_shallow_small_delim(ch) {
@@ -1657,6 +1675,12 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
+    else if (is_size_switch(node, i))
+        (let rendered = render_size_switch_tail(node, context, i),
+         acc ++ [rendered])
+    else if (is_malformed_left_sequence(node, i))
+        (let rendered = render_malformed_left_sequence(node[i], node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
@@ -1674,6 +1698,48 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_malformed_left_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         let next = node[i + 1],
+         is_left_error_node(child) and next is element and name(next) == 'group')
+}
+
+fn is_left_error_node(child) {
+    child is element and name(child) == 'ERROR' and plain_text(child) == "\\left"
+}
+
+fn render_malformed_left_sequence(err_node, delim_node, context) {
+    let left_box = render_unknown_display_command("\\\\left")
+    let delim_box = render_node(delim_node, context)
+    box_with_type(box.hbox([left_box, delim_box]), "minner")
+}
+
+fn render_malformed_right_command(node, context) {
+    let right_box = render_unknown_display_command("\\\\right")
+    let delim_box = render_node(node[0], context)
+    box_with_type(box.hbox([right_box, delim_box]), "minner")
+}
+
+fn render_error_node(node, context) {
+    let text = plain_text(node)
+    if (text == "\\left") render_unknown_display_command("\\\\left")
+    else render_unknown_display_command(text)
+}
+
+fn render_unknown_display_command(text) {
+    {
+        element: <span class: css.classes([css.ERROR, css.CMR]); text>,
+        height: 0.7,
+        depth: 0.0,
+        width: 0.4 * float(len(text)),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 fn is_null_middle_sequence(node, i) {
@@ -1846,6 +1912,56 @@ fn is_scriptstyle_switch(node, i) {
          child.arg == null and len(child) == 0)
 }
 
+fn is_size_switch(node, i) {
+    let child = if (i < len(node)) node[i] else null
+    child is element and name(child) == 'command' and len(child) == 0 and
+        is_math_size_name(command_name(child))
+}
+
+fn render_size_switch_tail(node, context, i) {
+    let scale = math_size_scale(command_name(node[i]))
+    let children = render_children_scan(node, context, i + 1, [])
+    let spaced = apply_spacing(children, context)
+    let hb = transparent_hbox(spaced)
+    let elements = box.child_elements(spaced)
+    let pct = string(round(scale * 1000.0) / 10.0) ++ "%"
+    {
+        element: <span style: "font-size: " ++ pct;
+            for (el in elements) el
+        >,
+        height: hb.height * scale,
+        depth: hb.depth * scale,
+        render_height: if (hb.render_height != null) hb.render_height * scale else null,
+        render_depth: if (hb.render_depth != null) hb.render_depth * scale else null,
+        render_total: if (hb.render_total != null) hb.render_total * scale else null,
+        left_right_render_depth: if (hb.left_right_render_depth != null) hb.left_right_render_depth * scale else null,
+        left_right_render_total: if (hb.left_right_render_total != null) hb.left_right_render_total * scale else null,
+        width: hb.width * scale,
+        type: hb.type,
+        italic: hb.italic * scale,
+        skew: hb.skew * scale,
+        is_middle_delim: has_middle_delim(spaced, 0)
+    }
+}
+
+fn is_math_size_name(size_name) {
+    math_size_scale(size_name) != 0.0
+}
+
+fn math_size_scale(size_name) {
+    if (size_name == "tiny") 0.5
+    else if (size_name == "scriptsize") 0.7
+    else if (size_name == "footnotesize") 0.8
+    else if (size_name == "small") 0.9
+    else if (size_name == "normalsize") 1.0
+    else if (size_name == "large") 1.2
+    else if (size_name == "Large") 1.44
+    else if (size_name == "LARGE") 1.728
+    else if (size_name == "huge") 2.074
+    else if (size_name == "Huge") 2.488
+    else 0.0
+}
+
 fn render_scriptstyle_sibling(child, context) {
     let bx = render_node(child, ctx.derive(context, {style: "script"}))
     style_wrap_box(bx, "font-size: 70%")
@@ -1964,7 +2080,8 @@ fn box_with_suppress_depth(bx) {
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
-        suppress_hbox_text_depth: true
+        suppress_hbox_text_depth: true,
+        is_middle_delim: bx.is_middle_delim
     }
 }
 

@@ -119,12 +119,13 @@ function buildCases(snapshotEntries) {
   const cases = [];
   for (const entry of snapshotEntries) {
     const rawFormula = formulaFromSnapshotKey(entry.key);
-    const formula = rawFormula == null ? null : normalizeFormula(rawFormula);
-    if (formula == null) continue;
+    const normalized = rawFormula == null ? null : normalizeFormula(rawFormula);
+    if (normalized == null) continue;
     cases.push({
       category: categoryFromKey(entry.key),
       key: entry.key,
-      formula,
+      formula: normalized.formula,
+      display: normalized.display,
       expectedHtml: entry.expectedHtml,
       expectedError: entry.expectedError,
     });
@@ -135,9 +136,9 @@ function buildCases(snapshotEntries) {
 function normalizeFormula(formula) {
   const trimmed = formula.trim();
   if (trimmed.startsWith('\\[') && trimmed.endsWith('\\]')) {
-    return trimmed.slice(2, -2).trim();
+    return { formula: trimmed.slice(2, -2).trim(), display: true };
   }
-  return formula;
+  return { formula, display: false };
 }
 
 function categoryFromKey(key) {
@@ -242,36 +243,40 @@ function lambdaString(value) {
   return JSON.stringify(value);
 }
 
-function buildLambdaScript(formulas) {
-  const formulaList = formulas.map((formula) => `    ${lambdaString(formula)}`).join(',\n');
+function buildLambdaScript(cases) {
+  const formulaList = cases.map((testCase) =>
+    `    {formula: ${lambdaString(testCase.formula)}, display: ${testCase.display ? 'true' : 'false'}}`
+  ).join(',\n');
   return `import math_pkg: lambda.package.math.math
 import html_ser: lambda.package.latex.to_html
 
-let formulas = [
+let cases = [
 ${formulaList}
 ]
 
-fn render_formula(formula) {
+fn render_formula(test_case) {
+    let formula = test_case.formula
     let ast^err = parse(formula, {type: "math", flavor: "latex"})
     if (^err) {
         let result = {formula: formula, error: string(^err), html: ""}
         result
     }
     else {
-        let html = html_ser.to_html(math_pkg.render_inline(ast))
+        let rendered = if (test_case.display) math_pkg.render_display(ast) else math_pkg.render_inline(ast)
+        let html = html_ser.to_html(rendered)
         let result = {formula: formula, error: "no-error", html: html}
         result
     }
 }
 
-let outputs = [for (formula in formulas) render_formula(formula)]
+let outputs = [for (test_case in cases) render_formula(test_case)]
 format(outputs, "json")
 `;
 }
 
 function runLambda(cases, opts) {
   fs.mkdirSync(path.dirname(opts.script), { recursive: true });
-  fs.writeFileSync(opts.script, buildLambdaScript(cases.map((x) => x.formula)));
+  fs.writeFileSync(opts.script, buildLambdaScript(cases));
 
   const result = spawnSync(opts.lambda, [opts.script], {
     cwd: PROJECT_ROOT,

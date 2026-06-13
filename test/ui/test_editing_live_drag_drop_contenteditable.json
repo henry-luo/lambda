@@ -9,9 +9,9 @@
      "target": {"selector": "#drag-src"},
      "to_target": {"selector": "#drop-host"}},
     {"type": "wait", "ms": 120},
-    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|ZZ|1|"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop||1|"},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "dt:text/plain:plain=ZZ:html="},
-    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop|ZZ|1|"},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromDrop||1|"},
     {"type": "assert_text", "target": {"selector": "#drop-host"}, "contains": "ZZ"},
     {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromDrop", "surface": "contenteditable", "operation": "default", "min": 2},
     {"type": "assert_event_log", "contains": "\"boundary_reason\":\"drop\"", "min": 1}
