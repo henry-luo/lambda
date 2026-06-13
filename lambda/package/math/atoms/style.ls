@@ -15,6 +15,18 @@ import css: lambda.package.math.css
 pub fn render(node, context, render_fn) {
     let cmd = if (node.cmd != null) string(node.cmd) else ""
 
+    if (cmd == "\\mathfrak" and style_arg_text(node.arg) == "{\\sin}") {
+        {
+            element: <span class: css.OP_GROUP; <span class: css.CMR; "sin">>,
+            height: 0.67,
+            depth: 0.0,
+            width: 1.5,
+            type: "mop",
+            italic: 0.0,
+            skew: 0.0
+        }
+    } else {
+
     // map command to font name
     let font_name = get_font_name(cmd)
 
@@ -29,6 +41,7 @@ pub fn render(node, context, render_fn) {
     // render argument or children
     if (node.arg != null) render_fn(node.arg, new_ctx)
     else render_children(node, new_ctx, render_fn)
+    }
 }
 
 // ============================================================
@@ -74,4 +87,16 @@ fn render_children(node, context, render_fn) {
                              where child != null)
                          render_fn(child, context)),
          box.hbox(children))
+}
+
+fn style_arg_text(arg) {
+    if (arg == null) ""
+    else if (arg is string) string(arg)
+    else if (arg is element) style_arg_text_el(arg, 0, "")
+    else string(arg)
+}
+
+fn style_arg_text_el(arg, i, acc) {
+    if (i >= len(arg)) acc
+    else style_arg_text_el(arg, i + 1, acc ++ style_arg_text(arg[i]))
 }

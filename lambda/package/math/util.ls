@@ -11,7 +11,18 @@ pub fn fmt_num(x, decimals) {
 }
 
 // format a number as em units: "0.5em"
-pub fn fmt_em(x) => fmt_num(x, 5) ++ "em"
+pub fn fmt_em(x) {
+    if (abs(x) >= 100000.0) fmt_large_em(x)
+    else fmt_num(x, 5) ++ "em"
+}
+
+fn fmt_large_em(x) {
+    let scaled = int(round(x * 10.0))
+    let s = string(abs(scaled))
+    let body = if (len(s) <= 1) "0." ++ s
+        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s))
+    (if (scaled < 0) "-" else "") ++ body ++ "em"
+}
 
 // format a number as percentage: "70%"
 pub fn fmt_pct(x) => fmt_num(x * 100.0, 1) ++ "%"

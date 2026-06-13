@@ -68,7 +68,8 @@ fn text_element(text, cls) {
 }
 
 fn text_style(text, cls) {
-    if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
+    if (cls == "lcGreek lm_mathit" and text == "α") "margin-right:0.01em"
+    else if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
@@ -84,6 +85,12 @@ fn text_has_tall_delim(text) {
 
 fn text_height(text) {
     if (text == "x") 0.44
+    else if (text == "o") 0.44
+    else if (text == "α") 0.69
+    else if (text == "Γ" or text == "Δ" or text == "Θ" or text == "Λ" or
+             text == "Π" or text == "Σ" or text == "Υ" or text == "Φ" or
+             text == "Ψ" or text == "Ω") 0.69
+    else if (text == "+" or text == "−") 0.69
     else if (text == "■" or text == "▲") 0.68
     else if (is_number_text(text)) 0.65
     else if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
@@ -93,6 +100,8 @@ fn text_depth(text) {
     if (text_has_tall_delim(text)) 0.25
     else if (text == "■" or text == "▲") 0.0
     else if (is_number_text(text)) 0.0
+    else if (text == "x") 0.0
+    else if (text == "o") 0.0
     else if (text == "," or text == ";") 0.19
     else if (text == "y") 0.19
     else 0.08
