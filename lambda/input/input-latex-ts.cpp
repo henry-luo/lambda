@@ -282,7 +282,8 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
     // Operator, relation, punctuation - create elements with the operator text
     if (strcmp(node_type, "operator") == 0 ||
         strcmp(node_type, "relation") == 0 ||
-        strcmp(node_type, "punctuation") == 0) {
+        strcmp(node_type, "punctuation") == 0 ||
+        strcmp(node_type, "escaped_symbol") == 0) {
         ElementBuilder elem = builder.element(node_type);
         elem.attr("value", {.item = s2it(builder.createString(source + start, len))});
         return elem.final();

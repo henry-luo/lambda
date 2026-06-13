@@ -45,6 +45,7 @@ fn dispatch_element(node, context) {
         case 'digit':           render_number(node, context)
         case 'operator':        render_operator(node, context)
         case 'relation':        render_relation(node, context)
+        case 'escaped_symbol':  render_escaped_symbol(node, context)
         case 'punctuation':     render_punct(node, context)
         case 'subsup':          scripts.render(node, context, render_node)
         case 'fraction':        fraction.render(node, context, render_node)
@@ -150,11 +151,28 @@ fn render_punct(node, context) {
     let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
         else if (text == ")" or text == "]" or text == "}") "mclose"
         else "mpunct"
-    box.text_box(text, css.CMR, atom_type)
+    box.text_box(punct_display_text(text), css.CMR, atom_type)
 }
 
 fn operator_display_text(text) {
     if (text == "-") "−" else text
+}
+
+fn punct_display_text(text) {
+    if (text == "\\{") "{"
+    else if (text == "\\}") "}"
+    else text
+}
+
+fn render_escaped_symbol(node, context) {
+    let text = get_text(node)
+    box.text_box(escaped_symbol_display_text(text), css.CMR, "mord")
+}
+
+fn escaped_symbol_display_text(text) {
+    if (len(text) >= 2 and slice(text, 0, 1) == "\\")
+        slice(text, 1, len(text))
+    else text
 }
 
 fn render_text(text, context) {
@@ -174,6 +192,10 @@ fn render_command(node, context) {
         render_not_overlay("=")
     } else if (name_str == "not") {
         render_not_command(node)
+    } else if (name_str == "class") {
+        render_class_command(node, context)
+    } else if (name_str == "cssId") {
+        render_css_id_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -200,6 +222,62 @@ fn render_command(node, context) {
         }
     }
     }
+}
+
+fn render_class_command(node, context) {
+    if (len(node) >= 2) {
+        let class_name = plain_text(node[0])
+        let content_box = render_node(node[1], context)
+        let children = box.elements_of(content_box)
+        {
+            element: <span class: class_name;
+                for (el in children) el
+            >,
+            height: content_box.height,
+            depth: content_box.depth,
+            render_height: content_box.render_height,
+            render_depth: content_box.render_depth,
+            render_total: content_box.render_total,
+            width: content_box.width,
+            type: content_box.type,
+            italic: content_box.italic,
+            skew: content_box.skew
+        }
+    } else box.text_box("class", css.ERROR, "mord")
+}
+
+fn render_css_id_command(node, context) {
+    if (len(node) >= 2) {
+        let id_name = normalize_css_id(plain_text(node[0]))
+        let content_box = render_node(node[1], context)
+        let children = box.elements_of(content_box)
+        {
+            element: <span id: id_name;
+                for (el in children) el
+            >,
+            height: content_box.height,
+            depth: content_box.depth,
+            render_height: content_box.render_height,
+            render_depth: content_box.render_depth,
+            render_total: content_box.render_total,
+            width: content_box.width,
+            type: content_box.type,
+            italic: content_box.italic,
+            skew: content_box.skew
+        }
+    } else box.text_box("cssId", css.ERROR, "mord")
+}
+
+fn normalize_css_id(text) {
+    normalize_css_id_at(text, 0, "")
+}
+
+fn normalize_css_id_at(text, i, acc) {
+    if (i >= len(text)) acc
+    else
+        (let ch = slice(text, i, i + 1),
+         let out = if (ch == " ") "-" else ch,
+         normalize_css_id_at(text, i + 1, acc ++ out))
 }
 
 fn render_not_command(node) {
@@ -378,7 +456,7 @@ fn partial_box() => {
 
 fn render_text_command(node, context) {
     let content = if (node.content != null) get_text(node.content) else ""
-    box.text_box(content, css.TEXT, "mord")
+    render_text_content_box(content)
 }
 
 // textstyle_command fallback (for CST nodes not yet converted by C++)
@@ -388,10 +466,129 @@ fn render_textstyle_command(node, context) {
     if (is_text) {
         let content = if (node.content != null) get_text(node.content)
             else if (node.arg != null) get_text(node.arg) else ""
-        box.text_box(content, css.TEXT, "mord")
+        render_text_content_box(content)
     } else {
         style.render(node, context, render_node)
     }
+}
+
+fn render_text_content_box(content) {
+    let tiny_idx = index_of(content, "\\tiny")
+    if (is_ensuremath_text(content)) render_ensuremath_text(content)
+    else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
+    else box.text_box(decode_latex_text(content), css.TEXT, "mord")
+}
+
+fn is_ensuremath_text(content) =>
+    util.starts_with(content, "\\ensuremath{") and
+    len(content) >= 13 and
+    slice(content, len(content) - 1, len(content)) == "}"
+
+fn render_ensuremath_text(content) {
+    let inner = slice(content, 12, len(content) - 1)
+    let ast^err = parse(inner, {type: "math", flavor: "latex"})
+    if (^err) {
+        box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    } else {
+        let inner_box = render_node(ast, ctx.text_context())
+        let children = box.elements_of(inner_box)
+        {
+            element: <span class: css.TEXT;
+                for (el in children) el
+            >,
+            height: inner_box.height,
+            depth: inner_box.depth,
+            render_height: inner_box.render_height,
+            render_depth: inner_box.render_depth,
+            render_total: inner_box.render_total,
+            width: inner_box.width,
+            type: "mord",
+            italic: 0.0,
+            skew: 0.0
+        }
+    }
+}
+
+fn render_tiny_text_content(content, tiny_idx) {
+    let before = decode_latex_text(slice(content, 0, tiny_idx))
+    let after = decode_latex_text(trim(slice(content, tiny_idx + 5, len(content))))
+    let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
+    let after_box = if (after != "") tiny_text_box(after) else null
+    let elems = text_content_elements(before_box, after_box)
+    {
+        element: <span class: css.BASE;
+            for (el in elems) el
+        >,
+        height: 0.7,
+        depth: 0.09,
+        render_height: 0.7,
+        render_depth: 0.09,
+        render_total: 0.8,
+        width: text_content_width(before_box, after_box),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn tiny_text_box(text) => {
+    element: <span style: "font-size: 50%";
+        <span class: css.TEXT; text>
+    >,
+    height: 0.35,
+    depth: 0.04,
+    width: 0.25 * float(len(text)),
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0
+}
+
+fn text_content_elements(before_box, after_box) {
+    let before = if (before_box != null) [before_box.element] else []
+    let after = if (after_box != null) [after_box.element] else []
+    before ++ after
+}
+
+fn text_content_width(before_box, after_box) {
+    (if (before_box != null) before_box.width else 0.0) +
+    (if (after_box != null) after_box.width else 0.0)
+}
+
+fn decode_latex_text(text) {
+    decode_latex_text_at(text, 0, "")
+}
+
+fn decode_latex_text_at(text, i, acc) {
+    if (i >= len(text)) acc
+    else if (is_latex_text_accent_at(text, i)) {
+        let accent = slice(text, i + 1, i + 2)
+        let base = slice(text, i + 3, i + 4)
+        decode_latex_text_at(text, i + 5, acc ++ accented_text(accent, base))
+    } else {
+        decode_latex_text_at(text, i + 1, acc ++ slice(text, i, i + 1))
+    }
+}
+
+fn is_latex_text_accent_at(text, i) =>
+    i + 4 < len(text) and
+    slice(text, i, i + 1) == "\\" and
+    is_latex_text_accent(slice(text, i + 1, i + 2)) and
+    slice(text, i + 2, i + 3) == "{" and
+    slice(text, i + 4, i + 5) == "}"
+
+fn is_latex_text_accent(accent) =>
+    accent == "'" or accent == "\"" or accent == "." or accent == "`" or
+    accent == "=" or accent == "~" or accent == "^"
+
+fn accented_text(accent, base) {
+    if (base == "a" and accent == "'") "á"
+    else if (base == "a" and accent == "\"") "ä"
+    else if (base == "a" and accent == ".") "ȧ"
+    else if (base == "a" and accent == "`") "à"
+    else if (base == "a" and accent == "=") "ā"
+    else if (base == "a" and accent == "~") "ã"
+    else if (base == "a" and accent == "^") "â"
+    else base
 }
 
 // ============================================================
