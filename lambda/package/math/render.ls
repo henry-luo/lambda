@@ -71,6 +71,7 @@ fn dispatch_element(node, context) {
         case 'matrix_command':  arr_mod.render_matrix(node, context, render_node)
         case 'env_body':        render_default(node, context)
         case 'matrix_body':     render_default(node, context)
+        case 'ERROR':           render_error_node(node, context)
         case 'phantom_command': enclose.render_phantom(node, context, render_node)
         case 'box_command':     enclose.render_box(node, context, render_node)
         case 'rule_command':    enclose.render_rule(node, context, render_node)
@@ -200,6 +201,8 @@ fn render_command(node, context) {
         render_html_data_command(node, context)
     } else if (is_math_size_name(name_str)) {
         box.text_box("", null, "mord")
+    } else if (name_str == "right" and len(node) == 1) {
+        render_malformed_right_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -1673,6 +1676,9 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_size_switch(node, i))
         (let rendered = render_size_switch_tail(node, context, i),
          acc ++ [rendered])
+    else if (is_malformed_left_sequence(node, i))
+        (let rendered = render_malformed_left_sequence(node[i], node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
@@ -1690,6 +1696,48 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_malformed_left_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         let next = node[i + 1],
+         is_left_error_node(child) and next is element and name(next) == 'group')
+}
+
+fn is_left_error_node(child) {
+    child is element and name(child) == 'ERROR' and plain_text(child) == "\\left"
+}
+
+fn render_malformed_left_sequence(err_node, delim_node, context) {
+    let left_box = render_unknown_display_command("\\\\left")
+    let delim_box = render_node(delim_node, context)
+    box_with_type(box.hbox([left_box, delim_box]), "minner")
+}
+
+fn render_malformed_right_command(node, context) {
+    let right_box = render_unknown_display_command("\\\\right")
+    let delim_box = render_node(node[0], context)
+    box_with_type(box.hbox([right_box, delim_box]), "minner")
+}
+
+fn render_error_node(node, context) {
+    let text = plain_text(node)
+    if (text == "\\left") render_unknown_display_command("\\\\left")
+    else render_unknown_display_command(text)
+}
+
+fn render_unknown_display_command(text) {
+    {
+        element: <span class: css.classes([css.ERROR, css.CMR]); text>,
+        height: 0.7,
+        depth: 0.0,
+        width: 0.4 * float(len(text)),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 fn is_null_middle_sequence(node, i) {

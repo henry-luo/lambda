@@ -38,8 +38,10 @@ pub fn render_matrix(node, context, render_fn) {
 // ============================================================
 
 fn render_body(body, context, render_fn, env_name, columns) {
-    let cell_ctx = if (env_name == "smallmatrix")
+    let cell_ctx = if (env_name == "smallmatrix" or env_name == "cases" or env_name == "rcases")
         ctx.derive(context, {style: "script"})
+    else if (env_name == "dcases")
+        ctx.derive(context, {style: "display"})
     else context
     let n = len(body)
     let declared_cols = declared_column_count(columns)
