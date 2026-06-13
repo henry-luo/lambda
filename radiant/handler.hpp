@@ -6,6 +6,7 @@ struct ViewText;
 struct TextRect;
 struct DocState;
 struct DomDocument;
+struct EditingTargetRange;
 
 typedef struct EventContext {
     RdtEvent event;
@@ -38,6 +39,13 @@ typedef struct EventContext {
     // the live selection before user handlers observe it.
     bool caret_pos_override_valid;
     int caret_pos_override;
+
+    // transient editing transaction target-range snapshot. When set,
+    // InputEvent.getTargetRanges() must use these pre-mutation ranges instead
+    // of recomputing from the live post-mutation selection.
+    bool editing_target_ranges_active;
+    const EditingTargetRange* editing_target_ranges;
+    uint32_t editing_target_range_count;
 
     // iframe bridging: when target is inside an iframe, this points to the
     // iframe block in the parent document so events can propagate across

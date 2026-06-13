@@ -1,0 +1,17 @@
+{
+  "name": "Editing paired false island - mutation target is rejected",
+  "html": "test/ui/editing/contenteditable.html",
+  "viewport": {"width": 700, "height": 430},
+  "events": [
+    {"type": "log", "message": "=== editing_paired_false_island_contenteditable ==="},
+    {"type": "wait", "ms": 150},
+    {"type": "set_editing_selection", "target": {"selector": "#false-island"}, "start": 2, "end": 2},
+    {"type": "type", "text": "Z"},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#false-host"}, "equals": "aLOCKb"},
+    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "surface": "contenteditable", "prevented": true, "min": 1},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertText", "surface": "contenteditable", "prevented": true, "min": 2},
+    {"type": "assert_event_log", "contains": "\"target_in_false_island\":true", "min": 1},
+    {"type": "assert_event_log", "contains": "\"valid\":false", "min": 1}
+  ]
+}
