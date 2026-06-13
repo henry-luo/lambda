@@ -1095,7 +1095,12 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     else
         "margin-top:-0.08333em;height:0.72777em"
     let both_null = left_char == "." and right_char == "."
-    let small_depth = if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
+    let has_corner = delims.is_corner_delim(left_char) or delims.is_corner_delim(right_char)
+    let has_surd = delims.is_surd_delim(left_char) or delims.is_surd_delim(right_char)
+    let small_height = if (has_surd) 0.8 else if (has_corner) 0.65 else if (both_null) 0.65 else 0.75
+    let small_depth = if (has_surd) 0.2
+        else if (has_corner) 0.15
+        else if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
         0.24 else 0.25
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
@@ -1103,7 +1108,7 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
             for (el in content_elements) el
             right_el
         >,
-        height: if (both_null) 0.65 else 0.75,
+        height: small_height,
         depth: if (both_null) content.depth else small_depth,
         width: content.width + 0.8,
         type: "minner",
@@ -1120,6 +1125,9 @@ fn small_delim_el(ch, side_class) {
     if (ch == ".") {
         let cls = css.classes([css.NULLDELIMITER, side_class])
         <span class: cls, style: "width:0.12em">
+    } else if (delims.is_corner_delim(ch)) {
+        let cls = css.classes([css.SMALL_DELIM, side_class])
+        <span class: cls, style: "top:0.08em;font-size: 70%"; ch>
     } else {
         let cls = css.classes([css.SMALL_DELIM, side_class])
         <span class: cls; ch>
@@ -1275,18 +1283,30 @@ fn render_unknown_command(cmd) {
 // ============================================================
 
 fn render_middle_delim(node, context) {
-    let delim_text = if (node.delim != null) string(node.delim) else "|"
-    let display_char = delims.resolve_char(delim_text)
-    let bx = box.text_box(display_char, css.SMALL_DELIM, "mord")
-    {
-        element: bx.element,
-        height: bx.height,
-        depth: bx.depth,
-        width: bx.width,
-        type: bx.type,
-        italic: bx.italic,
-        skew: bx.skew,
-        is_middle_delim: true
+    if (node.delim == null) {
+        {
+            element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
+            height: 0.0,
+            depth: 0.0,
+            width: 0.12,
+            type: "mord",
+            italic: 0.0,
+            skew: 0.0
+        }
+    } else {
+        let delim_text = string(node.delim)
+        let display_char = delims.resolve_char(delim_text)
+        let bx = box.text_box(display_char, css.SMALL_DELIM, "mord")
+        {
+            element: bx.element,
+            height: bx.height,
+            depth: bx.depth,
+            width: bx.width,
+            type: bx.type,
+            italic: bx.italic,
+            skew: bx.skew,
+            is_middle_delim: true
+        }
     }
 }
 
@@ -1563,6 +1583,9 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_sized_delim_pair(node, i))
         (let rendered = render_sized_delim_pair(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
+    else if (is_null_middle_sequence(node, i))
+        (let rendered = render_middle_delim(node[i], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
          let next_acc = if (child == null) acc
@@ -1570,6 +1593,13 @@ fn render_children_scan(node, context, i, acc) {
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_null_middle_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'middle_delim' and child.delim == null)
 }
 
 fn is_empty_not_target_sequence(node, i) {

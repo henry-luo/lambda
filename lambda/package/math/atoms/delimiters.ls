@@ -47,7 +47,10 @@ let SIZED_DELIMS = {
     '\\uparrow': true, '\\downarrow': true, '\\updownarrow': true,
     '\\Uparrow': true, '\\Downarrow': true, '\\Updownarrow': true,
     '\\lgroup': true, '\\rgroup': true,
-    '\\lmoustache': true, '\\rmoustache': true
+    '\\lmoustache': true, '\\rmoustache': true,
+    '\\surd': true,
+    '\\ulcorner': true, '\\urcorner': true,
+    '\\llcorner': true, '\\lrcorner': true
 }
 
 // Map command names to display characters
@@ -65,6 +68,9 @@ let DELIM_CHARS = {
     '\\Uparrow': "⇑", '\\Downarrow': "⇓", '\\Updownarrow': "⇕",
     '\\lgroup': "⟮", '\\rgroup': "⟯",
     '\\lmoustache': "⎰", '\\rmoustache': "⎱",
+    '\\surd': "√",
+    '\\ulcorner': "┌", '\\urcorner': "┐",
+    '\\llcorner': "└", '\\lrcorner': "┘",
     '\\backslash': "∖"
 }
 
@@ -100,7 +106,9 @@ pub fn render_stretchy(delim, content_height, atom_type) {
     } else {
         let display_char = stretchy_char(delim)
         let level = select_size_level(content_height)
-        if (level <= 4)
+        if (is_corner_delim(display_char))
+            render_corner(display_char, atom_type)
+        else if (level <= 4)
             render_sized(display_char, level, atom_type)
         else
             render_svg_delim(display_char, content_height, atom_type)
@@ -214,6 +222,31 @@ fn scale_to_level(scale) {
 
 fn is_vertical_bar(ch) {
     ch == "∣" or ch == "∥"
+}
+
+pub fn is_corner_delim(ch) {
+    ch == "┌" or ch == "┐" or ch == "└" or ch == "┘"
+}
+
+pub fn is_surd_delim(ch) {
+    ch == "√"
+}
+
+pub fn render_corner(ch, atom_type) {
+    let side = side_class(atom_type)
+    let cls = css.classes([css.SMALL_DELIM, side])
+    {
+        element: <span class: cls, style: "top:0.08em;font-size: 70%"; ch>,
+        height: 0.65,
+        depth: 0.15,
+        render_height: 0.65,
+        render_depth: 0.15,
+        render_total: 0.8,
+        width: 0.4,
+        type: atom_type,
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 fn render_vertical_mult(ch, level, atom_type) {
@@ -356,6 +389,11 @@ fn resolve_command_delim(name) {
     else if (name == "rgroup") "⟯"
     else if (name == "lmoustache") "⎰"
     else if (name == "rmoustache") "⎱"
+    else if (name == "surd") "√"
+    else if (name == "ulcorner") "┌"
+    else if (name == "urcorner") "┐"
+    else if (name == "llcorner") "└"
+    else if (name == "lrcorner") "┘"
     else if (name == "backslash") "∖"
     else null
 }

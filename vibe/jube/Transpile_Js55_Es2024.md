@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 + P11 (partial) done (18 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); 55 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 145.1 s. Latest full run: 40204/40261, 17 improvements vs original baseline, 0 regressions. See §12 for investigation history and §12.9 for P11 walkthrough.
+Status: P0 + P1 + P10 + P11 + P12 (all partial) done (20 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); ~53 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 137.7 s. See §12.11 for P12 walkthrough.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -905,4 +905,108 @@ P4 closure-capture is a real bug affecting ~25 Gate D failures plus likely sever
 - A scope_env allocation at module top level so the writeback path can persist iteration values.
 
 Either approach is a multi-hour JIT refactor with broad blast radius. Not safe to attempt without a focused isolation pass and a test-suite-wide baseline guard at each intermediate step.
+
+## 12.11 P12 isolated wins (2026-06-13)
+
+After P4 deferral, walked the remaining 55-failure list looking for items that don't depend on the for-of closure-capture cluster. Two cleanly-isolated wins identified and fixed.
+
+### P12(a) — `lastIndexOf` raw fast path reverse-iteration clamp (1 test)
+
+Test: `built-ins/TypedArray/prototype/lastIndexOf/negative-index-and-resize-to-smaller.js`
+
+Failing assertion (simplified):
+
+```js
+const rab = new ArrayBuffer(0, {maxByteLength: 32});  // BPE=8 (Float64Array)
+const ta = new Float64Array(rab);
+rab.resize(32);                       // ta.length === 4
+ta.fill(123);
+const indexValue = {
+  valueOf() { rab.resize(24); return -1; }   // shrinks to length 3
+};
+// Spec: len captured = 4 (pre-coercion), actualLast = 4 + -1 = 3,
+// iterate k = 3, 2, 1, 0 using HasProperty (current length = 3):
+//   k=3 → HasProperty false (3 ≥ 3) → skip
+//   k=2 → HasProperty true → ta[2] === 123 → return 2
+ta.lastIndexOf(123, indexValue);      // expected: 2,  Lambda returned: -1
+```
+
+The bug was in `js_typed_array_raw_index_of` ([js_typed_array.cpp:488](../../lambda/js/js_typed_array.cpp)):
+
+```cpp
+int current_len = js_typed_array_current_length(ta);    // 3 (post-resize)
+int len = bound < current_len ? bound : current_len;     // bound=4 → len=3
+if (from < 0 || from >= len) return -1;                  // from=3, len=3 → bail
+```
+
+The caller in `js_map_method`'s `lastIndexOf` handler ([js_runtime.cpp:17630](../../lambda/js/js_runtime.cpp)) treats this `-1` as "not found, definitive" and skips the spec-correct fallback loop. So the search short-circuits before the in-range `k=2` element gets checked.
+
+**Fix**: split the `from >= len` case by direction.
+- Forward iteration (`indexOf`): `from >= len` means no valid indices remain — return `-1` is correct.
+- Reverse iteration (`lastIndexOf`): clamp `from = len - 1` and continue. Indices in `[len, original_from]` are skipped per spec HasProperty=false; the search then proceeds over the in-range `[0, len-1]`. This is safe because those skipped indices would have been HasProperty=false in the spec anyway.
+
+```cpp
+if (from < 0) return -1;
+if (from >= len) {
+    if (!reverse) return -1;
+    from = len - 1;
+}
+```
+
+10-line edit. All 395 `indexOf` / `lastIndexOf` / `includes` tests pre-flight cleanly; only failures remaining are the 3 pre-existing P4-family items (`coerced-searchelement-fromindex-{resize,grow,shrink}`).
+
+### P12(b) — `Object.freeze` on resizable-buffer-backed TypedArray throws TypeError (1 test)
+
+Test: `built-ins/Object/freeze/typedarray-backed-by-resizable-buffer.js`
+
+Per ES2024 §10.4.5.16 `IntegerIndexedDefineOwnProperty` and `SetIntegrityLevel("frozen")` at §7.3.16: freezing a TypedArray backed by a resizable ArrayBuffer must throw TypeError, because the integer-indexed properties can't be redefined as `{writable: false, configurable: false}` (the buffer can resize behind them, invalidating the frozen state). Applies regardless of current length (even zero-length TAs throw, since the buffer could grow).
+
+Lambda's `js_object_freeze` had no such check — it called `js_object_prevent_extensions` then walked all keys and tried to define them as non-writable / non-configurable. For empty TAs the walk had nothing to do and silently "succeeded"; for non-empty TAs the per-key define may or may not have failed downstream. The test expected the spec-mandated upfront TypeError.
+
+**Fix**: in `js_object_freeze` ([js_globals.cpp:11045](../../lambda/js/js_globals.cpp)), add an early check before `js_object_prevent_extensions`:
+
+```cpp
+if (js_is_typed_array(obj)) {
+    JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+    if (ta && ta->buffer && ta->buffer->resizable) {
+        js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
+        return obj;
+    }
+}
+```
+
+15-line edit (with comment). All 112 `Object/freeze` + `Object/isFrozen` tests pre-flight cleanly.
+
+### P12 acceptance
+
+- Probes: both newly-fixed tests PASS
+- Pre-flight: 395 indexOf/includes + 112 freeze/isFrozen = 507 tests, 0 regressions (only the pre-existing 3 P4-family failures remain)
+- Baseline guard: 40187/40187 clean, 0 regressions, 137.7 s (well inside the +5% ceiling)
+- Net contribution this phase: **+2 tests**
+
+### Cumulative cleared, end of P12
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| P1 (D1) | 12 | `js_pending_new_target` clear in subclass-TA branch |
+| P10(a) | 1 | skip-list rgi-emoji-17.0 |
+| P10(b) | 1 | UTF-16 unit basis in regex Symbol.replace |
+| P11(a) | 1 | ArrayBuffer constructor arg ordering in Reflect.construct |
+| P11(c) | 3 | TypedArray.prototype.with current-length |
+| P11(d) | 0 (preventive) | second pending-new-target leak (user-class-extends-non-TA) |
+| P12(a) | 1 | lastIndexOf raw fast path reverse-iteration clamp |
+| P12(b) | 1 | Object.freeze TypedArray-resizable-buffer detection |
+| **Total** | **20** | (of original 73 admittable failures) |
+
+### Remaining 53 failures — what's NOT yet tractable
+
+The remaining failure list is now structurally narrow. After harvesting the cleanly-isolated wins (P1 + P10 + P11 + P12), the residual 53 failures concentrate in:
+
+1. **For-of let closure-capture cluster** (~28 tests): all Gate D items with `for (let ctor of ctors)` patterns and inner closures referencing `ctor`. Documented in §12.10. Single-edit fixes proven ineffective.
+
+2. **TLA module-mode plumbing** (Gate E, 20 tests): E1 NamedEvaluation (7) + E2 capability/$DONE (4) + E3 Promise.withResolvers (3) + E4 thenable await (4) + E5 SIGSEGV (2).
+
+3. **Wider engine refactors** (~5 tests): Array.prototype.toLocaleString mis-registered to OBJ_TO_LOCALE_STRING; ArrayBuffer.prototype.resize coerced-new-length-detach batch-mode divergence; a few species-ctor tests.
+
+None of these have a single-edit fix in the proposal's scope. The next iteration would need to either tackle P4 closure-capture (multi-hour JIT refactor) or carve out smaller wins from the TLA cluster (each requires its own batch-mode-vs-script reproduction step).
 

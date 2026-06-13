@@ -11046,6 +11046,22 @@ extern "C" Item js_object_freeze(Item obj) {
     // ES6: non-objects return the argument
     TypeId ot = get_type_id(obj);
     if (ot != LMD_TYPE_MAP && ot != LMD_TYPE_ARRAY && ot != LMD_TYPE_FUNC && ot != LMD_TYPE_ELEMENT) return obj;
+    // Js55 P12: per ES2024 §10.4.5.16 IntegerIndexedDefineOwnProperty step 3.c
+    // and SetIntegrityLevel("frozen") at §7.3.16, freezing a TypedArray that's
+    // backed by a resizable ArrayBuffer always throws TypeError — the integer-
+    // indexed properties can't be redefined as {writable: false, configurable:
+    // false} because the buffer can resize behind them. Applies even for
+    // currently-zero-length TAs (the buffer could grow). Tracking buffer-
+    // backed TA detection via js_is_typed_array + ta->buffer->resizable.
+    extern bool js_is_typed_array(Item val);
+    if (js_is_typed_array(obj)) {
+        extern JsTypedArray* js_get_typed_array_ptr(Map* m);
+        JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
+        if (ta && ta->buffer && ta->buffer->resizable) {
+            js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
+            return obj;
+        }
+    }
     Item prevent_status = js_object_prevent_extensions(obj);
     if (js_check_exception()) return obj;
     if (get_type_id(prevent_status) == LMD_TYPE_BOOL && !it2b(prevent_status)) {
