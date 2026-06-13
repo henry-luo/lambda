@@ -9,6 +9,7 @@
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "clip\ntext"},
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertFromPaste|clip\ntext|clip\ntext"},
+    {"type": "assert_text", "target": {"selector": "#transfer-log"}, "equals": "transfer:dt:none"},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 80},
     {"type": "key_combo", "key": "c", "mods_str": "super"},

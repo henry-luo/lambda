@@ -694,7 +694,11 @@ extern "C" Item js_selection_add_range(Item range_v) {
         !node_in_active_document(r->end.node)) {
         return make_undef();
     }
-    dom_selection_add_range(s, r);
+    const char* exc = nullptr;
+    if (!state_store_add_selection_range(s->state, r, &exc)) {
+        throw_from_dom_exc(exc, "Selection.addRange failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
@@ -711,7 +715,11 @@ extern "C" Item js_selection_remove_range(Item range_v) {
         if (dom_selection_get_range_at(s, i, &exc) == r) { in_sel = true; break; }
     }
     if (!in_sel) { throw_dom_exception("NotFoundError", "range not in selection"); return make_undef(); }
-    dom_selection_remove_range(s, r);
+    const char* exc = nullptr;
+    if (!state_store_remove_selection_range(s->state, r, &exc)) {
+        throw_from_dom_exc(exc, "Selection.removeRange failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
@@ -979,7 +987,7 @@ extern "C" Item js_selection_modify(Item alter_v, Item dir_v, Item gran_v) {
     const char* dir   = fn_to_cstr(dir_v);
     const char* gran  = fn_to_cstr(gran_v);
     const char* exc = nullptr;
-    if (!dom_selection_modify(s, alter, dir, gran, &exc)) {
+    if (!state_store_modify_selection(s->state, alter, dir, gran, &exc)) {
         throw_from_dom_exc(exc, "Selection.modify failed");
         return make_undef();
     }
@@ -1270,7 +1278,8 @@ extern "C" void js_dom_selection_install_globals(void) {
 // Phase 8D: selectionchange event bridge
 // ----------------------------------------------------------------------------
 // Called from radiant/dom_range.cpp's notify_selection_changed() (a weak
-// symbol) after every spec mutation funneled through sync_anchor_focus().
+// symbol) after every spec mutation funneled through StateStore/DOM selection
+// facade writers.
 // Per the WHATWG HTML "selectionchange" task: coalesce multiple synchronous
 // mutations into a single async dispatch, fire on the document.
 static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
