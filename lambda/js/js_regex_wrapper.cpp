@@ -21,6 +21,9 @@
 #include <vector>
 #include <algorithm>
 
+// Js54 P11: generated /v string property tables (Basic_Emoji, RGI_Emoji, etc.)
+#include "js_regex_string_properties.inc"
+
 // ============================================================================
 // Internal: Regex pattern scanner
 // ============================================================================
@@ -741,13 +744,50 @@ static bool v_parse_element(const std::string& s, size_t& i,
             }
             return true;
         }
-        // \p{...} or \P{...} property escape — for now, pass through as shorthand.
-        // (Layer 3 will expand string properties; here we just preserve the escape.)
+        // \p{...} or \P{...} property escape.
+        // Js54 P11: if the name is one of the 7 ES2024 string properties,
+        // expand it inline as alternation strings; otherwise pass through
+        // as a shorthand (\p{Lu} etc.) which RE2 understands.
         if (nx == 'p' || nx == 'P') {
             if (i + 2 >= s.size() || s[i + 2] != '{') return false;
             size_t j = i + 3;
             while (j < s.size() && s[j] != '}') j++;
             if (j >= s.size()) return false;
+            // Extract the property name (skip leading `\p{` and trailing `}`)
+            std::string prop_name(s, i + 3, j - (i + 3));
+            // Drop "Property_Name=" prefix if present (allow "Basic_Emoji" or
+            // longhand forms like "Emoji=Yes" — currently only the bare names
+            // appear in test262).
+            const JsVFlagStringProperty* found = nullptr;
+            for (int k = 0; k < js_v_string_property_count; k++) {
+                if (prop_name == js_v_string_properties[k].name) {
+                    found = &js_v_string_properties[k];
+                    break;
+                }
+            }
+            if (found) {
+                if (nx == 'P') {
+                    // \P{StringProperty} is a spec error inside class — fail.
+                    return false;
+                }
+                for (int k = 0; k < found->count; k++) {
+                    std::string entry(found->strings[k], found->string_lens[k]);
+                    if (found->string_lens[k] == 1) {
+                        el_ranges.add_char((unsigned char)entry[0]);
+                    } else {
+                        // multi-byte: check if it's a single codepoint
+                        size_t pos = 0;
+                        int cp = v_utf8_decode(entry, pos);
+                        if (cp >= 0 && pos == (size_t)found->string_lens[k]) {
+                            el_ranges.add_char(cp);
+                        } else {
+                            el_strings.push_back(entry);
+                        }
+                    }
+                }
+                i = j + 1;
+                return true;
+            }
             el_shorthand_raw.append(s, i, j - i + 1);
             if (nx == 'P') el_is_negated_prop = true;
             i = j + 1;
@@ -916,6 +956,52 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
     size_t i = 0, n = in.size();
     while (i < n) {
         char c = in[i];
+        // Js54 P11: outside-class \p{StringProperty} → alternation.
+        // Must come BEFORE the generic escape-passthrough so we don't lose
+        // the multi-char sequence.
+        if (c == '\\' && i + 2 < n && (in[i + 1] == 'p' || in[i + 1] == 'P') &&
+            in[i + 2] == '{') {
+            size_t name_start = i + 3;
+            size_t name_end = name_start;
+            while (name_end < n && in[name_end] != '}') name_end++;
+            if (name_end < n) {
+                std::string pname(in, name_start, name_end - name_start);
+                const JsVFlagStringProperty* found = nullptr;
+                for (int k = 0; k < js_v_string_property_count; k++) {
+                    if (pname == js_v_string_properties[k].name) {
+                        found = &js_v_string_properties[k];
+                        break;
+                    }
+                }
+                if (found && in[i + 1] == 'p') {
+                    // Emit alternation. The strings table holds raw UTF-8
+                    // bytes; RE2 in UTF-8 mode matches them byte-for-byte
+                    // against the input. ASCII characters that have regex
+                    // meta-semantics (e.g. `*`, `#`, `+`) must be escaped;
+                    // continuation bytes (>= 0x80) pass through unescaped.
+                    out_str.append("(?:");
+                    for (int k = 0; k < found->count; k++) {
+                        if (k > 0) out_str.push_back('|');
+                        for (int b = 0; b < found->string_lens[k]; b++) {
+                            unsigned char ub = (unsigned char)found->strings[k][b];
+                            if (ub < 0x80 &&
+                                (ub == '\\' || ub == '(' || ub == ')' ||
+                                 ub == '[' || ub == ']' || ub == '{' ||
+                                 ub == '}' || ub == '.' || ub == '*' ||
+                                 ub == '+' || ub == '?' || ub == '|' ||
+                                 ub == '^' || ub == '$' || ub == '/' ||
+                                 ub == '#')) {
+                                out_str.push_back('\\');
+                            }
+                            out_str.push_back((char)ub);
+                        }
+                    }
+                    out_str.push_back(')');
+                    i = name_end + 1;
+                    continue;
+                }
+            }
+        }
         if (c == '\\' && i + 1 < n) {
             out_str.push_back(c);
             out_str.push_back(in[i + 1]);
@@ -923,16 +1009,33 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
             continue;
         }
         if (c == '[') {
-            // peek: is this a "simple" class (no set ops, no nested `[`, no \q)?
+            // peek: is this a "simple" class (no set ops, no nested `[`, no \q,
+            // no string-property \p{}}? If so, pass through.
             size_t j = i + 1;
             int depth = 1;
             bool has_set_op = false;
             bool has_q = false;
             bool has_nested = false;
+            bool has_str_prop = false;
             while (j < n && depth > 0) {
                 char d = in[j];
                 if (d == '\\' && j + 1 < n) {
                     if (in[j + 1] == 'q') has_q = true;
+                    // Js54 P11: detect \p{<string property>}
+                    if ((in[j + 1] == 'p' || in[j + 1] == 'P') &&
+                        j + 2 < n && in[j + 2] == '{') {
+                        size_t name_start = j + 3;
+                        size_t name_end = name_start;
+                        while (name_end < n && in[name_end] != '}') name_end++;
+                        if (name_end < n) {
+                            std::string pname(in, name_start, name_end - name_start);
+                            for (int k = 0; k < js_v_string_property_count; k++) {
+                                if (pname == js_v_string_properties[k].name) {
+                                    has_str_prop = true; break;
+                                }
+                            }
+                        }
+                    }
                     j += 2;
                     continue;
                 }
@@ -942,7 +1045,7 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                 if (j + 1 < n && d == '&' && in[j + 1] == '&') { has_set_op = true; j += 2; continue; }
                 j++;
             }
-            if (!has_set_op && !has_q && !has_nested) {
+            if (!has_set_op && !has_q && !has_nested && !has_str_prop) {
                 // Pass through unchanged
                 while (i < j) out_str.push_back(in[i++]);
                 continue;

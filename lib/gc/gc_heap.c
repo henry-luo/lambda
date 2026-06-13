@@ -1408,6 +1408,7 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_
 
     log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects, skipped %d ASan-poisoned slots",
               scanned, (size_t)(aligned_end - aligned_start), marked, skipped_poisoned);
+    (void)scanned; (void)marked; (void)skipped_poisoned;  // silence release-build unused warning
 }
 
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
