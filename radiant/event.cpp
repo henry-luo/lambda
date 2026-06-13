@@ -1417,9 +1417,12 @@ static bool rich_delete_dom_selection(DocState* state, DomSelection* selection) 
     DomRange* range = selection->ranges[0];
     if (range && range->start.node) {
         const char* exc = nullptr;
-        dom_selection_collapse(selection, range->start.node, range->start.offset, &exc);
+        DomBoundary caret = { range->start.node, range->start.offset };
+        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+            log_debug("rich_delete_dom_selection: collapse rejected: %s",
+                      exc ? exc : "?");
+        }
     }
-    state_store_refresh_caret_projection(state);
     doc_state_request_reflow(state);
     state->needs_repaint = true;
     return true;
@@ -2333,13 +2336,10 @@ static bool rich_text_default_replace(EventContext* evcon,
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT && state->dom_selection) {
         const char* exc = nullptr;
         uint32_t caret_u16 = dom_text_utf8_to_utf16(live_text, caret_offset);
-        if (!dom_selection_collapse(state->dom_selection,
-                                    static_cast<DomNode*>(live_text),
-                                    caret_u16, &exc)) {
+        DomBoundary caret = { static_cast<DomNode*>(live_text), caret_u16 };
+        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
             log_debug("rich_text_default_replace: cut collapse rejected: %s",
                       exc ? exc : "?");
-        } else {
-            state_store_refresh_caret_projection(state);
         }
     }
     EditingSurface live_surface;
@@ -2516,20 +2516,19 @@ static bool dispatch_rich_select_all_default(EventContext* evcon,
         }
     }
 
-    if (!state->dom_selection) {
-        state->dom_selection = dom_selection_create(state);
-    }
-    DomSelection* selection = state->dom_selection;
-    if (!selection) return false;
-
     const char* exc = nullptr;
     DomNode* owner_node = static_cast<DomNode*>(owner);
-    if (!dom_selection_select_all_children(selection, owner_node, &exc)) {
+    uint32_t child_count = 0;
+    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+        child_count++;
+    }
+    DomBoundary start = { owner_node, 0 };
+    DomBoundary end = { owner_node, child_count };
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
         log_debug("dispatch_rich_select_all_default: rejected: %s",
                   exc ? exc : "?");
         return false;
     }
-    state_store_refresh_caret_projection(state);
     rich_select_all_sync_descendant_text_controls(state, owner_node);
     state->selection_layout_dirty = true;
     state->needs_repaint = true;

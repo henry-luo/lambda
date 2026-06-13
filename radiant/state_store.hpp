@@ -347,7 +347,7 @@ typedef struct DocState {
     // radiant/dom_range.hpp and vibe/radiant/Radiant_Design_Selection.md.
     // ------------------------------------------------------------------
     struct DomSelection* dom_selection;     // lazy; created on first read/write
-    // ED2-1 A-D canonical StateStore selection for the active editing surface.
+    // ED2-1 canonical StateStore selection for the active editing surface.
     // For DOM ranges it shadows dom_selection (references the live ranges[0], no
     // boundary copy); for text controls it is the canonical store
     // (form->selection_* mirrors it). Note a focused text control's selection
@@ -616,8 +616,7 @@ void state_begin_batch(DocState* state);
  */
 void state_end_batch(DocState* state);
 
-// ED2-1 A-D selection authority/projection API. Remaining direct JS Selection
-// mutator routing belongs to the deferred Phase E cleanup.
+// ED2-1 selection authority/projection API.
 #ifdef __cplusplus
 extern "C" {
 #endif
