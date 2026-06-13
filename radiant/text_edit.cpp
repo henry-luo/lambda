@@ -17,13 +17,6 @@
 #include <string.h>
 #include <strings.h>    // strcasecmp (F5 input type checks)
 
-// Forward decls (defined elsewhere — keep this file decoupled from the
-// large headers).
-void caret_set        (DocState* state, View* view, int char_offset);
-void selection_start  (DocState* state, View* view, int char_offset);
-void selection_extend (DocState* state, int char_offset);
-void selection_clear  (DocState* state);
-
 // F4: tc_set_value pushes a history snapshot on every mutation. To prevent
 // undo/redo restores from re-pushing (and corrupting the cursor), they
 // bracket their tc_set_value call with this guard.
@@ -209,9 +202,9 @@ bool te_apply_byte_range(DocState* state, void* target,
     if (!state || !target) return false;
     if (end < start) { uint32_t t = start; start = end; end = t; }
     View* view = (View*)target;
-    selection_start (state, view, (int)start);
-    selection_extend(state, (int)end);
-    caret_set       (state, view, (int)end);
+    state_store_legacy_selection_start(state, view, (int)start);
+    state_store_legacy_selection_extend(state, (int)end);
+    state_store_legacy_caret_set(state, view, (int)end);
     selection_finish_active_gesture(state);
     log_debug("text_edit: applied selection bytes=[%u..%u] view=%p",
               start, end, view);
@@ -330,8 +323,8 @@ bool te_replace_byte_range_no_events(DomElement* elem, DocState* state, void* ta
 
     // Place caret at end of inserted text and clear any selection.
     uint32_t new_caret = start + repl_len;
-    if (selection_has_projection(state)) selection_clear(state);
-    caret_set(state, (View*)target, (int)new_caret);
+    if (selection_has_projection(state)) state_store_legacy_selection_clear(state);
+    state_store_legacy_caret_set(state, (View*)target, (int)new_caret);
 
     // tc_set_value already pushed an undo entry; just notify selection
     // observers and we're done.

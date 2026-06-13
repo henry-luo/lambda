@@ -153,7 +153,7 @@ bool caret_transition(DocState* state,
     transition_enter(state);
     switch (kind) {
         case CARET_TRANSITION_COLLAPSE_TO_BOUNDARY:
-            caret_set(state, args->target, args->offset);
+            state_store_legacy_caret_set(state, args->target, args->offset);
             break;
         default:
             transition_leave(state);
@@ -180,7 +180,7 @@ bool selection_transition(DocState* state,
     switch (kind) {
         case SELECTION_TRANSITION_START_POINTER_SELECTION:
             if (!args) { transition_leave(state); return false; }
-            selection_start(state, args->target, args->focus_offset);
+            state_store_legacy_selection_start(state, args->target, args->focus_offset);
             if (state->selection && state->editing.drag_anchor_view) {
                 state->selection->is_selecting = true;
             }
@@ -190,27 +190,27 @@ bool selection_transition(DocState* state,
             break;
         case SELECTION_TRANSITION_EXTEND_TO_BOUNDARY:
             if (!args) { transition_leave(state); return false; }
-            selection_extend(state, args->focus_offset);
+            state_store_legacy_selection_extend(state, args->focus_offset);
             break;
         case SELECTION_TRANSITION_EXTEND_TO_VIEW:
             if (!args) { transition_leave(state); return false; }
-            selection_extend_to_view(state, args->target, args->focus_offset);
+            state_store_legacy_selection_extend_to_view(state, args->target, args->focus_offset);
             break;
         case SELECTION_TRANSITION_SET_BASE_AND_EXTENT:
             if (!args) { transition_leave(state); return false; }
-            selection_set(state, args->target, args->anchor_offset, args->focus_offset);
+            state_store_legacy_selection_set(state, args->target, args->anchor_offset, args->focus_offset);
             break;
         case SELECTION_TRANSITION_SELECT_ALL:
-            selection_select_all(state);
+            state_store_legacy_selection_select_all(state);
             break;
         case SELECTION_TRANSITION_COLLAPSE_TO_START:
-            selection_collapse(state, true);
+            state_store_legacy_selection_collapse(state, true);
             break;
         case SELECTION_TRANSITION_COLLAPSE_TO_END:
-            selection_collapse(state, false);
+            state_store_legacy_selection_collapse(state, false);
             break;
         case SELECTION_TRANSITION_CLEAR_SELECTION:
-            selection_clear(state);
+            state_store_legacy_selection_clear(state);
             break;
         default:
             transition_leave(state);
