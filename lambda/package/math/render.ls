@@ -105,7 +105,8 @@ fn render_group(node, context) {
 
 fn group_spacing_context(context) {
     if ((context.style == "script" or context.style == "scriptscript") and
-        context.script_container != true)
+        context.script_container != true and
+        not (context.fraction_child == true and context.colorbox_content == true))
         ctx.derive(context, {style: "text"})
     else context
 }
@@ -529,8 +530,9 @@ fn symbol_font_class(cmd_text, context) {
 fn render_colorbox_content(content_arg, context) {
     if (content_arg is string) box.text_box(string(content_arg), css.TEXT, "mord")
     else
-        (let children = render_children(content_arg, context),
-         let spaced = apply_spacing(children, context),
+        (let content_context = ctx.derive(context, {colorbox_content: true}),
+         let children = render_children(content_arg, content_context),
+         let spaced = apply_spacing(children, content_context),
          transparent_hbox(spaced))
 }
 

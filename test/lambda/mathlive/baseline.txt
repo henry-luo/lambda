@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 194 cases passing when this
+# One snapshot key per line. These are the 196 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -31,9 +31,11 @@ BOX 6/ \\mathrlap{x}o renders correctly 1
 BOX 7/ \\llap{x}o renders correctly 1
 BOX 8/ \\mathllap{x}o renders correctly 1
 COLORS 0/ color format "aquamarine" renders correctly 1
+COLORS 1/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 1/ color format "rgb(240, 10, 200)" renders correctly 1
 COLORS 2/ color format "#33d" renders correctly 1
 COLORS 3/ color format "#3130da" renders correctly 1
+COLORS 4/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 4/ color format "white" renders correctly 1
 COLORS 5/ color format "Aquamarine" renders correctly 1
 COLORS 6/ a{b\\color{#f00} c}d renders correctly 1
