@@ -197,8 +197,11 @@ void heap_init() {
     context->heap->gc = mem_gc_heap_create(NULL, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
     context->heap->pool = context->heap->gc->pool;  // alias for compatibility
 
-    // register context->result as a GC root slot
-    gc_register_root(context->heap->gc, &context->result.item);
+    // register a stable heap-owned result slot. EvalContext is often stack-local
+    // in JS/document paths, so registering context->result would leave stale
+    // root-slot addresses after that frame returns.
+    context->heap->result_root = context->result.item;
+    gc_register_root(context->heap->gc, &context->heap->result_root);
 
     // set the auto-collection callback so GC triggers when data zone fills up
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
@@ -219,7 +222,8 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc = mem_gc_heap_create_with_pool(NULL, pool, MEM_ROLE_RUNTIME_HEAP, "eval.heap");
     context->heap->pool = context->heap->gc->pool;
 
-    gc_register_root(context->heap->gc, &context->result.item);
+    context->heap->result_root = context->result.item;
+    gc_register_root(context->heap->gc, &context->heap->result_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
     context->heap->gc->vmap_trace = vmap_gc_trace;
     context->heap->gc->vmap_destroy = vmap_gc_destroy;
