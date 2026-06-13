@@ -228,7 +228,12 @@ bool js_regexp_compile_frontend(const char* pattern, int pattern_len,
     out->canonical_flags_len = fi;
 
     if (out->unicode || out->unicode_sets) {
-        if (!js_regex_wrapper_validate_unicode(pattern, pattern_len)) {
+        // Js54 P9: route /v through the unicode-sets validator that allows
+        // nested classes, --/&& set operators, and \q{...} alternation.
+        bool ok = out->unicode_sets
+            ? js_regex_wrapper_validate_unicode_sets(pattern, pattern_len)
+            : js_regex_wrapper_validate_unicode(pattern, pattern_len);
+        if (!ok) {
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: Annex B legacy syntax not allowed under `u` flag%s",
                 pattern, pattern_len, flags, flags_len, "");

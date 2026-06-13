@@ -1325,6 +1325,73 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+// Js54 P8: shared implementation for ArrayBuffer.prototype.transfer{,ToFixedLength}.
+// Per ES2024 §25.1.5.{3,4}: create a new ArrayBuffer of newLength bytes, copy
+// min(srcByteLength, newLength) bytes from source, detach the source. For
+// `transfer`, preserve resizable + maxByteLength from the source; for
+// `transferToFixedLength`, the result is always non-resizable.
+static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int argc,
+                                         bool to_fixed_length) {
+    if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
+        return js_throw_type_error("ArrayBuffer.prototype.transfer requires a non-shared ArrayBuffer receiver");
+    }
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
+    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
+    // Per spec: validate detached AFTER coercing newLength so the valueOf side
+    // effect runs first when applicable.
+    int new_length;
+    if (argc == 0 || get_type_id(new_length_item) == LMD_TYPE_UNDEFINED) {
+        if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+        new_length = ab->byte_length;
+    } else {
+        if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+        if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+    }
+
+    // Determine resizable / maxByteLength for the new buffer.
+    bool new_resizable;
+    int new_max_byte_length;
+    if (to_fixed_length) {
+        new_resizable = false;
+        new_max_byte_length = new_length;
+    } else {
+        new_resizable = ab->resizable;
+        new_max_byte_length = new_resizable ? ab->max_byte_length : new_length;
+    }
+    if (new_length > new_max_byte_length) {
+        return js_throw_range_error("Invalid array buffer length");
+    }
+
+    // Allocate the new buffer via js_arraybuffer_new, then adjust resizable
+    // metadata. Allocation uses the buffer's natural capacity; if resizable,
+    // ensure the data block can hold up to max_byte_length so subsequent
+    // resize() calls don't have to reallocate beyond their bound.
+    Item result = js_arraybuffer_new(new_length);
+    if (!js_is_arraybuffer(result)) return result;
+    JsArrayBuffer* nab = js_get_arraybuffer_ptr(result.map);
+    if (!nab) return result;
+
+    int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
+    if (ab->data && copy_len > 0) memcpy(nab->data, ab->data, copy_len);
+    nab->resizable = new_resizable;
+    nab->max_byte_length = new_max_byte_length;
+
+    // Detach the source. This zeros source byte_length and frees the conceptual
+    // data slot (ab->data set to NULL); existing TypedArray views over it
+    // observe the detach through their stored ta->buffer pointer.
+    js_arraybuffer_detach(val);
+
+    return result;
+}
+
+extern "C" Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc) {
+    return js_arraybuffer_transfer_impl(val, new_length_item, argc, /*to_fixed_length=*/false);
+}
+
+extern "C" Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc) {
+    return js_arraybuffer_transfer_impl(val, new_length_item, argc, /*to_fixed_length=*/true);
+}
+
 extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
     // ES spec: ArrayBuffer.prototype.slice must throw TypeError for SharedArrayBuffer
@@ -1334,6 +1401,10 @@ extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
+    if (ab->detached) {
+        js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
+        return ItemNull;
+    }
 
     if (begin < 0) begin = ab->byte_length + begin;
     if (end < 0) end = ab->byte_length + end;
@@ -1372,6 +1443,9 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
+    if (ab->detached) {
+        return js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
+    }
 
     int begin = 0;
     int end = ab->byte_length;

@@ -355,6 +355,9 @@ const JsBuiltinMethodSpec JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS[] = {
 const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
     {"slice", 5, JS_BUILTIN_ARRAYBUFFER_SLICE, 2},
     {"resize", 6, JS_BUILTIN_ARRAYBUFFER_RESIZE, 1},
+    // Js54 P8: ArrayBuffer.prototype.transfer / transferToFixedLength (ES2024)
+    {"transfer", 8, JS_BUILTIN_ARRAYBUFFER_TRANSFER, 0},
+    {"transferToFixedLength", 21, JS_BUILTIN_ARRAYBUFFER_TRANSFER_TO_FIXED_LENGTH, 0},
     {NULL, 0, 0, 0}
 };
 
