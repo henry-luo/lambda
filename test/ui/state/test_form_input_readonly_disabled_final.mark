@@ -3,7 +3,6 @@
     from_mouse: true
   }, hover: "#disabled-fld", render: {
     dirty: true,
-    reflow: true,
     repaint: true,
     rects: 1
   }, editing: {

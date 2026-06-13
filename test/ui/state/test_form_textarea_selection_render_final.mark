@@ -13,9 +13,7 @@
       node: "#bio",
       offset: 9
     }
-  }, hover: "#bio", render: {
-    reflow: true
-  }, editing: {
+  }, hover: "#bio", editing: {
     active_surface: true
   }
   <html flags: ['hover', 'focus-within']

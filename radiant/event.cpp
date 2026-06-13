@@ -1425,6 +1425,32 @@ static bool rich_delete_dom_selection(DocState* state, DomSelection* selection) 
     return true;
 }
 
+static bool dom_node_is_descendant_of(DomNode* node, DomNode* ancestor) {
+    for (DomNode* p = node; p; p = p->parent) {
+        if (p == ancestor) return true;
+    }
+    return false;
+}
+
+static void collapse_active_text_control_selection_for_rich_target(DocState* state,
+                                                                   View* target) {
+    if (!state || !target) return;
+
+    DomElement* elem = tc_get_active_element(state);
+    if (!elem) elem = tc_get_last_focused_text_control(state);
+    if (!elem || !tc_is_text_control(elem) || !elem->form) return;
+
+    DomNode* target_node = static_cast<DomNode*>(target);
+    DomNode* text_control_node = static_cast<DomNode*>(elem);
+    if (dom_node_is_descendant_of(target_node, text_control_node)) return;
+
+    tc_ensure_init(elem);
+    uint32_t end = elem->form ? elem->form->current_value_u16_len : 0;
+    form_control_set_selection(state, static_cast<View*>(elem), end, end, 0);
+    tc_set_active_element(state, nullptr);
+    log_debug("collapse_active_text_control_selection_for_rich_target: collapsed text control to %u", end);
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state || !selection_has(state)) return false;
     View* surface_target = nullptr;
@@ -6864,6 +6890,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // Set caret at clicked position for a fresh placement. A
                     // shift-click must preserve the existing collapsed
                     // selection anchor so selection_extend() can use it.
+                    collapse_active_text_control_selection_for_rich_target(state, evcon.target);
                     caret_set(state, evcon.target, char_offset);
                 }
 

@@ -1,6 +1,19 @@
 # Radiant Design - Unified Editing
 
-**Status:** Implementation in progress
+> ⚠️ **PHASED OUT — superseded by
+> [Radiant_Design_Editing2.md](Radiant_Design_Editing2.md).**
+> Editing 2 is now the canonical editing design. Its `EditingSelection`-canonical
+> / DOM-Selection-facade model replaces this doc's `dom_selection`-canonical +
+> synthetic-form-range selection model. This document is retained only as a
+> historical record of the already-landed E1–E7 implementation work; that code
+> stays valid and is re-described under Editing 2's authority model. The durable
+> cross-cutting decisions here (surface resolution, editing modes, shared
+> animation tick, composition session, `editing.*` log vocabulary + password
+> redaction, cross-surface boundary policy) have been adopted into Editing 2
+> §4.2–§4.3, §8.4, §9, and §10.3. **Do not extend this document; make changes
+> in Editing 2.**
+
+**Status:** Phased out (historical record of landed work)
 **Date:** 2026-05-28
 **Layer:** Interaction/editing core, above DOM Range/Selection and below form controls, contenteditable hosts, JS DOM events, and Lambda `edit <...>` templates.
 **Related docs:** [Radiant_Design_Form_Input.md](Radiant_Design_Form_Input.md), [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md), [Radiant_Design_State.md](Radiant_Design_State.md), [Radiant_Design_Event.md](Radiant_Design_Event.md), [Radiant_Design_Selection.md](Radiant_Design_Selection.md), [Radiant_ContentEditable_WPT_Status.md](Radiant_ContentEditable_WPT_Status.md)

@@ -2,7 +2,8 @@
 #define RADIANT_EDITING_INTENT_HPP
 
 // shared input intent model for form text controls and contenteditable.
-// see vibe/radiant/Radiant_Design_Editing.md E2.
+// canonical design: vibe/radiant/Radiant_Design_Editing2.md (§6.1).
+// vibe/radiant/Radiant_Design_Editing.md E2 is phased out (historical record).
 
 #include "event.hpp"
 

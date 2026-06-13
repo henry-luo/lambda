@@ -1,22 +1,27 @@
-# Radiant Contenteditable 2 - StateStore-driven rich text editing
+# Radiant Editing 2 - StateStore-driven unified editing core
 
 **Date:** 2026-06-13
 **Status:** Proposal
 **Layer:** Radiant interaction/editing core, above DOM Range/Selection and
-below JS DOM events, Lambda `edit <...>` templates, and future rich text
-editor features.
+below form controls, contenteditable hosts, JS DOM events, Lambda
+`edit <...>` templates, and future rich text editor features.
+**Scope:** Unified editing authority across contenteditable hosts, form text
+controls (`<input>`/`<textarea>`), and Lambda editor templates. This is the
+canonical successor to both Radiant_Design_Content_Editable.md (the rich
+contenteditable strategy) and Radiant_Design_Editing.md (the form+rich
+unification).
 **Supersedes / updates:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md)
 for the implementation strategy. The older document remains useful for the
 web-platform contract and WPT background.
 **Supersedes (selection + transaction model):**
 [Radiant_Design_Editing.md](Radiant_Design_Editing.md) is **phased out** as the
-canonical design. CE2 is now the canonical editing design. Editing.md's
+canonical design. Editing 2 is now the canonical editing design. Editing.md's
 selection-authority model (`DocState::dom_selection` as canonical owner,
 synthetic StaticRange for form fields, legacy projections kept in parallel) is
-replaced by CE2's `EditingSelection`-canonical / facade model (§5). Editing.md
+replaced by Editing 2's `EditingSelection`-canonical / facade model (§5). Editing.md
 remains a historical record of already-landed E1–E7 implementation work; the
-landed code stays valid and is re-described under CE2's authority model rather
-than discarded. The durable cross-cutting decisions from Editing.md that CE2
+landed code stays valid and is re-described under Editing 2's authority model rather
+than discarded. The durable cross-cutting decisions from Editing.md that Editing 2
 adopts are listed in §4.2–§4.3, §8.4, §9, and §10.3.
 **Related docs:**
 [Radiant_Design_State.md](Radiant_Design_State.md),
@@ -156,8 +161,8 @@ reconciled against the active surface before mutating**. This prevents the
 per-event resolver and the focused session from drifting — the same
 single-authority discipline this proposal applies to selection.
 
-`EditingMode` distinguishes mutation policy now that CE2 folds text controls in
-(Phase CE2-1 D):
+`EditingMode` distinguishes mutation policy now that Editing 2 folds text controls in
+(Phase ED2-1 D):
 
 ```cpp
 enum EditingMode {
@@ -178,7 +183,7 @@ replaces the same branch scattered across every key/mouse/IME path today.
 ### 4.3 Carry-over Concerns From Editing.md (already landed)
 
 These cross-cutting decisions from Editing.md are adopted as-is; their
-implementations have landed and remain valid under CE2's authority model. CE2
+implementations have landed and remain valid under Editing 2's authority model. Editing 2
 does not re-specify their mechanics, only records that they are in force:
 
 - **One shared editing animation tick.** A single time-driven tick drives caret
@@ -683,7 +688,7 @@ checks.
 
 ### 10.3 Cross-surface Boundaries (adopted from Editing.md §6.2, landed)
 
-Now that CE2 folds text controls into one selection authority (Phase CE2-1 D),
+Now that Editing 2 folds text controls into one selection authority (Phase ED2-1 D),
 an embedded `<input>`/`<textarea>` inside a contenteditable host is a distinct
 editing surface, and gestures across the boundary need defined behavior:
 
@@ -698,14 +703,14 @@ editing surface, and gestures across the boundary need defined behavior:
 
 These are already enforced via `editing_geometry_surface_contains_target_range()`
 and pinned by the landed `test_editing_mixed_selection_clamp` fixture. Under
-CE2 they become target-range invariants (`SM_INV_EDITING_TARGET_RANGES`,
+Editing 2 they become target-range invariants (`SM_INV_EDITING_TARGET_RANGES`,
 `SM_INV_EDITING_SURFACE`) rather than local checks.
 
 ---
 
 ## 11. Implementation Plan
 
-### Phase CE2-1 - StateStore Selection Authority
+### Phase ED2-1 - StateStore Selection Authority
 
 The boundaries are already single-store (`DocState::live_ranges`); this phase
 consolidates *authority*, not storage. Each sub-phase ships independently with
@@ -726,7 +731,8 @@ baseline tests green.
 - **D. Unify text controls.** Fold text-control selection into `sel`
   (`kind == EDIT_SEL_TEXT_CONTROL`), reusing the `editing_geometry`
   `EditingBoundary` for offsets. One selection authority across contenteditable
-  and form controls (ties to [Radiant_Design_Editing.md](Radiant_Design_Editing.md)).
+  and form controls. This replaces the synthetic-form-range approach landed
+  under the phased-out [Radiant_Design_Editing.md](Radiant_Design_Editing.md) E3.
 - **E. DOM facade.** Route `getSelection()` mutators and the
   `js_dom_selection.cpp` writers through `state_store_set_selection()`;
   `getRangeAt()` returns the wrapper for `sel.range`.
@@ -745,7 +751,7 @@ Exit criteria:
 - `dom_selection_sync_depth` and `legacy_sync_from_dom_selection()` are gone;
 - `selectionchange` WPT coverage does not regress.
 
-### Phase CE2-2 - Transaction Runner
+### Phase ED2-2 - Transaction Runner
 
 - Introduce `EditingTransaction`.
 - Move rich insertion, delete, cut, paste, Enter, and drop behind
@@ -757,7 +763,7 @@ Exit criteria:
 - all contenteditable UI tests pass through the transaction runner;
 - event logs show transaction begin/commit and beforeinput/input order.
 
-### Phase CE2-3 - State Schema Integration
+### Phase ED2-3 - State Schema Integration
 
 - Add rich editing state-machine events.
 - Add invariants for surface, selection host, target ranges, DOM cache, and
@@ -769,7 +775,7 @@ Exit criteria:
 - event sim can assert state validity after each rich edit;
 - stale caret/selection projection bugs become invariant failures.
 
-### Phase CE2-4 - InputEvent Level 2 Completion
+### Phase ED2-4 - InputEvent Level 2 Completion
 
 - Audit and complete `InputEvent` fields.
 - Ensure `getTargetRanges()` is pre-mutation and immutable.
@@ -782,7 +788,7 @@ Exit criteria:
   non-legacy skips;
 - UI tests cover data, html, target ranges, composition, paste, cut, drop.
 
-### Phase CE2-5 - Plaintext-only And False Islands
+### Phase ED2-5 - Plaintext-only And False Islands
 
 - Enforce plaintext-only mutation policy.
 - Enforce false-island mutation guards.
@@ -794,7 +800,7 @@ Exit criteria:
 - mutations inside false islands are rejected;
 - selection projection remains valid across island boundaries.
 
-### Phase CE2-6 - History And Rich Logs
+### Phase ED2-6 - History And Rich Logs
 
 - Record transaction summaries.
 - Add coalescing hooks for simple text insertion.
@@ -924,11 +930,13 @@ coverage if already present, but do not make it a gating track.
 
 ## 15. Summary
 
-Contenteditable 1 made Radiant editable. Contenteditable 2 makes it reliable.
+Contenteditable 1 made Radiant editable. Editing 2 makes it reliable and
+unifies it: contenteditable hosts, form text controls, and Lambda editor
+templates share one editing authority.
 
 The central move is to stop treating DOM Selection, legacy selection projection,
 and rich mutation code as separate authorities. StateStore becomes the editing
-state authority; DOM Selection becomes the web API facade; rich mutation becomes
-a single state-machine transaction; InputEvent Level 2 becomes the contract
-between platform input, JS, Lambda templates, logging, history, and future rich
-editing features.
+state authority; DOM Selection becomes the web API facade; every edit (rich or
+form) becomes a single state-machine transaction; InputEvent Level 2 becomes the
+contract between platform input, JS, Lambda templates, logging, history, and
+future rich editing features.
