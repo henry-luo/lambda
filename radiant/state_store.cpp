@@ -1087,10 +1087,16 @@ extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
 // and text controls publish through separate writers, while CaretState and
 // SelectionState remain private render/event projections.
 // ----------------------------------------------------------------------------
+static bool state_store_ensure_projection_storage(DocState* state);
+
 static DomSelection* sync_ensure_selection(DocState* state) {
     if (!state) return NULL;
-    if (state->dom_selection) return state->dom_selection;
-    state->dom_selection = dom_selection_create(state);
+    if (!state->dom_selection) {
+        state->dom_selection = dom_selection_create(state);
+    }
+    if (state->dom_selection) {
+        state_store_ensure_projection_storage(state);
+    }
     return state->dom_selection;
 }
 
@@ -1194,6 +1200,74 @@ extern "C" bool state_store_set_selection(DocState* state,
             anchor->node, anchor->offset, focus->node, focus->offset, out_exception);
     }
     return ok;
+}
+
+extern "C" bool state_store_add_selection_range(DocState* state,
+                                                 DomRange* range,
+                                                 const char** out_exception) {
+    if (!state || !range) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    dom_selection_add_range(selection, range);
+    return true;
+}
+
+extern "C" bool state_store_remove_selection_range(DocState* state,
+                                                    DomRange* range,
+                                                    const char** out_exception) {
+    if (!state || !range) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    bool in_selection = false;
+    for (uint32_t i = 0; i < selection->range_count; i++) {
+        if (selection->ranges[i] == range) {
+            in_selection = true;
+            break;
+        }
+    }
+    if (!in_selection) {
+        if (out_exception) *out_exception = "NotFoundError";
+        return false;
+    }
+
+    dom_selection_remove_range(selection, range);
+    return true;
+}
+
+extern "C" bool state_store_modify_selection(DocState* state,
+                                              const char* alter,
+                                              const char* direction,
+                                              const char* granularity,
+                                              const char** out_exception) {
+    if (!state) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    return dom_selection_modify(selection, alter, direction, granularity,
+                                out_exception);
 }
 
 extern "C" bool state_store_delete_selection_from_document(
@@ -1352,15 +1426,6 @@ static bool state_store_ensure_projection_storage(DocState* state) {
         }
     }
     return state->caret != NULL && state->selection != NULL;
-}
-
-// Called from `dom_selection_create` (in dom_range.cpp) immediately after the
-// DomSelection is allocated. Ensures StateStore projection storage exists so
-// older renderer/event paths can keep using StateStore helper APIs.
-extern "C" void dom_selection_attach_legacy_storage(DomSelection* s,
-                                                    DocState* state) {
-    if (!s) return;
-    state_store_ensure_projection_storage(state);
 }
 
 // View* in the legacy API IS a DomNode* (typedef in dom_node.hpp).
@@ -1734,10 +1799,7 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
     dom_boundary_to_legacy_projection(anchor, &anc_view, &anc_off);
     dom_boundary_to_legacy_projection(focus,  &foc_view, &foc_off);
 
-    // Projection storage is allocated during dom_selection_create via
-    // dom_selection_attach_legacy_storage, so state->caret / state->selection
-    // are expected to be non-null here.
-    if (!state->selection || !state->caret) {
+    if (!state_store_ensure_projection_storage(state)) {
         return;
     }
     SelectionState* sel = state->selection;

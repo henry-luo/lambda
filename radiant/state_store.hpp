@@ -351,11 +351,11 @@ typedef struct DocState {
     // radiant/dom_range.hpp and vibe/radiant/Radiant_Design_Selection.md.
     // ------------------------------------------------------------------
     struct DomSelection* dom_selection;     // lazy; created on first read/write
-    // ED2-1 canonical StateStore selection for the active editing surface.
-    // For DOM ranges it shadows dom_selection (references the live ranges[0], no
-    // boundary copy); for text controls it is the canonical store
-    // (form->selection_* mirrors it). Note a focused text control's selection
-    // can coexist with a separate, non-empty document dom_selection (browser
+    // ED2-1 StateStore selection authority/facade for the active editing
+    // surface. DOM selection writers route through StateStore before updating
+    // dom_selection/projections; text controls store the canonical selection
+    // here and mirror form->selection_*. A focused text control's selection can
+    // coexist with a separate, non-empty document dom_selection (browser
     // semantics). See state_store_set_text_control_selection.
     EditingSelection     sel;
     struct DomRange*     live_ranges;       // doubly-linked list head
@@ -620,7 +620,7 @@ void state_begin_batch(DocState* state);
  */
 void state_end_batch(DocState* state);
 
-// ED2-1 selection authority/projection API.
+// ED2-1 selection authority/facade/projection API.
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -632,6 +632,17 @@ bool state_store_set_selection(DocState* state,
                                const DomBoundary* anchor,
                                const DomBoundary* focus,
                                const char** out_exception);
+bool state_store_add_selection_range(DocState* state,
+                                     DomRange* range,
+                                     const char** out_exception);
+bool state_store_remove_selection_range(DocState* state,
+                                        DomRange* range,
+                                        const char** out_exception);
+bool state_store_modify_selection(DocState* state,
+                                  const char* alter,
+                                  const char* direction,
+                                  const char* granularity,
+                                  const char** out_exception);
 bool state_store_delete_selection_from_document(DocState* state,
                                                 const char** out_exception);
 void state_store_set_text_control_selection(DocState* state,

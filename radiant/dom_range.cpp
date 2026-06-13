@@ -66,14 +66,6 @@ __attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
 // state_store.cpp (production) or in a unit-test stub.
 struct Arena;
 extern "C" Arena*    dom_range_state_arena(DocState* state);
-// Implemented in state_store.cpp — ensures private projection storage exists
-// for this document. Strong def in production; weak no-op for unit tests.
-extern "C" void      dom_selection_attach_legacy_storage(struct DomSelection* s,
-                                                         DocState* state);
-extern "C" __attribute__((weak)) void dom_selection_attach_legacy_storage(
-        struct DomSelection* /*s*/, DocState* /*state*/) {
-    // weak fallback for test targets that don't link state_store.cpp.
-}
 extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state);
 extern "C" struct DomSelection* dom_range_state_selection(DocState* state);
 
@@ -560,9 +552,6 @@ DomSelection* dom_selection_create(DocState* state) {
     if (!s) return NULL;
     memset(s, 0, sizeof(*s));
     s->state = state;
-    // Ensure StateStore projection storage exists. Strong def in
-    // state_store.cpp; weak no-op for DOM-only unit tests.
-    dom_selection_attach_legacy_storage(s, state);
     return s;
 }
 

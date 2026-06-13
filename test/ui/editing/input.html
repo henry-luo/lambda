@@ -16,6 +16,7 @@
   <input id="nav-input" type="text" value="one two three">
   <div id="before-log" class="log">before:none</div>
   <div id="input-log" class="log">input:none</div>
+  <div id="transfer-log" class="log">transfer:none</div>
   <div id="blocked-log" class="log">blocked:none</div>
   <div id="composition-log" class="log">composition:none</div>
   <div id="history-log" class="log">history:none</div>
@@ -23,6 +24,7 @@
     var surface = document.getElementById('surface');
     var beforeLog = document.getElementById('before-log');
     var inputLog = document.getElementById('input-log');
+    var transferLog = document.getElementById('transfer-log');
     var blockedLog = document.getElementById('blocked-log');
     var compositionLog = document.getElementById('composition-log');
     var historyLog = document.getElementById('history-log');
@@ -39,9 +41,27 @@
         rangeCount + '|' + rangeText;
     }
 
+    function summarizeTransfer(event) {
+      var dt = event.dataTransfer;
+      if (!dt) {
+        return 'dt:none';
+      }
+      var types = [];
+      if (dt.types) {
+        for (var i = 0; i < dt.types.length; i++) {
+          types.push(dt.types[i]);
+        }
+      }
+      return 'dt:' + types.join(',');
+    }
+
     surface.onbeforeinput = function(event) {
       var summary = summarize(event);
       beforeLog.textContent = 'before:' + summary;
+      if (event.inputType === 'insertFromPaste' ||
+          event.inputType === 'insertFromDrop') {
+        transferLog.textContent = 'transfer:' + summarizeTransfer(event);
+      }
       if (event.inputType === 'historyUndo' ||
           event.inputType === 'historyRedo') {
         historyLog.textContent = 'history:' + event.inputType;

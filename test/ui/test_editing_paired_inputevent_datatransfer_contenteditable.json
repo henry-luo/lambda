@@ -8,8 +8,8 @@
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "clip", "html": "<b>clip</b>"},
     {"type": "wait", "ms": 80},
-    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromPaste|clip|1|4-4|dt:text/plain,text/html:plain=clip:html=<b>clip</b>"},
-    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromPaste|clip|seedclip|ranges:1|4-4|dt:text/plain,text/html:plain=clip:html=<b>clip</b>"},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromPaste||1|4-4|dt:text/plain,text/html:plain=clip:html=<b>clip</b>"},
+    {"type": "assert_text", "target": {"selector": "#input-log"}, "contains": "input:insertFromPaste||seedclip|ranges:1|4-4|dt:text/plain,text/html:plain=clip:html=<b>clip</b>"},
     {"type": "assert_editing_value", "target": {"selector": "#surface"}, "equals": "seedclip"},
     {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromPaste", "surface": "contenteditable", "mode": "rich", "min": 2}
   ]

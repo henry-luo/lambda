@@ -1,0 +1,6 @@
+surface: insertText|x|1|function
+ranges: 1|1|2-5|2-5
+fresh: true|true
+nodes: start|end|false
+defaults: true||true|0|0|true
+nullable: true|true|true

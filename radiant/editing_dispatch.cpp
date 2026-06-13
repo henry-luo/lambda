@@ -810,6 +810,9 @@ bool editing_run_transaction(EventContext* evcon,
     current_tx.surface = &current_surface;
 
     DocState* state = editing_dispatch_doc_state(evcon);
+    if (state) {
+        radiant_state_assert_valid(state, "editing_transaction_preflight");
+    }
     EditingTargetRangeStatus target_ranges =
         editing_dispatch_target_range_status(state, current_tx.surface,
                                              current_tx.intent);

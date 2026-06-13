@@ -986,6 +986,15 @@ static const char* init_str(Item init, const char* key, const char* def) {
     return s ? s : def;
 }
 
+static Item init_nullable_str_item(Item init, const char* key) {
+    Item v = read_init(init, key);
+    if (v.item == 0) return ItemNull;
+    TypeId t = get_type_id(v);
+    if (t == LMD_TYPE_NULL || t == LMD_TYPE_UNDEFINED) return ItemNull;
+    const char* s = fn_to_cstr(v);
+    return s ? (Item){.item = s2it(heap_create_name(s))} : ItemNull;
+}
+
 static Item init_item(Item init, const char* key) {
     Item v = read_init(init, key);
     if (!init_present(v)) return ItemNull;
@@ -1186,13 +1195,45 @@ extern "C" Item js_ctor_static_range_fn(Item init) {
     return obj;
 }
 
+static Item js_input_event_get_target_ranges(Item* args, int argc);
+static void js_input_event_install_target_ranges(Item ev, Item target_ranges);
+
+static Item js_input_event_snapshot_range(Item range) {
+    Item init = js_new_object();
+    event_set_item(init, "startContainer", init_item(range, "startContainer"));
+    event_set_int(init, "startOffset", init_int(range, "startOffset", 0));
+    event_set_item(init, "endContainer", init_item(range, "endContainer"));
+    event_set_int(init, "endOffset", init_int(range, "endOffset", 0));
+    return js_ctor_static_range_fn(init);
+}
+
+static Item js_input_event_snapshot_target_ranges(Item target_ranges) {
+    Item ranges = js_array_new(0);
+    if (get_type_id(target_ranges) != LMD_TYPE_ARRAY) return ranges;
+
+    int64_t len = js_array_length(target_ranges);
+    for (int64_t i = 0; i < len; i++) {
+        Item range = js_array_get_int(target_ranges, i);
+        TypeId range_type = get_type_id(range);
+        if (range_type != LMD_TYPE_MAP &&
+            range_type != LMD_TYPE_OBJECT &&
+            range_type != LMD_TYPE_VMAP) {
+            continue;
+        }
+        js_array_push(ranges, js_input_event_snapshot_range(range));
+    }
+    return ranges;
+}
+
 extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
     Item ev = build_ui_event(fn_to_cstr(type_arg), init_arg, "InputEvent");
     if (js_check_exception()) return make_js_undefined();
-    event_set_str(ev, "data", init_str(init_arg, "data", ""));
+    event_set_item(ev, "data", init_nullable_str_item(init_arg, "data"));
     event_set_str(ev, "inputType", init_str(init_arg, "inputType", ""));
     event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
     event_set_item(ev, "dataTransfer", init_item(init_arg, "dataTransfer"));
+    js_input_event_install_target_ranges(ev,
+        js_input_event_snapshot_target_ranges(init_item(init_arg, "targetRanges")));
     return ev;
 }
 
@@ -1336,6 +1377,18 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     return ranges;
 }
 
+static void js_input_event_install_target_ranges(Item ev, Item target_ranges) {
+    Item ranges = target_ranges;
+    if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
+        ranges = js_array_new(0);
+    }
+    Item ranges_key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
+    js_property_set(ev, ranges_key, ranges);
+    Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
+    js_property_set(ev, gtr_key,
+        js_new_function((void*)js_input_event_get_target_ranges, 0));
+}
+
 extern "C" Item js_create_native_input_event(const char* type,
     const char* input_type, const char* data,
     bool is_composing, Item data_transfer, Item target_ranges)
@@ -1347,7 +1400,8 @@ extern "C" Item js_create_native_input_event(const char* type,
     event_set_bool(init, "bubbles", true);
     event_set_bool(init, "cancelable", is_beforeinput);
     event_set_bool(init, "composed", true);
-    event_set_str(init, "data", data ? data : "");
+    if (data) event_set_str(init, "data", data);
+    else event_set_item(init, "data", ItemNull);
     event_set_str(init, "inputType", input_type ? input_type : "");
     event_set_bool(init, "isComposing", is_composing);
     if (data_transfer.item != 0) {
@@ -1360,15 +1414,7 @@ extern "C" Item js_create_native_input_event(const char* type,
     // If caller passed ItemNull, store an empty array — the WPT
     // `input-events-get-target-ranges*` tests expect the method to always
     // return an array (possibly empty), never null.
-    Item ranges = target_ranges;
-    if (get_type_id(ranges) != LMD_TYPE_ARRAY) {
-        ranges = js_array_new(0);
-    }
-    Item ranges_key = (Item){.item = s2it(heap_create_name("__target_ranges"))};
-    js_property_set(ev, ranges_key, ranges);
-    Item gtr_key = (Item){.item = s2it(heap_create_name("getTargetRanges"))};
-    js_property_set(ev, gtr_key,
-        js_new_function((void*)js_input_event_get_target_ranges, 0));
+    js_input_event_install_target_ranges(ev, target_ranges);
     return ev;
 }
 
