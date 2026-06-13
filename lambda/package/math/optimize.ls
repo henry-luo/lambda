@@ -32,7 +32,7 @@ fn merge_list(items) {
 }
 
 fn walk(c) {
-    if (c is element and len(c) > 1) build_merged(c)
+    if (c is element and len(c) > 0) build_merged(c)
     else c
 }
 
@@ -49,7 +49,7 @@ fn build_merged(el) {
 }
 
 fn merge_children(el) {
-    if (len(el) > 1) build_merged(el)
+    if (len(el) > 0) build_merged(el)
     else el
 }
 

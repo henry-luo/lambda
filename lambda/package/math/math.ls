@@ -34,12 +34,19 @@ pub fn render_math(ast, options) {
     let h = if (result_box.render_height != null) result_box.render_height else result_box.height
     let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
     let total = if (result_box.render_total != null) result_box.render_total else h + d
-    let strut_bottom_style = "height:" ++ util.fmt_em(total) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
-    let latex_el = <span class: css.LATEX;
-        <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
-        <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
-        result_box.element
-    >
+    let latex_el = if (d == 0.0) {
+        <span class: css.LATEX;
+            <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
+            result_box.element
+        >
+    } else {
+        let strut_bottom_style = "height:" ++ util.fmt_em(total) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
+        <span class: css.LATEX;
+            <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
+            <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
+            result_box.element
+        >
+    }
 
     // optionally wrap with stylesheet for standalone HTML
     if (is_standalone) css.wrap_standalone(latex_el)

@@ -298,19 +298,329 @@ fn render_big_op_inline(scaled_op, lower_box, upper_box, has_lower, has_upper) {
 
 fn render_accent(node, context) {
     let cmd = if (node.cmd != null) string(node.cmd) else ""
-    let base_box = if (node.base != null) render_node(node.base, context)
-        else box.text_box("", null, "ord")
-
     let accent_key = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\")
         slice(cmd, 1, len(cmd)) else cmd
-    let accent_char = sym.get_accent(accent_key)
-    let accent_text = if (accent_char != null) accent_char else "^"
-    let accent_box = box.text_box(accent_text, css.ACCENT_BODY, "ord")
+    if (accent_key == "overline" or accent_key == "underline")
+        render_line_accent(node, context, accent_key)
+    else
+        render_glyph_accent(node, context, accent_key)
+}
 
-    box.vbox([
-        {box: accent_box, shift: 0.0 - base_box.height - 0.05},
-        {box: base_box, shift: 0.0}
-    ])
+fn render_glyph_accent(node, context, accent_key) {
+    let accent_text = accent_display_text(accent_key)
+    let accent_height = accent_body_height(accent_key)
+    let accent_cls = if (accent_key == "vec")
+        css.classes([css.ACCENT_BODY, "lm_accent-combining-char"])
+        else css.ACCENT_BODY
+
+    if (node.base == null)
+        render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height)
+    else
+        (let base_box = render_accent_base(node.base, context),
+         if (base_box.width <= 0.8)
+            render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height)
+         else
+            render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height))
+}
+
+fn render_line_accent(node, context, accent_key) {
+    let base_box = if (node.base != null) render_accent_base(node.base, context)
+        else box.text_box("□", css.CMR, "mord")
+    let tall = line_accent_is_tall(base_box)
+    if (accent_key == "underline") {
+        if (tall) render_underline_tall(base_box)
+        else render_underline_simple(base_box)
+    } else {
+        if (tall) render_overline_tall(base_box)
+        else if (base_box.width <= 0.8) render_overline_simple(base_box)
+        else render_overline_wide(base_box)
+    }
+}
+
+fn render_overline_simple(base_box) {
+    let base_elements = box.elements_of(base_box)
+    let el = <span class: "overline";
+        <span class: css.VLIST_T;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.64em";
+                    <span style: "top:-3em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span style: "height:0.44em;display:inline-block";
+                            for (el in base_elements) el
+                        >
+                    >
+                    <span style: "top:-3.55em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
+                    >
+                >
+            >
+        >
+    >
+    line_accent_box(el, 0.64, 0.0, base_box.width, 0.0, 0.64, true)
+}
+
+fn render_overline_wide(base_box) {
+    let base_elements = box.elements_of(base_box)
+    let el = <span class: "overline";
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.64em";
+                    <span style: "top:-3em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span style: "height:0.63em;display:inline-block";
+                            for (el in base_elements) el
+                        >
+                    >
+                    <span style: "top:-3.55em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
+                    >
+                >
+                <span class: css.VLIST_S; "\u200B">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.2em">
+            >
+        >
+    >
+    line_accent_box(el, 0.64, 0.2, base_box.width, 0.2, 0.84, false)
+}
+
+fn render_overline_tall(base_box) {
+    let base_elements = box.elements_of(base_box)
+    let el = <span class: "overline";
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:1.35em";
+                    <span style: "top:-3.14em";
+                        <span class: css.PSTRUT, style: "height:3.15em">
+                        <span style: "height:1.84em;display:inline-block";
+                            for (el in base_elements) el
+                        >
+                    >
+                    <span style: "top:-4.4em";
+                        <span class: css.PSTRUT, style: "height:3.15em">
+                        <span class: "overline-line", style: "height:0.04em;display:inline-block">
+                    >
+                >
+                <span class: css.VLIST_S; "\u200B">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.69em">
+            >
+        >
+    >
+    line_accent_box(el, 1.35, 0.69, base_box.width, 0.69, 2.04, false)
+}
+
+fn render_underline_simple(base_box) {
+    let base_elements = box.elements_of(base_box)
+    let el = <span class: "underline";
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.7em";
+                    <span style: "top:-2.84em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
+                    >
+                    <span style: "top:-3em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span style: "height:0.7em;display:inline-block";
+                            for (el in base_elements) el
+                        >
+                    >
+                >
+                <span class: css.VLIST_S; "\u200B">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.21em">
+            >
+        >
+    >
+    line_accent_box(el, 0.7, 0.21, base_box.width, 0.21, 0.91, false)
+}
+
+fn render_underline_tall(base_box) {
+    let base_elements = box.elements_of(base_box)
+    let el = <span class: "underline";
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:1.15em";
+                    <span style: "top:-2.29em";
+                        <span class: css.PSTRUT, style: "height:3.15em">
+                        <span class: "underline-line", style: "height:0.04em;display:inline-block">
+                    >
+                    <span style: "top:-3.14em";
+                        <span class: css.PSTRUT, style: "height:3.15em">
+                        <span style: "height:1.84em;display:inline-block";
+                            for (el in base_elements) el
+                        >
+                    >
+                >
+                <span class: css.VLIST_S; "\u200B">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.89em">
+            >
+        >
+    >
+    line_accent_box(el, 1.15, 0.89, base_box.width, 0.88, 2.24, false)
+}
+
+fn line_accent_box(el, h, d, w, render_d, render_total_value, suppress_text_depth) => {
+    element: el,
+    height: h,
+    depth: d,
+    render_height: h,
+    render_depth: render_d,
+    render_total: render_total_value,
+    width: w,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    suppress_hbox_text_depth: suppress_text_depth
+}
+
+fn line_accent_is_tall(base_box) {
+    let total = if (base_box.render_total != null) base_box.render_total
+        else ((if (base_box.render_height != null) base_box.render_height else base_box.height) +
+              (if (base_box.render_depth != null) base_box.render_depth else base_box.depth))
+    (total > 1.0)
+}
+
+fn render_accent_base(base_node, context) {
+    if (base_node is element and (name(base_node) == 'group' or name(base_node) == 'brack_group')) {
+        let children = render_children(base_node, context)
+        transparent_hbox(apply_spacing(children, context))
+    } else {
+        render_node(base_node, context)
+    }
+}
+
+fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
+    let base_elements = box.elements_of(base_box)
+    let accent_top = if (accent_key == "tilde") -3.35 else -3.0
+    let margin_left = if (accent_key == "dot") 0.15 else 0.04
+    let el = <span class: css.VLIST_T;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(accent_height);
+                <span style: "top:-3em";
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span style: "height:0.44em;display:inline-block";
+                        for (el in base_elements) el
+                    >
+                >
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+                >
+            >
+        >
+    >
+    accent_box(el, accent_height, 0.0, base_box.width)
+}
+
+fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
+    let base_elements = box.elements_of(base_box)
+    let vheight = accent_height + if (accent_height < 0.7) 0.22 else 0.21
+    let accent_top = if (accent_key == "tilde") -3.56 else -3.21
+    let margin_left = if (accent_key == "dot") 0.79 else 0.68
+    let el = <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
+                <span style: "top:-3em";
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span style: "height:0.73em;display:inline-block";
+                        for (el in base_elements) el
+                    >
+                >
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+                >
+            >
+            <span class: css.VLIST_S; "\u200B">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:0.09em">
+        >
+    >
+    accent_box(el, vheight, 0.09, base_box.width)
+}
+
+fn render_missing_base_accent(accent_key, accent_text, accent_cls, accent_height) {
+    let vheight = accent_height + 0.27
+    let pstrut = if (accent_key == "vec") 2.72 else 2.7
+    let base_top = if (accent_height > 0.7) 0.0 - pstrut + 0.01 else 0.0 - pstrut
+    let accent_top = if (accent_key == "tilde") 0.0 - pstrut - 0.61 else 0.0 - pstrut - 0.26
+    let margin_left = if (accent_key == "dot") 0.27 else 0.16
+    let el = <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vheight);
+                <span style: "top:" ++ fmt_accent_em(base_top);
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
+                    <span style: "height:0.9em;display:inline-block";
+                        <span class: css.CMR; "□">
+                    >
+                >
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                    <span class: css.PSTRUT, style: "height:" ++ fmt_accent_em(pstrut)>
+                    <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
+                >
+            >
+            <span class: css.VLIST_S; "\u200B">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:0.2em">
+        >
+    >
+    accent_box(el, vheight, 0.2, 0.8)
+}
+
+fn accent_box(el, h, d, w) => {
+    element: el,
+    height: h,
+    depth: d,
+    render_height: h,
+    render_depth: d,
+    render_total: h + d,
+    width: w,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0
+}
+
+fn accent_display_text(key) {
+    match key {
+        case "vec": "⃗"
+        case "acute": "ˊ"
+        case "grave": "ˋ"
+        case "dot": "˙"
+        case "ddot": "¨"
+        case "tilde": "~"
+        case "bar": "ˉ"
+        case "breve": "˘"
+        case "check": "ˇ"
+        case "hat": "^"
+        default: (let accent_char = sym.get_accent(key),
+                  if (accent_char != null) accent_char else "^")
+    }
+}
+
+fn accent_body_height(key) {
+    if (key == "vec") 0.72
+    else if (key == "dot") 0.67
+    else if (key == "ddot") 0.67
+    else if (key == "tilde") 0.67
+    else if (key == "bar") 0.57
+    else if (key == "check") 0.63
+    else 0.7
+}
+
+fn fmt_accent_em(v) {
+    let rounded = round(v * 100.0) / 100.0
+    string(rounded) ++ "em"
 }
 
 // ============================================================
@@ -467,10 +777,57 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
+    else if (is_scriptstyle_switch(node, i))
+        (let rendered = render_scriptstyle_sibling(node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
-         let next_acc = if (child != null) acc ++ [render_node(child, context)] else acc,
+         let next_acc = if (child == null) acc
+             else if (child is string) acc ++ render_text_atoms(string(child), context)
+             else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_scriptstyle_switch(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'style_command' and
+         child.cmd != null and string(child.cmd) == "\\scriptstyle" and
+         child.arg == null and len(child) == 0)
+}
+
+fn render_scriptstyle_sibling(child, context) {
+    let bx = render_node(child, context)
+    style_wrap_box(bx, "font-size: 70%")
+}
+
+fn style_wrap_box(bx, style_text) {
+    let rt = if (bx.render_height != null) bx.render_height else bx.height
+    {
+        element: <span style: style_text; bx.element>,
+        height: bx.height,
+        depth: 0.0,
+        render_height: bx.render_height,
+        render_depth: 0.0,
+        render_total: rt,
+        width: bx.width,
+        type: bx.type,
+        italic: bx.italic,
+        skew: bx.skew,
+        suppress_hbox_text_depth: true
+    }
+}
+
+fn render_text_atoms(text, context) {
+    if (text == "+-") {
+        [
+            box.text_box("+", css.CMR, "mbin"),
+            box.text_box("−", css.CMR, "mbin")
+        ]
+    } else {
+        [render_text(text, context)]
+    }
 }
 
 fn child_is_text(node, i, text) {
@@ -552,7 +909,13 @@ fn get_text_from_element(node) {
 }
 
 fn is_plain_number_text(text) {
-    len(text) == 1 and contains("0123456789", text)
+    (len(text) > 0) and is_digit_text(text, 0)
+}
+
+fn is_digit_text(text, i) {
+    if (i >= len(text)) true
+    else if (contains("0123456789", slice(text, i, i + 1))) is_digit_text(text, i + 1)
+    else false
 }
 
 // ============================================================
