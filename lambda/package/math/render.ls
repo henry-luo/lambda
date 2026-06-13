@@ -113,7 +113,7 @@ fn render_symbol_command(node, context) {
     let unicode = sym.lookup_symbol(cmd_text)
     let display_text = if (unicode != null) unicode else cmd_text
     let atom_type = sym.classify_symbol(cmd_text)
-    let cls = css.font_class(context.font)
+    let cls = symbol_font_class(cmd_text, context)
     box.text_box(display_text, cls, atom_type)
 }
 
@@ -161,12 +161,14 @@ fn render_command(node, context) {
     let unicode = sym.lookup_symbol(cmd_text)
     if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
-        box.text_box(unicode, css.font_class(context.font), atom_type)
+        box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
     } else {
         let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
              slice(cmd_text, 1, len(cmd_text)) else cmd_text
         if (name_str == "pdiff") {
             render_pdiff(node, context)
+        } else if (name_str == "colorbox") {
+            render_colorbox_command(node, context)
         } else {
             let op_name = sym.get_operator_name(name_str)
             if (op_name != null) {
@@ -185,6 +187,32 @@ fn render_pdiff(node, context) {
     let numer_box = box.hbox([partial_box(), render_node(func_node, context)])
     let denom_box = box.hbox([partial_box(), render_node(var_node, context)])
     fraction.render_boxes(numer_box, denom_box, context)
+}
+
+fn render_colorbox_command(node, context) {
+    let n = len(node)
+    let color_arg = if (n > 0) node[0] else null
+    let content_arg = if (n > 1) node[1] else null
+    let bg = color.resolve_background_raw(plain_text(color_arg))
+    let content_box = if (content_arg != null)
+        render_colorbox_content(content_arg, context)
+        else box.text_box("", css.TEXT, "mord")
+    color.with_background(content_box, bg)
+}
+
+fn symbol_font_class(cmd_text, context) {
+    let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+        slice(cmd_text, 1, len(cmd_text)) else cmd_text
+    if (name_str == "blacksquare" or name_str == "blacktriangle") css.AMS
+    else css.font_class(context.font)
+}
+
+fn render_colorbox_content(content_arg, context) {
+    if (content_arg is string) box.text_box(string(content_arg), css.TEXT, "mord")
+    else
+        (let children = render_children(content_arg, context),
+         let spaced = apply_spacing(children, context),
+         transparent_hbox(spaced))
 }
 
 fn partial_box() => {
@@ -774,6 +802,14 @@ fn transparent_hbox(children) {
 
 fn render_children_scan(node, context, i, acc) {
     if (i >= len(node)) acc
+    else if (is_colorbox_sibling_sequence(node, i))
+        (let rendered = render_colorbox_sibling_sequence(node, context, i),
+         let rest = colorbox_sibling_rest(node, i),
+         let rest_boxes = if (rest == "") [] else render_text_atoms(rest, context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered] ++ rest_boxes))
+    else if (is_color_switch(node, i))
+        (let rendered = render_color_switch_tail(node, context, i),
+         acc ++ [rendered])
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
@@ -783,9 +819,83 @@ fn render_children_scan(node, context, i, acc) {
     else
         (let child = node[i],
          let next_acc = if (child == null) acc
+             else if (is_dollar_error(child)) acc
              else if (child is string) acc ++ render_text_atoms(string(child), context)
              else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_dollar_error(child) {
+    child is element and name(child) == 'ERROR' and plain_text(child) == "$"
+}
+
+fn is_colorbox_command_node(child) {
+    if (child is element and name(child) == 'command') {
+        let cmd_text = get_text(child)
+        let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+            slice(cmd_text, 1, len(cmd_text)) else cmd_text
+        name_str == "colorbox"
+    } else false
+}
+
+fn is_color_command_node(child) {
+    if (child is element and name(child) == 'command') {
+        let cmd_text = get_text(child)
+        let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+            slice(cmd_text, 1, len(cmd_text)) else cmd_text
+        name_str == "color"
+    } else false
+}
+
+fn is_color_switch(node, i) {
+    let child = if (i < len(node)) node[i] else null
+    is_color_command_node(child) and len(child) == 1
+}
+
+fn render_color_switch_tail(node, context, i) {
+    let cmd = node[i]
+    let color_value = color.resolve_raw(plain_text(cmd[0]))
+    let children = render_children_scan(node, context, i + 1, [])
+    let spaced = apply_spacing(children, context)
+    let hb = transparent_hbox(spaced)
+    let elements = (for (b in spaced) b.element)
+    box_with_suppress_depth({
+        element: <span style: "color:" ++ color_value;
+            for (el in elements) el
+        >,
+        height: hb.height,
+        depth: hb.depth,
+        render_height: hb.render_height,
+        render_depth: hb.render_depth,
+        render_total: hb.render_total,
+        width: hb.width,
+        type: hb.type,
+        italic: hb.italic,
+        skew: hb.skew
+    })
+}
+
+fn is_colorbox_sibling_sequence(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let cmd = node[i],
+         let next = node[i + 1],
+         is_colorbox_command_node(cmd) and len(cmd) == 1 and next is string and len(next) > 0)
+}
+
+fn render_colorbox_sibling_sequence(node, context, i) {
+    let cmd = node[i]
+    let next = string(node[i + 1])
+    let bg = color.resolve_background_raw(plain_text(cmd[0]))
+    let first = slice(next, 0, 1)
+    let content_box = box.text_box(first, css.TEXT, "mord")
+    let wrapped = color.with_background(content_box, bg)
+    box_with_suppress_depth(wrapped)
+}
+
+fn colorbox_sibling_rest(node, i) {
+    let next = string(node[i + 1])
+    if (len(next) <= 1) "" else slice(next, 1, len(next))
 }
 
 fn is_scriptstyle_switch(node, i) {
@@ -867,7 +977,7 @@ fn render_textcolor_sequence(node, context, i) {
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
     let elements = (for (b in spaced) b.element)
-    {
+    box_with_suppress_depth({
         element: <span style: "color:" ++ color_value;
             for (el in elements) el
         >,
@@ -877,6 +987,22 @@ fn render_textcolor_sequence(node, context, i) {
         type: hb.type,
         italic: hb.italic,
         skew: hb.skew
+    })
+}
+
+fn box_with_suppress_depth(bx) {
+    {
+        element: bx.element,
+        height: bx.height,
+        depth: 0.0,
+        render_height: bx.render_height,
+        render_depth: 0.0,
+        render_total: if (bx.render_height != null) bx.render_height else bx.height,
+        width: bx.width,
+        type: bx.type,
+        italic: bx.italic,
+        skew: bx.skew,
+        suppress_hbox_text_depth: true
     }
 }
 
@@ -888,8 +1014,16 @@ fn plain_text(node) {
 }
 
 fn plain_text_element(node, i, acc) {
-    if (i >= len(node)) acc
+    if (i >= len(node))
+        if (acc != "") acc else plain_text_value(node)
     else plain_text_element(node, i + 1, acc ++ plain_text(node[i]))
+}
+
+fn plain_text_value(node) {
+    if (node.value != null) string(node.value)
+    else if (node.name != null) string(node.name)
+    else if (node.cmd != null) string(node.cmd)
+    else ""
 }
 
 // get text content of a node

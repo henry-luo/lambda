@@ -7,7 +7,7 @@ true
 "5. color type:mord6. colorbox type:ord7. colorbox has bg:"
 true
 "8. colorbox has padding:"
-true
+false
 "9. colorbox extra width:"
 true
 "10. null content type:ord11. no color has el:"
