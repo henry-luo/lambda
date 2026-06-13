@@ -2398,11 +2398,13 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
         src_len = (int64_t)floor(length_double);
     }
 
-    // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
-    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(dst)) {
-        return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
-    }
-    target_len = js_typed_array_current_length(dst);
+    // Js55 P14: per ES §22.2.3.26.1 SetTypedArrayFromArrayLike, the targetLength
+    // is captured BEFORE LengthOfArrayLike(src) is called (which can invoke the
+    // source's length getter and resize the backing buffer). The range check at
+    // step 10 uses that original targetLength. Do NOT re-fetch target_len or
+    // re-check OOB after the length getter — the write loop uses
+    // js_typed_array_set, which silently no-ops for OOB indices via the
+    // IsValidIntegerIndex check.
     if ((int64_t)offset + src_len > (int64_t)target_len) {
         return js_throw_range_error("source is too large");
     }

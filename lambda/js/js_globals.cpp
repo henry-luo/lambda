@@ -8746,7 +8746,9 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
         (name_len == 12 && strncmp(name, "__is_proto__", 12) == 0) ||
         (name_len == 18 && strncmp(name, "__json_own_proto__", 18) == 0) ||
-        (name_len == 4 && strncmp(name, "__rd", 4) == 0)) {
+        (name_len == 4 && strncmp(name, "__rd", 4) == 0) ||
+        (name_len == 6 && strncmp(name, "__ta__", 6) == 0) ||
+        (name_len == 6 && strncmp(name, "__ab__", 6) == 0)) {
         return true;
     }
     return false;
@@ -8835,6 +8837,39 @@ extern "C" Item js_object_keys(Item object) {
     }
     if (!js_require_object_type(object, "keys")) return js_array_new(0);
     TypeId type = get_type_id(object);
+
+    // Js55 P16: TypedArray integer-indexed properties are enumerable own
+    // properties per ES2024 §10.4.5. Enumerate them in numeric order first,
+    // then any custom (non-index, non-internal, enumerable) properties.
+    if (type == LMD_TYPE_MAP && object.map &&
+        object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        int ta_len = js_typed_array_length(object);
+        Item result = js_array_new(0);
+        for (int i = 0; i < ta_len; i++) {
+            char buf[24];
+            int blen = snprintf(buf, sizeof(buf), "%d", i);
+            js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
+        }
+        Map* m = object.map;
+        TypeMap* tm = (TypeMap*)m->type;
+        ShapeEntry* e = tm ? tm->shape : NULL;
+        while (e) {
+            const char* s = e->name->str;
+            int slen = (int)e->name->length;
+            if (!js_is_engine_internal_enumeration_key(s, slen)) {
+                Item val = _map_read_field(e, m->data);
+                if (val.item != JS_DELETED_SENTINEL_VAL &&
+                    js_props_query_enumerable(m, e, s, slen)) {
+                    int64_t num_idx = js_parse_array_index(s, slen);
+                    if (num_idx < 0 || num_idx >= ta_len) {
+                        js_array_push(result, (Item){.item = s2it(heap_create_name(s, slen))});
+                    }
+                }
+            }
+            e = e->next;
+        }
+        return result;
+    }
 
     // For arrays, return indices as string keys: ["0", "1", "2", ...]
     if (type == LMD_TYPE_ARRAY) {
@@ -9215,6 +9250,35 @@ extern "C" Item js_for_in_keys(Item object) {
     Item* idx_items = (Item*)alloca(idx_cap * sizeof(Item));
 
     Item str_result = js_array_new(0); // non-index string keys in creation order
+
+    // Js55 P16: TypedArray integer-indexed properties are enumerable own
+    // properties per ES2024 §10.4.5 — seed the index pass with them so the
+    // for-in loop yields "0", "1", ..., "length-1" before falling through
+    // to shape and prototype enumeration. Marks them as seen so non-numeric
+    // shape entries with collision names don't reappear.
+    if (object.map && object.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        int ta_len = js_typed_array_length(object);
+        if (ta_len > idx_cap) {
+            int new_cap = idx_cap;
+            while (new_cap < ta_len) new_cap *= 2;
+            int64_t* new_vals = (int64_t*)alloca(new_cap * sizeof(int64_t));
+            Item* new_items = (Item*)alloca(new_cap * sizeof(Item));
+            idx_vals = new_vals;
+            idx_items = new_items;
+            idx_cap = new_cap;
+        }
+        for (int i = 0; i < ta_len; i++) {
+            char buf[24];
+            int blen = snprintf(buf, sizeof(buf), "%d", i);
+            Item key_str = (Item){.item = s2it(heap_create_name(buf, blen))};
+            idx_vals[idx_count] = i;
+            idx_items[idx_count] = key_str;
+            idx_count++;
+            JsForInSeenEntry probe;
+            js_for_in_seen_entry_set(&probe, buf, blen);
+            hashmap_set(seen, &probe);
+        }
+    }
 
     Item current = object;
     int depth = 0;
