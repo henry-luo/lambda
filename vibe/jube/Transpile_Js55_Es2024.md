@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 + P11 + P12 (all partial) done (20 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); ~53 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 137.7 s. See §12.11 for P12 walkthrough.
+Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 (all partial) done (25 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16); P4/P13(closure) and P15 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); ~48 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 140.8 s. Latest full run: 40211 passing, 24 improvements, 0 regressions. See §12.13 for P13/P14/P16 walkthrough.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -601,7 +601,11 @@ The +5% runtime ceiling (≤142 s) is borderline; 144 s is 2 s over. Js55 phases
 | **P11(a) — G ArrayBuffer ordering** | 1 | done | Two-prong fix at `js_globals.cpp:js_reflect_construct`: ArrayBuffer pre-check (byteLength + maxByteLength) mirrors the existing SharedArrayBuffer pattern. Fixes `options-maxbytelength-compared-before-object-creation.js`. |
 | **P11(c) — G with current-length** | 3 | done | One fix at `js_runtime.cpp:18345` in TypedArray.prototype.with — IsValidIntegerIndex now uses the **current** length (post-coercion), not the cached step-3 length. Spec §22.2.3.34 step 9. Fixes the three `with/*.js` tests. |
 | P11 — G remaining | ~10 | pending | Species (TA filter/map/subarray), `set/*`, `freeze/*` all share for-of let-binding closure-capture issue with P4. Defer until that's fixed. |
-| P12 | admission | pending | Final baseline update. |
+| **P13 — Array.toLocaleString** | **2** | **done** | One-site mis-registration fix at `js_runtime_builtin_registry.cpp:192` + new enum + dispatch case. `Array.prototype.toLocaleString` was routing to `JS_BUILTIN_OBJ_TO_LOCALE_STRING` (which calls `this.toString()`) — TA receivers then went through TA.join's OOB throw. New `JS_BUILTIN_ARR_TO_LOCALE_STRING` routes correctly through the Array shim. Fixes `Array/prototype/toLocaleString/{resizable-buffer,user-provided-tolocalestring-shrink}.js`. See §12.13. |
+| **P14 — TA.set targetLength** | **2** | **done** | One-block fix at `js_typed_array.cpp:js_typed_array_set_from`: remove the spec-incorrect re-OOB check and `target_len` re-capture after the source's length getter ran. Per ES2024 §22.2.3.26.1 step 4 captures targetLength BEFORE the length getter; step 10 uses that captured value; write loop relies on IsValidIntegerIndex to no-op OOB writes. Fixes 2 of 3 set-length-getter tests; third (`this-backed-by-resizable-buffer.js`) is closure-capture cluster. See §12.13. |
+| P15 — ArrayBuffer.resize | 1 | deferred | Probe reveals **block-scoped `let` closure-capture bug** — same family as §12.10 for-of let, exposed via `{...}` block. The "one detach check after coercion" spec fix would have no effect. See §12.13. |
+| **P16 — for-in/keys on TA** | **1** | **done** | Three edits at `js_globals.cpp`: TA branch added to `js_object_keys` enumerating integer indices then non-internal shape entries; TA index seed added to `js_for_in_keys` at the start of the LMD_TYPE_MAP path with seen-set marking; `__ta__`/`__ab__` added to engine-internal-key suppression. ES2024 §10.4.5: TA integer-indexed properties are enumerable own properties. Fixes `language/statements/for-in/resizable-buffer.js`. See §12.13. |
+| P17 (was P12) | admission | pending | Final baseline update. |
 
 ### Lessons for future work
 
@@ -1010,3 +1014,221 @@ The remaining failure list is now structurally narrow. After harvesting the clea
 
 None of these have a single-edit fix in the proposal's scope. The next iteration would need to either tackle P4 closure-capture (multi-hour JIT refactor) or carve out smaller wins from the TLA cluster (each requires its own batch-mode-vs-script reproduction step).
 
+## 12.12 P13 closure-capture deep dive (2026-06-13)
+
+After §12.11 deferred P4, took another attempt at the for-of let-binding closure-capture cluster. The investigation produced a precise mechanism description but no working fix — reverted clean.
+
+### Smoking gun
+
+A minimal reduction (no harness asserts, no comparisons):
+
+```js
+// Loop 1 — body contains a closure capturing `ctor`
+for (let ctor of ctors) {
+  const rab = CreateResizableArrayBuffer(4 * ctor.BYTES_PER_ELEMENT, 8 * ctor.BYTES_PER_ELEMENT);
+  const lengthTracking = new ctor(rab);
+  for (let i = 0; i < 4; ++i) lengthTracking[i] = MayNeedBigInt(lengthTracking, 1);
+  let evil = { valueOf: () => { rab.resize(6 * ctor.BYTES_PER_ELEMENT); return 0; } };
+  Array.prototype.indexOf.call(lengthTracking, MayNeedBigInt(lengthTracking, 0));
+  Array.prototype.indexOf.call(lengthTracking, MayNeedBigInt(lengthTracking, 0), evil);
+}
+
+// Loop 2 — body also contains a closure capturing `ctor`. Just prints.
+let i = 0;
+for (let ctor of ctors) {
+  let evil = { valueOf: () => { return ctor.BYTES_PER_ELEMENT; } };
+  print("loop2 iter " + (++i) + ": ctor=" + ctor.name);
+  if (i > 3) break;
+}
+// Expected: Uint8Array, Int8Array, Uint16Array, Int16Array
+// Actual:   MyBigInt64Array, MyBigInt64Array, MyBigInt64Array, MyBigInt64Array
+```
+
+`ctor` in loop 2's body reads loop 1's LAST iteration value, never updates. The same pattern WITHOUT the closure in loop 1's body works correctly. The same pattern WITHOUT the closure in loop 2's body also works correctly. Both closures must be present.
+
+### Mechanism (precise)
+
+After tracing through the JIT scope-env and capture analysis:
+
+1. **Loop 1's body** contains `let evil = { valueOf: () => …ctor… }`. The arrow `() => …ctor…` is compiled. Its `JsFuncCollected` records a capture of `ctor` with a `scope_env_slot`.
+
+2. **Closure analysis** propagates: the module-main function's `var` entry for `ctor` ends up with `in_scope_env = true` and some `scope_env_reg` set. (Mechanism is in `js_mir_function_class_lowering.cpp` around the closure-capture-marking lines 2785, 2829.)
+
+3. **Loop 2's `let ctor`** binding inherits `in_scope_env = true` from the existing entry (via `jm_set_var` at `js_mir_hashmap_scope_utils.cpp:267`).
+
+4. **Reading `ctor` in loop 2's body** emits the env-load at `js_mir_expression_lowering.cpp:978`:
+
+   ```cpp
+   if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
+       jm_emit(... MIR_MOV var->reg, env[var->scope_env_slot * 8 + var->scope_env_reg] ...);
+   }
+   ```
+
+   This **clobbers** `var->reg` (the loop_var register) with the env's stored value. Since the env was last written in loop 1's body (or its closure setup) with `MyBigInt64Array`, the loop's per-iteration MIR_MOV is silently overwritten on every read.
+
+5. **The for-of's `MIR_MOV`** (line 3878 / 4122) does write the new iteration's value to `loop_var` register. But every subsequent read in the body refreshes the register from env, so the body never sees the iteration update.
+
+### Why neither attempted fix worked
+
+- **Attempt A**: extend the for-of writeback (`jm_scope_env_mark_and_writeback`) to fire for `let`/`const` loops too. At trace time, `mt->scope_env_reg == 0` (module main hasn't allocated its scope_env at the for-of's compile point), so the writeback no-ops at the early-return on line 1157.
+
+- **Attempt B**: gate the env-load in `js_mir_expression_lowering.cpp:978` on `var->scope_env_reg == mt->scope_env_reg` so that a "wrong" env-register doesn't clobber the parent's register. Test still fails — at the read site, the var's recorded scope_env_reg apparently matches `mt->scope_env_reg`, so the guard doesn't shortcut.
+
+### Where the actual fix lives
+
+The structural mismatch:
+- Scope-env setup for module-main (at function lowering time, `function_class_lowering.cpp:2792`) marks the var entries with `in_scope_env = true` and `scope_env_reg = mt->scope_env_reg`.
+- The closure inside the for-of body sets up its OWN scope_env at expression lowering time, AND that allocation runs DURING module-main's body lowering, mutating `mt->scope_env_reg` mid-body. So the `mt->scope_env_reg` value seen at the for-of's writeback site is NOT the same as the value seen at the var-marking site or the closure-creation site.
+
+Two structural fix shapes (both larger than a single edit):
+
+1. **Save/restore `mt->scope_env_reg` around the closure expression compile** so that the module-main lowering sees a stable scope_env_reg throughout. Requires careful audit of every site that mutates `mt->scope_env_reg`.
+
+2. **Don't mark `in_scope_env` on let-loop variables at all** — closures that capture a let-loop variable should snapshot the variable's value into their OWN env at closure-creation time, with no shared scope_env dependency on the parent. This is closer to the JavaScript spec's "fresh binding per iteration" semantics, but requires reworking the capture analysis to distinguish loop-bound `let` captures from outer-scope captures.
+
+Neither fix is a single-edit landing. Both need:
+- A targeted MIR dump of the body's `ctor` read instructions before/after the change
+- A test-suite-wide baseline guard (every existing test that uses for-of let with inner closures could be affected)
+- A regression-test addition for the bisected reduction in `temp/js55_p4_bisect.js`
+
+### Outcome
+
+P13 attempts reverted. Verified post-P12 fixes still PASS (lastIndexOf, Object.freeze). Baseline guard re-confirmed clean.
+
+The structural fix is feasible but takes its own session. The mechanism description above (along with the bisected reduction in `temp/js55_p4_bisect.js`) gives the next person a precise starting point.
+
+## 12.13 P13 + P14 + P16 isolated wins (2026-06-13, second pass)
+
+After the §12.12 P13 closure-capture attempt was reverted, did another harvest pass over the remaining 53-failure list looking for clean wins that don't touch the closure-capture cluster. Found five new tests across three independent fix surfaces, none of which depend on the for-of let JIT bug.
+
+### P13 — `Array.prototype.toLocaleString` mis-registration (2 tests)
+
+Tests:
+- `built-ins/Array/prototype/toLocaleString/resizable-buffer.js`
+- `built-ins/Array/prototype/toLocaleString/user-provided-tolocalestring-shrink.js`
+
+Failure: `Array.prototype.toLocaleString.call(typedArray)` throws "Cannot perform %TypedArray%.prototype.join on an out-of-bounds ArrayBuffer".
+
+Root cause: `Array.prototype.toLocaleString` was registered in `JS_ARRAY_PROTOTYPE_METHOD_SPECS` ([js_runtime_builtin_registry.cpp:192](../../lambda/js/js_runtime_builtin_registry.cpp)) with `builtin_id = JS_BUILTIN_OBJ_TO_LOCALE_STRING`. That dispatch handler ([js_runtime.cpp:8363](../../lambda/js/js_runtime.cpp)) is `Object.prototype.toLocaleString`, which just does `this.toString()`. For a TypedArray, `toString()` routes to TA's join, which throws OOB on a shrunken-buffer-backed TA.
+
+The correct routing: `Array.prototype.toLocaleString` should iterate indexed properties and call each element's `toLocaleString`, matching the spec at §23.1.3.31. For a TA receiver, the TA-aware path at [js_runtime.cpp:18021](../../lambda/js/js_runtime.cpp) already implements the right behavior (and respects `js_dispatch_as_array_method` to skip the OOB throw).
+
+**Fix** (4 edits, ~10 LOC total):
+1. Added enum value `JS_BUILTIN_ARR_TO_LOCALE_STRING` to [js_runtime_internal.hpp:160](../../lambda/js/js_runtime_internal.hpp) right after `JS_BUILTIN_ARR_WITH`.
+2. Updated registry at [js_runtime_builtin_registry.cpp:192](../../lambda/js/js_runtime_builtin_registry.cpp) to use the new builtin id.
+3. Added the new id to the case list and `arr_method_names` map at [js_runtime.cpp:8505](../../lambda/js/js_runtime.cpp) so dispatch routes through the existing Array-method shim (which already handles `LMD_TYPE_ARRAY` → `js_array_method` and `LMD_TYPE_MAP` TA → `js_map_method`).
+
+The dispatch flag protocol takes over: when `Array.prototype.toLocaleString.call(taOOB)` runs, `js_dispatch_as_array_method = true` (because the Array.prototype function doesn't have `TYPED_ARRAY_METHOD` flag), the TA path at line 18021 skips the OOB throw, and `js_typed_array_length(obj)` returns the captured length (0 for OOB). Result: empty string, matching spec.
+
+For the user-provided shrink test, `len` is captured at entry (= 4), the loop iterates 4 times, the user's `Number.prototype.toLocaleString` callback fires and shrinks the buffer mid-iteration. For OOB indices `js_typed_array_get` returns undefined, which the loop's `if (elem_type == NULL || elem.item == ITEM_JS_UNDEFINED) continue;` skips. Result: `"0,0,,"` (two non-OOB elements + two skipped OOB elements yielding empty between separators), matching spec.
+
+Pre-flight: all 74 `toLocaleString` tests pass. Baseline guard clean.
+
+### P14 — `TypedArray.prototype.set` targetLength re-capture (2 tests)
+
+Tests:
+- `built-ins/TypedArray/prototype/set/target-grow-source-length-getter.js`
+- `built-ins/TypedArray/prototype/set/target-shrink-source-length-getter.js`
+
+Failure (grow): no exception thrown when RangeError expected. Failure (shrink): TypeError thrown when no throw expected.
+
+Root cause: `js_typed_array_set_from` at [js_typed_array.cpp:2323](../../lambda/js/js_typed_array.cpp) was re-checking OOB AND re-capturing `target_len` AFTER the source's length getter was invoked. Per ES2024 §22.2.3.26.1 SetTypedArrayFromArrayLike, the spec captures `targetLength` at step 4 (before any source-property access) and uses that captured value for the range check at step 10. The OOB check at step 3 also happens before the length getter. After the getter (step 8) the write loop relies on `IsValidIntegerIndex` to silently no-op OOB writes, never an upfront throw.
+
+Lambda's path was:
+```cpp
+int target_len = js_typed_array_current_length(dst);        // step 4: correct capture
+// ... source.length getter fires (step 7-8), may resize buffer
+if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(dst)) {
+    return js_throw_type_error("...OOB");                   // BUG: re-checking after getter
+}
+target_len = js_typed_array_current_length(dst);             // BUG: stomps spec-captured value
+if ((int64_t)offset + src_len > (int64_t)target_len) {       // step 10: uses wrong target_len
+    return js_throw_range_error("source is too large");
+}
+```
+
+**Fix**: removed the re-OOB check and the `target_len` re-capture ([js_typed_array.cpp:2402](../../lambda/js/js_typed_array.cpp)). The write loop already uses `js_typed_array_set` which gates per-index writes through `js_typed_array_current_length` ([js_typed_array.cpp:2139-2142](../../lambda/js/js_typed_array.cpp)) — OOB-indexed writes return silently.
+
+Grow case: target_len = 4 captured, getter grows buffer to 6, srcLength = 6, range check 0 + 6 > 4 → RangeError, matches spec. ✓
+Shrink case: target_len = 4 captured, getter shrinks to 3 (TA OOB), srcLength = 1, range check 0 + 1 > 4 false → continue to write loop, writes silently no-op on OOB indices, no throw — matches spec. ✓
+
+Pre-flight: 101 of 102 TA.set tests pass (1 failure is `this-backed-by-resizable-buffer.js`, a known closure-capture cluster victim). 2 SAB tests crash on signal 6 — pre-existing unrelated issue.
+
+### P15 — `ArrayBuffer.prototype.resize/coerced-new-length-detach` (deferred)
+
+Test: `built-ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js`
+
+Looks like a one-site spec ordering bug (one detach check, AFTER coercion), but the test's `let called = false; assert.throws(...); assert(called);` pattern hits a **block-scoped `let` closure-capture bug**: assignments to `let called` from inside an arrow body created within the same block don't propagate to the outer scope.
+
+Reduction (no for-of involved):
+```js
+{
+  let called = false;
+  try {
+    (function() { called = true; throw new Error("test"); })();
+  } catch (e) {}
+  print("called=", called);
+}
+// Actual: "called= false"   (BUG)
+// Expected: "called= true"
+```
+
+Top-level `let` works correctly. Function-body `let` also works. Only `let` declared **inside a `{...}` block** with a closure that mutates it from another scope fails to propagate the write. This is essentially the same bug-family as §12.10's for-of `let` capture, just exposed via block scoping.
+
+Same structural fix space as P13(closure)/P4 — deferred. The proposal's stated "one-line ArrayBuffer.resize spec fix" would have no effect on this failure shape.
+
+### P16 — for-in / Object.keys on TypedArrays (1 test)
+
+Test: `language/statements/for-in/resizable-buffer.js`
+
+Failure: `for (const key in ta)` over a TypedArray with length 3 yields no keys (expected `"012"`).
+
+Root cause: `js_for_in_keys` ([js_globals.cpp:9117](../../lambda/js/js_globals.cpp)) walks the prototype chain's `ShapeEntry`s but never enumerates the TypedArray's integer-indexed properties — those live in the buffer, not as shape entries. `js_object_keys` ([js_globals.cpp:8797](../../lambda/js/js_globals.cpp)) had the same gap. Per ES2024 §10.4.5, integer-indexed properties on a TypedArray are own enumerable properties.
+
+**Fix** (3 edits, ~50 LOC):
+1. Added a TA detection branch at the top of `js_object_keys` (right after the LMD_TYPE_ARRAY branch). Enumerates `[0, length-1]` as string keys, then walks shape entries for any custom non-index enumerable properties.
+2. Inside `js_for_in_keys`'s LMD_TYPE_MAP path, seeded the `idx_vals/idx_items` arrays with integer indices before the existing shape-entry-and-prototype walk. Added each integer index to the `seen` set so subsequent shape-walks don't re-emit.
+3. Extended `js_is_engine_internal_enumeration_key` to suppress the internal `__ta__` and `__ab__` markers (used to store the upgraded JsTypedArray*/JsArrayBuffer* pointers when the receiver gets non-internal properties). Without this, `for (key in ta)` was leaking `__ta__` after the index keys.
+
+The dynamic alloca sizing in the for-in path handles TAs longer than the default 16-slot capacity (most tests use small TAs; sizing-up is rare but safe).
+
+Pre-flight: 174 / 174 across `for-in`, `Object.keys`, `Object.getOwnPropertyNames`, and TA-related tests. Baseline guard clean.
+
+### P13 + P14 + P16 acceptance
+
+- Probes: 5 / 5 newly fixed tests PASS
+- Pre-flight (toLocaleString + set + for-in + keys): 350 / 350, 0 regressions
+- Baseline guard: 40187 / 40187 clean, 0 regressions, 140.8 s (well inside the +5 % ceiling vs the §12.11 baseline of 137.7 s)
+- Full run: 40211 / 40261, **24 improvements** vs original baseline (was 20 post-P12), 0 regressions
+- Net contribution this session: **+5 tests** (2 P13 + 2 P14 + 1 P16), 0 LOC of risky changes
+
+### Cumulative cleared, end of P16
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| P1 (D1) | 12 | `js_pending_new_target` clear in subclass-TA branch |
+| P10(a) | 1 | skip-list rgi-emoji-17.0 |
+| P10(b) | 1 | UTF-16 unit basis in regex Symbol.replace |
+| P11(a) | 1 | ArrayBuffer constructor arg ordering in Reflect.construct |
+| P11(c) | 3 | TypedArray.prototype.with current-length |
+| P11(d) | 0 (preventive) | second pending-new-target leak (user-class-extends-non-TA) |
+| P12(a) | 1 | lastIndexOf raw fast path reverse-iteration clamp |
+| P12(b) | 1 | Object.freeze TypedArray-resizable-buffer detection |
+| **P13** | **2** | **Array.prototype.toLocaleString builtin-id fix** |
+| **P14** | **2** | **TypedArray.set targetLength capture, drop re-OOB check** |
+| **P16** | **1** | **TA index enumeration in for-in + Object.keys** |
+| **Total** | **25** | (of original 73 admittable failures) |
+
+### Remaining 48 failures — structural buckets
+
+1. **For-of let closure-capture cluster** (~24 tests): all the Array.prototype.{copyWithin, find*, findLast*, includes, indexOf, lastIndexOf, map, reverse, slice, sort, toSorted/toReversed/toSpliced} resizable-buffer entries with `for (let ctor of ctors)` patterns. Also pulls in 2 TypedArray.map speciesctor tests, 1 set this-backed test, 1 slice speciesctor, and 4 sort/reverse tests with `wholeArrayView`/`taFull` TDZ-cascade errors. Mechanism in §12.10/§12.12.
+
+2. **TLA module-mode plumbing** (20 tests): E1 NamedEvaluation (7) + E2 capability/$DONE (4) + E3 Promise.withResolvers (3) + E4 thenable await (4) + E5 SIGSEGV (2). Per-phase fixes documented in §3.
+
+3. **Block-scoped let closure-capture** (1 test): `ArrayBuffer/prototype/resize/coerced-new-length-detach.js`. Same family as the for-of let bug, exposed via `{...}` block instead of for-of (§P15 above).
+
+4. **TypedArrayConstructors src-typedarray-resizable-buffer** (1 test): probably part of the closure-capture cluster; not investigated this pass.
+
+5. **2 already pre-existing SAB crashes** in `set/typedarray-arg-set-values-diff-buffer-other-type-sab.js` — orthogonal, not Js55 scope.
+
+None of these have a single-edit fix in this proposal's scope. The next iteration would need to either tackle the closure-capture structural fix (multi-hour JIT refactor in `js_mir_function_class_lowering.cpp` or `js_mir_analysis.cpp`) or carve into the TLA cluster (each needs its own batch-mode-vs-script reproduction step).

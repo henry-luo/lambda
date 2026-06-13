@@ -8502,7 +8502,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_ARR_TO_SORTED:
     case JS_BUILTIN_ARR_TO_REVERSED:
     case JS_BUILTIN_ARR_TO_SPLICED:
-    case JS_BUILTIN_ARR_WITH: {
+    case JS_BUILTIN_ARR_WITH:
+    case JS_BUILTIN_ARR_TO_LOCALE_STRING: {
         // Map builtin_id to method name and delegate to js_map_method
         static const char* arr_method_names[] = {
             [JS_BUILTIN_ARR_PUSH - JS_BUILTIN_ARR_PUSH] = "push",
@@ -8543,6 +8544,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             [JS_BUILTIN_ARR_TO_REVERSED - JS_BUILTIN_ARR_PUSH] = "toReversed",
             [JS_BUILTIN_ARR_TO_SPLICED - JS_BUILTIN_ARR_PUSH] = "toSpliced",
             [JS_BUILTIN_ARR_WITH - JS_BUILTIN_ARR_PUSH] = "with",
+            [JS_BUILTIN_ARR_TO_LOCALE_STRING - JS_BUILTIN_ARR_PUSH] = "toLocaleString",
         };
         int idx = builtin_id - JS_BUILTIN_ARR_PUSH;
         const char* name = arr_method_names[idx];

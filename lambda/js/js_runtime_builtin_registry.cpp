@@ -189,7 +189,7 @@ const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
     {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
     {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
     {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
-    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
+    {"toLocaleString", 14, JS_BUILTIN_ARR_TO_LOCALE_STRING, 0},
     {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
     {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
     {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
