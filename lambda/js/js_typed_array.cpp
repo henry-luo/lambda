@@ -488,7 +488,18 @@ extern "C" int js_typed_array_raw_index_of(Item ta_item, Item search_value,
     int current_len = js_typed_array_current_length(ta);
     int len = bound < current_len ? bound : current_len;
     if (len <= 0) return -1;
-    if (from < 0 || from >= len) return -1;
+    if (from < 0) return -1;
+    // Js55 P12: for reverse iteration (lastIndexOf), when `from` lies past the
+    // current end (the spec-cached `bound` was > current_len because a coercion
+    // callback shrank the buffer), the spec walks indices [from..0] using
+    // HasProperty — out-of-range indices are skipped, then the in-range
+    // indices [current_len-1..0] are tested. So clamp `from` to len-1 and
+    // continue, instead of bailing with -1. For forward iteration (indexOf)
+    // a `from >= len` value has no valid indices to test and we return -1.
+    if (from >= len) {
+        if (!reverse) return -1;
+        from = len - 1;
+    }
     char* data = (char*)js_typed_array_current_data(ta);
     if (!data) return -2;
 
