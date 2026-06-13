@@ -349,8 +349,12 @@ pub fn with_scale(bx, scale) {
 // wrap a box with a color
 pub fn with_color(bx, color) {
     if (color == null) bx
-    else {
-        element: <span style: "color:" ++ color; bx.element>,
+    else
+        (let children = elements_of(bx),
+         {
+        element: <span style: "color:" ++ color;
+            for (child in children) child
+        >,
         height: bx.height,
         depth: bx.depth,
         render_height: bx.render_height,
@@ -361,5 +365,5 @@ pub fn with_color(bx, color) {
         italic: bx.italic,
         skew: bx.skew,
         suppress_hbox_text_depth: bx.suppress_hbox_text_depth
-    }
+    })
 }

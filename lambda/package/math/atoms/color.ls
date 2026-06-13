@@ -47,8 +47,11 @@ fn render_colorbox(node, context, bg_color, render_fn) {
 pub fn with_background(content_box, bg_color) {
     let style = "background-color:" ++ bg_color ++ ";--bg-color:" ++ bg_color ++
         ";display:inline-block;position:relative"
+    let children = box.elements_of(content_box)
     {
-        element: <span class: css.BG, style: style; content_box.element>,
+        element: <span class: css.BG, style: style;
+            for (child in children) child
+        >,
         height: content_box.height,
         depth: content_box.depth,
         render_height: content_box.render_height,
