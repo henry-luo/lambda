@@ -47,8 +47,11 @@ fn render_colorbox(node, context, bg_color, render_fn) {
 pub fn with_background(content_box, bg_color) {
     let style = "background-color:" ++ bg_color ++ ";--bg-color:" ++ bg_color ++
         ";display:inline-block;position:relative"
+    let children = box.elements_of(content_box)
     {
-        element: <span class: css.BG, style: style; content_box.element>,
+        element: <span class: css.BG, style: style;
+            for (child in children) child
+        >,
         height: content_box.height,
         depth: content_box.depth,
         render_height: content_box.render_height,
@@ -72,7 +75,7 @@ let basic_colors = {
     yellow: "#ffc02b", orange: "#fe8a2b", purple: "#a219e6",
     cyan: "#13a7ec", magenta: "#eb4799", brown: "#792500",
     lime: "#63b215", olive: "#3c8031", olivegreen: "#3c8031",
-    pink: "#f282b4", teal: "#00b4ce", tealblue: "#00b4ce",
+    pink: "#f282b4", teal: "#00b4ce", tealblue: "#17cfcf",
     violet: "#6633cc", darkgray: "#888888", darkgrey: "#888888",
     lightgray: "#d3d3d3", lightgrey: "#d3d3d3",
     m1: "#993d71", m2: "#998b3d", m3: "#3d9956",
@@ -97,7 +100,7 @@ let xcolor_colors = {
     RoyalPurple: "#613f99", RubineRed: "#ed017d", Salmon: "#f69289",
     SeaGreen: "#3fbc9d", Sepia: "#671800", SkyBlue: "#46c5dd",
     SpringGreen: "#c6dc67", Tan: "#da9d76", Thistle: "#d883b7",
-    Turquoise: "#17cfcf", VioletRed: "#ef58a0", WildStrawberry: "#ee2967",
+    Turquoise: "#00b4ce", VioletRed: "#ef58a0", WildStrawberry: "#ee2967",
     YellowGreen: "#98cc70", YellowOrange: "#faa21a"
 }
 
@@ -150,6 +153,7 @@ fn resolve_named_color(raw) {
     let lower_raw = lower_ascii(raw)
     let lower = lower_ascii(compact)
     if (len(compact) > 0 and slice(compact, 0, 1) == "#") normalize_hex(compact)
+    else if (contains(compact, "!")) normalize_named_mix(compact)
     else if (starts_with(lower_raw, "rgb")) normalize_rgb_text(raw)
     else resolve_by_name(compact, lower)
 }
@@ -242,6 +246,34 @@ fn normalize_hex_mix(raw) =>
             hex_byte(mix_channel(base.b, target.b, pct))
          else raw)
      else raw)
+
+fn normalize_named_mix(raw) =>
+    (let parts = split_on_bang(raw, 0, "", []),
+     if ((len(parts) == 2) or (len(parts) == 3))
+        (let base = color_name_to_rgb(parts[0]),
+         let pct = int(parts[1]),
+         let target_raw = if (len(parts) == 3) parts[2] else "white",
+         let target = color_name_to_rgb(target_raw),
+         if (base != null and target != null)
+            "#" ++ hex_byte(mix_channel(base.r, target.r, pct)) ++
+            hex_byte(mix_channel(base.g, target.g, pct)) ++
+            hex_byte(mix_channel(base.b, target.b, pct))
+         else raw)
+     else raw)
+
+fn color_name_to_rgb(raw) {
+    let name = strip_leading_minus(raw)
+    let lower = lower_ascii(name)
+    let resolved = resolve_by_name(name, lower)
+    if (len(resolved) > 0 and slice(resolved, 0, 1) == "#")
+        hex_color_to_rgb(resolved)
+    else null
+}
+
+fn strip_leading_minus(raw) {
+    if (len(raw) > 0 and slice(raw, 0, 1) == "-") slice(raw, 1, len(raw))
+    else raw
+}
 
 fn split_on_bang(text, i, current, parts) {
     if (i >= len(text)) parts ++ [current]

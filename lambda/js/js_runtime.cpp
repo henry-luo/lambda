@@ -10930,6 +10930,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         extern Item js_arraybuffer_resize(Item val, Item new_length_item);
         return js_arraybuffer_resize(this_val, arg0);
     }
+    case JS_BUILTIN_ARRAYBUFFER_TRANSFER: {
+        // Js54 P8: ArrayBuffer.prototype.transfer(newLength?)
+        extern Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc);
+        return js_arraybuffer_transfer(this_val, arg0, arg_count);
+    }
+    case JS_BUILTIN_ARRAYBUFFER_TRANSFER_TO_FIXED_LENGTH: {
+        // Js54 P8: ArrayBuffer.prototype.transferToFixedLength(newLength?)
+        extern Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc);
+        return js_arraybuffer_transfer_to_fixed_length(this_val, arg0, arg_count);
+    }
     case JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH: {
         if (!js_is_arraybuffer(this_val) || js_is_sharedarraybuffer(this_val)) {
             return js_throw_type_error("ArrayBuffer.prototype.byteLength requires an ArrayBuffer receiver");
@@ -14339,7 +14349,27 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         named_alias_js_names[ai] = NULL;
         named_alias_js_lens[ai] = 0;
     }
+    // Js54 P10: the /v class-set rewriting uses code-point range computation
+    // (set difference, intersection, \q{...} alternation, nested classes) via
+    // the wrapper. We call it BEFORE the named-group rewriter so subsequent
+    // steps see flat classes.
     if (compile_info.unicode_sets) {
+        char* rewritten = nullptr;
+        int rewritten_len = 0;
+        if (js_regex_wrapper_rewrite_v_flag_classes_c(vpat, vpat_len, &rewritten, &rewritten_len)
+            && rewritten) {
+            v_processed.assign(rewritten, rewritten_len);
+            free(rewritten);
+            // log_debug("js regex /v runtime rewrite: '%.*s' -> %d bytes",
+            //     vpat_len, vpat, (int)v_processed.size());
+            effective_pattern = v_processed.c_str();
+            effective_pattern_len = (int)v_processed.size();
+        }
+    }
+    // Legacy block (disabled): the original /v rewriting used lookahead-based
+    // approximations and didn't handle \q{}, nested classes, or correctly-
+    // computed unions. Kept for reference; remove in cleanup pass.
+    if (false && compile_info.unicode_sets) {
         v_processed.reserve(pattern_len + 128);
         int i = 0;
         while (i < pattern_len) {

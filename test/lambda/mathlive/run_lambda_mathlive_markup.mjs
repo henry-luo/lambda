@@ -26,6 +26,7 @@ const DEFAULT_REPORT_PATH = path.join(
   TEMP_DIR,
   'lambda_mathlive_markup_report.json'
 );
+const DEFAULT_BASELINE_PATH = path.join(__dirname, 'baseline.txt');
 
 function parseArgs(argv) {
   const opts = {
@@ -36,17 +37,21 @@ function parseArgs(argv) {
     lambda: path.join(PROJECT_ROOT, 'lambda.exe'),
     script: DEFAULT_SCRIPT_PATH,
     report: DEFAULT_REPORT_PATH,
+    baseline: DEFAULT_BASELINE_PATH,
+    noBaseline: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--strict') opts.strict = true;
     else if (arg === '--list') opts.list = true;
+    else if (arg === '--no-baseline') opts.noBaseline = true;
     else if (arg === '--category') opts.category = argv[++i] ?? '';
     else if (arg === '--limit') opts.limit = Number(argv[++i] ?? '0');
     else if (arg === '--lambda') opts.lambda = path.resolve(argv[++i] ?? '');
     else if (arg === '--script') opts.script = path.resolve(argv[++i] ?? '');
     else if (arg === '--report') opts.report = path.resolve(argv[++i] ?? '');
+    else if (arg === '--baseline') opts.baseline = path.resolve(argv[++i] ?? '');
     else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -66,10 +71,22 @@ Options:
   --limit N         Run at most N extracted cases
   --list            List extracted cases without running Lambda
   --strict          Exit non-zero if any extracted case mismatches
+  --baseline PATH   Passed-case baseline path, default test/lambda/mathlive/baseline.txt
+  --no-baseline     Do not check passed-case baseline regressions
   --lambda PATH     Lambda executable path, default ./lambda.exe
   --script PATH     Generated Lambda batch script path, default ./temp/...
   --report PATH     JSON report path, default ./temp/...
 `);
+}
+
+function readBaseline(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  return new Set(
+    text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'))
+  );
 }
 
 function parseSnapshots(snapshotText) {
@@ -209,7 +226,7 @@ function splitDelimiterPair(body) {
 }
 
 function unescapeSnapshotText(text) {
-  return text.replace(/\\\\/g, '\\');
+  return text.replace(/\\\\n/g, ' ').replace(/\\\\/g, '\\');
 }
 
 function lambdaString(value) {
@@ -323,6 +340,27 @@ function summarize(results) {
   return summary;
 }
 
+function buildBaselineReport(results, baselineSet, baselinePath) {
+  if (!baselineSet) return null;
+
+  const covered = results.filter((result) => baselineSet.has(result.key));
+  const regressions = covered.filter((result) => !result.pass);
+  return {
+    path: path.relative(PROJECT_ROOT, baselinePath),
+    expected: baselineSet.size,
+    covered: covered.length,
+    regressions: regressions.map((result) => ({
+      key: result.key,
+      category: result.category,
+      formula: result.formula,
+      errorMatch: result.errorMatch,
+      htmlMatch: result.htmlMatch,
+      expectedError: result.expectedError,
+      actualError: result.actualError,
+    })),
+  };
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const snapshotText = fs.readFileSync(SNAPSHOT_PATH, 'utf8');
@@ -344,12 +382,15 @@ function main() {
 
   if (cases.length === 0) throw new Error('no runnable MathLive markup cases extracted');
 
+  const baselineSet = opts.noBaseline ? null : readBaseline(opts.baseline);
   const actuals = runLambda(cases, opts);
   const results = compareCases(cases, actuals);
   const summary = summarize(results);
+  const baseline = buildBaselineReport(results, baselineSet, opts.baseline);
   const report = {
     generatedScript: path.relative(PROJECT_ROOT, opts.script),
     sourceSnapshot: path.relative(PROJECT_ROOT, SNAPSHOT_PATH),
+    baseline,
     summary,
     results,
   };
@@ -361,6 +402,12 @@ function main() {
   console.log(`  cases:  ${summary.total}`);
   console.log(`  passed: ${summary.passed}`);
   console.log(`  failed: ${summary.failed}`);
+  if (baseline) {
+    console.log(
+      `  baseline: ${baseline.path} (${baseline.expected} tests, ${baseline.covered} covered)`
+    );
+    console.log(`  regressions: ${baseline.regressions.length}`);
+  }
   console.log(`  report: ${path.relative(PROJECT_ROOT, opts.report)}`);
   console.log(``);
   for (const [category, bucket] of Object.entries(summary.byCategory)) {
@@ -378,6 +425,21 @@ function main() {
         console.log(`    error expected ${failure.expectedError}, got ${failure.actualError}`);
       }
       if (!failure.htmlMatch) {
+        console.log(`    html differs`);
+      }
+    }
+  }
+
+  if (baseline && baseline.regressions.length > 0) {
+    console.log(`\nBaseline regressions:`);
+    for (const regression of baseline.regressions.slice(0, 10)) {
+      console.log(`  - ${regression.key}`);
+      if (!regression.errorMatch) {
+        console.log(
+          `    error expected ${regression.expectedError}, got ${regression.actualError}`
+        );
+      }
+      if (!regression.htmlMatch) {
         console.log(`    html differs`);
       }
     }

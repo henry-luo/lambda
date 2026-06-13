@@ -169,8 +169,8 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // === ES2024 features ===
     // "Atomics.waitAsync",                       // SUPPORTED (Js53 P3)
     // "resizable-arraybuffer",                   // SUPPORTED (Js54 P0–P6, partial: ~109/138 of previously-failing tests; remaining 29 deferred to Js55, see Transpile_Js54_Es2024.md §11)
-    "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
-    "regexp-v-flag",                              // Unicode sets (/v flag) (deferred to Js54 — see Transpile_Js_53_Es2024.md §11 P6)
+    // "ArrayBuffer-transfer", "arraybuffer-transfer", // SUPPORTED (Js54 P8)
+    // "regexp-v-flag",                           // SUPPORTED (Js54 P9–P10; ~21 string-property tests still fail pending P11 \p{StringProperty} tables)
     // "promise-with-resolvers",                  // SUPPORTED
     // "array-grouping",                          // SUPPORTED
     // "String.prototype.isWellFormed",           // SUPPORTED (Js53 P1)
@@ -2051,7 +2051,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
     fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
             get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
-    fprintf(f, "# Scope: ES2023 (skip ES2024+ features)\n");
+    fprintf(f, "# Scope: ES2024 (skip ES2025+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
     fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",
             total_tests, skipped, batched, passing.size(), failed);
