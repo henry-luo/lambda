@@ -7381,7 +7381,13 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
                 return ItemNull;
             }
         }
-        return js_dispatch_builtin(fn->builtin_id, js_current_this, args, arg_count);
+        // Js54 P5: propagate Array-vs-TypedArray prototype dispatch mode for
+        // shared JS_BUILTIN_ARR_* ids (see comment in js_call_function).
+        bool saved_array_mode = js_dispatch_as_array_method;
+        js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
+        Item result = js_dispatch_builtin(fn->builtin_id, js_current_this, args, arg_count);
+        js_dispatch_as_array_method = saved_array_mode;
+        return result;
     }
 
     // v48: Global builtin wrapper functions (parseInt, parseFloat, etc.)
@@ -11614,9 +11620,19 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             for (int i = 0; i < arg_count; i++) {
                 merged_args[fn->bound_argc + i] = args ? args[i] : ItemNull;
             }
-            return js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc);
+            // Js54 P5: propagate Array-vs-TypedArray prototype dispatch mode.
+            bool saved_array_mode = js_dispatch_as_array_method;
+            js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
+            Item result = js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc);
+            js_dispatch_as_array_method = saved_array_mode;
+            return result;
         }
-        return js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count);
+        // Js54 P5: same propagation for the non-bound path.
+        bool saved_array_mode = js_dispatch_as_array_method;
+        js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
+        Item result = js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count);
+        js_dispatch_as_array_method = saved_array_mode;
+        return result;
     }
 
     // v11: handle bound functions — use bound this and prepend bound args
@@ -17178,8 +17194,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_typed_array(obj)) {
         String* method = it2s(method_name);
         if (method) {
-            // ValidateTypedArray: check for detached buffer before any method
-            {
+            // ValidateTypedArray: check for detached buffer before any method.
+            // Js54 P5: only throw when invoked via TypedArray.prototype — when the
+            // call came in through Array.prototype.X.call(ta, ...) the spec uses
+            // LengthOfArrayLike, which returns 0 for a detached TA, and the
+            // method silently no-ops over the empty length.
+            if (!js_dispatch_as_array_method) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 bool is_subarray_method = method->len == 8 && strncmp(method->chars, "subarray", 8) == 0;
                 if (!is_subarray_method && ta && ta->buffer && ta->buffer->detached) {
@@ -17204,7 +17224,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
@@ -17246,7 +17266,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
                 }
 
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
@@ -17329,7 +17349,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 // Throws TypeError if the TA is OOB (fixed-length view shrunk
                 // past end, or length-tracking offset > buffer length).
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
@@ -17385,7 +17405,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.map on an out-of-bounds ArrayBuffer");
@@ -17398,6 +17418,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item result = js_typed_array_species_create(obj, len);
                 if (js_check_exception()) return ItemNull;
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17410,7 +17431,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.indexOf on an out-of-bounds ArrayBuffer");
@@ -17463,7 +17484,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.lastIndexOf on an out-of-bounds ArrayBuffer");
@@ -17513,7 +17534,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.includes on an out-of-bounds ArrayBuffer");
@@ -17566,7 +17587,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.forEach on an out-of-bounds ArrayBuffer");
@@ -17577,6 +17598,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    // Js54 P6: Array.prototype.forEach uses HasProperty per spec;
+                    // for TA receivers, indices beyond current length (post-resize
+                    // OOB) are absent and the callback is NOT invoked.
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17592,7 +17617,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.reduce on an out-of-bounds ArrayBuffer");
@@ -17613,6 +17638,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     return js_throw_type_error("Reduce of empty array with no initial value");
                 }
                 for (int i = start_idx; i < len; i++) {
+                    // Js54 P6: skip post-resize OOB indices in array-mode (HasProperty=false).
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
@@ -17628,7 +17655,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.find on an out-of-bounds ArrayBuffer");
@@ -17639,6 +17666,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17656,7 +17684,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.findIndex on an out-of-bounds ArrayBuffer");
@@ -17667,6 +17695,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17684,7 +17713,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.every on an out-of-bounds ArrayBuffer");
@@ -17695,6 +17724,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17712,7 +17742,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.some on an out-of-bounds ArrayBuffer");
@@ -17723,6 +17753,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17741,7 +17772,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.findLast on an out-of-bounds ArrayBuffer");
@@ -17752,6 +17783,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17770,7 +17802,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.findLastIndex on an out-of-bounds ArrayBuffer");
@@ -17781,6 +17813,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17799,7 +17832,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.reduceRight on an out-of-bounds ArrayBuffer");
@@ -17825,6 +17858,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     return ItemNull;
                 }
                 for (int i = start_idx; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
@@ -17836,7 +17870,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 4 && strncmp(method->chars, "join", 4) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.join on an out-of-bounds ArrayBuffer");
@@ -17880,7 +17914,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.toLocaleString on an out-of-bounds ArrayBuffer");
@@ -17937,7 +17971,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.filter on an out-of-bounds ArrayBuffer");
@@ -17951,6 +17985,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_JS_RUNTIME);
                 int count = 0;
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17969,7 +18004,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->buffer->detached) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.reverse on a detached ArrayBuffer");
                     }
@@ -17994,7 +18029,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 10 && strncmp(method->chars, "copyWithin", 10) == 0) {
                 // copyWithin(target, start, end?)
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->buffer->detached) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
@@ -18046,7 +18081,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
                 }
 
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->buffer->detached) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
@@ -18102,7 +18137,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
             if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.at on an out-of-bounds ArrayBuffer");
@@ -18134,7 +18169,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 (method->len == 6 && strncmp(method->chars, "values", 6) == 0) ||
                 (method->len == 7 && strncmp(method->chars, "entries", 7) == 0)) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype iterator on an out-of-bounds ArrayBuffer");
@@ -18166,7 +18201,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.sort on an out-of-bounds ArrayBuffer");
@@ -18213,7 +18248,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 4 && strncmp(method->chars, "with", 4) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.with on an out-of-bounds ArrayBuffer");
@@ -18265,7 +18300,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 10 && strncmp(method->chars, "toReversed", 10) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.toReversed on an out-of-bounds ArrayBuffer");
@@ -18291,7 +18326,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (ta && ta->buffer) {
+                if (!js_dispatch_as_array_method && ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.toSorted on an out-of-bounds ArrayBuffer");

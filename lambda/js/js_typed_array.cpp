@@ -3,6 +3,7 @@
  */
 #include "js_typed_array.h"
 #include "js_runtime.h"
+#include "js_runtime_state.hpp"
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_event_loop.h"
@@ -1305,10 +1306,15 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
         return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
-    if (!ab || ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+    // Js54 P6: spec §25.1.5.2 has just one detach check, AFTER ToIntegerOrInfinity.
+    // If the buffer is already detached at entry, the coercion still runs (and
+    // can have side effects); we throw afterwards. Test:
+    // built-ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js.
+    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     if (!ab->resizable) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
     if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+    if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
     if (new_length > ab->max_byte_length) return js_throw_range_error("Invalid array buffer length");
 
     void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
@@ -1725,7 +1731,13 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
     bool length_tracking = length < 0;
     if (length_tracking) {
-        if (available % elem_size != 0) {
+        // Js54 P6: per ES2024 §10.4.5.5 step 8, the alignment check is only
+        // required for non-resizable buffers. Resizable buffers with undefined
+        // length use auto-tracking and simply floor: the spec ignores the
+        // trailing remainder. Without this fix `new Float64Array(rab)` over a
+        // resizable buffer whose byteLength isn't a multiple of 8 throws
+        // RangeError, blocking the species-ctor cluster.
+        if (!ab->resizable && (available % elem_size != 0)) {
             return js_throw_range_error("Invalid typed array byteLength");
         }
         length = available / elem_size;
@@ -2127,7 +2139,10 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
         }
     }
 
-    if (js_typed_array_is_out_of_bounds(ta)) {
+    // Js54 P6: gate the TA-spec OOB throw on the dispatch mode. When invoked
+    // via Array.prototype.fill.call(ta_oob, ...) the spec uses LengthOfArrayLike
+    // (which yields 0 for an OOB TA) and the method silently no-ops.
+    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(ta)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
     }
 
@@ -2223,17 +2238,22 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
 extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     if (!js_is_typed_array(ta_item)) return ItemNull;
     JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
-    if (!dst || js_typed_array_is_out_of_bounds(dst)) {
+    // Js54 P6: gate the TA-spec OOB throw on dispatch mode (see fill).
+    if (!js_dispatch_as_array_method && (!dst || js_typed_array_is_out_of_bounds(dst))) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
     }
+    if (!dst) return (Item){.item = ITEM_JS_UNDEFINED};
     int target_len = js_typed_array_current_length(dst);
     if (offset < 0) return js_throw_range_error("offset is out of bounds");
 
     if (js_is_typed_array(source)) {
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
-        if (!src || js_typed_array_is_out_of_bounds(src) || js_typed_array_is_out_of_bounds(dst)) {
+        // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
+        if (!js_dispatch_as_array_method &&
+            (!src || js_typed_array_is_out_of_bounds(src) || js_typed_array_is_out_of_bounds(dst))) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
         }
+        if (!src) return (Item){.item = ITEM_JS_UNDEFINED};
         int src_len = js_typed_array_current_length(src);
         if ((int64_t)offset + (int64_t)src_len > (int64_t)target_len) {
             return js_throw_range_error("source is too large");
@@ -2293,7 +2313,8 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
         src_len = (int64_t)floor(length_double);
     }
 
-    if (js_typed_array_is_out_of_bounds(dst)) {
+    // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
+    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(dst)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
     }
     target_len = js_typed_array_current_length(dst);
@@ -2315,7 +2336,8 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
-    if (js_typed_array_is_out_of_bounds(ta)) {
+    // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
+    if (!js_dispatch_as_array_method && js_typed_array_is_out_of_bounds(ta)) {
         return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
     }
 
@@ -2333,7 +2355,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     int new_length = end - start;
     Item result = js_typed_array_species_create(ta_item, new_length);
     if (js_check_exception()) return (Item){.item = ITEM_NULL};
-    if (new_length > 0) {
+    if (new_length > 0 && !js_dispatch_as_array_method) {
         if (ta->buffer && ta->buffer->detached) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
         }

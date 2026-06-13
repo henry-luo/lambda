@@ -71,6 +71,7 @@ fn text_style(text, cls) {
     if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
+    else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
     else null
 }
 
@@ -82,7 +83,8 @@ fn text_has_tall_delim(text) {
 }
 
 fn text_height(text) {
-    if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
+    if (text == "x") 0.44
+    else if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
 }
 
 fn text_depth(text) {
@@ -125,18 +127,19 @@ pub fn hbox(boxes) {
     let valid = (for (b in boxes where b != null) b)
     let children = collect_elements(valid, 0, [])
     let total_width = sum((for (v in valid) v.width))
+    let suppress_text_depth = has_suppress_hbox_text_depth(valid, 0)
     let max_height = if (len(valid) == 0) 0.0
         else max((for (v in valid) v.height))
     let max_depth = if (len(valid) == 0) 0.0
-        else max((for (v in valid) v.depth))
+        else max((for (v in valid) hbox_depth_of(v, suppress_text_depth)))
     let max_render_height = if (len(valid) == 0) null
         else max((for (v in valid) if (v.render_height != null) v.render_height else v.height))
     let max_render_depth = if (len(valid) == 0) null
-        else max((for (v in valid) if (v.render_depth != null) v.render_depth else v.depth))
+        else max((for (v in valid) hbox_render_depth_of(v, suppress_text_depth)))
     let max_render_total = if (len(valid) == 0) null
         else max((for (v in valid) if (v.render_total != null) v.render_total
             else (if (v.render_height != null) v.render_height else v.height) +
-                 (if (v.render_depth != null) v.render_depth else v.depth)))
+                 hbox_render_depth_of(v, suppress_text_depth)))
     {
         element: <span class: css.BASE;
             for (child in children) child
@@ -176,6 +179,28 @@ fn collect_elements(valid, i, acc) {
         (let v = valid[i],
          let next = acc ++ elements_of(v),
          collect_elements(valid, i + 1, next))
+}
+
+fn has_suppress_hbox_text_depth(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].suppress_hbox_text_depth == true) true
+    else has_suppress_hbox_text_depth(items, i + 1)
+}
+
+fn hbox_depth_of(bx, suppress_text_depth) {
+    if (suppress_text_depth and is_mathit_text_box(bx)) 0.0
+    else bx.depth
+}
+
+fn hbox_render_depth_of(bx, suppress_text_depth) {
+    if (suppress_text_depth and is_mathit_text_box(bx)) 0.0
+    else if (bx.render_depth != null) bx.render_depth
+    else bx.depth
+}
+
+fn is_mathit_text_box(bx) {
+    bx.element is element and len(bx.element) == 1 and
+    bx.element.class == css.MATHIT and bx.element[0] is string
 }
 
 // ============================================================

@@ -133,13 +133,16 @@ This extracts 206 runnable markup snapshot formulas from the mirrored MathLive s
 
 Current phase checkpoint:
 
-- Full MathLive markup adapter: 23/206 exact snapshot matches.
+- Full MathLive markup adapter: 42/206 exact snapshot matches.
+- `ACCENTS`: 10/10 exact matches.
 - `BINARY OPERATORS`: 10/10 exact matches.
 - `FRACTIONS`: 8/9 exact matches.
+- `OVER/UNDERLINE`: 2/2 exact matches.
+- `SPACING AND KERN`: 8/10 exact matches.
 - `SUPERSCRIPT/SUBSCRIPT`: 2/2 exact matches.
 - `LEFT/RIGHT`: 2/55 exact matches.
-- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, MathLive-style vlist output for simple/tall/nested bar fractions, binomial/no-bar vlist output, `\dbinom`/`\tbinom`/infix `\choose` command preservation, and `\pdiff` expansion.
-- Next blocker: port display math delimiters, large-operator limits, text-mode math re-entry, and the remaining script spacing metrics needed by the final complex `FRACTIONS` snapshot.
+- Implemented so far: direct MathLive-style root struts, inline spacer spans, TeX binary-to-ordinary operator normalization, superscript vlist output, transparent script sibling emission, small `\left...\right` delimiter output, TeX minus glyph normalization, MathLive-style vlist output for simple/tall/nested bar fractions, binomial/no-bar vlist output, `\dbinom`/`\tbinom`/infix `\choose` command preservation, `\pdiff` expansion, MathLive-style accent vlist output, overline/underline rule vlist wrappers, primitive dimension spacing via `lm_mspace`, packed `+-` atom normalization, and sibling `\scriptstyle` switches for simple atoms.
+- Next blocker: port MathLive-style radical/placeholder vlist output, colorbox/background wrappers, display math delimiters, large-operator limits, text-mode math re-entry, `\not` overlays, and the remaining script spacing metrics needed by the final complex `FRACTIONS` snapshot.
 
 ### P1: Structural Rendering Fidelity
 
