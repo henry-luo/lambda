@@ -53,7 +53,7 @@ pub fn render(ast, options) {
     let html = dispatcher.render_node(ast, info)
 
     if (is_standalone(options)) {
-        wrap_standalone(html, info)
+        wrap_standalone(html, info, options)
     } else {
         postprocess(html, info)
     }
@@ -126,9 +126,9 @@ fn render_footnote_item(fn_entry, info) {
 // Standalone HTML wrapper
 // ============================================================
 
-fn wrap_standalone(html, info) {
+fn wrap_standalone(html, info, options) {
     let stylesheet = css.get_stylesheet()
-    let math_stylesheet = math_css.get_stylesheet()
+    let math_stylesheet = math_css.get_stylesheet(options)
     let title_text = get_title_or_default(info.title)
 
     <html lang: "en";

@@ -97,19 +97,20 @@ pub fn font_class(font_name) {
 // Embedded stylesheet
 // ============================================================
 
-pub fn get_stylesheet() {
+pub fn get_stylesheet(options = null) {
+    let families = font_families(options)
     let s = ".lm_latex{display:inline-block;direction:ltr;text-align:left;text-indent:0;text-rendering:auto;font-family:inherit;font-style:normal;letter-spacing:normal;line-height:1.2;word-wrap:normal;word-spacing:normal;white-space:nowrap}" ++
     ".lm_base{display:inline-block;position:relative;padding:0;margin:0;box-sizing:content-box;border:0;outline:0;vertical-align:baseline;text-decoration:none}" ++
     ".lm_strut,.lm_strut--bottom{display:inline-block;min-height:0.5em}" ++
-    ".lm_mathit{font-family:KaTeX_Math;font-style:italic}" ++
-    ".lm_cmr{font-family:KaTeX_Main;font-style:normal}" ++
-    ".lm_mathbf{font-family:KaTeX_Main;font-weight:bold}" ++
-    ".lm_ams,.lm_bb{font-family:KaTeX_AMS}" ++
-    ".lm_cal{font-family:KaTeX_Caligraphic}" ++
-    ".lm_frak{font-family:KaTeX_Fraktur}" ++
-    ".lm_tt{font-family:KaTeX_Typewriter}" ++
-    ".lm_script{font-family:KaTeX_Script}" ++
-    ".lm_sans{font-family:KaTeX_SansSerif}" ++
+    ".lm_mathit{font-family:" ++ families.math ++ ";font-style:italic}" ++
+    ".lm_cmr{font-family:" ++ families.main ++ ";font-style:normal}" ++
+    ".lm_mathbf{font-family:" ++ families.main ++ ";font-weight:bold}" ++
+    ".lm_ams,.lm_bb{font-family:" ++ families.ams ++ "}" ++
+    ".lm_cal{font-family:" ++ families.cal ++ "}" ++
+    ".lm_frak{font-family:" ++ families.frak ++ "}" ++
+    ".lm_tt{font-family:" ++ families.tt ++ "}" ++
+    ".lm_script{font-family:" ++ families.script ++ "}" ++
+    ".lm_sans{font-family:" ++ families.sans ++ "}" ++
     ".lm_text{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;white-space:pre}" ++
     ".lm_op-group{display:inline-block}" ++
     ".lm_bold{font-weight:700}" ++
@@ -122,12 +123,12 @@ pub fn get_stylesheet() {
     ".lm_sqrt-index{margin-left:0.27778em;margin-right:-0.55556em}" ++
     ".lm_msubsup{text-align:left}" ++
     ".lm_left-right{display:inline-block}" ++
-    ".lm_small-delim{font-family:KaTeX_Main}" ++
-    ".lm_delim-size1{font-family:KaTeX_Size1}" ++
-    ".lm_delim-size2{font-family:KaTeX_Size2}" ++
-    ".lm_delim-size3{font-family:KaTeX_Size3}" ++
-    ".lm_delim-size4{font-family:KaTeX_Size4}" ++
-    ".lm_accent-body{font-family:KaTeX_Main}" ++
+    ".lm_small-delim{font-family:" ++ families.main ++ "}" ++
+    ".lm_delim-size1{font-family:" ++ families.size1 ++ "}" ++
+    ".lm_delim-size2{font-family:" ++ families.size2 ++ "}" ++
+    ".lm_delim-size3{font-family:" ++ families.size3 ++ "}" ++
+    ".lm_delim-size4{font-family:" ++ families.size4 ++ "}" ++
+    ".lm_accent-body{font-family:" ++ families.main ++ "}" ++
     ".lm_negativethinspace{display:inline-block;margin-left:-0.16667em;height:0.71em}" ++
     ".lm_thinspace{display:inline-block;width:0.16667em;height:0.71em}" ++
     ".lm_mediumspace{display:inline-block;width:0.22222em;height:0.71em}" ++
@@ -142,9 +143,56 @@ pub fn get_stylesheet() {
     s
 }
 
+fn font_option(options) {
+    if (options == null) "default"
+    else if (options is string) options
+    else if (options.font_option != null) string(options.font_option)
+    else if (options.math_font != null) string(options.math_font)
+    else if (options.font != null) string(options.font)
+    else "default"
+}
+
+fn use_katex_fonts(options) =>
+    font_option(options) == "katex"
+
+fn font_families(options) {
+    if (use_katex_fonts(options)) katex_font_families()
+    else local_font_families()
+}
+
+fn katex_font_families() => {
+    main: "KaTeX_Main",
+    math: "KaTeX_Math",
+    ams: "KaTeX_AMS",
+    cal: "KaTeX_Caligraphic",
+    frak: "KaTeX_Fraktur",
+    tt: "KaTeX_Typewriter",
+    script: "KaTeX_Script",
+    sans: "KaTeX_SansSerif",
+    size1: "KaTeX_Size1",
+    size2: "KaTeX_Size2",
+    size3: "KaTeX_Size3",
+    size4: "KaTeX_Size4"
+}
+
+fn local_font_families() => {
+    main: "'Computer Modern Serif','Latin Modern Roman',KaTeX_Main,serif",
+    math: "'Computer Modern Serif','Latin Modern Roman',KaTeX_Math,serif",
+    ams: "KaTeX_AMS,'Computer Modern Serif','Latin Modern Roman',serif",
+    cal: "KaTeX_Caligraphic,'Computer Modern Serif','Latin Modern Roman',serif",
+    frak: "KaTeX_Fraktur,'Computer Modern Serif','Latin Modern Roman',serif",
+    tt: "'Computer Modern Typewriter','Latin Modern Mono',KaTeX_Typewriter,monospace",
+    script: "KaTeX_Script,'Computer Modern Serif','Latin Modern Roman',serif",
+    sans: "'Computer Modern Sans','Latin Modern Sans',KaTeX_SansSerif,sans-serif",
+    size1: "KaTeX_Size1",
+    size2: "KaTeX_Size2",
+    size3: "KaTeX_Size3",
+    size4: "KaTeX_Size4"
+}
+
 // wrap output in standalone HTML with style tag
-pub fn wrap_standalone(content_el) =>
+pub fn wrap_standalone(content_el, options = null) =>
     <span;
-        <style; get_stylesheet()>
+        <style; get_stylesheet(options)>
         content_el
     >
