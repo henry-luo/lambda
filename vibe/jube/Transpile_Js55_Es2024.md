@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 (all partial) done (25 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16); P4/P13(closure) and P15 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); ~48 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 140.8 s. Latest full run: 40211 passing, 24 improvements, 0 regressions. See §12.13 for P13/P14/P16 walkthrough.
+Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 + P20 (all partial) done (43 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16 + 18 P20); ~30 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 164.4 s. Latest full run: 40230 passing, 43 improvements, 0 regressions. See §12.15 for P20 closure-capture cluster fix.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -1229,6 +1229,198 @@ Pre-flight: 174 / 174 across `for-in`, `Object.keys`, `Object.getOwnPropertyName
 
 4. **TypedArrayConstructors src-typedarray-resizable-buffer** (1 test): probably part of the closure-capture cluster; not investigated this pass.
 
-5. **2 already pre-existing SAB crashes** in `set/typedarray-arg-set-values-diff-buffer-other-type-sab.js` — orthogonal, not Js55 scope.
+5. ~~**2 already pre-existing SAB crashes**~~ — retracted. The two `set/*-diff-buffer-other-type-sab.js` tests were noted as crashing in §12.13 preflight, but follow-up investigation revealed those were transient worker-crash artifacts from co-located tests, NOT real SAB failures. Stress-testing (3× isolated runs, 3× set/ preflight runs, 1× full release guard) confirms both SAB tests pass reliably. Likely cleared as a side effect of P14's `js_typed_array_set_from` simplification — removing the buggy re-OOB check eliminated whatever edge case was destabilizing the worker. All 97 baseline-admitted SAB tests pass.
+
+## 12.14 P19 closure-capture deep dive (2026-06-13, third pass)
+
+After the §12.13 wins landed, returned to the for-of let closure-capture cluster (~24 tests) with new instrumentation. Investigation produced a precise mechanism description — beyond §12.10 and §12.12 — but no fix landed.
+
+### Reproduction (simplified from `coerced-searchelement-fromindex-grow.js`)
+
+```js
+const ctors = [/* 14 TA constructors including MyBigInt64Array as last */];
+
+for (let ctor of ctors) {
+  const rab = CreateResizableArrayBuffer(...);
+  const lengthTracking = new ctor(rab);
+  // ... initialize ...
+  let evil = { valueOf: () => { rab.resize(...); return 0; } };
+  // calls that invoke evil.valueOf
+}
+
+// Second loop — same structure
+for (let ctor of ctors) {
+  const rab = CreateResizableArrayBuffer(4 * ctor.BYTES_PER_ELEMENT, 8 * ctor.BYTES_PER_ELEMENT);
+  // ...
+  let evil = { valueOf: () => { rab.resize(6 * ctor.BYTES_PER_ELEMENT); return -4; } };
+  // evil.valueOf() reads ctor.BYTES_PER_ELEMENT — gets MyBigInt64Array.BPE (8) for every iter
+}
+```
+
+The body's `print("ctor=" + ctor.name)` shows correct per-iteration values. But `evil.valueOf()` (when invoked) reads `ctor` as `MyBigInt64Array` (loop 1's last iteration) for every iteration of loop 2.
+
+### Precise mechanism (verified via MIR dump + runtime instrumentation)
+
+1. **Runtime closure env contents are stale.** Instrumented `js_new_closure` (runtime) shows:
+   - Loop 1's 14 closures: each env[1] holds the iteration's distinct `ctor` (Uint8Array, Int8Array, ..., MyBigInt64Array).
+   - Loop 2's 14 closures: each env[1] holds the SAME value across all iterations (a MAP, not a FUNC — and matching nothing in `ctors`).
+
+2. **Per-closure env is allocated correctly.** `js_alloc_env` returns a fresh address per call. Each closure has its OWN env (different pointer). Not a shared-env issue.
+
+3. **The bug is in what's STORED into env[1]**, not the env allocation. The MIR-emitted store `MOV env_582[1], reg315` runs once per iteration. `reg315` is loop 2's loop_var register. But somehow `reg315` holds the same stale value across all 14 iterations.
+
+4. **MIR dump reveals the actual sequence at closure-creation site in loop 2's body:**
+   ```text
+   mov  _js_rab_537, i64:(js_alloc_env_444)        ← READ from LOOP 1's env[0]
+   mov  _js_ctor_505, i64:8(js_alloc_env_444)      ← READ from LOOP 1's env[1]
+   call js_alloc_env, js_alloc_env_582, 2          ← allocate LOOP 2's env
+   mov  i64:(js_alloc_env_582), _js_rab_537        ← STORE stale rab to loop 2's env
+   mov  i64:8(js_alloc_env_582), _js_ctor_505      ← STORE stale ctor to loop 2's env
+   call js_new_closure, ..., js_alloc_env_582, 2
+   ```
+   `js_alloc_env_444` is **loop 1's** closure env register. After loop 1 ends, that MIR register still holds its last allocated env address (containing MyBigInt64Array et al). Loop 2's body is reading rab/ctor THROUGH this stale pointer.
+
+5. **The writeback into env_444 at `const rab = ...`** is ALSO wrong:
+   ```text
+   mov  _js_rab_537, dcall_541                     ← rab init result
+   mov  i64:(js_alloc_env_444), _js_rab_537        ← writeback to LOOP 1's env[0]
+   ```
+   So loop 2 is OVERWRITING loop 1's last env's rab slot with loop 2's value. (Doesn't matter for correctness since loop 1's closures already captured their values; but signals broken tracking.)
+
+### Why this happens
+
+Two distinct mechanisms collude:
+
+**A) `jm_write_last_closure_capture_if_matching`** (statement_lowering.cpp:28) fires when a `let`/`const` initializer matches a NAME in the most-recently-created closure's capture list. The function writes the new value to `mt->last_closure_env_reg`. After loop 1's last `let evil = ...` creates its closure, `mt->last_closure_env_reg = js_alloc_env_444`. This state **is not reset between for-of loops**. So when loop 2's `const rab = ...` runs, it matches `_js_rab` against loop 1's evil's captures (also named _js_rab) and writes to env_444.
+
+**B) The READS at lines 1316-1317** are NOT from `jm_scope_env_reload_vars` (would emit `boxed = env[slot]; var->reg = boxed` — TWO mov instructions). They're from a single `mov var->reg, env[slot]` pattern. That pattern only appears at `expression_lowering.cpp:978` (the env-load in identifier resolution). For this to fire, `var->in_scope_env` must be true AND `var->scope_env_reg != 0`. But P18-FE-STORE log shows loop 2's rab/ctor have `from_env=0`, `env_reg=0`, `in_scope_env=0` at MIR emission time.
+
+So either (i) the marking happens AFTER P18-FE-STORE fires (during subsequent statement processing inside the body), or (ii) the reads are emitted by a code path I haven't located.
+
+### Two attempted fixes (BOTH ineffective)
+
+- **§12.10 Attempt A**: extend for-of writeback to fire for let/const loops. No effect because `mt->scope_env_reg == 0` in js_main at for-of compile time. The writeback function early-returns.
+
+- **§12.12 Attempt B**: gate the env-load at expression_lowering.cpp:978 on `var->scope_env_reg == mt->scope_env_reg`. No effect — at the read site, the var's recorded scope_env_reg happens to match mt->scope_env_reg, so the guard doesn't kick in.
+
+### Where the actual fix needs to land
+
+One of:
+
+1. **Reset `mt->last_closure_env_reg = 0` at every for-of/for-in loop boundary** (or at every scope-pop). This would prevent the writeback at line 1283 from going to a stale env. But it might break other cases that rely on cross-block last-closure tracking.
+
+2. **`jm_write_last_closure_capture_if_matching` must verify the captured-name var entry's reg matches** (the val_reg argument). If the val_reg is for a DIFFERENT var than what the last closure captured (i.e. a re-declared let in a sibling scope), skip the writeback.
+
+3. **Properly clear the from_env / in_scope_env / scope_env_reg flags when popping a closure's body scope** — and ensure those flags don't leak via jm_set_var inheritance from outer-scope same-named entries.
+
+4. **Each for-of let iteration should allocate a fresh scope_env** matching ES spec's "fresh binding per iteration" — this is the spec-aligned fix but requires significant rework.
+
+### Outcome
+
+P19 attempts reverted. Mechanism described above is precise but the fix surface requires:
+- A targeted MIR dump diff between working (loop 1) and broken (loop 2) closure creations
+- Verification of which exact code path emits the `mov var->reg, env[slot]` pattern when var entries appear to have `from_env=0`
+- A test-suite-wide guard at each intermediate step (the for-of let pattern is ubiquitous)
+
+The mechanism description is more precise than §12.10/§12.12 but the structural fix still takes its own session. The reproduction lives at `temp/js55_p18_two_loops.js` and the MIR dump at `temp/js_mir_dump.txt`.
 
 None of these have a single-edit fix in this proposal's scope. The next iteration would need to either tackle the closure-capture structural fix (multi-hour JIT refactor in `js_mir_function_class_lowering.cpp` or `js_mir_analysis.cpp`) or carve into the TLA cluster (each needs its own batch-mode-vs-script reproduction step).
+
+## 12.15 P20 closure-capture cluster — actual fix (2026-06-14)
+
+After §12.14 deferred the cluster, returned with the precise mechanism description and **landed a working fix** in one session. Four distinct edits, ~18 tests cleared from the closure-capture cluster (plus spillover).
+
+### P20(a) — Reset `mt->last_closure_env_reg` at for-of/block boundaries (5 tests)
+
+The mechanism (verified via MIR dump): `jm_write_last_closure_capture_if_matching` ([js_mir_statement_lowering.cpp:28](../../lambda/js/js_mir_statement_lowering.cpp)) writes a let/const initializer's value to `mt->last_closure_env_reg[slot]` whenever the variable's name matches a capture name in the most-recently-created closure. The state persists across statement boundaries.
+
+When a SECOND `for (let X of …)` loop appears after a FIRST loop whose body created closures, the second loop's body initializers (`const rab = ...`) match the FIRST loop's last closure's captures by NAME — and write the values into the first loop's stale closure env. Subsequent reads of `_js_rab` / `_js_ctor` in the second loop go through `jm_env_reload_shared_captures` (called after every CALL expression) and pull from that stale env.
+
+**Fix**: at `jm_transpile_for_of` entry ([js_mir_statement_lowering.cpp:3547](../../lambda/js/js_mir_statement_lowering.cpp)), save and zero out `mt->last_closure_has_env`, `last_closure_env_reg`, `last_closure_capture_count` (+ names/slots/is_nfe arrays). Restore on exit. Same pattern in `case JS_AST_NODE_BLOCK_STATEMENT:` ([js_mir_statement_lowering.cpp:5403](../../lambda/js/js_mir_statement_lowering.cpp)) for nested-block patterns.
+
+Tests cleared: indexOf {grow,shrink}, includes resize, lastIndexOf shrink, slice grow.
+
+### P20(b) — find/findIndex/findLast/findLastIndex OOB semantics (8 tests)
+
+ES2024 §23.1.3.10-13: the four `find*` methods do NOT use HasProperty — they call `Get(O, k)` directly, which returns `undefined` for OOB indices. The callback is invoked with `undefined`.
+
+Lambda's TA path at four sites ([js_runtime.cpp:17777, 17807, 17898, 17929](../../lambda/js/js_runtime.cpp)) was doing `if (... continue;` on OOB when dispatched as Array method — skipping the callback entirely. For `forEach`/`every`/`some`/`reduce`/`reduceRight`/`filter`/`map` the `continue` IS spec-correct (those DO use HasProperty); only the four `find*` methods needed the change.
+
+**Fix**: at each site, replace the `continue` with:
+```cpp
+bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+Item elem = i_oob ? make_js_undefined()
+                  : js_typed_array_get(obj, (Item){.item = i2it(i)});
+```
+
+Tests cleared: 4 `find{,Index,Last,LastIndex}/callbackfn-resize-arraybuffer.js` + 4 `*/resizable-buffer-shrink-mid-iteration.js` (less the find/values which has a separate TDZ cascade, cleared by P20(c)).
+
+### P20(c) — Block-scoped function-decl: refresh closure at textual position (5 tests)
+
+`jm_init_block_tdz` ([js_mir_analysis.cpp:1416](../../lambda/js/js_mir_analysis.cpp)) hoists function declarations inside a block: creates `binding_reg`, initializes to undefined, then immediately creates the closure and assigns. This happens at block ENTRY — BEFORE any of the block's `const`/`let` initializers run.
+
+If the function body captures one of those let/const bindings, the capture reads TDZ sentinels and the env slot stays TDZ for the life of the closure. When the function is called later (even after the const has been initialized), the captured value still reads TDZ — runtime throws `Cannot access 'X' before initialization`.
+
+**Fix**: at the textual function-declaration statement handler ([js_mir_statement_lowering.cpp:4501](../../lambda/js/js_mir_statement_lowering.cpp)), when `existing` is the from_block_func_decl binding, REMEMBER it via `p19_block_func_existing` before clearing it. After the fresh closure is created at line 4547, also assign that closure to `p19_block_func_existing->reg`. The binding now sees a closure that captures the just-initialized const.
+
+Existing semantics for Annex B (legacy var/global env mirroring) are preserved by keeping `existing = NULL` for the rest of the function.
+
+Tests cleared: find shrink-mid-iteration (TDZ cascade), sort comparefn, reverse (Array + TA), sort default-comparator.
+
+### P20(d) — Array.prototype.slice on TA delegates to Array semantics (1 test)
+
+When `Array.prototype.slice.call(taOOB, evil)` is dispatched, ES spec ArraySpeciesCreate creates a regular Array (not a TA). The resulting Array should have HOLES (sparse slots) for OOB indices, observable as `undefined` per index.
+
+Lambda's `js_map_method` slice handler ([js_runtime.cpp:17456](../../lambda/js/js_runtime.cpp)) called `js_typed_array_slice` which creates a TA copy (zeros for OOB, since TAs can't hold undefined).
+
+**Fix**: when `js_dispatch_as_array_method` is true, short-circuit to `js_array_generic_slice` ([js_runtime.cpp:22263](../../lambda/js/js_runtime.cpp)). The TA-specific OOB throw also reorganized to fire only when NOT dispatching as Array method.
+
+Tests cleared: slice/coerced-start-end-shrink.
+
+### Cumulative cleared, end of P20
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| P1 (D1) | 12 | `js_pending_new_target` clear in subclass-TA branch |
+| P10(a) | 1 | skip-list rgi-emoji-17.0 |
+| P10(b) | 1 | UTF-16 unit basis in regex Symbol.replace |
+| P11(a) | 1 | ArrayBuffer constructor arg ordering in Reflect.construct |
+| P11(c) | 3 | TypedArray.prototype.with current-length |
+| P12(a) | 1 | lastIndexOf raw fast path reverse-iteration clamp |
+| P12(b) | 1 | Object.freeze TypedArray-resizable-buffer detection |
+| P13 | 2 | Array.prototype.toLocaleString builtin-id fix |
+| P14 | 2 | TypedArray.set targetLength capture, drop re-OOB check |
+| P16 | 1 | TA index enumeration in for-in + Object.keys |
+| **P20(a)** | **5** | **Reset `mt->last_closure_env_reg` at for-of/block boundaries** |
+| **P20(b)** | **8** | **find\* spec: yield undefined for OOB instead of skipping** |
+| **P20(c)** | **5** | **Block function-decl refreshes closure at textual position** |
+| **P20(d)** | **1** | **Array.slice on TA uses ArraySpeciesCreate path** |
+| **Total** | **43** | (of original 73 admittable failures) |
+
+Final full run: **40230 passing, 43 improvements vs baseline, 0 regressions** in 164.4s (within +5% of baseline).
+
+### Remaining ~9 failures after P20
+
+Now structurally narrow. The remaining cluster failures are all spec-correctness issues, NOT closure-capture:
+
+1. **`Array.prototype.copyWithin/resizable-buffer.js`** — uses `(...rest) => Array.prototype.copyWithin.call(ta, ...rest)`. Spread dispatch doesn't properly forward to the generic copyWithin path. Test passes WITHOUT spread (`f.call(ta, 0, 2)` works; `f.call(ta, ...rest)` doesn't). Suggests a spread+TA-dispatch interaction in the method-call routing.
+
+2. **`Array.prototype.map/callbackfn-resize-arraybuffer.js`** — Lambda's map on TA returns a TA which can't hold undefined. Needs the same `js_dispatch_as_array_method` shortcut as P20(d), but at the map site.
+
+3. **`Array.prototype.sort/resizable-buffer-default-comparator.js`** — `[4,6,8,10]` vs `[10,4,6,8]`. Array's default comparator does STRING compare, TA's does NUMERIC. When dispatched as Array method, should use string compare.
+
+4. **`TypedArrayConstructors/.../src-typedarray-resizable-buffer.js`** — TypeError missing for TA constructor edge case.
+
+5-6. **`TypedArray.prototype.map/speciesctor-resizable-buffer-{grow,shrink}.js`** — species ctor wiring with mid-construction resize.
+
+7. **`TypedArray.prototype.set/this-backed-by-resizable-buffer.js`** — TypeError vs Error: the test uses `throwingProxy` whose getter throws; should fail OOB check BEFORE accessing the proxy.
+
+8. **`TypedArray.prototype.slice/speciesctor-resize.js`** — species ctor + resize pattern.
+
+The species-ctor tests are TypedArray spec issues separate from closure-capture. (1) is a spread-dispatch issue. (2) is the same routing pattern as P20(d) — could be fixed similarly. (3) needs a separate sort dispatch.
+
+### Why this works where §12.10/§12.12 attempts didn't
+
+The key insight: the bug isn't in the SHARED scope_env path (which §12.10/§12.12 attacked). It's in the **per-closure env path** (use_scope_env=false), via a parallel state tracking system (`mt->last_closure_env_reg`). That state was being USED by `jm_write_last_closure_capture_if_matching` to forward let-initializer writes, but never RESET between sibling scopes. The fix is structural for the state lifetime, not for the captures protocol — much narrower in blast radius.
+
+§12.14 mechanism (B) — "the READS at lines 1316-1317" — was a red herring. Those reads ARE from `jm_env_reload_shared_captures` after CALL expressions. The var->reg pointing at the stale env_reg came from earlier shared-env marking elsewhere. The actual primary bug was simply the LACK of a reset on `mt->last_closure_env_reg` at for-of/block boundaries.

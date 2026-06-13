@@ -17454,11 +17454,19 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 return js_typed_array_subarray(obj, start, end, end_is_default);
             }
             if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                // Js55 P19: when Array.prototype.slice is called on a TA, ES spec
+                // ArraySpeciesCreate creates a regular Array (not a TA). Delegate
+                // to the generic slice path so the result observes
+                // HasProperty=false for OOB indices (yielding sparse holes) rather
+                // than the TA-element-typed copy which stores 0s for OOB.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_slice(obj, args, argc);
+                }
                 // Js54 P4: spec §23.2.3.27 step 2 — Perform ? ValidateTypedArray.
                 // Throws TypeError if the TA is OOB (fixed-length view shrunk
                 // past end, or length-tracking offset > buffer length).
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
@@ -17775,8 +17783,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: find spec doesn't use HasProperty — yield undefined for OOB
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17804,8 +17814,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: findIndex spec doesn't use HasProperty — yield undefined for OOB
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17892,8 +17904,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: when called as Array method, OOB indices yield
+                    // undefined to the callback (per spec — HasProperty returns
+                    // false, the loop still calls callback with undefined value).
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17922,8 +17938,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: yield undefined for OOB indices when called as Array method
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
