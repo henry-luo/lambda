@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 137 cases passing when this
+# One snapshot key per line. These are the 142 cases passing when this
 # baseline was created.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -57,6 +57,10 @@ COLORS 6/ a{b\\color{#f00} c}d renders correctly 1
 COLORS 7/ a\\left(b\\color{#f00} c\\right)d renders correctly 1
 COLORS 8/ {\\color{Apricot}\\blacksquare}{\\color{Aquamarine}\\blacksquare}\\n    {\\color{Bittersweet}\\blacksquare}{\\color{Black}\\blacksquare}\\n    {\\color{Blue}\\blacksquare}{\\color{BlueGreen}\\blacksquare}\\n    {\\color{BlueViolet}\\blacksquare}{\\color{BrickRed}\\blacksquare}\\n  \\n    {\\color{Brown}\\blacksquare}{\\color{BurntOrange}\\blacksquare}\\n    {\\color{CadetBlue}\\blacksquare}{\\color{CarnationPink}\\blacksquare}\\n    {\\color{Cerulean}\\blacksquare}{\\color{CornflowerBlue}\\blacksquare}\\n    {\\color{Cyan}\\blacksquare}{\\color{Dandelion}\\blacksquare}\\n  \\n  \\n    {\\color{DarkOrchid}\\blacksquare}{\\color{Emerald}\\blacksquare}\\n    {\\color{ForestGreen}\\blacksquare}{\\color{Fuchsia}\\blacksquare}\\n    {\\color{Goldenrod}\\blacksquare}{\\color{Gray}\\blacksquare}\\n    {\\color{Green}\\blacksquare}{\\color{GreenYellow}\\blacksquare}\\n  \\n    {\\color{JungleGreen}\\blacksquare}{\\color{Lavender}\\blacksquare}\\n    {\\color{LimeGreen}\\blacksquare}{\\color{Magenta}\\blacksquare}\\n    {\\color{Mahogany}\\blacksquare}{\\color{Maroon}\\blacksquare}\\n    {\\color{Melon}\\blacksquare}{\\color{MidnightBlue}\\blacksquare}\\n  \\n    {\\color{Mulberry}\\blacksquare}{\\color{NavyBlue}\\blacksquare}\\n    {\\color{OliveGreen}\\blacksquare}{\\color{Orange}\\blacksquare}\\n    {\\color{OrangeRed}\\blacksquare}{\\color{Orchid}\\blacksquare}\\n    {\\color{Peach}\\blacksquare}{\\color{Periwinkle}\\blacksquare}\\n  \\n    {\\color{PineGreen}\\blacksquare}{\\color{Plum}\\blacksquare}\\n    {\\color{ProcessBlue}\\blacksquare}{\\color{Purple}\\blacksquare}\\n    {\\color{RawSienna}\\blacksquare}{\\color{Red}\\blacksquare}\\n    {\\color{RedOrange}\\blacksquare}{\\color{RedViolet}\\blacksquare}\\n  \\n    {\\color{Rhodamine}\\blacksquare}{\\color{RoyalBlue}\\blacksquare}\\n    {\\color{RoyalPurple}\\blacksquare}{\\color{RubineRed}\\blacksquare}\\n    {\\color{Salmon}\\blacksquare}{\\color{SeaGreen}\\blacksquare}\\n    {\\color{Sepia}\\blacksquare}{\\color{SkyBlue}\\blacksquare}\\n  \\n    {\\color{SpringGreen}\\blacksquare}{\\color{Tan}\\blacksquare}\\n    {\\color{TealBlue}\\blacksquare}{\\color{Thistle}\\blacksquare}\\n    {\\color{Turquoise}\\blacksquare}{\\color{Violet}\\blacksquare}\\n    {\\color{VioletRed}\\blacksquare}{\\color{White}\\blacksquare}\\n  \\n    {\\color{WildStrawberry}\\blacksquare}{\\color{Yellow}\\blacksquare}\\n    {\\color{YellowGreen}\\blacksquare}{\\color{YellowOrange}\\blacksquare}\\n renders correctly 1
 COMMANDS Commands  1
+EXTENSIONS 4/ \\class{cssClassName}{2+\\frac{1}{x}} renders correctly 1
+EXTENSIONS 5/ \\class{css class name}{2+\\frac{1}{x}} renders correctly 1
+EXTENSIONS 6/ \\cssId{a-css-id-1234}{2+\\frac{1}{x}} renders correctly 1
+EXTENSIONS 7/ \\cssId{a css id 1234}{2+\\frac{1}{x}} renders correctly 1
 FONTS 0/ \\alpha + x - 1 - \\Gamma renders correctly 1
 FONTS 1/ \\alpha + x - 1 - \\Gamma renders correctly 1
 FONTS 2/ \\alpha + x - 1 - \\Gamma renders correctly 1
@@ -88,6 +92,7 @@ LEFT/RIGHT Delimiters \\| | 1
 LEFT/RIGHT Delimiters \\vert \\vert 1
 LEFT/RIGHT middle delimiters 1
 MODE SHIFT 0/ \\text{\\ensuremath{\\frac34}} renders correctly 1
+MODE SHIFT 1/ 1+\\textcolor{blue}{$ 2 $}+3+\\textcolor{red}{4}+\\text{5\\textcolor{purple}{6}} renders correctly 1
 NOT 0/ \\not\\in \\not{}\\in \\not{}\\in \\not\\in renders correctly 1
 NOT 0/ a \\ne b renders correctly 1
 NOT 1/ \\not= \\not{}= \\not{}= \\not= renders correctly 1

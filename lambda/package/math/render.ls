@@ -226,7 +226,7 @@ fn render_command(node, context) {
 
 fn render_class_command(node, context) {
     if (len(node) >= 2) {
-        let class_name = plain_text(node[0])
+        let class_name = arg_raw_text(node[0])
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         {
@@ -248,7 +248,7 @@ fn render_class_command(node, context) {
 
 fn render_css_id_command(node, context) {
     if (len(node) >= 2) {
-        let id_name = normalize_css_id(plain_text(node[0]))
+        let id_name = normalize_css_id(arg_raw_text(node[0]))
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         {
@@ -266,6 +266,11 @@ fn render_css_id_command(node, context) {
             skew: content_box.skew
         }
     } else box.text_box("cssId", css.ERROR, "mord")
+}
+
+fn arg_raw_text(node) {
+    if (node is element and node.raw != null) string(node.raw)
+    else plain_text(node)
 }
 
 fn normalize_css_id(text) {
@@ -476,6 +481,7 @@ fn render_text_content_box(content) {
     let tiny_idx = index_of(content, "\\tiny")
     if (is_ensuremath_text(content)) render_ensuremath_text(content)
     else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
+    else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
     else box.text_box(decode_latex_text(content), css.TEXT, "mord")
 }
 
@@ -507,6 +513,63 @@ fn render_ensuremath_text(content) {
             skew: 0.0
         }
     }
+}
+
+fn is_text_textcolor_content(content) =>
+    index_of(content, "\\textcolor{") >= 0
+
+fn render_text_textcolor_content(content) {
+    let cmd_idx = index_of(content, "\\textcolor{")
+    let before = decode_latex_text(slice(content, 0, cmd_idx))
+    let color_start = cmd_idx + 11
+    let color_end_rel = index_of(slice(content, color_start, len(content)), "}")
+    if (color_end_rel < 0) {
+        box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    } else {
+        let color_end = color_start + color_end_rel
+        let color_name = slice(content, color_start, color_end)
+        let body_start = color_end + 2
+        let body_end = len(content) - 1
+        let body = if (body_start <= body_end) decode_latex_text(slice(content, body_start, body_end)) else ""
+        let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
+        let color_box = text_color_box(body, color.resolve_raw(color_name))
+        let elems = text_content_elements(before_box, color_box)
+        {
+            element: <span class: css.BASE;
+                for (el in elems) el
+            >,
+            height: 0.65,
+            depth: 0.08,
+            render_height: 0.65,
+            render_depth: 0.08,
+            render_total: 0.73,
+            width: text_content_width(before_box, color_box),
+            type: "mord",
+            italic: 0.0,
+            skew: 0.0,
+            suppress_hbox_text_depth: true,
+            suppress_hbox_operator_render_height: true,
+            no_left_bin_space: true
+        }
+    }
+}
+
+fn text_color_box(text, color_value) => {
+    element: <span style: "color:" ++ color_value;
+        <span class: css.TEXT; text>
+    >,
+    height: 0.65,
+    depth: 0.08,
+    render_height: 0.65,
+    render_depth: 0.08,
+    render_total: 0.73,
+    width: 0.5 * float(len(text)),
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    suppress_hbox_text_depth: true,
+    suppress_hbox_operator_render_height: true,
+    no_left_bin_space: true
 }
 
 fn render_tiny_text_content(content, tiny_idx) {
@@ -1518,7 +1581,7 @@ fn render_color_switch_tail(node, context, i) {
     let children = render_children_scan(node, context, i + 1, [])
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
-    let elements = (for (b in spaced) b.element)
+    let elements = box.child_elements(spaced)
     box_with_suppress_depth({
         element: <span style: "color:" ++ color_value;
             for (el in elements) el
@@ -1641,10 +1704,12 @@ fn render_textcolor_sequence(node, context, i) {
     let color_arg = node[i + 6]
     let content_arg = node[i + 7]
     let color_value = color.resolve_raw(plain_text(color_arg))
-    let children = render_children(content_arg, context)
+    let children = if (is_dollar_math_group(content_arg))
+        [render_dollar_math_group(content_arg, context)]
+    else render_children(content_arg, context)
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
-    let elements = (for (b in spaced) b.element)
+    let elements = box.child_elements(spaced)
     box_with_suppress_depth({
         element: <span style: "color:" ++ color_value;
             for (el in elements) el
@@ -1656,6 +1721,18 @@ fn render_textcolor_sequence(node, context, i) {
         italic: hb.italic,
         skew: hb.skew
     })
+}
+
+fn is_dollar_math_group(content_arg) =>
+    (let txt = plain_text(content_arg),
+     len(txt) >= 2 and slice(txt, 0, 1) == "$" and slice(txt, len(txt) - 1, len(txt)) == "$")
+
+fn render_dollar_math_group(content_arg, context) {
+    let txt = plain_text(content_arg)
+    let inner = trim(slice(txt, 1, len(txt) - 1))
+    let ast^err = parse(inner, {type: "math", flavor: "latex"})
+    if (^err) render_node(content_arg, context)
+    else render_node(ast, context)
 }
 
 fn box_with_suppress_depth(bx) {
@@ -1733,6 +1810,9 @@ fn box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
+    render_height: bx.render_height,
+    render_depth: bx.render_depth,
+    render_total: bx.render_total,
     width: bx.width,
     type: atom_type,
     italic: bx.italic,
@@ -1760,7 +1840,8 @@ fn build_spaced(normalized, i, prev_type, acc, context) {
     if (i >= len(normalized)) acc
     else
         (let current = normalized[i],
-         let space = sp_table.get_spacing(prev_type, current.type, context.style),
+        let space = if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
          let with_space = if (space != 0.0)
              acc ++ [box.skip_box(space), current]
          else

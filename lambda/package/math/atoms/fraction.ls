@@ -331,7 +331,7 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             line_top: -3.23,
             numer_top: -3.5,
             numer_child_height: 0.65,
-            denom_child_height: 0.65,
+            denom_child_height: if (denom_box.height < 0.65) denom_box.height else 0.65,
             child_font_pct: null,
             rule_height: 0.04
         }
