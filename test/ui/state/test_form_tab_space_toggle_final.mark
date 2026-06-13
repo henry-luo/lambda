@@ -2,10 +2,15 @@
     target: "#radio-b",
     visible: true,
     from_keyboard: true
+  }, caret: {
+    target: "#empty",
+    offset: 0
   }, hover: "#email", render: {
     dirty: true,
     repaint: true,
     rects: 1
+  }, editing: {
+    active_surface: true
   }
   <html flags: ['hover', 'focus-within']
     <body index: 2, flags: ['hover', 'focus-within']

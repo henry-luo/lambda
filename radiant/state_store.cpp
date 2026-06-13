@@ -1626,8 +1626,6 @@ static void dom_boundary_to_legacy_projection(const DomBoundary& boundary,
 // ---------------------------------------------------------------------------
 extern "C" void state_store_refresh_caret_projection(DocState* state) {
     if (!state) return;
-    bool seq_current = state->selection_projection_seq == state->selection_mutation_seq;
-    if (seq_current && !state->selection_layout_dirty) return;
 
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
         if (!state_store_ensure_projection_storage(state)) return;
@@ -1659,29 +1657,45 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         View* view = static_cast<View*>(control);
 
         SelectionState* legacy = state->selection;
+        bool collapsed = start_u16 == end_u16;
+        bool control_focused = state->focus && state->focus->current == view;
+        bool caret_visible = collapsed && control_focused;
+        CaretState* caret = state->caret;
+        bool projection_changed =
+            legacy->anchor_view != view ||
+            legacy->focus_view != view ||
+            legacy->view != view ||
+            legacy->anchor_offset != anchor_offset ||
+            legacy->focus_offset != focus_offset ||
+            legacy->is_collapsed != collapsed ||
+            caret->view != view ||
+            caret->char_offset != focus_offset ||
+            caret->visible != caret_visible;
+
         bool was_selecting = legacy->is_selecting;
         legacy->anchor_view = view;
         legacy->focus_view = view;
         legacy->view = view;
         legacy->anchor_offset = anchor_offset;
         legacy->focus_offset = focus_offset;
-        legacy->is_collapsed = start_u16 == end_u16;
+        legacy->is_collapsed = collapsed;
         legacy->is_selecting = was_selecting;
 
-        CaretState* caret = state->caret;
         caret->view = view;
         caret->char_offset = focus_offset;
-        bool control_focused = state->focus && state->focus->current == view;
-        caret->visible = legacy->is_collapsed && control_focused;
+        caret->visible = caret_visible;
         caret->blink_time = 0;
 
         state->selection_layout_dirty = false;
         state->selection_projection_seq = state->selection_mutation_seq;
-        state->needs_repaint = true;
+        if (projection_changed) state->needs_repaint = true;
         log_debug("[SEL-PROJECT] text-control projection view=%p anchor=%d focus=%d collapsed=%d",
             (void*)view, anchor_offset, focus_offset, legacy->is_collapsed);
         return;
     }
+
+    bool seq_current = state->selection_projection_seq == state->selection_mutation_seq;
+    if (seq_current && !state->selection_layout_dirty) return;
 
     state_store_refresh_editing_selection_shadow(state);
     DomSelection* ds = state->dom_selection;

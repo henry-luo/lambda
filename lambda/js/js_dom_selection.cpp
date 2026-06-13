@@ -1271,6 +1271,7 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
     FormControlProp* f = elem->form;
     if (!f) return;
+    if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;

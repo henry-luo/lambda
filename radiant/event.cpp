@@ -2416,8 +2416,13 @@ static void rich_select_all_sync_descendant_text_controls(DocState* state,
     DomElement* elem = lam::dom_require_element(node);
     if (tc_is_text_control(elem)) {
         tc_ensure_init(elem);
-        uint32_t len = elem->form ? elem->form->current_value_u16_len : 0;
-        form_control_set_selection(state, static_cast<View*>(elem), 0, len, 1);
+        FormControlProp* form = elem->form;
+        if (!form) return;
+        uint32_t len = form->current_value_u16_len;
+        form->selection_start = 0;
+        form->selection_end = len;
+        form->selection_direction = len > 0 ? 1 : 0;
+        form_control_sync_text_control_state(state, static_cast<View*>(elem));
         return;
     }
 
