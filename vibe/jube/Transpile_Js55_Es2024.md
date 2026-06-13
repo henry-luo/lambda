@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 complete; P1 investigation surfaced a batch-mode discrepancy that invalidates the phase-by-phase root-cause analysis in §3 (see §12 Investigation Notes)
+Status: P0 + P1 + P10 done (14 admittable tests cleared: 12 from P1, 1 fix + 1 skip from P10); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); 59 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 134.8 s (well inside the +5% ceiling). See §12 for investigation history and §12.7 for the recommended next phase.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -590,13 +590,14 @@ The +5% runtime ceiling (≤142 s) is borderline; 144 s is 2 s over. Js55 phases
 | **P1 — D1** | **11** | **done** | One-site fix at js_runtime.cpp:2042-2073 — clears js_pending_new_target across the three return paths of the subclass-of-TA branch. 12 tests fixed (one extra captured by the same fix), 0 regressions. |
 | P2 — D2 | ~25 | pending | 39 Gate D failures remaining match proposal §3 D2/D3/D4 description (length re-derivation, OOB checks, RangeError, ReferenceError cascade). |
 | P3 — D3 | ~10 | pending | Overlaps with P2 — fix in same site. |
-| P4 — D4 | ~4 | pending | TA constructor max-byte-length check. |
+| **P4 — D4** | ~5 | **deferred** | Investigated 2026-06-13. Root cause is NOT a TA constructor max-byte-length check as §3 claims. It's a for-of let-binding closure-capture stale-read in the JIT scope-env mechanism (see §12.6 below). Fix surface is hot, broadly-used JIT path; risky without scope-env protocol audit. |
 | P5 — E1 | 7 | pending | Repro confirmed in module mode via batch protocol. Error path: `js_strict_throw_property_error("assign to read only", "name", 4)` fires twice (once per `export let/const = await new Promise(...)`). Investigation traced multiple `js_property_set` of `name=""` before the throw. Root cause requires further tracing (the proposal hypothesis "skip NamedEvaluation for AwaitExpression" needs to be verified — the existing var-decl path at js_mir_statement_lowering.cpp:373/429/504/646 already skips await; the actual emission site is elsewhere). |
 | P6 — E2 | 4 | pending | TLA capability chaining. |
 | P7 — E3 | 3 | pending | Promise.withResolvers cross-module. |
 | P8 — E4 | 4 | pending | Thenable await resume. |
-| P9 — E5 | 2 | pending | top-level-ticks SIGSEGV. |
-| P10 — F | 2 (+1 skip) | pending | v-flag tail. |
+| P9 — E5 | 2 | pending | top-level-ticks SIGSEGV intentionally kept on the failure list (not papered over via t262_partial.txt). Needs a real engine fix. |
+| P10(a) — F skip | 1 | done | `rgi-emoji-17.0.js` added to `test/js262/skip_list.txt` with Js56 deferral comment. Per proposal §3 Gate F item 1. |
+| **P10(b) — F fix** | **1** | **done** | One-line fix at `js_runtime.cpp:16252` — `utf16_replace` now considers `S->is_ascii`, not just the regex's `needs_utf16_subject`. Root cause was a unit-basis mismatch between `js_regex_exec` (returns `match.index` in UTF-16 code units whenever input has non-ASCII bytes) and `js_regexp_symbol_replace` (was treating `position` as a byte offset). 55/55 String.prototype.replace tests pass; baseline guard clean; 0 regressions. See §12.8 below. |
 | P11 — G | ~13 | pending | TA species + misc — note: most of "Gate G" overlaps with Gate D in the failure manifest's feature tags; the discrete Gate G work is smaller than proposed. |
 | P12 | admission | pending | Final baseline update. |
 
@@ -640,4 +641,105 @@ Fix surface lives in the JIT closure-capture / scope-env mechanism for `for-of l
 **Decision**: deferred. The actual fix is in a hot, broadly-used JIT path (closure binding for any `for (let x of …)` body that captures `x`); altering it without a clean understanding of the scope-env protocol risks regressions across hundreds of unrelated tests. P4 is left pending until a focused closure-capture diagnostic runs.
 
 **Pattern observation**: P1 and P4 are both JIT specialization stalenesses surfacing as RangeError/TypeError that the proposal blamed on TA constructors. Likely several of the remaining 39 Gate D / 20 Gate E failures share this shape — the failure error strings should be treated as symptoms, not diagnoses. A targeted audit of "values cached across for-of let-binding iterations" would probably clear another large batch in one site (just like P1's pending-new-target fix).
+
+## 12.7 Recommended next phase (2026-06-13)
+
+Ranked from lowest to highest risk, with two attractive options:
+
+### Option A (recommended) — **P10(a): skip rgi-emoji-17.0 (docs-only phase)**
+
+Single low-risk piece, strictly endorsed by §3 Gate F item 1:
+
+**P10(a) — skip `rgi-emoji-17.0.js`.** §3 Gate F item 1 says verbatim "out of scope unless the test262 sources upgrade. **Recommend defer to Js56**." Added: one entry in `test/js262/skip_list.txt` with the comment "requires Unicode 17 property tables; tracked for Js56." Result: 1 test off the failure list (63 → 62 admittable), 0 lines of C/C++ touched, 0 regression risk. Baseline guard after the change: 40187/40187, 0 regressions, 132.8 s — well inside the +5% ceiling.
+
+P9 (E5 — top-level-ticks SIGSEGV) was considered for the same flaky-partial treatment but is intentionally kept out of `t262_partial.txt`: the proposal's §3.E5 lists the partial-acceptance as a fallback only, and the maintainers want it surfaced as a real failure pressure for a future engine fix rather than papered over. **Keep it on the failure list until a real fix lands.**
+
+### Option B — **P10(b): regexp-prototype-replace-v-u-flag fix**
+
+Single test, targeted to one code path:
+
+- Test asserts `RegExp.prototype[Symbol.replace].call(/𠮷/g, '𠮷a𠮷b𠮷', '-') === '-a-b-'`.
+- Lambda currently returns `-a?-??????` — the surrogate-pair character `𠮷` (U+20BB7) is being mis-handled in the match-or-replace path.
+- Likely fix surface: `js_runtime.cpp` around the `Symbol.replace` dispatch and/or the UTF-8 ↔ UTF-16 boundary in regex match-iteration.
+- Risk: medium — touches a regex code path that the entire String.prototype.replace baseline relies on. Pre-flight required: diff all `built-ins/String/prototype/replace/*` outputs before/after.
+
+Skip if Option A is taken first — Option A gets us into a known-clean state from which Option B can be attempted with a smaller delta.
+
+### Options to AVOID next
+
+- **P2/P3 (D2/D3 length re-derivation)**: requires per-method audit of ~12 TA prototype methods (~50–80 LOC each). High blast radius. Save until a clean baseline is established and the for-of closure-capture pattern from P4 is resolved (some Gate D entries may then disappear without separate fixes).
+- **P4 (D4 closure-capture)**: as documented above, fix surface is the JIT scope-env / closure-binding code which underpins every `for (let x of …)` body in the engine. Requires a focused diagnostic separate from the §3 fix plan.
+- **P5–P8 (Gate E TLA cluster)**: each has its own batch-mode-vs-script reproduction question still open. Likely all four share an underlying TLA host-binding or pending-state-leak issue (analogous to P1) — a discovery pass should run before per-phase work.
+
+## 12.8 P10(b) walkthrough (2026-06-13)
+
+Failing assertion (first of seven):
+
+```js
+const text = '𠮷a𠮷b𠮷';  // 8 UTF-16 code units, 14 UTF-8 bytes
+const regex = /𠮷/g;
+RegExp.prototype[Symbol.replace].call(regex, text, '-');
+// expected: "-a-b-"   (5 code units, 5 UTF-8 bytes)
+// actual:   "-a�-𠮷" (6 code units; � = U+FFFD replacement char)
+```
+
+The actual output's exact byte sequence is `2D 61 F0 2D F0 A0 AE B7`. Decoding as UTF-8: `-`, `a`, F0 (orphan high byte → replacement char), `-`, then a valid `𠮷`.
+
+### Trace
+
+`js_regex_exec` at [js_runtime.cpp:15837](../../lambda/js/js_runtime.cpp) sets `code_unit_indices = input_s && !input_s->is_ascii` (line 15856) and then at line 15962:
+
+```cpp
+int match_index = (int)(matches[0].data() - match_chars);
+if (code_unit_indices) match_index = (int)js_utf16_index_from_byte(match_chars, match_len, match_index);
+```
+
+So for any non-ASCII input, `result.index` is a **UTF-16 code-unit count**, not a byte offset. RE2 still matches on raw UTF-8 bytes underneath, but the index reported back to JS is converted.
+
+Meanwhile `js_regexp_symbol_replace` at [js_runtime.cpp:16252](../../lambda/js/js_runtime.cpp) was deciding the unit basis purely from the regex compile flags:
+
+```cpp
+bool utf16_replace = fast_rd && fast_rd->needs_utf16_subject;
+```
+
+`needs_utf16_subject` is only set when the *pattern* contains a surrogate escape or a dot-atom (line 14358). For a literal pattern like `/𠮷/g`, it's false even though the *input* has surrogate code units. The replace loop at line 16462 then walks `position` as a byte offset:
+
+```cpp
+strbuf_append_str_n(buf, S->chars + next_source_pos, position - next_source_pos);
+```
+
+For our trace: matches reported at code-unit positions 0, 3, 6. Bytes consumed per match: 4 (`matched_len`). The byte loop adds bytes 4 to position-3 then position-6, splitting the second and third 𠮷 mid-UTF-8 sequence — hence the orphan F0.
+
+### Fix
+
+```cpp
+bool utf16_replace = (fast_rd && fast_rd->needs_utf16_subject) || (S && !S->is_ascii);
+```
+
+When `S` is non-ASCII, force `utf16_replace = true` so the replace loop:
+
+- computes `source_units` via `js_utf16_len(S->chars, S->len, S->is_ascii)`;
+- substitutes via `js_str_substring_utf16(str, next_source_pos, position)` for prefixes;
+- advances `next_source_pos` by `matched_units` (code units) rather than `matched_len` (bytes).
+
+This puts every count in the same basis as `result.index`. One line edited; the rest of the replace machinery already handles the utf16 branch correctly.
+
+### Why this is a Gate F win and not a v-flag tweak
+
+The proposal §3 Gate F item 2 named this test as "the replace edge case where `/v` flag interacts with the replacement function's argument coercion." That diagnosis was inverted by the failure: the very first assertion (using `/g`, no `/v`) was already failing, so v-flag interaction was never reached. The bug is older than v-flag — it would have surfaced on any non-ASCII replace any time `is_ascii` is false. v-flag tests just happen to exercise the path on supplementary-plane characters.
+
+Acceptance check post-fix:
+
+- Probe (the test itself): PASS
+- Pre-flight: 55/55 `built-ins/String/prototype/replace/*` PASS
+- Baseline guard: 40187/40187, 0 regressions, 134.8 s (well inside the +5 % ceiling)
+
+### Counter-cluster check
+
+Other call sites that may compare `position`/`index` with byte offsets after a `js_regex_exec`:
+- `js_regexp_symbol_match` ([js_runtime.cpp:16157](../../lambda/js/js_runtime.cpp)) — feeds `position` only into building the array result; doesn't mix with byte slicing.
+- `js_regexp_symbol_split` — same: uses code-unit indices throughout when constructing splits.
+- `js_string_replace_impl` ([js_runtime.cpp:19416](../../lambda/js/js_runtime.cpp)) — non-regex string replace; not affected.
+
+No further unit-basis fixes from this diagnosis. If a similar regression appears, the call-site pattern to look for is "uses `S->chars + position` after a `result.index` from `js_regex_exec`."
 
