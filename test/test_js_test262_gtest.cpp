@@ -2051,7 +2051,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Host OS: %s\n", get_host_os_summary().c_str());
     fprintf(f, "# Host capacity: %ld CPU cores, %s memory\n",
             get_host_cpu_cores(), format_memory_gib(get_host_memory_bytes()).c_str());
-    fprintf(f, "# Scope: ES2023 (skip ES2024+ features)\n");
+    fprintf(f, "# Scope: ES2024 (skip ES2025+ features)\n");
     fprintf(f, "# Total passing: %zu\n", passing.size());
     fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",
             total_tests, skipped, batched, passing.size(), failed);
