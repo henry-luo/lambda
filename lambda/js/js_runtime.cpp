@@ -14404,8 +14404,6 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
             && rewritten) {
             v_processed.assign(rewritten, rewritten_len);
             free(rewritten);
-            // log_debug("js regex /v runtime rewrite: '%.*s' -> %d bytes",
-            //     vpat_len, vpat, (int)v_processed.size());
             effective_pattern = v_processed.c_str();
             effective_pattern_len = (int)v_processed.size();
         }

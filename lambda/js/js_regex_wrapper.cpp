@@ -513,7 +513,7 @@ static void v_append_class_char(std::string& out, int c) {
 
 // Append code-point as a top-level literal (outside a class). Escape regex
 // metacharacters; otherwise emit as UTF-8/RE2 hex literal.
-static void v_append_topcode(std::string& out, int c) {
+static __attribute__((unused)) void v_append_topcode(std::string& out, int c) {
     // metacharacters that must be escaped outside class
     if (c == '\\' || c == '(' || c == ')' || c == '[' || c == ']' ||
         c == '{' || c == '}' || c == '.' || c == '*' || c == '+' ||
@@ -988,10 +988,30 @@ static bool v_parse_class(const std::string& s, size_t& i, VClassResult& result)
         // apply pending op
         if (pending_op == OP_DIFF) {
             acc.difference_with(el_ranges);
-            // (strings don't survive a difference; spec says \q strings on
-            // the RHS of `--` are not allowed in straightforward cases)
+            // Js54: difference filters out acc strings that also appear in el_strings.
+            if (!acc_strings.empty() && !el_strings.empty()) {
+                std::vector<std::string> kept;
+                kept.reserve(acc_strings.size());
+                for (auto& s : acc_strings) {
+                    bool drop = false;
+                    for (auto& e : el_strings) { if (s == e) { drop = true; break; } }
+                    if (!drop) kept.push_back(s);
+                }
+                acc_strings = std::move(kept);
+            }
         } else if (pending_op == OP_INTERSECT) {
             acc.intersect_with(el_ranges);
+            // Js54: intersection keeps only acc strings that appear in el_strings.
+            if (!acc_strings.empty()) {
+                std::vector<std::string> kept;
+                kept.reserve(acc_strings.size());
+                for (auto& s : acc_strings) {
+                    for (auto& e : el_strings) {
+                        if (s == e) { kept.push_back(s); break; }
+                    }
+                }
+                acc_strings = std::move(kept);
+            }
         } else {
             acc.union_with(el_ranges);
             for (auto& str : el_strings) acc_strings.push_back(str);
@@ -1159,8 +1179,21 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                 for (auto& st : real_strs) {
                     if (st.empty()) continue;
                     if (wrote_alt) out_str.push_back('|');
+                    // Emit raw UTF-8 bytes. Escape only ASCII regex meta-
+                    // characters; high bytes (>=0x80) pass through so RE2's
+                    // UTF-8 matcher consumes them as the intended codepoints.
                     for (size_t k = 0; k < st.size(); k++) {
-                        v_append_topcode(out_str, (unsigned char)st[k]);
+                        unsigned char ub = (unsigned char)st[k];
+                        if (ub < 0x80 &&
+                            (ub == '\\' || ub == '(' || ub == ')' ||
+                             ub == '[' || ub == ']' || ub == '{' ||
+                             ub == '}' || ub == '.' || ub == '*' ||
+                             ub == '+' || ub == '?' || ub == '|' ||
+                             ub == '^' || ub == '$' || ub == '/' ||
+                             ub == '#')) {
+                            out_str.push_back('\\');
+                        }
+                        out_str.push_back((char)ub);
                     }
                     wrote_alt = true;
                 }
@@ -1213,6 +1246,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     if (unicode_sets) {
         if (!rewrite_v_flag_classes(original_in, sets_rewritten)) return false;
         // log_debug("js regex /v rewrite: '%s' -> '%s'", original_in.c_str(), sets_rewritten.c_str());
+
     }
     const std::string& effective_input = unicode_sets ? sets_rewritten : original_in;
     // Prepass: rewrite empty character classes that RE2 doesn't accept,
@@ -1862,9 +1896,19 @@ static bool validate_unicode_strict(const std::string& pat, bool unicode_sets) {
                 bool is_shorthand = (nx == 'd' || nx == 'D' || nx == 's' || nx == 'S' ||
                                      nx == 'w' || nx == 'W' || nx == 'p' || nx == 'P');
                 // check for character class shorthand in range: e.g., [\d-a] or [a-\d]
-                if (i + 2 < n && pat[i + 2] == '-' && i + 3 < n && pat[i + 3] != ']') {
+                // Js54 P10: under /v, `--` is the set-difference operator, not a
+                // range that involves the shorthand. Skip the shorthand-range
+                // check when the dash is actually part of `--`.
+                bool dash_is_set_op = unicode_sets && i + 3 < n &&
+                                      pat[i + 2] == '-' && pat[i + 3] == '-';
+                if (!dash_is_set_op && i + 2 < n && pat[i + 2] == '-' &&
+                    i + 3 < n && pat[i + 3] != ']') {
                     if (is_shorthand) return false; // [\d-X]
                 }
+                // Same: `[X-\d]` is only illegal when the dash is a literal range
+                // marker, not part of `&&` or anything similar — but the check
+                // here is on the prior token. Under /v with set ops, `--`/`&&`
+                // already consumed the dash above before we'd reach this point.
                 if (class_prev_was_shorthand && (i > 0 && pat[i - 1] == '-')) {
                     return false; // [X-\d]
                 }
