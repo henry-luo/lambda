@@ -16249,7 +16249,16 @@ static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) 
         if (js_exception_pending) return ItemNull;
     }
     JsRegexData* fast_rd = js_get_regex_data(this_val);
-    bool utf16_replace = fast_rd && fast_rd->needs_utf16_subject;
+    // Js55 P10b: js_regex_exec returns match.index in UTF-16 code units whenever
+    // the input string has non-ASCII bytes (see `code_unit_indices` at
+    // js_runtime.cpp:15856). The replace loop below uses `position` as either
+    // a byte offset (utf16_replace=false) or a code-unit index
+    // (utf16_replace=true). Without this fix a non-ASCII input + a regex that
+    // doesn't set needs_utf16_subject (e.g. literal /𠮷/g) walks `position` as
+    // bytes, splits multi-byte UTF-8 sequences, and emits replacement chars in
+    // the output. Setting utf16_replace=true whenever S is non-ASCII keeps the
+    // unit basis consistent across exec and substring/append.
+    bool utf16_replace = (fast_rd && fast_rd->needs_utf16_subject) || (S && !S->is_ascii);
     int64_t source_units = utf16_replace && S ?
         js_utf16_len(S->chars, (int)S->len, (bool)S->is_ascii) : lengthS;
     if (fast_rd && fast_rd->global && !functional_replace) {
