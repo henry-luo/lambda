@@ -198,6 +198,8 @@ fn render_command(node, context) {
         render_css_id_command(node, context)
     } else if (name_str == "htmlData") {
         render_html_data_command(node, context)
+    } else if (is_math_size_name(name_str)) {
+        box.text_box("", null, "mord")
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -1163,8 +1165,8 @@ fn render_delimiter_group(node, context) {
 }
 
 fn render_small_delimiter_group(left_text, right_text, spaced, content) {
-    let left_char = delims.resolve_char(left_text)
-    let right_char = delims.resolve_char(right_text)
+    let left_char = small_left_right_char(left_text)
+    let right_char = small_left_right_char(right_text)
     let left_el = small_delim_el(left_char, css.OPEN)
     let right_el = small_delim_el(right_char, css.CLOSE)
     let content_elements = box.child_elements(spaced)
@@ -1195,6 +1197,17 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn small_left_right_char(delim_text) {
+    if (is_arrow_delimiter_text(delim_text)) "\\\\"
+    else delims.resolve_char(delim_text)
+}
+
+fn is_arrow_delimiter_text(delim_text) {
+    delim_text == "\\uparrow" or delim_text == "\\downarrow" or
+    delim_text == "\\updownarrow" or delim_text == "\\Uparrow" or
+    delim_text == "\\Downarrow" or delim_text == "\\Updownarrow"
 }
 
 fn is_shallow_small_delim(ch) {
@@ -1657,6 +1670,9 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
+    else if (is_size_switch(node, i))
+        (let rendered = render_size_switch_tail(node, context, i),
+         acc ++ [rendered])
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
@@ -1846,6 +1862,56 @@ fn is_scriptstyle_switch(node, i) {
          child.arg == null and len(child) == 0)
 }
 
+fn is_size_switch(node, i) {
+    let child = if (i < len(node)) node[i] else null
+    child is element and name(child) == 'command' and len(child) == 0 and
+        is_math_size_name(command_name(child))
+}
+
+fn render_size_switch_tail(node, context, i) {
+    let scale = math_size_scale(command_name(node[i]))
+    let children = render_children_scan(node, context, i + 1, [])
+    let spaced = apply_spacing(children, context)
+    let hb = transparent_hbox(spaced)
+    let elements = box.child_elements(spaced)
+    let pct = string(round(scale * 1000.0) / 10.0) ++ "%"
+    {
+        element: <span style: "font-size: " ++ pct;
+            for (el in elements) el
+        >,
+        height: hb.height * scale,
+        depth: hb.depth * scale,
+        render_height: if (hb.render_height != null) hb.render_height * scale else null,
+        render_depth: if (hb.render_depth != null) hb.render_depth * scale else null,
+        render_total: if (hb.render_total != null) hb.render_total * scale else null,
+        left_right_render_depth: if (hb.left_right_render_depth != null) hb.left_right_render_depth * scale else null,
+        left_right_render_total: if (hb.left_right_render_total != null) hb.left_right_render_total * scale else null,
+        width: hb.width * scale,
+        type: hb.type,
+        italic: hb.italic * scale,
+        skew: hb.skew * scale,
+        is_middle_delim: has_middle_delim(spaced, 0)
+    }
+}
+
+fn is_math_size_name(size_name) {
+    math_size_scale(size_name) != 0.0
+}
+
+fn math_size_scale(size_name) {
+    if (size_name == "tiny") 0.5
+    else if (size_name == "scriptsize") 0.7
+    else if (size_name == "footnotesize") 0.8
+    else if (size_name == "small") 0.9
+    else if (size_name == "normalsize") 1.0
+    else if (size_name == "large") 1.2
+    else if (size_name == "Large") 1.44
+    else if (size_name == "LARGE") 1.728
+    else if (size_name == "huge") 2.074
+    else if (size_name == "Huge") 2.488
+    else 0.0
+}
+
 fn render_scriptstyle_sibling(child, context) {
     let bx = render_node(child, ctx.derive(context, {style: "script"}))
     style_wrap_box(bx, "font-size: 70%")
@@ -1964,7 +2030,8 @@ fn box_with_suppress_depth(bx) {
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
-        suppress_hbox_text_depth: true
+        suppress_hbox_text_depth: true,
+        is_middle_delim: bx.is_middle_delim
     }
 }
 
