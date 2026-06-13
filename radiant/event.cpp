@@ -1359,6 +1359,72 @@ static DomText* rich_find_text_descendant(DomNode* node, bool last) {
     return found;
 }
 
+static bool rich_selection_is_host_child_range(const EditingSurface* surface,
+                                               const DomSelection* selection) {
+    if (!surface || !surface->owner || !selection || selection->range_count == 0 ||
+        selection->is_collapsed || !selection->ranges[0]) {
+        return false;
+    }
+
+    DomRange* range = selection->ranges[0];
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    if (range->start.node != owner_node || range->end.node != owner_node) {
+        return false;
+    }
+    if (range->start.offset != 0) return false;
+    return range->end.offset == dom_node_boundary_length(owner_node);
+}
+
+static bool rich_selection_single_text_range(const DomSelection* selection,
+                                             DomText** out_text,
+                                             uint32_t* out_start,
+                                             uint32_t* out_end) {
+    if (out_text) *out_text = nullptr;
+    if (out_start) *out_start = 0;
+    if (out_end) *out_end = 0;
+    if (!selection || selection->range_count == 0 || selection->is_collapsed ||
+        !selection->ranges[0]) {
+        return false;
+    }
+
+    DomRange* range = selection->ranges[0];
+    if (!range->start.node || range->start.node != range->end.node ||
+        !range->start.node->is_text()) {
+        return false;
+    }
+
+    DomText* text = lam::dom_require_text(range->start.node);
+    uint32_t start = dom_text_utf16_to_utf8(text, range->start.offset);
+    uint32_t end = dom_text_utf16_to_utf8(text, range->end.offset);
+    if (end < start) {
+        uint32_t tmp = start;
+        start = end;
+        end = tmp;
+    }
+    if (out_text) *out_text = text;
+    if (out_start) *out_start = start;
+    if (out_end) *out_end = end;
+    return true;
+}
+
+static bool rich_delete_dom_selection(DocState* state, DomSelection* selection) {
+    if (!state || !selection || selection->range_count == 0 ||
+        selection->is_collapsed || !selection->ranges[0]) {
+        return false;
+    }
+
+    dom_selection_delete_from_document(selection);
+    DomRange* range = selection->ranges[0];
+    if (range && range->start.node) {
+        const char* exc = nullptr;
+        dom_selection_collapse(selection, range->start.node, range->start.offset, &exc);
+    }
+    legacy_sync_from_dom_selection(state);
+    doc_state_request_reflow(state);
+    state->needs_repaint = true;
+    return true;
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state || !selection_has(state)) return false;
     View* surface_target = nullptr;
@@ -1372,7 +1438,7 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     char* html = extract_selected_html(state, temp_arena);
     bool copied = false;
     if (html && html[0] && text) {
-        clipboard_store_write_html(html, text);
+        clipboard_copy_rich(html, text);
         log_debug("%s: copied rich selection html=%zu text=%zu", prefix ? prefix : "copy selection", strlen(html), strlen(text));
         copied = true;
     } else if (text) {
@@ -2102,8 +2168,10 @@ static bool rich_text_default_replace(EventContext* evcon,
         intent->type != INPUT_INTENT_INSERT_REPLACEMENT_TEXT &&
         intent->type != INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
         intent->type != INPUT_INTENT_INSERT_FROM_COMPOSITION &&
+        intent->type != INPUT_INTENT_INSERT_FROM_PASTE &&
         intent->type != INPUT_INTENT_INSERT_PARAGRAPH &&
         intent->type != INPUT_INTENT_INSERT_LINE_BREAK &&
+        intent->type != INPUT_INTENT_DELETE_BY_CUT &&
         intent->type != INPUT_INTENT_DELETE_CONTENT_BACKWARD &&
         intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD) {
         return false;
@@ -2115,7 +2183,34 @@ static bool rich_text_default_replace(EventContext* evcon,
     DomSelection* dom_selection = state->dom_selection;
     if (dom_selection && dom_selection->range_count > 0 &&
         dom_selection->ranges[0] && !dom_selection->is_collapsed) {
-        return false;
+        EditingSurface surface;
+        if (rich_selection_single_text_range(dom_selection, &text, &start, &end)) {
+            // replace the selected text below
+        } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+            return rich_delete_dom_selection(state, dom_selection);
+        } else if (intent->type == INPUT_INTENT_INSERT_FROM_PASTE) {
+            if (!rich_delete_dom_selection(state, dom_selection)) return false;
+            View* caret_view = nullptr;
+            int caret_offset = 0;
+            if (!caret_get_position(state, &caret_view, &caret_offset) ||
+                !caret_view || !caret_view->is_text()) {
+                return false;
+            }
+            text = lam::dom_require_text(static_cast<DomNode*>(caret_view));
+            start = caret_offset < 0 ? 0 : (uint32_t)caret_offset;
+            end = start;
+        } else {
+            if (!editing_surface_from_target(fallback_view, &surface) ||
+                !editing_surface_is_rich(&surface) ||
+                !rich_selection_is_host_child_range(&surface, dom_selection)) {
+                return false;
+            }
+            text = rich_find_text_descendant(static_cast<DomNode*>(surface.owner), true);
+            if (!text) return false;
+            const char* selected_text = text->text ? text->text : "";
+            start = text->length > 0 ? (uint32_t)text->length : (uint32_t)strlen(selected_text);
+            end = start;
+        }
     } else {
         View* caret_view = nullptr;
         int caret_offset = 0;
@@ -2147,6 +2242,8 @@ static bool rich_text_default_replace(EventContext* evcon,
     if (intent->type == INPUT_INTENT_INSERT_PARAGRAPH ||
         intent->type == INPUT_INTENT_INSERT_LINE_BREAK) {
         data = "\n";
+    } else if (intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+        data = "";
     } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
                intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD) {
         data = "";
@@ -2208,6 +2305,18 @@ static bool rich_text_default_replace(EventContext* evcon,
     uint32_t caret_offset = start + data_len;
     caret_set(state, static_cast<View*>(live_text),
               (int)caret_offset); // INT_CAST_OK: StateStore caret API uses int offsets.
+    if (intent->type == INPUT_INTENT_DELETE_BY_CUT && state->dom_selection) {
+        const char* exc = nullptr;
+        uint32_t caret_u16 = dom_text_utf8_to_utf16(live_text, caret_offset);
+        if (!dom_selection_collapse(state->dom_selection,
+                                    static_cast<DomNode*>(live_text),
+                                    caret_u16, &exc)) {
+            log_debug("rich_text_default_replace: cut collapse rejected: %s",
+                      exc ? exc : "?");
+        } else {
+            legacy_sync_from_dom_selection(state);
+        }
+    }
     EditingSurface live_surface;
     if (editing_surface_from_target(static_cast<View*>(live_text), &live_surface) &&
         editing_surface_is_rich(&live_surface)) {
@@ -7716,8 +7825,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool beforeinput_prevented = false;
                     bool beforeinput_lambda_handled = false;
                     bool defaultable =
+                        intent.type == INPUT_INTENT_INSERT_FROM_PASTE ||
                         intent.type == INPUT_INTENT_INSERT_PARAGRAPH ||
                         intent.type == INPUT_INTENT_INSERT_LINE_BREAK ||
+                        intent.type == INPUT_INTENT_DELETE_BY_CUT ||
                         intent.type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
                         intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD;
                     if (defaultable &&

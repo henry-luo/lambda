@@ -7302,13 +7302,17 @@ char* extract_html_from_view(View* view, Arena* arena) {
 }
 
 char* extract_selected_text(DocState* state, Arena* arena) {
-    if (!state || !state->selection || state->selection->is_collapsed || !arena) {
+    if (!state || !arena) {
         return NULL;
     }
 
     if (state->dom_selection && state->dom_selection->range_count > 0 &&
         !state->dom_selection->is_collapsed && state->dom_selection->ranges[0]) {
         return extract_dom_range_text_to_arena(state->dom_selection->ranges[0], arena);
+    }
+
+    if (!state->selection || state->selection->is_collapsed) {
+        return NULL;
     }
 
     SelectionState* sel = state->selection;
@@ -7339,7 +7343,7 @@ char* extract_selected_text(DocState* state, Arena* arena) {
 }
 
 char* extract_selected_html(DocState* state, Arena* arena) {
-    if (!state || !state->selection || state->selection->is_collapsed || !arena) {
+    if (!state || !arena) {
         return NULL;
     }
 
@@ -7368,6 +7372,10 @@ char* extract_selected_html(DocState* state, Arena* arena) {
         char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
         strbuf_free(sb);
         return result;
+    }
+
+    if (!state->selection || state->selection->is_collapsed) {
+        return NULL;
     }
 
     // For now, just return HTML-escaped text
@@ -7439,4 +7447,20 @@ void clipboard_copy_html(const char* html) {
         glfwSetClipboardString(ui_context.window, html);
     }
     log_debug("clipboard_copy_html: wrote text/html (%zu bytes) + text/plain mirror", strlen(html));
+}
+
+void clipboard_copy_rich(const char* html, const char* plain_text) {
+    if (!html && !plain_text) return;
+    const char* text = plain_text ? plain_text : "";
+    if (html && html[0]) {
+        clipboard_store_write_html(html, text);
+    } else {
+        clipboard_store_write_text(text);
+    }
+    extern UiContext ui_context;
+    if (ui_context.window && !ui_context.headless) {
+        glfwSetClipboardString(ui_context.window, text);
+    }
+    log_debug("clipboard_copy_rich: wrote html=%zu plain=%zu",
+              html ? strlen(html) : 0, strlen(text));
 }

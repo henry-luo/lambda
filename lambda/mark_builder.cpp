@@ -139,7 +139,7 @@ String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
 }
 
 String* MarkBuilder::createDomTextString(const char* str, size_t len) {
-    if (!str || len == 0) return nullptr;
+    if (!str) return nullptr;
 
     // Allocate [DomText][String header][chars...\0] as one contiguous block
     // Used in ui_mode for text content that becomes DomText nodes in layout

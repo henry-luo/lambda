@@ -1306,10 +1306,15 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
         return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
-    if (!ab || ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+    // Js54 P6: spec §25.1.5.2 has just one detach check, AFTER ToIntegerOrInfinity.
+    // If the buffer is already detached at entry, the coercion still runs (and
+    // can have side effects); we throw afterwards. Test:
+    // built-ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js.
+    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
     if (!ab->resizable) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
     if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
+    if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
     if (new_length > ab->max_byte_length) return js_throw_range_error("Invalid array buffer length");
 
     void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
@@ -1726,7 +1731,13 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
 
     bool length_tracking = length < 0;
     if (length_tracking) {
-        if (available % elem_size != 0) {
+        // Js54 P6: per ES2024 §10.4.5.5 step 8, the alignment check is only
+        // required for non-resizable buffers. Resizable buffers with undefined
+        // length use auto-tracking and simply floor: the spec ignores the
+        // trailing remainder. Without this fix `new Float64Array(rab)` over a
+        // resizable buffer whose byteLength isn't a multiple of 8 throws
+        // RangeError, blocking the species-ctor cluster.
+        if (!ab->resizable && (available % elem_size != 0)) {
             return js_throw_range_error("Invalid typed array byteLength");
         }
         length = available / elem_size;

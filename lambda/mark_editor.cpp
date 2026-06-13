@@ -64,9 +64,9 @@ MarkEditor::~MarkEditor() {
  * Rebuild the DOM first_child/last_child/next_sibling/prev_sibling linked list
  * from the Element's items[] array. Called after inline child mutations in ui_mode.
  *
- * In ui_mode, each Element in items[] is embedded inside a DomElement (via fat pointer),
- * and each String is embedded inside a DomText. We recover the DomNode* from each Item
- * and link them into the sibling chain.
+ * In ui_mode, Element children are embedded inside DomElement. String children may
+ * be embedded inside DomText, or may need a normal backed DomText wrapper when the
+ * source tree was parsed before editing.
  */
 void MarkEditor::dom_relink_children(Element* parent_elem) {
     DomElement* parent = element_to_dom_element(parent_elem);
@@ -86,9 +86,17 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
         } else if (tid == LMD_TYPE_STRING) {
             String* s = child.get_safe_string();
             if (s) {
-                DomText* dt = string_to_dom_text(s);
+                DomText* dt = nullptr;
+                DomText* candidate = string_to_dom_text(s);
                 // safety: verify this is a fat DomText-String allocation
-                if (dt->node_type == DOM_NODE_TEXT && dt->native_string == s) {
+                if (arena_owns(parent->doc->arena, candidate) &&
+                    candidate->node_type == DOM_NODE_TEXT &&
+                    candidate->native_string == s) {
+                    dt = candidate;
+                } else {
+                    dt = dom_text_create(s, parent);
+                }
+                if (dt) {
                     node = static_cast<DomNode*>(dt);
                 }
             }

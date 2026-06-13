@@ -17418,6 +17418,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item result = js_typed_array_species_create(obj, len);
                 if (js_check_exception()) return ItemNull;
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17597,6 +17598,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    // Js54 P6: Array.prototype.forEach uses HasProperty per spec;
+                    // for TA receivers, indices beyond current length (post-resize
+                    // OOB) are absent and the callback is NOT invoked.
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17633,6 +17638,8 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     return js_throw_type_error("Reduce of empty array with no initial value");
                 }
                 for (int i = start_idx; i < len; i++) {
+                    // Js54 P6: skip post-resize OOB indices in array-mode (HasProperty=false).
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
@@ -17659,6 +17666,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17687,6 +17695,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17715,6 +17724,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17743,6 +17753,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17772,6 +17783,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17801,6 +17813,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
@@ -17845,6 +17858,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     return ItemNull;
                 }
                 for (int i = start_idx; i >= 0; i--) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[4] = {acc, elem, idx_item, obj};
@@ -17971,6 +17985,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_JS_RUNTIME);
                 int count = 0;
                 for (int i = 0; i < len; i++) {
+                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
                     Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
