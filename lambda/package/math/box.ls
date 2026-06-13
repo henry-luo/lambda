@@ -70,6 +70,8 @@ fn text_element(text, cls) {
 fn text_style(text, cls) {
     if (cls == "lcGreek lm_mathit" and text == "α") "margin-right:0.01em"
     else if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
+    else if (cls == css.MATHIT and text == "g") "margin-right:0.04em"
+    else if (cls == css.MATHIT and text == "j") "margin-right:0.06em"
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
@@ -405,6 +407,7 @@ pub fn with_color(bx, color) {
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
-        suppress_hbox_text_depth: bx.suppress_hbox_text_depth
+        suppress_hbox_text_depth: bx.suppress_hbox_text_depth,
+        is_middle_delim: bx.is_middle_delim
     })
 }

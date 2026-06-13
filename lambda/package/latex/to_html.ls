@@ -104,12 +104,31 @@ fn serialize_attrs_rec(pairs, i, n, acc) {
 }
 
 fn format_attr(key, val) {
-    if (val is bool) {
+    if (string(key) == "math_data_attrs") {
+        format_data_attrs(val)
+    }
+    else if (val is bool) {
         if (val == true) { " " ++ key }
         else { "" }
     }
     else if (val == null) { "" }
     else { " " ++ key ++ "=\"" ++ escape_attr(string(val)) ++ "\"" }
+}
+
+fn format_data_attrs(attrs) {
+    if (attrs == null) ""
+    else format_data_attrs_rec(attrs, 0, len(attrs), "")
+}
+
+fn format_data_attrs_rec(attrs, i, n, acc) {
+    if (i >= n) acc
+    else
+        (let attr = attrs[i],
+         let s = if (attr.has_value == true)
+            " " ++ attr.name ++ "=\"" ++ escape_attr(string(attr.value)) ++ "\""
+         else
+            " " ++ attr.name ++ " ",
+         format_data_attrs_rec(attrs, i + 1, n, acc ++ s))
 }
 
 // ============================================================

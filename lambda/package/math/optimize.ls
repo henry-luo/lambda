@@ -4,7 +4,8 @@ fn can_merge(a, b) {
     if (not (a is element) or not (b is element)) false
     else if (len(a) != 1 or len(b) != 1) false
     else if (not (a[0] is string) or not (b[0] is string)) false
-    else a.class == b.class and a.style == null and b.style == null
+    else a.math_data_attrs == null and b.math_data_attrs == null and
+        a.class == b.class and a.style == null and b.style == null
 }
 
 fn merge_two(a, b) {
@@ -43,7 +44,7 @@ fn build_merged(el) {
         (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
-         <span class: el.class, style: el.style, id: el.id;
+         <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs;
              for (c in items) c
          >)
 }
