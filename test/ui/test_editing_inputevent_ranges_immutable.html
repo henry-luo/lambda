@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>InputEvent target ranges immutable snapshot</title>
+  <style>
+    body { font: 16px Arial, sans-serif; padding: 16px; }
+    #surface { border: 1px solid #888; min-height: 36px; padding: 8px; width: 280px; }
+    #range-log, #input-log { margin-top: 8px; font: 13px monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="surface" contenteditable="true" tabindex="0">seed</div>
+  <div id="range-log">ranges:none</div>
+  <div id="input-log">input:none</div>
+  <script>
+    var surface = document.getElementById('surface');
+    var rangeLog = document.getElementById('range-log');
+    var inputLog = document.getElementById('input-log');
+
+    surface.addEventListener('beforeinput', function(event) {
+      var first = event.getTargetRanges();
+      var firstText = first.length ? first[0].startOffset + '-' + first[0].endOffset : 'empty';
+      if (first.length) {
+        try { first[0].startOffset = 99; } catch (err) {}
+      }
+      var firstAfter = first.length ? first[0].startOffset + '-' + first[0].endOffset : 'empty';
+      first.length = 0;
+
+      var second = event.getTargetRanges();
+      var secondText = second.length ? second[0].startOffset + '-' + second[0].endOffset : 'empty';
+      if (second.length) {
+        try { second[0].endOffset = 77; } catch (err) {}
+      }
+      var secondAfter = second.length ? second[0].startOffset + '-' + second[0].endOffset : 'empty';
+
+      var third = event.getTargetRanges();
+      var thirdText = third.length ? third[0].startOffset + '-' + third[0].endOffset : 'empty';
+      rangeLog.textContent = 'ranges:' + firstText + ':' + firstAfter + '|' +
+        second.length + ':' + secondText + ':' + secondAfter + '|' +
+        third.length + ':' + thirdText;
+    });
+
+    surface.addEventListener('input', function(event) {
+      var ranges = event.getTargetRanges();
+      var text = ranges.length ? ranges[0].startOffset + '-' + ranges[0].endOffset : 'empty';
+      inputLog.textContent = 'input:' + event.inputType + '|' + surface.textContent + '|' + text;
+    });
+  </script>
+</body>
+</html>

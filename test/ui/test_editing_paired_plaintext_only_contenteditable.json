@@ -16,12 +16,25 @@
     {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertLineBreak||1|7-7"},
     {"type": "assert_editing_value", "target": {"selector": "#plain"}, "equals": "plainpt\n"},
+    {"type": "set_editing_selection", "target": {"selector": "#plain"}, "start": 8, "end": 8},
+    {"type": "editing_text_drag_drop",
+     "target": {"selector": "#surface", "start": 0, "end": 2},
+     "to_target": {"selector": "#plain", "start": 8, "end": 8},
+     "text": "dr",
+     "html": "<em>dr</em>",
+     "move": false},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#before-log"}, "contains": "before:insertFromDrop|dr|1|8-8|dt:text/plain:plain=dr:html="},
+    {"type": "assert_editing_value", "target": {"selector": "#plain"}, "equals": "plainpt\ndr"},
     {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromPaste", "surface": "contenteditable", "mode": "plaintext_only", "min": 2},
     {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertLineBreak", "surface": "contenteditable", "mode": "plaintext_only", "min": 2},
-    {"type": "assert_event_log", "contains": "\"history_boundary\":true", "min": 2},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromDrop", "surface": "contenteditable", "mode": "plaintext_only", "min": 2},
+    {"type": "assert_event_log", "contains": "\"history_boundary\":true", "min": 3},
     {"type": "assert_event_log", "contains": "\"boundary_reason\":\"paste\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"boundary_reason\":\"enter\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"boundary_reason\":\"drop\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"transfer_kind\":\"paste\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"html_data_len\":0", "min": 1}
+    {"type": "assert_event_log", "contains": "\"transfer_kind\":\"drop\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"html_data_len\":0", "min": 2}
   ]
 }

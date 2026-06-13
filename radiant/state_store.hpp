@@ -214,6 +214,9 @@ typedef struct DragDropState {
     bool active;                   // true after movement exceeds threshold
     bool pending;                  // true between mousedown and threshold check
     View* drop_target;             // current drop target under cursor (has dropzone attr)
+    bool has_drop_range;           // true when drop_start/drop_end are valid
+    DomBoundary drop_start;        // target range captured during live dragover
+    DomBoundary drop_end;
     const char* drag_data;         // application-defined drag data type
 } DragDropState;
 
@@ -899,7 +902,9 @@ DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
                                          const char* drag_data);
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y);
 void doc_state_set_drag_drop_active(DocState* state, bool active);
-void doc_state_set_drag_drop_target(DocState* state, View* drop_target);
+void doc_state_set_drag_drop_target(DocState* state, View* drop_target,
+                                    const DomBoundary* drop_start,
+                                    const DomBoundary* drop_end);
 void doc_state_clear_drag_drop(DocState* state);
 void editing_interaction_sync_projection(DocState* state);
 void editing_interaction_set_active_surface(DocState* state,
@@ -1214,6 +1219,13 @@ char* extract_selected_text(DocState* state, Arena* arena);
  * @return Selected HTML, or NULL if no selection
  */
 char* extract_selected_html(DocState* state, Arena* arena);
+
+/**
+ * Extract the canonical StateStore editing selection as plain text / HTML.
+ * These do not fall back to legacy caret/selection projections.
+ */
+char* state_store_extract_selection_text(DocState* state, Arena* arena);
+char* state_store_extract_selection_html(DocState* state, Arena* arena);
 
 /**
  * Copy text to system clipboard

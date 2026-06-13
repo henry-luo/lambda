@@ -98,6 +98,9 @@ typedef struct DragTransitionArgs {
     bool active;
     float x;
     float y;
+    bool has_drop_range;
+    DomBoundary drop_start;
+    DomBoundary drop_end;
     const char* drag_data;
 } DragTransitionArgs;
 

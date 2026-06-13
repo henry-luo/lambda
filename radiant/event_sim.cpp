@@ -81,6 +81,7 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
                                                          uint32_t target_start,
                                                          uint32_t target_end,
                                                          const char* payload,
+                                                         const char* html_payload,
                                                          bool move);
 
 // Forward declaration for parse_json
@@ -1136,6 +1137,8 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             : ev->drag_target_end;
         const char* text = reader.get("text").cstring();
         if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        const char* html = reader.get("html").cstring();
+        if (html) ev->clipboard_html = mem_strdup(html, MEM_CAT_LAYOUT);
         ev->drag_move = reader.has("move") ? reader.get("move").asBool() : true;
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: editing_text_drag_drop missing 'target'");
@@ -3468,14 +3471,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             uint32_t target_end = ev->drag_target_end < 0
                 ? target_start
                 : (uint32_t)ev->drag_target_end;
-            log_info("event_sim: editing_text_drag_drop source=[%u..%u] target=[%u..%u] move=%d text_len=%zu",
+            log_info("event_sim: editing_text_drag_drop source=[%u..%u] target=[%u..%u] move=%d text_len=%zu html_len=%zu",
                      source_start, source_end, target_start, target_end,
                      ev->drag_move ? 1 : 0,
-                     ev->input_text ? strlen(ev->input_text) : 0);
+                     ev->input_text ? strlen(ev->input_text) : 0,
+                     ev->clipboard_html ? strlen(ev->clipboard_html) : 0);
             bool ok = radiant_dispatch_editing_text_drag_drop(
                 uicon, src_view, source_start, source_end,
                 dst_view, target_start, target_end,
-                ev->input_text, ev->drag_move);
+                ev->input_text, ev->clipboard_html, ev->drag_move);
             if (!ok) {
                 log_error("event_sim: editing_text_drag_drop failed");
                 ctx->fail_count++;
