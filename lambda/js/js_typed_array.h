@@ -109,6 +109,11 @@ int  js_arraybuffer_byte_length(Item val);
 int  js_arraybuffer_max_byte_length(Item val);
 bool js_arraybuffer_is_resizable(Item val);
 Item js_arraybuffer_resize(Item val, Item new_length_item);
+// Js54 P8: ArrayBuffer.prototype.transfer(newLength?) and transferToFixedLength(newLength?).
+// Both create a new ArrayBuffer of newLength bytes (defaults to source.byteLength),
+// copy min(srcByteLength, newLength) bytes, and detach the source.
+Item js_arraybuffer_transfer(Item val, Item new_length_item, int argc);
+Item js_arraybuffer_transfer_to_fixed_length(Item val, Item new_length_item, int argc);
 Item js_arraybuffer_slice(Item val, int begin, int end);
 Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc);
 bool js_arraybuffer_is_view(Item val);

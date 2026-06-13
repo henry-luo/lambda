@@ -72,6 +72,22 @@ JsRegexCompiled* js_regex_wrapper_compile(const char* pattern, int pattern_len,
 bool js_regex_wrapper_validate_unicode(const char* pattern, int pattern_len);
 
 /**
+ * Js54 P9: Validate pattern under Unicode-sets (`v`) mode. Same as the `u`
+ * validator but additionally allows nested character classes, set operators
+ * `--` and `&&`, and `\q{...}` quoted-string alternation inside classes.
+ */
+bool js_regex_wrapper_validate_unicode_sets(const char* pattern, int pattern_len);
+
+/**
+ * Js54 P10: Rewrite all /v-flag character classes in `in_buf` (UTF-8) to
+ * RE2-compatible syntax. On success, *out_buf is set to a newly-malloc'd
+ * null-terminated UTF-8 buffer of *out_len bytes. Caller must `free` it.
+ * Returns false if the pattern contains a malformed /v class.
+ */
+bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, int in_len,
+                                                char** out_buf, int* out_len);
+
+/**
  * Execute a compiled regex against input text.
  * Returns number of matches found (0 = no match).
  * match_starts[i] and match_ends[i] are filled with byte offsets for each group.
