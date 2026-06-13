@@ -241,24 +241,6 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: "70%",
             rule_height: 0.04
         }
-    } else if (child_total >= 1.15) {
-        {
-            height: 1.57,
-            depth: 1.06,
-            render_height: 1.57,
-            render_depth: 1.06,
-            render_total: 2.64,
-            left_right_render_depth: 1.069108,
-            left_right_render_total: 2.638216,
-            depth_holder: 1.07,
-            denom_top: -2.27,
-            line_top: -3.23,
-            numer_top: -3.73,
-            numer_child_height: 1.18,
-            denom_child_height: 1.18,
-            child_font_pct: null,
-            rule_height: 0.04
-        }
     } else if (numer_total >= 0.95 and denom_total < 0.95) {
         {
             height: 1.39,
@@ -288,6 +270,24 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             numer_top: -3.5,
             numer_child_height: 0.65,
             denom_child_height: round(denom_total * 100.0) / 100.0,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
+    } else if (child_total >= 1.15) {
+        {
+            height: 1.57,
+            depth: 1.06,
+            render_height: 1.57,
+            render_depth: 1.06,
+            render_total: 2.64,
+            left_right_render_depth: 1.069108,
+            left_right_render_total: 2.638216,
+            depth_holder: 1.07,
+            denom_top: -2.27,
+            line_top: -3.23,
+            numer_top: -3.73,
+            numer_child_height: 1.18,
+            denom_child_height: 1.18,
             child_font_pct: null,
             rule_height: 0.04
         }

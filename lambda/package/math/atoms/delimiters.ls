@@ -108,6 +108,8 @@ pub fn render_stretchy(delim, content_height, atom_type) {
         let level = select_size_level(content_height)
         if (is_corner_delim(display_char))
             render_corner(display_char, atom_type)
+        else if (level == 3 and is_mult_left_right_delim(delim))
+            render_mult_left_right_delim(delim, atom_type)
         else if (level <= 4)
             render_sized(display_char, level, atom_type)
         else
@@ -276,6 +278,110 @@ fn render_vertical_mult(ch, level, atom_type) {
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn is_mult_left_right_delim(delim) {
+    delim == "\\uparrow" or delim == "\\downarrow" or
+    delim == "\\updownarrow" or delim == "\\Uparrow" or
+    delim == "\\Downarrow" or delim == "\\Updownarrow" or
+    delim == "\\lgroup" or delim == "\\rgroup" or
+    delim == "\\lmoustache" or delim == "\\rmoustache"
+}
+
+fn render_mult_left_right_delim(delim, atom_type) {
+    let spec = mult_left_right_spec(delim)
+    let pieces = mult_left_right_pieces(spec, 0, [])
+    let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
+    {
+        element: <span class: cls;
+            <span class: spec.inner_class;
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:1.44em";
+                        for (piece in pieces) piece
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:0.96em">
+                >
+            >
+        >,
+        height: 1.45,
+        depth: 0.95,
+        render_height: 1.45,
+        render_depth: 0.95,
+        render_total: 2.41,
+        width: 0.4,
+        type: atom_type,
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn mult_left_right_pieces(spec, i, acc) {
+    if (i >= len(spec.chars)) acc
+    else
+        (let piece = <span style: "top:" ++ util.fmt_em(spec.tops[i]);
+             <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(spec.pstrut)>
+             <span style: "height:" ++ util.fmt_em(spec.heights[i]) ++ ";display:inline-block"; spec.chars[i]>
+         >,
+         mult_left_right_pieces(spec, i + 1, acc ++ [piece]))
+}
+
+fn mult_left_right_spec(delim) {
+    if (delim == "\\downarrow")
+        arrow_down_spec("⏐")
+    else if (delim == "\\Downarrow")
+        arrow_down_spec("‖")
+    else if (delim == "\\uparrow")
+        arrow_up_spec("⏐")
+    else if (delim == "\\Uparrow")
+        arrow_up_spec("‖")
+    else if (delim == "\\updownarrow")
+        arrow_updown_spec(["↓", "⏐", "⏐", "↑"])
+    else if (delim == "\\Updownarrow")
+        arrow_updown_spec(["⇓", "‖", "‖", "⇑"])
+    else if (delim == "\\lgroup")
+        brace_group_spec(["⎩", "⎪", "⎪", "⎧"])
+    else if (delim == "\\rgroup")
+        brace_group_spec(["⎭", "⎪", "⎪", "⎫"])
+    else if (delim == "\\lmoustache")
+        brace_group_spec(["⎭", "⎪", "⎪", "⎧"])
+    else if (delim == "\\rmoustache")
+        brace_group_spec(["⎩", "⎪", "⎪", "⎫"])
+    else arrow_down_spec("⏐")
+}
+
+fn arrow_down_spec(ext) => {
+    inner_class: "delim-size1 lm_vlist-t lm_vlist-t2",
+    chars: ["\\\\", ext, ext],
+    tops: [0.0 - 2.24, 0.0 - 3.09, 0.0 - 3.68],
+    heights: [1.21, 0.61, 0.61],
+    pstrut: 2.85
+}
+
+fn arrow_up_spec(ext) => {
+    inner_class: "delim-size1 lm_vlist-t lm_vlist-t2",
+    chars: [ext, ext, "\\\\"],
+    tops: [0.0 - 1.89, 0.0 - 2.49, 0.0 - 3.43],
+    heights: [0.61, 0.61, 1.21],
+    pstrut: 2.85
+}
+
+fn arrow_updown_spec(chars) => {
+    inner_class: "delim-size1 lm_vlist-t lm_vlist-t2",
+    chars: chars,
+    tops: [0.0 - 1.65, 0.0 - 2.24, 0.0 - 2.84, 0.0 - 3.43],
+    heights: [0.61, 0.61, 0.61, 0.61],
+    pstrut: 2.61
+}
+
+fn brace_group_spec(chars) => {
+    inner_class: "delim-size4 lm_vlist-t lm_vlist-t2",
+    chars: chars,
+    tops: [0.0 - 2.84, 0.0 - 2.84, 0.0 - 3.14, 0.0 - 3.43],
+    heights: [0.91, 0.3, 0.3, 0.91],
+    pstrut: 2.9
 }
 
 fn vertical_mult_pieces(ch, tops, i, acc) {
