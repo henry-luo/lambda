@@ -207,6 +207,30 @@ static const int SM_TO_RICH_EDIT_SAME[] = {
     SM_STATE_SAME,
 };
 
+static const int SM_TO_RICH_TX_OPEN[] = {
+    RICH_EDIT_TX_OPEN,
+};
+
+static const int SM_TO_RICH_BEFOREINPUT[] = {
+    RICH_EDIT_BEFOREINPUT_DONE,
+};
+
+static const int SM_TO_RICH_MUTATED[] = {
+    RICH_EDIT_MUTATED,
+};
+
+static const int SM_TO_RICH_SELECTION_SET[] = {
+    RICH_EDIT_SELECTION_SET,
+};
+
+static const int SM_TO_RICH_INPUT[] = {
+    RICH_EDIT_INPUT_DONE,
+};
+
+static const int SM_TO_RICH_IDLE[] = {
+    RICH_EDIT_IDLE,
+};
+
 #define SM_RULE_TO(list_name) list_name, (uint8_t)(sizeof(list_name) / sizeof((list_name)[0]))
 
 static const StateTransitionRule RADIANT_STATE_RULES[] = {
@@ -435,8 +459,54 @@ static const StateTransitionRule RADIANT_STATE_RULES[] = {
 
     { SM_FAMILY_RICH_EDIT, SM_VC_ANY, SM_STATE_ANY, SM_EV_RICH_TRANSACTION,
       SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_EDIT_SAME),
-      SM_ACT_DISPATCH_BEFOREINPUT, NULL, 0,
+      0, NULL, 0,
       "rich_edit.transaction" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_IDLE, SM_EV_EDIT_TX_BEGIN,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_TX_OPEN), 0, NULL, 0,
+      "rich_edit.tx_begin" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_TX_OPEN, SM_EV_EDIT_BEFOREINPUT,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_BEFOREINPUT),
+      SM_ACT_DISPATCH_BEFOREINPUT, NULL, 0,
+      "rich_edit.beforeinput" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_BEFOREINPUT_DONE,
+      SM_EV_EDIT_MUTATE_DOM, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_MUTATED),
+      SM_ACT_MUTATE_DOM, NULL, 0,
+      "rich_edit.mutate_dom" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_MUTATED,
+      SM_EV_EDIT_SET_SELECTION, SM_GUARD_NONE,
+      SM_RULE_TO(SM_TO_RICH_SELECTION_SET), SM_ACT_SET_SELECTION, NULL, 0,
+      "rich_edit.set_selection" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_BEFOREINPUT_DONE,
+      SM_EV_EDIT_INPUT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_INPUT),
+      SM_ACT_DISPATCH_INPUT, NULL, 0,
+      "rich_edit.input_after_beforeinput" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_MUTATED,
+      SM_EV_EDIT_INPUT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_INPUT),
+      SM_ACT_DISPATCH_INPUT, NULL, 0,
+      "rich_edit.input_after_mutation" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_SELECTION_SET,
+      SM_EV_EDIT_INPUT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_INPUT),
+      SM_ACT_DISPATCH_INPUT, NULL, 0,
+      "rich_edit.input_after_selection" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_TX_OPEN, SM_EV_EDIT_TX_ABORT,
+      SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_IDLE), 0, NULL, 0,
+      "rich_edit.tx_abort" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_BEFOREINPUT_DONE,
+      SM_EV_EDIT_TX_COMMIT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_IDLE),
+      0, NULL, 0,
+      "rich_edit.tx_commit_after_beforeinput" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_MUTATED,
+      SM_EV_EDIT_TX_COMMIT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_IDLE),
+      0, NULL, 0,
+      "rich_edit.tx_commit_after_mutation" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_SELECTION_SET,
+      SM_EV_EDIT_TX_COMMIT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_IDLE),
+      0, NULL, 0,
+      "rich_edit.tx_commit_after_selection" },
+    { SM_FAMILY_RICH_EDIT, SM_VC_ANY, RICH_EDIT_INPUT_DONE,
+      SM_EV_EDIT_TX_COMMIT, SM_GUARD_NONE, SM_RULE_TO(SM_TO_RICH_IDLE),
+      0, NULL, 0,
+      "rich_edit.tx_commit_after_input" },
 };
 
 #undef SM_RULE_TO
@@ -460,6 +530,13 @@ extern const StateInvariantBinding RADIANT_INVARIANTS[] = {
     { SM_FAMILY_DOCUMENT, SM_STATE_ANY, SM_INV_DIRTY_TRACKING, "dirty.tracking" },
     { SM_FAMILY_SELECTION, SM_STATE_ANY, SM_INV_DOM_SELECTION, "selection.dom" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_INTERACTION, "rich_edit.interaction" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_SURFACE, "rich_edit.editing_surface" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_SELECTION_HOST, "rich_edit.selection_host" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_FALSE_ISLAND, "rich_edit.false_island" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_EDITING_TARGET_RANGES, "rich_edit.target_ranges" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_DOM_SELECTION_CACHE, "rich_edit.dom_selection_cache" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_LEGACY_SELECTION_PROJECTION, "rich_edit.legacy_selection_projection" },
+    { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_INPUT_EVENT_ORDER, "rich_edit.input_event_order" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_CARET_PROJECTION, "rich_edit.caret" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_SELECTION_PROJECTION, "rich_edit.selection" },
     { SM_FAMILY_RICH_EDIT, SM_STATE_ANY, SM_INV_DOM_SELECTION, "rich_edit.dom_selection" },
@@ -551,6 +628,13 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
         case SM_EV_CONTEXT_MENU_CLOSE: return "context_menu_close";
         case SM_EV_CONTEXT_MENU_HOVER: return "context_menu_hover";
         case SM_EV_RICH_TRANSACTION: return "rich_transaction";
+        case SM_EV_EDIT_TX_BEGIN: return "edit_tx_begin";
+        case SM_EV_EDIT_BEFOREINPUT: return "edit_beforeinput";
+        case SM_EV_EDIT_MUTATE_DOM: return "edit_mutate_dom";
+        case SM_EV_EDIT_SET_SELECTION: return "edit_set_selection";
+        case SM_EV_EDIT_INPUT: return "edit_input";
+        case SM_EV_EDIT_TX_COMMIT: return "edit_tx_commit";
+        case SM_EV_EDIT_TX_ABORT: return "edit_tx_abort";
         default: return "unknown";
     }
 }
@@ -661,7 +745,22 @@ static int sm_derive_document_state(DocState* state) {
 }
 
 static int sm_derive_rich_edit_state(DocState* state) {
-    (void)state;
+    if (!state) return RICH_EDIT_IDLE;
+    switch (state->editing.rich_transaction_phase) {
+        case EDITING_RICH_TX_OPEN:
+            return RICH_EDIT_TX_OPEN;
+        case EDITING_RICH_TX_BEFOREINPUT:
+            return RICH_EDIT_BEFOREINPUT_DONE;
+        case EDITING_RICH_TX_MUTATED:
+            return RICH_EDIT_MUTATED;
+        case EDITING_RICH_TX_SELECTION_SET:
+            return RICH_EDIT_SELECTION_SET;
+        case EDITING_RICH_TX_INPUT:
+            return RICH_EDIT_INPUT_DONE;
+        case EDITING_RICH_TX_IDLE:
+        default:
+            break;
+    }
     return RICH_EDIT_IDLE;
 }
 

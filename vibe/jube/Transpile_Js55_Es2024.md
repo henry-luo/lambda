@@ -1,0 +1,643 @@
+# Transpile_Js55_Es2024 — ES2024 Long-Tail Cleanup: RAB Iteration, TLA Diversity, BigInt-TA, Final Polish
+
+Date: 2026-06-13
+
+Status: P0 complete; P1 investigation surfaced a batch-mode discrepancy that invalidates the phase-by-phase root-cause analysis in §3 (see §12 Investigation Notes)
+
+Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
+
+Unlike Js54 (net-new feature implementation across three subsystems), Js55 is **engine bug-fix work** on existing subsystems: TypedArray iteration paths need to handle mid-iteration resize callbacks; the top-level-await codegen has several independent issues around strict-mode and async resolution; a handful of long-tail patterns finish off the v-flag and Object semantics. The work is narrower per phase than Js54, but the resizable-arraybuffer cluster is structurally the hardest.
+
+## 1. Starting Baseline
+
+Current checked-in release baseline at Js55 start (post-Js54 + post-push):
+
+```text
+# Scope: ES2024 (skip ES2025+ features)
+# Total passing: 40187
+# Total tests: 42889  Skipped: 2627  Batched: 40262  Passed: 40187  Failed: 73
+# Runtime: 150–195s total wall (varies by run; see §1.1)
+# Batch size: batched 50 tests/process; async 50 tests/process
+```
+
+The Js55 acceptance bar:
+
+- Passing count stays `>= 40187` after every phase.
+- Regressions count is `0` at every phase boundary.
+- 0 batch-lost, 0 crash-exits at the gate of every admission run.
+- `t262_partial.txt` retains the existing flaky-TLA entries (`top-level-ticks{,2}.js`) — those are tracked separately in Phase E1 below, not on the partial-list ceiling.
+- Total runtime stays within `+5%` of the last clean Js54 release-run-007 baseline (157.8s). The `\p{RGI_Emoji}` rewriter expanded patterns considerably; that ceiling is already negotiated, but Js55 phases should not widen it further.
+- Final `# Scope:` line stays at `ES2024 (skip ES2025+ features)` unless Js55 finishes a meaningful ES2025+ feature cluster — out of scope here; see Js56 candidate features in §8.
+
+### 1.1 Runtime drift note
+
+Js54 release runs vary between 150 s and 195 s depending on memory pressure and the 45 KB `\p{RGI_Emoji}` pattern's RE2 compile cost. Js55 phases should benchmark against the average of 3 runs, not a single number. Phase boundary may accept up to `+5%` of that 3-run average, not the single P0 number from §1.
+
+## 2. What Js54 Deferred
+
+Js54's §11 / §12 documented the post-Js54 expectation as "ES2024 conformant for test262 baseline scope." It did not enumerate the 73 remaining failures because the failure-capture run happened after Js54 P13. This proposal pins those 73 tests.
+
+| Cluster | Tests | Already pass | To admit | Fix surface |
+|---|---:|---:|---:|---|
+| **Gate D — resizable-arraybuffer (iteration)** | ~120 | ~69 | 51 | TA index access + length re-derivation across `valueOf`/`toString` callbacks during iteration; BigInt-TA coercion path |
+| **Gate E — top-level-await diverse** | ~50 | ~30 | 20 | Strict-mode `name`-property assignment, $DONE plumbing, Promise resolver wiring |
+| **Gate F — v-flag / property tail** | ~3 | 0 | 3 | Last `\p{StringProperty}` negative tests + Unicode 17 emoji + v-flag String.replace coercion |
+| **Gate G — TypedArray makePassthrough + misc** | ~15 | 6 | 9 + 6 | TA iteration with passthrough-constructor + ArrayBuffer options checks + misc Object/Reflect tests |
+| **Total** | **~190** | **~105** | **~85 admissible** + flaky | of which ~73 are clean failures, ~10–12 will likely stay deferred to Js56 |
+
+The probe artifacts to retain in `temp/js55_repros/`:
+
+- `temp/js55_failures.tsv` — current 73-row failure manifest (generated at `--write-failures=temp/js55_failures.tsv`)
+- `temp/js55_repros/gate_d_rab_iter.txt` — Gate D test paths (~51 entries)
+- `temp/js55_repros/gate_e_tla.txt` — Gate E test paths (~20 entries)
+- `temp/js55_repros/gate_g_misc.txt` — Gate G test paths (~15 entries)
+
+## 3. The Four Gates
+
+### Gate D — resizable-arraybuffer iteration semantics (51 tests)
+
+This is the deferred §11 cluster from Js53/Js54: Array.prototype methods that iterate over a TypedArray view of a resizable ArrayBuffer must re-derive bounds **after every callback** that could trigger a resize. Today Lambda caches the length at entry; the tests prove this by passing a `valueOf` callback that shrinks the buffer mid-iteration.
+
+**Failure-shape breakdown** (from `temp/js55_failures.tsv`):
+
+| Failure cluster | Count | Root cause |
+|---|---:|---|
+| `Uncaught TypeError: Cannot convert a BigInt value to a number` | 11 | `Array.prototype.fill.call(bigIntTA, BigInt(n))` — Array fill path coerces value to Number before storing; spec says use the TypedArray's element-type semantics. |
+| `Actual [0,0,...] expected [0, undefined, 0, ...]` | ~12 | Array methods like `findIndex`/`find` over an out-of-bounds TA index should return `undefined`, not the stale buffer byte. |
+| `Cannot access 'taFull' before initialization` | 4 | TDZ false-positive from a secondary test-fixture error — the `let taFull = ...` line throws, then the catch handler reads `taFull` and trips TDZ. Root cause is one of the earlier issues. |
+| `Invalid array buffer length` (RangeError) | 4 | TA constructor with non-fixed length re-validates against the wrong upper bound (uses `byte_length` instead of `max_byte_length`). |
+| `Expected a TypeError to be thrown but no exception` | 3 | Method completes silently when it should detect OOB. |
+| `Expected [6,4,undefined,undefined]` vs actual `[6,4]` | 2 | Array iteration treats shortened buffer as truncated; should iterate over the original length and yield `undefined` for OOB indices. |
+| `Cannot perform %TypedArray%.prototype.set on OOB ArrayBuffer` | 1 | Over-eager OOB throw — `.set` should accept the call and silently no-op when target is OOB. |
+| `Cannot perform %TypedArray%.prototype.join on OOB ArrayBuffer` | 1 | Same — `.join` should treat OOB length as 0. |
+| Other shrink/grow content mismatches | ~13 | Various mid-iteration resize handling gaps. |
+
+**Highest-leverage fix** is the BigInt-TA Array-method coercion: 11 tests hit one site. Fix-first.
+
+Fix surface:
+
+1. **`Array.prototype.fill`** ([lambda/js/js_runtime.cpp:22401](../../lambda/js/js_runtime.cpp)) needs a BigInt-TA-aware value path: if `this` is `BigInt64Array`/`BigUint64Array` and `value` is a BigInt, pass through as BigInt to `js_property_set`. Today the generic fill calls `js_property_set(object, key, value)` which goes through TA's number-coercion path. Fix at the TA-prototype set boundary (in [lambda/js/js_typed_array.cpp](../../lambda/js/js_typed_array.cpp)) so BigInt typed-array `Set` accepts BigInt without coercing.
+2. **Same boundary for `Array.prototype.{copyWithin,reverse,slice,splice,toSorted,toReversed,toSpliced}`** — the generic Array-method shim at [lambda/js/js_runtime.cpp:8610+](../../lambda/js/js_runtime.cpp) needs to know when `this` is a TypedArray and route accordingly.
+3. **TypedArray iteration re-derivation** — every `for (i = 0; i < cached_length; i++)` loop in TA prototype methods needs to re-read the current OOB-aware length **after** any `js_call_function` to a callback (`callbackfn`, `comparefn`, `valueOf`, `toString`). Affected methods: `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `forEach`, `map`, `reduce`, `reduceRight`, `some`, `sort`. ~50–80 LOC of `int current_length = js_typed_array_current_length(ta); if (i >= current_length) break;` insertions per method.
+4. **Array methods that iterate TA inputs** — `Array.prototype.{at,copyWithin,fill,slice,splice,findIndex,find,findLast,findLastIndex,reverse,toSorted,toReversed,toSpliced,with}` need the same discipline when `this` is a TA. Reuses the same helper as (3).
+5. **TA construction range-check** at the constructor site: when constructing from a buffer with length argument, validate against `min(buffer->byte_length, buffer->max_byte_length)` not just `buffer->byte_length`.
+
+Risk: medium-to-high. Per-method audit is mechanical but easy to miss a site. **Phase split** below isolates the highest-leverage fixes from the long tail.
+
+#### D1 — BigInt-TA fill (11 tests, ~30 LOC)
+
+Single-site fix at the TA `Set` boundary. Most leverage per LOC of any Js55 phase.
+
+#### D2 — TA prototype method length re-derivation (~25 tests)
+
+Walk every TA prototype method ([lambda/js/js_typed_array.cpp](../../lambda/js/js_typed_array.cpp) `js_typed_array_*` and [lambda/js/js_runtime.cpp:11500–11800](../../lambda/js/js_runtime.cpp)) and insert post-callback OOB checks. Add a `js_typed_array_validate_or_truncate(ta, current_i, &out_length)` helper that returns the current valid length or signals OOB.
+
+#### D3 — Array.prototype methods on TA inputs (~10 tests)
+
+Same discipline as D2 but at the Array-method boundary in [js_runtime.cpp:22401–22550](../../lambda/js/js_runtime.cpp). The TA-aware shim at [js_runtime.cpp:8610](../../lambda/js/js_runtime.cpp) already routes some methods through a TA-specific path; D3 ensures all the affected methods are wired.
+
+#### D4 — TA constructor max-byte-length check (~4 tests)
+
+One-line fix at the TA constructor's length-argument validation in [lambda/js/js_typed_array.cpp:js_typed_array_construct](../../lambda/js/js_typed_array.cpp).
+
+### Gate E — top-level-await diverse (20 tests)
+
+This is a heterogeneous cluster — five independent issues, each requiring its own fix.
+
+| Failure cluster | Count | Root cause |
+|---|---:|---|
+| `Cannot assign to read only property 'name' of object` | 7 | Module strict-mode triggers NamedEvaluation for `export let/const/var x = await new Foo(...)` and tries to set `.name` on the result of `new Foo(...)`. Result is an instance; instances have a (configurable, non-writable) `.name` inherited from `Foo.prototype` — assignment silently fails in sloppy mode, throws in strict (module) mode. NamedEvaluation should only apply when the rhs is an anonymous function expression, class expression, or arrow function — not when it's `await NewExpression`. |
+| `async test did not call $DONE` | 4 | TLA module's top-level await chain doesn't propagate fulfillment back to the host's `$DONE` callback. The harness sets `$DONE` as `then(undefined, reportError)`; Lambda fulfills the module but never resolves the top-level capability. Fix in [js_mir_module_batch_lowering.cpp](../../lambda/js/js_mir_module_batch_lowering.cpp) — after `js_main` returns, await the module's `[[TopLevelCapability]]` and call $DONE. |
+| `Promise resolver is not a function` | 3 | These tests use `Promise.withResolvers()` in an imported `setup_FIXTURE.js`. The export from the fixture returns `{resolve, reject, promise}`; Lambda's module loader is dropping the resolve/reject function refs across the import boundary. Probably the function items become `null` after the export-binding handoff. |
+| `crashed with signal 11` (top-level-ticks*) | 2 | Pre-existing flaky SIGSEGV in TLA tests with Promise.then chains. Not new — already in `t262_partial.txt`. Js55 should either fix root cause or formally accept as flaky-partial (per Js52 §10 kill-switch precedent). |
+| `Expected SameValue(??[object Object]??, ??42??)` etc. | 4 | `await thenable` returns the thenable object itself instead of resolving it. `js_async_must_suspend` ([js_runtime.cpp:28678](../../lambda/js/js_runtime.cpp)) calls `js_promise_resolve` which queues a thenable job, but the async state machine's resume isn't waiting for the queued job to settle. Suspension returns 1, but the state machine's resume re-reads `js_async_resolved_value` which is the wrapped pending promise, not its eventual fulfillment value. |
+
+#### E1 — TLA-NamedEvaluation skip (7 tests, ~10 LOC)
+
+In [build_js_ast.cpp](../../lambda/js/build_js_ast.cpp) AssignmentExpression/VariableDeclaration handling, the NamedEvaluation rule must check: rhs is `await` expression → do NOT emit `js_function_set_name` call. The MDN spec list of NamedEvaluation triggers excludes `AwaitExpression`. Single rule, ~3–5 sites.
+
+#### E2 — Top-level await capability chaining (4 tests)
+
+After Js54's `_lambda_rt` save/restore around `js_main` (which fixed the TLA + template-literal SIGSEGV in Js54), the next step is plumbing the TLA top-level capability. Spec §16.2.1.5.3 "ExecuteAsyncModule" creates a promise capability; current Lambda module execution never resolves it. After `js_main` returns, the module is "evaluated" but the capability is still pending — host calls `then` on it but the resolve never fires.
+
+Fix in [js_mir_module_batch_lowering.cpp](../../lambda/js/js_mir_module_batch_lowering.cpp): after `js_main` returns, check for a top-level capability; if present, fulfill it with `undefined`. Drain microtasks before exit.
+
+#### E3 — Promise.withResolvers across module import (3 tests)
+
+Probe with a focused test: `export const { resolve, reject, promise } = Promise.withResolvers();` then `import { resolve, ... } from "./fixture.js"; resolve(42);`. Compare the imported `resolve` ref's identity against the module's local `resolve`. If they differ, the import binding rewriter is creating a wrapper. Fix in the module export/import handoff path.
+
+#### E4 — Thenable await resume (4 tests)
+
+The state machine in [js_runtime.cpp:28658+](../../lambda/js/js_runtime.cpp) needs to be aware that a queued thenable job's result fulfills the wrapped promise, not the wrapped's then() return. Trace: `js_promise_enqueue_thenable_job` → microtask runs → calls `thenable.then(resolve, reject)` → user code calls `resolve(42)` → wrapped promise settles to `42`. The async state machine's resume needs to read `wrapped->result` after resumption.
+
+#### E5 — top-level-ticks SIGSEGV decision
+
+Either fix the underlying issue (likely a use-after-free in the TLA + promise-then trampoline) or accept as flaky-partial in `t262_partial.txt`. Recommend: fix it; the crash is deterministic per-batch but flaky across batches due to memory layout, which suggests a real use-after-free.
+
+### Gate F — v-flag / property-escape tail (3 tests)
+
+Three tests after the Js54-push left:
+
+1. `built-ins/RegExp/unicodeSets/generated/rgi-emoji-17.0.js` — uses Unicode 17 emoji. Js54's tables are Unicode 16.0. Out of scope unless the test-262 sources upgrade. **Recommend defer to Js56.**
+2. `built-ins/String/prototype/replace/regexp-prototype-replace-v-u-flag.js` — String.replace edge case where `/v` flag interacts with the replacement function's argument coercion. See `temp/js55_failures.tsv` row for exact assertion.
+3. `built-ins/RegExp/unicodeSets/generated/character-class-escape-difference-string-literal.js` (1 leftover) — a `[\d--\q{ab}]` edge case where my string-set-arithmetic doesn't handle the case where a multi-byte string in `\q{}` happens to be subtracted from a single-codepoint shorthand.
+
+Each test is its own work item; F should be ~50 LOC across the three.
+
+### Gate G — TypedArray makePassthrough + misc (15 tests)
+
+The "makePassthrough" test helper constructs a TA via a custom Symbol.species constructor that proxies through to the test's real construction. Lambda's Symbol.species path was partially fixed in Js54 P6 but several TA prototype methods still bypass it.
+
+| Test path | Issue |
+|---|---|
+| `built-ins/TypedArray/prototype/filter/*` | filter() doesn't use Symbol.species |
+| `built-ins/TypedArray/prototype/map/*` | map() result construction misses species |
+| `built-ins/TypedArray/prototype/subarray/*` | subarray() misses species |
+| `built-ins/Object/getOwnPropertyDescriptors/*` | one remaining order-of-keys edge case (post-Js54 partial fix) |
+| `built-ins/Reflect/construct/*` | one Reflect.construct case |
+| `built-ins/Array/prototype/includes/*` | resizable-buffer includes() edge case |
+| `built-ins/Symbol/replace/*` | Symbol.replace dispatch on `/v` regex |
+| `built-ins/ArrayBuffer/options-*` | ArrayBuffer constructor options-bag validation order |
+| Other | small individual fixes |
+
+Each is ~10–30 LOC. The cluster is "long tail one-off bugs" rather than a coherent feature.
+
+## 4. Phase Plan
+
+Phases ordered to minimize blast radius. Gate D dominates the failure count and is the highest leverage; do D first. Gate E is independent and can branch. Gate F is small. Gate G is the long tail — schedule as cleanup after the others land.
+
+### P0 — Baseline confirmation and probe
+
+Goal: confirm the Js55 starting baseline and generate per-gate probe artifacts.
+
+Work:
+
+1. Re-run the release js262 guard. Confirm `40187 / 40187`, 0 regressions, 0 batch-lost, 0 crash-exits. Capture runtime as the 3-run average baseline.
+2. Generate `temp/js55_failures.tsv` via `--write-failures`.
+3. Split into `temp/js55_repros/gate_d_rab_iter.txt`, `temp/js55_repros/gate_e_tla.txt`, `temp/js55_repros/gate_f_v_tail.txt`, `temp/js55_repros/gate_g_misc.txt`.
+4. Snapshot the current `t262_partial.txt` to confirm only the 2 SLOW entries + TLA crashes are tracked.
+
+Acceptance:
+
+- 3 runs averaged, runtime within 5% of each other.
+- Probe artifacts checked in to `temp/js55_repros/`.
+
+### P1 — Gate D1: BigInt-TA fill path (11 tests)
+
+Single-site fix. Highest leverage per LOC of any Js55 phase.
+
+Work:
+
+1. Trace `Array.prototype.fill.call(bigInt64Ta, BigInt(n), 1, 2)`. Confirm it routes through `js_array_generic_fill` → `js_property_set` → TA Set → `js_to_number(value)` → BigInt throws.
+2. In the TA `Set` boundary at [lambda/js/js_typed_array.cpp:js_typed_array_set](../../lambda/js/js_typed_array.cpp): when `ta->element_type` is `JS_TYPED_BIGINT64` or `JS_TYPED_BIGUINT64`, call `js_to_bigint(value)` instead of `js_to_number(value)`.
+3. Verify the existing `built-ins/BigInt64Array/*` tests still pass byte-for-byte.
+
+Acceptance:
+
+- 11 BigInt-TA fill tests pass.
+- `built-ins/BigInt64Array/prototype/fill/*`, `built-ins/BigUint64Array/prototype/fill/*` plus the `Array.prototype.fill` calls on bigint TAs.
+- Release guard clean.
+- Passing count rises by ~11.
+
+### P2 — Gate D2: TA prototype method length re-derivation (~25 tests)
+
+Risk class: medium. Touches ~12 TA prototype methods.
+
+Work:
+
+1. Introduce a `js_typed_array_current_valid_length(ta_item)` helper in [js_typed_array.cpp](../../lambda/js/js_typed_array.cpp) returning `min(ta->length, max(0, ab->byte_length / element_size - ta->byte_offset / element_size))`.
+2. For each method `every`, `filter`, `find`, `findIndex`, `findLast`, `findLastIndex`, `forEach`, `map`, `reduce`, `reduceRight`, `some`, `sort` in `js_runtime.cpp`'s TA-method dispatch, insert post-callback OOB check: `current_len = js_typed_array_current_valid_length(ta); if (i >= current_len) break;`.
+3. For OOB indices encountered during iteration (when `current_len < cached_len`), yield `undefined` to the callback per spec semantics.
+4. `join` / `set` / `slice` need OOB-aware truncation, not throw, when the buffer shrinks.
+
+Risk controls:
+
+- Pre-flight all `built-ins/TypedArray/prototype/*` tests on debug. Diff failures before/after; only `resizable-buffer` tests should change state.
+- Diff any `Array.prototype` test outputs — they should be byte-identical.
+
+Acceptance:
+
+- ~25 mid-iteration-resize tests pass.
+- 0 regressions on existing TA tests.
+- Release guard clean.
+- Passing count rises by ~25.
+
+### P3 — Gate D3: Array.prototype methods on TA inputs (~10 tests)
+
+Risk class: small. Same discipline as P2, applied at the Array-method shim.
+
+Work:
+
+1. In `js_runtime.cpp:8610+` (TA-aware Array-method shim), the methods that already route through generic handlers (`fill`, `copyWithin`, `reverse`, `sort`) need the same post-callback OOB check.
+2. `find`, `findIndex`, `findLast`, `findLastIndex` need to yield `undefined` for OOB indices via `js_array_method_has_property` returning false for index >= current_length.
+
+Acceptance:
+
+- ~10 Array-method-on-TA tests pass.
+- 0 regressions.
+- Release guard clean.
+
+### P4 — Gate D4: TA constructor max-byte-length check (~4 tests)
+
+One-line fix per relevant constructor case.
+
+Work:
+
+1. In [js_typed_array.cpp:js_typed_array_construct](../../lambda/js/js_typed_array.cpp), the variant that takes `(buffer, byteOffset, length)`: when `length` is given, validate against `buffer->max_byte_length / element_size - byteOffset / element_size`, not `buffer->byte_length / element_size - byteOffset / element_size`.
+
+Acceptance:
+
+- 4 TA-construction range-error tests pass.
+- Release guard clean.
+
+### P5 — Gate E1: TLA NamedEvaluation skip for `await NewExpression` (7 tests)
+
+Single-rule fix in the AST→MIR lowering.
+
+Work:
+
+1. In [build_js_ast.cpp](../../lambda/js/build_js_ast.cpp) where AssignmentExpression / VariableDeclaration RHS triggers `js_function_set_name`, add a check: if the RHS is an `AwaitExpression`, skip NamedEvaluation entirely. The spec list excludes await; we mistakenly include it.
+2. Same for `YieldExpression` while we're there (in case any future generator test hits it).
+
+Acceptance:
+
+- 7 TLA `export let/const/var x = await new X(...)` tests pass.
+- Existing tests where `const fn = function() {}` still has its name set to "fn" continue to pass.
+- Release guard clean.
+
+### P6 — Gate E2: Top-level await capability chaining (4 tests)
+
+Work:
+
+1. In [js_mir_module_batch_lowering.cpp](../../lambda/js/js_mir_module_batch_lowering.cpp:transpile_js_module_to_mir), after `js_main` returns: if the module had top-level await, the module-level capability should fulfill with `undefined`. Currently we return the module's namespace object but never settle the host's outer promise.
+2. After `js_main` returns, drain microtasks. The `$DONE` callback is attached via `.then()`; without a microtask drain, it never fires.
+
+Acceptance:
+
+- 4 TLA `$DONE` tests pass.
+- Existing module tests pass byte-for-byte.
+- Release guard clean.
+
+### P7 — Gate E3: Promise.withResolvers across module import (3 tests)
+
+Work:
+
+1. Reproduce the issue with a focused test: `setup.js` exports `{resolve, reject, promise}` from `Promise.withResolvers()`. `main.js` imports them. The import binding for `resolve` must point to the same function object that the closure in `setup.js`'s promise captures.
+2. Trace the import-binding rewriter — if it wraps the import in a getter or copies the value, the closure identity breaks.
+
+Acceptance:
+
+- 3 TLA tests using `Promise.withResolvers` cross-module pass.
+- Existing `Promise.withResolvers` tests (Js52 admitted set) continue to pass.
+- Release guard clean.
+
+### P8 — Gate E4: Thenable await resume (4 tests)
+
+Work:
+
+1. In [js_runtime.cpp:28678](../../lambda/js/js_runtime.cpp) `js_async_must_suspend`, after `js_promise_resolve(value)` is called and returns a pending promise, ensure the async state machine's resume reads from the **resolved** wrapped promise, not the still-pending wrapped item.
+2. Probe: `await {then: function(res) { res(42); }}` should return 42, not the thenable.
+
+Acceptance:
+
+- 4 TLA thenable tests pass.
+- Existing async/await tests pass byte-for-byte.
+
+### P9 — Gate E5: top-level-ticks SIGSEGV decision
+
+Investigate the crash via ASAN reduction. Options:
+
+1. **Fix root cause.** Recommended if reduce-to-repro shows a real use-after-free.
+2. **Accept as flaky-partial.** Add to skip list explicitly with a comment pointing to a tracking issue. The 2 tests already crash flakily in `t262_partial.txt`.
+
+Acceptance:
+
+- Either the 2 SIGSEGV tests pass, OR they have an explicit skip-list entry with rationale.
+
+### P10 — Gate F: v-flag / property tail
+
+Work:
+
+1. **`rgi-emoji-17.0.js`** — out of scope (Unicode 17 not pinned). Add to skip list with comment "requires Unicode 17 property tables; tracked for Js56."
+2. **`regexp-prototype-replace-v-u-flag.js`** — investigate the replace edge case.
+3. **`character-class-escape-difference-string-literal.js` leftover** — investigate the multi-byte difference edge case in the string-set-arithmetic.
+
+Acceptance:
+
+- 2 tests pass (replace + character-class-escape-difference).
+- 1 skip-list entry added with Js56 rationale.
+
+### P11 — Gate G: TA Symbol.species + Object descriptors + misc (~15 tests)
+
+Risk class: low individually, but high admission gate due to count.
+
+Work:
+
+1. Audit TA `filter`, `map`, `subarray` for Symbol.species respect.
+2. Fix the `Object.getOwnPropertyDescriptors` order-after-define-property remaining edge case.
+3. Fix `Reflect.construct` edge case (1 test).
+4. Fix `Array.prototype.includes` resizable-buffer edge case (1 test).
+5. Fix `Symbol.replace` dispatch on `/v` regex (1 test).
+6. Fix `ArrayBuffer.options-maxbytelength-compared-before-object-creation` (1 test).
+7. Other misc (~8 tests).
+
+Acceptance:
+
+- ~13 tests pass (probably 2 stay deferred).
+- 0 regressions.
+- Release guard clean.
+
+### P12 — Final admission + stability guard
+
+Run release `--update-baseline` to admit everything. Run a stability guard to confirm 0 regressions.
+
+Acceptance:
+
+- Baseline updated with new commit hash.
+- 0 regressions, 0 batch-lost, 0 crash-exits.
+- Final passing count recorded.
+
+## 5. Per-Phase Guard Commands
+
+Same as Js54 §5. The contract is identical.
+
+Pre-flight (debug build):
+
+```bash
+make build && make build-test
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/typed_array_*'
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/buffer_*'
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/regex_*'
+```
+
+Release js262 guard:
+
+```bash
+make release
+make -C build/premake test_js_test262_gtest config=release_native
+./test/test_js_test262_gtest.exe --batch-only --baseline-only --run-async \
+  --async-list=test/js262/test262_baseline.txt \
+  --async-chunk-size=50 \
+  --write-failures=temp/js55_pN_release_guard.tsv \
+  --gtest_brief=1
+```
+
+(Replace `pN` with the phase number.)
+
+The guard tsv must report:
+
+- `Failed: 0` (in baseline)
+- `Regressions: 0`
+- `Passing >= 40187 + sum of admissions from prior phases`
+- `Skipped` non-increasing
+- Total runtime within `+5%` of the 3-run average from P0
+
+Final update (only after P12 guard is clean):
+
+```bash
+./test/test_js_test262_gtest.exe --batch-only --run-async \
+  --async-list=test/js262/test262_baseline.txt \
+  --async-chunk-size=50 \
+  --update-baseline \
+  --write-failures=temp/js55_update_baseline.tsv \
+  --gtest_brief=1
+```
+
+## 6. Risk Register
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| **D2 length re-derivation introduces a perf cliff** in tight TA-method loops | medium — runtime drift | Bench `built_ins/TypedArray/prototype/{forEach,map,reduce}/*` before/after. If 3-run average drifts > +5%, add an opt-out fast-path: `if (!ta->buffer || !ta->buffer->resizable) skip re-derivation`. |
+| **D1 BigInt-TA fix breaks existing BigInt64Array semantics** | high — silent wrong values | Pre-flight all `built-ins/BigInt64Array/*` tests; require byte-identical passing. |
+| **D3 Array-method-on-TA refactor breaks the Array-on-Array baseline tests** | high — false positive | The TA-aware shim is in a narrow branch; the Array-on-Array path is unaffected. Diff `built_ins/Array/prototype/*` outputs that don't involve TA. |
+| **E1 NamedEvaluation skip too broad, breaks `const fn = await async function() {}` (anon)** | medium — silent name absence | Spec: NamedEvaluation skips AwaitExpression entirely. The result of `await Promise.resolve(function() {})` has no name. Verify with focused test. |
+| **E2 microtask drain misses a critical resolution** in non-TLA modules | low — passing test goes silent | Only drain when the module had top-level await. Detect via flag set during MIR codegen. |
+| **E4 thenable resume fix breaks the existing native-promise await chain** | high — async tests stop resolving | Add a focused test for native-promise (`await Promise.resolve(42)`), thenable (`await {then: ...}`), non-promise (`await 42`). All three must resolve. |
+| **E5 SIGSEGV "fix" doesn't actually fix the use-after-free** | medium — flakiness returns | If the reduction doesn't yield a clear repro, formally accept as flaky-partial rather than land a speculative patch. |
+| **F2 v-flag String.replace fix breaks the existing String.replace baseline** | medium | Pre-flight all `built-ins/String/prototype/replace/*` tests. Diff outputs. |
+| **G2 Symbol.species TA-method refactor cascades to non-TA Array methods** | medium | TA-species lives in a narrow code path; verify no Array.prototype.* test changes. |
+| **Cumulative drift exceeds +5% over the Js55 phases** | medium | Per-phase +5% ceiling, multi-run trend. If a single phase pushes over, revert before the next phase opens. |
+| **A gate proves larger than this proposal anticipates** | medium | Js52 §10 / Js53 §11 / Js54 §11 kill-switch precedent. Stop at the gate, document deferral. |
+
+## 7. Completion Criteria
+
+| Criterion | Target | Notes |
+|---|---|---|
+| Skip-list ES2024 entries | unchanged | All ES2024 features stayed unblocked at the end of Js54 P12. Js55 doesn't re-skip anything. |
+| Baseline scope header | `ES2024 (skip ES2025+ features)` | unchanged from Js54. |
+| Passing count rises by ~73 (best case) or ~60 (realistic) | ≈ 40,247–40,260 | Js54 final 40,187 + Gate D ~50 + Gate E ~15–18 + Gate F ~2 + Gate G ~13 ≈ +80, minus the ~10 that may stay deferred. |
+| Failures (in baseline) | 0 | unchanged contract. |
+| Regressions | 0 | unchanged contract per phase. |
+| `t262_partial.txt` | <= 4 (no growth from current) | the 2 SLOW + 2 flaky-TLA-crash entries either get fixed (E5) or stay flagged. |
+| Runtime within +5% of 3-run-average baseline | yes | enforced per phase. |
+| New regression tests landed | 4+ | `test/js/regression_js55_bigint_ta_fill.js`, `regression_js55_rab_iter_resize.js`, `regression_js55_tla_named_eval.js`, `regression_js55_thenable_await.js`. |
+
+## 8. Out Of Scope
+
+- **Unicode 17 property tables** (`rgi-emoji-17.0.js`). Test262 sources currently pin Unicode 16; if upstream updates to Unicode 17, regenerate the existing 16.0 tables via the same generator script and re-admit.
+- **ES2025+ features.** `Float16Array`, `iterator-helpers` (already partial), `set-methods` (already), `import-attributes`, `Promise.try`, `RegExp.escape`, `regexp-modifiers`, `regexp-duplicate-named-groups`, `json-modules`, `json-parse-with-source`, `Math.sumPrecise`, `Uint8Array.prototype.{toBase64,fromBase64,toHex,fromHex}` — defer to Js56.
+- **Stage 3 / Stage 2 proposals.** `Temporal`, `ShadowRealm`, `decorators`, `explicit-resource-management`, `Atomics.pause`, `import-defer`, `Error.isError` — defer.
+
+## 9. Phase Effort Estimates
+
+| Phase | Tests | LOC | Risk | Estimate |
+|---|---:|---:|---|---|
+| P0 baseline + probe | 0 | — | trivial | 0.5 h |
+| P1 Gate D1 BigInt-TA fill | 11 | ~30 | low | 1–2 h |
+| P2 Gate D2 TA-method re-derivation | 25 | ~200 | medium | 4–6 h |
+| P3 Gate D3 Array-on-TA re-derivation | 10 | ~80 | small | 2–3 h |
+| P4 Gate D4 TA constructor max-byte | 4 | ~5 | trivial | 0.5 h |
+| P5 Gate E1 TLA NamedEval skip | 7 | ~15 | small | 1 h |
+| P6 Gate E2 TLA capability chain | 4 | ~50 | medium | 2–3 h |
+| P7 Gate E3 Promise.withResolvers import | 3 | ~30 | medium-high | 2–3 h |
+| P8 Gate E4 Thenable await resume | 4 | ~30 | medium | 2 h |
+| P9 Gate E5 top-level-ticks SIGSEGV | 2 | ?? | high (unknown) | 2–4 h or kill-switch |
+| P10 Gate F v-flag tail | 2 + 1 skip | ~50 | low | 1–2 h |
+| P11 Gate G misc cleanup | ~13 | ~150 | low-medium | 3–4 h |
+| P12 admission + guard | 0 | — | trivial | 1 h |
+
+**Total estimated effort: ~20–30 hours** of focused engine work, dominated by Gate D2 (TA-method audit) and Gate E2/E4 (TLA + thenable plumbing).
+
+## 10. Why this is "long tail" rather than "next feature"
+
+Js53 admitted easy ES2024 features. Js54 admitted the implementation-heavy ones (RAB OOB + transfer + `/v`). Js55 closes the **integration gaps** that Js53 and Js54 left: RAB iteration semantics (which are technically Gate A but harder than the single-call OOB fixes that Js54 P3–P5 landed), TLA host integration (Js52–Js54 added TLA syntax + runtime; Js55 finishes host callback wiring), and the various one-off bugs that aren't really a "feature" anymore.
+
+When Js55 P12 lands, Lambda's ES2024 baseline conformance is **>= 99.7%** of all batched ES2024 tests. The remaining gap is intentional (Unicode 17, deferred features) or platform-specific (resource limits on the largest patterns).
+
+## 11. Anticipated Final Numbers
+
+| Metric | Js54 final | Js55 P12 target | Js55 best case |
+|---|---:|---:|---:|
+| Baseline fully passing | 40,187 | ≈ 40,250 | ≈ 40,260 |
+| ES2024 admissions from Gate D | 0 | + ~50 | + ~50 |
+| ES2024 admissions from Gate E | 0 | + ~15 | + ~18 |
+| ES2024 admissions from Gate F | 0 | + ~2 | + ~2 |
+| ES2024 admissions from Gate G | 0 | + ~13 | + ~13 |
+| Scope line | ES2024 | ES2024 | ES2024 |
+| Failures in baseline | 0 | 0 | 0 |
+| Regressions | 0 | 0 | 0 |
+| Total ES2024 tests admitted across Js53+Js54+Js55 | ≈ 648 | ≈ 728 | ≈ 730 |
+
+Js55's primary deliverable is "ES2024 long-tail closed." After Js55 P12, the remaining failures should be limited to:
+
+- 2 SLOW pre-existing tests (unchanged from Js54)
+- 0–2 SIGSEGV TLA tests (depending on E5 outcome)
+- ~5–10 explicitly-deferred Unicode 17 / Js56 candidates
+
+No further ES2024 work is planned after Js55. The next proposal is Js56, opening ES2025 features.
+
+## 12. Investigation Notes (added during implementation)
+
+### P0 Result (2026-06-13)
+
+3 baseline runs, all clean:
+
+| Run | Wall (s) | Passing | Failed | Regressions |
+|---|---:|---:|---:|---:|
+| 1 | 135.5 | 40187 | 0 | 0 |
+| 2 | (clean) | 40187 | 0 | 0 |
+| 3 | (clean) | 40187 | 0 | 0 |
+
+The 3-run average is ≈135 s — below the proposal's 150–195 s estimate. The §1.1 +5% ceiling is therefore tight (~142 s).
+
+Per-gate failure split written to `temp/js55_repros/`:
+
+- `gate_d_rab_iter.txt` — 51 entries (matches proposal exactly)
+- `gate_e_tla.txt` — 20 entries (matches)
+- `gate_f_v_tail.txt` — 2 entries (proposal expected 3; the `character-class-escape-difference-string-literal.js` referenced in §3 Gate F is **not** in the failure manifest)
+- `gate_g_misc.txt` — 0 entries (proposal expected ~15)
+
+The Gate G/D overlap means the proposal's Gate G cluster (TA `makePassthrough` species tests) is already accounted for inside Gate D's 51 resizable-arraybuffer entries via the `TypedArray;resizable-arraybuffer` joint feature tags. Total still adds to 73 as expected — only the cluster decomposition differs.
+
+### P1 Investigation — root cause does NOT match §3 Gate D1
+
+The proposal §3 Gate D1 claims 11 tests fail because `Array.prototype.fill` coerces values to Number before storing, instead of dispatching to the TypedArray BigInt path. The recommended fix is to update the TA `Set` boundary to accept BigInt without coercing.
+
+Tracing the actual code reveals:
+
+1. `js_typed_array_set` at [js_typed_array.cpp:2045](../../lambda/js/js_typed_array.cpp) **already** has a BigInt branch (lines 2055–2101) that handles `JS_TYPED_BIGINT64` / `JS_TYPED_BIGUINT64` element types via `js_bigint_constructor` and `bigint_to_int64`, **not** `js_to_number`.
+2. `js_typed_array_fill` at [js_typed_array.cpp:2194](../../lambda/js/js_typed_array.cpp) **already** dispatches via `is_bigint_array` and calls `js_dataview_to_bigint_value` — the correct ToBigInt path.
+3. The `Array.prototype.fill.call(typedArray, ...)` dispatch at [js_runtime.cpp:8597](../../lambda/js/js_runtime.cpp) routes TAs to `js_map_method`, whose fill handler at [js_runtime.cpp:17305](../../lambda/js/js_runtime.cpp) calls `js_typed_array_fill` — the BigInt-correct path.
+
+A series of focused micro-repros confirms every code path described in §3 Gate D1 actually works correctly in isolation:
+
+- `temp/js55_p1_micro.js` — basic `Array.prototype.fill.call(BigInt64Array, BigInt(3), 1, 2)`: PASSES
+- `temp/js55_p1_micro2.js` — with `valueOf` resize side-effect: PASSES, fills no elements (correct OOB no-op)
+- `temp/js55_p1_micro3.js` — all 11 builtin TA ctors across loop 1: PASSES every ctor
+- `temp/js55_p1_micro4.js` — `BigUint64Array` isolated: PASSES
+- `temp/js55_p1_micro5.js` — all 3 evil-position loops × 2 BigInt ctors: PASSES all 6
+- `temp/js55_p1_micro6.js` — `MyBigInt64Array` subclass (`class extends BigInt64Array`): PASSES
+- `temp/js55_p1_microfull.js` — full reproduction of test262 file content using `print` instead of `assert`: PASSES every ctor in loop 1
+- `temp/js55_p1_microloops.js` — same for loops 2 and 3: PASSES every ctor
+- `temp/js55_p1_concat.js` — `sta.js + assert.js + compareArray.js + resizableArrayBufferUtils.js + typed-array-resize.js` concatenated and run as a single script: PASSES (exit 0)
+
+But the same test under `test_js_test262_gtest.exe --batch-only --batch-file=...` (with or without `--no-hot-reload`) fails with the exact error `Cannot convert a BigInt value to a number`.
+
+The same pattern holds for Gate E1: `temp/js55_e1_micro.js` reproduces the TLA `try { await new Promise(...) }` pattern from `export-lex-decl-await-expr-new-expr.js` and **passes**, but the actual test262 run reports `Cannot assign to read only property 'name' of object`.
+
+### What this means
+
+The failures are **batch-mode-specific**, not engine-level bugs in the call paths §3 identifies. The proposal's root-cause analysis was inferred from the failure error strings without verifying that the code paths described actually fail in isolation. Possible actual root causes:
+
+1. **Harness preamble binding lookup**: in batch mode, `sta.js` / `assert.js` / `resizableArrayBufferUtils.js` are compiled separately as a "preamble" with their module vars persisted. The test then runs as a second module that references preamble vars (`ctors`, `assert`, `BigInt`, etc.) via cross-module binding. A subtle binding-stale or constructor-prototype-shadowing issue at the boundary could mis-coerce values.
+2. **Persistent state across runs in the batch process**: `js_batch_reset_to(preamble_var_checkpoint)` at [main.cpp:3469](../../lambda/main.cpp) resets some state but maybe not all — a cached prototype or interned BigInt/Number could leak.
+3. **Module-mode flag plumbing**: TLA tests have `flags: [module]` and are dispatched as modules in batch mode. The `is_module` boolean drives strict-mode, NamedEvaluation, and the host capability wiring. A flag mismatch between batch-module and CLI-script execution would explain the divergence.
+
+### Recommended next step
+
+Before further phase work, instrument the batch dispatch path to:
+
+1. Diff the JIT-emitted MIR for a single failing test between (a) batch-mode-as-module and (b) single-script `./lambda.exe js`. The first instruction where the two diverge points at the responsible compile-time codegen condition.
+2. Once the divergence is localized, the actual fix may make several phases of §3 unnecessary (a single binding-lookup fix could clear 51+ Gate D entries simultaneously) — or may invalidate the per-phase risk estimates entirely.
+
+Until that diagnostic is run, none of the phase fixes can be validated reliably: a "successful" surgical patch could just be masking the real bug, and a "failing" fix could be working in isolation but blocked by the batch-mode anomaly.
+
+The 13 phases as written remain the appropriate fallback if the diagnostic shows multiple independent batch-mode issues rather than a single underlying one.
+
+### Diagnostic result (2026-06-13)
+
+The divergence localized to `js_new_from_class_object` in [lambda/js/js_runtime.cpp:1630](../../lambda/js/js_runtime.cpp). Specifically, the **subclass-of-typed-array path at line 2042**: `js_typed_array_construct` runs, but the function returns without clearing `js_pending_new_target` / `js_has_pending_new_target`. Every other `return` in the same function clears those flags — this branch was missed.
+
+**Repro**: `new MyBigInt64Array(8)` followed by `new Uint8Array(8)` in the same for-of loop. After iter 1 the pending-new-target globals leak with value `MyBigInt64Array`. Iter 2 enters with `js_has_pending_new_target == true`, so line 1638 picks `effective_new_target = MyBigInt64Array` instead of `Uint8Array`. The Uint8Array dispatch then calls `js_apply_constructed_builtin_prototype(uint8_ta, Uint8Array, MyBigInt64Array)` which sets `uint8_ta.__proto__ = MyBigInt64Array.prototype` — corrupting subsequent `instanceof BigInt64Array` checks for ordinary Uint8Array instances.
+
+This explains:
+- **Single-script does not reproduce**: the harness, subClass calls, and test code all run in one compile-and-execute; the `subClass('BigInt64Array')` call returns the class object but the `new MyBigInt64Array(...)` only happens later inside the loop. In the test262 batch driver the `ctors` array is built during harness compile, then the iteration loop runs with the leak surfacing on every `MyBigInt64Array → Uint8Array` transition.
+- **Order dependence**: `[MyBigInt64Array, Uint8Array]` triggers; `[Uint8Array, MyBigInt64Array]` does not. The leak from the BigInt subclass corrupts the next call only.
+- **Why so many tests fail**: any test that iterates over `ctors` and constructs both subclass and builtin typed arrays trips the bug on the very first `instanceof BigInt64Array` evaluation after the transition. Inside `ArrayFillHelper`, the false `instanceof` routes a Number-value call through the BigInt branch, which then tries `BigInt(...)` on a wrong value — surfacing as the `Cannot convert a BigInt value to a number` error from `js_to_number`.
+
+**Fix**: clear `js_pending_new_target` / `js_has_pending_new_target` before all three return paths in the subclass-TA branch (early-return on exception, return on `ctor_result`, fall-through return on `result`). Single edit in [js_runtime.cpp:2041](../../lambda/js/js_runtime.cpp).
+
+**Result**: 12 of 51 Gate D tests pass with no other code change. The remaining 39 are unrelated to the new-target leak — those are the genuine length-re-derivation / range-check / Symbol.species tests the proposal §3 D2/D3/D4 describes.
+
+The §3 D1 "BigInt-TA fill (~11 tests)" cluster is now closed by this one-site fix at a completely different location than the proposal anticipated. D2/D3/D4 remain as written but now have a credible execution model: the BigInt error was a symptom, not a coercion bug.
+
+### Confirmed baseline contract (P1, 2026-06-13)
+
+| Metric | Pre-P1 | Post-P1 |
+|---|---:|---:|
+| Fully passed (out of 40262 batched) | 40187 | 40199 |
+| Failed (admittable) | 73 | 63 |
+| Baseline regressions | 0 | 0 |
+| Runtime (release guard wall) | 135.5 s | 144.0 s |
+
+The +5% runtime ceiling (≤142 s) is borderline; 144 s is 2 s over. Js55 phases should hold this line — large added work would need to come with a corresponding optimization or a renegotiated ceiling.
+
+### Phase-by-phase status
+
+| Phase | Tests targeted | Status | Notes |
+|---|---:|---|---|
+| P0 | — | done | 3 runs averaging 135 s, all 40187/40187 clean. |
+| **P1 — D1** | **11** | **done** | One-site fix at js_runtime.cpp:2042-2073 — clears js_pending_new_target across the three return paths of the subclass-of-TA branch. 12 tests fixed (one extra captured by the same fix), 0 regressions. |
+| P2 — D2 | ~25 | pending | 39 Gate D failures remaining match proposal §3 D2/D3/D4 description (length re-derivation, OOB checks, RangeError, ReferenceError cascade). |
+| P3 — D3 | ~10 | pending | Overlaps with P2 — fix in same site. |
+| P4 — D4 | ~4 | pending | TA constructor max-byte-length check. |
+| P5 — E1 | 7 | pending | Repro confirmed in module mode via batch protocol. Error path: `js_strict_throw_property_error("assign to read only", "name", 4)` fires twice (once per `export let/const = await new Promise(...)`). Investigation traced multiple `js_property_set` of `name=""` before the throw. Root cause requires further tracing (the proposal hypothesis "skip NamedEvaluation for AwaitExpression" needs to be verified — the existing var-decl path at js_mir_statement_lowering.cpp:373/429/504/646 already skips await; the actual emission site is elsewhere). |
+| P6 — E2 | 4 | pending | TLA capability chaining. |
+| P7 — E3 | 3 | pending | Promise.withResolvers cross-module. |
+| P8 — E4 | 4 | pending | Thenable await resume. |
+| P9 — E5 | 2 | pending | top-level-ticks SIGSEGV. |
+| P10 — F | 2 (+1 skip) | pending | v-flag tail. |
+| P11 — G | ~13 | pending | TA species + misc — note: most of "Gate G" overlaps with Gate D in the failure manifest's feature tags; the discrete Gate G work is smaller than proposed. |
+| P12 | admission | pending | Final baseline update. |
+
+### Lessons for future work
+
+1. **Symptom-driven root causes are unreliable for JIT engines.** §3 read the failure error strings and inferred causes per error type. The actual P1 cause was a pending-globals leak surfacing as a coercion error in an entirely different code path. Future ES feature long-tail proposals should require a repro-in-isolation step before committing to phase decomposition.
+2. **Batch-mode vs single-script divergence is a load-bearing distinction.** Tests pass in `./lambda.exe js <script>` but fail under `--batch-only` for several Gate D entries. The harness preamble compile boundary and the `assemble_module_test_source` vs script path produce materially different execution. Phase work needs to verify reproduction in the actual test runner — single-script repros mask real bugs and create false reassurance.
+3. **One fix can clear a cluster.** D1's 11 tests + 1 extra all came from one missing assignment to `js_pending_new_target = ItemNull`. If E2/E4 share a TLA-state-leak shape (plausible given the symptoms), one fix there could similarly clear most of Gate E rather than the proposed 4 separate fixes.
+
+### P4 (D4) investigation (2026-06-13)
+
+Attempted Gate D4 next per the proposal's "trivial, 0.5h, ~5 LOC" estimate. The diagnosis there was: TA constructor (buffer, byteOffset, length) form validates length against `byte_length` instead of `max_byte_length`.
+
+Probe of `built-ins/Array/prototype/indexOf/coerced-searchelement-fromindex-grow.js`:
+
+```js
+for (let ctor of ctors) {                                     // Loop A (14 ctors)
+  const rab = CreateResizableArrayBuffer(4 * ctor.BYTES_PER_ELEMENT, 8 * ctor.BYTES_PER_ELEMENT);
+  const lengthTracking = new ctor(rab);
+  ... fill lengthTracking ...
+  let evil = { valueOf: () => { rab.resize(6 * ctor.BYTES_PER_ELEMENT); return 0; } };
+  assert.sameValue(Array.prototype.indexOf.call(lengthTracking, n0, evil), -1);
+}
+for (let ctor of ctors) {                                     // Loop B (14 ctors)
+  const rab = CreateResizableArrayBuffer(4 * ctor.BYTES_PER_ELEMENT, 8 * ctor.BYTES_PER_ELEMENT);
+  const lengthTracking = new ctor(rab);
+  lengthTracking[0] = MayNeedBigInt(lengthTracking, 1);
+  let evil = { valueOf: () => { rab.resize(6 * ctor.BYTES_PER_ELEMENT); return -4; } };
+  let n1 = MayNeedBigInt(lengthTracking, 1);
+  assert.sameValue(Array.prototype.indexOf.call(lengthTracking, n1, -4), 0);
+  assert.sameValue(Array.prototype.indexOf.call(lengthTracking, n1, evil), 0);  // ← throws here
+}
+```
+
+Adding `print("BYTES_PER_ELEMENT:", ctor.BYTES_PER_ELEMENT)` outside the closure showed the correct value (1 for Uint8Array). Adding `print("ctor.BYTES_PER_ELEMENT:", ctor.BYTES_PER_ELEMENT)` *inside* `evil.valueOf` showed `8` (MyBigInt64Array's value, the last ctor of Loop A). evil then computes `6 * 8 = 48` and calls `rab.resize(48)` on a buffer with `maxByteLength = 8` → "Invalid array buffer length" RangeError.
+
+The root cause is NOT the TA constructor at all — it's the same family of JIT specialization bugs as P1's `instanceof`: the closure inside `for (let ctor of ctors)` reads the wrong `ctor`. Both loops happen to bind the iteration variable to the same name `ctor`, and the closure captures a stale scope-env slot from Loop A's last iteration instead of Loop B's current one.
+
+Fix surface lives in the JIT closure-capture / scope-env mechanism for `for-of let` bindings — not in [js_typed_array.cpp:js_typed_array_construct](../../lambda/js/js_typed_array.cpp). The proposal's §3 D4 single-line edit at `js_typed_array_construct` would have no effect on this failure shape.
+
+**Decision**: deferred. The actual fix is in a hot, broadly-used JIT path (closure binding for any `for (let x of …)` body that captures `x`); altering it without a clean understanding of the scope-env protocol risks regressions across hundreds of unrelated tests. P4 is left pending until a focused closure-capture diagnostic runs.
+
+**Pattern observation**: P1 and P4 are both JIT specialization stalenesses surfacing as RangeError/TypeError that the proposal blamed on TA constructors. Likely several of the remaining 39 Gate D / 20 Gate E failures share this shape — the failure error strings should be treated as symptoms, not diagnoses. A targeted audit of "values cached across for-of let-binding iterations" would probably clear another large batch in one site (just like P1's pending-new-target fix).
+

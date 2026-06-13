@@ -187,6 +187,7 @@ struct SimEvent {
     char* assert_contains;       // for assert_text: substring match
     char* assert_equals;         // for assert_text: exact match
     char* clipboard_mime;        // for assert_clipboard: MIME representation to read
+    char* clipboard_html;        // for paste_text: optional text/html payload
     bool expected_visible;       // for assert_visible
     bool expected_checked;       // for assert_checked
     bool expected_password_reveal_active; // for assert_password_reveal

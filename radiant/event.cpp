@@ -1416,10 +1416,10 @@ static bool rich_delete_dom_selection(DocState* state, DomSelection* selection) 
     dom_selection_delete_from_document(selection);
     DomRange* range = selection->ranges[0];
     if (range && range->start.node) {
-        DomBoundary caret = range->start;
         const char* exc = nullptr;
-        state_store_set_selection(state, &caret, &caret, &exc);
+        dom_selection_collapse(selection, range->start.node, range->start.offset, &exc);
     }
+    state_store_refresh_caret_projection(state);
     doc_state_request_reflow(state);
     state->needs_repaint = true;
     return true;
@@ -2158,6 +2158,31 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     return editing_run_transaction(evcon, &tx, nullptr, nullptr, nullptr);
 }
 
+static const char* rich_text_default_mutation_operation(
+        const InputIntent* intent) {
+    if (!intent) return "replace";
+    switch (intent->type) {
+        case INPUT_INTENT_INSERT_TEXT:
+            return "insert";
+        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:
+            return "replace";
+        case INPUT_INTENT_INSERT_COMPOSITION_TEXT:
+        case INPUT_INTENT_INSERT_FROM_COMPOSITION:
+            return "composition";
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+            return "paste";
+        case INPUT_INTENT_INSERT_PARAGRAPH:
+        case INPUT_INTENT_INSERT_LINE_BREAK:
+            return "linebreak";
+        case INPUT_INTENT_DELETE_BY_CUT:
+        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
+        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+            return "delete";
+        default:
+            return "replace";
+    }
+}
+
 static bool rich_text_default_replace(EventContext* evcon,
                                       DocState* state,
                                       const InputIntent* intent,
@@ -2308,16 +2333,26 @@ static bool rich_text_default_replace(EventContext* evcon,
     if (intent->type == INPUT_INTENT_DELETE_BY_CUT && state->dom_selection) {
         const char* exc = nullptr;
         uint32_t caret_u16 = dom_text_utf8_to_utf16(live_text, caret_offset);
-        DomBoundary caret = { static_cast<DomNode*>(live_text), caret_u16 };
-        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+        if (!dom_selection_collapse(state->dom_selection,
+                                    static_cast<DomNode*>(live_text),
+                                    caret_u16, &exc)) {
             log_debug("rich_text_default_replace: cut collapse rejected: %s",
                       exc ? exc : "?");
+        } else {
+            state_store_refresh_caret_projection(state);
         }
     }
     EditingSurface live_surface;
     if (editing_surface_from_target(static_cast<View*>(live_text), &live_surface) &&
         editing_surface_is_rich(&live_surface)) {
         editing_interaction_set_active_surface(state, &live_surface);
+        uint32_t new_text_len = live_text->length > 0
+            ? (uint32_t)live_text->length
+            : (uint32_t)strlen(live_text->text ? live_text->text : "");
+        event_log_editing_mutation(state, &live_surface, intent,
+                                   rich_text_default_mutation_operation(intent),
+                                   old_len, new_text_len,
+                                   caret_offset, caret_offset);
     }
     doc_state_request_reflow(state);
     evcon->need_repaint = true;
@@ -4560,19 +4595,29 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     const char* input_type = input_intent_type_name(intent->type);
     const char* data = intent->data ? intent->data : "";
 
-    // CE-3 follow-up: compute the StaticRange[] snapshot BEFORE dispatch so
-    // a JS handler that calls e.getTargetRanges() sees the pre-mutation
-    // ranges (WPT input-events-get-target-ranges* contract).
-    EditingSurface surface;
-    bool has_surface = editing_surface_from_target(target, &surface);
     EditingTargetRange ranges[1];
-    DocState* state = event_context_target_state(evcon);
-    uint32_t n_ranges = has_surface
-        ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
-        : 0;
+    const EditingTargetRange* range_snapshot = nullptr;
+    uint32_t n_ranges = 0;
+    if (evcon->editing_target_ranges_active) {
+        range_snapshot = evcon->editing_target_ranges;
+        n_ranges = evcon->editing_target_range_count;
+    } else {
+        // Non-transaction fallback: compute the StaticRange[] snapshot before
+        // dispatch so handlers see the current pre-dispatch ranges.
+        EditingSurface surface;
+        bool has_surface = editing_surface_from_target(target, &surface);
+        DocState* state = event_context_target_state(evcon);
+        n_ranges = has_surface
+            ? editing_compute_target_ranges(state, &surface, intent, ranges, 1)
+            : 0;
+        range_snapshot = ranges;
+    }
+    if (!range_snapshot) {
+        n_ranges = 0;
+    }
     Item ranges_arr = js_array_new(0);
     for (uint32_t i = 0; i < n_ranges; i++) {
-        js_array_push(ranges_arr, ce_build_static_range_item(&ranges[i]));
+        js_array_push(ranges_arr, ce_build_static_range_item(&range_snapshot[i]));
     }
 
     // CE-3 follow-up (§6.1, §8): for paste/drop intents, attach a

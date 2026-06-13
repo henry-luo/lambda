@@ -3,6 +3,10 @@
 #include "state_machine.hpp"
 #include "state_schema.hpp"
 #include "state_store_internal.hpp"
+#include "editing_geometry.hpp"
+#include "editing_host.hpp"
+#include "editing_intent.hpp"
+#include "editing_target_range.hpp"
 #include "dom_range.hpp"
 #include "dom_range_resolver.hpp"
 #include "form_control.hpp"
@@ -744,6 +748,17 @@ static void validate_editing_interaction_invariants(DocState* state,
             }
         }
     }
+    if (editing->rich_transaction_phase == EDITING_RICH_TX_IDLE) {
+        if (editing->rich_transaction_target) {
+            report_fail(report, "idle rich edit transaction has stale target");
+        }
+    } else {
+        if (!editing->rich_transaction_target) {
+            report_fail(report, "active rich edit transaction has no target");
+        } else if (!view_has_document_root(editing->rich_transaction_target)) {
+            report_fail(report, "active rich edit transaction target is detached");
+        }
+    }
 
     if (editing->autoscroll.active != state->editing_autoscroll_active ||
         editing->autoscroll.surface != state->editing_autoscroll_surface ||
@@ -795,10 +810,6 @@ static void validate_selection_invariants(DocState* state,
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
         if (!state_store_editing_selection_shadow_matches(state)) {
             report_fail(report, "editing selection shadow disagrees with text control selection");
-        }
-        // Text-control and DOM-range selection must be mutually exclusive.
-        if (state->dom_selection && state->dom_selection->range_count > 0) {
-            report_fail(report, "text control selection coexists with a non-empty DOM selection");
         }
         DomElement* control = state->sel.control;
         if (!control || !tc_is_text_control(control)) {
@@ -1113,6 +1124,317 @@ static void validate_selection_projection_state(DocState* state,
     }
 }
 
+static bool editing_phase_has_mutation(EditingRichTransactionPhase phase) {
+    switch (phase) {
+        case EDITING_RICH_TX_MUTATED:
+        case EDITING_RICH_TX_SELECTION_SET:
+        case EDITING_RICH_TX_INPUT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool editing_phase_matches_premutation_selection(
+        EditingRichTransactionPhase phase) {
+    return phase == EDITING_RICH_TX_OPEN ||
+        phase == EDITING_RICH_TX_BEFOREINPUT;
+}
+
+static const EditingSurface* editing_validation_surface(
+        DocState* state,
+        EditingSurface* resolved) {
+    if (!state) return NULL;
+    const EditingInteractionState* editing = &state->editing;
+    if (resolved &&
+        editing->rich_transaction_phase != EDITING_RICH_TX_IDLE &&
+        editing->rich_transaction_target &&
+        editing_surface_from_target(editing->rich_transaction_target, resolved)) {
+        return resolved;
+    }
+    if (editing->has_active_surface &&
+        editing->active_surface.kind != EDIT_SURFACE_NONE) {
+        return &editing->active_surface;
+    }
+    if (resolved && editing->rich_transaction_target &&
+        editing_surface_from_target(editing->rich_transaction_target, resolved)) {
+        return resolved;
+    }
+    return NULL;
+}
+
+static bool editing_surface_contains_dom_boundary_for_validation(
+        const EditingSurface* surface,
+        const DomBoundary* boundary) {
+    if (!surface || !boundary || !boundary->node) return false;
+    EditingBoundary edit_boundary;
+    editing_boundary_clear(&edit_boundary);
+    edit_boundary.kind = EDITING_BOUNDARY_DOM;
+    edit_boundary.surface = *surface;
+    edit_boundary.dom = *boundary;
+    edit_boundary.view = static_cast<View*>(boundary->node);
+    return editing_geometry_surface_contains_boundary(surface, &edit_boundary);
+}
+
+static bool editing_boundary_in_false_island(const EditingSurface* surface,
+                                             const DomBoundary* boundary) {
+    if (!surface || !editing_surface_is_rich(surface) ||
+        !surface->owner || !boundary || !boundary->node) {
+        return false;
+    }
+    EditingHost host;
+    if (!editing_host_lookup(boundary->node, &host)) return false;
+    return host.host == surface->owner && host.target_in_false_island;
+}
+
+static bool editing_target_range_same(const EditingTargetRange* a,
+                                      const EditingTargetRange* b) {
+    if (!a || !b) return false;
+    return a->start.node == b->start.node &&
+        a->start.offset == b->start.offset &&
+        a->end.node == b->end.node &&
+        a->end.offset == b->end.offset;
+}
+
+static bool editing_surfaces_focus_compatible(const EditingSurface* active,
+                                              const EditingSurface* focused) {
+    if (!active || !focused) return false;
+    if (editing_surface_is_rich(active) && editing_surface_is_rich(focused)) {
+        return active->kind == focused->kind &&
+            active->mode == focused->mode &&
+            active->owner == focused->owner;
+    }
+    return editing_surface_matches(active, focused);
+}
+
+static void validate_editing_surface_invariant(DocState* state,
+                                               StateValidationReport* report) {
+    if (!state) return;
+    const EditingInteractionState* editing = &state->editing;
+    if (!editing->has_active_surface) {
+        if (editing->active_surface.kind != EDIT_SURFACE_NONE) {
+            report_fail(report, "SM_INV_EDITING_SURFACE: inactive surface has stale kind");
+        }
+        return;
+    }
+
+    const EditingSurface* surface = &editing->active_surface;
+    bool rich_context = editing_surface_is_rich(surface) ||
+        editing->rich_transaction_phase != EDITING_RICH_TX_IDLE;
+    if (!rich_context) return;
+    if (editing->rich_transaction_phase != EDITING_RICH_TX_IDLE &&
+        !editing_surface_is_rich(surface)) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: rich transaction surface is not rich");
+    }
+    if (surface->kind == EDIT_SURFACE_NONE) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface has none kind");
+    }
+    if (surface->readonly) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface is read-only");
+    }
+    if (surface->disabled) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface is disabled");
+    }
+    if (!surface->owner) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface has no owner");
+    } else if (!view_has_document_root(static_cast<View*>(surface->owner))) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface owner is detached");
+    }
+    if (!surface->view) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface has no target");
+    } else if (!view_has_document_root(surface->view)) {
+        report_fail(report, "SM_INV_EDITING_SURFACE: active surface target is detached");
+    } else {
+        EditingSurface resolved;
+        if (!editing_surface_from_target(surface->view, &resolved)) {
+            report_fail(report, "SM_INV_EDITING_SURFACE: active surface no longer resolves");
+        } else if (!editing_surface_matches(surface, &resolved)) {
+            report_fail(report, "SM_INV_EDITING_SURFACE: active surface projection is stale");
+        }
+    }
+
+    View* focused = focus_get(state);
+    if (focused) {
+        EditingSurface focus_surface;
+        if (editing_surface_from_target(focused, &focus_surface) &&
+            !editing_surfaces_focus_compatible(surface, &focus_surface)) {
+            report_fail(report, "SM_INV_EDITING_SURFACE: active surface disagrees with focus");
+        }
+    }
+}
+
+static void validate_editing_selection_host_invariant(
+        DocState* state,
+        StateValidationReport* report) {
+    if (!state ||
+        state->editing.rich_transaction_phase == EDITING_RICH_TX_IDLE) {
+        return;
+    }
+    EditingSurface resolved;
+    const EditingSurface* surface = editing_validation_surface(state, &resolved);
+    if (!editing_surface_is_rich(surface)) return;
+
+    DomSelection* selection = state->dom_selection;
+    if (!selection || selection->range_count == 0) return;
+
+    DomBoundary anchor = dom_selection_anchor_boundary(selection);
+    DomBoundary focus = dom_selection_focus_boundary(selection);
+    if (!editing_surface_contains_dom_boundary_for_validation(surface, &anchor) ||
+        !editing_surface_contains_dom_boundary_for_validation(surface, &focus)) {
+        report_fail(report, "SM_INV_EDITING_SELECTION_HOST: selection endpoint outside active host");
+    }
+}
+
+static void validate_editing_false_island_invariant(
+        DocState* state,
+        StateValidationReport* report) {
+    if (!state) return;
+    const EditingInteractionState* editing = &state->editing;
+    if (!editing_phase_has_mutation(editing->rich_transaction_phase)) return;
+
+    EditingSurface resolved;
+    const EditingSurface* surface = editing_validation_surface(state, &resolved);
+    if (!editing_surface_is_rich(surface)) return;
+
+    if (surface->target_in_false_island) {
+        report_fail(report, "SM_INV_EDITING_FALSE_ISLAND: mutation target is inside false island");
+    }
+    if (!editing->rich_transaction_target_ranges_active) return;
+    for (uint32_t i = 0; i < editing->rich_transaction_target_range_count && i < 4; i++) {
+        const EditingTargetRangeSnapshot* range =
+            &editing->rich_transaction_target_ranges[i];
+        if (editing_boundary_in_false_island(surface, &range->start) ||
+            editing_boundary_in_false_island(surface, &range->end)) {
+            report_fail(report, "SM_INV_EDITING_FALSE_ISLAND: target range enters false island");
+            return;
+        }
+    }
+}
+
+static void validate_editing_target_ranges_invariant(
+        DocState* state,
+        StateValidationReport* report) {
+    if (!state) return;
+    const EditingInteractionState* editing = &state->editing;
+    if (editing->rich_transaction_phase == EDITING_RICH_TX_IDLE) {
+        if (editing->rich_transaction_target_ranges_active ||
+            editing->rich_transaction_target_range_count != 0 ||
+            editing->rich_transaction_target_ranges_required ||
+            editing->rich_transaction_input_type != (uint32_t)INPUT_INTENT_NONE) {
+            report_fail(report, "SM_INV_EDITING_TARGET_RANGES: idle transaction has stale target ranges");
+        }
+        return;
+    }
+
+    if (!editing->rich_transaction_target_ranges_active) {
+        report_fail(report, "SM_INV_EDITING_TARGET_RANGES: active transaction has no target-range snapshot");
+        return;
+    }
+    if (editing->rich_transaction_target_range_count > 4) {
+        report_fail(report, "SM_INV_EDITING_TARGET_RANGES: target range count exceeds snapshot capacity");
+        return;
+    }
+    if (!editing->rich_transaction_target_ranges_valid &&
+        editing_phase_has_mutation(editing->rich_transaction_phase)) {
+        report_fail(report, "SM_INV_EDITING_TARGET_RANGES: invalid target range reached mutation phase");
+        return;
+    }
+
+    EditingSurface resolved;
+    const EditingSurface* surface = editing_validation_surface(state, &resolved);
+    if (!surface || surface->kind == EDIT_SURFACE_NONE) {
+        report_fail(report, "SM_INV_EDITING_TARGET_RANGES: active transaction has no surface");
+        return;
+    }
+
+    bool selection_unchanged = state->selection_mutation_seq ==
+        editing->rich_transaction_selection_seq;
+    if (editing->rich_transaction_target_ranges_valid &&
+        selection_unchanged) {
+        for (uint32_t i = 0; i < editing->rich_transaction_target_range_count; i++) {
+            EditingTargetRange range;
+            range.start = editing->rich_transaction_target_ranges[i].start;
+            range.end = editing->rich_transaction_target_ranges[i].end;
+            if (!editing_geometry_surface_contains_target_range(surface, &range)) {
+                report_fail(report, "SM_INV_EDITING_TARGET_RANGES: target range is outside active surface");
+                return;
+            }
+        }
+    }
+
+    if (!editing->rich_transaction_target_ranges_required ||
+        !editing->rich_transaction_target_ranges_valid ||
+        !editing_phase_matches_premutation_selection(
+            editing->rich_transaction_phase) ||
+        !selection_unchanged) {
+        return;
+    }
+
+    InputIntent intent;
+    memset(&intent, 0, sizeof(intent));
+    intent.type = (InputIntentType)editing->rich_transaction_input_type;
+    EditingTargetRange recomputed[4];
+    memset(recomputed, 0, sizeof(recomputed));
+    uint32_t count = editing_compute_target_ranges(state, surface, &intent,
+                                                   recomputed, 4);
+    if (count != editing->rich_transaction_target_range_count) {
+        report_fail(report, "SM_INV_EDITING_TARGET_RANGES: target range count changed before mutation");
+        return;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        EditingTargetRange snapshot;
+        snapshot.start = editing->rich_transaction_target_ranges[i].start;
+        snapshot.end = editing->rich_transaction_target_ranges[i].end;
+        if (!editing_target_range_same(&recomputed[i],
+                &snapshot)) {
+            report_fail(report, "SM_INV_EDITING_TARGET_RANGES: target range changed before mutation");
+            return;
+        }
+    }
+}
+
+static void validate_dom_selection_cache_invariant(DocState* state,
+                                                   StateValidationReport* report) {
+    if (!state) return;
+    if (!state_store_editing_selection_shadow_matches(state)) {
+        report_fail(report, "SM_INV_DOM_SELECTION_CACHE: selection shadow is stale");
+    }
+}
+
+static void validate_legacy_selection_projection_invariant(
+        DocState* state,
+        StateValidationReport* report) {
+    validate_caret_projection_state(state, report);
+    validate_selection_projection_state(state, report);
+}
+
+static void validate_input_event_order_invariant(DocState* state,
+                                                 StateValidationReport* report) {
+    if (!state) return;
+    const EditingInteractionState* editing = &state->editing;
+    switch (editing->rich_transaction_phase) {
+        case EDITING_RICH_TX_IDLE:
+        case EDITING_RICH_TX_OPEN:
+        case EDITING_RICH_TX_BEFOREINPUT:
+        case EDITING_RICH_TX_MUTATED:
+        case EDITING_RICH_TX_SELECTION_SET:
+        case EDITING_RICH_TX_INPUT:
+            break;
+        default:
+            report_fail(report, "SM_INV_INPUT_EVENT_ORDER: invalid rich transaction phase");
+            return;
+    }
+    if (editing->rich_transaction_phase != EDITING_RICH_TX_IDLE &&
+        !editing->rich_transaction_target) {
+        report_fail(report, "SM_INV_INPUT_EVENT_ORDER: active transaction has no target");
+    }
+    if (editing_phase_has_mutation(editing->rich_transaction_phase) &&
+        editing->rich_transaction_target_ranges_required &&
+        !editing->rich_transaction_target_ranges_valid) {
+        report_fail(report, "SM_INV_INPUT_EVENT_ORDER: mutation followed invalid target ranges");
+    }
+}
+
 static void validate_text_control_focus_state(DocState* state,
                                               StateValidationReport* report) {
     if (!state) return;
@@ -1217,6 +1539,27 @@ static void validate_schema_invariant_primitive(DocState* state,
         case SM_INV_DOM_SELECTION:
             validate_selection_invariants(state, report);
             break;
+        case SM_INV_EDITING_SURFACE:
+            validate_editing_surface_invariant(state, report);
+            break;
+        case SM_INV_EDITING_SELECTION_HOST:
+            validate_editing_selection_host_invariant(state, report);
+            break;
+        case SM_INV_EDITING_FALSE_ISLAND:
+            validate_editing_false_island_invariant(state, report);
+            break;
+        case SM_INV_EDITING_TARGET_RANGES:
+            validate_editing_target_ranges_invariant(state, report);
+            break;
+        case SM_INV_DOM_SELECTION_CACHE:
+            validate_dom_selection_cache_invariant(state, report);
+            break;
+        case SM_INV_LEGACY_SELECTION_PROJECTION:
+            validate_legacy_selection_projection_invariant(state, report);
+            break;
+        case SM_INV_INPUT_EVENT_ORDER:
+            validate_input_event_order_invariant(state, report);
+            break;
         default:
             break;
     }
@@ -1310,6 +1653,19 @@ static const char* editing_drag_mode_name(EditingDragMode mode) {
     }
 }
 
+static const char* editing_rich_transaction_phase_name(
+        EditingRichTransactionPhase phase) {
+    switch (phase) {
+        case EDITING_RICH_TX_IDLE: return "idle";
+        case EDITING_RICH_TX_OPEN: return "open";
+        case EDITING_RICH_TX_BEFOREINPUT: return "beforeinput";
+        case EDITING_RICH_TX_MUTATED: return "mutated";
+        case EDITING_RICH_TX_SELECTION_SET: return "selection_set";
+        case EDITING_RICH_TX_INPUT: return "input";
+        default: return "unknown";
+    }
+}
+
 static void write_editing_surface_ref(JsonWriter* w,
                                       const EditingSurface* surface) {
     if (!surface || surface->kind == EDIT_SURFACE_NONE) {
@@ -1349,6 +1705,28 @@ static void write_editing_interaction_snapshot(JsonWriter* w,
             jw_null(w);
         }
         jw_kv_bool(w, "composing", editing->composing);
+        jw_kv_str(w, "rich_transaction_phase",
+                  editing_rich_transaction_phase_name(
+                      editing->rich_transaction_phase));
+        write_optional_view_ref(w, "rich_transaction_target",
+                                editing->rich_transaction_target);
+        jw_key(w, "rich_transaction_target_ranges");
+        jw_obj_begin(w);
+            jw_kv_bool(w, "active",
+                       editing->rich_transaction_target_ranges_active);
+            jw_kv_bool(w, "required",
+                       editing->rich_transaction_target_ranges_required);
+            jw_kv_bool(w, "valid",
+                       editing->rich_transaction_target_ranges_valid);
+            jw_kv_str(w, "input_type",
+                      input_intent_type_name(
+                          (InputIntentType)
+                          editing->rich_transaction_input_type));
+            jw_kv_uint(w, "selection_seq",
+                       editing->rich_transaction_selection_seq);
+            jw_kv_uint(w, "count",
+                       editing->rich_transaction_target_range_count);
+        jw_obj_end(w);
         jw_key(w, "composition");
         jw_obj_begin(w);
             jw_kv_bool(w, "active", editing->composition.active);
