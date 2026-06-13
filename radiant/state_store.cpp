@@ -1196,6 +1196,36 @@ extern "C" bool state_store_set_selection(DocState* state,
     return ok;
 }
 
+extern "C" bool state_store_delete_selection_from_document(
+        DocState* state,
+        const char** out_exception) {
+    if (!state) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return false;
+    }
+
+    DomSelection* selection = state->dom_selection;
+    if (!selection || selection->range_count == 0 || !selection->ranges[0]) {
+        return true;
+    }
+    if (dom_selection_is_collapsed(selection)) {
+        return true;
+    }
+
+    DomRange* range = selection->ranges[0];
+    const char* exc = NULL;
+    if (!dom_range_delete_contents(range, &exc) || exc) {
+        if (out_exception) *out_exception = exc ? exc : "InvalidStateError";
+        return false;
+    }
+
+    if (range->start.node) {
+        DomBoundary caret = { range->start.node, range->start.offset };
+        return state_store_set_selection(state, &caret, &caret, out_exception);
+    }
+    return state_store_set_selection(state, NULL, NULL, out_exception);
+}
+
 // Canonical writer for text-control selection. `state->sel` is the StateStore
 // canonical store; `form->selection_*` is the HTML-facing mirror written in
 // lockstep here so JS (`selectionStart/End`) observes the same value. Both are
@@ -1514,10 +1544,10 @@ extern "C" void dom_selection_sync_from_legacy_caret(DocState* state) {
     DomSelection* ds = sync_ensure_selection(state);
     if (!ds) return;
     // During an active drag-selection (or any non-collapsed projection
-    // whose focus matches the caret), the caret_set() call is just
+    // whose focus matches the caret), the state_store_legacy_caret_set() call is just
     // moving the focus end of the selection — NOT collapsing it. Mirroring
     // it as `collapse(...)` here would wipe out the selection that
-    // `selection_extend()` just synced into DomSelection a moment ago.
+    // `state_store_legacy_selection_extend()` just synced into DomSelection a moment ago.
     // In that case skip the sync; the projection-to-DomSelection
     // mirror in selection_extend already updated the focus boundary.
     SelectionState* sel = state->selection;
@@ -4958,10 +4988,14 @@ bool visited_links_check(VisitedLinks* visited, const char* url) {
 }
 
 // ============================================================================
-// Caret API
+// Legacy caret/selection write API
 // ============================================================================
+//
+// These wrappers preserve view + byte-offset callers while routing through the
+// canonical selection writer. Keep new rich editing mutations on
+// state_store_set_selection() / editing transactions instead.
 
-void caret_set(DocState* state, View* view, int char_offset) {
+void state_store_legacy_caret_set(DocState* state, View* view, int char_offset) {
     log_debug("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
@@ -5052,7 +5086,7 @@ void caret_set(DocState* state, View* view, int char_offset) {
     log_debug("caret_set: view=%p, offset=%d", view, char_offset);
 }
 
-void caret_set_position(DocState* state, View* view, int line, int column) {
+void state_store_legacy_caret_set_position(DocState* state, View* view, int line, int column) {
     if (!state) return;
 
     if (!sync_ensure_selection(state) || !state->caret) return;
@@ -5445,7 +5479,7 @@ static bool state_store_commit_collapsed_caret(DocState* state,
     return true;
 }
 
-void caret_move(DocState* state, int delta) {
+void state_store_legacy_caret_move(DocState* state, int delta) {
     if (!state || !state->caret || !state->caret->view) {
         log_debug("caret_move: early return - state=%p, caret=%p, view=%p",
             state, state ? state->caret : nullptr,
@@ -5636,7 +5670,7 @@ void caret_move(DocState* state, int delta) {
         delta, caret->view, caret->char_offset);
 }
 
-void caret_move_to(DocState* state, int where) {
+void state_store_legacy_caret_move_to(DocState* state, int where) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -6036,7 +6070,7 @@ done_down: ;
     return best_view;
 }
 
-void caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
+void state_store_legacy_caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
     if (!state || !state->caret || !state->caret->view) return;
 
     CaretState* caret = state->caret;
@@ -6079,7 +6113,7 @@ void caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
         "caret_move_line");
 }
 
-void caret_clear(DocState* state) {
+void state_store_legacy_caret_clear(DocState* state) {
     if (!state) return;
 
     const char* exc = NULL;
@@ -6361,10 +6395,10 @@ void caret_toggle_blink(DocState* state) {
 }
 
 // ============================================================================
-// Selection API
+// Selection compatibility writes
 // ============================================================================
 
-void selection_start(DocState* state, View* view, int char_offset) {
+void state_store_legacy_selection_start(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6424,7 +6458,7 @@ void selection_start(DocState* state, View* view, int char_offset) {
     log_debug("selection_start: view=%p, offset=%d", view, char_offset);
 }
 
-void selection_extend(DocState* state, int char_offset) {
+void state_store_legacy_selection_extend(DocState* state, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6478,7 +6512,7 @@ void selection_extend(DocState* state, int char_offset) {
     log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
 }
 
-void selection_extend_to_view(DocState* state, View* view, int char_offset) {
+void state_store_legacy_selection_extend_to_view(DocState* state, View* view, int char_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6534,7 +6568,7 @@ void selection_extend_to_view(DocState* state, View* view, int char_offset) {
         view, char_offset, state->selection->anchor_view, state->selection->is_collapsed);
 }
 
-void selection_set(DocState* state, View* view, int anchor_offset, int focus_offset) {
+void state_store_legacy_selection_set(DocState* state, View* view, int anchor_offset, int focus_offset) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6583,7 +6617,7 @@ void selection_set(DocState* state, View* view, int anchor_offset, int focus_off
     log_debug("selection_set: anchor=%d, focus=%d", anchor_offset, focus_offset);
 }
 
-void selection_select_all(DocState* state) {
+void state_store_legacy_selection_select_all(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6653,7 +6687,7 @@ void selection_select_all(DocState* state) {
     log_debug("selection_select_all");
 }
 
-void selection_collapse(DocState* state, bool to_start) {
+void state_store_legacy_selection_collapse(DocState* state, bool to_start) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -6708,7 +6742,7 @@ void selection_collapse(DocState* state, bool to_start) {
     log_debug("selection_collapse: to_start=%d", to_start);
 }
 
-void selection_clear(DocState* state) {
+void state_store_legacy_selection_clear(DocState* state) {
     if (!state) return;
 
     if (state->transition_depth == 0) {
@@ -7097,13 +7131,13 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
 
     if (tc_get_active_element(state)) tc_set_active_element(state, NULL);
     if (state->caret && selection_is_text_control_view(state->caret->view)) {
-        caret_clear(state);
+        state_store_legacy_caret_clear(state);
     }
     if (state->selection &&
         (selection_is_text_control_view(state->selection->anchor_view) ||
          selection_is_text_control_view(state->selection->focus_view) ||
          selection_is_text_control_view(state->selection->view))) {
-        selection_clear(state);
+        state_store_legacy_selection_clear(state);
     }
 }
 
@@ -7198,8 +7232,8 @@ static void focus_clear_internal(DocState* state, bool preserve_selection) {
         editing_surface_is_rich(&state->editing.active_surface);
     if (!preserve_selection && !preserve_rich_editing) {
         // Also clear caret and selection
-        caret_clear(state);
-        selection_clear(state);
+        state_store_legacy_caret_clear(state);
+        state_store_legacy_selection_clear(state);
     }
 
     state->needs_repaint = true;
@@ -7766,110 +7800,11 @@ char* state_store_extract_selection_html(DocState* state, Arena* arena) {
 }
 
 char* extract_selected_text(DocState* state, Arena* arena) {
-    if (!state || !arena) {
-        return NULL;
-    }
-
-    if (state->dom_selection && state->dom_selection->range_count > 0 &&
-        !dom_selection_is_collapsed(state->dom_selection) && state->dom_selection->ranges[0]) {
-        return extract_dom_range_text_to_arena(state->dom_selection->ranges[0], arena);
-    }
-
-    if (!state->selection || state->selection->is_collapsed) {
-        return NULL;
-    }
-
-    SelectionState* sel = state->selection;
-    View* view = sel->view;
-
-    if (!view || view->view_type != RDT_VIEW_TEXT) {
-        return NULL;
-    }
-
-    ViewText* text = lam::view_require_text(view);
-    const char* text_data = (const char*)text->text_data();
-    if (!text_data) return NULL;
-
-    // Get normalized range
-    int start_offset, end_offset;
-    selection_get_range(state, &start_offset, &end_offset);
-
-    if (start_offset >= end_offset) return NULL;
-
-    int length = end_offset - start_offset;
-    char* result = (char*)arena_alloc(arena, length + 1);
-    if (result) {
-        memcpy(result, text_data + start_offset, length);
-        result[length] = '\0';
-    }
-
-    return result;
+    return state_store_extract_selection_text(state, arena);
 }
 
 char* extract_selected_html(DocState* state, Arena* arena) {
-    if (!state || !arena) {
-        return NULL;
-    }
-
-    if (state->dom_selection && state->dom_selection->range_count > 0 &&
-        !dom_selection_is_collapsed(state->dom_selection) && state->dom_selection->ranges[0]) {
-        DomRange* range = state->dom_selection->ranges[0];
-        StrBuf* sb = strbuf_new_cap(256);
-        if (!sb) return NULL;
-        DomText* text = first_text_in_range_for_clipboard(range);
-        while (text) {
-            DomBoundary text_start{ static_cast<DomNode*>(text), 0 };
-            DomBoundary text_end{ static_cast<DomNode*>(text), dom_text_utf16_length(text) };
-            if (!boundary_before_or_equal(&text_start, &range->end)) break;
-
-            DomBoundary slice_start = text_start;
-            DomBoundary slice_end = text_end;
-            if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
-            if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
-            if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
-                slice_start.offset < slice_end.offset) {
-                append_selected_text_html(sb, text, slice_start.offset, slice_end.offset);
-            }
-            if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
-            text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
-        }
-        char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
-        strbuf_free(sb);
-        return result;
-    }
-
-    if (!state->selection || state->selection->is_collapsed) {
-        return NULL;
-    }
-
-    // For now, just return HTML-escaped text
-    // TODO: preserve formatting tags within selection
-    char* text = extract_selected_text(state, arena);
-    if (!text) return NULL;
-
-    StrBuf* sb = strbuf_new_cap(strlen(text) * 2);
-    if (!sb) return NULL;
-
-    const char* p = text;
-    while (*p) {
-        char c = *p++;
-        switch (c) {
-            case '<': strbuf_append_str(sb, "&lt;"); break;
-            case '>': strbuf_append_str(sb, "&gt;"); break;
-            case '&': strbuf_append_str(sb, "&amp;"); break;
-            case '"': strbuf_append_str(sb, "&quot;"); break;
-            default: strbuf_append_char(sb, c); break;
-        }
-    }
-
-    char* result = (char*)arena_alloc(arena, sb->length + 1);
-    if (result) {
-        memcpy(result, sb->str, sb->length);
-        result[sb->length] = '\0';
-    }
-
-    strbuf_free(sb);
-    return result;
+    return state_store_extract_selection_html(state, arena);
 }
 
 // Clipboard helpers — delegate to the canonical Radiant ClipboardStore

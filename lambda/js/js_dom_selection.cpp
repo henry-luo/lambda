@@ -938,7 +938,11 @@ extern "C" Item js_selection_contains_node(Item node_v, Item allow_partial_v) {
 
 extern "C" Item js_selection_delete_from_document(void) {
     DomSelection* s = selection_from_this(); if (!s) return make_undef();
-    dom_selection_delete_from_document(s);
+    const char* exc = nullptr;
+    if (!state_store_delete_selection_from_document(s->state, &exc)) {
+        throw_from_dom_exc(exc, "deleteFromDocument failed");
+        return make_undef();
+    }
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }

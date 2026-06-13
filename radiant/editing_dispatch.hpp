@@ -41,6 +41,8 @@ struct EditingTransaction {
     void* mutate_user;
     const char* operation;
     bool dispatch_input_without_mutation;
+    bool mutation_invalidates_layout;
+    bool mutation_invalidates_paint;
 };
 
 bool editing_run_transaction(EventContext* evcon,

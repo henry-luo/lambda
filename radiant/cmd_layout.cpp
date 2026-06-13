@@ -5576,7 +5576,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             DomElement* af_elem = lam::dom_require_element(af);
             if (af_elem->has_attribute("autofocus")) {
                 focus_set(state, af, false);
-                caret_set(state, af, 0);
+                state_store_legacy_caret_set(state, af, 0);
                 log_debug("rebuild_lambda_doc: autofocus set on new input");
             }
         }
@@ -5865,7 +5865,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
                     DomElement* af_elem = lam::dom_require_element(af);
                     if (af_elem->has_attribute("autofocus")) {
                         focus_set(state, af, false);
-                        caret_set(state, af, 0);
+                        state_store_legacy_caret_set(state, af, 0);
                         log_debug("rebuild_incr: autofocus set on new input");
                         break;
                     }
