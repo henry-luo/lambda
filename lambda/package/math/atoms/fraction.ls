@@ -287,6 +287,22 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: null,
             rule_height: 0.04
         }
+    } else if (denom_total >= 0.75 and numer_total < 0.75) {
+        {
+            height: 1.15,
+            depth: 0.77,
+            render_height: 1.15,
+            render_depth: 0.77,
+            render_total: 1.92,
+            depth_holder: 0.77,
+            denom_top: -2.31,
+            line_top: -3.23,
+            numer_top: -3.5,
+            numer_child_height: 0.65,
+            denom_child_height: 0.73,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
     } else if (child_total >= 0.95) {
         {
             height: 1.4,

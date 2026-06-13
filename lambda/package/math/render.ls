@@ -8,6 +8,7 @@ import css: .css
 import met: .metrics
 import sym: .symbols
 import sp_table: .spacing_table
+import util: .util
 import fraction: .atoms.fraction
 import scripts: .atoms.scripts
 import spacing: .atoms.spacing
@@ -95,7 +96,16 @@ fn render_math_root(node, context) {
 
 fn render_group(node, context) {
     let children = render_children(node, context)
-    transparent_hbox(children)
+    let spacing_context = group_spacing_context(context)
+    let spaced = apply_spacing(children, spacing_context)
+    transparent_hbox(spaced)
+}
+
+fn group_spacing_context(context) {
+    if ((context.style == "script" or context.style == "scriptscript") and
+        context.script_container != true)
+        ctx.derive(context, {style: "text"})
+    else context
 }
 
 // ============================================================
@@ -215,10 +225,11 @@ fn is_generic_box_command(name_str) {
 
 fn render_generic_box_command(node, context, name_str) {
     let content = if (len(node) > 0) generic_box_content_arg(node, name_str) else null
+    let options = if (name_str == "bbox" and len(node) > 1) plain_text(node[0]) else null
     let cmd = if (starts_with_math_lap(name_str))
         "\\" ++ slice(name_str, 4, len(name_str))
     else "\\" ++ name_str
-    let synth = {cmd: cmd, content: content}
+    let synth = {cmd: cmd, content: content, options: options}
     enclose.render_box(synth, context, render_node)
 }
 
@@ -784,22 +795,183 @@ fn render_radical(node, context) {
         else box.text_box("", null, "ord")
 
     let index_box = if (node.index != null)
-        (let idx = render_node(node.index, ctx.sup_context(context)),
-         box.with_class(idx, css.SQRT_INDEX))
+        render_sqrt_index(render_node(node.index, ctx.sup_context(context)), context)
     else null
 
-    let sqrt_sign = box.text_box("\u221A", css.SQRT_SIGN, "ord")
-
-    // wrap radicand with vinculum (overline bar) using border-top
-    let body_with_vinculum = box.with_style(body_box,
-        "display:inline-block;border-top:0.04em solid currentColor;padding-top:1px")
-
-    let sqrt_body = box.hbox([sqrt_sign, body_with_vinculum])
-
-    if (index_box != null)
-        box.hbox([index_box, box.with_class(sqrt_body, css.SQRT)])
+    let spec = sqrt_spec(body_box, context)
+    let body_elements = box.elements_of(body_box)
+    let child_elements = if (index_box != null)
+        [index_box.element, sqrt_sign_element(spec), sqrt_vlist_element(spec, body_elements)]
     else
-        box.with_class(sqrt_body, css.SQRT)
+        [sqrt_unindexed_element(spec, body_elements)]
+    let el = <span class: css.BASE;
+        for (child in child_elements) child
+    >
+    {
+        element: el,
+        height: spec.height,
+        depth: spec.depth,
+        render_height: spec.height,
+        render_depth: spec.depth,
+        render_total: spec.render_total,
+        width: body_box.width + 0.52,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        is_radical: true
+    }
+}
+
+fn sqrt_unindexed_element(spec, body_elements) {
+    <span style: "display:inline-block;height:" ++ util.fmt_em(spec.render_total);
+        sqrt_sign_element(spec)
+        sqrt_vlist_element(spec, body_elements)
+    >
+}
+
+fn sqrt_sign_element(spec) {
+    let cls = spec.sign_class
+    let sign_style = if (spec.sign_top == null) null else "top:" ++ util.fmt_em(spec.sign_top)
+    if (sign_style == null) {
+        <span class: css.SQRT_SIGN;
+            <span class: cls; "\u221A">
+        >
+    } else {
+        <span class: css.SQRT_SIGN, style: sign_style;
+            <span class: cls; "\u221A">
+        >
+    }
+}
+
+fn sqrt_vlist_element(spec, body_elements) {
+    if (spec.is_tall == true) sqrt_tall_vlist_element(spec, body_elements)
+    else sqrt_small_vlist_element(spec, body_elements)
+}
+
+fn sqrt_small_vlist_element(spec, body_elements) {
+    let body_style = "height:" ++ fmt_sqrt_body_height(spec.body_height) ++ ";display:inline-block"
+    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
+    <span class: css.VLIST_T;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
+                <span style: "top:" ++ util.fmt_em(spec.body_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: body_style;
+                        for (child in body_elements) child
+                    >
+                >
+                <span style: "top:" ++ util.fmt_em(spec.line_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span class: css.SQRT_LINE, style: "height:" ++ util.fmt_em(spec.line_height) ++ ";display:inline-block">
+                >
+            >
+        >
+    >
+}
+
+fn sqrt_tall_vlist_element(spec, body_elements) {
+    let body_style = "height:" ++ util.fmt_em(spec.body_height) ++ ";display:inline-block"
+    let pstrut_style = "height:" ++ util.fmt_em(spec.pstrut)
+    <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.height);
+                <span style: "top:" ++ util.fmt_em(spec.body_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span style: body_style;
+                        for (child in body_elements) child
+                    >
+                >
+                <span style: "top:" ++ util.fmt_em(spec.line_top);
+                    <span class: css.PSTRUT, style: pstrut_style>
+                    <span class: css.SQRT_LINE, style: "height:" ++ util.fmt_em(spec.line_height) ++ ";display:inline-block">
+                >
+            >
+            <span class: css.VLIST_S; "\u200B">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(spec.depth_holder)>
+        >
+    >
+}
+
+fn fmt_sqrt_body_height(h) {
+    if (h == 0.0) "0" else util.fmt_em(h)
+}
+
+fn render_sqrt_index(index_box, context) {
+    let is_empty = index_box.height == 0.0 and index_box.depth == 0.0
+    let is_script = context.style == "script" or context.style == "scriptscript"
+    let elements = if (is_empty) ["\u00A0"] else box.elements_of(index_box)
+    let h = if (is_script and is_empty) 0.27
+        else if (is_empty) 0.33 else 0.78
+    let top = if (is_script and is_empty) -3.26
+        else if (is_empty) -3.32 else -3.45
+    let child_h = if (is_empty) 0.0 else 0.33
+    let child_font = if (is_script and is_empty) "71.43%" else "50%"
+    {
+        element: <span class: css.SQRT_INDEX;
+            <span class: css.VLIST_T;
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(h);
+                        <span style: "top:" ++ util.fmt_em(top);
+                            <span class: css.PSTRUT, style: "height:3em">
+                            <span style: "height:" ++ fmt_sqrt_body_height(child_h) ++
+                                ";display:inline-block;font-size: " ++ child_font;
+                                for (child in elements) child
+                            >
+                        >
+                    >
+                >
+            >
+        >,
+        height: h,
+        depth: 0.0,
+        width: index_box.width * 0.5,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn sqrt_spec(body_box, context) {
+    if (context.style == "script" or context.style == "scriptscript")
+        make_sqrt_spec(0.73, 0.27, body_box.height, -3.0, -3.62, 0.08, 3.0, 0.05, css.SMALL_DELIM)
+    else if (body_box.height == 0.0 and body_box.depth == 0.0)
+        make_sqrt_spec(0.66, 0.54, 0.0, -2.04, -2.61, 0.2, 2.04, 0.04, css.DELIM_SIZE1)
+    else if (body_box.height >= 1.0)
+        make_tall_sqrt_spec()
+    else if (body_box.height <= 0.5 and body_box.depth <= 0.1)
+        make_sqrt_spec(0.87, 0.33, body_box.height, -3.0, -3.78, -0.01, 3.0, 0.04, css.DELIM_SIZE1)
+    else
+        make_sqrt_spec(0.98, 0.22, body_box.height, -3.0, -3.89, -0.12, 3.0, 0.04, css.DELIM_SIZE1)
+}
+
+fn make_sqrt_spec(h, d, body_h, body_top, line_top, sign_top, pstrut, line_h, sign_class) => {
+    height: h,
+    depth: d,
+    render_total: if (h + d < 1.21) 1.21 else h + d,
+    body_height: body_h,
+    body_top: body_top,
+    line_top: line_top,
+    sign_top: sign_top,
+    pstrut: pstrut,
+    line_height: line_h,
+    sign_class: sign_class
+}
+
+fn make_tall_sqrt_spec() => {
+    height: 1.45,
+    depth: 0.77,
+    render_total: 2.41,
+    body_height: 1.92,
+    body_top: -3.14,
+    line_top: -4.5,
+    sign_top: null,
+    pstrut: 3.15,
+    line_height: 0.04,
+    sign_class: css.DELIM_SIZE3,
+    is_tall: true,
+    depth_holder: 0.77
 }
 
 // ============================================================
@@ -871,7 +1043,8 @@ fn render_children_scan(node, context, i, acc) {
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
     else if (is_scriptstyle_switch(node, i))
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
-         render_children_scan(node, context, i + 2, acc ++ [rendered]))
+         let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
+         render_children_scan(node, context, i + 2, acc ++ spacer ++ [rendered]))
     else
         (let child = node[i],
          let next_acc = if (child == null) acc
@@ -964,14 +1137,22 @@ fn is_scriptstyle_switch(node, i) {
 }
 
 fn render_scriptstyle_sibling(child, context) {
-    let bx = render_node(child, context)
+    let bx = render_node(child, ctx.derive(context, {style: "script"}))
     style_wrap_box(bx, "font-size: 70%")
+}
+
+fn has_trailing_radical(items) {
+    if (len(items) == 0) false
+    else items[len(items) - 1].is_radical == true
 }
 
 fn style_wrap_box(bx, style_text) {
     let rt = if (bx.render_height != null) bx.render_height else bx.height
+    let elements = box.elements_of(bx)
     {
-        element: <span style: style_text; bx.element>,
+        element: <span style: style_text;
+            for (el in elements) el
+        >,
         height: bx.height,
         depth: 0.0,
         render_height: bx.render_height,

@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 89 cases passing when this
+# One snapshot key per line. These are the 99 cases passing when this
 # baseline was created.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -21,6 +21,11 @@ BINARY OPERATORS 6/ \\sin+b renders corectly 1
 BINARY OPERATORS 7/ , +b renders corectly 1
 BINARY OPERATORS 8/ \\textcolor{red}{a}+b renders corectly 1
 BINARY OPERATORS 9/ \\textcolor{red}{a=}+b renders corectly 1
+BOX 0/ -\\bbox{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 1/ -\\bbox[border:solid 1px red]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 2/ -\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 3/ -\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
+BOX 4/ -\\bbox[ yellow , border: 1px solid red, 4 em ]{\\sqrt{\\frac{2}{1+x}}}- renders correctly 1
 BOX 5/ \\rlap{x}o renders correctly 1
 BOX 6/ \\mathrlap{x}o renders correctly 1
 BOX 7/ \\llap{x}o renders correctly 1
@@ -86,7 +91,12 @@ SPACING AND KERN 3/ a\\kern 3em b renders correctly 1
 SPACING AND KERN 4/ a\\hspace{3em} b renders correctly 1
 SPACING AND KERN 5/ a\\hskip 3em b renders correctly 1
 SPACING AND KERN 6/ +-a+b=c+-d=x^{2-\\frac{1}{2}} renders correctly 1
+SPACING AND KERN 7/ \\sqrt[\\placeholder{}]{x}\\scriptstyle \\sqrt[\\placeholder{}]{x} renders correctly 1
 SPACING AND KERN 8/ x \\scriptstyle x renders correctly 1
 SPACING AND KERN 9/ \\vec{x} \\scriptstyle \\vec{x} renders correctly 1
 SUPERSCRIPT/SUBSCRIPT \\left(x+1\\right)^2 1
 SUPERSCRIPT/SUBSCRIPT -1-\\frac56-1-x^{2-\\frac34} 1
+SURDS 0/ \\sqrt5 renders correctly 1
+SURDS 1/ \\sqrt{} renders correctly 1
+SURDS 3/ \\sqrt[3]{5} renders correctly 1
+SURDS 4/ \\sqrt[3]5 renders correctly 1

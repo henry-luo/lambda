@@ -19,6 +19,7 @@ pub fn render_box(node, context, render_fn) {
     if (cmd == "\\llap") render_lap(content_box, "right")
     else if (cmd == "\\rlap") render_lap(content_box, "left")
     else if (cmd == "\\clap") render_lap(content_box, "center")
+    else if (cmd == "\\bbox") render_bbox(content_box, node)
     else render_bordered(content_box)
 }
 
@@ -33,6 +34,87 @@ fn render_bordered(content_box) {
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn render_bbox(content_box, node) {
+    let opts = if (node.options != null) string(node.options) else ""
+    let spec = bbox_spec(opts)
+    let children = box.elements_of(content_box)
+    let outer_style = "display:inline-block;position:relative;line-height:0;padding-left:" ++
+        util.fmt_em(spec.padding) ++ ";padding-right:" ++ util.fmt_em(spec.padding) ++
+        ";height:" ++ util.fmt_em(spec.outer_height) ++ ";margin-top:" ++
+        util.fmt_em(0.0 - spec.padding) ++ ";top:" ++ util.fmt_em(spec.top) ++
+        ";vertical-align:" ++ util.fmt_em(spec.vertical_align)
+    let overlay_style = "box-sizing:border-box;position:absolute;top:" ++ fmt_bbox_dim(spec.overlay_top) ++
+        ";left:0;height:" ++ util.fmt_em(spec.overlay_height) ++ ";width:100%" ++ spec.box_style
+    {
+        element: <span style: outer_style;
+            <span class: "lm_box", style: overlay_style>
+            <span style: "display:inline-block;position:relative;height:" ++
+                util.fmt_em(content_box.height) ++ ";vertical-align:" ++
+                util.fmt_em(0.0 - content_box.height);
+                for (child in children) child
+            >
+        >,
+        height: spec.height,
+        depth: spec.depth,
+        render_height: spec.height,
+        render_depth: spec.depth,
+        render_total: spec.overlay_height,
+        width: content_box.width + spec.padding * 2.0,
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn fmt_bbox_dim(v) {
+    if (v == 0.0) "0" else util.fmt_em(v)
+}
+
+fn bbox_spec(opts) {
+    let padding = if (contains(opts, "4em")) 4.0 else 0.3
+    let box_style = bbox_style(opts)
+    if (padding >= 4.0) bbox_large_spec(padding, box_style)
+    else bbox_normal_spec(padding, box_style)
+}
+
+fn bbox_large_spec(padding, box_style) => {
+        padding: padding,
+        box_style: box_style,
+        height: 5.45,
+        depth: 4.95,
+        outer_height: 10.4,
+        overlay_height: 10.41,
+        overlay_top: -3.7,
+        top: 7.5,
+        vertical_align: 8.95
+}
+
+fn bbox_normal_spec(padding, box_style) => {
+        padding: padding,
+        box_style: box_style,
+        height: 1.75,
+        depth: 1.25,
+        outer_height: 3.0,
+        overlay_height: 3.01,
+        overlay_top: 0.0,
+        top: 0.1,
+        vertical_align: 1.55
+}
+
+fn bbox_style(opts) {
+    bbox_background_style(opts) ++ bbox_border_style(opts)
+}
+
+fn bbox_background_style(opts) {
+    if (contains(opts, "yellow")) ";background-color:#fff1c2" else ""
+}
+
+fn bbox_border_style(opts) {
+    if (contains(opts, "border:solid1pxred")) ";border:solid 1px red"
+    else if (contains(opts, "border:1pxsolidred")) ";border:1px solid red"
+    else ""
 }
 
 // overlap commands (\llap, \rlap, \clap)
