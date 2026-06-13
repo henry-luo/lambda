@@ -5,6 +5,7 @@ import box: lambda.package.math.box
 import ctx: lambda.package.math.context
 import css: lambda.package.math.css
 import met: lambda.package.math.metrics
+import util: lambda.package.math.util
 
 // ============================================================
 // Box commands (\boxed, \fbox, \bbox)
@@ -36,9 +37,17 @@ fn render_bordered(content_box) {
 
 // overlap commands (\llap, \rlap, \clap)
 fn render_lap(content_box, align) {
-    let style = "display:inline-block;width:0;text-align:" ++ align
+    let cls = if (align == "right") "lm_llap"
+        else if (align == "left") "lm_rlap"
+        else "lm_clap"
+    let children = box.elements_of(content_box)
     {
-        element: <span style: style; content_box.element>,
+        element: <span class: cls;
+            <span class: "lm_inner";
+                for (child in children) child
+            >
+            <span class: "lm_fix">
+        >,
         height: content_box.height,
         depth: content_box.depth,
         width: 0.0,
@@ -125,13 +134,16 @@ fn render_smash(content_box, node) {
 
 pub fn render_rule(node, context, render_fn) {
     let w = parse_dim(node.width, 1.0)
-    let h = parse_dim(node.height, 0.4)
+    let h = parse_dim(node.height, w)
     let vert_raise = parse_dim(node.shift, 0.0)
-    let rule_style = "width:" ++ string(w) ++ "em;height:" ++ string(h) ++ "em;background:currentColor"
-    let raised_style = if (vert_raise != 0.0)
-        rule_style ++ ";vertical-align:" ++ string(vert_raise) ++ "em"
-    else rule_style
-    box.box_styled(css.RULE, raised_style, h, 0.0, w, "ord")
+    let rw = round_rule_dim(w)
+    let rh = round_rule_dim(h)
+    let rs = round_rule_dim(vert_raise)
+    let rule_style = "border-right-width:" ++ fmt_rule_dim(w) ++
+        ";border-top-width:" ++ fmt_rule_dim(h) ++
+        ";vertical-align:" ++ fmt_rule_shift(vert_raise) ++
+        ";width:" ++ fmt_rule_width(w)
+    box.box_styled(css.RULE, rule_style, rh + rs, 0.0 - rs, rw, "ord")
 }
 
 // parse a dimension from a node attribute
@@ -139,15 +151,126 @@ fn parse_dim(attr, default_val) {
     if (attr == null) default_val
     else
         (let s = if (attr is string) attr
-             else if (attr is element) get_text(attr)
+             else if (attr is element) get_all_text(attr)
              else string(attr),
-         let v = float(s),
+         let v = parse_dim_string(s),
          if (v != null) v
          else default_val)
+}
+
+fn parse_dim_string(s) {
+    let start = find_number_start(s, 0)
+    if (start >= len(s)) null
+    else
+        (let end = find_number_end(s, start),
+         let unit_end = find_unit_end(s, end),
+         let num_text = normalize_decimal(slice(s, start, end), 0, ""),
+         let unit = if (unit_end > end) slice(s, end, unit_end) else "pt",
+         let val = float(num_text),
+         if (val == null) null else convert_dim(val, unit))
+}
+
+fn convert_dim(val, unit) {
+    if (unit == "em") val
+    else if (unit == "ex") val * 0.432
+    else if (unit == "pt") val / util.PT_PER_EM
+    else if (unit == "pc") val * 12.0 / util.PT_PER_EM
+    else if (unit == "mu") val / 18.0
+    else if (unit == "cm") val * 28.452756 / util.PT_PER_EM
+    else if (unit == "mm") val * 0.286
+    else if (unit == "in") val * 72.27 / util.PT_PER_EM
+    else if (unit == "bp") val * 0.101
+    else if (unit == "dd") val * 1238.0 / 1157.0 / util.PT_PER_EM
+    else val / util.PT_PER_EM
+}
+
+fn normalize_decimal(s, i, acc) {
+    if (i >= len(s)) acc
+    else
+        (let ch = slice(s, i, i + 1),
+         normalize_decimal(s, i + 1, acc ++ if (ch == ",") "." else ch))
+}
+
+fn find_number_start(s, i) {
+    if (i >= len(s)) i
+    else if (is_number_start_char(slice(s, i, i + 1))) i
+    else find_number_start(s, i + 1)
+}
+
+fn find_number_end(s, i) {
+    if (i >= len(s)) i
+    else if (is_number_char(slice(s, i, i + 1))) find_number_end(s, i + 1)
+    else i
+}
+
+fn find_unit_end(s, i) {
+    if (i >= len(s)) i
+    else if (is_unit_char(slice(s, i, i + 1))) find_unit_end(s, i + 1)
+    else i
+}
+
+fn is_number_start_char(ch) {
+    ch == "-" or ch == "+" or ch == "." or ch == "," or is_digit_char(ch)
+}
+
+fn is_number_char(ch) {
+    ch == "-" or ch == "+" or ch == "." or ch == "," or is_digit_char(ch)
+}
+
+fn is_digit_char(ch) {
+    ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+    ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9"
+}
+
+fn is_unit_char(ch) {
+    ch == "a" or ch == "b" or ch == "c" or ch == "d" or ch == "e" or
+    ch == "f" or ch == "g" or ch == "h" or ch == "i" or ch == "j" or
+    ch == "k" or ch == "l" or ch == "m" or ch == "n" or ch == "o" or
+    ch == "p" or ch == "q" or ch == "r" or ch == "s" or ch == "t" or
+    ch == "u" or ch == "v" or ch == "w" or ch == "x" or ch == "y" or
+    ch == "z"
+}
+
+fn fmt_rule_dim(v) {
+    if (v == 0.0) "0"
+    else if (abs(v) >= 100000.0) fmt_large_rule_dim(v)
+    else util.fmt_num(v, 2) ++ "em"
+}
+
+fn fmt_rule_width(v) {
+    if (abs(v) >= 100000.0) fmt_large_rule_dim(v)
+    else util.fmt_num(v, 2) ++ "em"
+}
+
+fn fmt_rule_shift(v) {
+    if (v == 0.0) "0"
+    else if (abs(v) >= 100000.0) fmt_large_rule_dim(v)
+    else util.fmt_num(v, 2) ++ "em"
+}
+
+fn round_rule_dim(v) => round(v * 100.0) / 100.0
+
+fn fmt_large_rule_dim(v) {
+    let scaled = int(round(v * 10.0))
+    let s = string(abs(scaled))
+    let body = if (len(s) <= 1) "0." ++ s
+        else slice(s, 0, len(s) - 1) ++ "." ++ slice(s, len(s) - 1, len(s))
+    (if (scaled < 0) "-" else "") ++ body ++ "em"
 }
 
 fn get_text(el) {
     if (len(el) > 0 and el[0] is string) string(el[0])
     else if (el.value != null) string(el.value)
     else ""
+}
+
+fn get_all_text(el) {
+    get_all_text_at(el, 0, "")
+}
+
+fn get_all_text_at(el, i, acc) {
+    if (i >= len(el)) if (acc != "") acc else get_text(el)
+    else
+        (let child_text = if (el[i] is string) string(el[i]) else get_all_text(el[i]),
+         get_all_text_at(el, i + 1, acc ++ child_text))
 }

@@ -169,6 +169,12 @@ fn render_command(node, context) {
             render_pdiff(node, context)
         } else if (name_str == "colorbox") {
             render_colorbox_command(node, context)
+        } else if (name_str == "placeholder") {
+            render_placeholder(context)
+        } else if (name_str == "rule") {
+            render_generic_rule_command(node, context)
+        } else if (is_generic_box_command(name_str)) {
+            render_generic_box_command(node, context, name_str)
         } else {
             let op_name = sym.get_operator_name(name_str)
             if (op_name != null) {
@@ -178,6 +184,51 @@ fn render_command(node, context) {
             }
         }
     }
+}
+
+fn render_generic_rule_command(node, context) {
+    let n = len(node)
+    let has_shift = n > 0 and node[0] is element and name(node[0]) == 'brack_group'
+    let shift = if (has_shift) plain_text(node[0]) else null
+    let width_idx = if (has_shift) 1 else 0
+    let height_idx = width_idx + 1
+    let width = if (width_idx < n) plain_text(node[width_idx]) else null
+    let height = if (height_idx < n) plain_text(node[height_idx]) else width
+    enclose.render_rule({width: width, height: height, shift: shift}, context, render_node)
+}
+
+fn render_placeholder(context) => {
+    element: <span style: "height:0;display:inline-block;font-size: 50%"; "\u00A0">,
+    height: 0.0,
+    depth: 0.0,
+    width: 0.0,
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0
+}
+
+fn is_generic_box_command(name_str) {
+    name_str == "bbox" or name_str == "boxed" or name_str == "fbox" or
+    name_str == "llap" or name_str == "rlap" or name_str == "clap" or
+    name_str == "mathllap" or name_str == "mathrlap" or name_str == "mathclap"
+}
+
+fn render_generic_box_command(node, context, name_str) {
+    let content = if (len(node) > 0) generic_box_content_arg(node, name_str) else null
+    let cmd = if (starts_with_math_lap(name_str))
+        "\\" ++ slice(name_str, 4, len(name_str))
+    else "\\" ++ name_str
+    let synth = {cmd: cmd, content: content}
+    enclose.render_box(synth, context, render_node)
+}
+
+fn generic_box_content_arg(node, name_str) {
+    if (name_str == "bbox" and len(node) > 1) node[1]
+    else node[len(node) - 1]
+}
+
+fn starts_with_math_lap(name_str) {
+    name_str == "mathllap" or name_str == "mathrlap" or name_str == "mathclap"
 }
 
 fn render_pdiff(node, context) {
@@ -203,7 +254,12 @@ fn render_colorbox_command(node, context) {
 fn symbol_font_class(cmd_text, context) {
     let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
         slice(cmd_text, 1, len(cmd_text)) else cmd_text
-    if (name_str == "blacksquare" or name_str == "blacktriangle") css.AMS
+    if (name_str == "alpha") "lcGreek lm_mathit"
+    else if (name_str == "Gamma" or name_str == "Delta" or name_str == "Theta" or
+             name_str == "Lambda" or name_str == "Pi" or name_str == "Sigma" or
+             name_str == "Upsilon" or name_str == "Phi" or name_str == "Psi" or
+             name_str == "Omega") css.CMR
+    else if (name_str == "blacksquare" or name_str == "blacktriangle") css.AMS
     else css.font_class(context.font)
 }
 

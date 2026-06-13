@@ -21,6 +21,8 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 // Initial mark stack capacity (grows if needed)
 #define GC_MARK_STACK_INITIAL 4096
 
+static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
+
 static void* gc_header_user_ptr(gc_header_t* header) {
     return header ? (void*)(header + 1) : NULL;
 }
@@ -529,6 +531,8 @@ int gc_is_managed(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     // check object zone
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    // check bump-allocated object structs
+    if (gc_bump_block_owns_exact(gc, ptr)) return 1;
     // check data zones
     if (gc_data_zone_owns(gc->data_zone, ptr)) return 1;
     if (gc_data_zone_owns(gc->tenured_data, ptr)) return 1;
@@ -714,26 +718,45 @@ static int gc_bump_block_owns(gc_heap_t* gc, void* ptr) {
     return 0;
 }
 
+static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
+    if (!gc || !ptr) return 0;
+    uint8_t* p = (uint8_t*)ptr;
+    gc_bump_block_t* block = gc->bump_blocks;
+    while (block) {
+        uint8_t* start = block->base;
+        uint8_t* end = block->base + block->size;
+        if (p >= start + sizeof(gc_header_t) && p < end) {
+            uint8_t* cursor = start;
+            uint8_t* used_end = (block == gc->bump_blocks) ? gc->bump_cursor : end;
+            if (used_end > end) used_end = end;
+
+            while (cursor + sizeof(gc_header_t) <= used_end) {
+                gc_header_t* header = (gc_header_t*)cursor;
+                if (header->type_tag == 0 || header->alloc_size == 0) return 0;
+
+                int cls = gc_object_zone_class_index(header->alloc_size);
+                if (cls < 0) return 0;
+                size_t class_size = gc_object_zone_class_size(cls);
+                size_t slot_size = sizeof(gc_header_t) + class_size;
+                uint8_t* user_ptr = (uint8_t*)(header + 1);
+                uint8_t* next_cursor = cursor + slot_size;
+
+                if (p == user_ptr) return 1;
+                if (p < next_cursor) return 0;
+                cursor = next_cursor;
+            }
+            return 0;
+        }
+        block = block->next;
+    }
+    return 0;
+}
+
 static int is_gc_object(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
     if (gc_large_object_find(gc, ptr) >= 0) return 1;
-
-    uint8_t* p = (uint8_t*)ptr;
-    gc_bump_block_t* block = gc->bump_blocks;
-    while (block) {
-        uint8_t* base = block->base;
-        uint8_t* end = block->base + block->size;
-        if (p >= base + sizeof(gc_header_t) && p < end) {
-            gc_header_t* header = ((gc_header_t*)ptr) - 1;
-            if ((uint8_t*)header >= base && (uint8_t*)header + sizeof(gc_header_t) <= end &&
-                header->type_tag > 0 && header->alloc_size > 0 &&
-                header->alloc_size <= block->size) {
-                return 1;
-            }
-        }
-        block = block->next;
-    }
+    if (gc_bump_block_owns_exact(gc, ptr)) return 1;
     return 0;
 }
 
@@ -1322,23 +1345,53 @@ static void gc_sweep(gc_heap_t* gc) {
 #ifndef GC_NO_SANITIZE_ADDRESS
 #define GC_NO_SANITIZE_ADDRESS
 #endif
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define GC_ASAN_ENABLED 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define GC_ASAN_ENABLED 1
+#endif
+#ifndef GC_ASAN_ENABLED
+#define GC_ASAN_ENABLED 0
+#endif
+
+#if GC_ASAN_ENABLED
+extern int __asan_address_is_poisoned(const volatile void *addr);
+
+static int gc_asan_word_is_poisoned(const uintptr_t* p) {
+    const unsigned char* bytes = (const unsigned char*)p;
+    for (size_t i = 0; i < sizeof(uintptr_t); i++) {
+        if (__asan_address_is_poisoned(bytes + i)) return 1;
+    }
+    return 0;
+}
+#endif
+
 static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_current) {
     if (stack_base == 0 || stack_current == 0) return;
     if (stack_current >= stack_base) return;  // stack grows down; current < base
 
     // scan from current SP up to stack base (stack grows downward)
-    uintptr_t* scan_start = (uintptr_t*)stack_current;
-    uintptr_t* scan_end = (uintptr_t*)stack_base;
-#ifndef NDEBUG
+    uintptr_t aligned_start = (stack_current + sizeof(uintptr_t) - 1) & ~(uintptr_t)(sizeof(uintptr_t) - 1);
+    uintptr_t aligned_end = stack_base & ~(uintptr_t)(sizeof(uintptr_t) - 1);
+    uintptr_t* scan_start = (uintptr_t*)aligned_start;
+    uintptr_t* scan_end = (uintptr_t*)aligned_end;
     int scanned = 0;
     int marked = 0;
-#endif
+    int skipped_poisoned = 0;
 
     for (uintptr_t* p = scan_start; p < scan_end; p++) {
-        uint64_t val = (uint64_t)*p;
-#ifndef NDEBUG
-        scanned++;
+#if GC_ASAN_ENABLED
+        if (gc_asan_word_is_poisoned(p)) {
+            skipped_poisoned++;
+            continue;
+        }
 #endif
+        uint64_t val = (uint64_t)*p;
+        scanned++;
         // try to interpret as a tagged Item
         void* ptr = item_to_ptr(val);
         if (!ptr) continue;
@@ -1348,15 +1401,13 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_
             if (header && !header->marked && !(header->gc_flags & GC_FLAG_FREED)) {
                 header->marked = 1;
                 mark_stack_push(gc, header);
-#ifndef NDEBUG
                 marked++;
-#endif
             }
         }
     }
 
-    log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects",
-              scanned, (size_t)(stack_base - stack_current), marked);
+    log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects, skipped %d ASan-poisoned slots",
+              scanned, (size_t)(aligned_end - aligned_start), marked, skipped_poisoned);
 }
 
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
