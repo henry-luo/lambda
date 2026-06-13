@@ -2169,8 +2169,18 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
                 rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
                 js_init_class_instance_fields(callee, result);
+                // Js55 P11: clear pending new-target globals across this return
+                // path too, mirroring the P1 fix in the subclass-TA branch.
+                // Otherwise a user-class-extending-non-TA-builtin leaks state to
+                // the next `new <expr>(...)` call.
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
                 return result;
             }
+            // ctor returned a primitive — `obj` will be returned below; still
+            // need to clear pending globals.
+            js_pending_new_target = ItemNull;
+            js_has_pending_new_target = false;
         }
         return obj;
     }

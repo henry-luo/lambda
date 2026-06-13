@@ -826,3 +826,83 @@ Two failing items were probed and deferred:
 | P11(c) | 3 | TypedArray.prototype.with current-length validation |
 | **Total** | **18** | (out of original 73 admittable failures) |
 
+### P11(d) — additional pending-new-target leak (preventive, no test surfaced)
+
+While auditing the remaining failures, found a second `js_pending_new_target` leak in `js_new_from_class_object` at [js_runtime.cpp:2162-2175](../../lambda/js/js_runtime.cpp) — the user-class-extending-non-TA-builtin branch. Same pattern as P1's bug (set, call, no clear), one branch over from the P1 fix:
+
+```cpp
+js_pending_new_target = effective_new_target;
+js_has_pending_new_target = true;
+Item result = js_call_function(ctor, obj, args, argc);
+// 4 lines later: return result  ← no clear
+// or fall through: return obj   ← no clear
+```
+
+Doesn't affect Promise/RegExp/Error/etc. (those builtins clear on entry), so the failing E1 NamedEvaluation tests aren't fixed by this. But it closes a latent leak that could surface as a P1-class bug for `class MyPromise extends Promise {}` style code in the wild. Filed under P11(d). Baseline guard clean post-fix.
+
+### Why E1 NamedEvaluation isn't fixed yet
+
+Investigation confirmed the proposal's stated root cause hypothesis ("skip NamedEvaluation when RHS is AwaitExpression") is **not** the actual bug surface. The existing variable-declaration code at `js_mir_statement_lowering.cpp:373/429/504/646` correctly skips NamedEvaluation for AwaitExpression — that path already only fires for FUNCTION_EXPRESSION / ARROW_FUNCTION literals.
+
+The runtime trace of a failing test shows many `js_property_set(fn, "name", "")` calls (setting an empty string) before the strict-mode "Cannot assign to read only property 'name'" throw fires. The source of these empty-string `name` writes hasn't been located — neither the explicit `js_set_function_name` paths nor the obvious initialization paths match. Likely a Map-shape-sharing artifact across function expressions in the second export, but tracing requires further runtime instrumentation that wasn't completed in this session.
+
+## 12.10 P4 closure-capture diagnostic (2026-06-13)
+
+Per user direction, dug into the for-of let-binding closure-capture bug. The bug is real and **reproduces in single-script mode**, not only in batch mode (correcting an earlier note in §12.6). Both single-script `./lambda.exe js` and batch dispatch show the same staleness.
+
+### Trace pattern
+
+```js
+const ctors = [Uint8Array, Int8Array, /* … */, MyBigInt64Array];   // ends with the BigInt subclass
+
+for (let ctor of ctors) { /* first loop, creates closures over `ctor` */ }
+for (let ctor of ctors) {
+  const evil = { valueOf: () => { /* …reads ctor… */ } };
+  // outer scope: ctor.name === Uint8Array (iter 1) — correct
+  // inside evil.valueOf when invoked by ToNumber: ctor.name === MyBigInt64Array — wrong
+}
+```
+
+Across every iteration of the second loop, the outer scope sees the **current** `ctor`, but a closure captured during that iteration reads the **first loop's last iteration value** (`MyBigInt64Array`).
+
+### What fails
+
+Attempted fix: extend the for-of writeback at `jm_transpile_for_of` (`js_mir_statement_lowering.cpp` lines ~3889 and ~4127) to call `jm_scope_env_mark_and_writeback` for let/const loops too. Was previously gated on `!is_let_const_loop`. The hypothesis was that scope_env wasn't being updated per iteration for let bindings, so closures captured a stale slot.
+
+After rebuilding with the change, instrumented `jm_scope_env_mark_and_writeback`:
+
+```text
+[WB] no scope_env_reg for '_js_ctor'
+[WB] no scope_env_reg for '_js_ctor'
+```
+
+The writeback is **reached but no-ops** because `mt->scope_env_reg == 0` at module top level (the for-of's enclosing function is module main, which doesn't allocate its own scope_env — closures inside use the module's locals directly via per-variable registers, not through scope_env). The fix was therefore ineffective and the test still fails identically.
+
+### What this implies
+
+The bug surface is NOT in the for-of writeback path. The closure body's read of `ctor` resolves through one of:
+- the closure's own env (populated at `js_alloc_env` time), or
+- a direct register reference into the module's local frame.
+
+Either way, the JIT is somehow resolving `ctor` in the second for-of's closure body to a stale value — possibly because:
+1. The two for-of bodies' closures share a `JsFuncCollected` entry (the function literal `() => ctor` is identical AST-wise), and the captured `ctor` slot is computed once at analysis time and points at the first for-of's loop_var register.
+2. Or the analysis pass assigns capture indices based on enclosing-function lexical position, and both for-of bodies map `ctor` to the same closure capture index but the runtime env slot points to whichever loop_var register the analysis visited first.
+
+Verifying which requires:
+- A focused dump of `fc->captures[]` for both closures and the corresponding `var->reg` registers at analysis time, OR
+- A focused dump of the emitted MIR for the closure's body, to see exactly which memory location its `ctor` read targets.
+
+That instrumentation wasn't completed in this session. The fix surface is likely in `lambda/js/js_mir_analysis.cpp` (closure capture analysis) or `lambda/js/js_mir_function_class_lowering.cpp` (closure env layout) — not in `jm_transpile_for_of`.
+
+### Reverted change
+
+The non-working writeback edit at `jm_transpile_for_of` was reverted before rebuilding. Baseline guard re-confirmed clean post-revert: P1, P10, P11 fixes all intact, 0 regressions.
+
+### Recommendation
+
+P4 closure-capture is a real bug affecting ~25 Gate D failures plus likely several Gate G items, but the fix surface is deeper than a single edit. It requires either:
+- Per-loop fresh `JsFuncCollected` entries for closures inside `for (let x …)` bodies (so each loop's closure has its own capture mapping), or
+- A scope_env allocation at module top level so the writeback path can persist iteration values.
+
+Either approach is a multi-hour JIT refactor with broad blast radius. Not safe to attempt without a focused isolation pass and a test-suite-wide baseline guard at each intermediate step.
+
