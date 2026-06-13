@@ -544,9 +544,14 @@ static int sm_derive_selection_state(DocState* state) {
     if (state->selection && state->selection->is_selecting) {
         return SEL_POINTER_SELECTING;
     }
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        if (state->sel.start_u16 == state->sel.end_u16) return SEL_CARET_COLLAPSED;
+        return state->sel.direction == DOM_SEL_DIR_BACKWARD ?
+            SEL_RANGE_BACKWARD : SEL_RANGE_FORWARD;
+    }
     DomSelection* selection = state->dom_selection;
     if (!selection || selection->range_count == 0) return SEL_EMPTY;
-    if (selection->is_collapsed) return SEL_CARET_COLLAPSED;
+    if (dom_selection_is_collapsed(selection)) return SEL_CARET_COLLAPSED;
     return selection->direction == DOM_SEL_DIR_BACKWARD ?
         SEL_RANGE_BACKWARD : SEL_RANGE_FORWARD;
 }

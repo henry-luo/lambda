@@ -9,6 +9,7 @@
 #include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "editing.hpp"
+#include "dom_range.hpp"
 
 // Forward declarations
 struct AnimationScheduler;
@@ -323,19 +324,21 @@ typedef struct DocState {
     // radiant/dom_range.hpp and vibe/radiant/Radiant_Design_Selection.md.
     // ------------------------------------------------------------------
     struct DomSelection* dom_selection;     // lazy; created on first read/write
+    // ED2-1 canonical StateStore selection. For DOM ranges it shadows
+    // dom_selection (references the live ranges[0], no boundary copy); for text
+    // controls it is the canonical store (form->selection_* mirrors it). The two
+    // kinds are mutually exclusive. See state_store_set_text_control_selection
+    // and state_store_refresh_editing_selection_shadow.
+    EditingSelection     sel;
     struct DomRange*     live_ranges;       // doubly-linked list head
     uint32_t             next_range_id;     // monotonic id (debug)
     bool                 selection_layout_dirty;
-    // Phase 6 (single source of truth): re-entry guard counter to prevent
-    // legacy<->DOM sync ping-pong. Bumped while either direction of sync is
-    // running so the other direction skips itself. Counter (not bool) so
-    // nested mutations are safe.
-    int                  dom_selection_sync_depth;
+    uint32_t             selection_projection_seq; // last seq reflected by legacy projections
     // Phase 8D: selectionchange event coalescing. `selection_mutation_seq`
-    // is bumped by every spec mutator (via sync_anchor_focus →
-    // notify_selection_changed); `selection_event_seq` is the last seq we
-    // already enqueued a selectionchange task for. Set equal once dispatch
-    // task is queued; cleared/advanced when next mutation runs.
+    // is bumped by the StateStore canonical selection writer/mutation hook;
+    // `selection_event_seq` is the last seq we already enqueued a
+    // selectionchange task for. Set equal once dispatch task is queued;
+    // cleared/advanced when next mutation runs.
     uint32_t             selection_mutation_seq;
     uint32_t             selection_event_seq;
     bool                 selectionchange_pending;  // task queued and not yet fired
@@ -588,6 +591,27 @@ void state_begin_batch(DocState* state);
  * End a batch of state updates (triggers deferred callbacks)
  */
 void state_end_batch(DocState* state);
+
+// ED2-1A shadow selection: derived from DomSelection until writers flip.
+#ifdef __cplusplus
+extern "C" {
+#endif
+void state_store_refresh_editing_selection_shadow(DocState* state);
+bool state_store_editing_selection_shadow_matches(DocState* state);
+void state_store_note_selection_mutation(DocState* state);
+void state_store_refresh_caret_projection(DocState* state);
+bool state_store_set_selection(DocState* state,
+                               const DomBoundary* anchor,
+                               const DomBoundary* focus,
+                               const char** out_exception);
+void state_store_set_text_control_selection(DocState* state,
+                                            DomElement* control,
+                                            uint32_t start_u16,
+                                            uint32_t end_u16,
+                                            uint8_t direction);
+#ifdef __cplusplus
+}
+#endif
 
 // ============================================================================
 // Caret API

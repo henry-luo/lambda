@@ -2802,10 +2802,9 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
 }
 
 // Assert helper for selection state.
-// Checks both StateStore's compatibility projection and the canonical
-// DomSelection used by selection render paths.
-// They MUST agree — disagreement means the selection is set internally but
-// nothing visible is drawn (or vice-versa).
+// Checks StateStore's compatibility projection plus the canonical render
+// selection. Text controls use EditingSelection; rich/document ranges use
+// DomSelection.
 static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon->document;
     if (!doc || !doc->state) {
@@ -2814,10 +2813,17 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
         return false;
     }
 
-    bool legacy_collapsed = !selection_has(doc->state);
+    DocState* state = doc->state;
+    bool legacy_collapsed = !selection_has(state);
+    bool text_control_selection = state->sel.kind == EDIT_SEL_TEXT_CONTROL;
+    bool canonical_collapsed = legacy_collapsed;
+    if (text_control_selection) {
+        canonical_collapsed = state->sel.start_u16 == state->sel.end_u16;
+    } else {
+        DomSelection* ds = state->dom_selection;
+        canonical_collapsed = dom_selection_is_collapsed(ds);
+    }
 
-    DomSelection* ds = doc->state->dom_selection;
-    bool dom_collapsed = (!ds || ds->range_count == 0) ? true : ds->is_collapsed;
 
     if (legacy_collapsed != ev->expected_is_collapsed) {
         log_error("event_sim: assert_selection - legacy is_collapsed mismatch: expected %s, got %s",
@@ -2827,11 +2833,13 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
         return false;
     }
 
-    if (ev->check_dom_selection && dom_collapsed != ev->expected_is_collapsed) {
-        log_error("event_sim: assert_selection - DomSelection is_collapsed mismatch: expected %s, got %s "
-                 "(range_count=%u). Highlight will not render.",
+    if (ev->check_dom_selection && canonical_collapsed != ev->expected_is_collapsed) {
+        DomSelection* ds = state->dom_selection;
+        log_error("event_sim: assert_selection - canonical is_collapsed mismatch: expected %s, got %s "
+                 "(source=%s range_count=%u). Highlight will not render.",
                  ev->expected_is_collapsed ? "true" : "false",
-                 dom_collapsed ? "true" : "false",
+                 canonical_collapsed ? "true" : "false",
+                 text_control_selection ? "text-control" : "dom",
                  ds ? ds->range_count : 0u);
         ctx->fail_count++;
         return false;
@@ -2839,7 +2847,8 @@ static bool assert_selection(EventSimContext* ctx, UiContext* uicon, SimEvent* e
 
     log_info("event_sim: assert_selection PASS (legacy=%s%s)",
              legacy_collapsed ? "collapsed" : "non-collapsed",
-             ev->check_dom_selection ? (dom_collapsed ? ", DOM=collapsed" : ", DOM=non-collapsed") : "");
+             ev->check_dom_selection ?
+                (canonical_collapsed ? ", canonical=collapsed" : ", canonical=non-collapsed") : "");
     ctx->pass_count++;
     return true;
 }
