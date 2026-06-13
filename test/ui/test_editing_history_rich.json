@@ -18,6 +18,8 @@
 
     {"type": "assert_event_log", "contains": "\"owned_by\":\"consumer\"", "min": 2},
     {"type": "assert_event_log", "contains": "\"input_type\":\"historyUndo\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"input_type\":\"historyRedo\"", "min": 1}
+    {"type": "assert_event_log", "contains": "\"input_type\":\"historyRedo\"", "min": 1},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "historyUndo", "surface": "contenteditable", "operation": "history", "min": 2},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "historyRedo", "surface": "contenteditable", "operation": "history", "min": 2}
   ]
 }
