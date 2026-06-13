@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 116 cases passing when this
+# One snapshot key per line. These are the 132 cases passing when this
 # baseline was created.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -71,17 +71,33 @@ FRACTIONS 7/ n \\choose k renders correctly 1
 FRACTIONS 8/ \\pdiff{f(x)}{x} renders correctly 1
 LEFT/RIGHT Delimiters ( ) 1
 LEFT/RIGHT Delimiters ( ) 3
+LEFT/RIGHT Delimiters . . 1
 LEFT/RIGHT Delimiters \\{ \\} 1
+LEFT/RIGHT Delimiters \\Vert \\Vert 1
+LEFT/RIGHT Delimiters \\lVert \\rVert 1
 LEFT/RIGHT Delimiters \\langle \\rangle 1
 LEFT/RIGHT Delimiters \\lbrace \\rbrace 1
+LEFT/RIGHT Delimiters \\lbrack \\rbrack 1
 LEFT/RIGHT Delimiters \\lceil \\rceil 1
 LEFT/RIGHT Delimiters \\lfloor \\rfloor 1
 LEFT/RIGHT Delimiters \\lfloor \\rfloor 3
+LEFT/RIGHT Delimiters \\lvert \\rvert 1
 LEFT/RIGHT Delimiters \\| | 1
 LEFT/RIGHT Delimiters \\vert \\vert 1
+LEFT/RIGHT middle delimiters 1
+NOT 0/ \\not\\in \\not{}\\in \\not{}\\in \\not\\in renders correctly 1
 NOT 0/ a \\ne b renders correctly 1
+NOT 1/ \\not= \\not{}= \\not{}= \\not= renders correctly 1
 NOT 1/ a \\neq b renders correctly 1
+NOT 2/ \\not= \\ne \\neq renders correctly 1
+NOT 2/ \\not= \\not{=} a \\neq b \\ne c \\not< d \\not{h} e\\not{} renders correctly 1
 NOT 3/ \\not renders correctly 1
+NOT 3/ a\\not= b renders correctly 1
+NOT 4/ a\\not< b renders correctly 1
+NOT 5/ a\\not{c} b renders correctly 1
+NOT 6/ a\\not{cd} b renders correctly 1
+NOT 7/ a\\not{<} b renders correctly 1
+NOT 8/ a\\not{<>} b renders correctly 1
 NOT 9/ a\\not{} b renders correctly 1
 NOT 10/ a\\not renders correctly 1
 OVER/UNDERLINE 0/ a\\overline{x}b renders correctly 1

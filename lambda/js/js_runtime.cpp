@@ -2055,13 +2055,21 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = callee;
                 js_has_pending_new_target = true;
                 Item ctor_result = js_call_function(ctor, result, args, argc);
-                if (js_check_exception()) return ItemNull;
+                if (js_check_exception()) {
+                    js_pending_new_target = ItemNull;
+                    js_has_pending_new_target = false;
+                    return ItemNull;
+                }
                 TypeId ctor_result_type = get_type_id(ctor_result);
                 if (ctor_result_type == LMD_TYPE_MAP || ctor_result_type == LMD_TYPE_ARRAY || ctor_result_type == LMD_TYPE_ELEMENT ||
                     ctor_result_type == LMD_TYPE_FUNC || ctor_result_type == LMD_TYPE_OBJECT || ctor_result_type == LMD_TYPE_VMAP) {
+                    js_pending_new_target = ItemNull;
+                    js_has_pending_new_target = false;
                     return ctor_result;
                 }
             }
+            js_pending_new_target = ItemNull;
+            js_has_pending_new_target = false;
             return result;
         }
         // No explicit constructor extending a builtin: run the implicit
