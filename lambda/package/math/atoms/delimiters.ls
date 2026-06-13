@@ -167,8 +167,46 @@ fn render_svg_delim(ch, target_height, atom_type) {
 
 // resolve a delimiter command to its display character
 pub fn resolve_char(delim) {
-    let mapped = DELIM_CHARS[delim]
-    if (mapped != null) mapped else delim
+    let explicit = resolve_escaped_char(delim)
+    if (explicit != null) explicit
+    else if (delim == "|") "∣"
+    else
+        (let mapped = DELIM_CHARS[delim],
+         if (mapped != null) mapped else delim)
+}
+
+fn resolve_escaped_char(delim) {
+    if (is_backslash_prefixed(delim))
+        resolve_command_delim(slice(delim, 1, len(delim)))
+    else null
+}
+
+fn is_backslash_prefixed(delim) {
+    (len(delim) > 1) and slice(delim, 0, 1) == "\\"
+}
+
+fn resolve_command_delim(name) {
+    if (name == "{") "{"
+    else if (name == "}") "}"
+    else if (name == "lbrace") "{"
+    else if (name == "rbrace") "}"
+    else if (name == "vert") "∣"
+    else if (name == "|") "∣"
+    else if (name == "Vert") "‖"
+    else if (name == "lfloor") "⌊"
+    else if (name == "rfloor") "⌋"
+    else if (name == "lceil") "⌈"
+    else if (name == "rceil") "⌉"
+    else if (name == "langle") "⟨"
+    else if (name == "rangle") "⟩"
+    else if (name == "uparrow") "↑"
+    else if (name == "downarrow") "↓"
+    else if (name == "updownarrow") "↕"
+    else if (name == "Uparrow") "⇑"
+    else if (name == "Downarrow") "⇓"
+    else if (name == "Updownarrow") "⇕"
+    else if (name == "backslash") "∖"
+    else null
 }
 
 // select size level based on content height

@@ -118,7 +118,8 @@ function parseSnapshotBody(body) {
 function buildCases(snapshotEntries) {
   const cases = [];
   for (const entry of snapshotEntries) {
-    const formula = formulaFromSnapshotKey(entry.key);
+    const rawFormula = formulaFromSnapshotKey(entry.key);
+    const formula = rawFormula == null ? null : normalizeFormula(rawFormula);
     if (formula == null) continue;
     cases.push({
       category: categoryFromKey(entry.key),
@@ -129,6 +130,14 @@ function buildCases(snapshotEntries) {
     });
   }
   return cases;
+}
+
+function normalizeFormula(formula) {
+  const trimmed = formula.trim();
+  if (trimmed.startsWith('\\[') && trimmed.endsWith('\\]')) {
+    return trimmed.slice(2, -2).trim();
+  }
+  return formula;
 }
 
 function categoryFromKey(key) {
@@ -226,7 +235,7 @@ function splitDelimiterPair(body) {
 }
 
 function unescapeSnapshotText(text) {
-  return text.replace(/\\\\n/g, ' ').replace(/\\\\/g, '\\');
+  return text.replace(/\\\\n(?=\s|$)/g, ' ').replace(/\\\\/g, '\\');
 }
 
 function lambdaString(value) {
