@@ -168,13 +168,18 @@ fn render_text(text, context) {
 
 fn render_command(node, context) {
     let cmd_text = get_text(node)
-    let unicode = sym.lookup_symbol(cmd_text)
-    if (unicode != null) {
+    let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
+         slice(cmd_text, 1, len(cmd_text)) else cmd_text
+    if (name_str == "ne" or name_str == "neq") {
+        render_not_overlay("=")
+    } else if (name_str == "not") {
+        render_not_slash()
+    } else {
+        let unicode = sym.lookup_symbol(cmd_text)
+        if (unicode != null) {
         let atom_type = sym.classify_symbol(cmd_text)
         box.text_box(unicode, symbol_font_class(cmd_text, context), atom_type)
     } else {
-        let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
-             slice(cmd_text, 1, len(cmd_text)) else cmd_text
         if (name_str == "pdiff") {
             render_pdiff(node, context)
         } else if (name_str == "colorbox") {
@@ -193,6 +198,46 @@ fn render_command(node, context) {
                 box.text_box(cmd_text, css.ERROR, "mord")
             }
         }
+    }
+    }
+}
+
+fn render_not_slash() {
+    {
+        element: <span class: css.CMR; "\uE020">,
+        height: 0.7,
+        depth: 0.19,
+        render_height: 0.7,
+        render_depth: 0.19,
+        render_total: 0.89,
+        width: 0.5,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn render_not_overlay(base_text) {
+    let overlay_el = <span class: css.BASE;
+        <span class: "lm_rlap";
+            <span class: "lm_inner";
+                <span class: css.CMR; "\uE020">
+            >
+            <span class: "lm_fix">
+        >
+        <span class: css.CMR; base_text>
+    >
+    {
+        element: overlay_el,
+        height: 0.7,
+        depth: 0.19,
+        render_height: 0.7,
+        render_depth: 0.19,
+        render_total: 0.89,
+        width: 0.5,
+        type: "mrel",
+        italic: 0.0,
+        skew: 0.0
     }
 }
 

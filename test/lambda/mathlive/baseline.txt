@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 103 cases passing when this
+# One snapshot key per line. These are the 116 cases passing when this
 # baseline was created.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -71,6 +71,19 @@ FRACTIONS 7/ n \\choose k renders correctly 1
 FRACTIONS 8/ \\pdiff{f(x)}{x} renders correctly 1
 LEFT/RIGHT Delimiters ( ) 1
 LEFT/RIGHT Delimiters ( ) 3
+LEFT/RIGHT Delimiters \\{ \\} 1
+LEFT/RIGHT Delimiters \\langle \\rangle 1
+LEFT/RIGHT Delimiters \\lbrace \\rbrace 1
+LEFT/RIGHT Delimiters \\lceil \\rceil 1
+LEFT/RIGHT Delimiters \\lfloor \\rfloor 1
+LEFT/RIGHT Delimiters \\lfloor \\rfloor 3
+LEFT/RIGHT Delimiters \\| | 1
+LEFT/RIGHT Delimiters \\vert \\vert 1
+NOT 0/ a \\ne b renders correctly 1
+NOT 1/ a \\neq b renders correctly 1
+NOT 3/ \\not renders correctly 1
+NOT 9/ a\\not{} b renders correctly 1
+NOT 10/ a\\not renders correctly 1
 OVER/UNDERLINE 0/ a\\overline{x}b renders correctly 1
 OVER/UNDERLINE 1/ \\overline{xyz}\\overline{1+\\frac34}\\underline{abc}\\underline{\\frac57} renders correctly 1
 RULE AND DIMENSIONS 0/ \\rule{1em}{2em} renders correctly 1
