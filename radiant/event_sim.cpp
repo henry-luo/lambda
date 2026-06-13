@@ -3985,11 +3985,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             if (start == end) {
                 if (selection_has_projection((DocState*)doc->state)) {
-                    selection_clear((DocState*)doc->state);
+                    state_store_legacy_selection_clear((DocState*)doc->state);
                 }
-                caret_set((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+                state_store_legacy_caret_set((DocState*)doc->state, range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
             } else {
-                selection_set((DocState*)doc->state, range_view,
+                state_store_legacy_selection_set((DocState*)doc->state, range_view,
                               (int)start, (int)end); // INT_CAST_OK: StateStore selection API uses int offsets.
             }
             log_info("event_sim: set_editing_selection [%u..%u]", start, end);
@@ -4034,7 +4034,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             dom_element_set_attribute(owner, "value", text);
-            caret_set((DocState*)doc->state, surface.view, (int)text_len);
+            state_store_legacy_caret_set((DocState*)doc->state, surface.view, (int)text_len);
             log_info("event_sim: set_editing_value len=%u", text_len);
             doc_state_request_repaint((DocState*)doc->state);
             break;

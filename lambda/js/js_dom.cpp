@@ -308,7 +308,7 @@ static inline void dom_pre_remove(DomNode* child) {
         } else {
             View* caret_view = caret_get_view(st);
             if (caret_view && js_dom_node_contains(child, (DomNode*)caret_view)) {
-                caret_clear(st);
+                state_store_legacy_caret_clear(st);
             }
 
             View* anchor_view = nullptr;
@@ -316,7 +316,7 @@ static inline void dom_pre_remove(DomNode* child) {
             if (selection_get_extent_views(st, &anchor_view, &focus_view) &&
                 ((anchor_view && js_dom_node_contains(child, (DomNode*)anchor_view)) ||
                  (focus_view && js_dom_node_contains(child, (DomNode*)focus_view)))) {
-                selection_clear(st);
+                state_store_legacy_selection_clear(st);
             }
         }
     }

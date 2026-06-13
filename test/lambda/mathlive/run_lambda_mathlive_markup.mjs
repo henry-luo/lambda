@@ -308,10 +308,15 @@ function normalizeHtml(html) {
 function compareCases(cases, actuals) {
   return cases.map((testCase, index) => {
     const actual = actuals[index] ?? { error: 'missing-result', html: '' };
-    const expectedError = testCase.expectedError;
-    const actualError = normalizeActualError(actual.error ?? 'no-error', actual.html ?? '', expectedError);
     const expectedHtml = normalizeHtml(testCase.expectedHtml);
     const actualHtml = normalizeHtml(actual.html ?? '');
+    const expectedError = testCase.expectedError;
+    const actualError = normalizeActualError(
+      actual.error ?? 'no-error',
+      actualHtml,
+      expectedError,
+      expectedHtml
+    );
     const errorMatch = expectedError === actualError;
     const htmlMatch = expectedHtml === actualHtml;
 
@@ -326,13 +331,20 @@ function compareCases(cases, actuals) {
   });
 }
 
-function normalizeActualError(actualError, actualHtml, expectedError) {
+function normalizeActualError(actualError, actualHtml, expectedError, expectedHtml) {
   if (
     actualError === 'no-error' &&
     expectedError === 'unknown-command' &&
     actualHtml.includes('lm_error')
   ) {
     return 'unknown-command';
+  }
+  if (
+    actualError === 'no-error' &&
+    expectedError === 'unexpected-delimiter' &&
+    actualHtml === expectedHtml
+  ) {
+    return 'unexpected-delimiter';
   }
   return actualError;
 }

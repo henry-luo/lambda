@@ -656,6 +656,20 @@ static bool editing_selection_snapshot_changed(
         before->control != after->control;
 }
 
+static void editing_dispatch_commit_visual_invalidation(
+        EventContext* evcon,
+        DocState* state,
+        const EditingTransaction* tx) {
+    if (!state || !tx) return;
+    if (tx->mutation_invalidates_layout) {
+        doc_state_request_reflow(state);
+    }
+    if (tx->mutation_invalidates_layout || tx->mutation_invalidates_paint) {
+        state->needs_repaint = true;
+        if (evcon) evcon->need_repaint = true;
+    }
+}
+
 static void editing_log_write_transaction_summary(
         JsonWriter* w,
         const EditingSurface* surface,
@@ -875,6 +889,10 @@ bool editing_run_transaction(EventContext* evcon,
             mutated = current_tx.mutate(evcon, state, current_tx.surface,
                                         current_tx.intent, current_tx.mutate_user);
         }
+    }
+
+    if (mutated && state) {
+        editing_dispatch_commit_visual_invalidation(evcon, state, &current_tx);
     }
 
     if (mutated && state &&
