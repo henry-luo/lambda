@@ -18358,13 +18358,6 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 Item index_arg = argc > 0 ? args[0] : make_js_undefined();
                 double relative_index = js_array_to_integer_or_infinity(index_arg);
                 if (js_check_exception()) return ItemNull;
-                Item raw_value = argc > 1 ? args[1] : make_js_undefined();
-                Item converted_holder = js_typed_array_new((int)ta->element_type, 1);
-                js_typed_array_set(converted_holder, (Item){.item = i2it(0)}, raw_value);
-                if (js_check_exception()) return ItemNull;
-                Item converted_value = js_typed_array_get(converted_holder, (Item){.item = i2it(0)});
-                if (js_check_exception()) return ItemNull;
-
                 int64_t actual_index = 0;
                 if (relative_index == INFINITY || relative_index == -INFINITY) {
                     return js_throw_range_error("Invalid index");
@@ -18374,10 +18367,25 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 } else {
                     actual_index = (int64_t)relative_index;
                 }
-                if (actual_index < 0 || actual_index >= len) {
+                Item raw_value = argc > 1 ? args[1] : make_js_undefined();
+                Item converted_holder = js_typed_array_new((int)ta->element_type, 1);
+                js_typed_array_set(converted_holder, (Item){.item = i2it(0)}, raw_value);
+                if (js_check_exception()) return ItemNull;
+                Item converted_value = js_typed_array_get(converted_holder, (Item){.item = i2it(0)});
+                if (js_check_exception()) return ItemNull;
+
+                // Js55 P11: ES2024 §22.2.3.34 step 9 — IsValidIntegerIndex uses
+                // the CURRENT typed-array length (after coercion may have resized
+                // a resizable buffer), not the cached length from step 3.
+                // Tests: built-ins/TypedArray/prototype/with/{index-validated-against-current-length,
+                // negative-index-resize-to-out-of-bounds,valid-typedarray-index-checked-after-coercions}.js
+                int current_len = js_typed_array_length(obj);
+                if (actual_index < 0 || actual_index >= current_len) {
                     return js_throw_range_error("Invalid index");
                 }
 
+                // Step 10: create result with the cached length (from step 3),
+                // not the post-coercion length. Spec is explicit.
                 Item result = js_typed_array_new((int)ta->element_type, len);
                 if (js_typed_array_raw_copy_same_type(result, obj)) {
                     js_typed_array_set(result, (Item){.item = i2it(actual_index)}, converted_value);

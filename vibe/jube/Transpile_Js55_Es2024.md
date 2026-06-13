@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 done (14 admittable tests cleared: 12 from P1, 1 fix + 1 skip from P10); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); 59 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 134.8 s (well inside the +5% ceiling). See §12 for investigation history and §12.7 for the recommended next phase.
+Status: P0 + P1 + P10 + P11 (partial) done (18 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11); P4 investigated and deferred (closure-capture root cause, not the proposal's TA constructor diagnosis); 55 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 145.1 s. Latest full run: 40204/40261, 17 improvements vs original baseline, 0 regressions. See §12 for investigation history and §12.9 for P11 walkthrough.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -598,7 +598,9 @@ The +5% runtime ceiling (≤142 s) is borderline; 144 s is 2 s over. Js55 phases
 | P9 — E5 | 2 | pending | top-level-ticks SIGSEGV intentionally kept on the failure list (not papered over via t262_partial.txt). Needs a real engine fix. |
 | P10(a) — F skip | 1 | done | `rgi-emoji-17.0.js` added to `test/js262/skip_list.txt` with Js56 deferral comment. Per proposal §3 Gate F item 1. |
 | **P10(b) — F fix** | **1** | **done** | One-line fix at `js_runtime.cpp:16252` — `utf16_replace` now considers `S->is_ascii`, not just the regex's `needs_utf16_subject`. Root cause was a unit-basis mismatch between `js_regex_exec` (returns `match.index` in UTF-16 code units whenever input has non-ASCII bytes) and `js_regexp_symbol_replace` (was treating `position` as a byte offset). 55/55 String.prototype.replace tests pass; baseline guard clean; 0 regressions. See §12.8 below. |
-| P11 — G | ~13 | pending | TA species + misc — note: most of "Gate G" overlaps with Gate D in the failure manifest's feature tags; the discrete Gate G work is smaller than proposed. |
+| **P11(a) — G ArrayBuffer ordering** | 1 | done | Two-prong fix at `js_globals.cpp:js_reflect_construct`: ArrayBuffer pre-check (byteLength + maxByteLength) mirrors the existing SharedArrayBuffer pattern. Fixes `options-maxbytelength-compared-before-object-creation.js`. |
+| **P11(c) — G with current-length** | 3 | done | One fix at `js_runtime.cpp:18345` in TypedArray.prototype.with — IsValidIntegerIndex now uses the **current** length (post-coercion), not the cached step-3 length. Spec §22.2.3.34 step 9. Fixes the three `with/*.js` tests. |
+| P11 — G remaining | ~10 | pending | Species (TA filter/map/subarray), `set/*`, `freeze/*` all share for-of let-binding closure-capture issue with P4. Defer until that's fixed. |
 | P12 | admission | pending | Final baseline update. |
 
 ### Lessons for future work
@@ -742,4 +744,85 @@ Other call sites that may compare `position`/`index` with byte offsets after a `
 - `js_string_replace_impl` ([js_runtime.cpp:19416](../../lambda/js/js_runtime.cpp)) — non-regex string replace; not affected.
 
 No further unit-basis fixes from this diagnosis. If a similar regression appears, the call-site pattern to look for is "uses `S->chars + position` after a `result.index` from `js_regex_exec`."
+
+## 12.9 P11 walkthrough (2026-06-13)
+
+P11 was scoped as "TA species + misc, ~13 tests" but the actual remaining Gate G surface after P0–P10 is much smaller. Two distinct fixes, four tests, ~50 LOC.
+
+### P11(a) — ArrayBuffer constructor argument ordering
+
+Test: `built-ins/ArrayBuffer/options-maxbytelength-compared-before-object-creation.js`
+
+Failure: "Expected a RangeError but got a Test262Error"
+
+Spec §25.1.5.1 step 4 (AllocateArrayBuffer) says `byteLength > maxByteLength` validation happens *before* OrdinaryCreateFromConstructor (which reads `NewTarget.prototype`). The test exploits this by passing a `newTarget` whose `prototype` getter throws `Test262Error`:
+
+```js
+let newTarget = Object.defineProperty(function(){}.bind(null), "prototype", {
+  get() { throw new Test262Error(); }
+});
+assert.throws(RangeError, () => {
+  Reflect.construct(ArrayBuffer, [10, {maxByteLength: 0}], newTarget);
+});
+```
+
+Lambda's `js_reflect_construct` had pre-checks for several builtins (DataView byteOffset, SharedArrayBuffer byteLength/maxByteLength, Promise executor) but not for ArrayBuffer. So control reached the construct path, which read `NewTarget.prototype` first and surfaced the wrong error.
+
+**Fix**: add an `ArrayBuffer` branch to the pre-check at `js_globals.cpp:js_reflect_construct`, mirroring the existing `SharedArrayBuffer` block at line ~6498. Validate `byteLength` and (if options present) `maxByteLength >= byteLength` early, throwing the spec-correct `RangeError` before any prototype access.
+
+### P11(c) — TypedArray.prototype.with: validate against current length
+
+Tests:
+- `built-ins/TypedArray/prototype/with/index-validated-against-current-length.js`
+- `built-ins/TypedArray/prototype/with/negative-index-resize-to-out-of-bounds.js`
+- `built-ins/TypedArray/prototype/with/valid-typedarray-index-checked-after-coercions.js`
+
+All three exercise a single spec step. ES2024 §22.2.3.34:
+
+```
+1. Let O be the this value.
+2. ValidateTypedArray.
+3. Let len be TypedArrayLength(taRecord).           ← cached length
+4. Let relativeIndex be ToIntegerOrInfinity(index).
+5–6. actualIndex from relativeIndex and len.
+7–8. Coerce value (ToNumber or ToBigInt — may resize a backing rab).
+9. If IsValidIntegerIndex(O, F(actualIndex)) is false, RangeError.   ← CURRENT length
+10. Let A be TypedArrayCreateSameType(O, « F(len) »).                ← cached length
+```
+
+Lambda's `with` handler at `js_runtime.cpp:18345` was reusing the cached `len` from step 3 for the step-9 validity check. When `ta.with(4, evilValue)` resizes the buffer from 2 → 5 elements during coercion, the actualIndex 4 *should* now be valid (4 < 5), but Lambda saw `4 >= cached_len (2)` and threw `RangeError`. Conversely, a negative index that came back in-range against the cached length but went out-of-range against a shrunken buffer was silently accepted.
+
+**Fix**: re-fetch `current_len = js_typed_array_length(obj)` after the coercion's side effect, and check `actual_index` against `current_len`. Result array still uses cached `len` (per step 10). 9-line code reordering, no semantic risk to the result-construction path.
+
+### Counter-cluster check
+
+Similar "cached length used after coercion" patterns to audit:
+- `at`, `slice`, `subarray`, `set`, `copyWithin`, `fill` — looked at; either re-fetch length at the right place or don't have a coercion step that resizes. None matched the bug pattern.
+- The general Gate D length-rederivation cluster (per proposal P2/P3) is the broader form of this bug surface; D-cluster will need an audit of every TA method's spec ordering once the P4 closure-capture issue is unblocked.
+
+### Tests intentionally NOT fixed in P11
+
+Two failing items were probed and deferred:
+
+1. `ArrayBuffer/prototype/resize/coerced-new-length-detach.js` — passes as a single-script `./lambda.exe js` (called=true, TypeError thrown) but fails in batch mode with "Expected true but got false". Same family as the P4 closure-capture batch-mode divergence. Punt to that diagnostic.
+2. `TypedArray/prototype/set/this-backed-by-resizable-buffer.js` and friends — heavy `for (let ctor of ctors)` loops with subclass species. Definitely P4-family.
+
+### Acceptance
+
+- 23/23 pre-flight (all TypedArray.prototype.with + the ArrayBuffer test) PASS
+- Baseline guard: 40187/40187, 0 regressions, 145.1 s
+- Full run: 40204/40261, 17 improvements vs. original baseline (was 13 post-P10), 0 regressions
+- Diff vs. pre-P11 failures: exactly 4 newly passing (the 4 above), 0 newly failing
+- Net contribution this phase: **+4 tests**, 0 LOC of risky changes
+
+### Cumulative cleared, end of P11
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| P1 (D1) | 12 | Clear `js_pending_new_target` leak in subclass-TA branch |
+| P10(a) | 1 | Skip-list rgi-emoji-17.0 (Unicode 17 dependency) |
+| P10(b) | 1 | UTF-16 unit basis in regex Symbol.replace |
+| P11(a) | 1 | ArrayBuffer constructor arg ordering in Reflect.construct |
+| P11(c) | 3 | TypedArray.prototype.with current-length validation |
+| **Total** | **18** | (out of original 73 admittable failures) |
 
