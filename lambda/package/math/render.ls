@@ -196,6 +196,8 @@ fn render_command(node, context) {
         render_class_command(node, context)
     } else if (name_str == "cssId") {
         render_css_id_command(node, context)
+    } else if (name_str == "htmlData") {
+        render_html_data_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -270,6 +272,84 @@ fn render_css_id_command(node, context) {
             skew: content_box.skew
         }
     } else box.text_box("cssId", css.ERROR, "mord")
+}
+
+fn render_html_data_command(node, context) {
+    if (len(node) >= 2) {
+        let attrs = parse_html_data_attrs(arg_raw_text(node[0]))
+        let content_box = render_node(node[1], context)
+        let children = box.elements_of(content_box)
+        {
+            element: <span math_data_attrs: attrs;
+                for (el in children) el
+            >,
+            height: content_box.height,
+            depth: content_box.depth,
+            render_height: content_box.render_height,
+            render_depth: content_box.render_depth,
+            render_total: content_box.render_total,
+            left_right_render_depth: content_box.left_right_render_depth,
+            left_right_render_total: content_box.left_right_render_total,
+            width: content_box.width,
+            type: content_box.type,
+            italic: content_box.italic,
+            skew: content_box.skew
+        }
+    } else box.text_box("htmlData", css.ERROR, "mord")
+}
+
+fn parse_html_data_attrs(raw) {
+    parse_html_data_attr_parts(split(raw, ","), 0, [])
+}
+
+fn parse_html_data_attr_parts(parts, i, acc) {
+    if (i >= len(parts)) acc
+    else
+        (let attr = parse_html_data_attr(parts[i]),
+         let next = if (attr == null) acc else acc ++ [attr],
+         parse_html_data_attr_parts(parts, i + 1, next))
+}
+
+fn parse_html_data_attr(part) {
+    let text = trim(part)
+    if (text == "") null
+    else
+        (let eq = index_of(text, "="),
+         let raw_name = if (eq >= 0) trim(slice(text, 0, eq)) else text,
+         let raw_value = if (eq >= 0) trim(slice(text, eq + 1, len(text))) else null,
+         let data_name = normalize_data_attr_name(raw_name),
+         if (data_name == "data-") null
+         else {
+            name: data_name,
+            value: if (raw_value == null) null else strip_attr_quotes(raw_value),
+            has_value: raw_value != null
+         })
+}
+
+fn normalize_data_attr_name(text) {
+    "data-" ++ normalize_data_attr_name_at(text, 0, "")
+}
+
+fn normalize_data_attr_name_at(text, i, acc) {
+    if (i >= len(text)) acc
+    else
+        (let ch = slice(text, i, i + 1),
+         let out = if (ch == " ") "-"
+            else if (is_data_attr_char(ch)) ch
+            else "",
+         normalize_data_attr_name_at(text, i + 1, acc ++ out))
+}
+
+fn is_data_attr_char(ch) {
+    contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:", ch)
+}
+
+fn strip_attr_quotes(value) {
+    if (len(value) >= 2 and
+        ((slice(value, 0, 1) == "\"" and slice(value, len(value) - 1, len(value)) == "\"") or
+         (slice(value, 0, 1) == "'" and slice(value, len(value) - 1, len(value)) == "'")))
+        slice(value, 1, len(value) - 1)
+    else value
 }
 
 fn arg_raw_text(node) {
@@ -1088,10 +1168,10 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     let left_el = small_delim_el(left_char, css.OPEN)
     let right_el = small_delim_el(right_char, css.CLOSE)
     let content_elements = box.child_elements(spaced)
-    let style_attr = if (has_suppressed_text_depth(spaced, 0))
-        "margin-top:0em;height:0.69444em"
-    else if (has_middle_delim(spaced, 0))
+    let style_attr = if (has_middle_delim(spaced, 0))
         "margin-top:-0.25em;height:1em"
+    else if (has_suppressed_text_depth(spaced, 0))
+        "margin-top:0em;height:0.69444em"
     else
         "margin-top:-0.08333em;height:0.72777em"
     let both_null = left_char == "." and right_char == "."
@@ -1291,7 +1371,8 @@ fn render_middle_delim(node, context) {
             width: 0.12,
             type: "mord",
             italic: 0.0,
-            skew: 0.0
+            skew: 0.0,
+            suppress_hbox_text_depth: true
         }
     } else {
         let delim_text = string(node.delim)
@@ -1728,7 +1809,8 @@ fn render_color_switch_tail(node, context, i) {
         width: hb.width,
         type: hb.type,
         italic: hb.italic,
-        skew: hb.skew
+        skew: hb.skew,
+        is_middle_delim: has_middle_delim(spaced, 0)
     })
 }
 
@@ -1790,7 +1872,8 @@ fn style_wrap_box(bx, style_text) {
         type: bx.type,
         italic: bx.italic,
         skew: bx.skew,
-        suppress_hbox_text_depth: true
+        suppress_hbox_text_depth: true,
+        is_middle_delim: bx.is_middle_delim
     }
 }
 
