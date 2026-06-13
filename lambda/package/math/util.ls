@@ -10,6 +10,20 @@ pub fn fmt_num(x, decimals) {
     string(round(x * factor) / factor)
 }
 
+pub fn fmt_fixed(x, decimals) {
+    let factor = int(10.0 ** float(decimals))
+    let scaled = int(round(abs(x) * float(factor)))
+    let whole = int(scaled / factor)
+    let frac = scaled % factor
+    let frac_s = pad_left(string(frac), decimals, "0")
+    (if (x < 0.0) "-" else "") ++ string(whole) ++ "." ++ frac_s
+}
+
+fn pad_left(s, width, ch) {
+    if (len(s) >= width) s
+    else pad_left(ch ++ s, width, ch)
+}
+
 // format a number as em units: "0.5em"
 pub fn fmt_em(x) {
     if (abs(x) >= 100000.0) fmt_large_em(x)

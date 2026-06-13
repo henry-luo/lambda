@@ -226,7 +226,7 @@ fn render_command(node, context) {
 
 fn render_class_command(node, context) {
     if (len(node) >= 2) {
-        let class_name = plain_text(node[0])
+        let class_name = arg_raw_text(node[0])
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         {
@@ -238,6 +238,8 @@ fn render_class_command(node, context) {
             render_height: content_box.render_height,
             render_depth: content_box.render_depth,
             render_total: content_box.render_total,
+            left_right_render_depth: content_box.left_right_render_depth,
+            left_right_render_total: content_box.left_right_render_total,
             width: content_box.width,
             type: content_box.type,
             italic: content_box.italic,
@@ -248,7 +250,7 @@ fn render_class_command(node, context) {
 
 fn render_css_id_command(node, context) {
     if (len(node) >= 2) {
-        let id_name = normalize_css_id(plain_text(node[0]))
+        let id_name = normalize_css_id(arg_raw_text(node[0]))
         let content_box = render_node(node[1], context)
         let children = box.elements_of(content_box)
         {
@@ -260,12 +262,19 @@ fn render_css_id_command(node, context) {
             render_height: content_box.render_height,
             render_depth: content_box.render_depth,
             render_total: content_box.render_total,
+            left_right_render_depth: content_box.left_right_render_depth,
+            left_right_render_total: content_box.left_right_render_total,
             width: content_box.width,
             type: content_box.type,
             italic: content_box.italic,
             skew: content_box.skew
         }
     } else box.text_box("cssId", css.ERROR, "mord")
+}
+
+fn arg_raw_text(node) {
+    if (node is element and node.raw != null) string(node.raw)
+    else plain_text(node)
 }
 
 fn normalize_css_id(text) {
@@ -476,6 +485,7 @@ fn render_text_content_box(content) {
     let tiny_idx = index_of(content, "\\tiny")
     if (is_ensuremath_text(content)) render_ensuremath_text(content)
     else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
+    else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
     else box.text_box(decode_latex_text(content), css.TEXT, "mord")
 }
 
@@ -501,12 +511,71 @@ fn render_ensuremath_text(content) {
             render_height: inner_box.render_height,
             render_depth: inner_box.render_depth,
             render_total: inner_box.render_total,
+            left_right_render_depth: inner_box.left_right_render_depth,
+            left_right_render_total: inner_box.left_right_render_total,
             width: inner_box.width,
             type: "mord",
             italic: 0.0,
             skew: 0.0
         }
     }
+}
+
+fn is_text_textcolor_content(content) =>
+    index_of(content, "\\textcolor{") >= 0
+
+fn render_text_textcolor_content(content) {
+    let cmd_idx = index_of(content, "\\textcolor{")
+    let before = decode_latex_text(slice(content, 0, cmd_idx))
+    let color_start = cmd_idx + 11
+    let color_end_rel = index_of(slice(content, color_start, len(content)), "}")
+    if (color_end_rel < 0) {
+        box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    } else {
+        let color_end = color_start + color_end_rel
+        let color_name = slice(content, color_start, color_end)
+        let body_start = color_end + 2
+        let body_end = len(content) - 1
+        let body = if (body_start <= body_end) decode_latex_text(slice(content, body_start, body_end)) else ""
+        let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
+        let color_box = text_color_box(body, color.resolve_raw(color_name))
+        let elems = text_content_elements(before_box, color_box)
+        {
+            element: <span class: css.BASE;
+                for (el in elems) el
+            >,
+            height: 0.65,
+            depth: 0.08,
+            render_height: 0.65,
+            render_depth: 0.08,
+            render_total: 0.73,
+            width: text_content_width(before_box, color_box),
+            type: "mord",
+            italic: 0.0,
+            skew: 0.0,
+            suppress_hbox_text_depth: true,
+            suppress_hbox_operator_render_height: true,
+            no_left_bin_space: true
+        }
+    }
+}
+
+fn text_color_box(text, color_value) => {
+    element: <span style: "color:" ++ color_value;
+        <span class: css.TEXT; text>
+    >,
+    height: 0.65,
+    depth: 0.08,
+    render_height: 0.65,
+    render_depth: 0.08,
+    render_total: 0.73,
+    width: 0.5 * float(len(text)),
+    type: "mord",
+    italic: 0.0,
+    skew: 0.0,
+    suppress_hbox_text_depth: true,
+    suppress_hbox_operator_render_height: true,
+    no_left_bin_space: true
 }
 
 fn render_tiny_text_content(content, tiny_idx) {
@@ -1026,6 +1095,8 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     else
         "margin-top:-0.08333em;height:0.72777em"
     let both_null = left_char == "." and right_char == "."
+    let small_depth = if (is_shallow_small_delim(left_char) or is_shallow_small_delim(right_char))
+        0.24 else 0.25
     {
         element: <span class: css.LEFT_RIGHT, style: style_attr;
             left_el
@@ -1033,12 +1104,16 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
             right_el
         >,
         height: if (both_null) 0.65 else 0.75,
-        depth: if (both_null) content.depth else 0.25,
+        depth: if (both_null) content.depth else small_depth,
         width: content.width + 0.8,
         type: "minner",
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn is_shallow_small_delim(ch) {
+    ch == "⟮" or ch == "⟯" or ch == "⎰" or ch == "⎱"
 }
 
 fn small_delim_el(ch, side_class) {
@@ -1064,9 +1139,8 @@ fn has_middle_delim(items, i) {
 }
 
 fn render_stretchy_delimiter_group(left_text, right_text, content) {
-    let content_height = content.height + content.depth
-    let left_box = delims.render_stretchy(left_text, content_height, "mopen")
-    let right_box = delims.render_stretchy(right_text, content_height, "mclose")
+    let left_box = delims.render_left_right(left_text, content.height, content.depth, "mopen")
+    let right_box = delims.render_left_right(right_text, content.height, content.depth, "mclose")
     let parts = [left_box, content, right_box]
     let elements = box.child_elements(parts)
     let style_attr = stretchy_left_right_style(content)
@@ -1079,18 +1153,29 @@ fn render_stretchy_delimiter_group(left_text, right_text, content) {
         width: sum((for (p in parts where p != null) p.width)),
         type: "minner",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        strut_total: left_right_strut_total(content)
     }
 }
 
 fn stretchy_left_right_style(content) {
-    let render_depth = if (content.render_depth != null) content.render_depth else content.depth
-    let render_total = if (content.render_total != null) content.render_total else content.height + content.depth
+    let render_depth = if (content.left_right_render_depth != null) content.left_right_render_depth
+        else if (content.render_depth != null) content.render_depth
+        else content.depth
+    let render_total = if (content.left_right_render_total != null) content.left_right_render_total
+        else if (content.render_total != null) content.render_total
+        else content.height + content.depth
     "margin-top:" ++ fmt_delim_em(0.0 - render_depth) ++ ";height:" ++ fmt_delim_em(render_total)
 }
 
+fn left_right_strut_total(content) {
+    if (content.left_right_render_total != null) round(content.left_right_render_total * 100.0) / 100.0
+    else if (content.render_total != null) round(content.render_total * 100.0) / 100.0
+    else null
+}
+
 fn fmt_delim_em(v) {
-    util.fmt_num(v, 6) ++ "em"
+    util.fmt_fixed(v, 6) ++ "em"
 }
 
 // ============================================================
@@ -1102,8 +1187,87 @@ fn render_sized_delim(node, context) {
     let size_cmd = if (node.size != null) string(node.size) else ""
     let size_name = if (len(size_cmd) > 0 and slice(size_cmd, 0, 1) == "\\")
         slice(size_cmd, 1, len(size_cmd)) else size_cmd
+    render_sized_delim_text(size_name, delim_text)
+}
+
+fn render_sized_delim_text(size_name, delim_text) {
     let scale = if (sym.get_delim_size(size_name) != null) sym.get_delim_size(size_name) else 1.0
-    delims.render_at_scale(delim_text, scale, "mord")
+    if (is_valid_sized_delim_text(delim_text))
+        delims.render_at_scale(delim_text, scale, "mord")
+    else
+        delims.render_at_scale("", scale, "mord")
+}
+
+fn is_valid_sized_delim_text(delim_text) {
+    delim_text == "(" or delim_text == ")" or
+    delim_text == "[" or delim_text == "]" or
+    delim_text == "{" or delim_text == "}" or
+    delim_text == "\\{" or delim_text == "\\}" or
+    delim_text == "|" or delim_text == "\\|" or
+    delim_text == "\\vert" or delim_text == "\\Vert" or
+    delim_text == "\\lvert" or delim_text == "\\rvert" or
+    delim_text == "\\lVert" or delim_text == "\\rVert" or
+    delim_text == "<" or delim_text == ">" or
+    delim_text == "\\langle" or delim_text == "\\rangle"
+}
+
+fn is_sized_delim_pair(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'sized_delimiter' and child.delim == null and
+         child.size != null and sized_pair_text(node[i + 1]) != null)
+}
+
+fn render_sized_delim_pair(cmd_node, delim_node, context) {
+    let size_name = string(cmd_node.size)
+    let delim_text = sized_pair_text(delim_node)
+    if (is_unknown_sized_letter(size_name, delim_text))
+        render_unknown_command("\\\\" ++ size_name ++ delim_text)
+    else
+        box_with_type(render_sized_delim_text(size_name, delim_text), sized_delim_atom_type(size_name))
+}
+
+fn sized_delim_atom_type(size_name) {
+    if (sized_command_suffix(size_name) == "l" or sized_command_suffix(size_name) == "r") "mopen"
+    else "mord"
+}
+
+fn sized_command_suffix(size_name) {
+    if (len(size_name) == 0) ""
+    else slice(size_name, len(size_name) - 1, len(size_name))
+}
+
+fn sized_pair_text(node) {
+    if (node is string) slice(string(node), 0, 1)
+    else if (node is element and (name(node) == 'punctuation' or name(node) == 'operator' or name(node) == 'relation'))
+        get_text(node)
+    else null
+}
+
+fn is_unknown_sized_letter(size_name, delim_text) {
+    is_plain_sized_command(size_name) and is_single_alpha_delim(delim_text)
+}
+
+fn is_plain_sized_command(size_name) {
+    size_name == "big" or size_name == "Big" or size_name == "bigg" or size_name == "Bigg"
+}
+
+fn is_single_alpha_delim(text) {
+    len(text) == 1 and is_alpha_text(text)
+}
+
+fn render_unknown_command(cmd) {
+    {
+        element: <span class: css.classes([css.ERROR, css.CMR]); cmd>,
+        height: 0.7,
+        depth: 0.0,
+        width: 0.4 * float(len(cmd)),
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0,
+        mathlive_error: "unknown-command"
+    }
 }
 
 // ============================================================
@@ -1396,6 +1560,9 @@ fn render_children_scan(node, context, i, acc) {
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
          render_children_scan(node, context, i + 2, acc ++ spacer ++ [rendered]))
+    else if (is_sized_delim_pair(node, i))
+        (let rendered = render_sized_delim_pair(node[i], node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
          let next_acc = if (child == null) acc
@@ -1518,7 +1685,7 @@ fn render_color_switch_tail(node, context, i) {
     let children = render_children_scan(node, context, i + 1, [])
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
-    let elements = (for (b in spaced) b.element)
+    let elements = box.child_elements(spaced)
     box_with_suppress_depth({
         element: <span style: "color:" ++ color_value;
             for (el in elements) el
@@ -1641,10 +1808,12 @@ fn render_textcolor_sequence(node, context, i) {
     let color_arg = node[i + 6]
     let content_arg = node[i + 7]
     let color_value = color.resolve_raw(plain_text(color_arg))
-    let children = render_children(content_arg, context)
+    let children = if (is_dollar_math_group(content_arg))
+        [render_dollar_math_group(content_arg, context)]
+    else render_children(content_arg, context)
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
-    let elements = (for (b in spaced) b.element)
+    let elements = box.child_elements(spaced)
     box_with_suppress_depth({
         element: <span style: "color:" ++ color_value;
             for (el in elements) el
@@ -1656,6 +1825,18 @@ fn render_textcolor_sequence(node, context, i) {
         italic: hb.italic,
         skew: hb.skew
     })
+}
+
+fn is_dollar_math_group(content_arg) =>
+    (let txt = plain_text(content_arg),
+     len(txt) >= 2 and slice(txt, 0, 1) == "$" and slice(txt, len(txt) - 1, len(txt)) == "$")
+
+fn render_dollar_math_group(content_arg, context) {
+    let txt = plain_text(content_arg)
+    let inner = trim(slice(txt, 1, len(txt) - 1))
+    let ast^err = parse(inner, {type: "math", flavor: "latex"})
+    if (^err) render_node(content_arg, context)
+    else render_node(ast, context)
 }
 
 fn box_with_suppress_depth(bx) {
@@ -1733,10 +1914,17 @@ fn box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
+    render_height: bx.render_height,
+    render_depth: bx.render_depth,
+    render_total: bx.render_total,
+    left_right_render_depth: bx.left_right_render_depth,
+    left_right_render_total: bx.left_right_render_total,
     width: bx.width,
     type: atom_type,
     italic: bx.italic,
-    skew: bx.skew
+    skew: bx.skew,
+    strut_total: bx.strut_total,
+    strut_depth_em: bx.strut_depth_em
 }
 
 fn normalize_bin_atom(bx, prev_type) {
@@ -1760,7 +1948,8 @@ fn build_spaced(normalized, i, prev_type, acc, context) {
     if (i >= len(normalized)) acc
     else
         (let current = normalized[i],
-         let space = sp_table.get_spacing(prev_type, current.type, context.style),
+        let space = if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
          let with_space = if (space != 0.0)
              acc ++ [box.skip_box(space), current]
          else

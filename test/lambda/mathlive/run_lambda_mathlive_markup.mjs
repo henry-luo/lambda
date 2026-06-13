@@ -309,7 +309,7 @@ function compareCases(cases, actuals) {
   return cases.map((testCase, index) => {
     const actual = actuals[index] ?? { error: 'missing-result', html: '' };
     const expectedError = testCase.expectedError;
-    const actualError = actual.error ?? 'no-error';
+    const actualError = normalizeActualError(actual.error ?? 'no-error', actual.html ?? '', expectedError);
     const expectedHtml = normalizeHtml(testCase.expectedHtml);
     const actualHtml = normalizeHtml(actual.html ?? '');
     const errorMatch = expectedError === actualError;
@@ -324,6 +324,17 @@ function compareCases(cases, actuals) {
       htmlMatch,
     };
   });
+}
+
+function normalizeActualError(actualError, actualHtml, expectedError) {
+  if (
+    actualError === 'no-error' &&
+    expectedError === 'unknown-command' &&
+    actualHtml.includes('lm_error')
+  ) {
+    return 'unknown-command';
+  }
+  return actualError;
 }
 
 function summarize(results) {

@@ -292,6 +292,9 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
     // Group { ... }
     if (strcmp(node_type, "group") == 0) {
         ElementBuilder elem = builder.element("group");
+        if (len >= 2 && source[start] == '{' && source[end - 1] == '}') {
+            elem.attr("raw", {.item = s2it(builder.createString(source + start + 1, len - 2))});
+        }
         uint32_t child_count = ts_node_child_count(node);
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(node, i);
@@ -309,6 +312,9 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
     // Bracket group [ ... ]
     if (strcmp(node_type, "brack_group") == 0) {
         ElementBuilder elem = builder.element("brack_group");
+        if (len >= 2 && source[start] == '[' && source[end - 1] == ']') {
+            elem.attr("raw", {.item = s2it(builder.createString(source + start + 1, len - 2))});
+        }
         uint32_t child_count = ts_node_child_count(node);
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(node, i);
@@ -987,6 +993,12 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
                 size_len--;
             }
             elem.attr("size", {.item = s2it(builder.createString(size_str, size_len))});
+        } else {
+            char cmd_buf[64];
+            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len > 1 && cmd_buf[0] == '\\') {
+                elem.attr("size", {.item = s2it(builder.createString(cmd_buf + 1, cmd_len - 1))});
+            }
         }
         if (!ts_node_is_null(delim)) {
             uint32_t d_start = ts_node_start_byte(delim);

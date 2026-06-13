@@ -43,7 +43,7 @@ fn build_merged(el) {
         (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
-         <span class: el.class, style: el.style;
+         <span class: el.class, style: el.style, id: el.id;
              for (c in items) c
          >)
 }
@@ -77,9 +77,13 @@ pub fn coalesce(bx) {
         render_height: bx.render_height,
         render_depth: bx.render_depth,
         render_total: bx.render_total,
+        left_right_render_depth: bx.left_right_render_depth,
+        left_right_render_total: bx.left_right_render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        strut_total: bx.strut_total,
+        strut_depth_em: bx.strut_depth_em
     }
 }

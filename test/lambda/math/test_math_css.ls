@@ -46,11 +46,19 @@ let ss = css.get_stylesheet()
 "31. stylesheet has lm_latex:"; contains(ss, ".lm_latex")
 "32. stylesheet has lm_mathit:"; contains(ss, ".lm_mathit")
 "33. stylesheet has lm_mfrac:"; contains(ss, ".lm_mfrac")
+"34. stylesheet default uses local main font:"; contains(ss, "Computer Modern Serif")
+"35. stylesheet default uses local typewriter font:"; contains(ss, "Computer Modern Typewriter")
+"36. stylesheet default keeps available size font:"; contains(ss, "font-family:KaTeX_Size1")
+
+let katex_ss = css.get_stylesheet({font_option: "katex"})
+"37. stylesheet katex uses KaTeX math:"; contains(katex_ss, ".lm_mathit{font-family:KaTeX_Math")
+"38. stylesheet katex uses KaTeX typewriter:"; contains(katex_ss, ".lm_tt{font-family:KaTeX_Typewriter")
+"39. stylesheet katex omits local main font:"; not contains(katex_ss, "Computer Modern Serif")
 
 // ---- wrap_standalone() ----
 let wrapped = css.wrap_standalone(<span; "x">)
-"34. wrap tag:"; name(wrapped)
-"35. wrap has style child:"; name(wrapped[0])
-"36. wrap has content:"; name(wrapped[1])
+"40. wrap tag:"; name(wrapped)
+"41. wrap has style child:"; name(wrapped[0])
+"42. wrap has content:"; name(wrapped[1])
 
 "===== ALL CSS TESTS DONE ====="

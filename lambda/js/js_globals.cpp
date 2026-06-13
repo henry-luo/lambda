@@ -6493,6 +6493,45 @@ extern "C" Item js_reflect_construct(Item target, Item args_array, Item new_targ
                     }
                 }
             }
+            // Js55 P11: ArrayBuffer validates byteLength and (when options is
+            // present) maxByteLength before OrdinaryCreateFromConstructor reads
+            // NewTarget.prototype. Mirrors the SharedArrayBuffer pre-check
+            // below. Required for
+            // built-ins/ArrayBuffer/options-maxbytelength-compared-before-object-creation.js
+            if (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) {
+                Item length_arg = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+                double byte_len = 0;
+                TypeId lt = get_type_id(length_arg);
+                if (lt != LMD_TYPE_UNDEFINED && lt != LMD_TYPE_NULL) {
+                    Item num = js_to_number(length_arg);
+                    if (js_check_exception()) return ItemNull;
+                    TypeId nnt = get_type_id(num);
+                    byte_len = (nnt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+                    if (byte_len != byte_len) byte_len = 0;
+                    byte_len = trunc(byte_len);
+                    if (byte_len < 0 || byte_len > 9007199254740991.0) {
+                        return js_throw_range_error("Invalid array buffer length");
+                    }
+                }
+                Item options = (argc > 1) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
+                if (get_type_id(options) == LMD_TYPE_MAP) {
+                    Item max_key = (Item){.item = s2it(heap_create_name("maxByteLength", 13))};
+                    Item max_item = js_property_get(options, max_key);
+                    if (js_check_exception()) return ItemNull;
+                    TypeId mt = get_type_id(max_item);
+                    if (mt != LMD_TYPE_UNDEFINED) {
+                        Item max_num = js_to_number(max_item);
+                        if (js_check_exception()) return ItemNull;
+                        TypeId mnt = get_type_id(max_num);
+                        double max_len = (mnt == LMD_TYPE_FLOAT) ? it2d(max_num) : (double)it2i(max_num);
+                        if (max_len != max_len) max_len = 0;
+                        max_len = trunc(max_len);
+                        if (max_len < 0 || max_len > 9007199254740991.0 || max_len < byte_len) {
+                            return js_throw_range_error("Invalid array buffer maxByteLength");
+                        }
+                    }
+                }
+            }
             // SharedArrayBuffer validates byteLength and maxByteLength before
             // OrdinaryCreateFromConstructor reads NewTarget.prototype.
             if (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) {

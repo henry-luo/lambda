@@ -240,8 +240,8 @@ fn wrap_delimiters(table_box, env_name) {
     let ld = get_left_delim(env_name)
     let rd = get_right_delim(env_name)
     let content_height = table_box.height + table_box.depth
-    let left_box = if (ld != null) delims.render_stretchy(ld, content_height, "mopen") else null
-    let right_box = if (rd != null) delims.render_stretchy(rd, content_height, "mclose") else null
+    let left_box = if (ld != null) delims.render_left_right(ld, table_box.height, table_box.depth, "mopen") else null
+    let right_box = if (rd != null) delims.render_left_right(rd, table_box.height, table_box.depth, "mclose") else null
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))

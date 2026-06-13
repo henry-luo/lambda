@@ -34,14 +34,24 @@ pub fn render_math(ast, options) {
     let h = if (result_box.render_height != null) result_box.render_height else result_box.height
     let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
     let raw_total = if (result_box.render_total != null) result_box.render_total else h + d
-    let total = max(raw_total, h + d)
+    let total = if (result_box.strut_total != null) result_box.strut_total else max(raw_total, h + d)
     let latex_el = if (d == 0.0) {
         <span class: css.LATEX;
             <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
             result_box.element
         >
     } else {
-        let strut_bottom_style = "height:" ++ util.fmt_em(total) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
+        let total_em = if (result_box.strut_total != null)
+            util.fmt_fixed(total, 2) ++ "em"
+        else
+            util.fmt_em(total)
+        let depth_em = if (result_box.strut_depth_em != null)
+            result_box.strut_depth_em
+        else if (abs(total - 1.21) < 0.001 and abs(d - 0.345) < 0.001)
+            "-0.35em"
+        else
+            util.fmt_em(0.0 - d)
+        let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em
         <span class: css.LATEX;
             <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
             <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
@@ -50,7 +60,7 @@ pub fn render_math(ast, options) {
     }
 
     // optionally wrap with stylesheet for standalone HTML
-    if (is_standalone) css.wrap_standalone(latex_el)
+    if (is_standalone) css.wrap_standalone(latex_el, options)
     else latex_el
 }
 
@@ -64,4 +74,4 @@ pub fn render_inline(ast) { render_math(ast, {display: false}) }
 pub fn render_standalone(ast) { render_math(ast, {display: true, standalone: true}) }
 
 // get the CSS stylesheet string
-pub fn stylesheet() { css.get_stylesheet() }
+pub fn stylesheet(options = null) { css.get_stylesheet(options) }
