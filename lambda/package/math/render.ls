@@ -742,8 +742,12 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
     let left_el = <span class: css.classes([css.SMALL_DELIM, css.OPEN]); left_char>
     let right_el = <span class: css.classes([css.SMALL_DELIM, css.CLOSE]); right_char>
     let content_elements = box.child_elements(spaced)
+    let style_attr = if (has_suppressed_text_depth(spaced, 0))
+        "margin-top:0em;height:0.69444em"
+    else
+        "margin-top:-0.08333em;height:0.72777em"
     {
-        element: <span class: css.LEFT_RIGHT, style: "margin-top:-0.08333em;height:0.72777em";
+        element: <span class: css.LEFT_RIGHT, style: style_attr;
             left_el
             for (el in content_elements) el
             right_el
@@ -755,6 +759,12 @@ fn render_small_delimiter_group(left_text, right_text, spaced, content) {
         italic: 0.0,
         skew: 0.0
     }
+}
+
+fn has_suppressed_text_depth(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].suppress_hbox_text_depth == true) true
+    else has_suppressed_text_depth(items, i + 1)
 }
 
 fn render_stretchy_delimiter_group(left_text, right_text, content) {
@@ -1025,7 +1035,10 @@ fn transparent_hbox(children) {
     else
         (let last_idx = len(filtered) - 1,
          let last = filtered[last_idx],
-         box_with_type(hb, last.type))
+         let typed = box_with_type(hb, last.type),
+         if (has_suppressed_text_depth(filtered, 0))
+            box_with_suppress_depth(typed)
+         else typed)
 }
 
 fn render_children_scan(node, context, i, acc) {
