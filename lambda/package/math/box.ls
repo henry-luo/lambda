@@ -83,7 +83,8 @@ fn text_has_tall_delim(text) {
 }
 
 fn text_height(text) {
-    if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
+    if (text == "x") 0.44
+    else if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
 }
 
 fn text_depth(text) {

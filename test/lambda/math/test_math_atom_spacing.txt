@@ -23,9 +23,9 @@ true
 "14. custom width:"
 1.5
 "15. custom type:skip16. pt width:"
-1
+10
 "17. negative:"
--1
+1
 "18. null value:"
 0
 "19. quad has el:"

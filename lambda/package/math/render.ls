@@ -777,10 +777,57 @@ fn render_children_scan(node, context, i, acc) {
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
          render_children_scan(node, context, i + 8, acc ++ [rendered]))
+    else if (is_scriptstyle_switch(node, i))
+        (let rendered = render_scriptstyle_sibling(node[i + 1], context),
+         render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
-         let next_acc = if (child != null) acc ++ [render_node(child, context)] else acc,
+         let next_acc = if (child == null) acc
+             else if (child is string) acc ++ render_text_atoms(string(child), context)
+             else acc ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_scriptstyle_switch(node, i) {
+    if (i + 1 >= len(node)) false
+    else
+        (let child = node[i],
+         child is element and name(child) == 'style_command' and
+         child.cmd != null and string(child.cmd) == "\\scriptstyle" and
+         child.arg == null and len(child) == 0)
+}
+
+fn render_scriptstyle_sibling(child, context) {
+    let bx = render_node(child, context)
+    style_wrap_box(bx, "font-size: 70%")
+}
+
+fn style_wrap_box(bx, style_text) {
+    let rt = if (bx.render_height != null) bx.render_height else bx.height
+    {
+        element: <span style: style_text; bx.element>,
+        height: bx.height,
+        depth: 0.0,
+        render_height: bx.render_height,
+        render_depth: 0.0,
+        render_total: rt,
+        width: bx.width,
+        type: bx.type,
+        italic: bx.italic,
+        skew: bx.skew,
+        suppress_hbox_text_depth: true
+    }
+}
+
+fn render_text_atoms(text, context) {
+    if (text == "+-") {
+        [
+            box.text_box("+", css.CMR, "mbin"),
+            box.text_box("−", css.CMR, "mbin")
+        ]
+    } else {
+        [render_text(text, context)]
+    }
 }
 
 fn child_is_text(node, i, text) {
@@ -862,7 +909,13 @@ fn get_text_from_element(node) {
 }
 
 fn is_plain_number_text(text) {
-    len(text) == 1 and contains("0123456789", text)
+    (len(text) > 0) and is_digit_text(text, 0)
+}
+
+fn is_digit_text(text, i) {
+    if (i >= len(text)) true
+    else if (contains("0123456789", slice(text, i, i + 1))) is_digit_text(text, i + 1)
+    else false
 }
 
 // ============================================================
