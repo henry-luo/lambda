@@ -24,6 +24,7 @@ typedef enum SmFamily {
     SM_FAMILY_FORM_TEXT,
     SM_FAMILY_DROPDOWN,
     SM_FAMILY_CONTEXT_MENU,
+    SM_FAMILY_RICH_EDIT,
     SM_FAMILY__COUNT
 } SmFamily;
 
@@ -121,6 +122,10 @@ typedef enum ContextMenuFsmState {
     CM_HOVER
 } ContextMenuFsmState;
 
+typedef enum RichEditFsmState {
+    RICH_EDIT_IDLE = 0
+} RichEditFsmState;
+
 typedef enum SmEvent {
     SM_EV_DOC_LOAD = 0,
     SM_EV_DOC_COMMIT,
@@ -181,6 +186,7 @@ typedef enum SmEvent {
     SM_EV_CONTEXT_MENU_OPEN,
     SM_EV_CONTEXT_MENU_CLOSE,
     SM_EV_CONTEXT_MENU_HOVER,
+    SM_EV_RICH_TRANSACTION,
     SM_EV__COUNT
 } SmEvent;
 

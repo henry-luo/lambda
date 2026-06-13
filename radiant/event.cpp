@@ -2147,43 +2147,15 @@ static bool dispatch_rich_beforeinput(EventContext* evcon, View* target,
     hooks.user = nullptr;
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
-    return editing_dispatch_beforeinput(evcon, &surface, intent, &hooks);
-}
 
-static bool dispatch_rich_beforeinput_defaultable(EventContext* evcon, View* target,
-                                                  const InputIntent* intent,
-                                                  EditingSurface* out_surface,
-                                                  bool* out_prevented,
-                                                  bool* out_lambda_handled) {
-    if (out_prevented) *out_prevented = false;
-    if (out_lambda_handled) *out_lambda_handled = false;
-    if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
-    EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface)) return false;
-    if (!editing_surface_is_rich(&surface)) return false;
-
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
-    DocState* state = event_context_target_state(evcon);
-    event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
-    bool dispatched = editing_dispatch_beforeinput_ex(evcon, &surface, intent,
-        &hooks, false, out_prevented, out_lambda_handled);
-    if (dispatched && out_surface) *out_surface = surface;
-    return dispatched;
-}
-
-static void dispatch_rich_input(EventContext* evcon,
-                                const EditingSurface* surface,
-                                const InputIntent* intent) {
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
-    editing_dispatch_input(evcon, surface, intent, &hooks);
+    EditingTransaction tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.surface = &surface;
+    tx.intent = intent;
+    tx.hooks = &hooks;
+    tx.operation = "consumer";
+    tx.dispatch_input_without_mutation = true;
+    return editing_run_transaction(evcon, &tx, nullptr, nullptr, nullptr);
 }
 
 static bool rich_text_default_replace(EventContext* evcon,
@@ -2352,6 +2324,61 @@ static bool rich_text_default_replace(EventContext* evcon,
     log_debug("rich_text_default_replace: inserted %u bytes at [%u,%u]",
               data_len, start, end);
     return true;
+}
+
+struct RichDefaultTransactionArgs {
+    View* fallback_view;
+    int fallback_offset;
+};
+
+static bool rich_text_default_transaction_mutate(EventContext* evcon,
+                                                 DocState* state,
+                                                 const EditingSurface* surface,
+                                                 const EditingIntent* intent,
+                                                 void* user) {
+    (void)surface;
+    RichDefaultTransactionArgs* args = (RichDefaultTransactionArgs*)user;
+    return rich_text_default_replace(evcon, state, intent,
+        args ? args->fallback_view : nullptr,
+        args ? args->fallback_offset : 0);
+}
+
+static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
+                                                  View* target,
+                                                  const InputIntent* intent,
+                                                  View* fallback_view,
+                                                  int fallback_offset) {
+    if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) {
+        return false;
+    }
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface)) return false;
+    if (!editing_surface_is_rich(&surface)) return false;
+
+    EditingDispatchHooks hooks;
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    hooks.user = nullptr;
+
+    DocState* state = event_context_target_state(evcon);
+    event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
+
+    RichDefaultTransactionArgs args;
+    args.fallback_view = fallback_view;
+    args.fallback_offset = fallback_offset;
+
+    EditingTransaction tx;
+    memset(&tx, 0, sizeof(tx));
+    tx.surface = &surface;
+    tx.intent = intent;
+    tx.hooks = &hooks;
+    tx.mutate = rich_text_default_transaction_mutate;
+    tx.mutate_user = &args;
+    tx.operation = "default";
+    tx.dispatch_input_without_mutation = false;
+    return editing_run_transaction(evcon, &tx, nullptr, nullptr, nullptr);
 }
 
 static bool dispatch_rich_selection_snapshot(EventContext* evcon,
@@ -7852,9 +7879,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             : editing_redo(&evcon, &surface, &controller_hooks);
                     }
                 } else {
-                    EditingSurface rich_surface;
-                    bool beforeinput_prevented = false;
-                    bool beforeinput_lambda_handled = false;
                     bool defaultable =
                         intent.type == INPUT_INTENT_INSERT_FROM_PASTE ||
                         intent.type == INPUT_INTENT_INSERT_PARAGRAPH ||
@@ -7862,22 +7886,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         intent.type == INPUT_INTENT_DELETE_BY_CUT ||
                         intent.type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
                         intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD;
-                    if (defaultable &&
-                        dispatch_rich_beforeinput_defaultable(&evcon, intent_target,
-                            &intent, &rich_surface, &beforeinput_prevented,
-                            &beforeinput_lambda_handled)) {
+                    if (defaultable && dispatch_rich_transaction_defaultable(
+                            &evcon, intent_target, &intent, intent_target,
+                            rich_keydown_caret_offset)) {
                         handled = true;
-                        if (!beforeinput_prevented) {
-                            bool rich_default_done = false;
-                            if (!beforeinput_lambda_handled) {
-                                rich_default_done = rich_text_default_replace(&evcon,
-                                    state, &intent, intent_target,
-                                    rich_keydown_caret_offset);
-                            }
-                            if (beforeinput_lambda_handled || rich_default_done) {
-                                dispatch_rich_input(&evcon, &rich_surface, &intent);
-                            }
-                        }
                     } else {
                         handled = dispatch_rich_beforeinput(&evcon, intent_target, &intent);
                     }
@@ -8828,24 +8840,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             View* intent_target = caret_view && rich_editable_from_target(caret_view)
                 ? caret_view
                 : (focused ? focused : caret_view);
-            EditingSurface rich_surface;
-            bool beforeinput_prevented = false;
-            bool beforeinput_lambda_handled = false;
             if (intent_target && input_intent_from_text_input(text_event->codepoint,
                     &intent, utf8_buf, sizeof(utf8_buf)) &&
-                dispatch_rich_beforeinput_defaultable(&evcon, intent_target, &intent,
-                    &rich_surface, &beforeinput_prevented,
-                    &beforeinput_lambda_handled)) {
-                if (!beforeinput_prevented) {
-                    bool rich_default_done = false;
-                    if (!beforeinput_lambda_handled) {
-                        rich_default_done = rich_text_default_replace(&evcon,
-                            state, &intent, intent_target, rich_caret_offset);
-                    }
-                    if (beforeinput_lambda_handled || rich_default_done) {
-                        dispatch_rich_input(&evcon, &rich_surface, &intent);
-                    }
-                }
+                dispatch_rich_transaction_defaultable(&evcon, intent_target,
+                    &intent, intent_target, rich_caret_offset)) {
                 evcon.need_repaint = true;
                 break;
             }
