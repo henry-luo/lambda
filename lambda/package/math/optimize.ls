@@ -77,9 +77,13 @@ pub fn coalesce(bx) {
         render_height: bx.render_height,
         render_depth: bx.render_depth,
         render_total: bx.render_total,
+        left_right_render_depth: bx.left_right_render_depth,
+        left_right_render_total: bx.left_right_render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        strut_total: bx.strut_total,
+        strut_depth_em: bx.strut_depth_em
     }
 }

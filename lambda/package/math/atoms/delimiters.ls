@@ -12,6 +12,7 @@
 
 import box: lambda.package.math.box
 import css: lambda.package.math.css
+import met: lambda.package.math.metrics
 import util: lambda.package.math.util
 
 // ============================================================
@@ -44,7 +45,9 @@ let SIZED_DELIMS = {
     '\\langle': true, '\\rangle': true,
     '/': true, '\\backslash': true,
     '\\uparrow': true, '\\downarrow': true, '\\updownarrow': true,
-    '\\Uparrow': true, '\\Downarrow': true, '\\Updownarrow': true
+    '\\Uparrow': true, '\\Downarrow': true, '\\Updownarrow': true,
+    '\\lgroup': true, '\\rgroup': true,
+    '\\lmoustache': true, '\\rmoustache': true
 }
 
 // Map command names to display characters
@@ -60,6 +63,8 @@ let DELIM_CHARS = {
     '\\langle': "⟨", '\\rangle': "⟩",
     '\\uparrow': "↑", '\\downarrow': "↓", '\\updownarrow': "↕",
     '\\Uparrow': "⇑", '\\Downarrow': "⇓", '\\Updownarrow': "⇕",
+    '\\lgroup': "⟮", '\\rgroup': "⟯",
+    '\\lmoustache': "⎰", '\\rmoustache': "⎱",
     '\\backslash': "∖"
 }
 
@@ -93,12 +98,23 @@ pub fn render_stretchy(delim, content_height, atom_type) {
     if (delim == null or delim == "" or delim == ".") {
         render_null_delim(atom_type)
     } else {
-        let display_char = resolve_char(delim)
+        let display_char = stretchy_char(delim)
         let level = select_size_level(content_height)
         if (level <= 4)
             render_sized(display_char, level, atom_type)
         else
             render_svg_delim(display_char, content_height, atom_type)
+    }
+}
+
+// Render a \left/\right delimiter. TeX does not size these directly from
+// height + depth; it computes a minimum delimiter height around the math axis.
+pub fn render_left_right(delim, height, depth, atom_type) {
+    if (delim == null or delim == "" or delim == ".") {
+        render_null_delim(atom_type)
+    } else {
+        let target_height = left_right_target_height(height, depth)
+        render_stretchy(delim, target_height, atom_type)
     }
 }
 
@@ -110,11 +126,16 @@ pub fn render_at_scale(delim, scale, atom_type) {
     } else {
         let display_char = resolve_char(delim)
         let cls = scale_to_class(scale)
-        let h = scale * 0.5
-        let d = scale * 0.3
-        box.make_box(
-            sized_delim_el(cls, display_char, atom_type),
-            h, d, 0.4 * scale, atom_type
+        let level = scale_to_level(scale)
+        if (is_vertical_bar(display_char))
+            render_vertical_mult(display_char, level, atom_type)
+        else (
+            let h = scale * 0.5,
+            let d = if (level == 1) 0.345 else scale * 0.3,
+            box.make_box(
+                sized_delim_el(cls, display_char, atom_type),
+                h, d, 0.4 * scale, atom_type
+            )
         )
     }
 }
@@ -128,10 +149,13 @@ fn render_sized(ch, level, atom_type) {
     let scale = level_to_scale(level)
     let h = scale * 0.5
     let d = scale * 0.3
-    box.make_box(
-        sized_delim_el(cls, ch, atom_type),
-        h, d, 0.4 * scale, atom_type
-    )
+    if (is_vertical_bar(ch))
+        render_vertical_mult(ch, level, atom_type)
+    else
+        box.make_box(
+            sized_delim_el(cls, ch, atom_type),
+            h, d, 0.4 * scale, atom_type
+        )
 }
 
 fn sized_delim_el(cls, ch, atom_type) {
@@ -181,6 +205,84 @@ fn scale_to_class(scale) {
     else css.DELIM_SIZE4
 }
 
+fn scale_to_level(scale) {
+    if (scale <= SIZE_1) 1
+    else if (scale <= SIZE_2) 2
+    else if (scale <= SIZE_3) 3
+    else 4
+}
+
+fn is_vertical_bar(ch) {
+    ch == "∣" or ch == "∥"
+}
+
+fn render_vertical_mult(ch, level, atom_type) {
+    let pieces = vertical_mult_pieces(ch, vertical_mult_tops(level), 0, [])
+    let cls = css.classes([side_class(atom_type), "lm_delim-mult"])
+    {
+        element: <span class: cls;
+            <span class: "delim-size1 lm_vlist-t lm_vlist-t2";
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vertical_mult_height(level));
+                        for (piece in pieces) piece
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vertical_mult_depth_holder(level))>
+                >
+            >
+        >,
+        height: vertical_mult_box_height(level),
+        depth: vertical_mult_box_depth(level),
+        render_height: vertical_mult_box_height(level),
+        render_depth: vertical_mult_box_depth(level),
+        render_total: vertical_mult_render_total(level),
+        width: 0.4,
+        type: atom_type,
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn vertical_mult_pieces(ch, tops, i, acc) {
+    if (i >= len(tops)) acc
+    else
+        (let top = tops[i],
+         let piece = <span style: "top:" ++ util.fmt_em(top);
+             <span class: css.PSTRUT, style: "height:2.61em">
+             <span style: "height:0.61em;display:inline-block"; ch>
+         >,
+         vertical_mult_pieces(ch, tops, i + 1, acc ++ [piece]))
+}
+
+fn vertical_mult_height(level) {
+    if (level == 1) 0.84 else if (level == 2) 1.14 else if (level == 3) 1.44 else 1.74
+}
+
+fn vertical_mult_depth_holder(level) {
+    if (level == 1) 0.36 else if (level == 2) 0.66 else if (level == 3) 0.96 else 1.26
+}
+
+fn vertical_mult_box_height(level) {
+    if (level == 1) 0.85 else if (level == 2) 1.15 else if (level == 3) 1.45 else 1.75
+}
+
+fn vertical_mult_box_depth(level) {
+    if (level == 1) 0.345 else if (level == 2) 0.65 else if (level == 3) 0.95 else 1.25
+}
+
+fn vertical_mult_render_total(level) {
+    if (level == 1) 1.21 else if (level == 2) 1.81 else if (level == 3) 2.41 else 3.01
+}
+
+fn vertical_mult_tops(level) {
+    if (level == 1) { [0.0 - 2.24, 0.0 - 2.83] }
+    else if (level == 2) { [0.0 - 1.94, 0.0 - 2.54, 0.0 - 3.13] }
+    else if (level == 3) { [0.0 - 1.64, 0.0 - 2.24, 0.0 - 2.84, 0.0 - 3.43] }
+    else { [0.0 - 1.34, 0.0 - 1.94, 0.0 - 2.54, 0.0 - 3.14, 0.0 - 3.73] }
+}
+
 // ============================================================
 // SVG-based stretchy rendering (level 5+)
 // ============================================================
@@ -190,6 +292,14 @@ fn render_svg_delim(ch, target_height, atom_type) {
     // (SVG-based stretchy delimiters are not yet supported;
     //  font-size scaling is unreliable due to em cascade issues.)
     render_sized(ch, 4, atom_type)
+}
+
+fn left_right_target_height(height, depth) {
+    let axis = met.AXIS_HEIGHT
+    let max_dist = max(height - axis, depth + axis)
+    let factor_target = max_dist * 901.0 / 500.0
+    let shortfall_target = 2.0 * max_dist - 5.0 / met.PT_PER_EM
+    max(factor_target, shortfall_target)
 }
 
 // ============================================================
@@ -242,8 +352,17 @@ fn resolve_command_delim(name) {
     else if (name == "Uparrow") "⇑"
     else if (name == "Downarrow") "⇓"
     else if (name == "Updownarrow") "⇕"
+    else if (name == "lgroup") "⟮"
+    else if (name == "rgroup") "⟯"
+    else if (name == "lmoustache") "⎰"
+    else if (name == "rmoustache") "⎱"
     else if (name == "backslash") "∖"
     else null
+}
+
+fn stretchy_char(delim) {
+    if (delim == "\\|") "∥"
+    else resolve_char(delim)
 }
 
 // select size level based on content height
