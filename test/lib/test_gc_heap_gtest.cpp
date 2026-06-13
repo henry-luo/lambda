@@ -155,6 +155,14 @@ TEST_F(GCHeapTest, OwnershipQuery) {
     EXPECT_FALSE(gc_is_managed(gc, &dummy));
 }
 
+TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
+    void* ptr = gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_NE(ptr, nullptr);
+
+    EXPECT_TRUE(gc_is_managed(gc, ptr));
+    EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)ptr + 8));
+}
+
 // ============================================================================
 // 2. Data Zone Allocation
 // ============================================================================

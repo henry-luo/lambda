@@ -57,6 +57,7 @@ pub NULLDELIMITER = "lm_nulldelimiter"
 pub MTABLE = "lm_mtable"
 pub ERROR = "lm_error"
 pub OP_GROUP = "lm_op-group"
+pub BG = "lm_bg"
 
 // ============================================================
 // Class builder helpers

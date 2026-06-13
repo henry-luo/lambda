@@ -84,14 +84,32 @@ fn text_has_tall_delim(text) {
 
 fn text_height(text) {
     if (text == "x") 0.44
+    else if (text == "■" or text == "▲") 0.68
+    else if (is_number_text(text)) 0.65
     else if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
 }
 
 fn text_depth(text) {
     if (text_has_tall_delim(text)) 0.25
+    else if (text == "■" or text == "▲") 0.0
+    else if (is_number_text(text)) 0.0
     else if (text == "," or text == ";") 0.19
     else if (text == "y") 0.19
     else 0.08
+}
+
+fn is_number_text(text) {
+    (len(text) > 0) and is_number_text_at(text, 0)
+}
+
+fn is_number_text_at(text, i) {
+    if (i >= len(text)) true
+    else
+        (let ch = slice(text, i, i + 1),
+         if (ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+             ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9")
+            is_number_text_at(text, i + 1)
+         else false)
 }
 
 // create an empty skip box (horizontal spacer)
@@ -188,19 +206,20 @@ fn has_suppress_hbox_text_depth(items, i) {
 }
 
 fn hbox_depth_of(bx, suppress_text_depth) {
-    if (suppress_text_depth and is_mathit_text_box(bx)) 0.0
+    if (suppress_text_depth and is_depthless_text_box(bx)) 0.0
     else bx.depth
 }
 
 fn hbox_render_depth_of(bx, suppress_text_depth) {
-    if (suppress_text_depth and is_mathit_text_box(bx)) 0.0
+    if (suppress_text_depth and is_depthless_text_box(bx)) 0.0
     else if (bx.render_depth != null) bx.render_depth
     else bx.depth
 }
 
-fn is_mathit_text_box(bx) {
+fn is_depthless_text_box(bx) {
     bx.element is element and len(bx.element) == 1 and
-    bx.element.class == css.MATHIT and bx.element[0] is string
+    bx.element.class == css.MATHIT and
+    bx.element[0] is string
 }
 
 // ============================================================
@@ -325,9 +344,13 @@ pub fn with_color(bx, color) {
         element: <span style: "color:" ++ color; bx.element>,
         height: bx.height,
         depth: bx.depth,
+        render_height: bx.render_height,
+        render_depth: bx.render_depth,
+        render_total: bx.render_total,
         width: bx.width,
         type: bx.type,
         italic: bx.italic,
-        skew: bx.skew
+        skew: bx.skew,
+        suppress_hbox_text_depth: bx.suppress_hbox_text_depth
     }
 }

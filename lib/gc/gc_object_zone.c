@@ -294,9 +294,29 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
         } else if (oz->slab_ranges[mid].base > p) {
             hi = mid;
         } else {
-            // p >= base && p < end — found
-            return 1;
+            lo = mid;
+            break;
         }
     }
+
+    if (lo >= oz->range_count) return 0;
+    if (p < oz->slab_ranges[lo].base || p >= oz->slab_ranges[lo].end) return 0;
+
+    // Conservative root scanning can see arbitrary words that point inside an
+    // object-zone slab. Only accept exact user pointers at allocated slot starts.
+    for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
+        size_t slot_size = sizeof(gc_header_t) + SIZE_CLASSES[cls];
+        gc_object_slab_t* slab = oz->slabs[cls];
+        while (slab) {
+            uint8_t* fresh_end = slab->base + slab->next_fresh * slab->slot_size;
+            if (p >= slab->base + sizeof(gc_header_t) && p < fresh_end) {
+                uintptr_t delta = (uintptr_t)(p - (slab->base + sizeof(gc_header_t)));
+                if (delta % slot_size == 0) return 1;
+                return 0;
+            }
+            slab = slab->next;
+        }
+    }
+
     return 0;
 }
