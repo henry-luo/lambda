@@ -16,6 +16,8 @@
     {"type": "assert_caret", "char_offset": 0},
     {"type": "assert_text", "target": {"selector": "#auto-rich"}, "contains": "This paragraph mixes , inline notes"},
     {"type": "paste_text", "text": "strong labels"},
-    {"type": "assert_text", "target": {"selector": "#auto-rich"}, "contains": "This paragraph mixes strong labels, inline notes"}
+    {"type": "assert_text", "target": {"selector": "#auto-rich"}, "contains": "This paragraph mixes strong labels, inline notes"},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "deleteByCut", "surface": "contenteditable", "min": 2},
+    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "insertFromPaste", "surface": "contenteditable", "min": 2}
   ]
 }

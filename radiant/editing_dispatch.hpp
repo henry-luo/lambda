@@ -20,6 +20,11 @@ typedef bool (*EditingDispatchLambdaEventFn)(EventContext* evcon, View* target,
                                              void* user);
 typedef bool (*EditingCopySelectionFn)(DocState* state, const char* prefix,
                                        void* user);
+typedef bool (*EditingTransactionMutateFn)(EventContext* evcon,
+                                           DocState* state,
+                                           const EditingSurface* surface,
+                                           const EditingIntent* intent,
+                                           void* user);
 
 struct EditingDispatchHooks {
     EditingDispatchInputEventFn dispatch_input_event;
@@ -27,6 +32,22 @@ struct EditingDispatchHooks {
     EditingCopySelectionFn copy_selection;
     void* user;
 };
+
+struct EditingTransaction {
+    const EditingSurface* surface;
+    const EditingIntent* intent;
+    const EditingDispatchHooks* hooks;
+    EditingTransactionMutateFn mutate;
+    void* mutate_user;
+    const char* operation;
+    bool dispatch_input_without_mutation;
+};
+
+bool editing_run_transaction(EventContext* evcon,
+                             const EditingTransaction* tx,
+                             bool* out_prevented,
+                             bool* out_mutated,
+                             bool* out_lambda_handled);
 
 bool editing_dispatch_beforeinput(EventContext* evcon,
                                   const EditingSurface* surface,
