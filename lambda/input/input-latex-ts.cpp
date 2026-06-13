@@ -205,6 +205,38 @@ static size_t extract_leading_command(const char* source, uint32_t start, uint32
     return i;
 }
 
+static size_t extract_infix_frac_command(const char* source, uint32_t start, uint32_t end, char* out_cmd, size_t out_max) {
+    static const char* commands[] = {
+        "\\overwithdelims",
+        "\\atopwithdelims",
+        "\\abovewithdelims",
+        "\\choose",
+        "\\brack",
+        "\\brace",
+        "\\over",
+        "\\atop",
+        "\\above"
+    };
+    const char* text = source + start;
+    size_t len = end - start;
+    for (size_t c = 0; c < sizeof(commands) / sizeof(commands[0]); c++) {
+        const char* cmd = commands[c];
+        size_t cmd_len = strlen(cmd);
+        const char* found = (const char*)memmem(text, len, cmd, cmd_len);
+        if (!found) continue;
+        size_t offset = (size_t)(found - text);
+        bool left_ok = (offset == 0) || !isalpha((unsigned char)text[offset - 1]);
+        bool right_ok = (offset + cmd_len >= len) || !isalpha((unsigned char)text[offset + cmd_len]);
+        if (!left_ok || !right_ok) continue;
+        size_t copy_len = cmd_len;
+        if (copy_len > out_max - 1) copy_len = out_max - 1;
+        memcpy(out_cmd, cmd, copy_len);
+        out_cmd[copy_len] = '\0';
+        return copy_len;
+    }
+    return 0;
+}
+
 /**
  * Convert a tree-sitter-latex-math node to Lambda Mark element.
  * This recursively builds an AST representation of the math content.
@@ -341,7 +373,10 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         } else {
             // extract command from node source text (anonymous token fallback)
             char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len == 0) {
+                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            }
             if (cmd_len > 0) {
                 elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
             }
@@ -432,7 +467,10 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         } else {
             // extract command from node source text (anonymous token fallback)
             char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len == 0) {
+                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            }
             if (cmd_len > 0) {
                 elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
             }
@@ -836,7 +874,10 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
         } else {
             // extract command from node source text (anonymous token fallback)
             char cmd_buf[64];
-            size_t cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            size_t cmd_len = extract_infix_frac_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            if (cmd_len == 0) {
+                cmd_len = extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
+            }
             if (cmd_len > 0) {
                 elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf, cmd_len))});
             }

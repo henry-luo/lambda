@@ -31,9 +31,10 @@ pub fn render_math(ast, options) {
     let result_box = opt.coalesce(raw_box)
 
     // wrap with struts and lm_latex class
-    let h = result_box.height
-    let d = result_box.depth
-    let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
+    let h = if (result_box.render_height != null) result_box.render_height else result_box.height
+    let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
+    let total = if (result_box.render_total != null) result_box.render_total else h + d
+    let strut_bottom_style = "height:" ++ util.fmt_em(total) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
     let latex_el = <span class: css.LATEX;
         <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
         <span class: css.STRUT_BOTTOM, style: strut_bottom_style>

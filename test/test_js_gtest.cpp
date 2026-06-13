@@ -713,6 +713,23 @@ TEST(JavaScriptRegression, Js54P3TypedArrayLengthTracking) {
     ASSERT_EQ(status, 0) << output;
 }
 
+// Js54 P4: TypedArray prototype methods over resizable buffers. The shared
+// shape: each method calls ValidateTypedArray at entry (throw TypeError on
+// detached or OOB). Several methods (slice, forEach, reduce, reduceRight,
+// join, toLocaleString, sort, with, toReversed, toSorted) were missing this
+// check. indexOf/lastIndexOf capture len BEFORE coercion callbacks and skip
+// post-coercion-detached/OOB positions per spec HasProperty semantics. The
+// raw_index_of fast path returns -2 for non-numeric search values so the
+// slow path (which uses Get) can match undefined at OOB positions for
+// includes(undefined, ...).
+TEST(JavaScriptRegression, Js54P4TypedArrayPrototypeOob) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js54_p4_typed_array_proto_oob.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
