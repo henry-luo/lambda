@@ -85,7 +85,7 @@ module.exports = grammar({
 
     // Delimiter commands: \lbrace, \rbrace, \langle, \rangle, \vert, etc.
     // Note: \uparrow etc. kept as string literals (shared with relation rule)
-    _delimiter_cmd: $ => token(/\\(lmoustache|rmoustache|backslash|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|vert|Vert)/),
+    _delimiter_cmd: $ => token(/\\(lmoustache|rmoustache|backslash|ulcorner|urcorner|llcorner|lrcorner|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|surd|vert|Vert)/),
 
     // Accent commands: \hat, \bar, \vec, \widehat, \overline, etc.
     _accent_cmd: $ => token(/\\(overleftrightarrow|underleftrightarrow|overrightarrow|underrightarrow|overleftarrow|underleftarrow|widetilde|underbrace|underline|overbrace|overline|widehat|ddddot|dddot|acute|breve|check|grave|tilde|ddot|dot|hat|bar|vec)/),

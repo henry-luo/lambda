@@ -121,7 +121,7 @@
       "type": "TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "\\\\(lmoustache|rmoustache|backslash|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|vert|Vert)"
+        "value": "\\\\(lmoustache|rmoustache|backslash|ulcorner|urcorner|llcorner|lrcorner|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|surd|vert|Vert)"
       }
     },
     "_accent_cmd": {
