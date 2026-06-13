@@ -906,7 +906,8 @@ static bool js_regexp_virtual_prop_name(const char* name, int len) {
            (len == 5 && strncmp(name, "flags", 5) == 0) ||
            (len == 10 && strncmp(name, "ignoreCase", 10) == 0) ||
            (len == 9 && strncmp(name, "multiline", 9) == 0) ||
-           (len == 7 && strncmp(name, "unicode", 7) == 0);
+           (len == 7 && strncmp(name, "unicode", 7) == 0) ||
+           (len == 11 && strncmp(name, "unicodeSets", 11) == 0);
 }
 
 extern void* heap_alloc(int size, TypeId type_id);

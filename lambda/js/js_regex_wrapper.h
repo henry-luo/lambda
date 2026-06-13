@@ -88,6 +88,14 @@ bool js_regex_wrapper_rewrite_v_flag_classes_c(const char* in_buf, int in_len,
                                                 char** out_buf, int* out_len);
 
 /**
+ * Js54: Look up a Unicode character-property name in the generated property
+ * tables and write its (lo, hi) range pairs to out_pairs. Returns the number
+ * of ranges written (clamped to max_pairs), or 0 if the property is not known.
+ */
+extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int name_len,
+                                                       int* out_pairs, int max_pairs);
+
+/**
  * Execute a compiled regex against input text.
  * Returns number of matches found (0 = no match).
  * match_starts[i] and match_ends[i] are filled with byte offsets for each group.

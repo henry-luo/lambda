@@ -788,6 +788,23 @@ static bool v_parse_element(const std::string& s, size_t& i,
                 i = j + 1;
                 return true;
             }
+            // Js54: not a string property — try the character-property tables
+            // so `[\p{Lu}--A]` style set ops resolve to code-point ranges.
+            // We only attempt this for \p (not \P) inside set-op classes; otherwise
+            // pass through as RE2 shorthand below.
+            if (nx == 'p') {
+                int pairs[16 * 1024];
+                int n = js_regex_wrapper_lookup_property_ranges(prop_name.data(),
+                                                                 (int)prop_name.size(),
+                                                                 pairs, 16 * 1024);
+                if (n > 0) {
+                    for (int k = 0; k < n; k++) {
+                        el_ranges.add(pairs[k * 2 + 0], pairs[k * 2 + 1]);
+                    }
+                    i = j + 1;
+                    return true;
+                }
+            }
             el_shorthand_raw.append(s, i, j - i + 1);
             if (nx == 'P') el_is_negated_prop = true;
             i = j + 1;
@@ -801,6 +818,47 @@ static bool v_parse_element(const std::string& s, size_t& i,
             el_ranges.add_char(cp);
             if (out_single_codepoint) *out_single_codepoint = cp;
         } else {
+            // Js54: try to expand the shorthand to ranges so set operations
+            // can apply. \d, \w, \s, \D, \W, \S are all expandable.
+            // sh is like "\\d", "\\D", etc.
+            if (sh.size() == 2 && sh[0] == '\\') {
+                char ch = sh[1];
+                CodePointRanges r;
+                bool ok = false, neg = false;
+                if (ch == 'd') { r.add('0','9'); ok = true; }
+                else if (ch == 'D') { r.add('0','9'); ok = true; neg = true; }
+                else if (ch == 'w') {
+                    r.add('0','9'); r.add('A','Z'); r.add('a','z'); r.add('_','_'); ok = true;
+                }
+                else if (ch == 'W') {
+                    r.add('0','9'); r.add('A','Z'); r.add('a','z'); r.add('_','_'); ok = true; neg = true;
+                }
+                else if (ch == 's') {
+                    // JS whitespace: \t\n\v\f\r and Unicode space chars (rough subset)
+                    r.add(0x09, 0x0D); r.add(0x20, 0x20); r.add(0xA0, 0xA0);
+                    r.add(0x1680, 0x1680); r.add(0x2000, 0x200A);
+                    r.add(0x2028, 0x2029); r.add(0x202F, 0x202F);
+                    r.add(0x205F, 0x205F); r.add(0x3000, 0x3000); r.add(0xFEFF, 0xFEFF);
+                    ok = true;
+                }
+                else if (ch == 'S') {
+                    r.add(0x09, 0x0D); r.add(0x20, 0x20); r.add(0xA0, 0xA0);
+                    r.add(0x1680, 0x1680); r.add(0x2000, 0x200A);
+                    r.add(0x2028, 0x2029); r.add(0x202F, 0x202F);
+                    r.add(0x205F, 0x205F); r.add(0x3000, 0x3000); r.add(0xFEFF, 0xFEFF);
+                    ok = true; neg = true;
+                }
+                if (ok) {
+                    if (neg) {
+                        CodePointRanges full;
+                        full.add(0, 0x10FFFF);
+                        full.difference_with(r);
+                        r = full;
+                    }
+                    el_ranges.union_with(r);
+                    return true;
+                }
+            }
             el_shorthand_raw.append(sh);
         }
         return true;
