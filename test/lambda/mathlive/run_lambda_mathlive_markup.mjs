@@ -5,8 +5,9 @@
 // renders formulas through lambda/package/math via a generated Lambda script.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +40,7 @@ function parseArgs(argv) {
     report: DEFAULT_REPORT_PATH,
     baseline: DEFAULT_BASELINE_PATH,
     noBaseline: false,
+    jobs: defaultJobCount(),
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -52,6 +54,7 @@ function parseArgs(argv) {
     else if (arg === '--script') opts.script = path.resolve(argv[++i] ?? '');
     else if (arg === '--report') opts.report = path.resolve(argv[++i] ?? '');
     else if (arg === '--baseline') opts.baseline = path.resolve(argv[++i] ?? '');
+    else if (arg === '--jobs') opts.jobs = Number(argv[++i] ?? '0');
     else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -60,7 +63,15 @@ function parseArgs(argv) {
     }
   }
 
+  if (!Number.isInteger(opts.jobs) || opts.jobs < 1) {
+    throw new Error(`--jobs must be a positive integer, got ${opts.jobs}`);
+  }
+
   return opts;
+}
+
+function defaultJobCount() {
+  return Math.max(1, os.cpus().length - 1);
 }
 
 function printHelp() {
@@ -76,6 +87,7 @@ Options:
   --lambda PATH     Lambda executable path, default ./lambda.exe
   --script PATH     Generated Lambda batch script path, default ./temp/...
   --report PATH     JSON report path, default ./temp/...
+  --jobs N          Parallel Lambda worker count, default CPU count - 1
 `);
 }
 
@@ -274,24 +286,98 @@ format(outputs, "json")
 `;
 }
 
-function runLambda(cases, opts) {
-  fs.mkdirSync(path.dirname(opts.script), { recursive: true });
-  fs.writeFileSync(opts.script, buildLambdaScript(cases));
-
-  const result = spawnSync(opts.lambda, [opts.script], {
-    cwd: PROJECT_ROOT,
-    encoding: 'utf8',
-    maxBuffer: 128 * 1024 * 1024,
-  });
-
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(
-      `Lambda exited with ${result.status}\n\nSTDOUT:\n${result.stdout}\n\nSTDERR:\n${result.stderr}`
-    );
+async function runLambda(cases, opts) {
+  const jobCount = Math.min(opts.jobs, cases.length);
+  if (jobCount <= 1) {
+    return runLambdaShard(cases, opts.script, opts);
   }
 
-  return parseLambdaJsonString(result.stdout);
+  const shards = shardCases(cases, jobCount);
+  const shardResults = await Promise.all(
+    shards.map((shard) =>
+      runLambdaShard(shard.cases, shardScriptPath(opts.script, shard.index), opts)
+        .then((actuals) => ({ start: shard.start, actuals }))
+    )
+  );
+
+  const actuals = new Array(cases.length);
+  for (const shard of shardResults) {
+    for (let i = 0; i < shard.actuals.length; i += 1) {
+      actuals[shard.start + i] = shard.actuals[i];
+    }
+  }
+  return actuals;
+}
+
+function shardCases(cases, jobCount) {
+  const shards = [];
+  const chunkSize = Math.ceil(cases.length / jobCount);
+  for (let start = 0; start < cases.length; start += chunkSize) {
+    shards.push({
+      index: shards.length,
+      start,
+      cases: cases.slice(start, start + chunkSize),
+    });
+  }
+  return shards;
+}
+
+function shardScriptPath(scriptPath, index) {
+  const parsed = path.parse(scriptPath);
+  return path.join(parsed.dir, `${parsed.name}.job${index}${parsed.ext || '.ls'}`);
+}
+
+function runLambdaShard(cases, scriptPath, opts) {
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  fs.writeFileSync(scriptPath, buildLambdaScript(cases));
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(opts.lambda, ['--no-log', scriptPath], {
+      cwd: PROJECT_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const chunks = { stdout: [], stderr: [] };
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const maxBytes = 128 * 1024 * 1024;
+
+    child.stdout.on('data', (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxBytes) {
+        child.kill();
+        reject(new Error(`Lambda stdout exceeded ${maxBytes} bytes for ${scriptPath}`));
+      } else {
+        chunks.stdout.push(chunk);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > maxBytes) {
+        child.kill();
+        reject(new Error(`Lambda stderr exceeded ${maxBytes} bytes for ${scriptPath}`));
+      } else {
+        chunks.stderr.push(chunk);
+      }
+    });
+    child.on('error', reject);
+    child.on('close', (status, signal) => {
+      const stdout = Buffer.concat(chunks.stdout).toString('utf8');
+      const stderr = Buffer.concat(chunks.stderr).toString('utf8');
+      if (status !== 0) {
+        reject(
+          new Error(
+            `Lambda exited with ${status ?? signal} for ${scriptPath}\n\nSTDOUT:\n${stdout}\n\nSTDERR:\n${stderr}`
+          )
+        );
+        return;
+      }
+      try {
+        resolve(parseLambdaJsonString(stdout));
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
 }
 
 function parseLambdaJsonString(stdout) {
@@ -398,7 +484,7 @@ function buildBaselineReport(results, baselineSet, baselinePath) {
   };
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const snapshotText = fs.readFileSync(SNAPSHOT_PATH, 'utf8');
   let cases = buildCases(parseSnapshots(snapshotText));
@@ -420,7 +506,7 @@ function main() {
   if (cases.length === 0) throw new Error('no runnable MathLive markup cases extracted');
 
   const baselineSet = opts.noBaseline ? null : readBaseline(opts.baseline);
-  const actuals = runLambda(cases, opts);
+  const actuals = await runLambda(cases, opts);
   const results = compareCases(cases, actuals);
   const summary = summarize(results);
   const baseline = buildBaselineReport(results, baselineSet, opts.baseline);
@@ -428,6 +514,7 @@ function main() {
     generatedScript: path.relative(PROJECT_ROOT, opts.script),
     sourceSnapshot: path.relative(PROJECT_ROOT, SNAPSHOT_PATH),
     baseline,
+    jobs: Math.min(opts.jobs, cases.length),
     summary,
     results,
   };
@@ -439,6 +526,7 @@ function main() {
   console.log(`  cases:  ${summary.total}`);
   console.log(`  passed: ${summary.passed}`);
   console.log(`  failed: ${summary.failed}`);
+  console.log(`  jobs:   ${Math.min(opts.jobs, cases.length)}`);
   if (baseline) {
     console.log(
       `  baseline: ${baseline.path} (${baseline.expected} tests, ${baseline.covered} covered)`
@@ -486,7 +574,7 @@ function main() {
 }
 
 try {
-  main();
+  await main();
 } catch (err) {
   console.error(err.stack || err.message);
   process.exit(1);
