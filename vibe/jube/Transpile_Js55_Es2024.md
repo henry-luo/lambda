@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 + P20 (all partial) done (43 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16 + 18 P20); ~30 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 164.4 s. Latest full run: 40230 passing, 43 improvements, 0 regressions. See §12.15 for P20 closure-capture cluster fix.
+Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 + P20 + P22 (all partial) done (47 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16 + 18 P20 + 4 P22); ~26 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 144.9 s. Latest full run: 40234 passing, 47 improvements, 0 regressions. See §12.15 for P20 closure-capture cluster fix, §12.16 for P22 spec-correctness fixes.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -1424,3 +1424,134 @@ The species-ctor tests are TypedArray spec issues separate from closure-capture.
 The key insight: the bug isn't in the SHARED scope_env path (which §12.10/§12.12 attacked). It's in the **per-closure env path** (use_scope_env=false), via a parallel state tracking system (`mt->last_closure_env_reg`). That state was being USED by `jm_write_last_closure_capture_if_matching` to forward let-initializer writes, but never RESET between sibling scopes. The fix is structural for the state lifetime, not for the captures protocol — much narrower in blast radius.
 
 §12.14 mechanism (B) — "the READS at lines 1316-1317" — was a red herring. Those reads ARE from `jm_env_reload_shared_captures` after CALL expressions. The var->reg pointing at the stale env_reg came from earlier shared-env marking elsewhere. The actual primary bug was simply the LACK of a reset on `mt->last_closure_env_reg` at for-of/block boundaries.
+
+## 12.16 P22 remaining closure-cluster wins (2026-06-14)
+
+After §12.15 P20 landed the closure-capture cluster fixes, returned for the remaining ~9 spec-correctness failures. Five distinct fixes, **4 tests cleared**, leaving 4-5 deferred to future work.
+
+### P22(a) — Array.prototype.map on TA delegates to Array path (1 test)
+
+Same pattern as P20(d) slice fix. When `Array.prototype.map.call(taOOB, ...)` is dispatched, ES spec ArraySpeciesCreate creates a regular Array (not a TA). The resulting Array uses HasProperty (skip on OOB → sparse holes), but Lambda's TA map handler called `js_typed_array_species_create` which returns a TA with element-type zeros.
+
+**Fix**: at the TA map handler ([js_runtime.cpp:17518](../../lambda/js/js_runtime.cpp)), when `js_dispatch_as_array_method` is true, short-circuit to `js_array_generic_iterative_callback(obj, args, argc, JS_ARRAY_ITER_MAP)`. The TA-specific OOB throw also reorganized to fire only when NOT dispatching as Array method.
+
+Test cleared: `Array/prototype/map/callbackfn-resize-arraybuffer.js`.
+
+### P22(b) — Array.prototype.sort on TA uses string compare (1 test)
+
+When `Array.prototype.sort.call(taOOB)` is dispatched without a comparefn, ES2024 §23.1.3.27 says use STRING comparison (default Array comparator). Lambda's TA sort used numeric comparator.
+
+**Fix**: at the TA sort handler ([js_runtime.cpp:18330](../../lambda/js/js_runtime.cpp)), when `js_dispatch_as_array_method` is true, short-circuit to `js_array_generic_sort(obj, args, argc)`.
+
+Test cleared: `Array/prototype/sort/resizable-buffer-default-comparator.js`.
+
+### P22(c) — Spread in `Func.call(this, ...args)` (1 test)
+
+Pattern: `Array.prototype.copyWithin.call(ta, ...rest)`. Lambda's call-expression lowering has a fast path for `f.call(thisArg, a, b, ...)` ([js_mir_expression_lowering.cpp:8079](../../lambda/js/js_mir_expression_lowering.cpp)) that bypasses `js_method_call_apply` and directly invokes `js_call_function`. But this path uses `jm_build_args_array` which doesn't expand SpreadElement nodes — so the spread'd array reaches the inner builtin as a single Array arg instead of expanded scalars.
+
+**Probe** (verified): for `f.call(ta, ...rest)`, the inner builtin gets `argc=1, args[0]=ARRAY` instead of `argc=2, args[0]=0, args[1]=2`.
+
+**Fix**: at the `.call` fast path, check the args list for any `JS_AST_NODE_SPREAD_ELEMENT`. If found, fall through to the existing spread-aware dispatch ([js_mir_expression_lowering.cpp:8430](../../lambda/js/js_mir_expression_lowering.cpp), which routes through `js_method_call_apply` and properly expands via `jm_build_spread_args_array`).
+
+Test cleared: `Array/prototype/copyWithin/resizable-buffer.js`. Pre-flight of all `Function.prototype.{call,apply}` tests passes (95/97, no regressions).
+
+### P22(d) — TA constructor from OOB TA + current-length copy (1 test)
+
+Test: `TypedArrayConstructors/.../src-typedarray-resizable-buffer.js`. Two issues:
+
+1. **OOB check missing**: `new targetCtor(taOOB)` should throw TypeError per ES2024 §23.2.5.1.1 step 2 (`IsTypedArrayOutOfBounds(srcRecord)`). Lambda's `js_typed_array_new_from_array` ([js_typed_array.cpp:1858](../../lambda/js/js_typed_array.cpp)) didn't validate.
+
+2. **Stale length on copy**: for a length-tracking source TA on a resized buffer, `src->length` is the cached value at view-creation time, not the current length witness. The copy was sizing/memcpy-ing with the wrong count.
+
+**Fix**: add the OOB throw at the top of the TA-source branch, and replace `src->length` reads with `js_typed_array_current_length(src)` + `js_typed_array_current_data(src)` for the data copy.
+
+Test cleared: `TypedArrayConstructors/ctors/typedarray-arg/src-typedarray-resizable-buffer.js`. Pre-flight of all 736 TypedArrayConstructors tests passes (the 190 not-found and 6 SAB crashes are pre-existing worker-flake issues, not regressions).
+
+### P22(e) — TA.set throwingProxy + BigInt iteration (deferred)
+
+Test: `TypedArray/prototype/set/this-backed-by-resizable-buffer.js`. Failure: "Expected TypeError but got Error".
+
+Investigation: the test's `SetNumOrBigInt(fixedLength, throwingProxy)` helper iterates `source` with `for (const s of source)` when target is a BigInt TA. For BigInt iterations of the `for (let ctor of ctors)`, this for-of triggers the proxy's get trap which throws `Error("Called getter for ...")` — the test then expects a TypeError but receives Error.
+
+The test pattern looks correct in spec terms — V8 might handle this differently due to optimizer reordering or the OOB check firing inside `target.set(...)` directly without the SetNumOrBigInt iteration path. Without deeper V8 spec comparison, this remains a one-off deferred.
+
+### P22(f) — TA species ctor closure mutation (deferred)
+
+Tests: `TypedArray/prototype/map/speciesctor-resizable-buffer-{grow,shrink}.js`, `TypedArray/prototype/slice/speciesctor-resize.js`.
+
+**Mechanism (verified via probe)**: the test pattern is:
+```js
+for (let ctor of ctors) {
+  let resizeFlag = false;
+  let counter = 0;
+  class MyArray extends ctor {
+    constructor(...params) {
+      counter++;                              // mutates outer let — broken
+      super(...params);
+      if (resizeFlag) rab.resize(...);        // reads outer let — partial broken
+    }
+  }
+  ...
+  fixedLength.map(...);   // triggers species ctor MyArray
+  assert.sameValue(counter, expected);        // FAILS
+  assert.sameValue(rab.byteLength, expected); // FAILS — resize didn't fire
+}
+```
+
+This is the *closure-mutation* sub-bug of the closure-capture cluster:
+```js
+for (let i of [1]) {
+  let x = 0;
+  const f = () => { x = x + 1; };
+  f(); // x: 0 → 1 ✓
+  f(); // x stays at 1 ✗
+  f(); // x stays at 1 ✗
+}
+```
+
+First closure invocation correctly mutates outer `x` to 1. Subsequent invocations don't propagate. Different from §12.10 closure-capture (which was about wrong env_reg being used) — this is about subsequent closure invocations reading a STALE captured value back into the closure body each time.
+
+The fix surface here is in the closure body's MIR emission: the body loads `cap_reg = env[slot]` at function entry (a single load), then uses `cap_reg` for the rest of the body. If the closure mutates `x`, it writes back to `env[slot]`. But on the NEXT invocation, `cap_reg = env[slot]` should re-read the new value (which it does).
+
+The actual broken bit appears to be the OUTER's read of `x` after the closure invocation. The outer reads from its own var register, not from env. The closure's writeback to env doesn't update outer's register. After the first invocation, somehow the value lands in outer's register (mechanism unclear), but subsequent writebacks just go to env.
+
+Deferred — same structural fix surface as the §12.12/§12.14 closure-mutation work. Not single-edit fixable.
+
+### Cumulative cleared, end of P22
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| P1 (D1) | 12 | `js_pending_new_target` clear in subclass-TA branch |
+| P10(a) | 1 | skip-list rgi-emoji-17.0 |
+| P10(b) | 1 | UTF-16 unit basis in regex Symbol.replace |
+| P11(a) | 1 | ArrayBuffer constructor arg ordering in Reflect.construct |
+| P11(c) | 3 | TypedArray.prototype.with current-length |
+| P12(a) | 1 | lastIndexOf raw fast path reverse-iteration clamp |
+| P12(b) | 1 | Object.freeze TypedArray-resizable-buffer detection |
+| P13 | 2 | Array.prototype.toLocaleString builtin-id fix |
+| P14 | 2 | TypedArray.set targetLength capture, drop re-OOB check |
+| P16 | 1 | TA index enumeration in for-in + Object.keys |
+| P20(a) | 5 | Reset `mt->last_closure_env_reg` at for-of/block boundaries |
+| P20(b) | 8 | find\* spec: yield undefined for OOB instead of skipping |
+| P20(c) | 5 | Block function-decl refreshes closure at textual position |
+| P20(d) | 1 | Array.slice on TA uses ArraySpeciesCreate path |
+| **P22(a)** | **1** | **Array.map on TA → Array path** |
+| **P22(b)** | **1** | **Array.sort on TA → Array path (string compare)** |
+| **P22(c)** | **1** | **`Func.call(this, ...spread)` falls through to spread dispatch** |
+| **P22(d)** | **1** | **TA ctor from OOB TA throws + current-length copy** |
+| **Total** | **47** | (of original 73 admittable failures) |
+
+### Remaining failures (~5)
+
+| Test | Bug class |
+|---|---|
+| `TypedArray/prototype/set/this-backed-by-resizable-buffer.js` | BigInt iteration vs throwingProxy order |
+| `TypedArray/prototype/map/speciesctor-resizable-buffer-grow.js` | Closure mutation (P22(f)) |
+| `TypedArray/prototype/map/speciesctor-resizable-buffer-shrink.js` | Closure mutation (P22(f)) |
+| `TypedArray/prototype/slice/speciesctor-resize.js` | Closure mutation (P22(f)) |
+| 20 TLA module-mode tests | Gate E (separate work) |
+| 2 SIGSEGV TLA tests | P9 (separate work) |
+
+The closure-mutation cluster (3 tests) needs a separate session — structurally related to but distinct from P20's closure-capture cluster. The TLA cluster (22 tests) is a fully separate work item (Gate E in §3).
+
+Net session win count: P22 adds 4 to the cumulative 43 = **47 admittable tests cleared total** vs original 73 failures. Remaining 25-26 = TLA + closure-mutation + a few one-offs.

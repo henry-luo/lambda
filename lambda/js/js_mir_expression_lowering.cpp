@@ -8076,7 +8076,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
             // Function.prototype.call(thisArg, ...args)
             // Pattern: Foo.call(thisObj, a1, a2, ...)
-            if (prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
+            // Js55 P22: skip this fast path when any arg is a SpreadElement —
+            // jm_build_args_array doesn't expand spread, so spread args would
+            // get passed as a single Array. Fall through to the spread-aware
+            // dispatch below (js_method_call_apply path).
+            bool call_has_spread = false;
+            for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { call_has_spread = true; break; }
+            }
+            if (!call_has_spread && prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
                 MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
                 MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // Build args from the remaining arguments (skip the first 'this' arg)
