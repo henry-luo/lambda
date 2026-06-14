@@ -547,6 +547,40 @@ With P1, P3, P4, and P5 landed, the expected admission delta is all five Js56 de
 - `language/module-code/top-level-await/fulfillment-order.js` — PASS (P5 dynamic-import wait chain through awaited-target propagation; reproduced locally via `p5_fulfillment_test.js`).
 - `language/module-code/top-level-await/rejection-order.js` — PASS (same machinery as fulfillment-order, rejection path; reproduced locally via `p5_rejection_test.js`).
 
+### P6 — final admission + stability guard (2026-06-15)
+
+Two extra phases became necessary at the gate:
+
+1. **P4 revert (`async-module-does-not-block-sibling-modules`).** The "drop post-await statements for nested-load modules" heuristic broke 5 other previously-passing TLA tests by silently swallowing `export default await Promise.resolve(42)` style fixtures (the await is the *only* statement after which the exports get published, so dropping it leaves the namespace empty). Replaced with a runtime-guarded helper `js_p5_module_await(specifier, value)` that publishes the awaited target onto the module registry **only** when the value is a still-pending Promise and otherwise falls back to `js_await_sync` so settled-Promise and non-Promise awaits unwrap normally. The sibling-modules test goes back to failing — accepted; spec-correct fix would need true async-state-machine module bodies.
+2. **P1 disabled.** The module-level `scope_env` regressed three resizable-ArrayBuffer + closure tests (Array/TypedArray.prototype.toLocaleString shrink + TypedArrayConstructors ctors out-of-bounds) — closures inside a `for (let ctor of ctors) { … }` loop body need per-iteration semantics for block-lets declared in the body, and the module scope env unifies them across iterations. An attempt at a surgical "exclude block-lets-inside-any-loop" filter widened the damage to 26 regressions, so the Phase 1.7.5 promotion was gated behind a `if (false && total > 0)` until that filter can be designed correctly. Gate K (`coerced-new-length-detach.js`) goes back to failing — accepted in exchange for 0 regressions.
+
+**Release-mode results** (`make release && make -C build/premake test_js_test262_gtest config=release_native`):
+
+| Run | Wall-clock | Fully passing / total | Failed | Regressions | Improvements |
+|---|---:|---:|---:|---:|---:|
+| Baseline (P0) | ~131 s | 40253 / 40253 | 0 | — | — |
+| P6 v4 guard (P1 disabled) | 128.8 s | 40253 / 40253 | 0 | 0 | 0 (baseline-only mode) |
+| `--update-baseline` | 130.7 s | **40256** / 40260 | 2 slow | 0 | **3** |
+| P6 stability guard | 128.7 s | **40256** / 40256 | 0 | 0 | 0 |
+
+**3 admissions** landed (baseline file `test/js262/test262_baseline.txt` updated in the same run):
+
+- `language/module-code/top-level-await/fulfillment-order.js`
+- `language/module-code/top-level-await/module-self-import-async-resolution-ticks.js`
+- `language/module-code/top-level-await/rejection-order.js`
+
+Two tests dropped during this session:
+
+- `built_ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js` — would pass with P1 enabled, but P1 disable was the cheapest path to 0 regressions; revisit when a per-iteration-aware filter lands.
+- `language/module-code/top-level-await/async-module-does-not-block-sibling-modules.js` — needs real TLA suspension; P4 revert is the right call for now.
+
+Acceptance criteria met:
+- Failed in baseline: 0
+- Regressions: 0
+- Improvements: 3
+- Wall-clock: 130.7 s (+0 % vs the 131 s P0 baseline; within the 138 s ceiling)
+- Two slow tests (Array.every / Array.some), unchanged from prior runs.
+
 ### Risk notes carried forward
 
 - The §6.1.2 wall-clock catastrophe risk for `js_await_sync` is still the highest concern on the P2 side. The bounded drain's three bounds (watchdog/no-progress/turn cap) were chosen to match the explicit mitigation shape, but the `+5 %` wall-clock guard at the P2 gate (release-mode P10 run on the full suite) is what would actually validate this. Debug-build smoke tests in `temp/js57_repros/` cannot substitute for that timing measurement.

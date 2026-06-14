@@ -3679,7 +3679,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
 
         int total = (int)hashmap_count(scope_vars);
-        if (total > 0) {
+        // P6: temporarily disable P1 (module-level scope env). It admitted
+        // built_ins/ArrayBuffer/.../coerced-new-length-detach.js but cost 3
+        // resizable-buffer + closure regressions
+        // (Array/TypedArray.prototype.toLocaleString shrink, ctors out-of-bounds).
+        // The right surgical filter — "exclude block-lets declared inside any
+        // loop body" — is non-trivial and an earlier attempt at it widened the
+        // damage to 26 regressions. Until that filter can be done correctly,
+        // skip the promotion entirely so the release guard hits 0 regressions.
+        // Self-import + fulfillment/rejection-order admissions are unaffected.
+        if (false && total > 0) {
             mt->module_fc.has_scope_env = true;
             mt->module_fc.scope_env_count = total;
             mt->module_fc.scope_env_normal_count = total;
