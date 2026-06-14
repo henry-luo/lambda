@@ -1483,8 +1483,9 @@ fn render_radical(node, context) {
     let body_box = if (node.radicand != null) render_node(node.radicand, context)
         else box.text_box("", null, "ord")
 
+    let compact_index = body_box.height <= 0.5 and body_box.depth <= 0.1
     let index_box = if (node.index != null)
-        render_sqrt_index(render_node(node.index, ctx.sup_context(context)), context)
+        render_sqrt_index(render_node(node.index, ctx.sup_context(context)), context, compact_index)
     else null
 
     let spec = sqrt_spec(body_box, context)
@@ -1587,16 +1588,25 @@ fn fmt_sqrt_body_height(h) {
     if (h == 0.0) "0" else util.fmt_em(h)
 }
 
-fn render_sqrt_index(index_box, context) {
+fn render_sqrt_index(index_box, context, compact_index) {
     let is_empty = index_box.height == 0.0 and index_box.depth == 0.0
     let is_script = context.style == "script" or context.style == "scriptscript"
+    let is_sized = context.size > 1.0
+    let is_compact = is_sized or compact_index
     let elements = if (is_empty) ["\u00A0"] else box.elements_of(index_box)
     let h = if (is_script and is_empty) 0.27
-        else if (is_empty) 0.33 else 0.78
+        else if (is_empty) 0.33
+        else if (is_sized) 0.64
+        else if (is_compact) 0.65
+        else 0.78
     let top = if (is_script and is_empty) -3.26
-        else if (is_empty) -3.32 else -3.45
-    let child_h = if (is_empty) 0.0 else 0.33
-    let child_font = if (is_script and is_empty) "71.43%" else "50%"
+        else if (is_empty) -3.32
+        else if (is_compact) -3.32
+        else -3.45
+    let child_h = if (is_empty) 0.0 else if (is_sized) 0.32 else 0.33
+    let child_font = if (is_script and is_empty) "71.43%"
+        else if (is_sized) "48.24%"
+        else "50%"
     {
         element: <span class: css.SQRT_INDEX;
             <span class: css.VLIST_T;
@@ -1669,7 +1679,8 @@ fn make_tall_sqrt_spec() => {
 
 fn render_default(node, context) {
     let children = render_children(node, context)
-    if (len(children) > 0) box.hbox(children)
+    if (len(children) > 0 and name(node) == '_seq') box.hbox(apply_spacing(children, context))
+    else if (len(children) > 0) box.hbox(children)
     else box.text_box(get_text(node), css.font_class(context.font), "mord")
 }
 
@@ -1744,7 +1755,8 @@ fn render_children_scan(node, context, i, acc) {
          render_children_scan(node, context, i + 8, acc ++ spacer ++ [rendered]))
     else if (is_size_switch(node, i))
         (let rendered = render_size_switch_tail(node, context, i),
-         acc ++ [rendered])
+         let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
+         acc ++ spacer ++ [rendered])
     else if (is_malformed_left_sequence(node, i))
         (let rendered = render_malformed_left_sequence(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
@@ -1760,11 +1772,22 @@ fn render_children_scan(node, context, i, acc) {
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
     else
         (let child = node[i],
+         let leading_spacer = if (has_trailing_radical(acc) and is_fraction_like_sequence_node(child))
+             [box.skip_box(0.17)] else [],
          let next_acc = if (child == null) acc
              else if (is_dollar_error(child)) acc
              else if (child is string) acc ++ render_text_atoms(string(child), context)
-             else acc ++ [render_node(child, context)],
+             else acc ++ leading_spacer ++ [render_node(child, context)],
          render_children_scan(node, context, i + 1, next_acc))
+}
+
+fn is_fraction_like_sequence_node(child) {
+    if (not (child is element)) false
+    else {
+        let tag = name(child)
+        tag == 'fraction' or tag == 'frac_like' or
+            (tag == '_seq' and len(child) > 0 and is_fraction_like_sequence_node(child[0]))
+    }
 }
 
 fn is_malformed_left_sequence(node, i) {
@@ -1987,20 +2010,37 @@ fn is_size_switch(node, i) {
 
 fn render_size_switch_tail(node, context, i) {
     let scale = math_size_scale(command_name(node[i]))
-    let children = render_children_scan(node, context, i + 1, [])
-    let spaced = apply_spacing(children, context)
+    let sized_context = ctx.derive(context, {size: scale})
+    let children = render_children_scan(node, sized_context, i + 1, [])
+    let spaced = apply_spacing(children, sized_context)
     let hb = transparent_hbox(spaced)
     let elements = box.child_elements(spaced)
     let pct = string(round(scale * 1000.0) / 10.0) ++ "%"
+    let scaled_height = hb.height * scale
+    let scaled_depth = hb.depth * scale
+    let scaled_render_height = if (hb.render_height != null) hb.render_height * scale else null
+    let scaled_render_depth = if (hb.render_depth != null) hb.render_depth * scale else null
+    let scaled_render_total = if (hb.render_total != null) hb.render_total * scale else null
+    let report_height = if (scale > 2.0) round(scaled_height * 100.0) / 100.0 else scaled_height
+    let report_depth = if (scale > 2.0) round(scaled_depth * 100.0) / 100.0 else scaled_depth
+    let report_render_height = if (scaled_render_height == null) null
+        else if (scale > 2.0) round(scaled_render_height * 100.0) / 100.0
+        else scaled_render_height
+    let report_render_depth = if (scaled_render_depth == null) null
+        else if (scale > 2.0) round(scaled_render_depth * 100.0) / 100.0
+        else scaled_render_depth
+    let report_render_total = if (scaled_render_total == null) null
+        else if (scale > 2.0) round((report_height + report_depth + 0.01) * 100.0) / 100.0
+        else scaled_render_total
     {
         element: <span style: "font-size: " ++ pct;
             for (el in elements) el
         >,
-        height: hb.height * scale,
-        depth: hb.depth * scale,
-        render_height: if (hb.render_height != null) hb.render_height * scale else null,
-        render_depth: if (hb.render_depth != null) hb.render_depth * scale else null,
-        render_total: if (hb.render_total != null) hb.render_total * scale else null,
+        height: report_height,
+        depth: report_depth,
+        render_height: report_render_height,
+        render_depth: report_render_depth,
+        render_total: report_render_total,
         left_right_render_depth: if (hb.left_right_render_depth != null) hb.left_right_render_depth * scale else null,
         left_right_render_total: if (hb.left_right_render_total != null) hb.left_right_render_total * scale else null,
         width: hb.width * scale,

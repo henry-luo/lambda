@@ -539,7 +539,7 @@ int map_css_keyword_to_lexbor(const char* keyword);
  * @param keyword const char* keyword string (e.g., "small", "large")
  * @return float font size in pixels
  */
-float map_lambda_font_size_keyword(const char* keyword);
+float map_lambda_font_size_keyword(CssEnum keyword_enum);
 
 /**
  * Map Lambda font-weight keyword to numeric value
