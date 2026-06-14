@@ -1167,10 +1167,19 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
             MIR_new_reg_op(mt->ctx, val)));
         return;
     }
-    // Check if this var name is in the current function's scope env
+    // Check if this var name is in the current function's scope env.
+    // Js57 Track A: in module body (current_func_index == -1), use the synthetic
+    // module_fc set up at js_main entry so top-level closures share lexical state.
     int fi = mt->current_func_index;
-    if (fi < 0 || fi >= mt->func_count) return;
-    JsFuncCollected* fc = &mt->func_entries[fi];
+    JsFuncCollected* fc;
+    if (fi < 0) {
+        if (!mt->module_scope_env_active) return;
+        fc = &mt->module_fc;
+    } else if (fi >= mt->func_count) {
+        return;
+    } else {
+        fc = &mt->func_entries[fi];
+    }
     if (!fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
         if (strcmp(name, fc->scope_env_names[s]) == 0) {

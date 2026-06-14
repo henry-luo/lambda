@@ -540,16 +540,15 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     // (e.g. FLOAT from `-Infinity` init), the scope_env reload after a
                     // call will misinterpret the boxed value written by the closure.
                     if (jm_is_native_type(init_type) && !mt->in_generator) {
-                        int fi = mt->current_func_index;
-                        if (fi >= 0 && fi < mt->func_count) {
-                            JsFuncCollected* fc = &mt->func_entries[fi];
-                            if (fc->has_scope_env) {
-                                for (int s = 0; s < fc->scope_env_count; s++) {
-                                    if (strcmp(vname, fc->scope_env_names[s]) == 0) {
-                                        log_debug("v24: widening scope-env var '%s' from %d to ANY", vname, init_type);
-                                        init_type = LMD_TYPE_ANY;
-                                        break;
-                                    }
+                        // Js57 Track A: current_fc covers both the function-body case
+                        // and js_main when the module-level scope env is active.
+                        JsFuncCollected* fc = mt->current_fc;
+                        if (fc && fc->has_scope_env && fc->scope_env_names) {
+                            for (int s = 0; s < fc->scope_env_count; s++) {
+                                if (strcmp(vname, fc->scope_env_names[s]) == 0) {
+                                    log_debug("v24: widening scope-env var '%s' from %d to ANY", vname, init_type);
+                                    init_type = LMD_TYPE_ANY;
+                                    break;
                                 }
                             }
                         }
