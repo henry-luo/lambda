@@ -40,7 +40,6 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let op_box = if (is_text_op != null)
         box.text_box(display_text, css.CMR, "mop")
     else large_op_symbol_box(display_text)
-    let scaled_op = box.with_scale(op_box, 1.5)
 
     let has_sub = node.sub != null
     let has_sup = node.sup != null
@@ -48,27 +47,79 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
     let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
 
-    let parts = [{box: scaled_op, shift: 0.0}]
-    let parts2 = if (has_sup)
-        [{box: sup_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
-    else parts
-    let parts3 = if (has_sub)
-        parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
-    else parts2
-    box.vbox(parts3)
+    if (is_text_op == null and has_sub and has_sup)
+        render_large_op_limits_vlist(op_box, sub_box, sup_box)
+    else
+        (let scaled_op = if (is_text_op != null) op_box else box.with_scale(op_box, 1.5),
+         let parts = [{box: scaled_op, shift: 0.0}],
+         let parts2 = if (has_sup)
+             [{box: sup_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
+         else parts,
+         let parts3 = if (has_sub)
+             parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
+         else parts2,
+         box.vbox(parts3))
 }
 
 fn large_op_symbol_box(text) => {
     element: <span class: "lm_op-symbol lm_large-op"; text>,
-    height: 1.07,
+    height: 1.61,
     depth: 0.0,
-    render_height: 1.07,
+    render_height: 1.61,
     render_depth: 0.0,
-    render_total: 1.07,
+    render_total: 1.61,
     width: 0.6,
     type: "mop",
     italic: 0.0,
     skew: 0.0
+}
+
+fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
+    let op_elements = box.elements_of(op_box)
+    let sub_elements = box.elements_of(sub_box)
+    let sup_elements = box.elements_of(sup_box)
+    let el = <span class: css.OP_GROUP;
+        <span class: css.VLIST_T2;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:1.66em";
+                    <span class: css.CENTER, style: "top:-1.87em";
+                        <span class: css.PSTRUT, style: "height:3.05em">
+                        <span style: "height:0.6em;display:inline-block;font-size: 70%";
+                            for (el in sub_elements) el
+                        >
+                    >
+                    <span class: css.CENTER, style: "top:-3.05em";
+                        <span class: css.PSTRUT, style: "height:3.05em">
+                        <span style: "height:1.61em;display:inline-block";
+                            for (el in op_elements) el
+                        >
+                    >
+                    <span class: css.CENTER, style: "top:-4.3em";
+                        <span class: css.PSTRUT, style: "height:3.05em">
+                        <span style: "height:0.31em;display:inline-block;font-size: 70%";
+                            for (el in sup_elements) el
+                        >
+                    >
+                >
+                <span class: css.VLIST_S; "\u200B">
+            >
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:1.42em">
+            >
+        >
+    >
+    {
+        element: el,
+        height: 1.66,
+        depth: 1.41,
+        render_height: 1.66,
+        render_depth: 1.41,
+        render_total: 3.07,
+        width: max(max(op_box.width, sub_box.width), sup_box.width),
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // render normal inline subscript/superscript
@@ -110,16 +161,23 @@ fn render_scripts(node, context, render_fn) {
                              is_char, sub_font_scale)
          else
              render_sup_only(base_box, sup_box, init_sup_shift, min_sup_shift, x_height,
-                             sup_font_scale),
+                             context, sup_font_scale),
          script_pair(base_box, box.with_class(supsub_box, css.MSUBSUP)))
 }
 
 fn script_pair(base_box, script_box) {
+    let render_h = if (script_box.render_height != null)
+        max(base_box.height, script_box.render_height) else null
+    let render_d = if (script_box.render_depth != null)
+        max(base_box.depth, script_box.render_depth) else null
     {
         element: box.hbox([base_box, script_box]).element,
         elements: [base_box.element, script_box.element],
         height: max(base_box.height, script_box.height),
         depth: max(base_box.depth, script_box.depth),
+        render_height: render_h,
+        render_depth: render_d,
+        render_total: script_box.render_total,
         width: base_box.width + script_box.width,
         type: "mord",
         italic: 0.0,
@@ -202,12 +260,19 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
 // Case C: Superscript only
 // ============================================================
 
-fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, font_scale) {
+fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font_scale) {
     let tall_script = sup_box.height > 0.72
     let tall_base = base_box.height > 0.72
-    let script_height = script_inner_height(sup_box, tall_script)
-    let vlist_height = if (tall_script) 1.16 else if (tall_base) 0.94 else 0.72
-    let top = 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
+    let in_fraction_child = context.fraction_child == true
+    let compound_fraction_script = in_fraction_child and sup_box.width > 0.8
+    let script_height = script_inner_height(sup_box, tall_script, in_fraction_child)
+    let vlist_height = if (compound_fraction_script and context.cramped == true) 0.76
+        else if (in_fraction_child and context.cramped == true) 0.75
+        else if (in_fraction_child) 0.82
+        else if (tall_script) 1.16 else if (tall_base) 0.94 else 0.72
+    let top = if (in_fraction_child and context.cramped == true) -3.28
+        else if (in_fraction_child) -3.36
+        else 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
     let inner_style = "height:" ++ util.fmt_em(script_height) ++ ";display:inline-block;font-size: 70%"
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
     let el = <span class: css.VLIST_T;
@@ -226,6 +291,12 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, font_scale) {
         element: el,
         height: vlist_height,
         depth: 0.0,
+        render_height: if (in_fraction_child) vlist_height else null,
+        render_depth: if (in_fraction_child) 0.0 else null,
+        render_total: if (in_fraction_child)
+            (if (compound_fraction_script) 1.01
+             else if (context.cramped == true) 1.0 else 1.01)
+            else null,
         width: sup_box.width * font_scale,
         type: "ord",
         italic: 0.0,
@@ -233,8 +304,10 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, font_scale) {
     }
 }
 
-fn script_inner_height(sup_box, tall_script) {
-    if (tall_script) 1.05
+fn script_inner_height(sup_box, tall_script, in_fraction_child) {
+    if (in_fraction_child and sup_box.width > 0.8) 0.6
+    else if (in_fraction_child) 0.46
+    else if (tall_script) 1.05
     else if (sup_box.element is element and sup_box.element.class == css.CMR) 0.46
     else 0.31
 }

@@ -72,6 +72,7 @@ fn text_style(text, cls) {
     else if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
     else if (cls == css.MATHIT and text == "g") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "j") "margin-right:0.06em"
+    else if (cls == css.MATHIT and text == "q") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
     else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
@@ -356,6 +357,13 @@ pub fn with_class(bx, cls) => {
     element: <span class: cls; bx.element>,
     height: bx.height,
     depth: bx.depth,
+    render_height: bx.render_height,
+    render_depth: bx.render_depth,
+    render_total: bx.render_total,
+    left_right_render_depth: bx.left_right_render_depth,
+    left_right_render_total: bx.left_right_render_total,
+    strut_total: bx.strut_total,
+    strut_depth_em: bx.strut_depth_em,
     width: bx.width,
     type: bx.type,
     italic: bx.italic,
