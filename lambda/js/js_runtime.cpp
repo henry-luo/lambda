@@ -17519,10 +17519,17 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) {
                     return js_throw_type_error("callback is not a function");
                 }
+                // Js55 P21: when Array.prototype.map is called on a TA, ES spec
+                // ArraySpeciesCreate creates a regular Array (not a TA). The
+                // generic path uses HasProperty (skip on OOB → sparse holes).
+                // TA species_create would return a TA with element-type zeros.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_iterative_callback(obj, args, argc, JS_ARRAY_ITER_MAP);
+                }
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.map on an out-of-bounds ArrayBuffer");
@@ -18326,9 +18333,16 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (has_comparefn && get_type_id(comparefn) != LMD_TYPE_FUNC) {
                     return js_throw_type_error("comparefn is not a function");
                 }
+                // Js55 P21: when Array.prototype.sort is called on a TA, the
+                // default (no comparefn) sort uses STRING comparison per ES spec
+                // §23.1.3.27, not the numeric compare that TA's sort uses. Route
+                // to the generic sort path so the behavior matches.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_sort(obj, args, argc);
+                }
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.sort on an out-of-bounds ArrayBuffer");
