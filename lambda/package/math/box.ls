@@ -198,7 +198,8 @@ pub fn hbox(boxes) {
         italic: 0.0,
         skew: 0.0,
         strut_total: if (len(valid) == 1) valid[0].strut_total else null,
-        strut_depth_em: strut_depth_em
+        strut_depth_em: strut_depth_em,
+        is_fraction: if (len(valid) == 1) valid[0].is_fraction else null
     }
 }
 

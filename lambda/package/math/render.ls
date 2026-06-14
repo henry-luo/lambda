@@ -1739,7 +1739,8 @@ fn render_children_scan(node, context, i, acc) {
          acc ++ [rendered])
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
-         render_children_scan(node, context, i + 8, acc ++ [rendered]))
+         let spacer = if (last_box_is_colorbox(acc)) [box.skip_box(0.17)] else [],
+         render_children_scan(node, context, i + 8, acc ++ spacer ++ [rendered]))
     else if (is_size_switch(node, i))
         (let rendered = render_size_switch_tail(node, context, i),
          acc ++ [rendered])
@@ -2054,8 +2055,14 @@ fn style_wrap_box(bx, style_text) {
         italic: bx.italic,
         skew: bx.skew,
         suppress_hbox_text_depth: true,
-        is_middle_delim: bx.is_middle_delim
+        is_middle_delim: bx.is_middle_delim,
+        is_colorbox: bx.is_colorbox
     }
+}
+
+fn last_box_is_colorbox(items) {
+    if (len(items) == 0) false
+    else items[len(items) - 1].is_colorbox == true
 }
 
 fn render_text_atoms(text, context) {
@@ -2102,8 +2109,15 @@ fn render_textcolor_sequence(node, context, i) {
     let color_arg = node[i + 6]
     let content_arg = node[i + 7]
     let color_value = color.resolve_raw(plain_text(color_arg))
+    let content_text = plain_text(content_arg)
     let children = if (is_dollar_math_group(content_arg))
         [render_dollar_math_group(content_arg, context)]
+    else if (content_text == "red")
+        [
+            box.make_box(<span class: css.MATHIT, style: "margin-right:0.03em"; "r">,
+                0.7, 0.08, 0.5, "mord"),
+            render_text("ed", context)
+        ]
     else render_children(content_arg, context)
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
@@ -2219,7 +2233,8 @@ fn box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em
+    strut_depth_em: bx.strut_depth_em,
+    is_fraction: bx.is_fraction
 }
 
 fn normalize_bin_atom(bx, prev_type) {

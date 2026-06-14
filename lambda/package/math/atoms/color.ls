@@ -62,7 +62,8 @@ pub fn with_background(content_box, bg_color) {
         type: "ord",
         italic: 0.0,
         skew: 0.0,
-        suppress_hbox_text_depth: content_box.suppress_hbox_text_depth
+        suppress_hbox_text_depth: content_box.suppress_hbox_text_depth,
+        is_colorbox: true
     }
 }
 

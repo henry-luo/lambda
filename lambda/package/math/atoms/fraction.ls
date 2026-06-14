@@ -86,7 +86,8 @@ pub fn render(node, context, render_fn) {
 
     // build the vbox
     let frac_box = if (rule_thickness <= 0.0)
-        build_frac_nobar(numer_box, denom_box, frac_ctx, cmd)
+        build_frac_nobar(numer_box, denom_box, frac_ctx, cmd,
+            is_unbraced_numeric_nobar(node))
     else
         build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx)
 
@@ -105,8 +106,8 @@ pub fn render_boxes(numer_box, denom_box, context) {
 }
 
 // Rule 15c: no bar line (binomial)
-fn build_frac_nobar(numer_box, denom_box, frac_ctx, cmd) {
-    build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd)
+fn build_frac_nobar(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric) {
+    build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
 }
 
 // Rule 15d: with bar line
@@ -156,12 +157,13 @@ fn build_frac_bar(numer_box, denom_box, ns, cl, ds, rule_thickness, frac_ctx) {
         width: max(numer_box.width, denom_box.width),
         type: "mord",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        is_fraction: true
     }
 }
 
-fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd) {
-    let spec = frac_nobar_spec(frac_ctx, cmd)
+fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric) {
+    let spec = frac_nobar_spec(frac_ctx, cmd, unbraced_numeric)
     let numer_elements = box.elements_of(numer_box)
     let denom_elements = box.elements_of(denom_box)
     let numer_style = frac_child_style(spec.numer_child_height, spec.child_font_pct)
@@ -200,6 +202,7 @@ fn build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd) {
         italic: 0.0,
         skew: 0.0,
         no_bar: true,
+        is_fraction: true,
         delim_level: spec.delim_level,
         delim_height: spec.delim_height,
         delim_depth: spec.delim_depth
@@ -225,6 +228,24 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             denom_child_height: 0.47,
             child_font_pct: "71.43%",
             rule_height: 0.05
+        }
+    } else if ((frac_ctx.style == "script" or frac_ctx.style == "scriptscript") and
+               frac_ctx.colorbox_content == true and numer_box.is_fraction == true and
+               denom_total < 0.8) {
+        {
+            height: 1.36,
+            depth: 0.35,
+            render_height: 1.36,
+            render_depth: 0.35,
+            render_total: 1.71,
+            depth_holder: 0.35,
+            denom_top: -2.65,
+            line_top: -3.23,
+            numer_top: -3.68,
+            numer_child_height: 1.05,
+            denom_child_height: 0.31,
+            child_font_pct: "70%",
+            rule_height: 0.04
         }
     } else if (frac_ctx.style == "scriptscript") {
         {
@@ -288,6 +309,57 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             numer_child_height: 0.46,
             denom_child_height: 0.46,
             child_font_pct: "70%",
+            rule_height: 0.04
+        }
+    } else if (frac_ctx.colorbox_content == true and numer_total >= 1.15 and denom_total >= 1.2) {
+        {
+            height: 2.09,
+            depth: 1.12,
+            render_height: 2.09,
+            render_depth: 1.12,
+            render_total: 3.22,
+            depth_holder: 1.13,
+            denom_top: -2.62,
+            line_top: -3.58,
+            numer_top: -4.08,
+            numer_child_height: colorbox_fraction_child_height(numer_box, numer_total),
+            denom_child_height: round(denom_total * 100.0) / 100.0,
+            child_font_pct: null,
+            rule_height: 0.04,
+            pstrut: 3.36
+        }
+    } else if (frac_ctx.colorbox_content == true and numer_total >= 1.15 and denom_total < 0.95) {
+        {
+            height: 2.09,
+            depth: 0.685,
+            render_height: 2.09,
+            render_depth: 0.68,
+            render_total: 2.78,
+            depth_holder: 0.69,
+            denom_top: -2.66,
+            line_top: -3.58,
+            numer_top: -4.08,
+            numer_child_height: colorbox_fraction_child_height(numer_box, numer_total),
+            denom_child_height: colorbox_simple_child_height(denom_box),
+            child_font_pct: null,
+            rule_height: 0.04,
+            pstrut: 3.36
+        }
+    } else if (frac_ctx.colorbox_content == true and numer_total < 0.95 and
+               denom_box.is_fraction == true and denom_total >= 1.15 and denom_total < 1.2) {
+        {
+            height: 1.15,
+            depth: 1.06,
+            render_height: 1.15,
+            render_depth: 1.06,
+            render_total: 2.22,
+            depth_holder: 1.07,
+            denom_top: -2.27,
+            line_top: -3.23,
+            numer_top: -3.5,
+            numer_child_height: 0.65,
+            denom_child_height: 1.18,
+            child_font_pct: null,
             rule_height: 0.04
         }
     } else if (numer_total >= 1.5 and denom_total >= 1.2) {
@@ -446,8 +518,44 @@ fn script_frac_child_height(child_box, fallback) {
     if (total >= 0.7) fallback else 0.46
 }
 
-fn frac_nobar_spec(frac_ctx, cmd) {
-    if (cmd == "\\tbinom" or frac_ctx.style == "script" or frac_ctx.style == "scriptscript") {
+fn colorbox_fraction_child_height(child_box, total) {
+    if (child_box.is_fraction == true and total >= 1.7 and total < 1.72)
+        1.7
+    else
+        round(total * 100.0) / 100.0
+}
+
+fn colorbox_simple_child_height(child_box) {
+    if (is_single_mathit_letter_box(child_box)) 0.44
+    else if (child_box.height < 0.65) child_box.height
+    else 0.65
+}
+
+fn is_single_mathit_letter_box(child_box) {
+    let els = box.elements_of(child_box)
+    len(els) == 1 and els[0] is element and els[0].class == css.MATHIT and
+    len(els[0]) == 1 and els[0][0] is string and len(string(els[0][0])) == 1
+}
+
+fn frac_nobar_spec(frac_ctx, cmd, unbraced_numeric) {
+    if (unbraced_numeric) {
+        {
+            height: 1.15,
+            depth: 0.69,
+            render_height: 1.45,
+            render_depth: 0.95,
+            render_total: 2.41,
+            depth_holder: 0.69,
+            numer_top: -3.5,
+            denom_top: -2.31,
+            numer_child_height: 0.65,
+            denom_child_height: 0.65,
+            child_font_pct: null,
+            delim_level: 3,
+            delim_height: 1.45,
+            delim_depth: 0.95
+        }
+    } else if (cmd == "\\tbinom" or frac_ctx.style == "script" or frac_ctx.style == "scriptscript") {
         {
             height: 0.78,
             depth: 0.35,
@@ -482,6 +590,28 @@ fn frac_nobar_spec(frac_ctx, cmd) {
             delim_depth: 0.95
         }
     }
+}
+
+fn is_unbraced_numeric_nobar(node) {
+    let cmd = if (node.cmd != null) string(node.cmd) else ""
+    is_nobar_cmd(cmd) and is_plain_number_node(node.numer) and
+    is_plain_number_node(node.denom)
+}
+
+fn is_plain_number_node(node) {
+    if (not (node is string)) false
+    else is_digit_string(string(node), 0)
+}
+
+fn is_digit_string(text, i) {
+    if (len(text) == 0) false
+    else if (i >= len(text)) true
+    else
+        (let ch = slice(text, i, i + 1),
+         if (ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+             ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9")
+            is_digit_string(text, i + 1)
+         else false)
 }
 
 fn render_total_of(bx) {
@@ -521,7 +651,8 @@ fn wrap_default_fraction(frac_box) {
         width: frac_box.width + 0.24,
         type: "minner",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        is_fraction: true
     }
 }
 
@@ -545,7 +676,8 @@ fn wrap_delimited_fraction(frac_box, left_delim, right_delim) {
         width: combined.width,
         type: "minner",
         italic: 0.0,
-        skew: 0.0
+        skew: 0.0,
+        is_fraction: true
     }
 }
 
