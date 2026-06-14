@@ -104,9 +104,10 @@ fn render_group(node, context) {
 }
 
 fn group_spacing_context(context) {
-    if ((context.style == "script" or context.style == "scriptscript") and
-        context.script_container != true and
-        not (context.fraction_child == true and context.colorbox_content == true))
+    if (context.style == "script" and context.script_container != true)
+        ctx.derive(context, {style: "text"})
+    else if (context.style == "scriptscript" and
+        context.script_container != true and context.fraction_child != true)
         ctx.derive(context, {style: "text"})
     else context
 }
