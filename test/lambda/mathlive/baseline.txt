@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 203 cases passing when this
+# One snapshot key per line. These are the 204 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -188,6 +188,7 @@ RULE AND DIMENSIONS 13/ \\rule{5in}{7in} renders correctly 1
 RULE AND DIMENSIONS 14/ \\rule{5mu}{7mu} renders correctly 1
 SIZING COMMANDS 0/ \\text{a \\tiny x y}b renders correctly 1
 SIZING COMMANDS 1/ \\mbox{a \\tiny x y}b renders correctly 1
+SIZING COMMANDS 2/ \\binom12  \\sqrt[3]{x}  \\Huge \\sqrt[3]{x} \\binom56 x \\text{text is huge} renders correctly 1
 SPACING AND KERN 0/ a+{}b+c renders correctly 1
 SPACING AND KERN 1/ 123\\colorbox{red}456 renders correctly 1
 SPACING AND KERN 2/ a\\hskip 3em b renders correctly 1
