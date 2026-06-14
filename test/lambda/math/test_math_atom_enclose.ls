@@ -29,19 +29,19 @@ let bx = enc.render_box(bx_node, base_ctx, mock_render)
 let ll_node = {cmd: "\\llap", content: <group "L">}
 let ll = enc.render_box(ll_node, base_ctx, mock_render)
 "5. llap width:"; ll.width
-"6. llap align:"; contains(ll.element.style, "text-align:right")
+"6. llap class:"; contains(ll.element.class, "lm_llap")
 
 // ---- \rlap ----
 let rl_node = {cmd: "\\rlap", content: <group "R">}
 let rl = enc.render_box(rl_node, base_ctx, mock_render)
 "7. rlap width:"; rl.width
-"8. rlap align:"; contains(rl.element.style, "text-align:left")
+"8. rlap class:"; contains(rl.element.class, "lm_rlap")
 
 // ---- \clap ----
 let cl_node = {cmd: "\\clap", content: <group "C">}
 let cl = enc.render_box(cl_node, base_ctx, mock_render)
 "9. clap width:"; cl.width
-"10. clap align:"; contains(cl.element.style, "text-align:center")
+"10. clap class:"; contains(cl.element.class, "lm_clap")
 
 // ---- \phantom ----
 let ph_node = {cmd: "\\phantom", content: <group "m">}
@@ -88,7 +88,7 @@ let ru_node = {cmd: "\\rule", width: "2", height: "0.5"}
 let ru = enc.render_rule(ru_node, base_ctx, mock_render)
 "27. rule type:"; ru.type
 "28. rule has style:"; ru.element.style != null
-"29. rule has bg:"; contains(ru.element.style, "background:")
+"29. rule has border:"; contains(ru.element.style, "border-right-width:") and contains(ru.element.style, "border-top-width:")
 "30. rule width:"; ru.width
 "31. rule height:"; ru.height
 
