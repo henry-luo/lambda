@@ -113,6 +113,13 @@ extern "C" void js_next_tick_enqueue(Item callback) {
     next_tick_push(callback);
 }
 
+// Js57 P2c: visible queue size for the bounded-await drain heuristic.
+// Returns the combined pending nextTick + microtask count so js_await_sync can
+// detect whether a drain turn made progress (no progress = give up early).
+extern "C" int js_microtask_pending_count(void) {
+    return next_tick_count + microtask_count;
+}
+
 extern "C" void js_microtask_flush(void) {
     int safety = 0;
     while ((next_tick_count > 0 || microtask_count > 0) &&
@@ -1128,6 +1135,63 @@ static void close_all_timer_handles(void) {
             timer_close_handle(th);
         }
     }
+}
+
+// Js57 P2c: bounded loop drain for js_await_sync on a pending promise.
+//
+// Drains microtasks + libuv loop in tight non-blocking turns, polling the caller's
+// `predicate` after each turn. Returns 0 if the predicate ever returns non-zero
+// (loop made forward progress), or -1 if the bound expired with predicate still 0.
+//
+// Three independent bounds prevent the Js55 P23(b) catastrophe (full-loop drain
+// from inside js_await_sync went 155s → 1675s on the suite):
+//   * watchdog_ms      — hard wall-clock cap per call (suggested 100ms);
+//   * max_no_progress  — successive turns where nothing was popped from
+//                        microtask/nextTick queues count as "no progress"; on
+//                        the Nth such turn we give up immediately;
+//   * max_turns        — absolute upper bound on uv_run iterations.
+//
+// This is intentionally narrower than js_event_loop_drain: no watchdog timer,
+// no signal handler installation, no interval-timer cleanup. The intent is a
+// brief "hand off control so cross-module promise resolution can happen", not
+// a full event loop run.
+extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
+                                      int watchdog_ms, int max_no_progress,
+                                      int max_turns) {
+    if (!predicate) return -1;
+    if (predicate(user)) return 0;
+    js_microtask_flush();
+    if (predicate(user)) return 0;
+
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return -1;
+
+    if (watchdog_ms <= 0) watchdog_ms = 100;
+    if (max_no_progress <= 0) max_no_progress = 3;
+    if (max_turns <= 0) max_turns = 64;
+
+    uint64_t start_ns = uv_hrtime();
+    uint64_t watchdog_ns = (uint64_t)watchdog_ms * 1000000ULL;
+    int no_progress = 0;
+
+    for (int turn = 0; turn < max_turns; turn++) {
+        int before = next_tick_count + microtask_count;
+        uv_run(loop, UV_RUN_NOWAIT);
+        int after_uv = next_tick_count + microtask_count;
+        js_microtask_flush();
+        if (predicate(user)) return 0;
+
+        bool made_progress = (after_uv > before) || (after_uv != 0);
+        if (made_progress) {
+            no_progress = 0;
+        } else {
+            no_progress++;
+            if (no_progress >= max_no_progress) break;
+        }
+
+        if (uv_hrtime() - start_ns > watchdog_ns) break;
+    }
+    return predicate(user) ? 0 : -1;
 }
 
 extern "C" int js_event_loop_drain(void) {

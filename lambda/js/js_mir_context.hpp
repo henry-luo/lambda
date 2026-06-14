@@ -477,6 +477,14 @@ struct JsMirTranspiler {
     bool in_typeof;                          // true when transpiling operand of typeof
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
+
+    // Js57 Track A: synthetic module-level scope env. Captures of top-level closures
+    // (parent_index == -1) that reference block-lets at module scope land here. The
+    // env is allocated at js_main entry and shared across all top-level child closures
+    // so mutations propagate (matches spec lexical-env semantics). For-init lets are
+    // excluded so per-iteration semantics still works.
+    JsFuncCollected module_fc;
+    bool module_scope_env_active;             // true if module_fc has been initialised and scope_env is live
 };
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
@@ -510,4 +518,12 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         }
     }
     jm_free_scope_env_names(mt->func_entries, mt->func_count);
+    if (mt->module_fc.scope_env_names) {
+        mem_free(mt->module_fc.scope_env_names);
+        mt->module_fc.scope_env_names = NULL;
+    }
+    if (mt->module_fc.captures) {
+        mem_free(mt->module_fc.captures);
+        mt->module_fc.captures = NULL;
+    }
 }
