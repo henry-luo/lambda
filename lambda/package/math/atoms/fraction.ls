@@ -279,6 +279,40 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: "70%",
             rule_height: 0.04
         }
+    } else if ((frac_ctx.style == "script" or frac_ctx.style == "scriptscript") and
+               script_fraction_has_descender(numer_box) and denom_total < 0.75) {
+        let numer_child_height = script_fraction_descender_child_height(numer_box)
+        {
+            height: numer_child_height + 0.31,
+            depth: 0.35,
+            render_height: numer_child_height + 0.31,
+            render_depth: 0.35,
+            render_total: numer_child_height + 0.66,
+            depth_holder: 0.35,
+            denom_top: -2.65,
+            line_top: -3.23,
+            numer_top: -3.44,
+            numer_child_height: numer_child_height,
+            denom_child_height: 0.46,
+            child_font_pct: "70%",
+            rule_height: 0.04
+        }
+    } else if ((frac_ctx.style == "script" or frac_ctx.style == "scriptscript") and denom_total < 0.7) {
+        {
+            height: 0.84,
+            depth: 0.35,
+            render_height: 0.84,
+            render_depth: 0.35,
+            render_total: 1.19,
+            depth_holder: 0.35,
+            denom_top: -2.65,
+            line_top: -3.23,
+            numer_top: -3.38,
+            numer_child_height: script_frac_child_height(numer_box, 0.51),
+            denom_child_height: 0.46,
+            child_font_pct: "70%",
+            rule_height: 0.04
+        }
     } else if ((frac_ctx.style == "script" or frac_ctx.style == "scriptscript") and child_total >= 0.7) {
         {
             height: 0.84,
@@ -494,6 +528,24 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: null,
             rule_height: 0.04
         }
+    } else if (denom_total < 0.75 and numer_total >= 0.7) {
+        let numer_child_height = text_fraction_numer_child_height(numer_box)
+        let has_descender = script_fraction_has_descender(numer_box)
+        {
+            height: if (has_descender) numer_child_height + 0.39 else 1.15,
+            depth: 0.685,
+            render_height: if (has_descender) numer_child_height + 0.39 else 1.15,
+            render_depth: 0.68,
+            render_total: if (has_descender) numer_child_height + 1.08 else 1.84,
+            depth_holder: 0.69,
+            denom_top: -2.31,
+            line_top: -3.23,
+            numer_top: if (has_descender) 0.0 - 3.58 else 0.0 - 3.5,
+            numer_child_height: numer_child_height,
+            denom_child_height: 0.65,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
     } else {
         {
             height: 1.15,
@@ -516,6 +568,78 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
 fn script_frac_child_height(child_box, fallback) {
     let total = render_total_of(child_box)
     if (total >= 0.7) fallback else 0.46
+}
+
+fn script_fraction_descender_child_height(child_box) {
+    if (script_fraction_has_digit(child_box)) 0.59 else 0.55
+}
+
+fn text_fraction_numer_child_height(child_box) {
+    if (script_fraction_has_descender(child_box)) {
+        if (script_fraction_has_digit(child_box)) 0.84 else 0.78
+    } else 0.73
+}
+
+fn script_fraction_has_descender(child_box) {
+    items_have_descender(box.elements_of(child_box), 0)
+}
+
+fn script_fraction_has_digit(child_box) {
+    items_have_digit(box.elements_of(child_box), 0)
+}
+
+fn items_have_descender(items, i) {
+    if (i >= len(items)) false
+    else item_has_descender(items[i]) or items_have_descender(items, i + 1)
+}
+
+fn item_has_descender(item) {
+    if (item is string) text_has_descender(string(item), 0)
+    else if (item is element) element_has_descender(item, 0)
+    else false
+}
+
+fn element_has_descender(el, i) {
+    if (i >= len(el)) false
+    else item_has_descender(el[i]) or element_has_descender(el, i + 1)
+}
+
+fn text_has_descender(text, i) {
+    if (i >= len(text)) false
+    else {
+        let ch = slice(text, i, i + 1)
+        ch == "g" or ch == "j" or ch == "p" or ch == "q" or ch == "y" or
+            text_has_descender(text, i + 1)
+    }
+}
+
+fn items_have_digit(items, i) {
+    if (i >= len(items)) false
+    else item_has_digit(items[i]) or items_have_digit(items, i + 1)
+}
+
+fn item_has_digit(item) {
+    if (item is string) text_has_digit(string(item), 0)
+    else if (item is element) element_has_digit(item, 0)
+    else false
+}
+
+fn element_has_digit(el, i) {
+    if (i >= len(el)) false
+    else item_has_digit(el[i]) or element_has_digit(el, i + 1)
+}
+
+fn text_has_digit(text, i) {
+    if (i >= len(text)) false
+    else {
+        let ch = slice(text, i, i + 1)
+        is_digit_char(ch) or text_has_digit(text, i + 1)
+    }
+}
+
+fn is_digit_char(ch) {
+    ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+    ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9"
 }
 
 fn colorbox_fraction_child_height(child_box, total) {

@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 201 cases passing when this
+# One snapshot key per line. These are the 203 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -74,6 +74,8 @@ ENVIRONMENTS 3/ \\begin{bmatrix}a & b & c\\\\ d \\\\ g & h & i & j\\end{bmatrix}
 ENVIRONMENTS 4/ \\begin{array}{ll}xyz & abc & 123 \\\\ cde & fgh \\end{array} renders correctly 1
 ENVIRONMENTS 5/ \\begin{Bmatrix}a & b & c\\end{Bmatrix} renders correctly 1
 ENVIRONMENTS 6/ \\begin{pmatrix}a & b & c\\end{pmatrix} renders correctly 1
+ENVIRONMENTS 7/ \\begin{cases}\\sum_n^{100}+\\frac{x-y}{4}=\\frac{4-y}{8}\\\\-\\frac{y+3}{8}=\\frac{1-2x}{8}+\\sum_n^{100}\\end{cases} renders correctly 1
+ENVIRONMENTS 8/ \\begin{dcases}\\sum_n^{100}+\\frac{x-y}{4}=\\frac{4-y}{8}\\\\-\\frac{y+3}{8}=\\frac{1-2x}{8}+\\sum_n^{100}\\end{dcases} renders correctly 1
 EXTENSIONS 0/ \\htmlData{foo=green}{2+\\frac{1}{x}} renders correctly 1
 EXTENSIONS 1/ \\htmlData{foo=green, bar}{2+\\frac{1}{x}} renders correctly 1
 EXTENSIONS 2/ \\htmlData{foo=green, bar=blue}{2+\\frac{1}{x}} renders correctly 1

@@ -9,6 +9,7 @@
 import box: lambda.package.math.box
 import ctx: lambda.package.math.context
 import css: lambda.package.math.css
+import sp_table: lambda.package.math.spacing_table
 import util: lambda.package.math.util
 
 // ============================================================
@@ -53,7 +54,8 @@ fn render_body(body, context, render_fn, env_name, columns) {
     let ncols = if (declared_cols > 0) declared_cols else max_cols(row_groups, 0, 0)
     let aligns = if (declared_cols > 0) declared_alignment(columns)
         else get_alignment(env_name, ncols)
-    let row_boxes = render_row_groups(row_groups, cell_ctx, render_fn)
+    let spacing_ctx = cell_spacing_context(env_name, context, cell_ctx)
+    let row_boxes = render_row_groups(row_groups, cell_ctx, spacing_ctx, render_fn)
     let table = build_table(row_boxes, ncols, nrows, aligns, env_name)
     wrap_delimiters(table, env_name)
 }
@@ -96,17 +98,84 @@ fn max_cols(rows, i, acc) {
     else max_cols(rows, i + 1, max(acc, len(rows[i].cells)))
 }
 
-fn render_row_groups(rows, cell_ctx, render_fn) {
-    [for (row in rows) [for (g in row.cells) render_cell_group(g.items, cell_ctx, render_fn)]]
+fn cell_spacing_context(env_name, context, cell_ctx) {
+    if (env_name == "cases" or env_name == "rcases")
+        ctx.derive(context, {style: "text"})
+    else cell_ctx
 }
 
-fn render_cell_group(children, cell_ctx, render_fn) {
+fn render_row_groups(rows, cell_ctx, spacing_ctx, render_fn) {
+    [for (row in rows) [for (g in row.cells) render_cell_group(g.items, cell_ctx, spacing_ctx, render_fn)]]
+}
+
+fn render_cell_group(children, cell_ctx, spacing_ctx, render_fn) {
     if (len(children) == 0) blank_cell_box()
     else if (len(children) == 1) render_fn(children[0], cell_ctx)
     else {
         let parts = (for (c in children) render_fn(c, cell_ctx))
-        box.hbox(parts)
+        box.hbox(apply_spacing(parts, spacing_ctx))
     }
+}
+
+fn bin_as_ord_after(prev_type) {
+    prev_type == null or prev_type == "mbin" or prev_type == "mopen" or
+    prev_type == "mrel" or prev_type == "mpunct" or prev_type == "mop"
+}
+
+fn box_with_type(bx, atom_type) => {
+    element: bx.element,
+    height: bx.height,
+    depth: bx.depth,
+    render_height: bx.render_height,
+    render_depth: bx.render_depth,
+    render_total: bx.render_total,
+    left_right_render_depth: bx.left_right_render_depth,
+    left_right_render_total: bx.left_right_render_total,
+    width: bx.width,
+    type: atom_type,
+    italic: bx.italic,
+    skew: bx.skew,
+    strut_total: bx.strut_total,
+    strut_depth_em: bx.strut_depth_em,
+    is_fraction: bx.is_fraction
+}
+
+fn normalize_bin_atom(bx, prev_type) {
+    if (bx.type == "mbin" and bin_as_ord_after(prev_type)) box_with_type(bx, "mord")
+    else bx
+}
+
+fn build_normalized(filtered, i, prev_type, acc) {
+    if (i >= len(filtered)) acc
+    else
+        (let current = normalize_bin_atom(filtered[i], prev_type),
+         build_normalized(filtered, i + 1, current.type, acc ++ [current]))
+}
+
+fn normalize_atom_types(filtered) {
+    build_normalized(filtered, 0, null, [])
+}
+
+fn build_spaced(normalized, i, prev_type, acc, context) {
+    if (i >= len(normalized)) acc
+    else
+        (let current = normalized[i],
+         let space = if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else if (prev_type == "mpunct" and current.type == "skip")
+             0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
+         let with_space = if (space != 0.0)
+             acc ++ [box.skip_box(space), current]
+         else
+             acc ++ [current],
+         build_spaced(normalized, i + 1, current.type, with_space, context))
+}
+
+fn apply_spacing(boxes, context) {
+    let filtered = (for (b in boxes where b != null) b)
+    if (len(filtered) <= 1) filtered
+    else
+        (let normalized = normalize_atom_types(filtered),
+         build_spaced(normalized, 1, normalized[0].type, [normalized[0]], context))
 }
 
 fn blank_cell_box() => {
@@ -177,7 +246,9 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
 }
 
 fn add_trailing_array_sep(acc, env_name) {
-    if (env_name == "array") acc ++ [array_col_sep(0.5)] else acc
+    if (env_name == "array") acc ++ [array_col_sep(0.5)]
+    else if (env_name == "cases" or env_name == "dcases") acc ++ [array_col_sep(1.0)]
+    else acc
 }
 
 fn array_col_sep(width) =>
@@ -206,9 +277,10 @@ fn build_column_rows(row_boxes, col, metrics, row, acc) {
     else {
         let cell = cell_at(row_boxes, row, col)
         let top = row_top(metrics, row)
+        let cell_height = row_cell_height(metrics, row)
         let span = <span style: "top:" ++ util.fmt_em(top);
             <span class: css.PSTRUT, style: "height:" ++ util.fmt_em(metrics.pstrut)>
-            <span style: "height:" ++ util.fmt_em(metrics.cell_height) ++ ";display:inline-block";
+            <span style: "height:" ++ util.fmt_em(cell_height) ++ ";display:inline-block";
                 for child in box.elements_of(cell) { child }
             >
         >
@@ -223,7 +295,37 @@ fn cell_at(row_boxes, row, col) {
 
 fn table_metrics(env_name, nrows) {
     if (env_name == "array") array_table_metrics(nrows)
+    else if (env_name == "cases") cases_table_metrics(nrows)
+    else if (env_name == "dcases") dcases_table_metrics(nrows)
     else matrix_table_metrics(nrows)
+}
+
+fn cases_table_metrics(nrows) {
+    if (nrows == 2) {
+        {
+            height: 1.75,
+            depth: 1.25,
+            render_total: 3.01,
+            vlist_height: 1.69,
+            depth_holder: 1.19,
+            pstrut: 3.01,
+            cell_height: 1.44
+        }
+    } else matrix_table_metrics(nrows)
+}
+
+fn dcases_table_metrics(nrows) {
+    if (nrows == 2) {
+        {
+            height: 3.46,
+            depth: 2.95,
+            render_total: 6.41,
+            vlist_height: 3.46,
+            depth_holder: 2.96,
+            pstrut: 3.81,
+            cell_height: 3.36
+        }
+    } else matrix_table_metrics(nrows)
 }
 
 fn matrix_table_metrics(nrows) => {
@@ -250,7 +352,25 @@ fn array_table_metrics(nrows) => {
 
 fn row_top(metrics, row) {
     if (metrics.height == 0.84) array_row_top(row)
+    else if (metrics.pstrut == 3.01) cases_row_top(row)
+    else if (metrics.pstrut == 3.81) dcases_row_top(row)
     else matrix_row_top(metrics, row)
+}
+
+fn row_cell_height(metrics, row) {
+    if (metrics.pstrut == 3.81) {
+        if (row == 0) 3.36 else 3.06
+    } else metrics.cell_height
+}
+
+fn cases_row_top(row) {
+    if (row == 0) 0.0 - 3.69
+    else 0.0 - 2.25
+}
+
+fn dcases_row_top(row) {
+    if (row == 0) 0.0 - 5.45
+    else 0.0 - 2.09
 }
 
 fn matrix_row_top(metrics, row) {
@@ -346,7 +466,7 @@ fn get_left_delim(env_name) {
     else if (env_name == "Bmatrix") "{"
     else if (env_name == "vmatrix") "|"
     else if (env_name == "Vmatrix") "\u2016"
-    else if (env_name == "cases") "{"
+    else if (env_name == "cases" or env_name == "dcases") "{"
     else null
 }
 
@@ -369,7 +489,9 @@ fn wrap_delimiters(table_box, env_name) {
 
 fn wrap_with_delimiters(table_box, ld, rd) {
     let left_box = if (ld != null) render_matrix_delim(ld, table_box) else null
-    let right_box = if (rd != null) render_matrix_delim(rd, table_box) else null
+    let right_box = if (rd != null) render_matrix_delim(rd, table_box)
+        else if (ld == "{") render_null_right_delim()
+        else null
     let parts = (for (p in [left_box, table_box, right_box] where p != null) p)
     let children = (for (p in parts) p.element)
     let total_width = sum((for (p in parts) p.width))
@@ -391,9 +513,22 @@ fn wrap_with_delimiters(table_box, ld, rd) {
     }
 }
 
+fn render_null_right_delim() {
+    {
+        element: <span class: css.NULLDELIMITER, style: "width:0.12em">,
+        height: 0.0,
+        depth: 0.0,
+        width: 0.12,
+        type: "mclose",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
 fn render_matrix_delim(ch, table_box) {
     let nrows = int(round((table_box.render_total - 1.21) / 1.2)) + 1
     if (nrows >= 3 and (ch == "[" or ch == "]")) render_square_mult_delim(ch)
+    else if (ch == "{" and table_box.render_total > 4.0) render_brace_mult_delim()
     else render_plain_sized_delim(ch, matrix_delim_level(table_box.render_total))
 }
 
@@ -444,6 +579,42 @@ fn render_square_mult_delim(ch) {
         >,
         height: 2.05,
         depth: 1.55,
+        width: 0.4,
+        type: "ord",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn render_brace_mult_delim() {
+    let pieces = ["⎩", "⎪", "⎪", "⎪", "⎪", "⎨", "⎪", "⎪", "⎪", "⎪", "⎧"]
+    let tops = [
+        0.0 - 1.29, 0.0 - 1.29, 0.0 - 1.59, 0.0 - 1.89, 0.0 - 2.19,
+        0.0 - 3.13, 0.0 - 4.27, 0.0 - 4.57, 0.0 - 4.87, 0.0 - 5.17,
+        0.0 - 5.46
+    ]
+    let heights = [0.91, 0.3, 0.3, 0.3, 0.3, 1.81, 0.3, 0.3, 0.3, 0.3, 0.91]
+    {
+        element: <span class: "lm_delim-mult";
+            <span class: "delim-size4 lm_vlist-t lm_vlist-t2";
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:3.22em";
+                        for i in 0 to 10 {
+                            <span style: "top:" ++ util.fmt_em(tops[i]);
+                                <span class: css.PSTRUT, style: "height:3.15em">
+                                <span style: "height:" ++ util.fmt_em(heights[i]) ++ ";display:inline-block"; pieces[i]>
+                            >
+                        }
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:2.76em">
+                >
+            >
+        >,
+        height: 3.46,
+        depth: 2.95,
         width: 0.4,
         type: "ord",
         italic: 0.0,

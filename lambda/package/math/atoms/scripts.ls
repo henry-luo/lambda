@@ -23,8 +23,59 @@ pub fn render(node, context, render_fn) {
 
     if (is_big_op and ctx.is_display(context))
         render_big_op_limits(base, node, context, render_fn)
+    else if (is_big_op and node.sub != null and node.sup != null)
+        render_inline_big_op_scripts(base, node, context, render_fn)
     else
         render_scripts(node, context, render_fn)
+}
+
+fn render_inline_big_op_scripts(base, node, context, render_fn) {
+    let cmd = string(base.name)
+    let unicode = sym.lookup_symbol(cmd)
+    let display_text = if (unicode != null) unicode else cmd
+    let sub_box = render_fn(node.sub, ctx.sub_context(context))
+    let sup_box = render_fn(node.sup, ctx.sup_context(context))
+    let sub_elements = box.elements_of(sub_box)
+    let sup_elements = box.elements_of(sup_box)
+    let el = <span class: css.OP_GROUP;
+        <span class: "lm_op-symbol lm_small-op"; display_text>
+        <span class: css.MSUBSUP;
+            <span class: css.VLIST_T2;
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:0.94em";
+                        <span style: "top:-2.71em";
+                            <span class: css.PSTRUT, style: "height:3em">
+                            <span style: "height:0.31em;display:inline-block;font-size: 70%";
+                                for (el in sub_elements) el
+                            >
+                        >
+                        <span style: "top:-3.47em";
+                            <span class: css.PSTRUT, style: "height:3em">
+                            <span style: "height:0.46em;display:inline-block;font-size: 70%";
+                                for (el in sup_elements) el
+                            >
+                        >
+                    >
+                    <span class: css.VLIST_S; "\u200B">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:0.29em">
+                >
+            >
+        >
+    >
+    {
+        element: el,
+        height: 0.94,
+        depth: 0.29,
+        render_height: 0.94,
+        render_depth: 0.29,
+        render_total: 1.23,
+        width: max(0.6, max(sub_box.width, sup_box.width)),
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 // render a big operator with limits above/below (display mode)
@@ -78,13 +129,20 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let op_elements = box.elements_of(op_box)
     let sub_elements = box.elements_of(sub_box)
     let sup_elements = box.elements_of(sup_box)
+    let compact_limits = sub_box.width <= 1.0 and sup_box.width > 1.0
+    let vlist_height = if (compact_limits) 1.81 else 1.66
+    let sub_top = if (compact_limits) 0.0 - 1.89 else 0.0 - 1.87
+    let sub_child_height = if (compact_limits) 0.31 else 0.6
+    let sup_child_height = if (compact_limits) 0.46 else 0.31
+    let depth_holder = if (compact_limits) 1.26 else 1.42
+    let box_depth = if (compact_limits) 1.26 else 1.41
     let el = <span class: css.OP_GROUP;
         <span class: css.VLIST_T2;
             <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.66em";
-                    <span class: css.CENTER, style: "top:-1.87em";
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
+                    <span class: css.CENTER, style: "top:" ++ util.fmt_em(sub_top);
                         <span class: css.PSTRUT, style: "height:3.05em">
-                        <span style: "height:0.6em;display:inline-block;font-size: 70%";
+                        <span style: "height:" ++ util.fmt_em(sub_child_height) ++ ";display:inline-block;font-size: 70%";
                             for (el in sub_elements) el
                         >
                     >
@@ -96,7 +154,7 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
                     >
                     <span class: css.CENTER, style: "top:-4.3em";
                         <span class: css.PSTRUT, style: "height:3.05em">
-                        <span style: "height:0.31em;display:inline-block;font-size: 70%";
+                        <span style: "height:" ++ util.fmt_em(sup_child_height) ++ ";display:inline-block;font-size: 70%";
                             for (el in sup_elements) el
                         >
                     >
@@ -104,16 +162,16 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
                 <span class: css.VLIST_S; "\u200B">
             >
             <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:1.42em">
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
             >
         >
     >
     {
         element: el,
-        height: 1.66,
-        depth: 1.41,
-        render_height: 1.66,
-        render_depth: 1.41,
+        height: vlist_height,
+        depth: box_depth,
+        render_height: vlist_height,
+        render_depth: box_depth,
         render_total: 3.07,
         width: max(max(op_box.width, sub_box.width), sup_box.width),
         type: "mop",
