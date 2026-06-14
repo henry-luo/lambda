@@ -12875,6 +12875,25 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             return await_result;
         }
 
+        // Js57 P5 (fulfillment/rejection-order): for top-level awaits in
+        // nested modules, route through js_p5_module_await — it publishes the
+        // awaited value onto the module registry when (and only when) the
+        // awaited value is a pending Promise, and falls back to js_await_sync
+        // for settled Promises / non-Promises so `export default await
+        // Promise.resolve(42)` still unwraps to 42. The chain-pending case is
+        // what gives the dynamic-import chain its spec-order property.
+        extern int g_tla_module_depth;
+        bool is_p5_module_tla = (mt->is_module && mt->in_main &&
+            mt->current_func_index < 0 && !mt->in_generator && !mt->in_async &&
+            g_tla_module_depth >= 2 && mt->filename);
+        if (is_p5_module_tla) {
+            MIR_reg_t spec_reg = jm_box_string_literal(mt, mt->filename,
+                (int)strlen(mt->filename));
+            MIR_reg_t result = jm_call_2(mt, "js_p5_module_await", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+            return result;
+        }
         // Phase 5: Synchronous fast path (non-state-machine async)
         MIR_reg_t result = jm_call_1(mt, "js_await_sync", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));

@@ -5615,6 +5615,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // uncaught exception, stop executing further statements
         jm_emit_exc_propagate_check(mt);
 
+        // Js57 P4 reverted in P6: the post-await body-break broke any nested
+        // module that emits exports after a top-level await (e.g. fixtures
+        // shaped like `await 1; export default await Promise.resolve(42);`).
+        // The narrow win it bought on
+        // `async-module-does-not-block-sibling-modules.js` is given up here
+        // because that test's spec-correct fix requires real TLA suspension —
+        // out of scope for the current change set. P5's
+        // `js_p5_module_await` does still publish the awaited target so the
+        // fulfillment/rejection-order dynamic-import chain works.
+
         stmt = stmt->next;
     }
 
@@ -6137,6 +6147,12 @@ bool jm_validate_mir_labels(MIR_context_t ctx) { (void)ctx; return true; }
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
     extern int js_dynamic_import_suppress_module_drain;
+    // Js57 P4 (Track B3): bump depth at the very start so jm_load_imports
+    // nested calls see depth >= 2 while the outermost transpile sits at 1;
+    // the matching exit at the end of the function drains continuations only
+    // when this is the outermost call.
+    extern void js_tla_enter_module(void);
+    js_tla_enter_module();
     Runtime* prev_source_runtime = js_source_runtime;
     js_source_runtime = runtime;
 
@@ -6161,6 +6177,19 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         js_transpiler_destroy(tp);
         js_source_runtime = prev_source_runtime;
         return ItemNull;
+    }
+
+    // Js57 P5: register the current module BEFORE jm_load_imports so the
+    // inherit-awaited-target call inside the loader has a registry entry to
+    // write to. A throwaway namespace is used; the real one replaces it after
+    // js_main runs (existing js_module_register call further down).
+    {
+        String* p5_self_spec = heap_create_name(filename, strlen(filename));
+        Item p5_self_spec_item = (Item){.item = s2it(p5_self_spec)};
+        Item p5_existing = js_module_get(p5_self_spec_item);
+        if (get_type_id(p5_existing) == LMD_TYPE_NULL) {
+            js_module_register(p5_self_spec_item, js_new_object());
+        }
     }
 
     // Recursively load this module's imports first
@@ -6251,6 +6280,12 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     _lambda_rt = prev_lambda_rt;
     js_set_active_module_vars(prev_module_vars);
     js_set_active_module_namespace(prev_namespace);
+    // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
+    // chunks. Sits AFTER the namespace/module-vars/_lambda_rt restore so
+    // continuations that touch module-level state read whichever active
+    // namespace the outer caller had — typically the entry module's.
+    extern void js_tla_exit_module(void);
+    js_tla_exit_module();
 
     // Register the module with its resolved path as key. In normal execution
     // this re-registers the pre-created namespace; if compilation returned a
@@ -6320,6 +6355,16 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 Item spec_item = (Item){.item = s2it(spec_str)};
                 Item existing = js_module_get(spec_item);
                 if (get_type_id(existing) != LMD_TYPE_NULL) {
+                    // Js57 P5: even cached deps still propagate their awaited
+                    // target. This is the common case for the second sibling
+                    // in `import "a.js"; import "b.js"` where b was already
+                    // pulled in as part of a's subgraph.
+                    if (filename) {
+                        String* cur_str_c = heap_create_name(filename, strlen(filename));
+                        Item cur_item_c = (Item){.item = s2it(cur_str_c)};
+                        extern void js_module_inherit_awaited_target(Item, Item);
+                        js_module_inherit_awaited_target(cur_item_c, spec_item);
+                    }
                     s = s->next;
                     continue;
                 }
@@ -6356,6 +6401,15 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                     } else {
                         log_error("js-mir: cannot read module '%s'", resolved);
                     }
+                }
+                // Js57 P5: propagate any awaited target from the just-loaded
+                // dependency to the importer so dynamic imports that hit the
+                // importer chain on the same Promise as the underlying TLA.
+                if (filename) {
+                    String* cur_str = heap_create_name(filename, strlen(filename));
+                    Item cur_item = (Item){.item = s2it(cur_str)};
+                    extern void js_module_inherit_awaited_target(Item, Item);
+                    js_module_inherit_awaited_target(cur_item, spec_item);
                 }
             }
         }

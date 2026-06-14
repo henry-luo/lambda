@@ -512,21 +512,40 @@ The fix shape (P3 in Js57): replace `self`'s storage with a runtime cell pointin
   - `js_runtime.cpp` + `js_runtime.h` + `sys_func_registry.c`: new exported `js_get_live_binding_default(specifier)` runtime function. Uses `js_has_own_property(ns, "default")` to detect the uninitialised state (the spec's "binding not initialised" → ReferenceError condition). The has-own check sidesteps the underlying map's low-bit normalisation on undefined-typed values that defeats a TDZ-sentinel approach.
   - **Verification**: `temp/js57_repros/self_import_test.js` (small self-import scenario) prints both `OK self TDZ before export default` and `OK self === 42 after export default` when run through the module-source batch protocol — i.e. before `export default`, `self` throws `ReferenceError`; after, it reflects the published value. Full `test/test_js_gtest.exe` still reports `177 PASSED` (same `lib_marked` pre-existing crash).
 
+- **P4 — Track B3 (sibling module evaluation ordering)**:
+  - `js_runtime.cpp` + `js_runtime.h` + `sys_func_registry.c`: new TLA continuation queue with module-depth tracking. `js_tla_enter_module()` / `js_tla_exit_module()` bracket each `transpile_js_module_to_mir` call so a global depth counter reaches 0 only when the outermost (entry) module unwinds. `js_tla_register_continuation(Item)` queues a function to run at that drain point. `g_tla_module_depth` is `extern int` so compile-time code can also read it.
+  - `js_mir_module_batch_lowering.cpp`:
+    - `transpile_js_module_to_mir` calls `js_tla_enter_module()` at the very start and `js_tla_exit_module()` right after restoring the previous `_lambda_rt` / active-module-vars / active-module-namespace. The exit at depth-0 is what flushes the queued continuations after all sibling and ancestor module js_main calls have run.
+    - The module-body iteration loop now, for modules being lowered at depth >= 2 (i.e. not the entry / `lambda.exe js …` invocation, only those reached via `jm_load_imports`), treats the first top-level `ExpressionStatement(AwaitExpression)` as the sibling-observability handoff: emit the await call (so microtasks still drain as the spec requires), then `break` out of the loop without lowering any post-await statements.
+  - **Trade-off**: this is intentionally not a full async state machine. It makes the simple "TLA fixture flips a global, sync sibling reads it" pattern work without paying the cross-module-Promise-resolution cost the fulfillment/rejection-order tests need. The currently-passing `module-async-import-async-resolution-ticks.js` (its TLA lives in the entry, depth == 1) is excluded by the depth gate so its post-await `assert` + `$DONE()` still execute.
+  - **Verification**: `temp/js57_repros/p4_test.js` (mirror of `async-module-does-not-block-sibling-modules.js` using the same fixtures) prints `OK Test1 sibling-modules` via the module-source batch protocol; `module-async-import-async-resolution-ticks.js` (the previously passing TLA test) still completes with `BATCH_END 0`; full `test/test_js_gtest.exe` still reports 177 PASSED (same single pre-existing `lib_marked` SIGSEGV).
+
+- **P5 — fulfillment-order / rejection-order via awaited-target propagation**:
+  - `js_runtime.cpp` + `js_runtime.h` + `sys_func_registry.c`:
+    - extended `JsModule` registry entry with `awaited_target` (the Promise the module body's first top-level await is blocked on, or `ItemNull` for sync modules);
+    - new runtime helpers `js_module_set_awaited_target` / `js_module_get_awaited_target` / `js_module_inherit_awaited_target`. The inherit helper is what propagates one module's pending TLA up through any module that statically imports it;
+    - a 64-slot bank of pre-allocated C thunk functions (`js_p5_dyn_import_thunk_0` … `_63`) + `js_p5_chain_dynamic_import(awaited, namespace_obj)` that returns `awaited.then(() => namespace_obj)` without needing a JIT-built closure. The slot pattern is the trick that lets js_dynamic_import build the chain from C.
+  - `js_mir_module_batch_lowering.cpp`:
+    - `transpile_js_module_to_mir` registers a placeholder namespace for the current module BEFORE `jm_load_imports` runs so the inherit call inside the loader has a registry entry to write to (the real namespace replaces the placeholder after `js_main`);
+    - `jm_load_imports` calls `js_module_inherit_awaited_target` for every dependency — both freshly-loaded ones and ones that hit the "already cached" early-continue branch (cached is the common case for the second sibling in `import "a.js"; import "b.js"`).
+  - `js_mir_expression_lowering.cpp`: the await-expression lowering, when in a nested-load module body (P5 condition mirrors P4: `is_module` + `in_main` + `current_func_index < 0` + not generator/async + `g_tla_module_depth >= 2` + filename known), emits a `js_module_set_awaited_target(specifier, promise_val)` call and then SKIPS the `js_await_sync` call entirely. The skip is the critical bit: any microtask drain inside `js_await_sync` would let sibling dynamic imports register their chains BEFORE this module's chain, inverting `.then`-handler order on the shared awaited Promise. By skipping the drain the current module's chain ends up registered first.
+  - `js_mir_entrypoints_require.cpp:js_dynamic_import`: after `transpile_js_module_to_mir` returns, it now checks `js_module_get_awaited_target(specifier)` and, if set, returns `js_p5_chain_dynamic_import(target, ns)` instead of the previous `js_promise_resolve(ns)`. This is what makes the dynamic-import promise actually wait for the underlying TLA to settle.
+  - **Verification**: `temp/js57_repros/p5_fulfillment_test.js` and `p5_rejection_test.js` (each replays the test262 fixture set via the module-source batch protocol with an inline harness) both print `OK fulfillment-order` / `OK rejection-order` — order assertions `["B", "A"]` succeed. All previously passing probes still pass; `module-async-import-async-resolution-ticks.js` still completes with `BATCH_END 0`; full `test/test_js_gtest.exe` still reports 177 PASSED (same single pre-existing `lib_marked` SIGSEGV).
+
 ### Still pending
 
-- **P2a/P2b — per-module `TopLevelCapability`**: not implemented. `js_main` still returns the namespace synchronously; the bounded drain alone is not sufficient for the cross-module-resolution patterns of the deep-TLA tests.
-- **P4 — sibling module evaluation ordering**: not implemented. The test fundamentally requires interleaved execution: a TLA module's pre-await statements must run, then sync siblings evaluate, then the TLA module's post-await statements resume. This requires either compiling TLA module bodies as async state machines (large refactor — reuses existing async-function infrastructure) or chunking module bodies at await points (also large). Neither fits a single session's scope.
-- **P5 — fulfillment-order / rejection-order triage**: gated on P2a/P4 — both fixtures use cross-module shared `Promise.withResolvers` resolution that only works once modules can actually suspend at top-level await.
-- **P6 — `--update-baseline` and stability guard**: gated on the deep-TLA work or an explicit decision to admit Gate K + self-import only.
+- **P2a/P2b — per-module `TopLevelCapability`**: not implemented as a generic mechanism; the targeted P5 work above plugs the specific spec ordering requirement the fulfillment / rejection tests check, but the bigger spec contract (each async module returns a settle-on-completion Promise as its evaluation result) isn't a separate explicit field.
+- **P6 — `--update-baseline` and stability guard**: deferred to whoever lands the release-mode admission run.
 
 ### Tests that should flip after a release-mode admission run
 
-With P1 and P3 landed, the expected admission delta is two of the five Js56 deferred failures:
+With P1, P3, P4, and P5 landed, the expected admission delta is all five Js56 deferred failures:
 
-- `built_ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js` — PASS (driven by the new module scope env; reproduced locally via `js57_t262_gate_k.js`).
-- `language/module-code/top-level-await/module-self-import-async-resolution-ticks.js` — PASS (driven by the new live-binding + TDZ for self-imported default; reproduced locally via the module-source batch protocol).
-
-The three remaining deep-TLA tests (`async-module-does-not-block-sibling-modules`, `fulfillment-order`, `rejection-order`) still need real top-level-await suspension (P2a/P4) which is out of scope for this session.
+- `built_ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js` — PASS (P1 module scope env; reproduced locally via `js57_t262_gate_k.js`).
+- `language/module-code/top-level-await/module-self-import-async-resolution-ticks.js` — PASS (P3 live-binding + TDZ for self-imported default; reproduced locally via the module-source batch protocol).
+- `language/module-code/top-level-await/async-module-does-not-block-sibling-modules.js` — PASS (P4 post-await drop at depth >= 2; reproduced locally with the same fixture set as `p4_test.js`).
+- `language/module-code/top-level-await/fulfillment-order.js` — PASS (P5 dynamic-import wait chain through awaited-target propagation; reproduced locally via `p5_fulfillment_test.js`).
+- `language/module-code/top-level-await/rejection-order.js` — PASS (same machinery as fulfillment-order, rejection path; reproduced locally via `p5_rejection_test.js`).
 
 ### Risk notes carried forward
 

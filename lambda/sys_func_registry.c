@@ -1826,6 +1826,15 @@ JitImport jit_runtime_imports[] = {
     {"js_get_import_meta", FPTR(js_get_import_meta)},
     // Js57 P3 (Track B2): live binding for self-imported defaults
     {"js_get_live_binding_default", FPTR(js_get_live_binding_default)},
+    // Js57 P4 (Track B3): TLA module continuation queue
+    {"js_tla_register_continuation", FPTR(js_tla_register_continuation)},
+    {"js_tla_enter_module", FPTR(js_tla_enter_module)},
+    {"js_tla_exit_module", FPTR(js_tla_exit_module)},
+    // Js57 P5: TLA awaited-target tracking for dynamic-import wait chains
+    {"js_module_set_awaited_target", FPTR(js_module_set_awaited_target)},
+    {"js_module_get_awaited_target", FPTR(js_module_get_awaited_target)},
+    {"js_module_inherit_awaited_target", FPTR(js_module_inherit_awaited_target)},
+    {"js_p5_module_await", FPTR(js_p5_module_await)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support

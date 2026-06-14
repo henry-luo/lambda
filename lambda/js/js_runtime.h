@@ -896,6 +896,26 @@ Item js_module_get(Item specifier);
 Item js_get_live_binding_default(Item specifier);
 
 /**
+ * Js57 P4 (Track B3): register a post-await chunk to be invoked after the
+ * outermost module-load call unwinds. See js_runtime.cpp for details.
+ */
+void js_tla_register_continuation(Item func);
+void js_tla_enter_module(void);
+void js_tla_exit_module(void);
+
+/**
+ * Js57 P5 (fulfillment/rejection-order): TLA awaited-target tracking on the
+ * module registry. Used to make dynamic imports wait on the same Promise the
+ * imported module's first top-level await is blocked on, and to propagate
+ * that wait through static-import edges so siblings end up chained on the
+ * same target.
+ */
+void js_module_set_awaited_target(Item specifier, Item target);
+Item js_module_get_awaited_target(Item specifier);
+void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
+Item js_p5_module_await(Item specifier, Item value);
+
+/**
  * Create a module namespace object from an export map.
  */
 Item js_module_namespace_create(Item exports_map);

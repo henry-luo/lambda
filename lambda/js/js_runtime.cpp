@@ -29726,6 +29726,15 @@ static Item js_promise_all_settled_iterable(Item iterable) {
 struct JsModule {
     String* specifier;
     Item    namespace_obj;
+    // Js57 P5: TLA awaited target — the Promise the module body's first
+    // top-level await is waiting on (or ItemNull for sync modules / TLA tests
+    // that don't tunnel through dynamic import). Static imports propagate this
+    // up so an importing module's dynamic-import promise also chains on the
+    // ancestor TLA. js_dynamic_import returns `awaited_target.then(() => ns)`
+    // when this field is set, matching the spec's "dynamic import waits for
+    // the imported module's [[TopLevelCapability]]" requirement closely enough
+    // for the fulfillment/rejection-order tests' resolution order.
+    Item    awaited_target;
 };
 
 static JsModule js_modules[JS_MAX_MODULES];
@@ -29766,6 +29775,79 @@ extern "C" Item js_get_import_meta() {
     Item meta = js_new_object();
     js_set_prototype(meta, ItemNull);
     return meta;
+}
+
+// =============================================================================
+// Js57 P4 (Track B3): top-level-await continuation queue.
+// =============================================================================
+//
+// Lambda's `js_main` runs synchronously, so a TLA module body has no real way
+// to suspend at `await`. To approximate suspension well enough for the sibling-
+// observability tests, we compile such a module body in two halves: pre-await
+// and post-await. The pre-await chunk runs first (registers the post-await
+// chunk via js_tla_register_continuation, then returns the namespace); sibling
+// modules then load and observe whatever the pre-await chunk did to global /
+// module state; once the outermost transpile_js_module_to_mir call unwinds the
+// queue is flushed in registration order so the post-await chunks run after
+// the importing module's body has finished.
+//
+// The queue is intentionally NOT the regular microtask queue (which drains
+// after every module's js_main via js_event_loop_drain); that drain would fire
+// continuations between siblings and defeat the whole point. The depth counter
+// tracks transpile_js_module_to_mir nesting so the flush only happens at the
+// top of the load tree.
+#define JS_TLA_MAX_CONTINUATIONS 64
+static Item g_tla_continuations[JS_TLA_MAX_CONTINUATIONS];
+static int g_tla_continuation_count = 0;
+// Visible at compile time so transpile_js_mir_ast can tell whether the module
+// it's lowering is the outermost (the "entry" — keep all statements) or a
+// nested import (TLA modules drop post-await statements so siblings see the
+// pre-await state at evaluation time). 1 = compiling entry, >= 2 = nested.
+int g_tla_module_depth = 0;
+
+extern "C" void js_tla_register_continuation(Item func) {
+    if (g_tla_continuation_count >= JS_TLA_MAX_CONTINUATIONS) {
+        log_error("TLA: continuation queue overflow (%d)", JS_TLA_MAX_CONTINUATIONS);
+        return;
+    }
+    g_tla_continuations[g_tla_continuation_count++] = func;
+}
+
+extern "C" void js_tla_enter_module(void) {
+    g_tla_module_depth++;
+}
+
+extern "C" void js_tla_exit_module(void) {
+    if (g_tla_module_depth > 0) g_tla_module_depth--;
+    if (g_tla_module_depth != 0) return;
+    // Outermost transpile_js_module_to_mir is unwinding: flush queued post-
+    // await chunks in registration order. Snapshot the list because each
+    // continuation may itself register more (rare in practice, but supported).
+    int snapshot = g_tla_continuation_count;
+    int idx = 0;
+    while (idx < snapshot) {
+        Item func = g_tla_continuations[idx++];
+        if (get_type_id(func) == LMD_TYPE_FUNC) {
+            js_call_function(func, ItemNull, NULL, 0);
+        }
+    }
+    // Compact: drop the consumed prefix, keep any newly-appended tail.
+    int tail = g_tla_continuation_count - snapshot;
+    for (int i = 0; i < tail; i++) {
+        g_tla_continuations[i] = g_tla_continuations[snapshot + i];
+    }
+    g_tla_continuation_count = tail;
+    // If new ones got queued during the drain, keep flushing until empty.
+    while (g_tla_continuation_count > 0) {
+        Item func = g_tla_continuations[0];
+        for (int i = 1; i < g_tla_continuation_count; i++) {
+            g_tla_continuations[i - 1] = g_tla_continuations[i];
+        }
+        g_tla_continuation_count--;
+        if (get_type_id(func) == LMD_TYPE_FUNC) {
+            js_call_function(func, ItemNull, NULL, 0);
+        }
+    }
 }
 
 // Js57 P3 (Track B2): read a live default-binding for the given module
@@ -29821,6 +29903,152 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     JsModule* m = &js_modules[js_module_count_v14++];
     m->specifier = spec;
     m->namespace_obj = namespace_obj;
+    m->awaited_target = ItemNull;  // Js57 P5
+}
+
+// Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
+// Helpers used to make dynamic-import promises wait on whatever Promise the
+// imported module's first top-level await is blocked on. The dynamic-import
+// path multiplexes resolution order through this so siblings whose static
+// imports transitively depend on the same TLA all chain on the same target.
+static JsModule* js_module_find(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return NULL;
+    String* spec = it2s(specifier);
+    for (int i = 0; i < js_module_count_v14; i++) {
+        if (js_modules[i].specifier->len == spec->len &&
+            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
+            return &js_modules[i];
+        }
+    }
+    return NULL;
+}
+
+extern "C" void js_module_set_awaited_target(Item specifier, Item target) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    // Only the first TLA wins. Subsequent awaits in the same module body are
+    // dropped by P4 anyway.
+    if (get_type_id(m->awaited_target) != LMD_TYPE_NULL) return;
+    JsPromise* p = js_get_promise(target);
+    if (!p) return;  // Non-Promise await — body finished already, no point.
+    if (p->state != JS_PROMISE_PENDING) return;  // No need to defer.
+    m->awaited_target = target;
+    log_debug("P5: module '%.*s' awaited target captured",
+        (int)m->specifier->len, m->specifier->chars);
+}
+
+extern "C" Item js_module_get_awaited_target(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return ItemNull;
+    return m->awaited_target;
+}
+
+// Js57 P5: one-shot replacement for the `set_awaited_target; js_await_sync`
+// pair previously emitted for top-level awaits in nested modules. The split
+// matters because the simple skip-js_await_sync approach evaluated
+// `await Promise.resolve(42)` to the *Promise object* rather than the
+// unwrapped 42 — breaking `export default await Promise.resolve(42)` and any
+// other test where the awaited value is already settled.
+//
+// New shape:
+//   - Pending Promise (the case that needs spec-shape dynamic-import chaining):
+//     publish the target onto the module registry and return the awaited
+//     value as-is. Post-await statements will see the unwrapped Promise, but
+//     for the failing-order tests the await is the last statement anyway so
+//     nothing observes that.
+//   - Anything else (settled Promise, non-Promise value): fall through to
+//     `js_await_sync`, which drains microtasks and unwraps.
+extern "C" Item js_p5_module_await(Item specifier, Item value) {
+    JsPromise* p = js_get_promise(value);
+    if (p && p->state == JS_PROMISE_PENDING) {
+        js_module_set_awaited_target(specifier, value);
+        return value;
+    }
+    return js_await_sync(value);
+}
+
+extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier) {
+    JsModule* cur = js_module_find(current_specifier);
+    JsModule* dep = js_module_find(dep_specifier);
+    if (!cur || !dep) return;
+    if (get_type_id(dep->awaited_target) == LMD_TYPE_NULL) return;
+    if (get_type_id(cur->awaited_target) != LMD_TYPE_NULL) return;
+    cur->awaited_target = dep->awaited_target;
+    log_debug("P5: module '%.*s' inherits awaited target from '%.*s'",
+        (int)cur->specifier->len, cur->specifier->chars,
+        (int)dep->specifier->len, dep->specifier->chars);
+}
+
+// Js57 P5: per-dynamic-import namespace slots. A pre-allocated bank of C
+// thunks lets us build a `promise.then(() => namespace)` chain from C without
+// going through Lambda's closure-with-captured-value path. Each thunk's only
+// job is to return the namespace its slot was seeded with — the thunk's slot
+// index is baked into its function pointer.
+#define P5_SLOTS 64
+static Item g_p5_slot_namespace[P5_SLOTS];
+static int g_p5_next_slot = 0;
+
+#define P5_DEFINE_THUNK(N) \
+    extern "C" Item js_p5_dyn_import_thunk_##N(Item arg) { \
+        (void)arg; return g_p5_slot_namespace[N]; \
+    }
+P5_DEFINE_THUNK(0)  P5_DEFINE_THUNK(1)  P5_DEFINE_THUNK(2)  P5_DEFINE_THUNK(3)
+P5_DEFINE_THUNK(4)  P5_DEFINE_THUNK(5)  P5_DEFINE_THUNK(6)  P5_DEFINE_THUNK(7)
+P5_DEFINE_THUNK(8)  P5_DEFINE_THUNK(9)  P5_DEFINE_THUNK(10) P5_DEFINE_THUNK(11)
+P5_DEFINE_THUNK(12) P5_DEFINE_THUNK(13) P5_DEFINE_THUNK(14) P5_DEFINE_THUNK(15)
+P5_DEFINE_THUNK(16) P5_DEFINE_THUNK(17) P5_DEFINE_THUNK(18) P5_DEFINE_THUNK(19)
+P5_DEFINE_THUNK(20) P5_DEFINE_THUNK(21) P5_DEFINE_THUNK(22) P5_DEFINE_THUNK(23)
+P5_DEFINE_THUNK(24) P5_DEFINE_THUNK(25) P5_DEFINE_THUNK(26) P5_DEFINE_THUNK(27)
+P5_DEFINE_THUNK(28) P5_DEFINE_THUNK(29) P5_DEFINE_THUNK(30) P5_DEFINE_THUNK(31)
+P5_DEFINE_THUNK(32) P5_DEFINE_THUNK(33) P5_DEFINE_THUNK(34) P5_DEFINE_THUNK(35)
+P5_DEFINE_THUNK(36) P5_DEFINE_THUNK(37) P5_DEFINE_THUNK(38) P5_DEFINE_THUNK(39)
+P5_DEFINE_THUNK(40) P5_DEFINE_THUNK(41) P5_DEFINE_THUNK(42) P5_DEFINE_THUNK(43)
+P5_DEFINE_THUNK(44) P5_DEFINE_THUNK(45) P5_DEFINE_THUNK(46) P5_DEFINE_THUNK(47)
+P5_DEFINE_THUNK(48) P5_DEFINE_THUNK(49) P5_DEFINE_THUNK(50) P5_DEFINE_THUNK(51)
+P5_DEFINE_THUNK(52) P5_DEFINE_THUNK(53) P5_DEFINE_THUNK(54) P5_DEFINE_THUNK(55)
+P5_DEFINE_THUNK(56) P5_DEFINE_THUNK(57) P5_DEFINE_THUNK(58) P5_DEFINE_THUNK(59)
+P5_DEFINE_THUNK(60) P5_DEFINE_THUNK(61) P5_DEFINE_THUNK(62) P5_DEFINE_THUNK(63)
+
+static void* g_p5_thunk_fns[P5_SLOTS] = {
+    (void*)js_p5_dyn_import_thunk_0,  (void*)js_p5_dyn_import_thunk_1,
+    (void*)js_p5_dyn_import_thunk_2,  (void*)js_p5_dyn_import_thunk_3,
+    (void*)js_p5_dyn_import_thunk_4,  (void*)js_p5_dyn_import_thunk_5,
+    (void*)js_p5_dyn_import_thunk_6,  (void*)js_p5_dyn_import_thunk_7,
+    (void*)js_p5_dyn_import_thunk_8,  (void*)js_p5_dyn_import_thunk_9,
+    (void*)js_p5_dyn_import_thunk_10, (void*)js_p5_dyn_import_thunk_11,
+    (void*)js_p5_dyn_import_thunk_12, (void*)js_p5_dyn_import_thunk_13,
+    (void*)js_p5_dyn_import_thunk_14, (void*)js_p5_dyn_import_thunk_15,
+    (void*)js_p5_dyn_import_thunk_16, (void*)js_p5_dyn_import_thunk_17,
+    (void*)js_p5_dyn_import_thunk_18, (void*)js_p5_dyn_import_thunk_19,
+    (void*)js_p5_dyn_import_thunk_20, (void*)js_p5_dyn_import_thunk_21,
+    (void*)js_p5_dyn_import_thunk_22, (void*)js_p5_dyn_import_thunk_23,
+    (void*)js_p5_dyn_import_thunk_24, (void*)js_p5_dyn_import_thunk_25,
+    (void*)js_p5_dyn_import_thunk_26, (void*)js_p5_dyn_import_thunk_27,
+    (void*)js_p5_dyn_import_thunk_28, (void*)js_p5_dyn_import_thunk_29,
+    (void*)js_p5_dyn_import_thunk_30, (void*)js_p5_dyn_import_thunk_31,
+    (void*)js_p5_dyn_import_thunk_32, (void*)js_p5_dyn_import_thunk_33,
+    (void*)js_p5_dyn_import_thunk_34, (void*)js_p5_dyn_import_thunk_35,
+    (void*)js_p5_dyn_import_thunk_36, (void*)js_p5_dyn_import_thunk_37,
+    (void*)js_p5_dyn_import_thunk_38, (void*)js_p5_dyn_import_thunk_39,
+    (void*)js_p5_dyn_import_thunk_40, (void*)js_p5_dyn_import_thunk_41,
+    (void*)js_p5_dyn_import_thunk_42, (void*)js_p5_dyn_import_thunk_43,
+    (void*)js_p5_dyn_import_thunk_44, (void*)js_p5_dyn_import_thunk_45,
+    (void*)js_p5_dyn_import_thunk_46, (void*)js_p5_dyn_import_thunk_47,
+    (void*)js_p5_dyn_import_thunk_48, (void*)js_p5_dyn_import_thunk_49,
+    (void*)js_p5_dyn_import_thunk_50, (void*)js_p5_dyn_import_thunk_51,
+    (void*)js_p5_dyn_import_thunk_52, (void*)js_p5_dyn_import_thunk_53,
+    (void*)js_p5_dyn_import_thunk_54, (void*)js_p5_dyn_import_thunk_55,
+    (void*)js_p5_dyn_import_thunk_56, (void*)js_p5_dyn_import_thunk_57,
+    (void*)js_p5_dyn_import_thunk_58, (void*)js_p5_dyn_import_thunk_59,
+    (void*)js_p5_dyn_import_thunk_60, (void*)js_p5_dyn_import_thunk_61,
+    (void*)js_p5_dyn_import_thunk_62, (void*)js_p5_dyn_import_thunk_63,
+};
+
+extern "C" Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj) {
+    int slot = g_p5_next_slot++ % P5_SLOTS;
+    g_p5_slot_namespace[slot] = namespace_obj;
+    Item handler = js_new_function(g_p5_thunk_fns[slot], 1);
+    return js_promise_then(awaited, handler, ItemNull);
 }
 
 // =============================================================================

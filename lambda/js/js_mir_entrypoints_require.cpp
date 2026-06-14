@@ -1279,6 +1279,16 @@ extern "C" Item js_dynamic_import(Item specifier) {
         return js_dynamic_import_reject_type_error(msg);
     }
 
+    // Js57 P5: if the imported module (or any of its static dependencies)
+    // had a pending TLA target captured, return a Promise chained on that
+    // target so dynamic-import .then/.finally callbacks fire in spec order
+    // (importing modules' callbacks fire after the underlying TLA settles).
+    extern Item js_module_get_awaited_target(Item);
+    extern Item js_p5_chain_dynamic_import(Item, Item);
+    Item awaited = js_module_get_awaited_target(specifier_string);
+    if (get_type_id(awaited) != LMD_TYPE_NULL) {
+        return js_p5_chain_dynamic_import(awaited, ns);
+    }
     // Wrap the namespace in a resolved Promise
     return js_promise_resolve(ns);
 }
