@@ -323,11 +323,14 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     let tall_base = base_box.height > 0.72
     let in_fraction_child = context.fraction_child == true
     let compound_fraction_script = in_fraction_child and sup_box.width > 0.8
+    let numeric_x_script = is_mathit_x_box(base_box) and is_numeric_script_box(sup_box)
     let script_height = script_inner_height(sup_box, tall_script, in_fraction_child)
     let vlist_height = if (compound_fraction_script and context.cramped == true) 0.76
         else if (in_fraction_child and context.cramped == true) 0.75
         else if (in_fraction_child) 0.82
-        else if (tall_script) 1.16 else if (tall_base) 0.94 else 0.72
+        else if (tall_script) 1.16 else if (tall_base) 0.94
+        else if (numeric_x_script) 0.87
+        else 0.72
     let top = if (in_fraction_child and context.cramped == true) -3.28
         else if (in_fraction_child) -3.36
         else 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
@@ -359,6 +362,29 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
         type: "ord",
         italic: 0.0,
         skew: 0.0
+    }
+}
+
+fn is_mathit_x_box(bx) {
+    let els = box.elements_of(bx)
+    len(els) == 1 and els[0] is element and els[0].class == css.MATHIT and
+    len(els[0]) == 1 and els[0][0] is string and string(els[0][0]) == "x"
+}
+
+fn is_numeric_script_box(bx) {
+    let els = box.elements_of(bx)
+    len(els) == 1 and els[0] is element and els[0].class == css.CMR and
+    len(els[0]) == 1 and els[0][0] is string and is_digit_text(string(els[0][0]), 0)
+}
+
+fn is_digit_text(text, i) {
+    if (len(text) == 0) false
+    else if (i >= len(text)) true
+    else {
+        let ch = slice(text, i, i + 1)
+        (ch == "0" or ch == "1" or ch == "2" or ch == "3" or ch == "4" or
+         ch == "5" or ch == "6" or ch == "7" or ch == "8" or ch == "9") and
+            is_digit_text(text, i + 1)
     }
 }
 

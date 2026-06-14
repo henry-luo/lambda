@@ -28753,9 +28753,15 @@ extern "C" Item js_await_sync(Item value) {
     }
 
     if (p->state == JS_PROMISE_FULFILLED) {
+        // Js56 P10: per ES spec, even a fulfilled promise await yields to the
+        // microtask queue before resuming. Drain microtasks first so any
+        // pending `.then()` handlers fire in the correct order relative to
+        // continuation. Mirrors the non-promise drain above.
+        js_run_microtasks();
         return p->result;
     }
     if (p->state == JS_PROMISE_REJECTED) {
+        js_run_microtasks();
         // Rejected promise: throw the rejection reason
         js_throw_value(p->result);
         return ItemNull;
@@ -28764,9 +28770,7 @@ extern "C" Item js_await_sync(Item value) {
     // Handles `await Promise.resolve(1).then(...).then(...)` where the chained
     // then handlers run as microtasks and only resolve the awaited promise after
     // the queue is flushed. Drain is bounded by TASK_FLUSH_SAFETY_LIMIT (see
-    // js_event_loop.cpp:js_microtask_flush). Single drain — if still pending
-    // after one flush, the promise needs the full async state machine, which
-    // the sync fast-path cannot model.
+    // js_event_loop.cpp:js_microtask_flush).
     js_run_microtasks();
     if (p->state == JS_PROMISE_FULFILLED) {
         return p->result;
@@ -28775,7 +28779,34 @@ extern "C" Item js_await_sync(Item value) {
         js_throw_value(p->result);
         return ItemNull;
     }
-    log_debug("js: await_sync: promise still pending after microtask flush");
+    // Js57 P2c: bounded libuv loop drain so cross-module Promise resolution
+    // (e.g. another async module fulfilling a shared `Promise.withResolvers()`
+    // promise via a queued task) can still settle this await. Guarded by three
+    // bounds (watchdog 100 ms, 3 no-progress turns, 64 turn cap) so that a
+    // promise that genuinely cannot settle in this turn returns undefined
+    // quickly — Js55 P23(b) hit 1675 s on the suite by drainin unconditionally.
+    //
+    // Conditional trigger: if the promise has no then-handlers queued AND no
+    // pending nextTick / microtask is present, no future progress is possible
+    // from this thread; return undefined immediately.
+    if (p->then_count > 0 || js_microtask_pending_count() > 0) {
+        struct AwaitPredCtx { JsPromise* p; };
+        AwaitPredCtx ctx = { p };
+        auto predicate = [](void* u) -> int {
+            JsPromise* pp = ((AwaitPredCtx*)u)->p;
+            return pp->state != JS_PROMISE_PENDING ? 1 : 0;
+        };
+        js_await_bounded_drain(predicate, &ctx, /*watchdog_ms=*/100,
+                               /*max_no_progress=*/3, /*max_turns=*/64);
+        if (p->state == JS_PROMISE_FULFILLED) {
+            return p->result;
+        }
+        if (p->state == JS_PROMISE_REJECTED) {
+            js_throw_value(p->result);
+            return ItemNull;
+        }
+    }
+    log_debug("js: await_sync: promise still pending after bounded drain");
     return make_js_undefined();
 }
 

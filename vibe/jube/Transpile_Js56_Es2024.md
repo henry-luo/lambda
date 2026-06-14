@@ -626,13 +626,21 @@ Baseline progression: 40236 → 40249 (Js56 P0-P8) → 40251 (SIGSEGV fix) → *
 |---|---:|---|
 | Js56 P0-P8 | 13 | Closure-mutation + E1 NamedEvaluation + microtask drain on pending Promise + destructured export |
 | `_lambda_rt` ordering | 2 | top-level-ticks{,-2}.js — `_lambda_rt = prev` moved to AFTER drain |
-| `await` always drains microtasks | 1 | module-async-import-async-resolution-ticks — `await 1` now yields to queue |
+| `await` always drains microtasks (non-promise / FULFILLED) | 1 | module-async-import-async-resolution-ticks — `await N` / `await Promise.resolve(N)` now yields to queue |
 | `import()` bypasses CJS default extraction | 1 | await-dynamic-import-resolution — js_dynamic_import returns the ESM namespace directly |
 
-Remaining 6 failures:
-- **1 Gate K** (closure-mutation through call args) — needs module-level scope_env
-- **1 Gate J** (V8 spec discrepancy) — TA.set BigInt source ordering
-- **4 deep-TLA tests** that need actual TLA suspension semantics:
-  - `async-module-does-not-block-sibling-modules.js` — needs sync siblings to evaluate while TLA is waiting
-  - `fulfillment-order.js` / `rejection-order.js` — multiple async modules with leaf-to-root capability resolution
-  - `module-self-import-async-resolution-ticks.js` — self-import circular dependency + TDZ on default export
+Remaining 6 failures (all need architectural work):
+
+- **1 Gate K** (`coerced-new-length-detach.js`): closure-mutation through call args. The arrow `() => rab.resize({valueOf(){called=true}})` creates a per-invocation object whose `valueOf` captures `called`. valueOf mutates its env's snapshot, never reaching the outer block's `called`. Needs module-level scope_env so the arrow and valueOf share storage.
+- **1 Gate J** (`TA.set throwingProxy`): V8-specific TA.set OOB-check ordering. Test's helper iterates the BigInt source ad-hoc, firing the proxy before `.set` runs its OOB check. Defer or skip-list as V8 discrepancy.
+- **4 deep-TLA tests**:
+  - `async-module-does-not-block-sibling-modules.js` — sync sibling must evaluate while TLA module is suspended. Needs cooperative module evaluation scheduling.
+  - `fulfillment-order.js` / `rejection-order.js` — multi-module + Promise.all + dynamic imports + true Promise pending. The `await p1.promise` in a fixture module is pending; needs full TLA suspension semantics.
+  - `module-self-import-async-resolution-ticks.js` — needs (1) self-import live bindings (so `self` reflects the eventual `export default 42`) and (2) TDZ on the imported default before the source module's `export default` runs.
+
+These all require either:
+1. A new module-level scope_env mechanism (Gate K), or
+2. Real TLA suspension with [[TopLevelCapability]] resolution and live import bindings (4 deep-TLA tests), or
+3. Spec re-read / partial-list skip (Gate J).
+
+Js56 closes here at **40253 passing, 99.99% ES2024 conformance** for the batched test suite.

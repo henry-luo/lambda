@@ -33,6 +33,12 @@ bool js_event_loop_auto_close_mode(void);
 void js_microtask_enqueue(Item callback);
 void js_next_tick_enqueue(Item callback);
 void js_microtask_flush(void);
+int  js_microtask_pending_count(void);
+// Js57 P2c: bounded loop drain — runs uv_run(UV_RUN_NOWAIT) + microtask flush in
+// tight turns until predicate(user) is non-zero or one of three bounds expires
+// (watchdog_ms, max_no_progress turns, max_turns). See impl for details.
+int  js_await_bounded_drain(int (*predicate)(void*), void* user,
+                            int watchdog_ms, int max_no_progress, int max_turns);
 
 // =============================================================================
 // Animation Frame Queue

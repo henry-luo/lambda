@@ -430,6 +430,24 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04,
             pstrut: 3.36
         }
+    } else if (numer_box.is_script_radical == true and numer_total >= 0.95 and denom_total < 0.95) {
+        {
+            height: 1.39,
+            depth: 0.685,
+            render_height: 1.39,
+            render_depth: 0.68,
+            render_total: 2.08,
+            left_right_render_depth: 0.686,
+            left_right_render_total: 2.076,
+            depth_holder: 0.69,
+            denom_top: -2.31,
+            line_top: -3.23,
+            numer_top: -3.55,
+            numer_child_height: 1.0,
+            denom_child_height: 0.65,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
     } else if (numer_total >= 0.95 and denom_total < 0.95) {
         {
             height: 1.39,

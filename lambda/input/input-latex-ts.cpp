@@ -417,13 +417,22 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             extract_leading_command(source, start, end, cmd_buf, sizeof(cmd_buf));
         }
 
+        uint32_t child_count = ts_node_child_count(node);
+        int arg_count = 0;
+        for (uint32_t i = 0; i < child_count; i++) {
+            const char* field = ts_node_field_name_for_child(node, i);
+            if (field && strcmp(field, "arg") == 0) {
+                arg_count++;
+            }
+        }
+
         ElementBuilder elem = builder.element("fraction");
         if (cmd_buf[0]) {
             elem.attr("cmd", {.item = s2it(builder.createString(cmd_buf))});
         }
 
-        // collect 'arg' fields: first = numer, second = denom
-        uint32_t child_count = ts_node_child_count(node);
+        // collect 'arg' fields: first = numer, second = denom; surplus args
+        // belong to the surrounding math stream because frac/binom consume two args.
         int arg_index = 0;
         for (uint32_t i = 0; i < child_count; i++) {
             const char* field = ts_node_field_name_for_child(node, i);
@@ -439,7 +448,28 @@ static Item convert_math_node(InputContext& ctx, TSNode node, const char* source
             }
         }
 
-        return elem.final();
+        Item fraction_item = elem.final();
+        if (arg_count <= 2) {
+            return fraction_item;
+        }
+
+        ElementBuilder seq = builder.element("_seq");
+        seq.child(fraction_item);
+        arg_index = 0;
+        for (uint32_t i = 0; i < child_count; i++) {
+            const char* field = ts_node_field_name_for_child(node, i);
+            if (field && strcmp(field, "arg") == 0) {
+                TSNode arg_node = ts_node_child(node, i);
+                if (arg_index >= 2) {
+                    Item arg_item = convert_math_node(ctx, arg_node, source);
+                    if (arg_item.item != ITEM_NULL) {
+                        seq.child(arg_item);
+                    }
+                }
+                arg_index++;
+            }
+        }
+        return seq.final();
     }
 
     // Radical (sqrt)
