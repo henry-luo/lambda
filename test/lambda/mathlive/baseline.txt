@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 204 cases passing when this
+# One snapshot key per line. These are the 206 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -149,6 +149,7 @@ LEFT/RIGHT Delimiters \\uparrow \\downarrow 2
 LEFT/RIGHT Delimiters \\vert \\vert 1
 LEFT/RIGHT Delimiters \\vert \\vert 2
 LEFT/RIGHT Delimiters {(} {)} 1
+LEFT/RIGHT Delimiters {(} {)} 2
 LEFT/RIGHT middle delimiters 1
 LEFT/RIGHT middle delimiters 2
 LEFT/RIGHT middle delimiters 3
@@ -203,5 +204,6 @@ SUPERSCRIPT/SUBSCRIPT \\left(x+1\\right)^2 1
 SUPERSCRIPT/SUBSCRIPT -1-\\frac56-1-x^{2-\\frac34} 1
 SURDS 0/ \\sqrt5 renders correctly 1
 SURDS 1/ \\sqrt{} renders correctly 1
+SURDS 2/ ax^2+bx+c = a \\left( x - \\frac{-b + \\sqrt {b^2-4ac}}{2a} \\right) \\left( x - \\frac{-b - \\sqrt {b^2-4ac}}{2a} \\right) renders correctly 1
 SURDS 3/ \\sqrt[3]{5} renders correctly 1
 SURDS 4/ \\sqrt[3]5 renders correctly 1
