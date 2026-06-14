@@ -5276,6 +5276,30 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             jm_emit_module_export(mt, vid->name->chars, (int)vid->name->len,
                                 current_export->is_default);
+                        } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                                              vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                            // Js56 H2: `export const { resolve, reject } = expr;` /
+                            // `export let [a, b] = expr;` — walk the pattern and
+                            // export each bound name so cross-module imports
+                            // (e.g. Promise.withResolvers fixtures in TLA tests)
+                            // can resolve them.
+                            struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                                jm_name_hash, jm_name_cmp, NULL, NULL);
+                            jm_collect_pattern_names(vd->id, names);
+                            size_t iter = 0; void* item;
+                            while (hashmap_iter(names, &iter, &item)) {
+                                JsNameSetEntry* ne = (JsNameSetEntry*)item;
+                                // names from jm_collect_pattern_names have "_js_" prefix
+                                const char* js_name = ne->name;
+                                int js_name_len = (int)strlen(ne->name);
+                                if (strncmp(js_name, "_js_", 4) == 0) {
+                                    js_name += 4;
+                                    js_name_len -= 4;
+                                }
+                                jm_emit_module_export(mt, js_name, js_name_len,
+                                    current_export->is_default);
+                            }
+                            hashmap_free(names);
                         }
                     }
                     d = d->next;
@@ -5908,10 +5932,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     Context* prev_lambda_rt = _lambda_rt;
     _lambda_rt = (Context*)context;
     namespace_obj = js_main((Context*)context);
-    _lambda_rt = prev_lambda_rt;
+    // Js56 P9 (SIGSEGV fix): keep _lambda_rt set during the microtask drain.
+    // Microtasks scheduled by the module (e.g. `Promise.resolve(0).then(...)`
+    // chains in top-level-await tests) run inside js_event_loop_drain() and
+    // their JIT'd handler bodies dereference _lambda_rt to access the runtime
+    // pool. The old order restored _lambda_rt BEFORE the drain, so first-run
+    // tests (prev_lambda_rt == NULL) hit a NULL-deref EXC_BAD_ACCESS in the
+    // microtask. Restore after the drain instead. Same reasoning for
+    // module_vars and module_namespace — handlers may read module-level vars.
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
+    _lambda_rt = prev_lambda_rt;
     js_set_active_module_vars(prev_module_vars);
     js_set_active_module_namespace(prev_namespace);
 

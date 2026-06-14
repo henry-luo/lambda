@@ -25,8 +25,8 @@ static JsMirVarEntry* jm_find_nearest_catch_param_var(JsMirTranspiler* mt, const
     return NULL;
 }
 
-static void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
-        const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY) {
+void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
+        const char* name, MIR_reg_t val_reg, TypeId type_id) {
     if (!mt || !name || !mt->last_closure_has_env || mt->last_closure_env_reg == 0) return;
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
@@ -1470,6 +1470,17 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     if (for_node->init && init_is_lexical_decl) {
         jm_transpile_statement(mt, for_node->init);
     }
+
+    // Js56 P2: per-iteration binding boundary. Any closure created in INIT
+    // captures the init-time binding; subsequent test/body/update assignments
+    // must not write through to that closure's env (per-iteration semantics —
+    // each iteration has its own logical binding). Resetting last_closure_*
+    // here prevents the assignment writeback (added by Js56 P2) from leaking
+    // an iteration mutation into a closure that captured the init binding.
+    // Regression test: language/statements/for/scope-body-lex-open.js.
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
 
     // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
     jm_eval_cptn_reset(mt);
