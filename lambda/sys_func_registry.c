@@ -1824,6 +1824,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_get", FPTR(js_module_get)},
     {"js_get_active_module_namespace", FPTR(js_get_active_module_namespace)},
     {"js_get_import_meta", FPTR(js_get_import_meta)},
+    // Js57 P3 (Track B2): live binding for self-imported defaults
+    {"js_get_live_binding_default", FPTR(js_get_live_binding_default)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support

@@ -29768,6 +29768,36 @@ extern "C" Item js_get_import_meta() {
     return meta;
 }
 
+// Js57 P3 (Track B2): read a live default-binding for the given module
+// specifier. Used by self-imports so that reads of the imported name observe
+// the current state of namespace.default instead of an import-time snapshot.
+// Throws ReferenceError when the value is the TDZ sentinel (pre-initialised at
+// namespace creation for modules whose AST contains `export default`).
+extern "C" Item js_get_live_binding_default(Item specifier) {
+    Item ns = js_module_get(specifier);
+    if (get_type_id(ns) == LMD_TYPE_NULL) {
+        // No module registered — return undefined (mirror snapshot behaviour).
+        return make_js_undefined();
+    }
+    Item key = (Item){.item = s2it(heap_create_name("default", 7))};
+    // Spec 16.2.1.7: imported binding is uninitialised until the source
+    // module's `export default <expr>` runs. We detect that state by missing
+    // own property; once exported it is always present (even if exported as
+    // undefined). The TDZ sentinel doesn't survive map storage round-trips
+    // because the underlying map normalises low bits of undefined-typed values
+    // — has_own_property dodges that quirk.
+    Item has = js_has_own_property(ns, key);
+    bool present = (has.item == ITEM_TRUE);
+    if (!present) {
+        Item type_name = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+        Item msg = (Item){.item = s2it(heap_create_name(
+            "Cannot access 'default' before initialization", 45))};
+        js_throw_value(js_new_error_with_name(type_name, msg));
+        return ItemNull;
+    }
+    return js_property_get(ns, key);
+}
+
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     if (js_module_count_v14 >= JS_MAX_MODULES) {
         log_error("module: exceeded max modules (%d)", JS_MAX_MODULES);

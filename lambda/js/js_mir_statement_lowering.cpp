@@ -5956,26 +5956,46 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
         // Bind default import: import X from 'module'
         if (imp->default_name) {
-            MIR_reg_t key = jm_box_string_literal(mt, "default", 7);
-            MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
             char vname[128];
             snprintf(vname, sizeof(vname), "_js_%.*s",
                 (int)imp->default_name->len, imp->default_name->chars);
-            MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var_reg),
-                MIR_new_reg_op(mt->ctx, val)));
-            jm_set_var(mt, vname, var_reg);
-            // Also update module var for closure access
-            JsModuleConstEntry lookup;
-            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-            JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
-            if (mce && mce->const_type == MCONST_MODVAR) {
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            // Js57 P3 (Track B2): self-import live binding.
+            // When the source resolves to the current module's filename, the
+            // import sees a namespace whose `default` slot won't be initialised
+            // until `export default <expr>` runs later in this body. Replace the
+            // snapshot with a live binding: each read emits a runtime call that
+            // re-fetches namespace.default and throws ReferenceError if the slot
+            // still holds the TDZ sentinel.
+            bool is_self_import = (mt->filename != NULL &&
+                strcmp(resolved, mt->filename) == 0);
+            if (is_self_import) {
+                MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                jm_set_var(mt, vname, var_reg);
+                JsMirVarEntry* lv = jm_find_var(mt, vname);
+                if (lv) {
+                    lv->is_live_default_binding = true;
+                    lv->live_binding_specifier = name_pool_create_len(
+                        mt->tp->name_pool, resolved, (int)strlen(resolved))->chars;
+                }
+            } else {
+                MIR_reg_t key = jm_box_string_literal(mt, "default", 7);
+                MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var_reg),
+                    MIR_new_reg_op(mt->ctx, val)));
+                jm_set_var(mt, vname, var_reg);
+                // Also update module var for closure access
+                JsModuleConstEntry lookup;
+                snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                if (mce && mce->const_type == MCONST_MODVAR) {
+                    jm_call_void_2(mt, "js_set_module_var",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
             }
         }
 
