@@ -5276,6 +5276,30 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
                             jm_emit_module_export(mt, vid->name->chars, (int)vid->name->len,
                                 current_export->is_default);
+                        } else if (vd->id && (vd->id->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+                                              vd->id->node_type == JS_AST_NODE_ARRAY_PATTERN)) {
+                            // Js56 H2: `export const { resolve, reject } = expr;` /
+                            // `export let [a, b] = expr;` — walk the pattern and
+                            // export each bound name so cross-module imports
+                            // (e.g. Promise.withResolvers fixtures in TLA tests)
+                            // can resolve them.
+                            struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
+                                jm_name_hash, jm_name_cmp, NULL, NULL);
+                            jm_collect_pattern_names(vd->id, names);
+                            size_t iter = 0; void* item;
+                            while (hashmap_iter(names, &iter, &item)) {
+                                JsNameSetEntry* ne = (JsNameSetEntry*)item;
+                                // names from jm_collect_pattern_names have "_js_" prefix
+                                const char* js_name = ne->name;
+                                int js_name_len = (int)strlen(ne->name);
+                                if (strncmp(js_name, "_js_", 4) == 0) {
+                                    js_name += 4;
+                                    js_name_len -= 4;
+                                }
+                                jm_emit_module_export(mt, js_name, js_name_len,
+                                    current_export->is_default);
+                            }
+                            hashmap_free(names);
                         }
                     }
                     d = d->next;

@@ -28197,6 +28197,18 @@ static void js_promise_mark_anonymous_builtin(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (!fn) return;
+    // Js56 P5: js_new_function caches by func_ptr, so the resolve/reject base
+    // functions are shared across all `new Promise(...)` invocations. Marking
+    // sets `name`="" non-writable; doing it twice on the same shared function
+    // throws "Cannot assign to read only property 'name'". Skip the redundant
+    // marking on the UNBOUND cached callback only — `js_bind_function` produces
+    // a fresh `JsFunction*` per Promise (each with its own name slot), so bound
+    // functions must still be marked. (E1 cluster: 7 tests in
+    // language/module-code/top-level-await/syntax/*-await-expr-new-expr;
+    // regression to avoid: Promise/{resolve,reject}-function-name and bound
+    // 'name' = "" mismatch.)
+    bool is_bound = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) != 0;
+    if (!is_bound && fn->name && fn->name->len == 0) return;
     fn->name = heap_create_name("", 0);
     fn->flags |= JS_FUNC_FLAG_ARROW;
     Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
@@ -28701,9 +28713,37 @@ extern "C" Item js_promise_with_resolvers(void) {
 
 // Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
 extern "C" Item js_await_sync(Item value) {
-    // If not a promise, return value as-is (like awaiting a non-thenable)
+    extern void js_run_microtasks(void);
+    // If not a promise, check for thenable per ES spec PromiseResolve.
+    // For TLA without state machine, we can only synchronously resolve thenables
+    // whose .then() invokes resolve() synchronously.
     JsPromise* p = js_get_promise(value);
-    if (!p) return value;
+    if (!p) {
+        if (js_promise_is_object_like(value)) {
+            Item wrapped = js_promise_resolve(value);
+            p = js_get_promise(wrapped);
+            if (p) {
+                // js_promise_resolve_with_value enqueues thenable.then(resolve, reject)
+                // as a microtask. Drain microtasks so the resolve callback fires
+                // before we read p->state. This handles thenables whose .then()
+                // invokes resolve() synchronously.
+                if (p->state == JS_PROMISE_PENDING) {
+                    js_run_microtasks();
+                }
+                if (p->state == JS_PROMISE_FULFILLED) {
+                    return p->result;
+                }
+                if (p->state == JS_PROMISE_REJECTED) {
+                    js_throw_value(p->result);
+                    return ItemNull;
+                }
+                // Pending — sync fast-path can't suspend
+                log_debug("js: await_sync: thenable pending (no async state machine yet)");
+                return make_js_undefined();
+            }
+        }
+        return value;
+    }
 
     if (p->state == JS_PROMISE_FULFILLED) {
         return p->result;
@@ -28713,8 +28753,22 @@ extern "C" Item js_await_sync(Item value) {
         js_throw_value(p->result);
         return ItemNull;
     }
-    // Pending promise — synchronous fast-path cannot handle this
-    log_debug("js: await_sync: promise still pending (no async state machine yet)");
+    // Js56 H1: pending direct Promise — drain microtasks once, then re-check.
+    // Handles `await Promise.resolve(1).then(...).then(...)` where the chained
+    // then handlers run as microtasks and only resolve the awaited promise after
+    // the queue is flushed. Drain is bounded by TASK_FLUSH_SAFETY_LIMIT (see
+    // js_event_loop.cpp:js_microtask_flush). Single drain — if still pending
+    // after one flush, the promise needs the full async state machine, which
+    // the sync fast-path cannot model.
+    js_run_microtasks();
+    if (p->state == JS_PROMISE_FULFILLED) {
+        return p->result;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        js_throw_value(p->result);
+        return ItemNull;
+    }
+    log_debug("js: await_sync: promise still pending after microtask flush");
     return make_js_undefined();
 }
 

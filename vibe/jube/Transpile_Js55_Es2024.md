@@ -2,7 +2,7 @@
 
 Date: 2026-06-13
 
-Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 + P20 + P22 (all partial) done (47 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16 + 18 P20 + 4 P22); ~26 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 144.9 s. Latest full run: 40234 passing, 47 improvements, 0 regressions. See §12.15 for P20 closure-capture cluster fix, §12.16 for P22 spec-correctness fixes.
+Status: P0 + P1 + P10 + P11 + P12 + P13 + P14 + P16 + P20 + P22 + P23 (all partial) done (49 admittable tests cleared total: 12 P1 + 1 P10b fix + 1 P10a skip + 4 P11 + 2 P12 + 2 P13 + 2 P14 + 1 P16 + 18 P20 + 4 P22 + 2 P23); ~24 admittable failures remain (was 73). Latest baseline guard: 40187/40187, 0 regressions, 149.4 s. Latest full run: 40236 passing, 49 improvements, 0 regressions. See §12.15-12.17 for P20-P23 walkthroughs.
 
 Js55 closes the long tail of ES2024 failures left after [Transpile_Js54_Es2024.md](Transpile_Js54_Es2024.md) finished the three Gates (resizable-arraybuffer, arraybuffer-transfer, regexp-v-flag) and the post-Js54 push that picked up another 68 tests (RegExp.prototype.unicodeSets getter, ArrayBuffer.prototype.detached, compound `\p{}`/`\q{}` set ops, UTF-8 emit fix, string set-arithmetic). Js54 admitted the bulk of ES2024 — Js55's job is the 73 individually-failing tests still in the failure list. They split cleanly into three clusters with very different fix surfaces.
 
@@ -1424,6 +1424,89 @@ The species-ctor tests are TypedArray spec issues separate from closure-capture.
 The key insight: the bug isn't in the SHARED scope_env path (which §12.10/§12.12 attacked). It's in the **per-closure env path** (use_scope_env=false), via a parallel state tracking system (`mt->last_closure_env_reg`). That state was being USED by `jm_write_last_closure_capture_if_matching` to forward let-initializer writes, but never RESET between sibling scopes. The fix is structural for the state lifetime, not for the captures protocol — much narrower in blast radius.
 
 §12.14 mechanism (B) — "the READS at lines 1316-1317" — was a red herring. Those reads ARE from `jm_env_reload_shared_captures` after CALL expressions. The var->reg pointing at the stale env_reg came from earlier shared-env marking elsewhere. The actual primary bug was simply the LACK of a reset on `mt->last_closure_env_reg` at for-of/block boundaries.
+
+## 12.17 P23 TLA thenable await (2026-06-14)
+
+After §12.16 P22 cleared the closure cluster, returned for the TLA cluster (24 remaining failures). Tackled the E4 thenable-await sub-cluster — 2 tests cleared.
+
+### P23(a) — `await thenable` at module top level (2 tests)
+
+Test pattern:
+```js
+// language/module-code/top-level-await/await-awaits-thenables.js
+var thenable = { then: function (resolve, reject) { resolve(42); } };
+assert.sameValue(await thenable, 42);
+```
+
+Lambda was returning `thenable` (the object itself) instead of 42. Root cause: at TLA without async state machine, `await` lowers to a direct call to `js_await_sync(promise_val)` ([js_mir_expression_lowering.cpp:12802](../../lambda/js/js_mir_expression_lowering.cpp)). That function ([js_runtime.cpp:28703](../../lambda/js/js_runtime.cpp)) only handled native Promises — for any non-promise value (including thenables), it returned the value as-is.
+
+The async state-machine path's `js_async_must_suspend` ([js_runtime.cpp:28745](../../lambda/js/js_runtime.cpp)) correctly handles thenables: it detects `js_promise_is_object_like(value)`, calls `js_promise_resolve(value)` which enqueues `thenable.then(resolve, reject)` as a microtask, then synchronously drains and reads the resulting promise state.
+
+**Fix**: mirror the same logic in `js_await_sync`:
+```cpp
+if (!p) {
+    if (js_promise_is_object_like(value)) {
+        Item wrapped = js_promise_resolve(value);  // enqueues thenable.then microtask
+        p = js_get_promise(wrapped);
+        if (p) {
+            if (p->state == JS_PROMISE_PENDING) js_run_microtasks();
+            if (p->state == JS_PROMISE_FULFILLED) return p->result;
+            if (p->state == JS_PROMISE_REJECTED) { js_throw_value(p->result); return ItemNull; }
+            return make_js_undefined();  // genuinely-async pending
+        }
+    }
+    return value;
+}
+```
+
+Tests cleared:
+- `await-awaits-thenables.js`
+- `await-awaits-thenables-that-throw.js`
+
+### P23(b) — Chained Promise await (deferred)
+
+Test: `await-expr-resolution.js` has `await Promise.resolve(1).then(v => v*2).then(v => v*3)`. The chain returns a pending promise whose resolution requires draining microtasks (Promise then handlers).
+
+**Attempted fix**: also drain microtasks when an existing-promise (not thenable) is pending. Reverted — caused dramatic test-suite slowdown (155s → 1675s), likely from many spurious pending-promise paths hitting the global microtask flush per-call. Need a more surgical approach (e.g. drain only when the promise has known-attached then-handlers, or use a localized microtask queue).
+
+Deferred to a future session.
+
+### P23 other TLA subclusters (deferred)
+
+The remaining ~22 TLA failures split:
+- 7 "Cannot assign to read only property 'name'" (E1 NamedEvaluation) — investigated in §12.13 prior session: hypothesis disproven, actual emission site unlocated.
+- 4 "async test did not call $DONE" — TLA top-level capability chain not resolving (E2).
+- 3 "Promise resolver is not a function" — Promise.withResolvers in fixture (E3).
+- 2 SIGSEGV (top-level-ticks) — E5.
+- 1 "Expected SameValue(undefined, 42)" (await-dynamic-import-resolution) — TLA dynamic import resolution.
+- 1 "Expected SameValue(undefined, false)" (async-module-does-not-block-sibling-modules) — TLA module evaluation ordering.
+
+These are all deep TLA infrastructure issues that need a separate session focused on the TLA host integration. The 4 + 3 + 1 + 1 cluster share the same root cause family: TLA module evaluation doesn't properly drain microtasks / resolve top-level capability / wait for promise chain settlement.
+
+### Cumulative cleared, end of P23
+
+| Phase | Tests cleared | Mechanism |
+|---|---:|---|
+| Prior (P1-P22) | 47 | See §12.13-12.16 |
+| **P23(a)** | **2** | **`js_await_sync` handles thenables (calls `js_promise_resolve` + microtask drain)** |
+| **Total** | **49** | (of original 73 admittable failures) |
+
+Final full run: **40236 passing, 49 improvements vs baseline, 0 regressions**, in normal time (~155s).
+
+### Remaining 24 failures
+
+| Cluster | Count |
+|---|---:|
+| TLA NamedEvaluation (E1, batch-mode) | 7 |
+| TLA $DONE / capability chain (E2) | 4 |
+| TLA Promise.withResolvers cross-module (E3) | 3 |
+| TLA dynamic-import resolution (E2 family) | 2 |
+| TLA SIGSEGV (E5) | 2 |
+| TA closure-mutation (species ctor) | 3 |
+| ArrayBuffer block-let closure | 1 |
+| TA.set BigInt+throwingProxy | 1 |
+| TA species ctor TypeError | 1 |
+| Pre-existing slow test (Array.some) | 1 |
 
 ## 12.16 P22 remaining closure-cluster wins (2026-06-14)
 
