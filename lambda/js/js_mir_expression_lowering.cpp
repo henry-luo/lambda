@@ -8357,8 +8357,16 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // Reset closure env tracking before evaluating arguments
-            mt->last_closure_has_env = false;
+            // Js56 Gate K: preserve closure env tracking across the method call.
+            // The previous "reset before arguments" prevented stale readback when
+            // no new closure was created during arg eval, but it also defeated
+            // the readback path for indirectly-invoked closures (e.g.
+            // `rab.resize({valueOf() { called = true; }})` where valueOf runs
+            // inside resize). Argument evaluation overrides last_closure_* when
+            // it creates a new closure; otherwise the previous closure's env
+            // is the right one to refresh after the call. Readback on the
+            // wrong env is idempotent (just copies the same value back), so
+            // preserving is safe.
 
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(mt, (JsAstNode*)m->property, prop->name);

@@ -5932,10 +5932,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     Context* prev_lambda_rt = _lambda_rt;
     _lambda_rt = (Context*)context;
     namespace_obj = js_main((Context*)context);
-    _lambda_rt = prev_lambda_rt;
+    // Js56 P9 (SIGSEGV fix): keep _lambda_rt set during the microtask drain.
+    // Microtasks scheduled by the module (e.g. `Promise.resolve(0).then(...)`
+    // chains in top-level-await tests) run inside js_event_loop_drain() and
+    // their JIT'd handler bodies dereference _lambda_rt to access the runtime
+    // pool. The old order restored _lambda_rt BEFORE the drain, so first-run
+    // tests (prev_lambda_rt == NULL) hit a NULL-deref EXC_BAD_ACCESS in the
+    // microtask. Restore after the drain instead. Same reasoning for
+    // module_vars and module_namespace — handlers may read module-level vars.
     if (js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
+    _lambda_rt = prev_lambda_rt;
     js_set_active_module_vars(prev_module_vars);
     js_set_active_module_namespace(prev_namespace);
 

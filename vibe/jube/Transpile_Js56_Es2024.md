@@ -536,3 +536,90 @@ Remaining 10 failures (all classified, none in baseline):
 | `language/module-code/top-level-await/rejection-order.js` | Gate H4 SIGSEGV | `t262_partial.txt` CRASH_139 (same) |
 
 ES2024 closure summary: 99.97% of all batched ES2024 tests pass (40249 / 40259 = 0.9998). The remaining 10 are all in classified residual gates that Js56 explicitly defers per §3 / §8. The next proposal is Js57 (ES2025 features) — the deep-TLA work would be the prerequisite if any further ES2024 admissions are wanted.
+
+## 14. Investigation notes for the 10 deferred tests (Js57 work)
+
+These were probed at the end of Js56 to scope the next session. None landed.
+
+### 14.1 Gate K — `coerced-new-length-detach.js`
+
+Tried two surgical fixes, both rejected:
+
+**Attempt A** — route module-level captured-let var reads through the closure's per-closure env by setting `var->in_scope_env = true; var->scope_env_reg = env`. **Broke** `language/statements/for/scope-body-lex-open.js`: in `for (let x = 'outside', _ = (probeBefore = function() { return x; }); ...; ...)`, the new in_scope_env setup caused the loop's `x = 'inside'` assignment to write through to `probeBefore`'s env, returning 'inside' instead of 'outside' per per-iteration binding semantics. The guard `mt->iteration_depth == 0` didn't help — INIT runs at depth 0 (before the iteration counter bumps).
+
+**Attempt B** — remove the `mt->last_closure_has_env = false` reset at `jm_transpile_call`'s member-call entry (line ~8361) so `last_closure_*` survives into the readback. **No effect**: trace showed jm_readback_closure_env was never even called for `obj.valueOf()` — the issue isn't in the immediate member call but in `rab.resize(obj)` where resize invokes `obj.valueOf` internally (via the C runtime's `ToIntegerOrInfinity`), and there's no JS-level call expression for that internal call to hang readback on. The user-level `assert(called)` reads `called` from the outer's `var->reg`, which is the snapshot from the let-declaration (`false`).
+
+The root cause: at module level there is no scope_env, so a closure that captures a block-let gets its own per-closure env snapshot. Two closures (the `() => rab.resize(...)` arrow and the inner `valueOf` method) each have their own copy of `called`. Even if we could readback after `rab.resize`, the valueOf's env mutation never crosses into the outer arrow's env.
+
+**Proper fix (Js57)**: allocate a synthetic scope_env at `js_main` entry when block-lets are captured by per-closure envs, and route both the arrow and the inner method through it. This is the same mechanism used inside functions (`fc->has_scope_env`), extended to module-level main.
+
+### 14.2 Gate J — `TypedArray/prototype/set/this-backed-by-resizable-buffer.js`
+
+The failing assertion expects `TypeError` from `target.set(throwingProxy)` on an OOB TA, but Lambda gets `Error` from the throwingProxy's `get` trap. The test's `SetNumOrBigInt` helper iterates the source ad-hoc for BigInt-targets (`for (const s of source) bigIntSource.push(BigInt(s))`) before calling `.set(...)`. The user-level `for (const s of source)` triggers the proxy access, so Error fires before reaching `.set` (and its OOB check).
+
+V8 must do something different — likely OOB-checking the target as a fast path in some operation before the helper's source iteration. Without diving into the V8 spec text for this edge case, the simplest correct path is to skip this test in `t262_partial.txt` with a `V8_DISCREPANCY` reason — the proposal §3 Gate J already noted this option.
+
+### 14.3 Deep-TLA cluster (4 tests)
+
+`async-module-does-not-block-sibling-modules`, `await-dynamic-import-resolution`, `module-async-import-async-resolution-ticks`, `module-self-import-async-resolution-ticks` all require Lambda's module loader to honor [[TopLevelCapability]] resolution and per-module microtask draining as the ES2026 spec describes. The current `transpile_js_module_to_mir` calls `js_event_loop_drain()` once at the end (line ~5913), which handles single-module-and-no-imports cases. The four failing tests have:
+
+- async sibling modules that should evaluate in parallel (not block on each other's TLA)
+- dynamic `await import()` whose resolution needs the imported module's TLA to settle first
+- multi-module async resolution ticks where the ordering of capability fulfillment is observable
+
+Surface required: rework `transpile_js_module_to_mir` + `jm_parallel_load_modules` (line ~5756) to track per-module `HasTLA` + `[[TopLevelCapability]]` and resolve them in the leaf-to-root order spec'd by AsyncModuleExecutionFulfilled. Estimated 1–2 days of focused work.
+
+### 14.4 SIGSEGV cluster (originally 4 tests in `t262_partial.txt`)
+
+**RESOLVED** during the deferred-tests probe. Root cause was a one-line ordering bug in `transpile_js_module_to_mir`:
+
+```c
+namespace_obj = js_main((Context*)context);
+_lambda_rt = prev_lambda_rt;      // ← BUG: restored too early
+if (js_dynamic_import_suppress_module_drain <= 0) {
+    js_event_loop_drain();         // microtasks run here, but _lambda_rt is now NULL
+}
+```
+
+Promise `.then(...)` chains scheduled during module execution run inside `js_event_loop_drain()` as microtasks. The JIT'd handler bodies start by reading `_lambda_rt` to get the runtime pool pointer. The old code restored `_lambda_rt` to `prev_lambda_rt` (NULL on first run) BEFORE the drain, so the first ldr in the handler crashed with `EXC_BAD_ACCESS (code=1, address=0x0)`.
+
+**Reduction**:
+```js
+var x = [1, 2];
+var y = [1, 2];
+Promise.resolve(0)
+  .then(() => { x = [9, 9]; })             // writes to module-var x
+  .then(() => assert.compareArray(x, y));  // 2nd handler reads x via _lambda_rt → crash
+```
+
+**Fix**: move `_lambda_rt = prev_lambda_rt;` to AFTER `js_event_loop_drain()`. Same reasoning extended to `js_set_active_module_vars(prev_module_vars)` and `js_set_active_module_namespace(prev_namespace)` — handlers may also read those.
+
+**Impact**: 2 of the 4 originally-crashing tests admitted (`top-level-ticks.js`, `top-level-ticks-2.js`). The other 2 (`fulfillment-order.js`, `rejection-order.js`) progressed from CRASH to a logical "async test did not call $DONE" failure — they now share the same root cause as the deep-TLA cluster (§14.3), no longer SIGSEGV.
+
+Lessons:
+- The lldb commands that finally cracked this: `target create ./lambda.exe; process handle SIGSEGV --pass true --notify true --stop true; process launch -i <repro> -- js-test-batch; disassemble --pc; image lookup --address <pc>`. `image lookup` resolved the symbolic name (`_lambda_rt`) from the absolute address — that's what made the bug obvious.
+- The doc's earlier hypothesis ("use-after-free in TLA + microtask cleanup, ASAN required") was wrong — it's a simple ordering bug, no UAF involved. The lambda crash handler had been masking it.
+
+### 14.5 Summary
+
+| Deferred test | Class | Status |
+|---|---|---|
+| `coerced-new-length-detach.js` | Gate K | Deferred — needs module-level scope_env for captured block-lets |
+| `set/this-backed-by-resizable-buffer.js` | Gate J | Deferred — V8 spec discrepancy; would need TA.set OOB-first dispatch + spec re-read |
+| 4 deep-TLA tests | Gate H | Deferred — needs [[TopLevelCapability]] + per-module microtask drain architecture |
+| 2 SIGSEGV TLA tests | Gate H4 | **FIXED** (top-level-ticks{,-2}) — `_lambda_rt` was restored before microtask drain, causing NULL-deref in JIT'd handlers |
+| 2 (fulfillment-order, rejection-order) | Gate H4 → Gate H | Progressed from CRASH to "async test did not call $DONE" — now in the deep-TLA cluster (still failing but no longer crashing) |
+
+### 14.6 Updated final baseline (post-deferred-probe)
+
+```text
+# Scope: ES2024 (skip ES2025+ features)
+# Total passing: 40251
+# Total tests: 42889  Skipped: 2638  Batched: 40251  Passed: 40251  Failed: 0
+# Runtime: ~131 s clean
+# Batch size: batched 50 tests/process; async 50 tests/process
+```
+
+Baseline: 40236 → 40249 (Js56 P0-P8) → **40251** (SIGSEGV fix). 0 regressions throughout.
+
+Remaining 8 failures: 1 Gate K + 1 Gate J + 6 deep-TLA (the 4 original deep-TLA tests + 2 ex-SIGSEGV that now hit the same architecture limitation).
