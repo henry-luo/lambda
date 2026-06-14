@@ -975,6 +975,18 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     JsMirVarEntry* var = jm_find_var(mt, vname);
     if (var) {
+        // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
+        // `namespace.default` from the module registry each time the local
+        // identifier is read. Throws ReferenceError if the source module's
+        // `export default` has not run yet (slot still holds TDZ sentinel).
+        if (var->is_live_default_binding && var->live_binding_specifier) {
+            MIR_reg_t spec_reg = jm_box_string_literal(mt,
+                var->live_binding_specifier, (int)strlen(var->live_binding_specifier));
+            MIR_reg_t live_val = jm_call_1(mt, "js_get_live_binding_default", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec_reg));
+            jm_emit_exc_propagate_check(mt);
+            return live_val;
+        }
         if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, var->reg),
@@ -1096,6 +1108,21 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 return jm_emit_null(mt);
             }
             case MCONST_MODVAR: {
+                // Js57 P3 (Track B2): live binding for self-imported default.
+                // Closures bypass capture analysis for MCONST_MODVAR entries and
+                // emit js_get_module_var here at every use — perfect place to
+                // also route live-binding entries through the runtime call that
+                // re-reads namespace.default (and throws ReferenceError if the
+                // module's `export default` has not yet executed).
+                if (mc->is_live_default_binding && mc->live_binding_specifier) {
+                    MIR_reg_t spec_reg = jm_box_string_literal(mt,
+                        mc->live_binding_specifier,
+                        (int)strlen(mc->live_binding_specifier));
+                    MIR_reg_t live_val = jm_call_1(mt, "js_get_live_binding_default", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, spec_reg));
+                    jm_emit_exc_propagate_check(mt);
+                    return jm_apply_with_identifier_fallback(mt, id, live_val);
+                }
                 MIR_reg_t mv = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
                 if (mc->is_nested_func_hoist && !mc->is_iife_var) {

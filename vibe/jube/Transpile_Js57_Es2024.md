@@ -502,21 +502,31 @@ The fix shape (P3 in Js57): replace `self`'s storage with a runtime cell pointin
   - `js_runtime.cpp:js_await_sync`: pending-promise branch now calls `js_await_bounded_drain` (gated on `then_count > 0 || js_microtask_pending_count() > 0` so a strict no-handlers-no-microtasks pending promise still returns `undefined` immediately — matches the §6.1.2 "conditional trigger" mitigation).
   - **Verification**: `js57_p2_correctness.js` exercises await on resolved/chained/rejected/value/`Promise.all` — all print `OK`. Same 177/178 JS gtest count as P1.
 
+- **P3 — Track B2 (live import bindings + TDZ for self-imports)**:
+  - `js_mir_context.hpp`: added `is_live_default_binding` + `live_binding_specifier` to both `JsMirVarEntry` and `JsModuleConstEntry`. The MCONST flag covers the closure path (where captures of module-level imports route through `js_get_module_var`); the var-entry flag covers module-level reads via `jm_find_var`.
+  - `js_mir_module_batch_lowering.cpp`:
+    - third-pass module-const registration (the place the import name is reserved as `MCONST_MODVAR`) now resolves the import source against the current filename and stamps `is_live_default_binding` + `live_binding_specifier` when they match;
+    - `jm_load_imports` skips self-imports up front so the loader does not recurse-compile the same source.
+  - `js_mir_statement_lowering.cpp`: the `JS_AST_NODE_IMPORT_DECLARATION` handler now detects self-imports and, instead of snapshotting `js_property_get(ns, "default")` into a local register, leaves the register uninitialised and tags the `JsMirVarEntry` with the live-binding fields so direct reads also go through the runtime helper.
+  - `js_mir_expression_lowering.cpp`: both identifier-load paths (`jm_find_var` and the `MCONST_MODVAR` branch) emit `js_get_live_binding_default(specifier)` when the live-binding flag is set.
+  - `js_runtime.cpp` + `js_runtime.h` + `sys_func_registry.c`: new exported `js_get_live_binding_default(specifier)` runtime function. Uses `js_has_own_property(ns, "default")` to detect the uninitialised state (the spec's "binding not initialised" → ReferenceError condition). The has-own check sidesteps the underlying map's low-bit normalisation on undefined-typed values that defeats a TDZ-sentinel approach.
+  - **Verification**: `temp/js57_repros/self_import_test.js` (small self-import scenario) prints both `OK self TDZ before export default` and `OK self === 42 after export default` when run through the module-source batch protocol — i.e. before `export default`, `self` throws `ReferenceError`; after, it reflects the published value. Full `test/test_js_gtest.exe` still reports `177 PASSED` (same `lib_marked` pre-existing crash).
+
 ### Still pending
 
-- **P2a/P2b — per-module `TopLevelCapability`**: not implemented. `js_main` still returns the namespace synchronously; the bounded drain alone is not sufficient for the cross-module-resolution patterns of the four deep-TLA tests.
-- **P3 — live import bindings + TDZ**: not implemented. `module-self-import-async-resolution-ticks.js` still snapshots `self.default` at import time.
-- **P4 — sibling module evaluation ordering**: not implemented. Depends on P2a.
-- **P5 — fulfillment-order / rejection-order triage**: gated on P2a/P3/P4.
-- **P6 — `--update-baseline` and stability guard**: gated on the deep-TLA work or an explicit decision to admit Gate K only.
+- **P2a/P2b — per-module `TopLevelCapability`**: not implemented. `js_main` still returns the namespace synchronously; the bounded drain alone is not sufficient for the cross-module-resolution patterns of the deep-TLA tests.
+- **P4 — sibling module evaluation ordering**: not implemented. The test fundamentally requires interleaved execution: a TLA module's pre-await statements must run, then sync siblings evaluate, then the TLA module's post-await statements resume. This requires either compiling TLA module bodies as async state machines (large refactor — reuses existing async-function infrastructure) or chunking module bodies at await points (also large). Neither fits a single session's scope.
+- **P5 — fulfillment-order / rejection-order triage**: gated on P2a/P4 — both fixtures use cross-module shared `Promise.withResolvers` resolution that only works once modules can actually suspend at top-level await.
+- **P6 — `--update-baseline` and stability guard**: gated on the deep-TLA work or an explicit decision to admit Gate K + self-import only.
 
 ### Tests that should flip after a release-mode admission run
 
-With only P1 landed, the expected admission delta is exactly the one test the doc projected for Track A:
+With P1 and P3 landed, the expected admission delta is two of the five Js56 deferred failures:
 
 - `built_ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js` — PASS (driven by the new module scope env; reproduced locally via `js57_t262_gate_k.js`).
+- `language/module-code/top-level-await/module-self-import-async-resolution-ticks.js` — PASS (driven by the new live-binding + TDZ for self-imported default; reproduced locally via the module-source batch protocol).
 
-The four deep-TLA tests stay failing until P2a + P3 + P4 land.
+The three remaining deep-TLA tests (`async-module-does-not-block-sibling-modules`, `fulfillment-order`, `rejection-order`) still need real top-level-await suspension (P2a/P4) which is out of scope for this session.
 
 ### Risk notes carried forward
 

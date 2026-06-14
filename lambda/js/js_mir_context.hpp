@@ -67,6 +67,14 @@ struct JsModuleConstEntry {
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
     bool annexb_suppressed;    // AnnexB B.3.3.3: true if propagation suppressed (let/const collision, catch param, etc.)
+    // Js57 P3 (Track B2): live binding for self-imported default. When set,
+    // identifier reads emit js_get_live_binding_default(specifier) instead of
+    // js_get_module_var(int_val); the inner read sees TDZ until `export default`
+    // overwrites namespace.default at the module's source position. Live
+    // binding entries are also skipped during snapshot publication so closures
+    // do not capture a pre-initialised undefined.
+    bool is_live_default_binding;
+    const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
 // Evidence counters for parameter type inference.
@@ -154,6 +162,12 @@ struct JsMirVarEntry {
     MIR_reg_t hoisted_data_reg;  // P4h: hoisted items/data pointer for loop optimization (0 = not active)
     MIR_reg_t hoisted_len_reg;   // P4h: hoisted length register for loop optimization (0 = not active)
     bool from_hoist;             // v50: true if created by var-hoisting (not a parameter)
+    // Js57 P3 (Track B2): live binding to another module's default export.
+    // Used for self-imports (`import self from "./self.js"` inside self.js)
+    // so reads see the current state of `namespace.default` rather than the
+    // import-time snapshot (which is TDZ before `export default` runs).
+    bool is_live_default_binding;
+    const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
 struct JsVarScopeEntry {
