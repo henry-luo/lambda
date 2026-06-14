@@ -1619,6 +1619,47 @@ static void fixup_collapsed_inline_spans(LayoutContext* lycon, ViewSpan* span) {
     }
 }
 
+static bool view_is_non_rendered_table_marker(View* view) {
+    if (!view || view->view_type != RDT_VIEW_NONE) return false;
+    DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(static_cast<DomNode*>(view));
+    if (!elem) return false;
+    return elem->display.inner == CSS_VALUE_TABLE_COLUMN ||
+        elem->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
+        elem->display.inner == CSS_VALUE_TABLE_CAPTION;
+}
+
+static void finalize_non_rendered_table_markers_walk(View* view, float line_top,
+                                                     float baseline_y) {
+    while (view) {
+        if (view_is_non_rendered_table_marker(view)) {
+            float line_delta = view->y - line_top;
+            if (line_delta < 0.0f) line_delta = -line_delta;
+            if (line_delta <= 0.5f) {
+                view->y = baseline_y;
+                view->width = 0.0f;
+                view->height = 0.0f;
+                log_debug("%s non-rendered table marker finalized: x=%.1f, y=%.1f",
+                          view->source_loc(), view->x, view->y);
+            }
+        } else if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+            if (span->first_child) {
+                finalize_non_rendered_table_markers_walk(span->first_child,
+                                                         line_top, baseline_y);
+            }
+        }
+        view = view->next();
+    }
+}
+
+static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
+    if (!lycon || !lycon->line.start_view) return;
+    float line_top = lycon->block.advance_y;
+    float baseline_y = line_top + lycon->line.max_ascender;
+    finalize_non_rendered_table_markers_walk(lycon->line.start_view,
+                                             line_top, baseline_y);
+}
+
 void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
@@ -1714,6 +1755,7 @@ void line_break(LayoutContext* lycon) {
             lycon->line.max_descender, lycon->line.max_desc_before_last_text);
         lycon->line.max_descender = lycon->line.max_desc_before_last_text;
     }
+    finalize_non_rendered_table_markers_for_line(lycon);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font
     // and line-height. Run vertical alignment when:
     // 1) inline content exceeds the strut (original condition), OR

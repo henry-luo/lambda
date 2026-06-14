@@ -28742,6 +28742,13 @@ extern "C" Item js_await_sync(Item value) {
                 return make_js_undefined();
             }
         }
+        // Js56 P9: even for non-promise/non-thenable awaits, the ES spec
+        // wraps the value in `PromiseResolve(X)` and yields to the microtask
+        // queue. Without draining microtasks here, tests that rely on
+        // observable tick ordering (e.g.
+        // `Promise.resolve().then(...); await 1; assert(...)`) see stale
+        // state. The drain is bounded by TASK_FLUSH_SAFETY_LIMIT.
+        js_run_microtasks();
         return value;
     }
 

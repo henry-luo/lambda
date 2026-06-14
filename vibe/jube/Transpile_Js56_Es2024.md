@@ -614,12 +614,25 @@ Lessons:
 
 ```text
 # Scope: ES2024 (skip ES2025+ features)
-# Total passing: 40251
-# Total tests: 42889  Skipped: 2638  Batched: 40251  Passed: 40251  Failed: 0
-# Runtime: ~131 s clean
+# Total passing: 40253
+# Total tests: 42889  Skipped: 2636  Batched: 40253  Passed: 40253  Failed: 0
+# Runtime: ~135 s clean
 # Batch size: batched 50 tests/process; async 50 tests/process
 ```
 
-Baseline: 40236 → 40249 (Js56 P0-P8) → **40251** (SIGSEGV fix). 0 regressions throughout.
+Baseline progression: 40236 → 40249 (Js56 P0-P8) → 40251 (SIGSEGV fix) → **40253** (deep-TLA: always-drain on `await` + ESM-style dynamic import).
 
-Remaining 8 failures: 1 Gate K + 1 Gate J + 6 deep-TLA (the 4 original deep-TLA tests + 2 ex-SIGSEGV that now hit the same architecture limitation).
+| Fix | Tests cleared | Mechanism |
+|---|---:|---|
+| Js56 P0-P8 | 13 | Closure-mutation + E1 NamedEvaluation + microtask drain on pending Promise + destructured export |
+| `_lambda_rt` ordering | 2 | top-level-ticks{,-2}.js — `_lambda_rt = prev` moved to AFTER drain |
+| `await` always drains microtasks | 1 | module-async-import-async-resolution-ticks — `await 1` now yields to queue |
+| `import()` bypasses CJS default extraction | 1 | await-dynamic-import-resolution — js_dynamic_import returns the ESM namespace directly |
+
+Remaining 6 failures:
+- **1 Gate K** (closure-mutation through call args) — needs module-level scope_env
+- **1 Gate J** (V8 spec discrepancy) — TA.set BigInt source ordering
+- **4 deep-TLA tests** that need actual TLA suspension semantics:
+  - `async-module-does-not-block-sibling-modules.js` — needs sync siblings to evaluate while TLA is waiting
+  - `fulfillment-order.js` / `rejection-order.js` — multiple async modules with leaf-to-root capability resolution
+  - `module-self-import-async-resolution-ticks.js` — self-import circular dependency + TDZ on default export

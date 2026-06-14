@@ -944,23 +944,203 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     lycon->line.parent_font_handle = saved_pa_handle;
 }
 
+static bool block_view_is_out_of_flow(ViewBlock* block) {
+    return block && block->position &&
+        (block->position->position == CSS_VALUE_ABSOLUTE ||
+         block->position->position == CSS_VALUE_FIXED ||
+         block->position->float_prop == CSS_VALUE_LEFT ||
+         block->position->float_prop == CSS_VALUE_RIGHT);
+}
+
 static bool inline_span_has_in_flow_block_child(ViewSpan* span) {
     if (!span) return false;
     View* child = span->first_child;
     while (child) {
         if (ViewBlock* block = lam::view_as_block(child)) {
-            bool out_of_flow = block->position &&
-                (block->position->position == CSS_VALUE_ABSOLUTE ||
-                 block->position->position == CSS_VALUE_FIXED ||
-                 block->position->float_prop == CSS_VALUE_LEFT ||
-                 block->position->float_prop == CSS_VALUE_RIGHT);
-            if (!out_of_flow && child->view_type != RDT_VIEW_INLINE_BLOCK) {
+            bool is_inline_level_table = child->view_type == RDT_VIEW_TABLE &&
+                (block->display.outer == CSS_VALUE_INLINE ||
+                 block->display.outer == CSS_VALUE_INLINE_BLOCK);
+            if (!block_view_is_out_of_flow(block) &&
+                child->view_type != RDT_VIEW_INLINE_BLOCK &&
+                !is_inline_level_table) {
                 return true;
             }
         }
         child = child->next();
     }
     return false;
+}
+
+static bool inline_span_has_direct_visible_text_child(ViewSpan* span) {
+    if (!span) return false;
+    View* child = span->first_child;
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT &&
+            child->width > 0.0f && child->height > 0.0f) {
+            return true;
+        }
+        child = child->next();
+    }
+    return false;
+}
+
+static bool element_has_anonymous_table_tag(DomElement* elem, const char* tag_name) {
+    return elem && elem->tag_name && strcmp(elem->tag_name, tag_name) == 0;
+}
+
+static ViewBlock* inline_span_anonymous_inline_table_child(ViewSpan* span) {
+    if (!span) return nullptr;
+    View* child = span->first_child;
+    while (child) {
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            bool is_inline_table = child->view_type == RDT_VIEW_TABLE &&
+                (block->display.outer == CSS_VALUE_INLINE ||
+                 block->display.outer == CSS_VALUE_INLINE_BLOCK);
+            if (!block_view_is_out_of_flow(block) &&
+                is_inline_table &&
+                element_has_anonymous_table_tag(block->as_element(), "::anon-table")) {
+                return block;
+            }
+        }
+        child = child->next();
+    }
+    return nullptr;
+}
+
+static bool inline_span_is_in_anonymous_table_cell(ViewSpan* span) {
+    if (!span || !span->parent || !span->parent->is_element()) return false;
+    DomElement* parent = span->parent->as_element();
+    if (parent->view_type != RDT_VIEW_TABLE_CELL ||
+        !element_has_anonymous_table_tag(parent, "::anon-td")) {
+        return false;
+    }
+    return parent->parent && parent->parent->is_element() &&
+        parent->parent->as_element()->view_type == RDT_VIEW_TABLE_ROW &&
+        element_has_anonymous_table_tag(parent->parent->as_element(), "::anon-tr");
+}
+
+static bool inline_span_has_non_baseline_vertical_align(ViewSpan* span) {
+    return span && span->in_line && span->in_line->vertical_align &&
+        span->in_line->vertical_align != CSS_VALUE_BASELINE;
+}
+
+static bool display_is_table_column_marker(DisplayValue display) {
+    return display.inner == CSS_VALUE_TABLE_COLUMN ||
+        display.inner == CSS_VALUE_TABLE_COLUMN_GROUP;
+}
+
+static bool dom_children_have_renderable_content(DomNode* child) {
+    while (child) {
+        if (child->is_text()) {
+            const unsigned char* text = child->text_data();
+            while (text && *text) {
+                if (*text != ' ' && *text != '\t' && *text != '\n' &&
+                    *text != '\r' && *text != '\f') {
+                    return true;
+                }
+                text++;
+            }
+        } else if (child->is_element()) {
+            return true;
+        }
+        child = child->next_sibling;
+    }
+    return false;
+}
+
+static bool table_caption_is_empty_inline_marker(DomElement* elem,
+                                                 DisplayValue display) {
+    if (!elem || display.inner != CSS_VALUE_TABLE_CAPTION) return false;
+    if (!elem->parent || !elem->parent->is_element()) return false;
+    DomElement* parent = elem->parent->as_element();
+    if (!parent || parent->view_type != RDT_VIEW_INLINE) return false;
+    return !dom_children_have_renderable_content(elem->first_child);
+}
+
+static bool css_length_nonzero(float value) {
+    return value > 0.01f || value < -0.01f;
+}
+
+static bool box_edges_have_contribution(BoundaryProp* bound) {
+    if (!bound) return false;
+    if (css_length_nonzero(bound->margin.top) ||
+        css_length_nonzero(bound->margin.right) ||
+        css_length_nonzero(bound->margin.bottom) ||
+        css_length_nonzero(bound->margin.left) ||
+        css_length_nonzero(bound->padding.top) ||
+        css_length_nonzero(bound->padding.right) ||
+        css_length_nonzero(bound->padding.bottom) ||
+        css_length_nonzero(bound->padding.left)) {
+        return true;
+    }
+    if (bound->border &&
+        (css_length_nonzero(bound->border->width.top) ||
+         css_length_nonzero(bound->border->width.right) ||
+         css_length_nonzero(bound->border->width.bottom) ||
+         css_length_nonzero(bound->border->width.left))) {
+        return true;
+    }
+    return false;
+}
+
+static bool table_caption_has_box_contribution(DomElement* elem) {
+    if (!elem) return false;
+    if (box_edges_have_contribution(elem->bound)) return true;
+
+    ViewBlock* block = lam::unsafe_view_block_element_storage(elem);
+    if (!block || !block->blk) return false;
+    return block->blk->given_width >= 0.0f ||
+        block->blk->given_height >= 0.0f ||
+        block->blk->given_min_width > 0.0f ||
+        block->blk->given_min_height > 0.0f;
+}
+
+static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* elem,
+                                             DisplayValue display) {
+    if (!lycon || !elem) return false;
+    bool is_column_marker = display_is_table_column_marker(display);
+    bool is_empty_caption_marker = table_caption_is_empty_inline_marker(elem, display);
+    if (!is_column_marker && !is_empty_caption_marker) return false;
+
+    View* marker = static_cast<View*>(elem);
+    View* saved_view = lycon->view;
+    DomNode* saved_elmt = lycon->elmt;
+    BlockContext saved_block = lycon->block;
+    Linebox saved_line = lycon->line;
+    FontBox saved_font = lycon->font;
+    ViewType saved_view_type = marker->view_type;
+
+    // resolve computed style with the same element/view context normal inline
+    // layout provides, then restore layout state because non-rendered table
+    // internals do not generate inline boxes or affect siblings.
+    marker->view_type = RDT_VIEW_INLINE;
+    lycon->view = marker;
+    lycon->elmt = elem;
+    dom_node_resolve_style(elem, lycon);
+    marker->view_type = saved_view_type;
+    lycon->view = saved_view;
+    lycon->elmt = saved_elmt;
+    lycon->block = saved_block;
+    lycon->line = saved_line;
+    lycon->font = saved_font;
+
+    elem->display = display;
+    if (is_empty_caption_marker && table_caption_has_box_contribution(elem)) {
+        return false;
+    }
+
+    marker->view_type = RDT_VIEW_NONE;
+    marker->x = lycon->line.advance_x;
+    marker->y = lycon->block.advance_y;
+    marker->width = 0.0f;
+    marker->height = 0.0f;
+    if (!lycon->line.start_view) {
+        lycon->line.start_view = marker;
+    }
+    lycon->view = marker;
+    log_debug("%s non-rendered table marker: display=%d, x=%.1f, line_y=%.1f",
+              elem->source_loc(), display.inner, marker->x, marker->y);
+    return true;
 }
 
 // apply vertical alignment to a view
@@ -1098,6 +1278,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // font content box when on a line with visible content. content_height
         // marks that the inline contributed to line layout, while DOMRect height
         // follows the font box rather than the used line-height.
+        bool materialized_empty_inline = false;
         if (span->height == 0 && span->content_height > 0) {
             float empty_inline_height = span_fh ? font_get_cell_height(span_fh) : 0.0f;
             FontProp* empty_inline_font = span->font ? span->font : lycon->font.style;
@@ -1109,6 +1290,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 empty_inline_height = empty_inline_font->ascender + empty_inline_font->descender;
             }
             span->height = empty_inline_height > 0.0f ? empty_inline_height : span->content_height;
+            materialized_empty_inline = true;
         }
         float span_asc = 0, span_desc = 0;
         if (span->font) {
@@ -1129,7 +1311,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 pt = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
                 pb = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
-            int expected_height = (int)(content_area + bt + pt + pb + bb);
+            float expected_height = content_area + bt + pt + pb + bb;
             // Check if any child inline span overflows the expected height
             bool child_overflows = false;
             if (span->height > expected_height) {
@@ -1142,10 +1324,50 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     ch = (View*)ch->next_sibling;
                 }
             }
-            if (span->height > expected_height && !child_overflows) {
-                // Children extend beyond the font content area (e.g., tall image).
-                // Override both Y and height. Y is computed from the baseline position
-                // using the half-leading model.
+            ViewBlock* anonymous_inline_table =
+                inline_span_anonymous_inline_table_child(span);
+            bool use_anonymous_table_cell_fragment =
+                anonymous_inline_table &&
+                inline_span_is_in_anonymous_table_cell(span) &&
+                inline_span_has_non_baseline_vertical_align(span) &&
+                !inline_span_has_direct_visible_text_child(span);
+
+            if (materialized_empty_inline) {
+                // CSS 2.1 §10.8.1: an empty inline still has its own font box
+                // within the line-height half-leading area.
+                float span_lh = span->content_height;
+                float hhea_content = span_asc + span_desc;
+                float half_leading = (span_lh - hhea_content) / 2.0f;
+                float item_baseline = span_asc + half_leading;
+                CssEnum align = (span->in_line && span->in_line->vertical_align) ?
+                    span->in_line->vertical_align : lycon->line.vertical_align;
+                float valign_offset = (span->in_line && span->in_line->vertical_align) ?
+                    span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+                float inline_line_height = max(lycon->block.line_height,
+                    lycon->line.max_ascender + lycon->line.max_descender);
+                float vertical_offset = calculate_vertical_align_offset(lycon, align,
+                    span_lh, inline_line_height, baseline_pos, item_baseline, valign_offset);
+                span->y = lycon->block.advance_y + vertical_offset + half_leading - bt - pt;
+            } else if (use_anonymous_table_cell_fragment) {
+                // CSS 2.1 §17.2.1: an improper inline child of a row group is
+                // wrapped in anonymous table-row/table-cell boxes. Browser DOMRects
+                // expose the originating inline's own anonymous line fragment, while
+                // the generated inline-table can protrude above it.
+                float table_baseline = find_first_baseline_recursive(
+                    lycon, static_cast<View*>(anonymous_inline_table), 0.0f, true);
+                if (table_baseline >= 0.0f &&
+                    anonymous_inline_table->height > table_baseline) {
+                    span->y = anonymous_inline_table->y +
+                        (anonymous_inline_table->height - table_baseline);
+                    span->height = expected_height;
+                    log_debug("anonymous table-cell inline fragment placement: y=%.1f, h=%.1f, table_desc=%.1f",
+                              span->y, span->height,
+                              anonymous_inline_table->height - table_baseline);
+                }
+            } else if (span->height > expected_height && !child_overflows) {
+                // CSS 2.1 §10.6.1 and §10.8.1: an inline non-replaced element's
+                // own box is positioned from its font metrics. Atomic children
+                // such as inline-blocks and inline-tables may protrude outside it.
                 float span_lh = span->content_height;
                 float hhea_content = span_asc + span_desc;
                 float half_leading = (span_lh - hhea_content) / 2.0f;
@@ -1165,9 +1387,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 // Content area top = baseline - ascender_for_content_area
                 // For matching browser: content_area_top ≈ inline_box_top + half_leading
                 // Since cell_height may differ from hhea, adjust by centering difference
-                span->y = (int)(lycon->block.advance_y + vertical_offset + half_leading - bt - pt);
+                span->y = lycon->block.advance_y + vertical_offset + half_leading - bt - pt;
                 span->height = expected_height;
-                log_debug("inline box override (tall child): y=%d, h=%d, area=%.1f",
+                log_debug("inline box font-box placement: y=%.1f, h=%.1f, area=%.1f",
                          span->y, span->height, content_area);
             }
             // Else: text-only content — compute_span_bounding_box result is correct
@@ -1864,8 +2086,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // CSS 2.1 §17.2.1: table-column and table-column-group elements do not
         // generate boxes. They only serve to define column properties for table layout.
         // When orphaned (outside a table context), they should not be rendered.
-        if (display.inner == CSS_VALUE_TABLE_COLUMN || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
-            log_debug("%s skipping table-column/table-column-group element (no visual rendering)", node->source_loc());
+        if (layout_non_rendered_table_marker(lycon, elem, display)) {
+            log_debug("%s skipping non-rendered table-internal element (no visual rendering)", node->source_loc());
             lycon->depth--;
             return;
         }

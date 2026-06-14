@@ -1238,11 +1238,37 @@ extern "C" Item js_dynamic_import(Item specifier) {
         return js_dynamic_import_reject_type_error("import() requires a non-empty specifier");
     }
 
-    // Reuse require() logic to load the module synchronously. Defer microtask
-    // draining to the outer script so import() Promise reactions run in the
-    // caller's active runtime context.
+    // Js56 P10: dynamic `import(...)` is ES-module-only — CommonJS uses
+    // `require()`. The shared js_require() path treats unmarked .js files as
+    // CJS by default and extracts the CJS `default` export from the loaded
+    // namespace; for ESM dynamic imports that strips the entire namespace
+    // (`export var x = 42` ends up not on the returned object). Resolve
+    // through the module cache and the ESM transpile path directly here so
+    // the dynamic import returns the real namespace.
     js_dynamic_import_suppress_module_drain++;
-    Item ns = js_require(specifier_string);
+    Item ns;
+    Item existing = js_module_get(specifier_string);
+    if (get_type_id(existing) != LMD_TYPE_NULL) {
+        ns = existing;
+    } else {
+        char path_buf[512];
+        snprintf(path_buf, sizeof(path_buf), "%.*s", (int)spec->len, spec->chars);
+        char* source = read_text_file(path_buf);
+        if (!source) {
+            js_dynamic_import_suppress_module_drain--;
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot find module '%.*s'", (int)spec->len, spec->chars);
+            return js_dynamic_import_reject_type_error(msg);
+        }
+        Runtime* runtime = js_source_runtime;
+        if (!runtime) {
+            mem_free(source);
+            js_dynamic_import_suppress_module_drain--;
+            return js_dynamic_import_reject_type_error("import(): no runtime available");
+        }
+        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        mem_free(source);
+    }
     js_dynamic_import_suppress_module_drain--;
     if (js_check_exception()) {
         return js_promise_reject(js_clear_exception());
