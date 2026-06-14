@@ -1,5 +1,5 @@
 # Lambda MathLive markup baseline.
-# One snapshot key per line. These are the 196 cases passing when this
+# One snapshot key per line. These are the 201 cases passing when this
 # baseline was last updated.
 ACCENTS 0/ \\vec renders correctly 1
 ACCENTS 1/ \\acute renders correctly 1
@@ -30,13 +30,17 @@ BOX 5/ \\rlap{x}o renders correctly 1
 BOX 6/ \\mathrlap{x}o renders correctly 1
 BOX 7/ \\llap{x}o renders correctly 1
 BOX 8/ \\mathllap{x}o renders correctly 1
+COLORS 0/ \\sin x \\textcolor{#f00}{red} \\colorbox{yellow}{$x + \\frac1{\\frac34}$} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle} renders correctly 1
 COLORS 0/ color format "aquamarine" renders correctly 1
 COLORS 1/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 1/ color format "rgb(240, 10, 200)" renders correctly 1
+COLORS 2/ a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 2/ color format "#33d" renders correctly 1
+COLORS 3/ a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{a}$} renders correctly 1
 COLORS 3/ color format "#3130da" renders correctly 1
 COLORS 4/ a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 4/ color format "white" renders correctly 1
+COLORS 5/ a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}$} renders correctly 1
 COLORS 5/ color format "Aquamarine" renders correctly 1
 COLORS 6/ a{b\\color{#f00} c}d renders correctly 1
 COLORS 6/ color format "m5" renders correctly 1
@@ -86,6 +90,7 @@ FONTS 4/ \\mathfrak{\\sin} renders correctly 1
 FRACTIONS 0/ \\frac57 renders correctly 1
 FRACTIONS 1/ \\frac {5} {7} renders correctly 1
 FRACTIONS 2/ \\frac {\\frac57} {\\frac37} renders correctly 1
+FRACTIONS 3/ \\[ 1 + \\frac{q^2}{(1-q)}+\\frac{q^6}{(1-q)(1-q^2)}+\\cdots = \\prod_{j=0}^{\\infty}\\frac{1}{(1-q^{5j+2})(1-q^{5j+3})}, \\quad\\quad \\text{for $|q|<1$}. \\] renders correctly 1
 FRACTIONS 4/ \\binom{n}{k} renders correctly 1
 FRACTIONS 5/ \\dbinom{n}{k} renders correctly 1
 FRACTIONS 6/ \\tbinom{n}{k} renders correctly 1

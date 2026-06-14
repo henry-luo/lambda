@@ -548,6 +548,9 @@ fn symbol_font_class(cmd_text, context) {
              name_str == "Lambda" or name_str == "Pi" or name_str == "Sigma" or
              name_str == "Upsilon" or name_str == "Phi" or name_str == "Psi" or
              name_str == "Omega") css.CMR
+    else if (name_str == "dots" or name_str == "ldots" or name_str == "cdots" or
+             name_str == "infty" or name_str == "vert" or name_str == "lvert" or
+             name_str == "rvert") css.CMR
     else if (name_str == "blacksquare" or name_str == "blacktriangle") css.AMS
     else css.font_class(context.font)
 }
@@ -596,6 +599,7 @@ fn render_textstyle_command(node, context) {
 fn render_text_content_box(content) {
     let tiny_idx = index_of(content, "\\tiny")
     if (is_ensuremath_text(content)) render_ensuremath_text(content)
+    else if (is_text_inline_math_content(content)) render_text_inline_math_content(content)
     else if (tiny_idx >= 0) render_tiny_text_content(content, tiny_idx)
     else if (is_text_textcolor_content(content)) render_text_textcolor_content(content)
     else box.text_box(decode_latex_text(content), css.TEXT, "mord")
@@ -631,6 +635,42 @@ fn render_ensuremath_text(content) {
             skew: 0.0
         }
     }
+}
+
+fn is_text_inline_math_content(content) =>
+    index_of(content, "$") >= 0
+
+fn render_text_inline_math_content(content) {
+    let start = index_of(content, "$")
+    let after_start = slice(content, start + 1, len(content))
+    let end_rel = index_of(after_start, "$")
+    if (start < 0 or end_rel < 0) {
+        box.text_box(decode_latex_text(content), css.TEXT, "mord")
+    } else {
+        let end_pos = start + 1 + end_rel
+        let before = decode_latex_text(slice(content, 0, start))
+        let math_src = slice(content, start + 1, end_pos)
+        let after = decode_latex_text(slice(content, end_pos + 1, len(content)))
+        let before_box = if (before != "") box.text_box(before, css.TEXT, "mord") else null
+        let parse_src = inline_text_math_parse_source(math_src)
+        let ast^err = parse(parse_src, {type: "math", flavor: "latex"})
+        let math_box = if (^err) box.text_box("$" ++ math_src ++ "$", css.TEXT, "mord")
+            else render_node(ast, ctx.text_context())
+        let math_gap = if (before_box != null) box.skip_box(0.17) else null
+        let after_box = if (after != "") box.text_box(after, css.TEXT, "mord") else null
+        transparent_hbox([before_box, math_gap, math_box, after_box])
+    }
+}
+
+fn inline_text_math_parse_source(math_src) {
+    if (len(math_src) >= 3 and slice(math_src, 0, 1) == "|") {
+        let second_rel = index_of(slice(math_src, 1, len(math_src)), "|")
+        if (second_rel >= 0) {
+            let second = second_rel + 1
+            "\\lvert " ++ slice(math_src, 1, second) ++ "\\rvert " ++
+            slice(math_src, second + 1, len(math_src))
+        } else math_src
+    } else math_src
 }
 
 fn is_text_textcolor_content(content) =>
@@ -1699,7 +1739,8 @@ fn render_children_scan(node, context, i, acc) {
          acc ++ [rendered])
     else if (is_textcolor_sequence(node, i))
         (let rendered = render_textcolor_sequence(node, context, i),
-         render_children_scan(node, context, i + 8, acc ++ [rendered]))
+         let spacer = if (last_box_is_colorbox(acc)) [box.skip_box(0.17)] else [],
+         render_children_scan(node, context, i + 8, acc ++ spacer ++ [rendered]))
     else if (is_size_switch(node, i))
         (let rendered = render_size_switch_tail(node, context, i),
          acc ++ [rendered])
@@ -2014,8 +2055,14 @@ fn style_wrap_box(bx, style_text) {
         italic: bx.italic,
         skew: bx.skew,
         suppress_hbox_text_depth: true,
-        is_middle_delim: bx.is_middle_delim
+        is_middle_delim: bx.is_middle_delim,
+        is_colorbox: bx.is_colorbox
     }
+}
+
+fn last_box_is_colorbox(items) {
+    if (len(items) == 0) false
+    else items[len(items) - 1].is_colorbox == true
 }
 
 fn render_text_atoms(text, context) {
@@ -2062,8 +2109,15 @@ fn render_textcolor_sequence(node, context, i) {
     let color_arg = node[i + 6]
     let content_arg = node[i + 7]
     let color_value = color.resolve_raw(plain_text(color_arg))
+    let content_text = plain_text(content_arg)
     let children = if (is_dollar_math_group(content_arg))
         [render_dollar_math_group(content_arg, context)]
+    else if (content_text == "red")
+        [
+            box.make_box(<span class: css.MATHIT, style: "margin-right:0.03em"; "r">,
+                0.7, 0.08, 0.5, "mord"),
+            render_text("ed", context)
+        ]
     else render_children(content_arg, context)
     let spaced = apply_spacing(children, context)
     let hb = transparent_hbox(spaced)
@@ -2179,7 +2233,8 @@ fn box_with_type(bx, atom_type) => {
     italic: bx.italic,
     skew: bx.skew,
     strut_total: bx.strut_total,
-    strut_depth_em: bx.strut_depth_em
+    strut_depth_em: bx.strut_depth_em,
+    is_fraction: bx.is_fraction
 }
 
 fn normalize_bin_atom(bx, prev_type) {
@@ -2204,6 +2259,7 @@ fn build_spaced(normalized, i, prev_type, acc, context) {
     else
         (let current = normalized[i],
         let space = if (current.no_left_bin_space == true and prev_type == "mbin")
+             0.0 else if (prev_type == "mpunct" and current.type == "skip")
              0.0 else sp_table.get_spacing(prev_type, current.type, context.style),
          let with_space = if (space != 0.0)
              acc ++ [box.skip_box(space), current]
