@@ -1707,11 +1707,54 @@ typedef struct EmitHandlerContext {
 
 static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
 
+static DomElement* find_element_by_author_id(DomNode* node, const char* id);
+
+static bool dom_node_is_within_root(DomNode* node, DomNode* root) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == root) return true;
+    }
+    return false;
+}
+
+static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
+    if (!doc || !doc->root || !state) {
+        return doc && doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
+    }
+
+    EditingSurface resolved;
+    const EditingSurface* surface = nullptr;
+    if (state->editing.rich_transaction_phase != EDITING_RICH_TX_IDLE &&
+        state->editing.rich_transaction_target &&
+        editing_surface_from_target(state->editing.rich_transaction_target, &resolved) &&
+        editing_surface_is_rich(&resolved) && resolved.owner) {
+        surface = &resolved;
+    } else if (state->editing.has_active_surface &&
+               editing_surface_is_rich(&state->editing.active_surface) &&
+               state->editing.active_surface.owner) {
+        surface = &state->editing.active_surface;
+    }
+
+    DomNode* doc_root = static_cast<DomNode*>(doc->root);
+    if (!surface || !surface->owner) return doc_root;
+
+    DomElement* owner = surface->owner;
+    if (!dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root) &&
+        owner->id && owner->id[0]) {
+        DomElement* live_owner = find_element_by_author_id(doc_root, owner->id);
+        if (live_owner) owner = live_owner;
+    }
+
+    return dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root)
+        ? static_cast<DomNode*>(owner)
+        : doc_root;
+}
+
 static bool apply_source_selection_to_doc(UiContext* uicon, DomDocument* doc, Item selection) {
     if (!doc || !doc->root) return false;
     DocState* state = (DocState*)doc->state;
     if (!state || !state->dom_selection) return false;
-    if (!dom_selection_apply_source_selection(state->dom_selection, static_cast<DomNode*>(doc->root), selection)) {
+    DomNode* root = source_selection_scope_root(doc, state);
+    if (!root || !dom_selection_apply_source_selection(state->dom_selection, root, selection)) {
         return false;
     }
     update_caret_visual_position(uicon, state);
@@ -4224,6 +4267,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
         bool preserve_rich_editing =
             state->editing.has_active_surface &&
             editing_surface_is_rich(&state->editing.active_surface);
+        bool preserve_text_control_selection =
+            state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+            state->sel.control && tc_is_text_control(state->sel.control);
         doc_state_close_dropdown(state, NULL);
         doc_state_close_context_menu(state);
         doc_state_set_hover_target(state, NULL);
@@ -4231,9 +4277,11 @@ static void post_html_handler_rebuild(EventContext* evcon,
         doc_state_set_drag_state(state, NULL, false);
         if (focus_has_current(state)) {
             focus_clear(state);
-        } else if (!preserve_rich_editing) {
+        } else if (!preserve_rich_editing && !preserve_text_control_selection) {
             state_store_legacy_selection_clear(state);
             state_store_legacy_caret_clear(state);
+        } else if (preserve_text_control_selection) {
+            state_store_refresh_caret_projection(state);
         }
     }
 
@@ -7083,9 +7131,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
 
                 } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
-                    // Non-text replaced elements: clear caret
-                    state_store_legacy_caret_clear(state);
-                    state_store_legacy_selection_clear(state);
+                    bool disabled_form_control =
+                        target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                        target_elem->form &&
+                        form_control_is_disabled(state, static_cast<View*>(target_elem));
+                    if (disabled_form_control) {
+                        if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+                            state_store_refresh_caret_projection(state);
+                        }
+                    } else {
+                        // Non-text replaced elements: clear caret
+                        state_store_legacy_caret_clear(state);
+                        state_store_legacy_selection_clear(state);
+                    }
                     evcon.need_repaint = true;
                 }
             }
@@ -7885,6 +7943,23 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+
+        // copy has no beforeinput intent, so rich surfaces need their default
+        // clipboard action here after keydown handlers had a chance to cancel.
+        if (!evcon.default_prevented &&
+            (key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER)) &&
+            key_event->key == RDT_KEY_C) {
+            View* rich_copy_target = intent_target
+                ? intent_target
+                : canonical_selection_focus_target(state);
+            EditingSurface rich_copy_surface;
+            if (rich_copy_target &&
+                editing_surface_from_target(rich_copy_target, &rich_copy_surface) &&
+                editing_surface_is_rich(&rich_copy_surface)) {
+                copy_current_selection_to_clipboard(state, "rich copy");
+                break;
+            }
         }
 
         // Handle arrow keys and caret adjustment for text input form controls

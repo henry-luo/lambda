@@ -2625,7 +2625,6 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
         int start_row;
         int end_row;
         float required_height;
-        float current_total;
     };
 
     ArrayList* rowspan_cells = arraylist_new(8);
@@ -2658,7 +2657,6 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
                     rsc->start_row = start_row;
                     rsc->end_row = end_row;
                     rsc->required_height = required_height;
-                    rsc->current_total = current_total;
                     arraylist_append(rowspan_cells, rsc);
 
                     log_debug("Rowspan cell at row %d spans %d rows: needs %.1fpx, currently %.1fpx",
@@ -2671,7 +2669,24 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
     // Distribute excess height for each rowspan cell
     for (int i = 0; i < rowspan_cells->length; i++) {
         RowspanCell* rsc = (RowspanCell*)rowspan_cells->data[i];
-        float excess = rsc->required_height - rsc->current_total;
+        // recompute the spanned height after earlier rowspan cells may have
+        // expanded overlapping rows. otherwise sibling rowspans over the same
+        // row range each add the full original deficit.
+        float current_total = 0.0f;
+        for (int r = rsc->start_row; r < rsc->end_row; r++) {
+            current_total += meta->row_heights[r];
+            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0.0f && r < rsc->end_row - 1) {
+                current_total += table->tb->border_spacing_v;
+            }
+        }
+
+        float excess = rsc->required_height - current_total;
+        if (excess <= 0.0f) {
+            log_debug("Rowspan cell at row %d spans %d rows: already satisfied %.1fpx >= %.1fpx",
+                      rsc->start_row, rsc->end_row - rsc->start_row,
+                      current_total, rsc->required_height);
+            continue;
+        }
 
         // Calculate total content height of spanned rows for proportional distribution
         float total_content = 0;
@@ -2697,15 +2712,19 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
             log_debug("Distributed %.1fpx across rows %d-%d (total excess: %.1fpx)",
                      distributed, rsc->start_row, rsc->end_row - 1, excess);
         } else {
-            // Equal fallback if all spanned rows have zero height
-            int span = rsc->end_row - rsc->start_row;
-            float amount_per_row = excess / span;
-            for (int r = rsc->start_row; r < rsc->end_row; r++) {
-                meta->row_heights[r] += amount_per_row;
-                log_debug("  Row %d: height %.1fpx (equal distribution)", r, meta->row_heights[r]);
+            // if all spanned rows have zero own height, browsers keep the row
+            // where the rowspan starts at zero and place the spanned cell's
+            // height into the later grid row. this preserves empty placeholder
+            // rows used only to terminate rowspans.
+            int target_row = rsc->end_row - 1;
+            if (meta->row_collapsed) {
+                while (target_row > rsc->start_row && meta->row_collapsed[target_row]) {
+                    target_row--;
+                }
             }
-            log_debug("Distributed %.1fpx equally across rows %d-%d",
-                     excess, rsc->start_row, rsc->end_row - 1);
+            meta->row_heights[target_row] += excess;
+            log_debug("Distributed %.1fpx to zero-height rowspan target row %d across rows %d-%d",
+                     excess, target_row, rsc->start_row, rsc->end_row - 1);
         }
     }
 

@@ -167,7 +167,8 @@ extern "C" {
 // `source_text_selection_to_item` / `source_node_selection_to_item`:
 //   { kind:'text', anchor:pos, head:pos }
 //   { kind:'node', path:[int,...] }
-//   { kind:'all' }                       — selects every child of dom_root
+//   { kind:'all' }                       — selects the recorded source root,
+//                                          falling back to dom_root
 //
 // Each `pos` endpoint is resolved against `dom_root` via
 // `dom_boundary_from_source_pos`. On success the selection is updated

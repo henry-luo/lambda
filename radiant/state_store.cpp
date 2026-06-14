@@ -6312,6 +6312,22 @@ bool caret_prepare_selective_repaint(DocState* state) {
 bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
     if (out_view) *out_view = NULL;
     if (out_offset) *out_offset = 0;
+    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control && tc_is_text_control(state->sel.control)) {
+        DomElement* control = state->sel.control;
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        if (form) {
+            uint32_t focus_u16 = state->sel.direction == DOM_SEL_DIR_BACKWARD ?
+                state->sel.start_u16 : state->sel.end_u16;
+            uint32_t focus_byte = text_control_u16_offset_to_byte(form, focus_u16);
+            if (out_view) *out_view = static_cast<View*>(control);
+            if (out_offset) {
+                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: legacy caret API exposes text-control byte offsets as int.
+            }
+            return true;
+        }
+    }
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
@@ -6326,6 +6342,21 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
 
 bool caret_get_offset(DocState* state, int* out_offset) {
     if (out_offset) *out_offset = 0;
+    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control && tc_is_text_control(state->sel.control)) {
+        DomElement* control = state->sel.control;
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        if (form) {
+            uint32_t focus_u16 = state->sel.direction == DOM_SEL_DIR_BACKWARD ?
+                state->sel.start_u16 : state->sel.end_u16;
+            uint32_t focus_byte = text_control_u16_offset_to_byte(form, focus_u16);
+            if (out_offset) {
+                *out_offset = static_cast<int>(focus_byte); // INT_CAST_OK: legacy caret API exposes text-control byte offsets as int.
+            }
+            return true;
+        }
+    }
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
@@ -6338,6 +6369,10 @@ bool caret_get_offset(DocState* state, int* out_offset) {
 }
 
 View* caret_get_view(DocState* state) {
+    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
+        state->sel.control && tc_is_text_control(state->sel.control)) {
+        return static_cast<View*>(state->sel.control);
+    }
     DomBoundary focus = dom_selection_focus_boundary(state ? state->dom_selection : NULL);
     if (state && state->dom_selection && state->dom_selection->range_count > 0 &&
         focus.node) {
@@ -7192,14 +7227,12 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
     }
 
     if (tc_get_active_element(state)) tc_set_active_element(state, NULL);
-    if (state->caret && selection_is_text_control_view(state->caret->view)) {
-        state_store_legacy_caret_clear(state);
-    }
-    if (state->selection &&
-        (selection_is_text_control_view(state->selection->anchor_view) ||
-         selection_is_text_control_view(state->selection->focus_view) ||
-         selection_is_text_control_view(state->selection->view))) {
-        state_store_legacy_selection_clear(state);
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        state_store_refresh_caret_projection(state);
+    } else if (state->caret && selection_is_text_control_view(state->caret->view)) {
+        state->caret->visible = false;
+        state->caret->blink_time = 0;
+        state->needs_repaint = true;
     }
 }
 
@@ -7292,10 +7325,13 @@ static void focus_clear_internal(DocState* state, bool preserve_selection) {
     bool preserve_rich_editing =
         state->editing.has_active_surface &&
         editing_surface_is_rich(&state->editing.active_surface);
-    if (!preserve_selection && !preserve_rich_editing) {
+    bool preserve_text_control_selection = state->sel.kind == EDIT_SEL_TEXT_CONTROL;
+    if (!preserve_selection && !preserve_rich_editing && !preserve_text_control_selection) {
         // Also clear caret and selection
         state_store_legacy_caret_clear(state);
         state_store_legacy_selection_clear(state);
+    } else if (preserve_text_control_selection) {
+        state_store_refresh_caret_projection(state);
     }
 
     state->needs_repaint = true;
