@@ -99,11 +99,11 @@ let misc_symbols = {
     degree: "°", copyright: "©",
     dots: "…", ldots: "…", cdots: "⋯",
     vdots: "⋮", ddots: "⋱",
-    colon: ":", vert: "|", Vert: "‖",
+    colon: ":", vert: "∣", Vert: "‖",
     langle: "⟨", rangle: "⟩",
     lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋",
     lbrace: "{", rbrace: "}",
-    lvert: "|", rvert: "|", lVert: "‖", rVert: "‖"
+    lvert: "∣", rvert: "∣", lVert: "‖", rVert: "‖"
 }
 
 // ============================================================

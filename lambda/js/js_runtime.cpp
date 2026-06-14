@@ -17454,11 +17454,19 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 return js_typed_array_subarray(obj, start, end, end_is_default);
             }
             if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                // Js55 P19: when Array.prototype.slice is called on a TA, ES spec
+                // ArraySpeciesCreate creates a regular Array (not a TA). Delegate
+                // to the generic slice path so the result observes
+                // HasProperty=false for OOB indices (yielding sparse holes) rather
+                // than the TA-element-typed copy which stores 0s for OOB.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_slice(obj, args, argc);
+                }
                 // Js54 P4: spec §23.2.3.27 step 2 — Perform ? ValidateTypedArray.
                 // Throws TypeError if the TA is OOB (fixed-length view shrunk
                 // past end, or length-tracking offset > buffer length).
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
@@ -17511,10 +17519,17 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) {
                     return js_throw_type_error("callback is not a function");
                 }
+                // Js55 P21: when Array.prototype.map is called on a TA, ES spec
+                // ArraySpeciesCreate creates a regular Array (not a TA). The
+                // generic path uses HasProperty (skip on OOB → sparse holes).
+                // TA species_create would return a TA with element-type zeros.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_iterative_callback(obj, args, argc, JS_ARRAY_ITER_MAP);
+                }
                 Item callback = args[0];
                 Item this_arg = argc > 1 ? args[1] : make_js_undefined();
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.map on an out-of-bounds ArrayBuffer");
@@ -17775,8 +17790,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: find spec doesn't use HasProperty — yield undefined for OOB
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17804,8 +17821,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = 0; i < len; i++) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: findIndex spec doesn't use HasProperty — yield undefined for OOB
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17892,8 +17911,12 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: when called as Array method, OOB indices yield
+                    // undefined to the callback (per spec — HasProperty returns
+                    // false, the loop still calls callback with undefined value).
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -17922,8 +17945,10 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
                 int len = js_typed_array_length(obj);
                 for (int i = len - 1; i >= 0; i--) {
-                    if (js_dispatch_as_array_method && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    // Js55 P19: yield undefined for OOB indices when called as Array method
+                    bool i_oob = js_dispatch_as_array_method && i >= js_typed_array_length(obj);
+                    Item elem = i_oob ? make_js_undefined()
+                                      : js_typed_array_get(obj, (Item){.item = i2it(i)});
                     if (elem.item == ITEM_NULL) elem = make_js_undefined();
                     Item idx_item = {.item = i2it(i)};
                     Item fn_args[3] = {elem, idx_item, obj};
@@ -18308,9 +18333,16 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 if (has_comparefn && get_type_id(comparefn) != LMD_TYPE_FUNC) {
                     return js_throw_type_error("comparefn is not a function");
                 }
+                // Js55 P21: when Array.prototype.sort is called on a TA, the
+                // default (no comparefn) sort uses STRING comparison per ES spec
+                // §23.1.3.27, not the numeric compare that TA's sort uses. Route
+                // to the generic sort path so the behavior matches.
+                if (js_dispatch_as_array_method) {
+                    return js_array_generic_sort(obj, args, argc);
+                }
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 // Js54 P4: ValidateTypedArray throws on OOB / detached.
-                if (!js_dispatch_as_array_method && ta && ta->buffer) {
+                if (ta && ta->buffer) {
                     if (ta->length_tracking) {
                         if (ta->buffer->byte_length < ta->byte_offset) {
                             return js_throw_type_error("Cannot perform %TypedArray%.prototype.sort on an out-of-bounds ArrayBuffer");
@@ -28165,6 +28197,18 @@ static void js_promise_mark_anonymous_builtin(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (!fn) return;
+    // Js56 P5: js_new_function caches by func_ptr, so the resolve/reject base
+    // functions are shared across all `new Promise(...)` invocations. Marking
+    // sets `name`="" non-writable; doing it twice on the same shared function
+    // throws "Cannot assign to read only property 'name'". Skip the redundant
+    // marking on the UNBOUND cached callback only — `js_bind_function` produces
+    // a fresh `JsFunction*` per Promise (each with its own name slot), so bound
+    // functions must still be marked. (E1 cluster: 7 tests in
+    // language/module-code/top-level-await/syntax/*-await-expr-new-expr;
+    // regression to avoid: Promise/{resolve,reject}-function-name and bound
+    // 'name' = "" mismatch.)
+    bool is_bound = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) != 0;
+    if (!is_bound && fn->name && fn->name->len == 0) return;
     fn->name = heap_create_name("", 0);
     fn->flags |= JS_FUNC_FLAG_ARROW;
     Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
@@ -28669,9 +28713,44 @@ extern "C" Item js_promise_with_resolvers(void) {
 
 // Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
 extern "C" Item js_await_sync(Item value) {
-    // If not a promise, return value as-is (like awaiting a non-thenable)
+    extern void js_run_microtasks(void);
+    // If not a promise, check for thenable per ES spec PromiseResolve.
+    // For TLA without state machine, we can only synchronously resolve thenables
+    // whose .then() invokes resolve() synchronously.
     JsPromise* p = js_get_promise(value);
-    if (!p) return value;
+    if (!p) {
+        if (js_promise_is_object_like(value)) {
+            Item wrapped = js_promise_resolve(value);
+            p = js_get_promise(wrapped);
+            if (p) {
+                // js_promise_resolve_with_value enqueues thenable.then(resolve, reject)
+                // as a microtask. Drain microtasks so the resolve callback fires
+                // before we read p->state. This handles thenables whose .then()
+                // invokes resolve() synchronously.
+                if (p->state == JS_PROMISE_PENDING) {
+                    js_run_microtasks();
+                }
+                if (p->state == JS_PROMISE_FULFILLED) {
+                    return p->result;
+                }
+                if (p->state == JS_PROMISE_REJECTED) {
+                    js_throw_value(p->result);
+                    return ItemNull;
+                }
+                // Pending — sync fast-path can't suspend
+                log_debug("js: await_sync: thenable pending (no async state machine yet)");
+                return make_js_undefined();
+            }
+        }
+        // Js56 P9: even for non-promise/non-thenable awaits, the ES spec
+        // wraps the value in `PromiseResolve(X)` and yields to the microtask
+        // queue. Without draining microtasks here, tests that rely on
+        // observable tick ordering (e.g.
+        // `Promise.resolve().then(...); await 1; assert(...)`) see stale
+        // state. The drain is bounded by TASK_FLUSH_SAFETY_LIMIT.
+        js_run_microtasks();
+        return value;
+    }
 
     if (p->state == JS_PROMISE_FULFILLED) {
         return p->result;
@@ -28681,8 +28760,22 @@ extern "C" Item js_await_sync(Item value) {
         js_throw_value(p->result);
         return ItemNull;
     }
-    // Pending promise — synchronous fast-path cannot handle this
-    log_debug("js: await_sync: promise still pending (no async state machine yet)");
+    // Js56 H1: pending direct Promise — drain microtasks once, then re-check.
+    // Handles `await Promise.resolve(1).then(...).then(...)` where the chained
+    // then handlers run as microtasks and only resolve the awaited promise after
+    // the queue is flushed. Drain is bounded by TASK_FLUSH_SAFETY_LIMIT (see
+    // js_event_loop.cpp:js_microtask_flush). Single drain — if still pending
+    // after one flush, the promise needs the full async state machine, which
+    // the sync fast-path cannot model.
+    js_run_microtasks();
+    if (p->state == JS_PROMISE_FULFILLED) {
+        return p->result;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        js_throw_value(p->result);
+        return ItemNull;
+    }
+    log_debug("js: await_sync: promise still pending after microtask flush");
     return make_js_undefined();
 }
 

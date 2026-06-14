@@ -4787,6 +4787,12 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, var->reg)));
         }
+        // Js56 P2: per-closure env writeback. When the outer mutates a block-let
+        // captured by a closure that lives in a per-closure env (no scope_env at
+        // module level), propagate the new value to the closure's env so the
+        // closure sees the update on subsequent invocations (Gate I closure-
+        // capture cluster: speciesctor-resizable-buffer / coerced-new-length-detach).
+        jm_write_last_closure_capture_if_matching(mt, vname, var->reg, var->type_id);
         // v20: arguments aliasing — write back to arguments[i] when param is assigned
         {
             int api = jm_arguments_param_index(mt, vname);
@@ -6041,10 +6047,21 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
-        if (!var) continue;
+        if (!var) {
+            if (getenv("JS56_READBACK_TRACE")) fprintf(stderr, "  skip: var '%s' not found\n", mt->last_closure_capture_names[i]);
+            continue;
+        }
         if (var->from_block_func_decl) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
-        if (jm_is_native_type(var->type_id)) {
+        // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
+        // generic boxed branch — there is no native-bool fast path), so they
+        // need the same MOV-only readback as object types even though
+        // jm_is_native_type(BOOL) returns true. Treat BOOL as boxed here so
+        // closure-mutated booleans propagate back to the outer var->reg
+        // (Gate K coerced-new-length-detach: `let called = false; closure
+        // mutates called`).
+        bool is_bool = (var->type_id == LMD_TYPE_BOOL);
+        if (jm_is_native_type(var->type_id) && !is_bool) {
             // Read boxed value from env slot, unbox to native type
             MIR_reg_t boxed = jm_new_reg(mt, "envrd", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -6076,9 +6093,18 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
             }
         }
     }
-    if (!mt->preserve_last_closure_env_after_readback) {
-        mt->last_closure_has_env = false;
-    }
+    // Js56 P2: do NOT reset last_closure_has_env after readback. The closure's
+    // env is kept alive by the closure object itself and remains the canonical
+    // storage for the captured vars; readback on every subsequent call to the
+    // same closure propagates env mutations back to the outer's var->reg.
+    // Resetting here only works for one-shot callbacks (forEach/map) and
+    // silently fails when the closure is stored and called multiple times
+    // (Js56 Gate I: speciesctor closure-mutation cluster, §12.17).
+    // The earlier "reset on readback" was a forEach-shaped optimization; keeping
+    // the env around costs nothing because the readback is idempotent when the
+    // env value matches the var->reg already (no spurious work at runtime —
+    // just an extra mem load that lands in the same value).
+    (void)mt->preserve_last_closure_env_after_readback;  // flag now unused at this site
 }
 
 // P6: Check if a function is eligible for call-site inlining.
@@ -8076,7 +8102,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
             // Function.prototype.call(thisArg, ...args)
             // Pattern: Foo.call(thisObj, a1, a2, ...)
-            if (prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
+            // Js55 P22: skip this fast path when any arg is a SpreadElement —
+            // jm_build_args_array doesn't expand spread, so spread args would
+            // get passed as a single Array. Fall through to the spread-aware
+            // dispatch below (js_method_call_apply path).
+            bool call_has_spread = false;
+            for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
+                if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { call_has_spread = true; break; }
+            }
+            if (!call_has_spread && prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
                 MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
                 MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // Build args from the remaining arguments (skip the first 'this' arg)
@@ -8323,8 +8357,16 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // Reset closure env tracking before evaluating arguments
-            mt->last_closure_has_env = false;
+            // Js56 Gate K: preserve closure env tracking across the method call.
+            // The previous "reset before arguments" prevented stale readback when
+            // no new closure was created during arg eval, but it also defeated
+            // the readback path for indirectly-invoked closures (e.g.
+            // `rab.resize({valueOf() { called = true; }})` where valueOf runs
+            // inside resize). Argument evaluation overrides last_closure_* when
+            // it creates a new closure; otherwise the previous closure's env
+            // is the right one to refresh after the call. Readback on the
+            // wrong env is idempotent (just copies the same value back), so
+            // preserving is safe.
 
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(mt, (JsAstNode*)m->property, prop->name);
@@ -11694,6 +11736,22 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, self_ref_slot * (int)sizeof(uint64_t), env, 0, 1),
                     MIR_new_reg_op(mt->ctx, fn_reg)));
             }
+
+            // Js56 P2: register last_closure for the writeback path so subsequent
+            // assignments to captured vars (e.g. `flag = true;` after `class Foo {
+            // constructor() { if (flag) ... } }`) propagate into this env. The
+            // class-constructor path goes through jm_create_func_or_closure rather
+            // than jm_transpile_func_expr, so without this it would never register
+            // and outer writes would never reach the constructor's captured env.
+            mt->last_closure_env_reg = env;
+            mt->last_closure_capture_count = fc->capture_count;
+            for (int ci = 0; ci < fc->capture_count && ci < 16; ci++) {
+                snprintf(mt->last_closure_capture_names[ci], 128, "%s", fc->captures[ci].name);
+                mt->last_closure_capture_slots[ci] =
+                    has_remapped ? fc->captures[ci].scope_env_slot : ci;
+                mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
+            }
+            mt->last_closure_has_env = true;
         }
     } else {
         fn_reg = jm_call_2(mt, "js_new_function", MIR_T_I64,

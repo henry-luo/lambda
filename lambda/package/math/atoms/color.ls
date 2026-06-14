@@ -39,7 +39,8 @@ fn render_foreground(node, context, color, render_fn) {
 // ============================================================
 
 fn render_colorbox(node, context, bg_color, render_fn) {
-    let content_box = if (node.content != null) render_fn(node.content, context)
+    let content_ctx = ctx.derive(context, {colorbox_content: true})
+    let content_box = if (node.content != null) render_fn(node.content, content_ctx)
         else box.text_box("", null, "ord")
     with_background(content_box, bg_color)
 }
@@ -61,7 +62,8 @@ pub fn with_background(content_box, bg_color) {
         type: "ord",
         italic: 0.0,
         skew: 0.0,
-        suppress_hbox_text_depth: content_box.suppress_hbox_text_depth
+        suppress_hbox_text_depth: content_box.suppress_hbox_text_depth,
+        is_colorbox: true
     }
 }
 

@@ -1861,22 +1861,34 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
     if (js_is_typed_array(source)) {
         // Copy from another typed array
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
+        // Js55 P22: per ES2024 §23.2.5.1.1 InitializeTypedArrayFromTypedArray,
+        // step 2 — IsTypedArrayOutOfBounds(srcRecord) must throw TypeError.
+        // This catches the case where the source TA's backing resizable
+        // ArrayBuffer was shrunk past the view's range.
+        if (js_typed_array_is_out_of_bounds(src)) {
+            return js_throw_type_error("Cannot construct from an out-of-bounds TypedArray");
+        }
         bool src_bigint = js_typed_array_is_bigint_element(src->element_type);
         bool dst_bigint = js_typed_array_is_bigint_element((JsTypedArrayType)type_id);
         if (src_bigint != dst_bigint) {
             return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
         }
-        Item result = js_typed_array_new(type_id, src->length);
+        // Js55 P22: for length-tracking source TAs on a resized buffer, use
+        // current length (TypedArrayLength of the witness record), not the
+        // cached src->length which may be stale.
+        int src_len = js_typed_array_current_length(src);
+        Item result = js_typed_array_new(type_id, src_len);
         JsTypedArray* dst = js_get_typed_array_ptr(result.map);
         if (src->element_type == (JsTypedArrayType)type_id) {
             // fast path: same type → memcpy
             int elem_size = typed_array_element_size(src->element_type);
-            memcpy(dst->data, src->data, src->length * elem_size);
+            void* src_data = js_typed_array_current_data(src);
+            if (src_data) memcpy(dst->data, src_data, src_len * elem_size);
         } else if (js_typed_array_try_raw_convert_number(dst, src, 0, true) ||
                    js_typed_array_try_raw_convert_bigint(dst, src, 0, true)) {
             // fast path: typed-array conversion without Item boxing
         } else {
-            for (int i = 0; i < src->length; i++) {
+            for (int i = 0; i < src_len; i++) {
                 Item idx = (Item){.item = i2it(i)};
                 Item val = js_typed_array_get(source, idx);
                 js_typed_array_set(result, idx, val);

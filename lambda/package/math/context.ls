@@ -18,7 +18,9 @@ pub fn display_context() {
         font: "mathit",
         cramped: false,
         phantom: false,
-        script_container: false
+        script_container: false,
+        fraction_child: false,
+        colorbox_content: false
     }
 }
 
@@ -31,7 +33,9 @@ pub fn text_context() {
         font: "mathit",
         cramped: false,
         phantom: false,
-        script_container: false
+        script_container: false,
+        fraction_child: false,
+        colorbox_content: false
     }
 }
 
@@ -48,7 +52,9 @@ pub fn derive(ctx, overrides) {
         font: if (overrides.font != null) overrides.font else ctx.font,
         cramped: if (overrides.cramped != null) overrides.cramped else ctx.cramped,
         phantom: if (overrides.phantom != null) overrides.phantom else ctx.phantom,
-        script_container: if (overrides.script_container != null) overrides.script_container else ctx.script_container
+        script_container: if (overrides.script_container != null) overrides.script_container else ctx.script_container,
+        fraction_child: if (overrides.fraction_child != null) overrides.fraction_child else ctx.fraction_child,
+        colorbox_content: if (overrides.colorbox_content != null) overrides.colorbox_content else ctx.colorbox_content
     }
 }
 
@@ -60,7 +66,7 @@ pub fn numer_context(ctx) {
         case "script": "scriptscript"
         default: "scriptscript"
     }
-    derive(ctx, {style: new_style})
+    derive(ctx, {style: new_style, fraction_child: true})
 }
 
 // derive context for a fraction denominator
@@ -71,7 +77,7 @@ pub fn denom_context(ctx) {
         case "script": "scriptscript"
         default: "scriptscript"
     }
-    derive(ctx, {style: new_style, cramped: true})
+    derive(ctx, {style: new_style, cramped: true, fraction_child: true})
 }
 
 // derive context for superscript

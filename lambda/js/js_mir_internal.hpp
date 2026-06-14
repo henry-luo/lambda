@@ -307,6 +307,8 @@ String* jm_get_math_method(JsCallNode* call);
 bool jm_is_document_call(JsCallNode* call);
 bool jm_is_window_getComputedStyle(JsCallNode* call);
 void jm_readback_closure_env(JsMirTranspiler* mt);
+void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
+        const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 bool jm_should_inline(JsFuncCollected* fc);
 MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);
 MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call);
