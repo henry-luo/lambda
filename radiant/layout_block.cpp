@@ -2959,6 +2959,35 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     }
 }
 
+static void resolve_table_auto_margins_after_shrink(ViewBlock* block, float containing_width, bool is_float) {
+    if (!block || !block->bound || is_float) return;
+    if (block->display.outer == CSS_VALUE_INLINE ||
+        block->display.outer == CSS_VALUE_INLINE_BLOCK) return;
+    if (block->bound->margin.left_type != CSS_VALUE_AUTO &&
+        block->bound->margin.right_type != CSS_VALUE_AUTO) return;
+
+    float available_width = containing_width > 0.0f ? containing_width : 0.0f;
+    float old_margin_left = block->bound->margin.left;
+
+    if (block->bound->margin.left_type == CSS_VALUE_AUTO &&
+        block->bound->margin.right_type == CSS_VALUE_AUTO) {
+        float used_margin = max((available_width - block->width) / 2.0f, 0.0f);
+        block->bound->margin.left = used_margin;
+        block->bound->margin.right = used_margin;
+    } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
+        block->bound->margin.left = max(
+            available_width - block->width - block->bound->margin.right, 0.0f);
+    } else {
+        block->bound->margin.right = max(
+            available_width - block->width - block->bound->margin.left, 0.0f);
+    }
+
+    block->x += block->bound->margin.left - old_margin_left;
+    log_debug("%s TABLE-AUTO-MARGIN resolved after shrink: containing=%.1f, width=%.1f, margin-left=%.1f, margin-right=%.1f, x=%.1f",
+              block->source_loc(), available_width, block->width,
+              block->bound->margin.left, block->bound->margin.right, block->x);
+}
+
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     DomDocument* doc = NULL;
     log_debug("layout iframe");
@@ -4022,6 +4051,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 auto t_table_start = high_resolution_clock::now();
+                float table_margin_containing_width = lycon->block.content_width;
                 log_debug("%s TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s", block->source_loc(),
                     block->display.outer, block->display.inner, block->node_name());
                 layout_table_content(lycon, block, block->display);
@@ -4055,6 +4085,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     if (block->blk && block->blk->given_min_width >= 0 && shrink_width < block->blk->given_min_width)
                         shrink_width = block->blk->given_min_width;
                     block->width = shrink_width;
+                    resolve_table_auto_margins_after_shrink(
+                        block, table_margin_containing_width, block->position && element_has_float(block));
                     log_debug("%s TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)", block->source_loc(),
                               block->width, block->content_width);
                 }
@@ -4103,6 +4135,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 auto t_table_start = high_resolution_clock::now();
+                float table_margin_containing_width = lycon->block.content_width;
                 layout_table_content(lycon, block, block->display);
                 g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
 
@@ -4123,6 +4156,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     float shrink_width = block->content_width +
                         (block->bound && block->bound->border ? block->bound->border->width.right : 0);
                     block->width = adjust_min_max_width(block, shrink_width);
+                    resolve_table_auto_margins_after_shrink(
+                        block, table_margin_containing_width, block->position && element_has_float(block));
                     log_debug("%s EMPTY TABLE shrink-to-fit: block->width=%.1f (content_width=%.1f)", block->source_loc(),
                               block->width, block->content_width);
                 }

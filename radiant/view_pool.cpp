@@ -1199,15 +1199,31 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
 static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect);
 static bool text_has_visible_rect(ViewText* text);
 
+static bool text_white_space_preserves_space_advance(ViewText* text) {
+    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
+    return white_space == CSS_VALUE_PRE ||
+        white_space == CSS_VALUE_PRE_WRAP ||
+        white_space == CSS_VALUE_BREAK_SPACES;
+}
+
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // If text combination is disabled, just print this single text node
-    if (!g_combine_text_nodes) {
+    if (!g_combine_text_nodes || text_white_space_preserves_space_advance(first_text)) {
         // Output single text node without combining
         ViewText* text = first_text;
         TextRect* rect = text->rect;
         unsigned char* text_data = text->text_data();
 
-        if (rect) {
+        bool first_emitted = true;
+        while (rect) {
+            if (text_rect_is_collapsed_whitespace(text, rect)) {
+                rect = rect->next;
+                continue;
+            }
+
+            if (!first_emitted) strbuf_append_str(buf, ",\n");
+            first_emitted = false;
+
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "{\n");
             strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1242,6 +1258,8 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             strbuf_append_str(buf, "}\n");
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "}");
+
+            rect = rect->next;
         }
 
         return static_cast<View*>(first_text);  // Return this text node only
@@ -1492,6 +1510,160 @@ static bool is_anonymous_element(ViewBlock* block) {
     return false;
 }
 
+static bool is_non_rendered_table_marker(View* view) {
+    if (!view || view->view_type != RDT_VIEW_NONE || !view->is_element()) {
+        return false;
+    }
+    DomElement* elem = lam::dom_require_element(view);
+    return elem->display.inner == CSS_VALUE_TABLE_COLUMN ||
+        elem->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
+        elem->display.inner == CSS_VALUE_TABLE_CAPTION;
+}
+
+static const char* non_rendered_table_marker_display(DomElement* elem) {
+    if (elem && elem->display.inner == CSS_VALUE_TABLE_COLUMN) {
+        return "table-column";
+    }
+    if (elem && elem->display.inner == CSS_VALUE_TABLE_CAPTION) {
+        return "table-caption";
+    }
+    return "table-column-group";
+}
+
+static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int indent) {
+    DomElement* elem = lam::dom_require_element(view);
+    const char* tag_name = elem->node_name() ? elem->node_name() : "unknown";
+
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": \"inline\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string(buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": ");
+    const char* class_attr = elem->get_attribute("class");
+    char base_selector[256];
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        snprintf(base_selector, sizeof(base_selector), "%s.%.*s",
+                 tag_name, (int)class_len, class_attr); // INT_CAST_OK: snprintf precision requires int.
+    } else {
+        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    }
+
+    char final_selector[512];
+    DomNode* parent = elem->parent;
+    if (parent && parent->is_element()) {
+        int sibling_count = 0;
+        int current_index = 0;
+        DomNode* sibling = lam::dom_require_element(parent)->first_child;
+        while (sibling) {
+            if (sibling->node_type == DOM_NODE_ELEMENT) {
+                const char* sibling_tag = sibling->node_name();
+                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                    sibling_count++;
+                    if (sibling == elem) {
+                        current_index = sibling_count;
+                    }
+                }
+            }
+            sibling = sibling->next_sibling;
+        }
+        if (sibling_count > 1 && current_index > 0) {
+            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)",
+                     base_selector, current_index);
+        } else {
+            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+        }
+    } else {
+        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+    }
+    append_json_string(buf, final_selector);
+    strbuf_append_str(buf, ",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"classes\": [");
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        strbuf_append_char(buf, '\"');
+        strbuf_append_str_n(buf, class_attr, class_len);
+        strbuf_append_char(buf, '\"');
+    }
+    strbuf_append_str(buf, "],\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    print_bounds_json(view, buf, indent);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"computed\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"display\": \"%s\",\n",
+                         non_rendered_table_marker_display(elem));
+
+    if (elem->in_line && elem->in_line->has_color) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"color\": \"#%06x\",\n",
+                             elem->in_line->color.c);
+    }
+
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"font\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (elem->font && elem->font->family) {
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", elem->font->family);
+    } else {
+        strbuf_append_str(buf, "\"family\": \"Times\",\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (elem->font && elem->font->font_size > 0.0f) {
+        strbuf_append_format(buf, "\"size\": %g,\n", elem->font->font_size);
+    } else {
+        strbuf_append_str(buf, "\"size\": 16,\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    const char* style_str = "normal";
+    if (elem->font) {
+        auto style_val = css_enum_info(elem->font->font_style);
+        if (style_val) style_str = (const char*)style_val->name;
+    }
+    strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (elem->font && elem->font->font_weight_numeric > 0) {
+        char weight_buf[8];
+        snprintf(weight_buf, sizeof(weight_buf), "%d",
+                 elem->font->font_weight_numeric);
+        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
+    } else if (elem->font && elem->font->font_weight) {
+        const char* weight_str = "normal";
+        auto weight_val = css_enum_info(elem->font->font_weight);
+        if (weight_val) weight_str = (const char*)weight_val->name;
+        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
+    } else {
+        strbuf_append_str(buf, "\"weight\": \"400\"\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "},\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"children\": []\n");
+
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
 // Forward declaration for recursive calls
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root);
 void print_br_json(View* br, StrBuf* buf, int indent);
@@ -1650,6 +1822,13 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
     View* child = (lam::view_require_element(block))->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
+            if (is_non_rendered_table_marker(child)) {
+                if (!*first_child) { strbuf_append_str(buf, ",\n"); }
+                *first_child = false;
+                print_non_rendered_table_marker_json(child, buf, indent);
+                child = child->next_sibling;
+                continue;
+            }
             if (child->is_element()) {
                 DomElement* elmt = lam::dom_require_element(child);
                 const char* tag = child->node_name();
@@ -2625,6 +2804,15 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
+            if (is_non_rendered_table_marker(child)) {
+                if (!first_child) {
+                    strbuf_append_str(buf, ",\n");
+                }
+                first_child = false;
+                print_non_rendered_table_marker_json(child, buf, indent + 4);
+                child = child->next_sibling;
+                continue;
+            }
             child = child->next_sibling;
             continue;  // skip the view
         }

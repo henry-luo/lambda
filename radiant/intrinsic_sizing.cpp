@@ -12,6 +12,7 @@
 #include "form_control.hpp" // For FormDefaults
 #include "layout_pass.hpp"
 #include "layout_measure.hpp"
+#include "layout_table.hpp"
 #include "rdt_video.h"
 #include "retained_fields.hpp"
 #include "font_face.h"
@@ -65,6 +66,56 @@ static float intrinsic_resolve_line_height_for_owner(LayoutContext* lycon, const
         return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
     }
     return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
+}
+
+static float intrinsic_resolve_font_size_value(LayoutContext* lycon, const CssValue* value,
+                                               bool* resolved_from_medium) {
+    if (resolved_from_medium) *resolved_from_medium = false;
+    if (!lycon || !value) return -1.0f;
+
+    float parent_font_size = (lycon->font.style && lycon->font.style->font_size > 0.0f)
+        ? lycon->font.style->font_size : 16.0f;
+    bool parent_from_medium = lycon->font.style &&
+        lycon->font.style->font_size_from_medium;
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        if (value->data.length.unit == CSS_UNIT_EM) {
+            if (resolved_from_medium) *resolved_from_medium = parent_from_medium;
+            return (float)value->data.length.value * parent_font_size;
+        }
+        float font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+        if (resolved_from_medium) *resolved_from_medium = false;
+        return font_size;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        if (resolved_from_medium) *resolved_from_medium = parent_from_medium;
+        return (float)(value->data.percentage.value / 100.0 * parent_font_size);
+    }
+
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum kw = value->data.keyword;
+        if (resolved_from_medium) *resolved_from_medium = true;
+        if (kw == CSS_VALUE_INHERIT) {
+            if (resolved_from_medium) *resolved_from_medium = parent_from_medium;
+            return parent_font_size;
+        }
+        if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
+            float scale = (kw == CSS_VALUE_LARGER) ? 1.2f : (1.0f / 1.2f);
+            return parent_font_size * scale;
+        }
+        return map_lambda_font_size_keyword(kw);
+    }
+
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value == 0.0 ? 0.0f : -1.0f;
+    }
+
+    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        return resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+    }
+
+    return -1.0f;
 }
 
 // ============================================================================
@@ -161,107 +212,217 @@ static bool css_has_horizontal_box_decl(StyleTree* style) {
            style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
 }
 
-// Parses the CSS border shorthand to extract border width, matching the logic
-// in resolve_css_style.cpp. Handles: explicit length, keyword (thin/medium/thick),
-// and the CSS default of medium (3px) when style is visible but width unspecified.
-static float get_border_width_from_css(LayoutContext* lycon, DomElement* element) {
-    if (!element || !element->specified_style) return 0;
-    CssDeclaration* border_decl = style_tree_get_declaration(
-        element->specified_style, CSS_PROPERTY_BORDER);
-    if (!border_decl || !border_decl->value) return 0;
+static bool intrinsic_style_has_horizontal_padding_decl(StyleTree* style) {
+    if (!style) return false;
+    return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_START) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_PADDING_INLINE_END);
+}
 
-    float bw = -1.0f;
+static bool intrinsic_style_has_horizontal_border_decl(StyleTree* style) {
+    if (!style) return false;
+    return style_tree_get_declaration(style, CSS_PROPERTY_BORDER) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_WIDTH) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_LEFT_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_RIGHT_STYLE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_START) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_BORDER_INLINE_END);
+}
+
+static DomElement* intrinsic_find_html_table_ancestor(DomElement* element) {
+    for (DomNode* node = element ? element->parent : nullptr; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* ancestor = node->as_element();
+        if (ancestor->tag() == HTM_TAG_TABLE) return ancestor;
+    }
+    return nullptr;
+}
+
+static float intrinsic_unresolved_html_cell_horizontal_box_extra(DomElement* cell) {
+    if (!cell || cell->bound) return 0.0f;
+    uintptr_t tag = cell->tag();
+    if (tag != HTM_TAG_TD && tag != HTM_TAG_TH) return 0.0f;
+
+    DomElement* table = intrinsic_find_html_table_ancestor(cell);
+    if (!table) return 0.0f;
+
+    float extra = 0.0f;
+    StyleTree* style = cell->specified_style;
+
+    // HTML table presentational hints apply to real td/th cells even when CSS
+    // anonymous table wrappers sit between the cell and its nearest HTML table.
+    if (!intrinsic_style_has_horizontal_padding_decl(style)) {
+        float cell_padding = 1.0f;
+        const char* cellpadding_attr = table->get_attribute("cellpadding");
+        if (cellpadding_attr) {
+            cell_padding = (float)str_to_double_default(
+                cellpadding_attr, strlen(cellpadding_attr), 0.0);
+            if (cell_padding < 0.0f) cell_padding = 0.0f;
+        }
+        extra += cell_padding * 2.0f;
+    }
+
+    if (!intrinsic_style_has_horizontal_border_decl(style)) {
+        const char* border_attr = table->get_attribute("border");
+        if (border_attr) {
+            float border = (float)str_to_double_default(border_attr, strlen(border_attr), 0.0);
+            if (border > 0.0f) extra += 2.0f;
+        }
+    }
+
+    return extra;
+}
+
+static float intrinsic_border_width_from_shorthand_value(LayoutContext* lycon, CssPropertyId property,
+                                                         const CssValue* value) {
+    if (!value) return 0.0f;
+
+    float border_width = -1.0f;
     bool has_visible_style = false;
-    CssValue* val = border_decl->value;
 
-    auto parse_keyword = [&](CssEnum kw) {
-        if (kw == CSS_VALUE_THIN) bw = 1.0f;
-        else if (kw == CSS_VALUE_MEDIUM) bw = 3.0f;
-        else if (kw == CSS_VALUE_THICK) bw = 5.0f;
+    auto consider_keyword = [&](CssEnum kw) {
+        if (kw == CSS_VALUE_THIN) border_width = 1.0f;
+        else if (kw == CSS_VALUE_MEDIUM) border_width = 3.0f;
+        else if (kw == CSS_VALUE_THICK) border_width = 5.0f;
         else if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DASHED ||
                  kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DOUBLE ||
                  kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
-                 kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET)
+                 kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET) {
             has_visible_style = true;
+        } else if (kw == CSS_VALUE_NONE || kw == CSS_VALUE_HIDDEN) {
+            border_width = 0.0f;
+            has_visible_style = false;
+        }
     };
 
-    if (val->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < val->data.list.count; i++) {
-            CssValue* v = val->data.list.values[i];
-            if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER)
-                bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, v);
-            else if (v->type == CSS_VALUE_TYPE_KEYWORD)
-                parse_keyword(v->data.keyword);
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < value->data.list.count; i++) {
+            CssValue* item = value->data.list.values[i];
+            if (!item) continue;
+            if (item->type == CSS_VALUE_TYPE_LENGTH || item->type == CSS_VALUE_TYPE_NUMBER) {
+                border_width = resolve_length_value(lycon, property, item);
+            } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+                consider_keyword(item->data.keyword);
+            }
         }
-    } else if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER) {
-        bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, val);
-    } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
-        parse_keyword(val->data.keyword);
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+        border_width = resolve_length_value(lycon, property, value);
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        consider_keyword(value->data.keyword);
     }
 
-    // CSS spec: visible style with no explicit width defaults to medium (3px)
-    if (has_visible_style && bw < 0) bw = 3.0f;
-    return bw > 0 ? bw : 0;
+    // CSS Backgrounds and Borders §3: a visible border style with the initial
+    // border-width computes to medium when no width is specified.
+    if (has_visible_style && border_width < 0.0f) border_width = 3.0f;
+    return border_width > 0.0f ? border_width : 0.0f;
+}
+
+static float intrinsic_border_width_from_spacing_value(LayoutContext* lycon, CssPropertyId property,
+                                                       const CssValue* value, bool right_side) {
+    if (!value) return 0.0f;
+
+    const CssValue* side_value = value;
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+        int count = value->data.list.count;
+        CssValue** values = value->data.list.values;
+        if (count == 1) {
+            side_value = values[0];
+        } else if (count == 2 || count == 3) {
+            side_value = values[1];
+        } else {
+            side_value = values[right_side ? 1 : 3];
+        }
+    }
+
+    return resolve_length_value(lycon, property, side_value);
 }
 
 static void get_horizontal_border_widths_from_css(LayoutContext* lycon, DomElement* element,
                                                   float* border_left, float* border_right) {
     if (!element || !element->specified_style || !border_left || !border_right) return;
 
-    bool border_width_found = false;
+    float left_width = *border_left;
+    float right_width = *border_right;
+    int64_t left_priority = -1;
+    int64_t right_priority = -1;
+
+    auto apply_width = [&](const CssDeclaration* decl, float width, bool apply_left, bool apply_right) {
+        if (!decl || !decl->value) return;
+        int64_t priority = get_cascade_priority(decl);
+        if (apply_left && priority >= left_priority) {
+            left_width = width;
+            left_priority = priority;
+        }
+        if (apply_right && priority >= right_priority) {
+            right_width = width;
+            right_priority = priority;
+        }
+    };
+
+    CssDeclaration* border_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER);
+    if (border_decl && border_decl->value) {
+        float width = intrinsic_border_width_from_shorthand_value(
+            lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
+        apply_width(border_decl, width, true, true);
+    }
+
     CssDeclaration* border_width_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
     if (border_width_decl && border_width_decl->value) {
-        const CssValue* val = border_width_decl->value;
-        if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER ||
-            val->type == CSS_VALUE_TYPE_KEYWORD) {
-            float width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, val);
-            *border_left = width;
-            *border_right = width;
-            border_width_found = true;
-        } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
-            int cnt = val->data.list.count;
-            CssValue** vals = val->data.list.values;
-            if (cnt == 1) {
-                float width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[0]);
-                *border_left = width;
-                *border_right = width;
-            } else if (cnt == 2 || cnt == 3) {
-                float width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                *border_left = width;
-                *border_right = width;
-            } else {
-                *border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                *border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[3]);
-            }
-            border_width_found = true;
-        }
+        apply_width(border_width_decl,
+                    intrinsic_border_width_from_spacing_value(
+                        lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value, false),
+                    true, false);
+        apply_width(border_width_decl,
+                    intrinsic_border_width_from_spacing_value(
+                        lycon, CSS_PROPERTY_BORDER_WIDTH, border_width_decl->value, true),
+                    false, true);
     }
 
     CssDeclaration* left_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_BORDER_LEFT_WIDTH);
     if (left_decl && left_decl->value) {
-        *border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, left_decl->value);
-        border_width_found = true;
+        apply_width(left_decl,
+                    resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, left_decl->value),
+                    true, false);
     }
     CssDeclaration* right_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
     if (right_decl && right_decl->value) {
-        *border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, right_decl->value);
-        border_width_found = true;
+        apply_width(right_decl,
+                    resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, right_decl->value),
+                    false, true);
     }
 
-    // If no border-width longhand applies, fall back to the border shorthand.
-    // Side-aware longhands must be able to override border: 4px solid with
-    // border-width: 4px 0 during intrinsic sizing, just as normal style
-    // resolution does for the actual layout box.
-    if (!border_width_found) {
-        float width = get_border_width_from_css(lycon, element);
-        if (width > 0) {
-            *border_left = width;
-            *border_right = width;
-        }
+    CssDeclaration* left_shorthand_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER_LEFT);
+    if (left_shorthand_decl && left_shorthand_decl->value) {
+        apply_width(left_shorthand_decl,
+                    intrinsic_border_width_from_shorthand_value(
+                        lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, left_shorthand_decl->value),
+                    true, false);
     }
+    CssDeclaration* right_shorthand_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_BORDER_RIGHT);
+    if (right_shorthand_decl && right_shorthand_decl->value) {
+        apply_width(right_shorthand_decl,
+                    intrinsic_border_width_from_shorthand_value(
+                        lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, right_shorthand_decl->value),
+                    false, true);
+    }
+
+    *border_left = left_width;
+    *border_right = right_width;
 }
 
 static float intrinsic_resolve_box_length(LayoutContext* lycon, CssPropertyId property,
@@ -570,6 +731,54 @@ static bool node_is_table_cell_like(DomNode* node) {
     return false;
 }
 
+static bool intrinsic_text_ends_with_whitespace(const char* text) {
+    if (!text) return false;
+    size_t len = strlen(text);
+    if (len == 0) return false;
+    unsigned char ch = (unsigned char)text[len - 1];
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool intrinsic_text_starts_with_whitespace(const char* text) {
+    if (!text || !*text) return false;
+    unsigned char ch = (unsigned char)text[0];
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool intrinsic_element_text_ends_with_whitespace(DomNode* element) {
+    if (!element || !element->is_element()) return false;
+
+    DomNode* node = element->as_element()->last_child;
+    while (node) {
+        if (node->is_text()) {
+            return intrinsic_text_ends_with_whitespace((const char*)node->text_data());
+        }
+        if (node->is_element() && node->as_element()->last_child) {
+            node = node->as_element()->last_child;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+static bool intrinsic_element_text_starts_with_whitespace(DomNode* element) {
+    if (!element || !element->is_element()) return false;
+
+    DomNode* node = element->as_element()->first_child;
+    while (node) {
+        if (node->is_text()) {
+            return intrinsic_text_starts_with_whitespace((const char*)node->text_data());
+        }
+        if (node->is_element() && node->as_element()->first_child) {
+            node = node->as_element()->first_child;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
 static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const char* text,
                                                     size_t length, float start_offset,
                                                     CssEnum text_transform, CssEnum font_variant,
@@ -668,6 +877,13 @@ static inline bool is_zwj_composition_base(uint32_t cp) {
     return utf_is_zwj_composition_base(cp);
 }
 
+static inline bool intrinsic_allows_soft_wrap_after_codepoint(uint32_t cp) {
+    // CSS text wrapping follows Unicode line breaking. Hyphen characters create
+    // a soft wrap opportunity after the hyphen while keeping the hyphen on the
+    // preceding line.
+    return cp == 0x002D || cp == 0x2010;
+}
+
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
@@ -720,7 +936,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             } else {
                 current_word += 11.0f;  // Use 11.0 to match font fallback width
                 total_width += 11.0f;
-                if (break_anywhere) {
+                if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint((uint32_t)ch)) {
                     longest_word = fmax(longest_word, current_word);
                     current_word = 0.0f;
                 }
@@ -948,7 +1164,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 total_width += 11.0f;
             }
             i += bytes;
-            if (break_anywhere) {
+            if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint)) {
                 longest_word = fmax(longest_word, current_word);
                 current_word = 0.0f;
             }
@@ -999,7 +1215,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         i += bytes;  // Advance by the number of bytes consumed
 
         // overflow-wrap: anywhere — every character is a break opportunity
-        if (break_anywhere) {
+        if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint)) {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
         }
@@ -1281,6 +1497,137 @@ static bool is_inline_level_element(DomElement* element) {
     return false;
 }
 
+static bool intrinsic_table_resolve_border_spacing_value(LayoutContext* lycon, const CssValue* value,
+        float* spacing, bool* keep_inheriting) {
+    if (keep_inheriting) *keep_inheriting = false;
+    if (!value) return false;
+
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        *spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, value);
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1 &&
+        value->data.list.values[0]) {
+        *spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING,
+                                        value->data.list.values[0]);
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        *spacing = (float)value->data.number.value;
+        return true;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum kw = value->data.keyword;
+        if (kw == CSS_VALUE_INHERIT || kw == CSS_VALUE_UNSET) {
+            if (keep_inheriting) *keep_inheriting = true;
+            return false;
+        }
+        if (kw == CSS_VALUE_INITIAL) {
+            *spacing = 0.0f;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool intrinsic_table_inherit_border_spacing(LayoutContext* lycon, DomElement* element,
+        float* spacing) {
+    for (DomNode* ancestor = element ? element->parent : nullptr; ancestor; ancestor = ancestor->parent) {
+        if (!ancestor->is_element()) continue;
+
+        DomElement* anc_elem = ancestor->as_element();
+        if (anc_elem->specified_style) {
+            CssDeclaration* decl = style_tree_get_declaration(
+                anc_elem->specified_style,
+                CSS_PROPERTY_BORDER_SPACING);
+            if (decl && decl->value) {
+                bool keep_inheriting = false;
+                if (intrinsic_table_resolve_border_spacing_value(lycon, decl->value,
+                        spacing, &keep_inheriting)) {
+                    return true;
+                }
+                if (!keep_inheriting) return false;
+            }
+        }
+
+        if (anc_elem->item_prop_type == DomElement::ITEM_PROP_TABLE && anc_elem->tb) {
+            *spacing = anc_elem->tb->border_spacing_h;
+            return true;
+        }
+        if (anc_elem->tag() == HTM_TAG_TABLE) {
+            float inherited_spacing = 2.0f;
+            const char* cellspacing_attr = anc_elem->get_attribute("cellspacing");
+            if (cellspacing_attr) {
+                inherited_spacing = (float)str_to_double_default(
+                    cellspacing_attr, strlen(cellspacing_attr), 0.0);
+                if (inherited_spacing < 0.0f) inherited_spacing = 0.0f;
+            }
+            *spacing = inherited_spacing;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool intrinsic_is_table_structure_container(CssEnum inner_display) {
+    return inner_display == CSS_VALUE_TABLE ||
+           inner_display == CSS_VALUE_TABLE_ROW ||
+           inner_display == CSS_VALUE_TABLE_ROW_GROUP ||
+           inner_display == CSS_VALUE_TABLE_HEADER_GROUP ||
+           inner_display == CSS_VALUE_TABLE_FOOTER_GROUP;
+}
+
+static void intrinsic_prepare_anonymous_table_children(LayoutContext* lycon,
+        DomElement* element) {
+    if (!lycon || !element || !element->first_child) return;
+
+    DisplayValue display = resolve_display_value((void*)element);
+    if (intrinsic_is_table_structure_container(display.inner)) return;
+
+    // CSS 2.1 §17.2.1 anonymous table wrappers affect intrinsic inline-size
+    // contributions. Layout creates them before flowing content; intrinsic sizing
+    // must do the same before walking children, otherwise column measurement can
+    // miss the anonymous table's border-spacing and row/cell structure.
+    wrap_orphaned_table_children(lycon, element);
+}
+
+static bool intrinsic_element_is_float(DomElement* element) {
+    if (!element) return false;
+    if (element->position &&
+        (element->position->float_prop == CSS_VALUE_LEFT ||
+         element->position->float_prop == CSS_VALUE_RIGHT)) {
+        return true;
+    }
+    if (!element->specified_style) return false;
+    CssDeclaration* float_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_FLOAT);
+    if (!float_decl || !float_decl->value ||
+        float_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+        return false;
+    }
+    CssEnum float_value = float_decl->value->data.keyword;
+    return float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT;
+}
+
+static bool intrinsic_element_is_abs_or_fixed(DomElement* element) {
+    if (!element) return false;
+    if (element->position &&
+        (element->position->position == CSS_VALUE_ABSOLUTE ||
+         element->position->position == CSS_VALUE_FIXED)) {
+        return true;
+    }
+    if (!element->specified_style) return false;
+    CssDeclaration* pos_decl = style_tree_get_declaration(
+        element->specified_style, CSS_PROPERTY_POSITION);
+    if (!pos_decl || !pos_decl->value ||
+        pos_decl->value->type != CSS_VALUE_TYPE_KEYWORD) {
+        return false;
+    }
+    CssEnum position_value = pos_decl->value->data.keyword;
+    return position_value == CSS_VALUE_ABSOLUTE ||
+           position_value == CSS_VALUE_FIXED;
+}
+
 // Helper to get text-transform property from an element, traversing parent chain
 // since text-transform is an inherited property
 CssEnum get_element_text_transform(DomElement* element) {
@@ -1378,6 +1725,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
+    if (!element->styles_resolved && element->tag() == HTM_TAG_BUTTON) {
+        // Buttons are non-replaced controls with UA font, padding, border-box
+        // sizing, and author-overridable border styles. Resolve those defaults
+        // in measurement mode before intrinsic width walks the button content.
+        radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
+        dom_node_resolve_style(element, lycon);
+    }
+
     // First check if element has resolved font
     if (view_block_font->font && lycon->ui_context) {
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
@@ -1417,19 +1772,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
                         // font-size found
-                        bool parent_from_medium = lycon->font.style &&
-                            lycon->font.style->font_size_from_medium;
-                        if (v->type == CSS_VALUE_TYPE_LENGTH) {
-                            float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
-                            if (sz > 0) {
-                                temp_font_prop->font_size = sz;
-                                temp_font_prop->font_size_from_medium =
-                                    (v->data.length.unit == CSS_UNIT_EM) && parent_from_medium;
-                            }
-                        } else {
-                            float parent_sz = lycon->font.style ? lycon->font.style->font_size : 16.0f;
-                            temp_font_prop->font_size = (float)(v->data.percentage.value / 100.0 * parent_sz);
-                            temp_font_prop->font_size_from_medium = parent_from_medium;
+                        bool resolved_from_medium = false;
+                        float sz = intrinsic_resolve_font_size_value(
+                            lycon, v, &resolved_from_medium);
+                        if (sz >= 0.0f) {
+                            temp_font_prop->font_size = sz;
+                            temp_font_prop->font_size_from_medium = resolved_from_medium;
                         }
                         // skip /line-height, then extract font-family
                         size_t fam_idx = fi + 1;
@@ -1469,10 +1817,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
                                 temp_font_prop->font_style = v->data.keyword;
                             } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE) {
-                                float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
-                                if (sz > 0) {
+                                bool resolved_from_medium = false;
+                                float sz = intrinsic_resolve_font_size_value(
+                                    lycon, v, &resolved_from_medium);
+                                if (sz >= 0.0f) {
                                     temp_font_prop->font_size = sz;
-                                    temp_font_prop->font_size_from_medium = true;
+                                    temp_font_prop->font_size_from_medium = resolved_from_medium;
                                 }
                                 // everything after is font-family
                                 size_t fam_idx = fi + 1;
@@ -1541,27 +1891,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             element->specified_style, CSS_PROPERTY_FONT_SIZE);
         if (font_size_decl && font_size_decl->value &&
             (!font_shorthand_decl || font_size_decl->source_order > font_shorthand_decl->source_order)) {
-            float resolved_size = 0;
+            float resolved_size = -1.0f;
             bool resolved_from_medium = false;
-            bool parent_from_medium = lycon->font.style &&
-                lycon->font.style->font_size_from_medium;
-            if (font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
-                                                         font_size_decl->value);
-                resolved_from_medium =
-                    font_size_decl->value->data.length.unit == CSS_UNIT_EM &&
-                    parent_from_medium;
-            } else if (font_size_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // e.g., font-size: 85% → percentage of parent font size
-                float parent_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
-                resolved_size = (float)(font_size_decl->value->data.percentage.value / 100.0 * parent_size);
-                resolved_from_medium = parent_from_medium;
-            } else if (font_size_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
-                                                     font_size_decl->value);
-                resolved_from_medium = true;
-            }
-            if (resolved_size > 0) {
+            resolved_size = intrinsic_resolve_font_size_value(
+                lycon, font_size_decl->value, &resolved_from_medium);
+            if (resolved_size >= 0.0f) {
                 // When shorthand already triggered setup, apply size unconditionally
                 // (even if it matches parent) to override shorthand's default size
                 if (need_font_setup || fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
@@ -1677,6 +2011,23 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) {
             ua_font = alloc_font_prop(lycon);
             temp_font_guard.prop_b = ua_font;
+            ua_font->font_weight = CSS_VALUE_BOLD;
+            ua_font->font_weight_numeric = 700;
+        } else if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+            ua_font = alloc_font_prop(lycon);
+            temp_font_guard.prop_b = ua_font;
+            float em_size = 1.0f;
+            switch (tag) {
+                case HTM_TAG_H1: em_size = 2.0f; break;
+                case HTM_TAG_H2: em_size = 1.5f; break;
+                case HTM_TAG_H3: em_size = 1.17f; break;
+                case HTM_TAG_H4: em_size = 1.0f; break;
+                case HTM_TAG_H5: em_size = 0.83f; break;
+                case HTM_TAG_H6: em_size = 0.67f; break;
+                default: em_size = 1.0f; break;
+            }
+            ua_font->font_size = lycon->font.style->font_size * em_size;
+            ua_font->font_size_from_medium = false;
             ua_font->font_weight = CSS_VALUE_BOLD;
             ua_font->font_weight_numeric = 700;
         } else if (tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
@@ -2294,21 +2645,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 border_spacing = element->tb->border_spacing_h;
             } else {
                 // Table metadata not yet created during intrinsic measurement.
-                // Read border-spacing from CSS or use UA defaults.
+                // Read border-spacing from CSS, inherited computed values, or UA defaults.
                 bool found_css = false;
                 if (element->specified_style) {
                     CssDeclaration* bs_decl = style_tree_get_declaration(
                         element->specified_style, CSS_PROPERTY_BORDER_SPACING);
                     if (bs_decl && bs_decl->value) {
-                        const CssValue* bsv = bs_decl->value;
-                        if (bsv->type == CSS_VALUE_TYPE_LENGTH) {
-                            border_spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, bsv);
+                        bool keep_inheriting = false;
+                        if (intrinsic_table_resolve_border_spacing_value(lycon, bs_decl->value,
+                                &border_spacing, &keep_inheriting)) {
                             found_css = true;
-                        } else if (bsv->type == CSS_VALUE_TYPE_LIST && bsv->data.list.count >= 2) {
-                            border_spacing = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, bsv->data.list.values[0]);
-                            found_css = true;
-                        } else if (bsv->type == CSS_VALUE_TYPE_NUMBER) {
-                            border_spacing = (float)bsv->data.number.value;
+                        } else if (keep_inheriting &&
+                                   intrinsic_table_inherit_border_spacing(lycon, element, &border_spacing)) {
                             found_css = true;
                         }
                     }
@@ -2321,6 +2669,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (cs) {
                         border_spacing = (float)str_to_double_default(cs, strlen(cs), 0.0);
                     }
+                } else if (!found_css) {
+                    // CSS 2.1 §17.6.1: border-spacing is inherited. Anonymous
+                    // table boxes have no TableProp during intrinsic sizing, but
+                    // their shrink-to-fit width must still include inherited spacing.
+                    intrinsic_table_inherit_border_spacing(lycon, element, &border_spacing);
                 }
             }
 
@@ -2344,17 +2697,164 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 return 1;
             };
 
+            enum IntrinsicAnonymousRowContext {
+                INTRINSIC_ANON_ROW_NONE,
+                INTRINSIC_ANON_ROW_TABLE,
+                INTRINSIC_ANON_ROW_GROUP
+            };
+
+            auto is_proper_table_child = [](DomElement* child_elem) -> bool {
+                if (!child_elem) return false;
+                DisplayValue child_display = resolve_display_value((void*)child_elem);
+                CssEnum inner = child_display.inner;
+                return inner == CSS_VALUE_TABLE_ROW ||
+                       inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                       inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                       inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
+                       inner == CSS_VALUE_TABLE_COLUMN ||
+                       inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
+                       inner == CSS_VALUE_TABLE_CAPTION;
+            };
+
+            auto should_skip_anonymous_row_child = [&is_proper_table_child](
+                    DomElement* child_elem, IntrinsicAnonymousRowContext anon_context) -> bool {
+                if (anon_context == INTRINSIC_ANON_ROW_TABLE) {
+                    return is_proper_table_child(child_elem);
+                }
+                if (anon_context == INTRINSIC_ANON_ROW_GROUP) {
+                    DisplayValue child_display = resolve_display_value((void*)child_elem);
+                    return child_display.inner == CSS_VALUE_TABLE_ROW;
+                }
+                return false;
+            };
+
+            auto measure_anonymous_cell_run = [&should_skip_anonymous_row_child, &lycon](
+                    DomNode* run_start, IntrinsicAnonymousRowContext anon_context) -> IntrinsicSizes {
+                IntrinsicSizes run_sizes = {0.0f, 0.0f};
+                float inline_run_max = 0.0f;
+                float inline_run_min = 0.0f;
+                float float_run_max = 0.0f;
+                float float_run_min = 0.0f;
+                bool inline_run_has_content = false;
+                bool prev_ended_with_space = false;
+
+                auto flush_current_run = [&]() {
+                    float line_max = inline_run_max + float_run_max;
+                    if (line_max > run_sizes.max_content) {
+                        run_sizes.max_content = line_max;
+                    }
+                    float line_min = inline_run_min;
+                    if (float_run_min > line_min) line_min = float_run_min;
+                    if (line_min > run_sizes.min_content) {
+                        run_sizes.min_content = line_min;
+                    }
+                    inline_run_max = 0.0f;
+                    inline_run_min = 0.0f;
+                    float_run_max = 0.0f;
+                    float_run_min = 0.0f;
+                    inline_run_has_content = false;
+                    prev_ended_with_space = false;
+                };
+
+                for (DomNode* item = run_start; item; item = item->next_sibling) {
+                    if (item->is_text()) {
+                        if (text_node_is_ascii_whitespace(item)) {
+                            if (inline_run_has_content) prev_ended_with_space = true;
+                            continue;
+                        }
+                        DomElement* owner = item->parent && item->parent->is_element()
+                            ? item->parent->as_element() : nullptr;
+                        const char* text = (const char*)item->text_data();
+                        if (!text || !*text) continue;
+                        if (inline_run_has_content && intrinsic_text_starts_with_whitespace(text)) {
+                            inline_run_max += measure_current_space_advance(
+                                lycon, lycon->font.font_handle, lycon->font.style);
+                        }
+                        TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
+                            lycon, text, strlen(text),
+                            owner ? get_element_text_transform(owner) : CSS_VALUE_NONE,
+                            owner ? get_element_font_variant(owner) : CSS_VALUE_NONE);
+                        inline_run_max += text_widths.max_content;
+                        if (text_widths.min_content > inline_run_min) {
+                            inline_run_min = text_widths.min_content;
+                        }
+                        inline_run_has_content = true;
+                        prev_ended_with_space = intrinsic_text_ends_with_whitespace(text);
+                        continue;
+                    }
+
+                    if (!item->is_element()) continue;
+
+                    DomElement* item_elem = item->as_element();
+                    if (should_skip_anonymous_row_child(item_elem, anon_context)) break;
+
+                    DisplayValue item_display = resolve_display_value((void*)item_elem);
+                    bool item_is_float = intrinsic_element_is_float(item_elem);
+                    if (!item_is_float && item_display.inner == CSS_VALUE_TABLE_CELL) break;
+                    if (item_display.outer == CSS_VALUE_NONE ||
+                        item_display.inner == CSS_VALUE_NONE ||
+                        intrinsic_element_is_abs_or_fixed(item_elem)) {
+                        continue;
+                    }
+
+                    IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, item_elem);
+                    float extra = intrinsic_unresolved_html_cell_horizontal_box_extra(item_elem);
+                    child_sizes.min_content += extra;
+                    child_sizes.max_content += extra;
+
+                    if (item_is_float) {
+                        // CSS Sizing 3 §5: max-content places floats side-by-side,
+                        // while min-content stacks them and uses the widest item.
+                        float rounded_child = ceilf(child_sizes.max_content * 2.0f) / 2.0f;
+                        float_run_max += rounded_child;
+                        if (child_sizes.min_content > float_run_min) {
+                            float_run_min = child_sizes.min_content;
+                        }
+                    } else if (is_inline_level_element(item_elem)) {
+                        bool starts_with_ws = intrinsic_element_text_starts_with_whitespace(item);
+                        if (inline_run_has_content && (prev_ended_with_space || starts_with_ws)) {
+                            inline_run_max += measure_current_space_advance(
+                                lycon, lycon->font.font_handle, lycon->font.style);
+                        }
+                        inline_run_max += child_sizes.max_content;
+                        if (child_sizes.min_content > inline_run_min) {
+                            inline_run_min = child_sizes.min_content;
+                        }
+                        inline_run_has_content = true;
+                        prev_ended_with_space = intrinsic_element_text_ends_with_whitespace(item);
+                    } else {
+                        flush_current_run();
+                        if (child_sizes.max_content > run_sizes.max_content) {
+                            run_sizes.max_content = child_sizes.max_content;
+                        }
+                        if (child_sizes.min_content > run_sizes.min_content) {
+                            run_sizes.min_content = child_sizes.min_content;
+                        }
+                    }
+                }
+
+                flush_current_run();
+                log_debug("  anonymous table-cell run intrinsic: min=%.1f, max=%.1f",
+                          run_sizes.min_content, run_sizes.max_content);
+                return run_sizes;
+            };
+
             // Helper: count columns in a row (accounting for colspan)
-            auto count_cells = [&get_cell_colspan](DomElement* row_elem) -> int {
+            auto count_cells = [&get_cell_colspan, &should_skip_anonymous_row_child](
+                    DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) -> int {
                 int n = 0;
                 bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
+                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
+                        in_non_cell_run = false;
+                        continue;
+                    }
                     ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
-                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
+                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
                     if (is_cell) {
                         n += get_cell_colspan(cell_elem, cell_view);
                         in_non_cell_run = false;
@@ -2368,62 +2868,57 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // Helper: iterate rows in table (handles direct rows and row groups)
             auto for_each_row = [&](auto&& callback) {
-                bool has_direct_cells = false;
+                bool has_direct_anonymous_row_content = false;
                 for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                     if (!child->is_element()) continue;
                     DomElement* child_elem = child->as_element();
-                    uintptr_t ctag = child_elem->tag();
-                    DisplayValue child_display = resolve_display_value((void*)child_elem);
-                    if (child_display.inner == CSS_VALUE_TABLE_CELL ||
-                        ctag == HTM_TAG_TD || ctag == HTM_TAG_TH) {
-                        has_direct_cells = true;
+                    if (!is_proper_table_child(child_elem)) {
+                        has_direct_anonymous_row_content = true;
+                        break;
                     }
                 }
-                if (has_direct_cells) {
-                    // CSS 2.1 §17.2.1: direct table-cell children of a table
-                    // are wrapped in an anonymous table-row. Intrinsic sizing
-                    // must use the same anonymous row structure as layout.
-                    callback(element);
+                if (has_direct_anonymous_row_content) {
+                    // CSS 2.1 §17.2.1: improper direct children of a table are
+                    // wrapped in anonymous row/cell structures. Intrinsic sizing
+                    // must include that anonymous row contribution.
+                    callback(element, INTRINSIC_ANON_ROW_TABLE);
                 }
 
                 for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                     if (!child->is_element()) continue;
                     DomElement* child_elem = child->as_element();
-                    uintptr_t ctag = child_elem->tag();
                     DisplayValue child_display = resolve_display_value((void*)child_elem);
-                    bool is_row = (child_display.inner == CSS_VALUE_TABLE_ROW || ctag == HTM_TAG_TR);
+                    bool is_row = (child_display.inner == CSS_VALUE_TABLE_ROW);
                     bool is_row_group = (!is_row && (
                         child_display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
                         child_display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
-                        child_display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
-                        ctag == HTM_TAG_TBODY || ctag == HTM_TAG_THEAD || ctag == HTM_TAG_TFOOT));
+                        child_display.inner == CSS_VALUE_TABLE_FOOTER_GROUP));
                     if (is_row) {
-                        callback(child_elem);
+                        callback(child_elem, INTRINSIC_ANON_ROW_NONE);
                     } else if (is_row_group) {
                         for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
                             if (!row->is_element()) continue;
                             DomElement* row_elem = row->as_element();
                             DisplayValue row_display = resolve_display_value((void*)row_elem);
-                            if (row_display.inner == CSS_VALUE_TABLE_ROW || row_elem->tag() == HTM_TAG_TR) {
-                                callback(row_elem);
+                            if (row_display.inner == CSS_VALUE_TABLE_ROW) {
+                                callback(row_elem, INTRINSIC_ANON_ROW_NONE);
                             }
                         }
-                        bool group_has_direct_cells = false;
-                        for (DomNode* cell = child_elem->first_child; cell; cell = cell->next_sibling) {
-                            if (!cell->is_element()) continue;
-                            DomElement* cell_elem = cell->as_element();
-                            uintptr_t cell_tag = cell_elem->tag();
-                            DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                            if (cell_display.inner == CSS_VALUE_TABLE_CELL ||
-                                cell_tag == HTM_TAG_TD || cell_tag == HTM_TAG_TH) {
-                                group_has_direct_cells = true;
+                        bool group_has_anonymous_row_content = false;
+                        for (DomNode* item = child_elem->first_child; item; item = item->next_sibling) {
+                            if (!item->is_element()) continue;
+                            DomElement* item_elem = item->as_element();
+                            DisplayValue item_display = resolve_display_value((void*)item_elem);
+                            if (item_display.inner != CSS_VALUE_TABLE_ROW) {
+                                group_has_anonymous_row_content = true;
                                 break;
                             }
                         }
-                        if (group_has_direct_cells) {
-                            // CSS 2.1 §17.2.1: direct table-cell children of a
-                            // row group are wrapped in an anonymous table-row.
-                            callback(child_elem);
+                        if (group_has_anonymous_row_content) {
+                            // CSS 2.1 §17.2.1: direct children of a row group
+                            // that are not table-row boxes are wrapped in an
+                            // anonymous table-row.
+                            callback(child_elem, INTRINSIC_ANON_ROW_GROUP);
                         }
                     }
                 }
@@ -2431,33 +2926,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // Pass 1: determine column count
             int num_columns = 0;
-            for_each_row([&](DomElement* row_elem) {
-                int n = count_cells(row_elem);
+            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
+                int n = count_cells(row_elem, anon_context);
                 if (n > num_columns) num_columns = n;
             });
-
-            // Determine cell padding and border from HTML attributes (when cells
-            // haven't been style-resolved yet). WHATWG 15.3.8 applies these
-            // presentational hints to real HTML tables/cells only; CSS-generated
-            // table boxes on non-table elements do not get HTML cellpadding/border
-            // defaults.
-            float cell_padding_h = 0;
-            float cell_border_h = 0;
-            if (element->tag() == HTM_TAG_TABLE) {
-                // Check cellpadding from parent table
-                const char* cp = element->get_attribute("cellpadding");
-                if (cp) {
-                    cell_padding_h = 2.0f * (float)str_to_double_default(cp, strlen(cp), 0.0);
-                } else {
-                    cell_padding_h = 2.0f;  // UA default: 1px each side
-                }
-                // Check if parent table has border attribute → cells get 1px border
-                const char* tbl_border = element->get_attribute("border");
-                if (tbl_border) {
-                    float bv = (float)str_to_double_default(tbl_border, strlen(tbl_border), 0.0);
-                    if (bv > 0) cell_border_h = 2.0f;  // 1px each side
-                }
-            }
 
             // Allocate per-column min/max arrays on the stack
             float* col_min = (float*)alloca(num_columns * sizeof(float));
@@ -2470,37 +2942,36 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Pass 2: measure single-span cells, update per-column min/max
             // CSS 2.1 §17.5.2.2: First process cells that span a single column,
             // then distribute multi-span cells across their spanned columns.
-            for_each_row([&](DomElement* row_elem) {
+            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
                 int col = 0;
                 bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
+                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
+                        in_non_cell_run = false;
+                        continue;
+                    }
                     ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
-                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
+                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
                     int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
                     if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
                     in_non_cell_run = !is_cell;
                     if (span == 1) {
-                        IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                        float extra = 0;
-                        if (is_cell && !cell_view->bound) {
-                            bool css_sets_padding = false;
-                            if (cell_elem->specified_style) {
-                                css_sets_padding =
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
-                            }
-                            if (!css_sets_padding) {
-                                extra = cell_padding_h + cell_border_h;
-                            }
-                        }
-                        float cmin = ceilf(cell_sizes.min_content + extra);
-                        float cmax = ceilf(cell_sizes.max_content + extra);
+                        IntrinsicSizes cell_sizes = is_cell
+                            ? measure_element_intrinsic_widths(lycon, cell_elem)
+                            : measure_anonymous_cell_run(cell, anon_context);
+                        float extra = is_cell ?
+                            intrinsic_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
+                        float cmin = is_cell
+                            ? ceilf(cell_sizes.min_content + extra)
+                            : cell_sizes.min_content;
+                        float cmax = is_cell
+                            ? ceilf(cell_sizes.max_content + extra)
+                            : cell_sizes.max_content;
                         if (cmin > col_min[col]) col_min[col] = cmin;
                         if (cmax > col_max[col]) col_max[col] = cmax;
                     }
@@ -2512,35 +2983,28 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // Pass 3: distribute multi-span cell widths across spanned columns
             // CSS 2.1 §17.5.2.2: If the sum of column widths spanned by a multi-span
             // cell is less than the cell's intrinsic width, distribute the deficit evenly.
-            for_each_row([&](DomElement* row_elem) {
+            for_each_row([&](DomElement* row_elem, IntrinsicAnonymousRowContext anon_context) {
                 int col = 0;
                 bool in_non_cell_run = false;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
+                    if (should_skip_anonymous_row_child(cell_elem, anon_context)) {
+                        in_non_cell_run = false;
+                        continue;
+                    }
                     ViewBlock* cell_view = lam::unsafe_view_block_element_storage(cell_elem);
                     DisplayValue cell_display = resolve_display_value((void*)cell_elem);
-                    bool is_cell = (cell_display.inner == CSS_VALUE_TABLE_CELL ||
-                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    bool is_cell = !intrinsic_element_is_float(cell_elem) &&
+                        (cell_display.inner == CSS_VALUE_TABLE_CELL);
                     int span = is_cell ? get_cell_colspan(cell_elem, cell_view) : 1;
                     if (!is_cell && in_non_cell_run) continue;
                     if (col + span > num_columns) break;
                     in_non_cell_run = !is_cell;
                     if (span > 1) {
                         IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                        float extra = 0;
-                        if (is_cell && !cell_view->bound) {
-                            bool css_sets_padding = false;
-                            if (cell_elem->specified_style) {
-                                css_sets_padding =
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING) ||
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_LEFT) ||
-                                    style_tree_get_declaration(cell_elem->specified_style, CSS_PROPERTY_PADDING_RIGHT);
-                            }
-                            if (!css_sets_padding) {
-                                extra = cell_padding_h + cell_border_h;
-                            }
-                        }
+                        float extra = is_cell ?
+                            intrinsic_unresolved_html_cell_horizontal_box_extra(cell_elem) : 0.0f;
                         float cmin = ceilf(cell_sizes.min_content + extra);
                         float cmax = ceilf(cell_sizes.max_content + extra);
 
@@ -2677,6 +3141,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                       element->node_name());
         }
     }
+
+    intrinsic_prepare_anonymous_table_children(lycon, element);
 
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Max of min-content widths for inline children
@@ -4086,102 +4552,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
-        // Also check for border-width (handles both single value and multi-value shorthand)
-        bool border_width_found = false;
-        CssDeclaration* border_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-        if (border_decl && border_decl->value) {
-            if (border_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                // Single value: applies to all sides
-                float border_width = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, border_decl->value);
-                border_left = border_right = border_width;
-                border_width_found = true;
-            } else if (border_decl->value->type == CSS_VALUE_TYPE_LIST && border_decl->value->data.list.count >= 1) {
-                // Multi-value: border-width: top right [bottom] [left]
-                int cnt = border_decl->value->data.list.count;
-                CssValue** vals = border_decl->value->data.list.values;
-                if (cnt == 1) {
-                    float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[0]);
-                    border_left = border_right = bw;
-                } else if (cnt == 2) {
-                    // vals[1] = left/right
-                    float lr = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                    border_left = border_right = lr;
-                } else if (cnt == 3) {
-                    // vals[1] = left/right
-                    float lr = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                    border_left = border_right = lr;
-                } else if (cnt >= 4) {
-                    // vals[1] = right, vals[3] = left
-                    border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
-                    border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[3]);
-                }
-                border_width_found = true;
-                log_debug("  -> multi-value border-width: left=%.1f, right=%.1f", border_left, border_right);
-            }
-        }
-        // Fallback to individual border-*-width if shorthand not found
-        // IMPORTANT: Only fall back when border-width was NOT found at all.
-        // When border-width IS found (even with value 0), it takes precedence
-        // over individual properties and the border shorthand per CSS cascade.
-        if (!border_width_found && border_left == 0 && border_right == 0) {
-            CssDeclaration* bl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_LEFT_WIDTH);
-            if (bl && bl->value && bl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, bl->value);
-            }
-            CssDeclaration* br = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
-            if (br && br->value && br->value->type == CSS_VALUE_TYPE_LENGTH) {
-                border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br->value);
-            }
-        }
-        // Check border-left/border-right side shorthands (border-left: width style color)
-        // These store the value as a list with length, keyword (style), and color components
-        if (!border_width_found && border_left == 0) {
-            CssDeclaration* bl_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_LEFT);
-            if (bl_decl && bl_decl->value) {
-                const CssValue* v = bl_decl->value;
-                if (v->type == CSS_VALUE_TYPE_LENGTH) {
-                    border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v);
-                } else if (v->type == CSS_VALUE_TYPE_LIST) {
-                    for (int i = 0; i < v->data.list.count; i++) {
-                        CssValue* item = v->data.list.values[i];
-                        if (item && item->type == CSS_VALUE_TYPE_LENGTH) {
-                            border_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, item);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (!border_width_found && border_right == 0) {
-            CssDeclaration* br_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_RIGHT);
-            if (br_decl && br_decl->value) {
-                const CssValue* v = br_decl->value;
-                if (v->type == CSS_VALUE_TYPE_LENGTH) {
-                    border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v);
-                } else if (v->type == CSS_VALUE_TYPE_LIST) {
-                    for (int i = 0; i < v->data.list.count; i++) {
-                        CssValue* item = v->data.list.values[i];
-                        if (item && item->type == CSS_VALUE_TYPE_LENGTH) {
-                            border_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, item);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        // Also check border shorthand (border: width style color)
-        // Only if neither border-width nor individual properties were found
-        if (!border_width_found && border_left == 0 && border_right == 0) {
-            CssDeclaration* b_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER);
-            if (b_decl && b_decl->value && b_decl->value->type == CSS_VALUE_TYPE_LIST &&
-                b_decl->value->data.list.count >= 1) {
-                CssValue* width_val = b_decl->value->data.list.values[0];
-                if (width_val && width_val->type == CSS_VALUE_TYPE_LENGTH) {
-                    float bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, width_val);
-                    border_left = border_right = bw;
-                }
-            }
-        }
+        get_horizontal_border_widths_from_css(lycon, element, &border_left, &border_right);
     }
 
     float horiz_padding = pad_left + pad_right;
@@ -4546,11 +4917,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
         CssDeclaration* font_size_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_SIZE);
-        if (font_size_decl && font_size_decl->value &&
-            font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            float resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
-                                                       font_size_decl->value);
-            if (resolved_size > 0 && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
+        if (font_size_decl && font_size_decl->value) {
+            bool resolved_from_medium = false;
+            float resolved_size = intrinsic_resolve_font_size_value(
+                lycon, font_size_decl->value, &resolved_from_medium);
+            if (resolved_size >= 0.0f && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
                     temp_height_font_guard.prop = tfp;
@@ -4558,6 +4929,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                         radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
                     }
                     tfp->font_size = resolved_size;
+                    tfp->font_size_from_medium = resolved_from_medium;
                     setup_font(lycon->ui_context, &lycon->font, tfp);
                     height_font_changed = true;
                 }
