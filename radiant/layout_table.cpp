@@ -3496,6 +3496,70 @@ static bool is_abspos_or_fixed(DomElement* elem) {
     return false;
 }
 
+static bool table_white_space_preserves_space_advance(CssEnum white_space) {
+    return white_space == CSS_VALUE_PRE ||
+           white_space == CSS_VALUE_PRE_WRAP ||
+           white_space == CSS_VALUE_BREAK_SPACES;
+}
+
+static bool table_text_node_has_non_whitespace_content(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+
+    const char* text = lam::dom_require<DOM_NODE_TEXT>(node)->text;
+    if (!text || !*text) return false;
+
+    for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
+        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool table_text_node_has_preserved_whitespace_content(DomNode* node) {
+    if (!node || !node->is_text()) return false;
+
+    const char* text = lam::dom_require<DOM_NODE_TEXT>(node)->text;
+    if (!text || !*text) return false;
+    if (table_text_node_has_non_whitespace_content(node)) return false;
+
+    return table_white_space_preserves_space_advance(get_white_space_value(node));
+}
+
+static bool table_anonymous_run_allows_preserved_whitespace(ArrayList* run) {
+    if (!run) return false;
+
+    for (int i = run->length - 1; i >= 0; i--) {
+        DomNode* node = static_cast<DomNode*>(run->data[i]);
+        if (!node) continue;
+        if (node->is_text()) {
+            return table_text_node_has_non_whitespace_content(node) ||
+                   table_text_node_has_preserved_whitespace_content(node);
+        }
+        if (node->is_element()) {
+            DisplayValue display = resolve_display_value(node);
+            if (display.outer == CSS_VALUE_NONE || display.inner == CSS_VALUE_NONE) {
+                continue;
+            }
+            return false;
+        }
+    }
+
+    return false;
+}
+
+static bool table_text_node_generates_anonymous_content(DomNode* node,
+        bool run_allows_preserved_whitespace) {
+    if (table_text_node_has_non_whitespace_content(node)) return true;
+    if (!table_text_node_has_preserved_whitespace_content(node)) return false;
+
+    // CSS 2.1 §17.2.1 anonymous table content follows normal table boundary
+    // filtering: preserved whitespace is content inside a non-cell run, but a
+    // whitespace-only node at the boundary after a table-cell does not start one.
+    return run_allows_preserved_whitespace;
+}
+
 /**
  * Helper to wrap a run of nodes in table cells.
  * - Elements that are already cells get reparented directly
@@ -3571,19 +3635,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
         // CSS 2.1 Section 17.2.1: "Any content that is not a table-* element
         // will be wrapped in an anonymous table-cell box"
         if (child->is_text()) {
-            // Check if this text node has non-whitespace content
-            const char* text = lam::dom_require<DOM_NODE_TEXT>(child)->text;
-            bool has_content = false;
-            if (text) {
-                for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
-                    // check for common whitespace characters
-                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
-                        has_content = true;
-                        break;
-                    }
-                }
-            }
-            if (has_content) {
+            if (table_text_node_generates_anonymous_content(child,
+                    table_anonymous_run_allows_preserved_whitespace(current_cell_run))) {
                 log_debug("%s [ANON-TABLE] Text node with content needs cell wrapping", table->source_loc());
                 arraylist_append(current_cell_run, child);
             }
@@ -3777,18 +3830,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 // CSS 2.1: "Any other child of a table-row-group is treated as if it were
                 // wrapped in an anonymous table-cell box"
                 if (gchild->is_text()) {
-                    // Check if this text node has non-whitespace content
-                    const char* text = lam::dom_require<DOM_NODE_TEXT>(gchild)->text;
-                    bool has_content = false;
-                    if (text) {
-                        for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
-                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
-                                has_content = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (has_content) {
+                    if (table_text_node_generates_anonymous_content(gchild,
+                            table_anonymous_run_allows_preserved_whitespace(cell_run))) {
                         arraylist_append(cell_run, gchild);
                         log_debug("%s [ANON-TABLE] Phase 2: Text node with content added to cell run", table->source_loc());
                     }
@@ -3890,18 +3933,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     // CSS 2.1: "Any other child of a table-row is treated as if it were
                     // wrapped in an anonymous table-cell box"
                     if (rchild->is_text()) {
-                        // Check if this text node has non-whitespace content
-                        const char* text = lam::dom_require<DOM_NODE_TEXT>(rchild)->text;
-                        bool has_content = false;
-                        if (text) {
-                            for (const unsigned char* p = (const unsigned char*)text; *p; p++) {
-                                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
-                                    has_content = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (has_content) {
+                        if (table_text_node_generates_anonymous_content(rchild,
+                                table_anonymous_run_allows_preserved_whitespace(non_cell_run))) {
                             arraylist_append(non_cell_run, rchild);
                             log_debug("%s [ANON-TABLE] Phase 3: Text node with content added to non-cell run", table->source_loc());
                         }
@@ -4745,7 +4778,6 @@ static float reflow_table_rows_from_metadata(LayoutContext* lycon, ViewTable* ta
                     table->tb->border_spacing_v > 0.0f &&
                     visual_row_index < meta->row_count) {
                     cursor_y += table->tb->border_spacing_v;
-                    group_max_y += table->tb->border_spacing_v;
                 }
             }
 
