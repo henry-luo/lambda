@@ -626,8 +626,12 @@ extern "C" bool dom_selection_apply_source_selection(DomSelection* ds,
 
     if (strcmp(kind_str, "all") == 0) {
         if (!ds->state) return false;
-        DomBoundary start = { dom_root, 0 };
-        DomBoundary end = { dom_root, source_selection_child_count(dom_root) };
+        SourcePathC root_path;
+        source_path_init(&root_path);
+        DomNode* source_root = dom_node_from_source_path(dom_root, &root_path);
+        DomNode* selection_root = source_root ? source_root : dom_root;
+        DomBoundary start = { selection_root, 0 };
+        DomBoundary end = { selection_root, source_selection_child_count(selection_root) };
         return state_store_set_selection(ds->state, &start, &end, &exc);
     }
 

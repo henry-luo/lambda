@@ -1,6 +1,6 @@
 "===== MATH DELIMITER TESTS =====1. null delim type:mopen2. null delim width:"
 0.12
-"3. dot delim type:mopen4. empty delim type:mopen5. small paren type:mopen6. small paren has el:"
+"3. dot delim type:mopen4. empty delim type:mclose5. small paren type:mopen6. small paren has el:"
 true
 "7. small paren height >0:"
 true
