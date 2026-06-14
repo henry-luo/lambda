@@ -1,7 +1,7 @@
 "===== MATH BOX TESTS =====1. text_box type:mord2. text_box height:"
 0.44
 "3. text_box depth:"
-0.08
+0
 "4. text_box italic:"
 0
 "5. text_box el tag:"

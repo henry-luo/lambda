@@ -2317,6 +2317,22 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s",
                         (int)imp->default_name->len, imp->default_name->chars);
+                    // Js57 P3 (Track B2): detect self-import so the module_consts
+                    // entry can carry the live-binding marker. Closures and
+                    // module-level reads then route through the live-binding
+                    // runtime call instead of the snapshot path.
+                    char resolved_pp[512] = {0};
+                    if (imp->source) {
+                        if (mt->filename) {
+                            jm_resolve_module_path(mt->filename, imp->source->chars,
+                                (int)imp->source->len, resolved_pp, sizeof(resolved_pp));
+                        } else {
+                            snprintf(resolved_pp, sizeof(resolved_pp), "%.*s",
+                                (int)imp->source->len, imp->source->chars);
+                        }
+                    }
+                    bool is_self_import = (mt->filename != NULL && resolved_pp[0] != '\0' &&
+                        strcmp(resolved_pp, mt->filename) == 0);
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                     if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
@@ -2325,8 +2341,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         snprintf(mce.name, sizeof(mce.name), "%s", vname);
                         mce.const_type = MCONST_MODVAR;
                         mce.int_val = mt->module_var_count++;
+                        if (is_self_import) {
+                            mce.is_live_default_binding = true;
+                            mce.live_binding_specifier = name_pool_create_len(
+                                mt->tp->name_pool, resolved_pp, (int)strlen(resolved_pp))->chars;
+                        }
                         hashmap_set(mt->module_consts, &mce);
-                        log_debug("js-mir: import default '%s' → module_var[%d]", vname, (int)mce.int_val);
+                        log_debug("js-mir: import default '%s' → module_var[%d] live=%d",
+                            vname, (int)mce.int_val, is_self_import);
                     }
                 }
 
@@ -4381,6 +4403,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Module mode: create namespace object to hold exports
     if (mt->is_module) {
         mt->namespace_reg = jm_call_0(mt, "js_get_active_module_namespace", MIR_T_I64);
+
+        // Js57 P3 (Track B2): no namespace pre-init is needed. The live-binding
+        // runtime helper detects "default not yet exported" via the absence of
+        // the `default` own property (see js_get_live_binding_default). The
+        // existing `js_property_set` at the `export default <expr>` site is
+        // what publishes the binding.
     }
 
     // Emit variable bindings for named function declarations (so they can be
@@ -6274,6 +6302,17 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 } else {
                     snprintf(resolved, sizeof(resolved), "%.*s",
                         (int)imp->source->len, imp->source->chars);
+                }
+
+                // Js57 P3 (Track B2): self-import — skip loading because the
+                // current module is its own dependency. The module's namespace
+                // gets registered by transpile_js_module_to_mir before js_main
+                // runs (sites 6188-6190), so reads of the imported binding go
+                // through the live-binding path which observes the in-progress
+                // namespace.
+                if (filename && strcmp(resolved, filename) == 0) {
+                    s = s->next;
+                    continue;
                 }
 
                 // Check if already loaded (also catches circular imports via placeholder)

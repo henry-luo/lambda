@@ -6,15 +6,15 @@ false
 true
 "5. llap width:"
 0
-"6. llap align:"
+"6. llap class:"
 true
 "7. rlap width:"
 0
-"8. rlap align:"
+"8. rlap class:"
 true
 "9. clap width:"
 0
-"10. clap align:"
+"10. clap class:"
 true
 "11. phantom type:ord12. phantom hidden:"
 true
@@ -48,16 +48,16 @@ true
 true
 "27. rule type:ord28. rule has style:"
 true
-"29. rule has bg:"
+"29. rule has border:"
 true
 "30. rule width:"
-2
+0.2
 "31. rule height:"
-0.5
+0.05
 "32. shifted rule align:"
 true
 "33. default width:"
 1
 "34. default height:"
-0.4
+1
 "===== ALL MATH ATOM ENCLOSE TESTS DONE ====="

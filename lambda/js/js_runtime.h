@@ -889,6 +889,13 @@ void js_module_register(Item specifier, Item namespace_obj);
 Item js_module_get(Item specifier);
 
 /**
+ * Js57 P3 (Track B2): read a live default-binding for the given module
+ * specifier. Used by self-imports so reads of the imported name observe the
+ * current state of namespace.default; throws ReferenceError on the TDZ sentinel.
+ */
+Item js_get_live_binding_default(Item specifier);
+
+/**
  * Create a module namespace object from an export map.
  */
 Item js_module_namespace_create(Item exports_map);
