@@ -157,8 +157,8 @@ pub fn render_at_scale(delim, scale, atom_type) {
 fn render_sized(ch, level, atom_type) {
     let cls = level_to_class(level)
     let scale = level_to_scale(level)
-    let h = scale * 0.5
-    let d = scale * 0.3
+    let h = if (level == 3) 1.45 else scale * 0.5
+    let d = if (level == 3) 0.95 else scale * 0.3
     if (is_vertical_bar(ch))
         render_vertical_mult(ch, level, atom_type)
     else

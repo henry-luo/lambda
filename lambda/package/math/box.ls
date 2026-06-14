@@ -199,7 +199,8 @@ pub fn hbox(boxes) {
         skew: 0.0,
         strut_total: if (len(valid) == 1) valid[0].strut_total else null,
         strut_depth_em: strut_depth_em,
-        is_fraction: if (len(valid) == 1) valid[0].is_fraction else null
+        is_fraction: if (len(valid) == 1) valid[0].is_fraction else null,
+        is_script_radical: has_script_radical(valid, 0)
     }
 }
 
@@ -238,6 +239,12 @@ fn has_suppress_hbox_text_depth(items, i) {
     if (i >= len(items)) false
     else if (items[i].suppress_hbox_text_depth == true) true
     else has_suppress_hbox_text_depth(items, i + 1)
+}
+
+fn has_script_radical(items, i) {
+    if (i >= len(items)) false
+    else if (items[i].is_script_radical == true) true
+    else has_script_radical(items, i + 1)
 }
 
 fn has_suppress_hbox_operator_render_height(items, i) {
