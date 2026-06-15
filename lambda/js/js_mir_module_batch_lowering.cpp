@@ -22,12 +22,20 @@ int js_dynamic_func_counter = 0;
 // Set before execution, cleared after normal cleanup in transpile_js_to_mir_core.
 MIR_context_t g_active_mir_ctx = NULL;
 
-// Js57 Track A: walk the AST collecting names of let/const variables declared in
-// for-/for-of-/for-in-init slots at module scope (skip function and class bodies —
-// those have their own scope). Used to exclude per-iteration bindings from the
-// module-level scope env (preserving language/statements/for/scope-body-lex-open.js
-// semantics where init-time closures see a different binding than body closures).
-static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* names);
+// Js57 Track A (P7a): walk the AST collecting names of let/const variables that
+// CANNOT be promoted to the module-level scope env because they need
+// per-iteration binding semantics. Two categories qualify:
+//   1. for-/for-of-/for-in-init lexical bindings (the loop variable itself),
+//   2. ANY let/const declared inside a loop body — closures created inside a
+//      loop body capture the current iteration's binding, and the shared
+//      module env would unify them across iterations (regression observed on
+//      built_ins/Array/prototype/toLocaleString/user-provided-tolocalestring-
+//      shrink and the TypedArray twin).
+// Function/class bodies are skipped — they have their own scope env.
+//
+// The `in_loop` flag is sticky once set on a statement subtree, so a let
+// inside `for { if (cond) { let X = …; } }` still counts as inside-loop.
+static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* names, bool in_loop);
 
 static void jm_collect_for_init_lexical_pattern(JsAstNode* pat, struct hashmap* names) {
     if (!pat) return;
@@ -64,35 +72,46 @@ static void jm_collect_for_init_lexical_from_decl(JsVariableDeclarationNode* vd,
     }
 }
 
-static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* names) {
+static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* names, bool in_loop) {
     if (!node) return;
     switch (node->node_type) {
     case JS_AST_NODE_PROGRAM: {
         JsProgramNode* prog = (JsProgramNode*)node;
         for (JsAstNode* s = prog->body; s; s = s->next)
-            jm_collect_for_init_lexical_names(s, names);
+            jm_collect_for_init_lexical_names(s, names, in_loop);
+        return;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        // Only counts when this declaration appears inside a loop body — top-
+        // level let/consts (outside any loop) keep their normal promotion.
+        if (in_loop) {
+            JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+            if (vd->kind == JS_VAR_LET || vd->kind == JS_VAR_CONST) {
+                jm_collect_for_init_lexical_from_decl(vd, names);
+            }
+        }
         return;
     }
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         for (JsAstNode* s = blk->statements; s; s = s->next)
-            jm_collect_for_init_lexical_names(s, names);
+            jm_collect_for_init_lexical_names(s, names, in_loop);
         return;
     }
     case JS_AST_NODE_IF_STATEMENT: {
         JsIfNode* n = (JsIfNode*)node;
-        jm_collect_for_init_lexical_names(n->consequent, names);
-        jm_collect_for_init_lexical_names(n->alternate, names);
+        jm_collect_for_init_lexical_names(n->consequent, names, in_loop);
+        jm_collect_for_init_lexical_names(n->alternate, names, in_loop);
         return;
     }
     case JS_AST_NODE_WHILE_STATEMENT: {
         JsWhileNode* n = (JsWhileNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
         return;
     }
     case JS_AST_NODE_DO_WHILE_STATEMENT: {
         JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
         return;
     }
     case JS_AST_NODE_FOR_STATEMENT: {
@@ -100,7 +119,7 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
         if (n->init && n->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
             jm_collect_for_init_lexical_from_decl((JsVariableDeclarationNode*)n->init, names);
         }
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
         return;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
@@ -109,49 +128,49 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
         if (n->left && n->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
             jm_collect_for_init_lexical_from_decl((JsVariableDeclarationNode*)n->left, names);
         }
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
         return;
     }
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* n = (JsTryNode*)node;
-        jm_collect_for_init_lexical_names(n->block, names);
-        if (n->handler) jm_collect_for_init_lexical_names(n->handler, names);
-        jm_collect_for_init_lexical_names(n->finalizer, names);
+        jm_collect_for_init_lexical_names(n->block, names, in_loop);
+        if (n->handler) jm_collect_for_init_lexical_names(n->handler, names, in_loop);
+        jm_collect_for_init_lexical_names(n->finalizer, names, in_loop);
         return;
     }
     case JS_AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* n = (JsCatchNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, in_loop);
         return;
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* n = (JsSwitchNode*)node;
         for (JsAstNode* c = n->cases; c; c = c->next)
-            jm_collect_for_init_lexical_names(c, names);
+            jm_collect_for_init_lexical_names(c, names, in_loop);
         return;
     }
     case JS_AST_NODE_SWITCH_CASE: {
         JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
         for (JsAstNode* s = n->consequent; s; s = s->next)
-            jm_collect_for_init_lexical_names(s, names);
+            jm_collect_for_init_lexical_names(s, names, in_loop);
         return;
     }
     case JS_AST_NODE_LABELED_STATEMENT: {
         JsLabeledStatementNode* n = (JsLabeledStatementNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names);
+        jm_collect_for_init_lexical_names(n->body, names, in_loop);
         return;
     }
     case JS_AST_NODE_EXPORT_DECLARATION: {
         JsExportNode* n = (JsExportNode*)node;
-        jm_collect_for_init_lexical_names(n->declaration, names);
+        jm_collect_for_init_lexical_names(n->declaration, names, in_loop);
         return;
     }
     case JS_AST_NODE_FUNCTION_DECLARATION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
     case JS_AST_NODE_CLASS_DECLARATION:
-        // Functions and classes have their own lexical environments — for-init lets
-        // inside them are handled by the function's own scope_env analysis.
+        // Functions and classes have their own lexical environments — for-init
+        // lets inside them are handled by the function's own scope_env analysis.
         return;
     default:
         return;
@@ -3642,36 +3661,63 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         struct hashmap* for_init_lets = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
-        jm_collect_for_init_lexical_names((JsAstNode*)program, for_init_lets);
+        jm_collect_for_init_lexical_names((JsAstNode*)program, for_init_lets, /*in_loop=*/false);
 
         struct hashmap* scope_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
 
-        auto include_capture = [&](JsFuncCollected* child, int k) -> bool {
-            JsCaptureEntry* cap = &child->captures[k];
-            if (!cap->is_let_const) return false;
-            if (cap->is_nfe_binding) return false;
-            // Skip module-level top-level lets/consts: handled via module_consts.
+        // P7a: helper that decides whether a capture name qualifies for the
+        // module-level scope env. Returns false when the binding needs
+        // per-iteration semantics (for-init lets, block-lets declared inside a
+        // loop body — both collected into `for_init_lets`).
+        auto capture_qualifies = [&](const char* name, bool is_let_const,
+                                     bool is_nfe_binding) -> bool {
+            if (!is_let_const) return false;
+            if (is_nfe_binding) return false;
             if (mt->module_consts) {
                 JsModuleConstEntry mclookup;
                 memset(&mclookup, 0, sizeof(mclookup));
-                snprintf(mclookup.name, sizeof(mclookup.name), "%s", cap->name);
+                snprintf(mclookup.name, sizeof(mclookup.name), "%s", name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
                 if (mc && mc->const_type == MCONST_MODVAR) return false;
             }
-            // Skip for-init lexical bindings to preserve per-iteration semantics.
-            if (jm_name_set_has(for_init_lets, cap->name)) return false;
-            // Skip special bindings — they are not regular block-lets.
-            if (strcmp(cap->name, "_js_this") == 0 ||
-                strcmp(cap->name, "_js_new.target") == 0 ||
-                strcmp(cap->name, "_js_arguments") == 0) return false;
+            if (jm_name_set_has(for_init_lets, name)) return false;
+            if (strcmp(name, "_js_this") == 0 ||
+                strcmp(name, "_js_new.target") == 0 ||
+                strcmp(name, "_js_arguments") == 0) return false;
             return true;
+        };
+
+        // P7a: a closure participates in the module scope env only when EVERY
+        // one of its let/const captures qualifies. If even one capture is
+        // disqualified (e.g. a `for (let ctor of …) { … rab, resizeAfter …}`
+        // closure mixes for-init lets with in-loop block-lets), routing some
+        // captures through the module env and others through per-closure env
+        // means the closure body reads the non-env slots out of bounds. Skip
+        // the whole closure in that case — its captures stay at slot -1 and
+        // jm_transpile_func_expr falls back to the original per-closure path
+        // for all of them.
+        auto closure_qualifies = [&](JsFuncCollected* child) -> bool {
+            for (int k = 0; k < child->capture_count; k++) {
+                JsCaptureEntry* cap = &child->captures[k];
+                if (!cap->is_let_const) continue;  // non-let captures are unaffected
+                if (!capture_qualifies(cap->name, cap->is_let_const, cap->is_nfe_binding)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        auto include_capture = [&](JsFuncCollected* child, int k) -> bool {
+            JsCaptureEntry* cap = &child->captures[k];
+            return capture_qualifies(cap->name, cap->is_let_const, cap->is_nfe_binding);
         };
 
         for (int ci = 0; ci < mt->func_count; ci++) {
             JsFuncCollected* child = &mt->func_entries[ci];
             if (child->parent_index != -1) continue;
             if (child->capture_count == 0) continue;
+            if (!closure_qualifies(child)) continue;
             for (int k = 0; k < child->capture_count; k++) {
                 if (!include_capture(child, k)) continue;
                 jm_name_set_add(scope_vars, child->captures[k].name);
@@ -3679,16 +3725,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
 
         int total = (int)hashmap_count(scope_vars);
-        // P6: temporarily disable P1 (module-level scope env). It admitted
-        // built_ins/ArrayBuffer/.../coerced-new-length-detach.js but cost 3
-        // resizable-buffer + closure regressions
-        // (Array/TypedArray.prototype.toLocaleString shrink, ctors out-of-bounds).
-        // The right surgical filter — "exclude block-lets declared inside any
-        // loop body" — is non-trivial and an earlier attempt at it widened the
-        // damage to 26 regressions. Until that filter can be done correctly,
-        // skip the promotion entirely so the release guard hits 0 regressions.
-        // Self-import + fulfillment/rejection-order admissions are unaffected.
-        if (false && total > 0) {
+        if (total > 0) {
             mt->module_fc.has_scope_env = true;
             mt->module_fc.scope_env_count = total;
             mt->module_fc.scope_env_normal_count = total;
@@ -3702,6 +3739,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
                 if (child->parent_index != -1) continue;
+                if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
                     if (!jm_name_set_has(scope_vars, child->captures[k].name)) {
@@ -3714,11 +3752,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
 
             // Remap child capture slots to point at module scope env positions.
-            // Slots stay -1 for excluded captures (including for-init lets) so
-            // the existing per-closure-env fallback handles them.
+            // Slots stay -1 for closures that didn't qualify (any in-loop /
+            // for-init capture disqualifies the whole closure) so the existing
+            // per-closure-env fallback handles them.
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
                 if (child->parent_index != -1) continue;
+                if (!closure_qualifies(child)) continue;
                 for (int k = 0; k < child->capture_count; k++) {
                     if (!include_capture(child, k)) continue;
                     for (int s = 0; s < total; s++) {
@@ -6172,11 +6212,18 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return ItemNull;
     }
 
+    extern void js_tla_exit_module(void);
+
     if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
+        // Js57 P7b: parse failure is a SyntaxError. Return ITEM_ERROR (not
+        // ItemNull) so the batch driver short-circuits its post-test global
+        // probes (async_required check), which SEGV when the heap was never
+        // initialized for this test.
         log_error("js-mir: module: parse failed for '%s'", filename);
         js_transpiler_destroy(tp);
         js_source_runtime = prev_source_runtime;
-        return ItemNull;
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
@@ -6185,7 +6232,21 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         log_error("js-mir: module: AST build failed for '%s'", filename);
         js_transpiler_destroy(tp);
         js_source_runtime = prev_source_runtime;
-        return ItemNull;
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // Js57 P7b: run early-error checks before any further compilation. The
+    // module path previously skipped this and crashed on illegal forms like
+    // `await 0;` (escaped await — contextually-reserved keyword written
+    // with a unicode escape, which is a SyntaxError per the spec).
+    int p7b_early_errors = js_check_early_errors(tp, js_ast);
+    if (p7b_early_errors > 0) {
+        log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
+        js_transpiler_destroy(tp);
+        js_source_runtime = prev_source_runtime;
+        js_tla_exit_module();
+        return (Item){.item = ITEM_ERROR};
     }
 
     // Js57 P5: register the current module BEFORE jm_load_imports so the

@@ -345,6 +345,18 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
                 if (is_reserved_word(normalized, ctx->in_strict)) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);
                 }
+                // P7b: contextually-reserved keywords ('await' / 'yield') must
+                // also not be written with escape sequences. The spec is
+                // explicit that escapes don't satisfy IdentifierName-not-
+                // ReservedWord: even in a non-strict / non-async / non-module
+                // context, no parse of `await` may flow into AwaitExpression
+                // / IdentifierReference. Treat the escape form as a hard
+                // SyntaxError so test262's `early-no-escaped-await.js` /
+                // `early-no-escaped-yield.js` family stops crashing.
+                else if (strcmp(normalized, "await") == 0 ||
+                         strcmp(normalized, "yield") == 0) {
+                    ee_error(ctx, node, "'%s' may not contain escape sequences", normalized);
+                }
             }
         }
     }
