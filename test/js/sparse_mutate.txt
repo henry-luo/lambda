@@ -8,3 +8,12 @@ sort-a3[2] 30
 copy-a4[0] 4
 copy-a4[1] 5
 copy-a4[4] 5
+fill-a5[19999] f
+fill-a5[20000] f
+copy-a6[0] x
+reverse-a7[0] x
+reverse-a7[20000] 1
+sort-a8[0] 0
+sort-a8[3] 3
+sort-a8[4] undefined
+sort-a8-length 20001

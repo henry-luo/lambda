@@ -1,16 +1,15 @@
-// Js58 regression-lock for the sparse-array iteration paths that DO route
-// through js_array_find_next_own_element and are correct after Js57 P8 +
-// Js58 P0 (hole-fill on sparse-store, OOB guards on js_array_element /
-// js_in / js_object_keys). These paths must stay correct as later Js58
-// phases refactor the broken-method siblings.
+// Js58 regression-lock for the sparse-array iteration paths that were already
+// routed through js_array_find_next_own_element after Js57 P8 + Js58 P0
+// (hole-fill on sparse-store, OOB guards on js_array_element / js_in /
+// js_object_keys). These paths must stay correct as other sparse methods are
+// fixed in sibling fixtures.
 //
 // Methods covered here:  every, some, forEach, map, filter, indexOf,
 //                        lastIndexOf, Object.keys, `in` operator, delete.
 //
-// Methods deliberately NOT covered (they're broken on sparse — see the
-// sibling test files sparse_broken_*.{js,txt}):  find, findIndex,
-// findLast, findLastIndex, reduce, reduceRight, includes, flat, flatMap,
-// concat, slice, splice, fill, copyWithin, reverse, sort, length-truncate.
+// Methods covered by sibling fixtures: find, findIndex, findLast,
+// findLastIndex, reduce, reduceRight, includes, flat, flatMap, concat,
+// slice, splice, fill, copyWithin, reverse, sort, length-truncate.
 
 var arr = [10, 20, 30];
 arr[20000] = "sparse";   // gap=19997 > SPARSE_GAP_MAX=10000 → routes through extra Map
@@ -47,3 +46,7 @@ console.log("keys-includes-0", keys.indexOf("0") >= 0);
 console.log("0-in", 0 in arr);
 console.log("20000-in", 20000 in arr);
 console.log("9999-in", 9999 in arr);
+
+console.log("delete-sparse", delete arr[20000]);
+console.log("after-delete-in", 20000 in arr);
+console.log("after-delete-value", arr[20000]);

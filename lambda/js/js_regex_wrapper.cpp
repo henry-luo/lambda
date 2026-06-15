@@ -2215,16 +2215,17 @@ static bool split_pattern_around_capture_group(const std::string& pat, int targe
     return true;
 }
 
-static bool js_regex_retry_reject_same_start(const std::string& refined_pattern,
+static bool js_regex_retry_marker_same_start(const std::string& refined_pattern,
                                              const re2::RE2::Options& opts,
-                                             JsRegexFilter& reject_filter,
+                                             JsRegexFilter& marker_filter,
                                              const char* input, int input_len,
-                                             int match_start, int rejected_offset,
+                                             int match_start, int marker_offset,
+                                             bool require_marker_match,
                                              re2::StringPiece* groups, int ngroups) {
-    int marker_group = reject_filter.reject_at_start;
+    int marker_group = marker_filter.reject_at_start;
     if (marker_group <= 0 || marker_group >= ngroups) return false;
     if (match_start < 0 || match_start > input_len) return false;
-    if (rejected_offset < match_start || rejected_offset > input_len) return false;
+    if (marker_offset < match_start || marker_offset > input_len) return false;
 
     std::string prefix_pattern;
     std::string suffix_pattern;
@@ -2242,7 +2243,7 @@ static bool js_regex_retry_reject_same_start(const std::string& refined_pattern,
     if (prefix_ngroups > JS_REGEX_MAX_GROUPS) prefix_ngroups = JS_REGEX_MAX_GROUPS;
     if (suffix_ngroups > JS_REGEX_MAX_GROUPS) suffix_ngroups = JS_REGEX_MAX_GROUPS;
 
-    for (int boundary = rejected_offset + 1; boundary <= input_len; boundary++) {
+    for (int boundary = marker_offset + 1; boundary <= input_len; boundary++) {
         if (!is_utf8_boundary(input, input_len, boundary)) continue;
 
         int prefix_len = boundary - match_start;
@@ -2255,7 +2256,8 @@ static bool js_regex_retry_reject_same_start(const std::string& refined_pattern,
 
         int check_len = input_len - boundary;
         if (check_len < 0) continue;
-        if (js_regex_reject_filter_matches(reject_filter, input + boundary, check_len)) {
+        bool marker_matches = js_regex_reject_filter_matches(marker_filter, input + boundary, check_len);
+        if (require_marker_match ? !marker_matches : marker_matches) {
             continue;
         }
 
@@ -2634,7 +2636,25 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             match_starts, match_ends, max_groups);
                     }
                 } else if (f.type == JS_PF_ASSERT_AT_MARKER) {
+                    if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                        !groups[f.reject_at_start].data()) {
+                        continue;
+                    }
                     if (!js_regex_assert_marker_matches(f, input, input_len, groups, ngroups)) {
+                        int marker_offset = -1;
+                        if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                            groups[f.reject_at_start].data()) {
+                            marker_offset = (int)(groups[f.reject_at_start].data() - input);
+                        }
+                        if (marker_offset >= 0 && js_regex_retry_marker_same_start(
+                                matched_pattern, refined_opts, f, input, input_len,
+                                match_begin_offset, marker_offset, true, groups, ngroups)) {
+                            match_begin = groups[0].data();
+                            match_begin_offset = (int)(match_begin - input);
+                            match_end_offset = match_begin_offset + (int)groups[0].size();
+                            fi = -1;
+                            continue;
+                        }
                         if (anchor_start) return 0;
                         return js_regex_wrapper_exec(compiled, input, input_len,
                             match_begin_offset + 1, anchor_start,
@@ -2666,9 +2686,9 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                         if (check_len >= 0) {
                             if (js_regex_reject_filter_matches(f, check_start, check_len)) {
                                 int rejected_offset = (int)(check_start - input);
-                                if (js_regex_retry_reject_same_start(
+                                if (js_regex_retry_marker_same_start(
                                         matched_pattern, refined_opts, f, input, input_len,
-                                        match_begin_offset, rejected_offset, groups, ngroups)) {
+                                        match_begin_offset, rejected_offset, false, groups, ngroups)) {
                                     match_begin = groups[0].data();
                                     match_begin_offset = (int)(match_begin - input);
                                     match_end_offset = match_begin_offset + (int)groups[0].size();
@@ -2743,7 +2763,32 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             break;
                         }
                         case JS_PF_ASSERT_AT_MARKER: {
+                            if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                                !groups[f.reject_at_start].data()) {
+                                break;
+                            }
                             if (!js_regex_assert_marker_matches(f, input, input_len, groups, ngroups)) {
+                                int marker_offset = -1;
+                                if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
+                                    groups[f.reject_at_start].data()) {
+                                    marker_offset = (int)(groups[f.reject_at_start].data() - input);
+                                }
+                                re2::RE2::Options retry_opts;
+                                retry_opts.set_log_errors(false);
+                                retry_opts.set_encoding(re2::RE2::Options::EncodingUTF8);
+                                retry_opts.set_case_sensitive(compiled->re2->options().case_sensitive());
+                                retry_opts.set_dot_nl(compiled->re2->options().dot_nl());
+                                retry_opts.set_one_line(compiled->re2->options().one_line());
+                                if (marker_offset >= 0 && js_regex_retry_marker_same_start(
+                                        compiled->re2->pattern(), retry_opts, f, input, input_len,
+                                        match_begin_offset, marker_offset, true, groups, ngroups)) {
+                                    match_begin = groups[0].data();
+                                    match_begin_offset = (int)(match_begin - input);
+                                    match_end_offset = match_begin_offset + (int)groups[0].size();
+                                    match_start = match_begin_offset;
+                                    fi = -1;
+                                    continue;
+                                }
                                 rejected = true;
                             }
                             break;

@@ -12969,7 +12969,9 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     }
                 }
             }
-            arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+            if (idx < arr->capacity) {
+                arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+            }
             // Arguments exotic objects: deleting a mapped index breaks the
             // ParameterMap link, so later re-defining the index must not
             // update the formal parameter binding.

@@ -13,3 +13,6 @@ keys-includes-0 true
 0-in true
 20000-in true
 9999-in false
+delete-sparse true
+after-delete-in false
+after-delete-value undefined

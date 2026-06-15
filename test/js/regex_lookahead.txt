@@ -8,3 +8,5 @@ t7:ab
 t8:a
 t9:# H1,4,#, H1
 t10:hello world,h
+t11:/foo,4
+t12:true,true

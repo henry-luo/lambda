@@ -4,6 +4,14 @@ slice-100[2] 30
 slice-100[50] undefined
 slice-all-length 20001
 slice-all[0] 10
+slice-all[20000] sparse
 splice-removed-length 2
 splice-arr2-length 19999
 splice-arr2[0] 3
+splice-arr2[19998] x
+splice-arr2[20000] undefined
+splice-removed2-length 2
+splice-removed2[0] undefined
+splice-removed2[1] y
+splice-arr3-length 19999
+splice-arr3[20000] undefined

@@ -51,3 +51,12 @@ console.log("t9:" + (m9 ? m9[0] : "null") + "," + (m9 ? m9[0].length : -1) + ","
 var re10 = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/;
 var m10 = re10.exec("hello world");
 console.log("t10:" + (m10 ? m10[0] : "null") + "," + (m10 ? m10[1] : "null"));
+
+// --- Test 11: Lazy prefix must retry the zero-width lookahead marker ---
+var re11 = /^\/?(?:.|\n)*?(?=\/|$)/;
+var m11 = re11.exec("/foo/bar");
+console.log("t11:" + (m11 ? m11[0] : "null") + "," + (m11 ? m11[0].length : -1));
+
+// --- Test 12: Marker inside skipped optional branch must not reject ---
+var re12 = /^x(?:\?[^#]*(?=#|$))?$/;
+console.log("t12:" + re12.test("x") + "," + re12.test("x?a"));

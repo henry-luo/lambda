@@ -1,9 +1,5 @@
-// Js58 P1 target: fill / copyWithin / reverse / sort on sparse arrays.
-//
-// CURRENT behaviour mostly correct for in-range dense slots; sparse
-// entries beyond capacity are touched only by paths that consult the
-// companion Map. The .txt below pins observed behaviour today; Phase 1's
-// refactor should keep these passing while extending the sparse semantics.
+// Js58 P1: mutating Array methods must handle sparse companion-map DATA
+// entries without dense-buffer OOB reads or writes.
 
 // --- fill across dense range only ---
 var a1 = [1, 2, 3];
@@ -31,3 +27,32 @@ a4.copyWithin(0, 3);
 console.log("copy-a4[0]", a4[0]);
 console.log("copy-a4[1]", a4[1]);
 console.log("copy-a4[4]", a4[4]);
+
+// --- fill across sparse-only range ---
+var a5 = [1, 2, 3];
+a5[20000] = "x";
+a5.fill("f", 19999, 20001);
+console.log("fill-a5[19999]", a5[19999]);
+console.log("fill-a5[20000]", a5[20000]);
+
+// --- copyWithin from sparse source ---
+var a6 = [1, 2, 3];
+a6[20000] = "x";
+a6.copyWithin(0, 20000);
+console.log("copy-a6[0]", a6[0]);
+
+// --- reverse sparse entry to front and dense front to sparse end ---
+var a7 = [1, 2, 3];
+a7[20000] = "x";
+a7.reverse();
+console.log("reverse-a7[0]", a7[0]);
+console.log("reverse-a7[20000]", a7[20000]);
+
+// --- sort sparse entries with dense present values, holes at end ---
+var a8 = [3, 1, 2];
+a8[20000] = 0;
+a8.sort(function (x, y) { return x - y; });
+console.log("sort-a8[0]", a8[0]);
+console.log("sort-a8[3]", a8[3]);
+console.log("sort-a8[4]", a8[4]);
+console.log("sort-a8-length", a8.length);

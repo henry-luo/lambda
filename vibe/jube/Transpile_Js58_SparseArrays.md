@@ -2,7 +2,7 @@
 
 Date: 2026-06-16
 
-Status: proposal. Js57 closed the ES2024 module-evaluation work and the sparse-array `SPARSE_GAP_MAX = 10000` perf workaround in P8. The P8 workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable" — any JS that does `arr[20000] = …` followed by `reduce` / `findLast` / `fill` / `sort` / `arr.length = N` now hits a half-finished sparse path. Js58 finishes the integration.
+Status: implementation in progress. Js57 closed the ES2024 module-evaluation work and the sparse-array `SPARSE_GAP_MAX = 10000` perf workaround in P8. The P8 workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable" — any JS that does `arr[20000] = …` followed by `reduce` / `findLast` / `fill` / `sort` / `arr.length = N` now hits a half-finished sparse path. Js58 finishes the integration. The sparse correctness work for Phases 1-3 is implemented in grouped fixtures as of §10.7; Phase 4 remains deferred.
 
 The audit in Js57 §13 P8 documented the gaps (`reduce` / `reduceRight` / `findLast` / `findLastIndex` / `fill` / `copyWithin` / `reverse` / `sort` ignore sparse entries; `includes` / `flat` / `flatMap` / `concat` / `slice` / `splice` partially miss them; `arr.length` truncation leaks orphaned sparse entries). Test262 doesn't exercise these gaps for arrays with gap > 10K because its sparse fixtures use smaller gaps that still ride the dense path. Js58 fixes the gaps **and** authors a focused `test/js/sparse_*.{js,txt}` suite to lock the behaviour in.
 
@@ -194,7 +194,9 @@ These tests target the gaps test262 doesn't reach with `SPARSE_GAP_MAX = 10000`.
 | `sparse_already_robust.{js,txt}` | Regression-lock for the helper-routed methods: `every`, `some`, `indexOf`, `lastIndexOf`, `forEach`, `map`, `filter`, `find`, `findIndex`. Asserts callback counts and return values on the same sparse fixtures used by the broken-method tests, so any future regression in the helper itself is caught. |
 | `sparse_gc_survival.{js,txt}` | Allocate a sparse array, trigger several GC cycles via large string concatenation, then verify sparse entries survive intact. Pins the GC tracing of `arr->extra`. |
 
-15 test files; each `.js` ≤ 80 lines, `.txt` ≤ 30 lines. The whole suite runs in under 1 s.
+Implementation note: the landed suite groups related rows into 10 fixtures rather than one file per method family. The grouped files are `sparse_basic`, `sparse_reduce`, `sparse_find`, `sparse_includes`, `sparse_concat_flat`, `sparse_slice_splice`, `sparse_mutate`, `sparse_length`, `sparse_already_robust`, and `sparse_gc_survival`.
+
+15 test files were the original split-plan target; each `.js` ≤ 80 lines, `.txt` ≤ 30 lines. The grouped suite keeps the same coverage with less fixture duplication.
 
 The robustness-lock file (`sparse_already_robust`) is the safety net: if Phase 1's helper refactor breaks something in the already-correct iteration methods, this catches it without requiring a full test262 run.
 
@@ -214,7 +216,7 @@ The robustness-lock file (`sparse_already_robust`) is the safety net: if Phase 1
 | P2 — `has_property` companion-Map check | 1 (.cpp) | ~12 | low | 30 min |
 | P3 — length-truncation cleanup | 1 (.cpp) | ~8 | low | 30 min |
 | P4 — sub-linear sparse-key lookup | 1 (.cpp) + struct change | ~100 | low (sparse-side only) | 1 day (only if needed) |
-| Test authoring | 15 (.js+.txt pairs) | ~700 LOC total | — | 1 day |
+| Test authoring | 10 grouped (.js+.txt pairs) | ~700 LOC total | — | 1 day |
 
 **Total**: 3-4 days for full correctness; Phase 4 only if profiling justifies.
 
@@ -243,7 +245,7 @@ The only sparse-path perf hit comes in Phase 1's `sort`/`reverse` refactor for a
 | Failures in baseline | 0 | 0 |
 | Sparse-path correctness | partial (9 broken methods + length leak) | full |
 | Dense-path wall-clock | n | ±2 % of n |
-| `test/js/sparse_*` test files | 0 | ≥ 15 |
+| `test/js/sparse_*` test files | 0 | 10 grouped fixtures covering the 15 split-plan method families |
 | Scope line | ES2024 | ES2024 (Js58 is last ES2024 proposal) |
 
 Js58 is the closer for ES2024 sparse semantics. After Js58 lands, Lambda's array implementation matches V8/SpiderMonkey behaviour on sparse arrays for every test262-relevant method, with no perf regression on the 99 %-dense workloads that dominate real JS.
@@ -463,6 +465,25 @@ Tripwires installed on `js_property_set`, `js_set_shaped_slot`, `js_create_data_
 Hypothesis (2) is now most likely because all the helper tripwires are clean. Next step would be a tracing GC build (or an LLDB scripted watchpoint on Map+0x08 after lex allocation) to identify exactly when the slab slot is recycled vs the JS-side reference is still considered live.
 
 For now the existing safety nets (`js_map_get_fast`, `js_invoke_fn`, `js_obj_typemap`, `js_class_get`/`js_class_id`) convert the SIGSEGV into a `TypeError`, keeping the test deterministic and preventing crash propagation to other tests.
+
+## 10.7. Js58 Sparse Phases 1-3 — grouped-fixture implementation
+
+The sparse correctness portion now lands as grouped fixtures instead of the original one-method-per-file split.
+
+Runtime changes:
+- `js_array_element` reads companion-Map DATA entries when no dense slot is present, while keeping index reads bounded by `capacity`.
+- `js_create_data_property_or_throw`, direct `slice`, direct `splice`, `at`, `item`, `findLast`, and `findLastIndex` avoid dense-buffer OOB reads/writes for sparse logical indexes.
+- `fill` uses the generic property-setting path; `sort` keeps the dense cleanup path unchanged for ordinary dense arrays and clears sparse/dense tail entries only for sparse-shaped arrays.
+- `js_delete_property` no longer writes past `arr->capacity` when deleting sparse numeric indexes.
+
+Fixture coverage:
+- Existing grouped files cover reduce/reduceRight, find/findIndex/findLast/findLastIndex, includes, concat/flat/flatMap, slice/splice, fill/copyWithin/reverse/sort, length truncate/extend, already-robust helper-routed methods, delete, and sparse GC survival.
+- Current focused gate: `test/test_js_gtest.exe --gtest_filter='*sparse*' --gtest_brief=1` runs 10 sparse JS fixtures and passes.
+- Current build gate: `make build-test` passes.
+- Current test262 guard caveat: the sparse guard run emitted 0 failure rows, but the harness reported 3 timing-only slow-gate classifications in unrelated TypedArray `copyWithin` tests. Treat this as not yet a clean admission gate, and re-run before closing Js58.
+- Current full JS-suite caveat: `lib_joi` / `lib_ajv` URI regex failures reproduce with the sparse patch reversed, so they are tracked as pre-existing/unrelated to this sparse landing.
+
+Phase 4 remains deferred; no sparse-key index/cache structure has been added.
 
 ## 11. Followups After Js58
 

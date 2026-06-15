@@ -1,4 +1,6 @@
 find-30 30
-find-string undefined
-findIndex-string -1
+find-string sparse
+findIndex-string 20000
+findLast-string sparse
+findLastIndex-string 20000
 find-missing undefined

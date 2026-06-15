@@ -21659,6 +21659,13 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
             }
         }
         // AT-3: legacy __get_<idx> marker fallback retired.
+        bool sparse_found = false;
+        Item sparse_val = js_map_get_fast_ext(props, idx_buf, idx_len, &sparse_found);
+        if (sparse_found && sparse_val.item != JS_DELETED_SENTINEL_VAL) {
+            bool dense_present = idx >= 0 && idx < arr->length && idx < arr->capacity &&
+                arr->items[idx].item != JS_DELETED_SENTINEL_VAL;
+            if (!dense_present) return sparse_val;
+        }
     }
     // J39-7: spec [[Get]] for index >= length returns undefined (after array
     // mutation during iteration, find/forEach/map etc. may visit indices that
@@ -21694,7 +21701,7 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
     if (type == LMD_TYPE_ARRAY) {
         // for arrays, direct index write
         Array* arr = object.array;
-        if (index >= arr->length) {
+        if (index >= arr->length || index >= arr->capacity) {
             // extend array
             Item key = (Item){.item = i2it(index)};
             js_array_set(object, key, value);
@@ -22754,10 +22761,24 @@ static Item js_array_generic_sort(Item object, Item* args, int argc) {
             return ItemNull;
         }
     }
-    for (int64_t j = item_count; j < len; j++) {
-        if (!js_delete_property_or_throw(object, js_array_index_key(j))) {
-            if (items) mem_free(items);
-            return ItemNull;
+    if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
+            (object.array->extra != 0 || len > object.array->capacity)) {
+        Array* a = object.array;
+        int64_t dense_limit = len;
+        if (dense_limit > a->capacity) dense_limit = a->capacity;
+        Item hole = lam::hole_sentinel_item();
+        for (int64_t j = item_count; j < dense_limit; j++) {
+            a->items[j] = hole;
+        }
+        if (a->extra != 0) {
+            js_array_delete_sparse_indices_from(lam::gc_borrow(a), item_count);
+        }
+    } else {
+        for (int64_t j = item_count; j < len; j++) {
+            if (!js_delete_property_or_throw(object, js_array_index_key(j))) {
+                if (items) mem_free(items);
+                return ItemNull;
+            }
         }
     }
 
@@ -23609,7 +23630,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
         int idx = (int)js_get_number(args[0]);
         Array* a = arr.array;
-        if (idx >= 0 && idx < a->length) return a->items[idx];
+        if (idx >= 0 && idx < a->length) {
+            Item val = js_array_element(arr, idx);
+            if (get_type_id(val) == LMD_TYPE_UNDEFINED || val.item == ITEM_JS_UNDEFINED) return ItemNull;
+            return val;
+        }
         return ItemNull;
     }
     // includes
@@ -23701,82 +23726,48 @@ includes_slow_path:
     if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* src = arr.array;
-        // ES §23.1.3.28: undefined start/end → defaults (0 / length).
-        double d_start = 0.0;
-        if (argc > 0 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-            d_start = js_get_number(args[0]);
-            if (js_exception_pending) return ItemNull;
-        }
-        double d_end = (double)src->length;
-        if (argc > 1 && args[1].item != ITEM_JS_UNDEFINED && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            d_end = js_get_number(args[1]);
-            if (js_exception_pending) return ItemNull;
-        }
-        if (d_start != d_start) d_start = 0.0;
-        if (d_end != d_end) d_end = 0.0;
-        d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
-        d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
-        int start;
-        if (d_start == INFINITY) start = src->length;
-        else if (d_start == -INFINITY) start = 0;
-        else if (d_start < 0) start = (int)fmax((double)src->length + d_start, 0.0);
-        else start = (int)fmin(d_start, (double)src->length);
-        int end;
-        if (d_end == INFINITY) end = src->length;
-        else if (d_end == -INFINITY) end = 0;
-        else if (d_end < 0) end = (int)fmax((double)src->length + d_end, 0.0);
-        else end = (int)fmin(d_end, (double)src->length);
-        if (start >= end) return js_array_species_create(arr, 0);
-        int count = end - start;
+        int64_t len = src->length;
+        int64_t start = argc > 0 ? js_array_relative_index(args[0], len, 0) : 0;
+        if (js_exception_pending) return ItemNull;
+        int64_t end = argc > 1 ? js_array_relative_index(args[1], len, len) : len;
+        if (js_exception_pending) return ItemNull;
+        int64_t count = end > start ? end - start : 0;
         Item result = js_array_species_create(arr, count);
         if (js_exception_pending) return make_js_undefined();
-        bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && result.array->extra == 0);
-        bool src_has_proto = js_proto_chain_has_numeric_keys(arr);
-        if (result_is_plain_array) {
-            Array* dst = result.array;
-            int64_t src_cap = src->capacity;
-            for (int i = 0; i < count; i++) {
-                int idx = start + i;
-                // js58 P2: for sparse arrays, indices past dense capacity are holes
-                Item elem = ((int64_t)idx < src_cap) ? src->items[idx]
-                          : (Item){.item = JS_DELETED_SENTINEL_VAL};
-                if (elem.item == JS_DELETED_SENTINEL_VAL) {
-                    // hole: check prototype chain to find value (Array.prototype or Object.prototype)
-                    if (src_has_proto) {
-                        Item proto_elem = ItemNull;
-                        bool found = js_array_has_element(arr, lam::gc_borrow(src), idx, &proto_elem, true);
-                        if (found && proto_elem.item != ItemNull.item) elem = proto_elem;
-                    } else {
-                        // still check Array.prototype directly (may have numeric properties
-                        // stored as array items, not shape entries, so js_proto_chain_has_numeric_keys
-                        // may miss them)
-                        char idx_buf[32];
-                        int blen = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
-                        Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, blen))};
-                        Item p = js_property_get(arr, idx_key);
-                        if (p.item != ItemNull.item && get_type_id(p) != LMD_TYPE_UNDEFINED)
-                            elem = p;
-                    }
-                }
-                dst->items[i] = elem;
-            }
-            dst->length = count;
-        } else {
-            int64_t src_cap = src->capacity;
-            for (int i = 0; i < count; i++) {
-                int idx = start + i;
-                Item src_elem = ((int64_t)idx < src_cap) ? src->items[idx]
-                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
-                js_create_data_property_or_throw(result, i, src_elem);
+
+        bool check_proto = js_proto_chain_has_numeric_keys(arr);
+        int64_t dense_end = end;
+        if (dense_end > src->capacity) dense_end = src->capacity;
+        if (dense_end > src->length) dense_end = src->length;
+        for (int64_t idx = start; idx < dense_end; idx++) {
+            Item elem = ItemNull;
+            if (js_array_has_element(arr, lam::gc_borrow(src), idx, &elem, check_proto)) {
+                js_create_data_property_or_throw(result, idx - start, elem);
                 if (js_exception_pending) return make_js_undefined();
             }
-            if (get_type_id(result) == LMD_TYPE_ARRAY) {
-                result.array->length = count;
-            } else {
-                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                js_property_set(result, len_key, (Item){.item = i2it(count)});
+        }
+        if (src->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)src->extra;
+            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
+            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                if (!se->name) continue;
+                int64_t sparse_idx = -1;
+                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &sparse_idx)) continue;
+                if (sparse_idx < start || sparse_idx >= end || sparse_idx < dense_end) continue;
+                Item sparse_val = _map_read_field(se, pm->data);
+                if (sparse_val.item == JS_DELETED_SENTINEL_VAL) continue;
+                if (jspd_is_accessor(se)) {
+                    Item sparse_key = (Item){.item = s2it(heap_create_name(se->name->str, (int)se->name->length))};
+                    sparse_val = js_property_get(arr, sparse_key);
+                    if (js_exception_pending) return make_js_undefined();
+                }
+                js_create_data_property_or_throw(result, sparse_idx - start, sparse_val);
+                if (js_exception_pending) return make_js_undefined();
             }
         }
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        js_property_set(result, len_key, (Item){.item = i2it(count)});
+        if (js_exception_pending) return make_js_undefined();
         return result;
     }
     // concat - returns new array that is the concatenation
@@ -24075,10 +24066,11 @@ includes_slow_path:
         Item thisArg_fl = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
         js_current_this = js_compute_callback_this(fn, thisArg_fl);
         for (int i = src->length - 1; i >= 0; i--) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item elem = js_array_element(arr, i);
+            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
-            if (js_is_truthy(pred)) { js_current_this = prev_this; return src->items[i]; }
+            if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
         js_current_this = prev_this;
         return make_js_undefined();
@@ -24094,7 +24086,8 @@ includes_slow_path:
         Item thisArg_fli = (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) ? args[1] : make_js_undefined();
         js_current_this = js_compute_callback_this(fn, thisArg_fli);
         for (int i = src->length - 1; i >= 0; i--) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item elem = js_array_element(arr, i);
+            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
@@ -24192,40 +24185,7 @@ includes_slow_path:
     }
     // fill(value, start?, end?) — fill array elements in range with value
     if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
-        // ES §22.1.3.6: fill(value [, start [, end]]). value defaults to undefined,
-        // start defaults to 0, end defaults to len. undefined for end means len (not NaN→0).
-        Item fill_val = (argc >= 1) ? args[0] : make_js_undefined();
-        if (argc <= 1) {
-            // simple: fill all with value (or undefined if no args)
-            return js_array_fill(arr, fill_val);
-        }
-        // fill with start and/or end index
-        if (arr_type != LMD_TYPE_ARRAY) return arr;
-        Array* a = arr.array;
-        int len = a->length;
-        // ES spec: ToInteger(start) and ToInteger(end) — throw TypeError for Symbol
-        if (argc > 1 && js_key_is_symbol(args[1]))
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        if (argc > 2 && js_key_is_symbol(args[2]))
-            return js_throw_type_error("Cannot convert a Symbol value to a number");
-        // ES ToInteger semantics: NaN→0, truncate toward zero before clamping.
-        // Per spec, end=undefined means len (NOT ToInteger(undefined)=0).
-        bool end_is_undef = (argc <= 2) ||
-            args[2].item == ITEM_JS_UNDEFINED ||
-            get_type_id(args[2]) == LMD_TYPE_UNDEFINED;
-        double d_start = js_get_number(args[1]);
-        double d_end   = end_is_undef ? (double)len : js_get_number(args[2]);
-        if (d_start != d_start) d_start = 0;
-        if (d_end != d_end) d_end = 0;
-        d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
-        d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
-        int start = (d_start < 0) ? (int)fmax(len + d_start, 0) : (int)fmin(d_start, len);
-        int end   = (d_end < 0)   ? (int)fmax(len + d_end, 0)   : (int)fmin(d_end, len);
-        Item val = fill_val;
-        for (int i = start; i < end; i++) {
-            a->items[i] = val;
-        }
-        return arr;
+        return js_array_generic_fill(arr, args, argc);
     }
     // copyWithin(target, start, end?) — copy elements within the array
     if (method->len == 10 && strncmp(method->chars, "copyWithin", 10) == 0) {
@@ -24258,6 +24218,7 @@ includes_slow_path:
         if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
         Array* a = arr.array;
         double start_d = argc > 0 ? js_get_number(args[0]) : 0;
+        if (js_exception_pending) return make_js_undefined();
         int start;
         if (start_d < 0) {
             start_d = (double)a->length + start_d;
@@ -24267,61 +24228,78 @@ includes_slow_path:
         else if (start_d < 0) start = 0;
         else start = (int)start_d;
         double dc_d = argc > 1 ? js_get_number(args[1]) : (double)(a->length - start);
+        if (js_exception_pending) return make_js_undefined();
         int delete_count;
         if (dc_d < 0) delete_count = 0;
         else if (dc_d > (double)(a->length - start)) delete_count = a->length - start;
         else delete_count = (int)dc_d;
         int insert_count = argc > 2 ? argc - 2 : 0;
 
-        // save deleted elements (use ArraySpeciesCreate per ES spec)
         Item deleted = js_array_species_create(arr, delete_count);
         if (js_exception_pending) return make_js_undefined();
-        bool del_is_plain_array = (get_type_id(deleted) == LMD_TYPE_ARRAY && deleted.array->extra == 0);
-        // js58 P2: for sparse arrays (length > capacity), reads past capacity are holes
-        int64_t a_cap = a->capacity;
-        if (del_is_plain_array) {
-            Array* del_arr = deleted.array;
-            for (int i = 0; i < delete_count; i++) {
-                Item src_elem = ((int64_t)(start + i) < a_cap) ? a->items[start + i]
-                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
-                if (i < del_arr->length) del_arr->items[i] = src_elem;
-                else js_array_push_item_direct(del_arr, src_elem);
-            }
-        } else {
-            for (int i = 0; i < delete_count; i++) {
-                Item src_elem = ((int64_t)(start + i) < a_cap) ? a->items[start + i]
-                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        for (int i = 0; i < delete_count; i++) {
+            int64_t src_idx = (int64_t)start + i;
+            Item from_key = js_array_index_key(src_idx);
+            if (js_array_method_has_property(arr, from_key)) {
+                Item src_elem = js_property_get(arr, from_key);
+                if (js_exception_pending) return make_js_undefined();
                 js_create_data_property_or_throw(deleted, i, src_elem);
                 if (js_exception_pending) return make_js_undefined();
             }
-            if (get_type_id(deleted) == LMD_TYPE_ARRAY) {
-                deleted.array->length = delete_count;
-            } else {
-                Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                js_property_set(deleted, len_key, (Item){.item = i2it(delete_count)});
+        }
+        js_property_set(deleted, len_key, (Item){.item = i2it(delete_count)});
+        if (js_exception_pending) return make_js_undefined();
+
+        int sparse_count = 0;
+        if (a->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)a->extra;
+            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
+            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                if (!se->name) continue;
+                int64_t idx = -1;
+                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+                if (idx < a->capacity || idx >= a->length) continue;
+                Item val = _map_read_field(se, pm->data);
+                if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
+            }
+        }
+        int64_t* sparse_indices = sparse_count > 0 ?
+            (int64_t*)mem_alloc((size_t)sparse_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME) : NULL;
+        Item* sparse_values = sparse_count > 0 ?
+            (Item*)mem_alloc((size_t)sparse_count * sizeof(Item), MEM_CAT_JS_RUNTIME) : NULL;
+        int sparse_pos = 0;
+        if (sparse_count > 0 && a->extra != 0) {
+            Map* pm = (Map*)(uintptr_t)a->extra;
+            TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
+            for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+                if (!se->name) continue;
+                int64_t idx = -1;
+                if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+                if (idx < a->capacity || idx >= a->length) continue;
+                Item val = _map_read_field(se, pm->data);
+                if (val.item == JS_DELETED_SENTINEL_VAL) continue;
+                sparse_indices[sparse_pos] = idx;
+                sparse_values[sparse_pos] = val;
+                sparse_pos++;
             }
         }
 
-        // shift elements
         int shift = insert_count - delete_count;
         int old_len = a->length;
         int new_len = old_len + shift;
-        // js58 P2: only memmove the DENSE portion. Items past capacity are holes
-        // (sparse). The dense range is [0, min(old_len, capacity)).
         int dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
         if (shift > 0) {
-            // grow: ensure capacity, then memmove
             if (new_len + 4 > a->capacity) {
                 int new_cap = new_len + 4;
                 Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
-                    if (a->items && a->length > 0) {
-                        int copy_cnt = (int)((int64_t)a->length < a->capacity ? a->length : a->capacity);
-                        memcpy(new_items, a->items, copy_cnt * sizeof(Item));
-                    }
-                    js_array_install_runtime_items(a, new_items, new_cap);
-                    dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
+                if (a->items && a->length > 0) {
+                    int copy_cnt = (int)((int64_t)a->length < a->capacity ? a->length : a->capacity);
+                    memcpy(new_items, a->items, copy_cnt * sizeof(Item));
                 }
-            // move elements after delete region to their new positions
+                js_array_install_runtime_items(a, new_items, new_cap);
+                dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
+            }
             int elements_to_move = dense_end - start - delete_count;
             if (elements_to_move > 0) {
                 memmove(&a->items[start + insert_count], &a->items[start + delete_count],
@@ -24329,7 +24307,6 @@ includes_slow_path:
             }
             a->length = new_len;
         } else if (shift < 0) {
-            // shrink: memmove left, then adjust length
             int elements_to_move = dense_end - start - delete_count;
             if (elements_to_move > 0) {
                 memmove(&a->items[start + insert_count], &a->items[start + delete_count],
@@ -24338,9 +24315,48 @@ includes_slow_path:
             a->length = new_len;
         }
 
-        // insert new items
+        for (int i = 0; i < sparse_pos; i++) {
+            int64_t old_idx = sparse_indices[i];
+            if (old_idx >= start && old_idx < (int64_t)start + delete_count) {
+                if (!js_delete_property_or_throw(arr, js_array_index_key(old_idx))) {
+                    if (sparse_indices) mem_free(sparse_indices);
+                    if (sparse_values) mem_free(sparse_values);
+                    return make_js_undefined();
+                }
+            } else if (old_idx >= (int64_t)start + delete_count && old_idx < old_len) {
+                if (!js_delete_property_or_throw(arr, js_array_index_key(old_idx))) {
+                    if (sparse_indices) mem_free(sparse_indices);
+                    if (sparse_values) mem_free(sparse_values);
+                    return make_js_undefined();
+                }
+            }
+        }
+        for (int i = 0; i < sparse_pos; i++) {
+            int64_t old_idx = sparse_indices[i];
+            if (old_idx >= (int64_t)start + delete_count && old_idx < old_len) {
+                int64_t new_idx = old_idx + shift;
+                if (new_idx >= 0 && new_idx < new_len) {
+                    js_array_set(arr, (Item){.item = i2it(new_idx)}, sparse_values[i]);
+                    if (js_exception_pending) {
+                        if (sparse_indices) mem_free(sparse_indices);
+                        if (sparse_values) mem_free(sparse_values);
+                        return make_js_undefined();
+                    }
+                }
+            }
+        }
+        if (a->extra != 0) js_array_delete_sparse_indices_from(lam::gc_borrow(a), new_len);
+        if (sparse_indices) mem_free(sparse_indices);
+        if (sparse_values) mem_free(sparse_values);
+
         for (int i = 0; i < insert_count; i++) {
-            a->items[start + i] = args[2 + i];
+            int64_t idx = (int64_t)start + i;
+            if (idx >= 0 && idx < a->capacity) {
+                a->items[idx] = args[2 + i];
+            } else {
+                js_array_set(arr, (Item){.item = i2it(idx)}, args[2 + i]);
+                if (js_exception_pending) return make_js_undefined();
+            }
         }
         return deleted;
     }
@@ -24494,9 +24510,7 @@ includes_slow_path:
         }
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
-        Item val = a->items[idx];
-        if (val.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();
-        return val;
+        return js_array_element(arr, idx);
     }
     // item(index) — DOM NodeList/HTMLCollection compatibility. Unlike
     // Array.prototype.at(), negative and out-of-range indices return null.
@@ -24516,8 +24530,8 @@ includes_slow_path:
             idx = (int64_t)d;
         }
         if (idx < 0 || idx >= a->length) return ItemNull;
-        Item val = a->items[idx];
-        if (val.item == JS_DELETED_SENTINEL_VAL) return ItemNull;
+        Item val = js_array_element(arr, idx);
+        if (get_type_id(val) == LMD_TYPE_UNDEFINED || val.item == ITEM_JS_UNDEFINED) return ItemNull;
         return val;
     }
     // toString — join elements with comma
