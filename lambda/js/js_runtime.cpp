@@ -21932,6 +21932,127 @@ static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Ite
     return false; // true hole — no property in chain
 }
 
+typedef struct JsArraySparseKeyCursor {
+    Map* props;
+    TypeMap* type;
+    ShapeEntry* shape;
+    int64_t type_length;
+    int64_t* keys;
+    int count;
+    int capacity;
+    bool ready;
+} JsArraySparseKeyCursor;
+
+static int js_array_sparse_key_cmp(const void* left, const void* right) {
+    int64_t a = *(const int64_t*)left;
+    int64_t b = *(const int64_t*)right;
+    return (a > b) - (a < b);
+}
+
+static void js_array_sparse_key_cursor_init(JsArraySparseKeyCursor* cursor) {
+    if (!cursor) return;
+    cursor->props = NULL;
+    cursor->type = NULL;
+    cursor->shape = NULL;
+    cursor->type_length = 0;
+    cursor->keys = NULL;
+    cursor->count = 0;
+    cursor->capacity = 0;
+    cursor->ready = false;
+}
+
+static void js_array_sparse_key_cursor_free(JsArraySparseKeyCursor* cursor) {
+    if (!cursor) return;
+    if (cursor->keys) mem_free(cursor->keys);
+    js_array_sparse_key_cursor_init(cursor);
+}
+
+static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, lam::GcPtr<Array> a) {
+    if (!cursor) return false;
+    Map* props = (a && a->extra != 0) ? (Map*)(uintptr_t)a->extra : NULL;
+    TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
+    ShapeEntry* shape = tm ? tm->shape : NULL;
+    int64_t type_length = tm ? tm->length : 0;
+
+    int count = 0;
+    for (ShapeEntry* se = shape; se; se = se->next) {
+        if (!se->name) continue;
+        int64_t idx = -1;
+        if (js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) count++;
+    }
+    if (count > cursor->capacity) {
+        int64_t* new_keys = (int64_t*)mem_alloc((size_t)count * sizeof(int64_t), MEM_CAT_JS_RUNTIME);
+        if (!new_keys) return false;
+        if (cursor->keys) mem_free(cursor->keys);
+        cursor->keys = new_keys;
+        cursor->capacity = count;
+    }
+
+    int pos = 0;
+    for (ShapeEntry* se = shape; se; se = se->next) {
+        if (!se->name) continue;
+        int64_t idx = -1;
+        if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
+        cursor->keys[pos++] = idx;
+    }
+    if (pos > 1) qsort(cursor->keys, (size_t)pos, sizeof(int64_t), js_array_sparse_key_cmp);
+    int unique = 0;
+    for (int i = 0; i < pos; i++) {
+        if (unique > 0 && cursor->keys[i] == cursor->keys[unique - 1]) continue;
+        cursor->keys[unique++] = cursor->keys[i];
+    }
+
+    cursor->props = props;
+    cursor->type = tm;
+    cursor->shape = shape;
+    cursor->type_length = type_length;
+    cursor->count = unique;
+    cursor->ready = true;
+    return true;
+}
+
+static bool js_array_sparse_key_cursor_refresh(JsArraySparseKeyCursor* cursor, lam::GcPtr<Array> a) {
+    if (!cursor) return false;
+    Map* props = (a && a->extra != 0) ? (Map*)(uintptr_t)a->extra : NULL;
+    TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
+    ShapeEntry* shape = tm ? tm->shape : NULL;
+    int64_t type_length = tm ? tm->length : 0;
+    if (cursor->ready && cursor->props == props && cursor->type == tm &&
+            cursor->shape == shape && cursor->type_length == type_length) {
+        return true;
+    }
+    return js_array_sparse_key_cursor_rebuild(cursor, a);
+}
+
+static int js_array_sparse_key_lower_bound(int64_t* keys, int count, int64_t target) {
+    int lo = 0, hi = count;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (keys[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+static int js_array_sparse_key_upper_bound(int64_t* keys, int count, int64_t target) {
+    int lo = 0, hi = count;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (keys[mid] <= target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+static bool js_array_sparse_key_has_current_slot(Map* props, int64_t idx) {
+    if (!props) return false;
+    char idx_buf[32];
+    int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
+    bool found = false;
+    Item val = js_map_get_fast_ext(props, idx_buf, idx_len, &found);
+    return found && val.item != JS_DELETED_SENTINEL_VAL;
+}
+
 // For sparse arrays with no numeric prototype keys, callback methods can skip
 // true holes by finding the next own dense or companion-map index. The caller
 // still refreshes the prototype check after each callback; if user code installs
@@ -21969,6 +22090,48 @@ static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_
             }
         }
     }
+    int64_t best_index = best_dense;
+    if (best_extra >= 0 && (best_index < 0 || best_extra < best_index)) best_index = best_extra;
+    if (best_index < 0) return false;
+    if (!js_array_has_element(arr, a, best_index, out_elem, false)) return false;
+    *out_index = best_index;
+    return true;
+}
+
+static bool js_array_find_next_own_element_cached(Item arr, lam::GcPtr<Array> a, int64_t start, int64_t len,
+        int64_t* out_index, Item* out_elem, JsArraySparseKeyCursor* cursor) {
+    if (!a) return false;
+    if (!cursor) return js_array_find_next_own_element(arr, a, start, len, out_index, out_elem);
+    if (start < 0) start = 0;
+    if (start >= len) return false;
+
+    int64_t dense_limit = a->capacity;
+    if (dense_limit > len) dense_limit = len;
+    if (dense_limit > a->length) dense_limit = a->length;
+    int64_t best_dense = -1;
+    for (int64_t i = start; i < dense_limit; i++) {
+        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+            best_dense = i;
+            break;
+        }
+    }
+
+    int64_t best_extra = -1;
+    if (a->extra != 0) {
+        if (!js_array_sparse_key_cursor_refresh(cursor, a)) {
+            return js_array_find_next_own_element(arr, a, start, len, out_index, out_elem);
+        }
+        int pos = js_array_sparse_key_lower_bound(cursor->keys, cursor->count, start);
+        while (pos < cursor->count) {
+            int64_t idx = cursor->keys[pos++];
+            if (idx >= len) break;
+            if (js_array_sparse_key_has_current_slot(cursor->props, idx)) {
+                best_extra = idx;
+                break;
+            }
+        }
+    }
+
     int64_t best_index = best_dense;
     if (best_extra >= 0 && (best_index < 0 || best_extra < best_index)) best_index = best_extra;
     if (best_index < 0) return false;
@@ -22033,6 +22196,48 @@ static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_
     return true;
 }
 
+static bool js_array_find_prev_own_element_cached(Item arr, lam::GcPtr<Array> a, int64_t start,
+        int64_t* out_index, Item* out_elem, JsArraySparseKeyCursor* cursor) {
+    if (!a) return false;
+    if (!cursor) return js_array_find_prev_own_element(arr, a, start, out_index, out_elem);
+    if (start >= a->length) start = a->length - 1;
+    if (start < 0) return false;
+
+    int64_t dense_start = start;
+    if (dense_start >= a->capacity) dense_start = a->capacity - 1;
+    if (dense_start >= a->length) dense_start = a->length - 1;
+    int64_t best_dense = -1;
+    for (int64_t i = dense_start; i >= 0; i--) {
+        if (a->items[i].item != JS_DELETED_SENTINEL_VAL) {
+            best_dense = i;
+            break;
+        }
+    }
+
+    int64_t best_extra = -1;
+    if (a->extra != 0) {
+        if (!js_array_sparse_key_cursor_refresh(cursor, a)) {
+            return js_array_find_prev_own_element(arr, a, start, out_index, out_elem);
+        }
+        int pos = js_array_sparse_key_upper_bound(cursor->keys, cursor->count, start);
+        while (pos > 0) {
+            int64_t idx = cursor->keys[--pos];
+            if (idx < 0) break;
+            if (js_array_sparse_key_has_current_slot(cursor->props, idx)) {
+                best_extra = idx;
+                break;
+            }
+        }
+    }
+
+    int64_t best_index = best_dense;
+    if (best_extra >= 0 && (best_index < 0 || best_extra > best_index)) best_index = best_extra;
+    if (best_index < 0) return false;
+    if (!js_array_has_element(arr, a, best_index, out_elem, false)) return false;
+    *out_index = best_index;
+    return true;
+}
+
 extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
     Array* array = arr.array;
@@ -22044,13 +22249,20 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     if (array->extra != 0 && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_proto_chain_has_numeric_keys(arr)) {
         int64_t idx = 0;
         Item elem = ItemNull;
-        while (js_array_find_next_own_element(arr, lam::gc_borrow(array), idx, array->length, &idx, &elem)) {
-            if (elem.item == search_val.item) return (Item){.item = i2it((int)idx)};
+        JsArraySparseKeyCursor sparse_cursor;
+        js_array_sparse_key_cursor_init(&sparse_cursor);
+        while (js_array_find_next_own_element_cached(arr, lam::gc_borrow(array), idx, array->length, &idx, &elem, &sparse_cursor)) {
+            if (elem.item == search_val.item) {
+                js_array_sparse_key_cursor_free(&sparse_cursor);
+                return (Item){.item = i2it((int)idx)};
+            }
             if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                js_array_sparse_key_cursor_free(&sparse_cursor);
                 return (Item){.item = i2it((int)idx)};
             }
             idx++;
         }
+        js_array_sparse_key_cursor_free(&sparse_cursor);
         return (Item){.item = i2it(-1)};
     }
     if (array->extra == 0) {
@@ -22896,28 +23108,34 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
             Array* a = object.array;
             int64_t own_idx = k;
             Item elem = ItemNull;
+            JsArraySparseKeyCursor sparse_cursor;
+            js_array_sparse_key_cursor_init(&sparse_cursor);
             if (get_type_id(search_val) == LMD_TYPE_INT) {
                 // Dense integer lookup is a hot path for test262 membership
                 // tables.  Avoid routing every integer slot through generic
                 // strict equality; non-integer slots still need the full path
                 // for ES semantics such as Number-vs-BigInt/object mismatch.
-                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element_cached(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem, &sparse_cursor)) {
                     if (elem.item == search_val.item) {
+                        js_array_sparse_key_cursor_free(&sparse_cursor);
                         return (Item){.item = i2it(own_idx)};
                     }
                     if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                        js_array_sparse_key_cursor_free(&sparse_cursor);
                         return (Item){.item = i2it(own_idx)};
                     }
                     own_idx++;
                 }
             } else {
-                while (js_array_find_next_own_element(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem)) {
+                while (js_array_find_next_own_element_cached(object, lam::gc_borrow(a), own_idx, len, &own_idx, &elem, &sparse_cursor)) {
                     if (it2b(js_strict_equal(elem, search_val))) {
+                        js_array_sparse_key_cursor_free(&sparse_cursor);
                         return (Item){.item = i2it(own_idx)};
                     }
                     own_idx++;
                 }
             }
+            js_array_sparse_key_cursor_free(&sparse_cursor);
             return (Item){.item = i2it(-1)};
         }
         while (k < len) {
@@ -22957,27 +23175,33 @@ static Item js_array_generic_index_of(Item object, Item* args, int argc, bool fr
         Array* a = object.array;
         int64_t own_idx = k;
         Item elem = ItemNull;
+        JsArraySparseKeyCursor sparse_cursor;
+        js_array_sparse_key_cursor_init(&sparse_cursor);
         if (get_type_id(search_val) == LMD_TYPE_INT) {
             // Mirror the forward indexOf fast path for lastIndexOf(int): keep
             // the common dense-int scan branch-free while preserving generic
             // strict equality for non-integer elements.
-            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element_cached(object, lam::gc_borrow(a), own_idx, &own_idx, &elem, &sparse_cursor)) {
                 if (elem.item == search_val.item) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
                     return (Item){.item = i2it(own_idx)};
                 }
                 if (get_type_id(elem) != LMD_TYPE_INT && it2b(js_strict_equal(elem, search_val))) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
                     return (Item){.item = i2it(own_idx)};
                 }
                 own_idx--;
             }
         } else {
-            while (js_array_find_prev_own_element(object, lam::gc_borrow(a), own_idx, &own_idx, &elem)) {
+            while (js_array_find_prev_own_element_cached(object, lam::gc_borrow(a), own_idx, &own_idx, &elem, &sparse_cursor)) {
                 if (it2b(js_strict_equal(elem, search_val))) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
                     return (Item){.item = i2it(own_idx)};
                 }
                 own_idx--;
             }
         }
+        js_array_sparse_key_cursor_free(&sparse_cursor);
         return (Item){.item = i2it(-1)};
     }
     while (k >= 0) {
@@ -23171,6 +23395,8 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
     bool object_is_array = get_type_id(object) == LMD_TYPE_ARRAY;
     Array* object_array = object_is_array ? object.array : NULL;
     bool check_proto = object_is_array ? js_proto_chain_has_numeric_keys(object) : true;
+    JsArraySparseKeyCursor sparse_cursor;
+    js_array_sparse_key_cursor_init(&sparse_cursor);
     int64_t k = 0;
     while (k < len) {
         Item elem = ItemNull;
@@ -23178,7 +23404,7 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         bool present = false;
         if (object_is_array) {
             if (!check_proto) {
-                present = js_array_find_next_own_element(object, lam::gc_borrow(object_array), k, len, &idx, &elem);
+                present = js_array_find_next_own_element_cached(object, lam::gc_borrow(object_array), k, len, &idx, &elem, &sparse_cursor);
                 if (!present) break;
             } else {
                 for (; idx < len; idx++) {
@@ -23200,30 +23426,49 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         if (present) {
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, callback_object };
             Item selected = js_call_function(callback, this_arg, cb_args, 3);
-            if (js_exception_pending) return ItemNull;
+            if (js_exception_pending) {
+                js_array_sparse_key_cursor_free(&sparse_cursor);
+                return ItemNull;
+            }
 
             if (method_kind == JS_ARRAY_ITER_MAP) {
                 js_create_data_property_or_throw(result, idx, selected);
-                if (js_exception_pending) return ItemNull;
+                if (js_exception_pending) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
+                    return ItemNull;
+                }
             } else if (method_kind == JS_ARRAY_ITER_FILTER) {
                 if (js_is_truthy(selected)) {
                     js_create_data_property_or_throw(result, to, elem);
-                    if (js_exception_pending) return ItemNull;
+                    if (js_exception_pending) {
+                        js_array_sparse_key_cursor_free(&sparse_cursor);
+                        return ItemNull;
+                    }
                     to++;
                 }
             } else if (method_kind == JS_ARRAY_ITER_SOME) {
-                if (js_is_truthy(selected)) return (Item){.item = b2it(true)};
+                if (js_is_truthy(selected)) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
+                    return (Item){.item = b2it(true)};
+                }
             } else if (method_kind == JS_ARRAY_ITER_EVERY) {
-                if (!js_is_truthy(selected)) return (Item){.item = b2it(false)};
+                if (!js_is_truthy(selected)) {
+                    js_array_sparse_key_cursor_free(&sparse_cursor);
+                    return (Item){.item = b2it(false)};
+                }
             }
             if (object_is_array) {
                 check_proto = js_proto_chain_has_numeric_keys(object);
             }
         }
-        if (js_exception_pending) return ItemNull;
+        if (js_exception_pending) {
+            js_array_sparse_key_cursor_free(&sparse_cursor);
+            return ItemNull;
+        }
         k = idx + 1;
     }
 
+    js_array_sparse_key_cursor_free(&sparse_cursor);
     if (method_kind == JS_ARRAY_ITER_FOR_EACH) return make_js_undefined();
     if (method_kind == JS_ARRAY_ITER_SOME) return (Item){.item = b2it(false)};
     if (method_kind == JS_ARRAY_ITER_EVERY) return (Item){.item = b2it(true)};
@@ -24004,12 +24249,14 @@ includes_slow_path:
         js_current_this = js_compute_callback_this(fn, thisArg_forEach);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
+        JsArraySparseKeyCursor sparse_cursor;
+        js_array_sparse_key_cursor_init(&sparse_cursor);
         int64_t i = 0;
         while (i < len) {
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element_cached(arr, lam::gc_borrow(src), i, len, &idx, &elem, &sparse_cursor)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
@@ -24027,6 +24274,7 @@ includes_slow_path:
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
+        js_array_sparse_key_cursor_free(&sparse_cursor);
         js_current_this = prev_this;
         return make_js_undefined();
     }
@@ -24126,12 +24374,14 @@ includes_slow_path:
         js_current_this = js_compute_callback_this(fn, thisArg_some);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
+        JsArraySparseKeyCursor sparse_cursor;
+        js_array_sparse_key_cursor_init(&sparse_cursor);
         int64_t i = 0;
         while (i < len) {
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element_cached(arr, lam::gc_borrow(src), i, len, &idx, &elem, &sparse_cursor)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
@@ -24145,11 +24395,16 @@ includes_slow_path:
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
-            if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
+            if (js_is_truthy(pred)) {
+                js_array_sparse_key_cursor_free(&sparse_cursor);
+                js_current_this = prev_this;
+                return (Item){.item = b2it(true)};
+            }
             i = idx + 1;
             // J39-7: refresh check_proto in case callback or getter mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
+        js_array_sparse_key_cursor_free(&sparse_cursor);
         js_current_this = prev_this;
         return (Item){.item = b2it(false)};
     }
@@ -24166,12 +24421,14 @@ includes_slow_path:
         js_current_this = js_compute_callback_this(fn, thisArg_every);
         int64_t len = src->length;  // spec: capture length before loop
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
+        JsArraySparseKeyCursor sparse_cursor;
+        js_array_sparse_key_cursor_init(&sparse_cursor);
         int64_t i = 0;
         while (i < len) {
             Item elem;
             int64_t idx = i;
             if (!check_proto) {
-                if (!js_array_find_next_own_element(arr, lam::gc_borrow(src), i, len, &idx, &elem)) break;
+                if (!js_array_find_next_own_element_cached(arr, lam::gc_borrow(src), i, len, &idx, &elem, &sparse_cursor)) break;
             } else {
                 bool found = false;
                 for (; idx < len; idx++) {
@@ -24185,11 +24442,16 @@ includes_slow_path:
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
-            if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
+            if (!js_is_truthy(pred)) {
+                js_array_sparse_key_cursor_free(&sparse_cursor);
+                js_current_this = prev_this;
+                return (Item){.item = b2it(false)};
+            }
             i = idx + 1;
             // J39-7: refresh check_proto in case callback or getter mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
         }
+        js_array_sparse_key_cursor_free(&sparse_cursor);
         js_current_this = prev_this;
         return (Item){.item = b2it(true)};
     }

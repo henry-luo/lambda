@@ -2,7 +2,7 @@
 
 Date: 2026-06-16
 
-Status: implementation in progress. Js57 closed the ES2024 module-evaluation work and the sparse-array `SPARSE_GAP_MAX = 10000` perf workaround in P8. The P8 workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable" — any JS that does `arr[20000] = …` followed by `reduce` / `findLast` / `fill` / `sort` / `arr.length = N` now hits a half-finished sparse path. Js58 finishes the integration. The sparse correctness work for Phases 1-3 is implemented in grouped fixtures as of §10.7; Phase 4 remains deferred.
+Status: sparse correctness Phases 1-3 implemented and admitted; Phase 4 sparse-key cursor implemented as the next optimization tranche. Js57 closed the ES2024 module-evaluation work and the sparse-array `SPARSE_GAP_MAX = 10000` perf workaround in P8. The P8 workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable" — any JS that does `arr[20000] = …` followed by `reduce` / `findLast` / `fill` / `sort` / `arr.length = N` now hits the real sparse path. Js58 finishes that integration with grouped `test/js/sparse_*.{js,txt}` fixtures and a clean test262 admission gate.
 
 The audit in Js57 §13 P8 documented the gaps (`reduce` / `reduceRight` / `findLast` / `findLastIndex` / `fill` / `copyWithin` / `reverse` / `sort` ignore sparse entries; `includes` / `flat` / `flatMap` / `concat` / `slice` / `splice` partially miss them; `arr.length` truncation leaks orphaned sparse entries). Test262 doesn't exercise these gaps for arrays with gap > 10K because its sparse fixtures use smaller gaps that still ride the dense path. Js58 fixes the gaps **and** authors a focused `test/js/sparse_*.{js,txt}` suite to lock the behaviour in.
 
@@ -141,7 +141,7 @@ Cost: O(sparse_count) one-time scan of the companion-Map shape entries on trunca
 
 **Acceptance**: `test/js/sparse_length_truncate.{js,txt}` passes (asserts: after `arr.length = N`, `Object.keys(arr)` contains no indices ≥ N, `arr[k]` returns undefined for k ≥ N). Full test262 baseline at 40261+ with 0 regressions.
 
-### Phase 4 (deferred unless profiling justifies) — sub-linear sparse-key lookup
+### Phase 4 — sub-linear sparse-key lookup
 
 After Phases 1-3, `js_array_find_next_own_element` still walks the companion Map's full ShapeEntry list on every call (O(s) per call, O(s²) per array iteration). If sparse arrays become a hot path in real workloads, augment the companion Map with:
 
@@ -151,6 +151,8 @@ After Phases 1-3, `js_array_find_next_own_element` still walks the companion Map
 Both changes are sparse-side only — dense fast path stays byte-identical.
 
 **Decision criterion**: land Phase 4 only if, after Phases 1-3, the `test_js_transpile_timing` corpora show >2 % regression on a sparse-heavy corpus (none of the existing corpora are sparse-heavy; this would require a new bench).
+
+**Landed variant:** the first Phase 4 tranche avoids `Map` / `TypeMap` layout changes. Instead, each sparse-aware array iteration creates a local sorted sparse-key cursor from the companion Map's numeric shape entries, uses binary search for next/previous sparse candidates, and refreshes the cursor when callback code changes the companion Map shape. Candidate values are still read from the current companion Map slot, so deletes and re-adds remain visible during iteration. Dense arrays do not allocate a cursor buffer.
 
 ## 4. Acceptance Gates
 
@@ -236,19 +238,21 @@ Empirical check at each phase: re-run `test_js_transpile_timing_gtest` on the he
 
 The only sparse-path perf hit comes in Phase 1's `sort`/`reverse` refactor for arrays with both dense and sparse content — those are O(n + s) instead of O(n). Acceptable, since sparse `sort` was previously *wrong*, not fast.
 
-## 10. Final Js58 Numbers (target)
+## 10. Final Js58 Numbers (verified)
 
-| Metric | Js57 final | Js58 target |
+| Metric | Js57 final | Js58 verified |
 |---|---:|---:|
-| Baseline fully passing | 40261 | ≥ 40261 |
+| Baseline fully passing | 40261 | 40261 |
+| Non-fully-passing | 0 | 0 |
 | Regressions | 0 | 0 |
 | Failures in baseline | 0 | 0 |
 | Sparse-path correctness | partial (9 broken methods + length leak) | full |
-| Dense-path wall-clock | n | ±2 % of n |
+| Dense-path wall-clock | n | timing smoke passed; formal `±2 %` comparison pending baseline file |
+| Sparse-key lookup microbench | n/a | `forEach` 59 ms → 51 ms; `indexOf` 44 ms → 35 ms on 2,500 sparse keys |
 | `test/js/sparse_*` test files | 0 | 10 grouped fixtures covering the 15 split-plan method families |
 | Scope line | ES2024 | ES2024 (Js58 is last ES2024 proposal) |
 
-Js58 is the closer for ES2024 sparse semantics. After Js58 lands, Lambda's array implementation matches V8/SpiderMonkey behaviour on sparse arrays for every test262-relevant method, with no perf regression on the 99 %-dense workloads that dominate real JS.
+Js58 is the closer for ES2024 sparse semantics. With the Phase 1-3 sparse fixes admitted, Lambda's array implementation now matches the intended V8/SpiderMonkey sparse-array behaviour for the test262-relevant method families covered here. The dense-workload timing smoke passes all 7 headline transpile corpora; the saved `temp/js58_perf/js57_baseline.tsv` comparison file is not present in this checkout, so the final `±2 %` claim remains a follow-up measurement rather than a hard admission fact.
 
 ## 10.1. Js58 P0.1 — Slice/Splice OOB Fix (landed)
 
@@ -480,10 +484,21 @@ Fixture coverage:
 - Existing grouped files cover reduce/reduceRight, find/findIndex/findLast/findLastIndex, includes, concat/flat/flatMap, slice/splice, fill/copyWithin/reverse/sort, length truncate/extend, already-robust helper-routed methods, delete, and sparse GC survival.
 - Current focused gate: `test/test_js_gtest.exe --gtest_filter='*sparse*' --gtest_brief=1` runs 10 sparse JS fixtures and passes.
 - Current build gate: `make build-test` passes.
-- Current test262 guard caveat: the sparse guard run emitted 0 failure rows, but the harness reported 3 timing-only slow-gate classifications in unrelated TypedArray `copyWithin` tests. Treat this as not yet a clean admission gate, and re-run before closing Js58.
-- Current full JS-suite caveat: `lib_joi` / `lib_ajv` URI regex failures reproduce with the sparse patch reversed, so they are tracked as pre-existing/unrelated to this sparse landing.
+- Current test262 admission gate: `make test262-baseline` passes with `Fully passed: 40261 / 40261`, `Non-fully-passing: 0`, `Failed: 0`, and `Regressions: 0`.
+- Current URI guard: `test/test_js_gtest.exe --gtest_filter='*lib_joi*:*lib_ajv*' --gtest_brief=1` passes both fixtures; the URI regex failures no longer block Js58 admission.
+- Current timing guard: `test/test_js_transpile_timing_gtest.exe --gtest_brief=1` passes all 7 headline corpora. The saved Js57 timing baseline file is absent, so this is a timing smoke rather than a formal per-corpus delta comparison.
 
-Phase 4 remains deferred; no sparse-key index/cache structure has been added.
+## 10.8. Js58 Phase 4 — sparse-key cursor implementation
+
+The original persistent companion-Map cache idea was not landed because `Map` size is baked into allocation size classes and JIT-visible layout. The admitted Phase 4 tranche keeps the cache local to array iteration:
+
+- `JsArraySparseKeyCursor` builds a sorted list of numeric companion-map shape keys for an array iteration.
+- `js_array_find_next_own_element_cached` and `js_array_find_prev_own_element_cached` use binary search over that key list instead of scanning every `ShapeEntry` on every helper call.
+- The cursor records the companion `Map*`, `TypeMap*`, shape head, and type length; if callback code adds a new sparse property and changes the shape, the next helper call rebuilds the key list.
+- Candidate presence is checked against the current companion-map slot before returning it, so deleted entries are skipped and tombstoned entries that are re-added under an existing shape become visible.
+- `sparse_already_robust` now includes dynamic add/delete cases during `forEach` to lock this mutation behaviour.
+
+Follow-up only if needed: a persistent per-companion-map cache can still be considered later, but it should be designed with the `Map` layout/JIT offset constraints in mind.
 
 ## 11. Followups After Js58
 

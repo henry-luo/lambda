@@ -50,3 +50,26 @@ console.log("9999-in", 9999 in arr);
 console.log("delete-sparse", delete arr[20000]);
 console.log("after-delete-in", 20000 in arr);
 console.log("after-delete-value", arr[20000]);
+
+// Phase 4 sparse-key cursor safety: callbacks can still add/delete future
+// sparse entries while iteration is in progress.
+var dynAdd = [];
+dynAdd[20000] = "a";
+dynAdd[60000] = "z";
+var dynAddSeen = [];
+dynAdd.forEach(function (v, i) {
+  dynAddSeen.push(i + "=" + v);
+  if (i === 20000) dynAdd[40000] = "new";
+});
+console.log("dynamic-add", dynAddSeen.join("|"));
+
+var dynDel = [];
+dynDel[20000] = "a";
+dynDel[40000] = "drop";
+dynDel[60000] = "z";
+var dynDelSeen = [];
+dynDel.forEach(function (v, i) {
+  dynDelSeen.push(i + "=" + v);
+  if (i === 20000) delete dynDel[40000];
+});
+console.log("dynamic-delete", dynDelSeen.join("|"));

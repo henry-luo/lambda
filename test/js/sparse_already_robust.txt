@@ -16,3 +16,5 @@ keys-includes-0 true
 delete-sparse true
 after-delete-in false
 after-delete-value undefined
+dynamic-add 20000=a|40000=new|60000=z
+dynamic-delete 20000=a|60000=z
