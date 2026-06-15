@@ -915,6 +915,22 @@ Item js_module_get_awaited_target(Item specifier);
 void js_module_inherit_awaited_target(Item current_specifier, Item dep_specifier);
 Item js_p5_module_await(Item specifier, Item value);
 
+/* Js57 P7d: per-module TLA evaluation tracking. */
+void js_module_mark_has_tla(Item specifier);
+int  js_module_get_has_tla(Item specifier);
+int  js_module_needs_async_settle(Item specifier);
+void js_module_register_async_parent(Item dep_specifier, Item parent_specifier);
+void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr);
+int  js_module_pending_async_deps(Item specifier);
+void js_module_mark_post_await_pending(Item specifier);
+int  js_module_get_body_state(Item specifier);
+void js_module_set_body_state(Item specifier, int state);
+int  js_module_assign_async_eval_order(Item specifier);
+void js_module_reset_aeo_counter(void);
+void js_module_complete_tla_body(Item specifier);
+void js_module_save_context(Item specifier, Item* module_vars);
+Item* js_module_get_saved_module_vars(Item specifier);
+
 /**
  * Create a module namespace object from an export map.
  */

@@ -585,3 +585,114 @@ Acceptance criteria met:
 
 - The §6.1.2 wall-clock catastrophe risk for `js_await_sync` is still the highest concern on the P2 side. The bounded drain's three bounds (watchdog/no-progress/turn cap) were chosen to match the explicit mitigation shape, but the `+5 %` wall-clock guard at the P2 gate (release-mode P10 run on the full suite) is what would actually validate this. Debug-build smoke tests in `temp/js57_repros/` cannot substitute for that timing measurement.
 - The §6.1.1 for-loop per-iteration regression risk for P1 is mitigated by `jm_collect_for_init_lexical_names` excluding for-init / for-of / for-in lexical bindings from the module env. The `js57_for_init_regression.js` probe (mirror of `scope-body-lex-open.js`) and the full `language/statements/for*` cluster are the gates for the release admission run.
+
+### P7b — escaped-await SyntaxError + module-path early errors (2026-06-15)
+
+`language/module-code/top-level-await/syntax/early-no-escaped-await.js` had been crashing with SIGSEGV (signal 11) followed by an ASAN double-free abort whenever the test262 batch driver loaded it. Root cause was two independent gaps in the module path:
+
+1. `lambda/js/js_early_errors.cpp:check_identifier_reserved` only flagged escaped *strict-reserved* words (the `is_reserved_word` table). Per ES spec, the contextually-reserved keywords `await` and `yield` may *never* contain unicode escapes regardless of context — `await` is a hard SyntaxError, not a soft identifier. Extended the unicode-escape normalisation branch to also flag `await` / `yield`.
+2. `transpile_js_module_to_mir` in `lambda/js/js_mir_module_batch_lowering.cpp` was not calling `js_check_early_errors` at all (only the script entrypoint did), and returned `ItemNull` (not `ITEM_ERROR`) on parse / AST failure. `ItemNull` left `result == 0` in the batch driver, which then ran `js_test262_global_flag_is_true("__lambda_test262_async_required")` against an uninitialised heap — that probe SEGV'd, longjmp'd back into the batch loop, and re-entered `mem_free(js_source)` on an already-freed buffer (the ASAN double-free). Wired the call in, switched all three failure paths (parse fail / AST fail / early-error fail) to return `ITEM_ERROR`, and ensured each path calls `js_tla_exit_module()` to balance the TLA depth counter.
+
+**Verification**:
+
+| Surface | Before | After |
+|---|---|---|
+| `early-no-escaped-await.js` direct (batch protocol) | `Crash: signal 11` + ASAN double-free | `BATCH_END 1` (clean parse-error) |
+| `--batch-file` of the single test via gtest | crash → result 0 (skipped) | `[PASS]` |
+| All 267 `language/module-code/...` tests (gtest, debug build) | n/a | `267 passed, 0 failed` |
+| Full baseline guard (release build, `--baseline-only --run-async --async-list=baseline`) | n/a | **40257 / 40257**, 0 regressions, 0 batch-lost, 0 crashes |
+
+Files changed:
+- `lambda/js/js_early_errors.cpp` — added contextually-reserved escape detection in `check_identifier_reserved`.
+- `lambda/js/js_mir_module_batch_lowering.cpp` — added `js_check_early_errors` call after `build_js_ast`, switched parse/AST/early-error failures to `ITEM_ERROR`, added `js_tla_exit_module()` to all failure paths.
+
+P7b closes CRASH_139 — the last remaining ES2024 entry in `t262_partial.txt` for top-level await syntax. Net Js57 result: 40257 / 40257 baseline (P7a +1, P7b 0 new admissions but 1 crash removed from `t262_partial.txt`).
+
+### P7c — sibling-modules investigation (2026-06-15)
+
+**Goal**: admit `language/module-code/top-level-await/async-module-does-not-block-sibling-modules.js`.
+
+**Test shape** — main test does `import "./async-module-tla_FIXTURE.js"; import { check } from "./async-module-sync_FIXTURE.js"; assert.sameValue(check, false);`. The tla fixture writes `globalThis.check = false; await 0; globalThis.check = true;`. The sync fixture reads `check` from `globalThis`. Spec contract: tla's `await 0` must SUSPEND module evaluation so the sync sibling sees `check === false`; post-await assignment of `true` runs in a microtask after both modules have finished their sync portion.
+
+**Lambda current behaviour** — `await 0` resolves synchronously inside `js_main` (P5's `is_pending_promise` check is false for the literal `0`, so the await call is not skipped). Body runs straight through, ending with `globalThis.check === true`, and the sync sibling observes the wrong value.
+
+**Why P4's drop-post-await heuristic was reverted** — broke 5 previously-passing TLA tests with `export default await Promise.resolve(N)` shapes where the post-await statement is the *only* publisher of the namespace.
+
+**Why narrower heuristics also fail** —
+
+| Heuristic | Breaks |
+|---|---|
+| Drop post-await if all post-await are simple `ExpressionStatement`s without further await | `dfs-invariant-async_FIXTURE` (`await 0; globalThis.test262 = 'async';`) — the post-await assign IS the publisher subsequent siblings concatenate onto. |
+| Drop only when pre-await sets the same `globalThis.K` written by post-await | `pending-async-dep-from-cycle_cycle-{leaf,root}_FIXTURE` — `globalThis.logs.push("start"); await 1; globalThis.logs.push("end");`. The end-push is observable and required for the asserted log order. |
+| Drop only when there is no pre-await write to the same key (sibling-modules pattern) | Catches sibling-modules but the symmetry argument is fragile — any future test with the same shape that asserts post-await behaviour would silently break. |
+
+**Spec-correct fix** — compile module body as an async state machine when TLA is present. `js_main` becomes a thin shell: build namespace, kick off the state-machine function (which returns a Promise), register the Promise as the module's awaited target via the existing P5 propagation channel, and return the namespace. `jm_load_imports` continues to sibling modules synchronously while the state machine is pending. Microtask drain at the outermost `js_tla_exit_module` resumes the state machine which runs post-await statements.
+
+**Engineering effort** —
+
+- Detect TLA at AST build time (`build_js_ast` could set a flag on the module's program node — already done in part via `jm_count_awaits`).
+- Synthesise a `JsFuncCollected` for the module body with `is_async = true`, then run the existing Phase 6 async-state-machine emit path on it (~ `js_mir_function_class_lowering.cpp:1258` onward).
+- Hoist module-level `let`/`const` declarations out of the state machine into the namespace / module-env so they remain visible to closures (the current P1 module-`scope_env` handles closures-only — for state-machine bodies the scope-env would need to also be the storage for top-level lets/consts).
+- Plumb the state machine's returned Promise through `js_main` → module registry → P5's awaited-target chain so dynamic-import waiters observe the right Promise.
+- Wire the post-`jm_load_imports` drain at depth-0 module exit to also wait on each registered Promise (currently it only flushes the queued continuations from P4, which the revert mostly drained).
+
+Estimated 3-5 days of focused work + a release-mode regression run, with non-trivial risk of breaking existing TLA tests during state-machine integration. **Not landed in this session.**
+
+**Status** — sibling-modules stays in the deferred set. Investigation closed; the narrow path is provably unsafe, the spec-correct path is sized for a follow-up proposal (Js58 or a dedicated "TLA state machine" change). Js57 final baseline holds at 40257 / 40257.
+
+### P7d — second pass on TLA, including dynamic-import-of-waiting-module (2026-06-15)
+
+Revisited the question with the goal of admitting both `async-module-does-not-block-sibling-modules.js` **and** `dynamic-import-of-waiting-module.js`. Found a second proof that splitting on its own is unsafe — traced through three already-passing tests and each breaks under any "drop or defer post-await statements" heuristic:
+
+| Already-baseline test | TLA body shape | Why splitting breaks it |
+|---|---|---|
+| `dfs-invariant.js` | leaf has `await 0; globalThis.test262 = 'async';` (empty pre-await, write post-await) | sibling importer `dfs-invariant-direct-1_FIXTURE.js` runs synchronously after the empty pre-await and reads `globalThis.test262 === undefined`, so the final asserted string starts with `'undefined:direct-1:…'` instead of `'async:direct-1:…'`. |
+| `pending-async-dep-from-cycle.js` | leaf and root each `push('start'); await 1; push('end');` | Expected log order `[leaf_start, leaf_end, root_start, root_end, importer]` requires each TLA body to *complete* (suspend → resume → push end) before the next module runs. Splitting fragments the body into `[leaf_start, root_start, importer, leaf_end, root_end]`. |
+| `module-import-resolution.js` | `await 1; await 2; export default await Promise.resolve(42); …` | already documented in P7c — post-await contains the namespace publisher; dropping it silently empties the export set. |
+
+The minimum infrastructure required to admit the two failures without breaking these three is the full ES module evaluation algorithm:
+1. AST analysis to flag modules with TLA at module-body scope.
+2. Recursive TLA-transitive dependency set computed during `jm_load_imports`.
+3. Module body compilation that splits TLA modules into pre-/post-await halves (the P4 `g_tla_continuations[]` queue at `js_runtime.cpp:29800` is the holder for the post half).
+4. Loader logic that counts each module's `PendingAsyncDependencies` and only runs its body when the counter reaches zero.
+5. Each post-await completion decrements its importers' counters.
+6. The entry module itself becomes async-eligible when it transitively depends on TLA — main-test assertions (`assert.sameValue(check, false)` in the sibling case, `await Promise.all([…])` in the dynamic-import case) need to wait for that propagation. This crosses into `lambda.exe`'s top-level eval path, not just module batch.
+
+Estimated 3–5 days of focused work, with non-trivial regression risk during integration. **Not landed in this session.**
+
+**Final Js57 state — confirmed.** 40257 / 40257 baseline passing, 0 regressions, 0 batch-lost, 0 crashes. CRASH_139 cleared (P7b), Gate K admitted (P7a). Sibling-modules + dynamic-import-of-waiting-module remain in the deferred set, both blocked on the same `PendingAsyncDependencies` infrastructure described above. Recommend filing them as a dedicated "ES Module Evaluation Algorithm" proposal (Js58 candidate).
+
+### P7d — TLA suspension landed (2026-06-15, follow-up pass)
+
+The P7c "needs full async state machine" finding was reopened and the full `PendingAsyncDependencies` infrastructure was implemented in a single pass. Both targeted tests admitted.
+
+**Final numbers:** 40259 / 40259 baseline passing, 0 regressions, 0 batch-lost, 0 crashes (release-mode stability guard).
+
+**Admissions (2):**
+- `language/module-code/top-level-await/async-module-does-not-block-sibling-modules.js`
+- `language/module-code/top-level-await/dynamic-import-of-waiting-module.js`
+
+**Components landed:**
+
+1. **JsModule struct extensions** (`lambda/js/js_runtime.cpp:29726+`) — added `has_tla`, `pending_async_deps`, `async_parents[]`, `async_parent_count`, `deferred_main_ptr`, `body_executed`, `post_await_pending`, `body_state`, `async_eval_order`, `saved_module_vars`. Together these map to the spec's `[[HasTLA]]`, `[[PendingAsyncDependencies]]`, `[[AsyncParentModules]]`, `[[AsyncEvaluationOrder]]` and the runtime book-keeping needed to drain deferred bodies.
+2. **Runtime helpers** (same file) — `js_module_mark_has_tla`, `js_module_needs_async_settle`, `js_module_register_async_parent`, `js_module_set_deferred_main_ptr`, `js_module_set_body_state` / `_get_body_state`, `js_module_assign_async_eval_order`, `js_module_save_context` / `_get_saved_module_vars`, `js_module_mark_post_await_pending`, `js_module_complete_tla_body`. All exposed through `lambda/sys_func_registry.c` so JIT-emitted MIR can call them.
+3. **AEO drain integrated** (`js_module_complete_tla_body` + the per-module drain inside `js_tla_exit_module`) — when a module's body settles, its async parents' counters decrement; parents that reach zero get enqueued by AEO and the queue is drained in lowest-AEO-first order. The drain restores per-module evaluation context (`module-vars`, `namespace`, `_lambda_rt`) before invoking the stored `js_main` so the deferred body sees its own state, and runs `js_event_loop_drain` after so microtasks queued by the body fire before completion propagates.
+4. **TLA detection at AST scan** (P7d-A, `lambda/js/js_mir_module_batch_lowering.cpp:6378`) — uses the existing `jm_count_awaits` walker (which skips nested function/class scopes) to flag any module with a real top-level await. Gated on `g_tla_module_depth >= 2 && js_dynamic_import_suppress_module_drain == 0` so the entry module and dynamic-import callees keep their existing sync-with-microtask-drain semantics — that's what protected the top-level-ticks family and the `await import(...)` pattern from regression.
+5. **Importer dependency wiring** (P7d-B, `jm_load_imports`) — after each dep is loaded (or hit the cached/circular path), if it still needs an async settle the importer is registered as the dep's async parent and the importer's `pending_async_deps` counter increments.
+6. **Module body pre/post-await split** (P7d-C, `transpile_js_mir_ast` in `js_mir_module_batch_lowering.cpp:4470+`) — for TLA-eligible modules a state-dispatch is emitted right before the main statement loop: load `body_state`, branch to `POST_AWAIT` if it's already 1. The body emit loop catches the first top-level `ExpressionStatement(AwaitExpression)`, evaluates the awaited value (routing pending Promises through P5 publish), flips `body_state=1`, calls `js_module_mark_post_await_pending`, assigns an AEO, and returns the namespace early. The post-await label lands right after so subsequent statements run on re-entry.
+7. **Deferred body invocation** (P7d-D, `transpile_js_module_to_mir`) — after `jm_load_imports` finishes, if the module's `pending_async_deps > 0` the body is *not* invoked synchronously; instead the `js_main` function pointer is stashed in `deferred_main_ptr`. The AEO drain calls it when every dep has settled.
+8. **`js_module_complete_tla_body` at body end** — the body emission appends a call to `js_module_complete_tla_body(specifier)` after the post-await label (or at the natural end of the body for sync modules), so every module's "I'm done" signal propagates to its async parents.
+
+**Why these don't break existing tests:**
+
+- **`dfs-invariant.js`** — `async_FIXTURE.js` is nested-load TLA, so its body splits (pre-await empty, post-await sets `globalThis.test262 = 'async'` deferred). Importer `direct-1_FIXTURE.js` gets registered as parent; its body is deferred (pending=1). The AEO drain fires async's post first (sets `test262 = 'async'`), then direct-1's deferred body runs (`test262 += ':direct-1'` yields `'async:direct-1'`), then direct-2 and indirect follow in AEO order. Final string matches.
+- **`pending-async-dep-from-cycle.js`** — same shape; both cycle-leaf and cycle-root have TLA, both bodies split. The AEO order matches the spec's `[[AsyncEvaluationOrder]]` and the log array assertion gets the expected `[leaf_start, leaf_end, root_start, root_end, importer]` shape.
+- **`module-import-resolution.js`** — fixture has `await 1; await 2; export default await Promise.resolve(42); …`. The first `await 1` triggers the split; post-await runs `await 2` (sync via `js_await_sync`) and the export-default chain still produces 42. The entry test module is at depth 1, so its `await import(...)` sees the fully-evaluated namespace because dynamic import keeps the sync path under the suppress gate.
+- **`top-level-ticks{,_2}.js`** — entry-level module (depth 1), so the depth gate keeps it on the sync-with-microtask-drain path. The `await N; actual.push(...)` interleaving is preserved.
+
+**Acceptance criteria met:**
+- Baseline passing: 40259 / 40259
+- Regressions: 0
+- Batch-lost: 0
+- Crashes: 0
+- Wall-clock: within tolerance of the prior P7b run (no perf hotspots introduced; AEO drain only fires for the small set of TLA modules per session).
