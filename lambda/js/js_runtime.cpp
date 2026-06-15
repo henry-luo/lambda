@@ -6642,8 +6642,22 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         // but expand_list interprets it as an extra-item count at buffer end.
         int64_t saved_extra = arr->extra;
         arr->extra = 0;
+        int64_t old_capacity = arr->capacity;
         expand_list((List*)arr);
         arr->extra = saved_extra;
+        // P8: expand_list copies the old buffer and leaves new slots at the
+        // tail uninitialized (heap_data_alloc returns zero-init memory, which
+        // for JS Items decodes as `null`/`undefined` and falsely registers as
+        // "present" in dense iteration paths like Array.prototype.indexOf and
+        // Array.prototype.every. Stamp those tail slots with the hole sentinel
+        // so subsequent dense scans correctly treat them as empty until they
+        // are explicitly assigned.
+        if (arr->items && arr->capacity > old_capacity) {
+            Item hole = lam::hole_sentinel_item();
+            for (int64_t i = old_capacity; i < arr->capacity; i++) {
+                arr->items[i] = hole;
+            }
+        }
     }
     arr->items[arr->length] = value;
     arr->length++;

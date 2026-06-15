@@ -518,8 +518,15 @@ enum JsBuiltinId {
 };
 
 
-// v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
-#define SPARSE_GAP_MAX 1000000
+// v22 / P8: Maximum gap allowed for dense array expansion; beyond this, store
+// in the sparse companion Map. Lowered from 1,000,000 to 10,000 — the larger
+// threshold tickled a `gc_data_zone` block-overlap corruption inside
+// multi-million-item dense fills (Array.prototype.every / some on
+// `arr[999999] = …` looped 163,840× instead of 7×). 10,000 keeps the dense
+// fast path for common moderate-density patterns (`arr[100] = …`,
+// `arr[1000] = …`) that downstream search/iteration helpers rely on, while
+// shunting genuinely sparse stores through the sparse-Map.
+#define SPARSE_GAP_MAX 10000
 
 // Forward declarations for Unicode normalization (implemented in utf_string.cpp)
 extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);
