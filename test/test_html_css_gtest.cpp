@@ -1329,7 +1329,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Overflow) {
 // ============================================================================
 
 TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_FontFamilies) {
-    std::string html_content = read_file("test/layout/data/text_flow/text_flow_751_mixed_font_families.html");
+    std::string html_content = read_file("test/layout/data/baseline/text_flow_751_mixed_font_families.html");
     if (html_content.empty()) {
         GTEST_SKIP() << "File not found";
     }
@@ -1347,7 +1347,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_FontFamilies) {
 }
 
 TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_Wrapping) {
-    std::string html_content = read_file("test/layout/data/text_flow/text_flow_741_text_wrapping_sans.html");
+    std::string html_content = read_file("test/layout/data/baseline/text_flow_741_text_wrapping_sans.html");
     if (html_content.empty()) {
         GTEST_SKIP() << "File not found";
     }

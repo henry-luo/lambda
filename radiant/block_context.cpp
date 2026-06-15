@@ -293,8 +293,10 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     // Stop at the BFC establishing element
     ViewElement* parent = float_elem->parent_view();
     while (parent && parent != ctx->establishing_element) {
-        bfc_x += parent->x;
-        bfc_y += parent->y;
+        if (parent->is_block()) {
+            bfc_x += parent->x;
+            bfc_y += parent->y;
+        }
         parent = parent->parent_view();
     }
 

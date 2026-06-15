@@ -2172,8 +2172,10 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     if (parent_view) {
         ViewElement* v = parent_view;
         while (v && v != bfc->establishing_element) {
-            parent_x_in_bfc += v->x;
-            parent_y_in_bfc += v->y;
+            if (v->is_block()) {
+                parent_x_in_bfc += v->x;
+                parent_y_in_bfc += v->y;
+            }
             ViewElement* pv = v->parent_view();
             if (!pv) break;
             v = pv;

@@ -2742,7 +2742,67 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 return false;
             };
 
-            auto measure_anonymous_cell_run = [&should_skip_anonymous_row_child, &lycon](
+            auto anonymous_table_child_horizontal_margin = [&lycon](DomElement* child_elem) -> float {
+                if (!child_elem) return 0.0f;
+                float margin_left = 0.0f;
+                float margin_right = 0.0f;
+                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
+                if (child_view && child_view->bound) {
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO) {
+                        margin_left = child_view->bound->margin.left;
+                    }
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO) {
+                        margin_right = child_view->bound->margin.right;
+                    }
+                    return margin_left + margin_right;
+                }
+                if (!child_elem->specified_style) return 0.0f;
+
+                CssDeclaration* margin_left_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+                if (margin_left_decl && margin_left_decl->value &&
+                    margin_left_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT,
+                                                       margin_left_decl->value);
+                }
+                CssDeclaration* margin_right_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+                if (margin_right_decl && margin_right_decl->value &&
+                    margin_right_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT,
+                                                        margin_right_decl->value);
+                }
+                if (margin_left != 0.0f || margin_right != 0.0f) {
+                    return margin_left + margin_right;
+                }
+
+                CssDeclaration* margin_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                if (!margin_decl || !margin_decl->value) return 0.0f;
+                const CssValue* val = margin_decl->value;
+                if (val->type == CSS_VALUE_TYPE_LENGTH) {
+                    float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
+                    return margin + margin;
+                }
+                if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
+                    CssValue** vals = val->data.list.values;
+                    if (val->data.list.count == 1) {
+                        float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[0]);
+                        return margin + margin;
+                    }
+                    if (val->data.list.count == 2 || val->data.list.count == 3) {
+                        float margin = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                        return margin + margin;
+                    }
+                    float right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                    float left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
+                    return left + right;
+                }
+                return 0.0f;
+            };
+
+            auto measure_anonymous_cell_run = [&should_skip_anonymous_row_child,
+                    &anonymous_table_child_horizontal_margin, &lycon](
                     DomNode* run_start, IntrinsicAnonymousRowContext anon_context) -> IntrinsicSizes {
                 IntrinsicSizes run_sizes = {0.0f, 0.0f};
                 float inline_run_max = 0.0f;
@@ -2822,6 +2882,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     float extra = intrinsic_unresolved_html_cell_horizontal_box_extra(item_elem);
                     child_sizes.min_content += extra;
                     child_sizes.max_content += extra;
+                    bool item_is_inline_level = is_inline_level_element(item_elem);
+                    if (!item_is_inline_level || item_is_float) {
+                        float margin_extra = anonymous_table_child_horizontal_margin(item_elem);
+                        child_sizes.min_content += margin_extra;
+                        child_sizes.max_content += margin_extra;
+                    }
 
                     if (item_is_float) {
                         // CSS Sizing 3 §5: max-content places floats side-by-side,
@@ -2831,7 +2897,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (child_sizes.min_content > float_run_min) {
                             float_run_min = child_sizes.min_content;
                         }
-                    } else if (is_inline_level_element(item_elem)) {
+                    } else if (item_is_inline_level) {
                         bool starts_with_ws = intrinsic_element_text_starts_with_whitespace(item);
                         if (inline_run_has_content && (prev_ended_with_space || starts_with_ws)) {
                             inline_run_max += measure_current_space_advance(
