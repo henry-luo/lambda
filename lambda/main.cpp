@@ -52,6 +52,7 @@
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
+#include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
 #ifdef LAMBDA_PYTHON
 #include "py/py_transpiler.hpp"      // Python transpiler
 #endif
@@ -69,10 +70,66 @@
 #include "network/network_resource_manager.h"
 #include "network/network_thread_pool.h"
 
+extern __thread EvalContext* context;
+
 static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item value = js_get_global_property(key);
     return value.item == (ITEM_TRUE);
+}
+
+static void js_test262_hot_context_create(EvalContext* batch_context) {
+    memset(batch_context, 0, sizeof(EvalContext));
+    context = batch_context;
+    batch_context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
+    heap_init();
+    batch_context->pool = batch_context->heap->pool;
+    batch_context->name_pool = name_pool_create(batch_context->pool, nullptr);
+    batch_context->type_list = arraylist_new(64);
+}
+
+static void js_test262_hot_context_destroy(EvalContext* batch_context) {
+    if (!batch_context) return;
+    context = batch_context;
+    js_batch_reset();
+    if (batch_context->name_pool) {
+        name_pool_release(batch_context->name_pool);
+        batch_context->name_pool = NULL;
+    }
+    if (batch_context->heap) {
+        heap_destroy();
+        batch_context->heap = NULL;
+    }
+    if (batch_context->nursery) {
+        gc_nursery_destroy(batch_context->nursery);
+        batch_context->nursery = NULL;
+    }
+    if (batch_context->type_list) {
+        arraylist_free((ArrayList*)batch_context->type_list);
+        batch_context->type_list = NULL;
+    }
+    memset(batch_context, 0, sizeof(EvalContext));
+    context = NULL;
+}
+
+static void js_test262_clear_preamble(
+    JsPreambleState* preamble,
+    bool* has_preamble,
+    int* preamble_var_checkpoint,
+    char** saved_harness_src,
+    size_t* saved_harness_len)
+{
+    if (*has_preamble) {
+        preamble_state_destroy(preamble);
+        *has_preamble = false;
+    }
+    memset(preamble, 0, sizeof(JsPreambleState));
+    *preamble_var_checkpoint = 0;
+    if (*saved_harness_src) {
+        mem_free(*saved_harness_src);
+        *saved_harness_src = NULL;
+    }
+    *saved_harness_len = 0;
 }
 
 #ifdef _WIN32
@@ -3455,6 +3512,27 @@ int main(int argc, char *argv[]) {
             while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
                 line[--len] = '\0';
             if (len == 0) continue;
+
+            // Persistent js262 workers concatenate multiple manifests into one
+            // child process. This boundary drops the previous manifest's harness
+            // preamble and recreates the hot heap before the next manifest.
+            if (strncmp(line, "batch-boundary:", 15) == 0) {
+                const char* boundary_id = line + 15;
+                js_test262_clear_preamble(&preamble, &has_preamble, &preamble_var_checkpoint,
+                                          &saved_harness_src, &saved_harness_len);
+                if (hot_reload) {
+                    js_test262_hot_context_destroy(&batch_context);
+                    jm_cleanup_deferred_mir();
+                    js_test262_hot_context_create(&batch_context);
+                } else {
+                    js_batch_reset();
+                    runtime_reset_heap(&runtime);
+                    path_reset();
+                }
+                printf("\x01" "BATCH_MANIFEST_END %s\n", boundary_id);
+                fflush(stdout);
+                continue;
+            }
 
             // Handle harness protocol: harness:<length>
             // Compiles harness source once as preamble; function objects persist as module vars.
