@@ -395,7 +395,11 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
             value_item
         );
 
-        if (result.element) {
+        // NOTE: a failed update returns ITEM_ERROR, whose raw bits are non-null
+        // (0x19<<56), so a bare `if (result.element)` would treat the error as a
+        // valid pointer and corrupt native_element — later crashing any reader.
+        // Guard on the actual runtime type, mirroring the delete path below.
+        if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
             // In INLINE mode, element pointer remains the same (in-place mutation)
             // In IMMUTABLE mode, a new element would be created
             // Since we're using INLINE mode, this assignment is a no-op but kept for consistency
