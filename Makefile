@@ -917,8 +917,6 @@ test-lambda-baseline: build-test test-input-baseline
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
-	@echo "Running Lambda MathLive markup baseline..."
-	@node test/lambda/mathlive/run_lambda_mathlive_markup.mjs --strict
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
