@@ -1423,6 +1423,12 @@ static bool state_store_ensure_projection_storage(DocState* state) {
         state->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
         if (state->selection) {
             memset(state->selection, 0, sizeof(SelectionState));
+            // An empty (no-range) selection is collapsed by definition. Without
+            // this, the zero-initialized projection is non-collapsed with null
+            // endpoints, which violates the DocState interaction invariant
+            // ("non-collapsed selection has missing endpoints") the moment any
+            // state mutation triggers a validation pass before a selection is set.
+            state->selection->is_collapsed = true;
         }
     }
     return state->caret != NULL && state->selection != NULL;
@@ -1803,6 +1809,34 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
         return;
     }
     SelectionState* sel = state->selection;
+
+    // A non-collapsed DOM selection whose endpoint(s) do not map to a rendered
+    // view — e.g. a boundary inside a replaced/text-control element, as produced
+    // by selectAllChildren(<input>) — cannot be represented by the legacy
+    // SelectionState. Leaving it non-collapsed with missing endpoints trips the
+    // DocState interaction invariant ("non-collapsed selection has missing
+    // endpoints"). Reset the projection to a clean empty/collapsed state,
+    // mirroring the empty-selection branch above; the canonical EditingSelection
+    // (state->sel) still holds the true range for API queries.
+    if ((!anc_view || !foc_view) && !dom_selection_is_collapsed(ds)) {
+        sel->anchor_view   = NULL;
+        sel->focus_view    = NULL;
+        sel->view          = NULL;
+        sel->anchor_offset = 0;
+        sel->focus_offset  = 0;
+        sel->is_collapsed  = true;
+        sel->is_selecting  = false;
+        if (state->caret) {
+            state->caret->view = NULL;
+            state->caret->char_offset = 0;
+            state->caret->visible = false;
+        }
+        state->selection_layout_dirty = false;
+        state->selection_projection_seq = state->selection_mutation_seq;
+        state->needs_repaint = true;
+        return;
+    }
+
     sel->anchor_view   = anc_view;
     sel->focus_view    = foc_view;
     sel->view          = foc_view;  // legacy single-view fallback
