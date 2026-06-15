@@ -3386,6 +3386,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                      (lycon->line.effective_right - lycon->line.effective_left) <
                      (lycon->line.right - lycon->line.left) &&
                      rect->width <= (lycon->line.right - lycon->line.left) + 0.5f) {
+                float required_width = rect->width;
                 log_debug("text overflows next to float, shifting below float (eff_width=%.1f < full_width=%.1f)",
                           lycon->line.effective_right - lycon->line.effective_left,
                           lycon->line.right - lycon->line.left);
@@ -3402,7 +3403,23 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     while (prev && prev->next != rect) prev = prev->next;
                     if (prev) prev->next = nullptr;
                 }
-                line_break(lycon);
+                if (lycon->line.is_line_start) {
+                    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+                    float query_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : 16.0f;
+                    float current_y_bfc = lycon->block.advance_y + lycon->block.bfc_offset_y;
+                    float new_y_bfc = bfc ?
+                        block_context_find_y_for_width(bfc, required_width, current_y_bfc, query_height) :
+                        current_y_bfc;
+                    float new_y = new_y_bfc - lycon->block.bfc_offset_y;
+                    if (new_y > lycon->block.advance_y + 0.01f) {
+                        lycon->block.advance_y = new_y;
+                        line_reset(lycon);
+                    } else {
+                        line_break(lycon);
+                    }
+                } else {
+                    line_break(lycon);
+                }
                 goto LAYOUT_TEXT;
             }
             // overflow-wrap: break-word/anywhere — emergency mid-word break

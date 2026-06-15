@@ -71,7 +71,7 @@ Verified 2026-06 (debug build), both runners live:
 | `test_wpt_selection_gtest` | 151 | 18 fail | `selection/contenteditable/initial-selection-on-focus.tentative` **segfaults** (SIGSEGV); `collapse` 0/3; `modify*` partial; `caret/*` 0/0; `textcontrols/*`; `bidi/modify`; 2 pre-existing `move-by-word` i18n |
 | `test_wpt_contenteditable_gtest` | 194 | 139 pass / 41 skip / 14 fail | `editing/crashtests/insertparagraph-in-listitem-in-svg-…` **SIGABRT**; `contentEditable`/`designMode`/`spellcheck`/`autocapitalize`/`writingsuggestions` IDL; focus-fixup / tabindex / autofocus; 23/25 `input-events` skipped pending synthetic input |
 
-Two **genuine engine crashes** sit at the top of the list. They must be root-caused (not skipped) per the project's "no work-arounds" rule.
+Two **genuine engine crashes** sit at the top of the list. They must be root-caused (not skipped) per the project's "no work-arounds" rule. *(Update: both are now fixed — see §4.1. The numbers above are the pre-Phase-0 starting line; current numbers are in §4.1.)*
 
 ---
 
@@ -81,13 +81,54 @@ Two **genuine engine crashes** sit at the top of the list. They must be root-cau
 
 | Workstream | Target failures | Maps to |
 |---|---|---|
-| **P0-A — Engine crashes** | `initial-selection-on-focus` (SIGSEGV), `insertparagraph-in-listitem-in-svg` (SIGABRT). Root-cause both. | stability |
+| **P0-A — Engine crashes ✅ DONE (2026-06-15)** | `initial-selection-on-focus` (SIGSEGV) + `insertparagraph-in-listitem-in-svg` (SIGABRT) — both root-caused & fixed, no regressions (see §4.1) | stability |
 | **P0-B — Selection ops** | `selection/contenteditable/collapse` (0/3), `modify` / `modify-around-*`, `textcontrols/*` selectionchange/focus | CE-1, §4.3 |
 | **P0-C — Editing-host IDL** | `contentEditable` / `isContentEditable` enumerated+case-insensitive + slotted-inherit; `designMode`; `spellcheck`; `autocapitalize`; `writingsuggestions` | CE-1, §4.2 |
 | **P0-D — Focus model** | focus-fixup-rule, tabindex getter / focus-flag, autofocus supported-elements | CE-2, §5 |
 | **P0-E — Caret** | `selection/caret/*` (collapse-pre-linestart, move-around-cE-false, generated-content, designMode-off, invisible-br) | CE-1, §5 |
 
 **Exit criterion:** both gtests **green** — zero unexpected failures; the only non-passing cases are *documented capability skips* (testdriver synthetic input, Shadow DOM, reftests, the 2 pre-existing `move-by-word` i18n cases tracked separately). Note: the 23 `input-events` + selection mouse-button skips are **not** gated here — they unblock in Phase SI (§5). "Green" means *every runnable assertion passes.*
+
+### 4.1 Progress
+
+**P0-A — engine crashes: DONE (2026-06-15).** Both root-caused and fixed; zero test regressions.
+
+- **`initial-selection-on-focus` (SIGSEGV)** — `setAttribute`'s success check in
+  `lambda/input/css/dom_element.cpp` (`if (result.element)`) treated a failed
+  `elmt_update_attr` return (`ITEM_ERROR`, whose raw bits are non-null) as a
+  valid pointer and wrote it into `native_element`; a later `get_attribute` →
+  `ElementReader` then dereferenced it. **Fix:** guard on the runtime type
+  (`get_type_id(result) == LMD_TYPE_ELEMENT && result.element`), matching the
+  already-correct delete-attr path. *(This fix was committed alongside the
+  parallel "layout fixes" commits.)*
+- **`insertparagraph-in-listitem-in-svg` (SIGABRT)** — a debug `DocState`
+  invariant *("non-collapsed selection has missing endpoints")*. Root cause was
+  the **zero-initialized legacy `SelectionState`** (`is_collapsed = false`
+  default — itself the invalid "non-collapsed with null endpoints" combo),
+  latent until the first invariant check (here triggered by
+  `selectAllChildren(<input>)` → `tc_ensure_init` → `state_set`, *not* the
+  337M-char whitespace, which is a red herring). **Fix** in `radiant/state_store.cpp`:
+  (a) default an empty selection to `is_collapsed = true`; (b) degrade the
+  legacy projection to a clean empty/collapsed state when a non-collapsed
+  selection has an endpoint that can't map to a rendered view — the canonical
+  `EditingSelection` still holds the true range (the "clean collapse/none +
+  reset legacy projection" approach).
+
+**Current baseline (2026-06-15):**
+
+| Runner | Cases | Result | Δ from §3 start |
+|---|---|---|---|
+| `test_wpt_selection_gtest` | 151 | 87 pass / 46 skip / 18 fail | SIGSEGV eliminated (`initial-selection-on-focus` now a logical fail, not a crash) |
+| `test_wpt_contenteditable_gtest` | 194 | 140 pass / 41 skip / 13 fail | +1 pass; SIGABRT eliminated (`insertparagraph-…` crashtest now passes) |
+
+Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82.
+
+**Remaining for P0 green:** P0-B (selection ops), **P0-C (editing-host IDL — the
+`editing-0` failures, completes CE-1)**, P0-D (focus model), P0-E (caret). Plus a
+**harness decision**: `initial-selection-on-focus` (and other `?div`/`?span`
+variant tests) need WPT **variant** support in the runner, or a documented
+skip — its crash is fixed but it stays `0/100` headless until variants are
+applied (it does `createElement(location.search.substr(1))` → `createElement("")`).
 
 ---
 
