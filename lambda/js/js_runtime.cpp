@@ -4846,6 +4846,59 @@ static Map* js_array_ensure_props_map(Array* arr) {
     return (Map*)(uintptr_t)arr->extra;
 }
 
+static const int64_t JS_ARRAY_DENSE_GAP_ALWAYS_OK = 10000;
+static const int64_t JS_ARRAY_DENSE_MIN_PRESENT_DEN = 4;
+
+static void js_array_stamp_dense_tail_holes(Array* arr) {
+    if (!arr || !arr->items || arr->length >= arr->capacity) return;
+    Item hole = lam::hole_sentinel_item();
+    for (int64_t i = arr->length; i < arr->capacity; i++) {
+        arr->items[i] = hole;
+    }
+}
+
+static int64_t js_array_count_dense_present(Array* arr) {
+    if (!arr || !arr->items || arr->length <= 0 || arr->capacity <= 0) return 0;
+    int64_t limit = arr->length < arr->capacity ? arr->length : arr->capacity;
+    int64_t count = 0;
+    for (int64_t i = 0; i < limit; i++) {
+        if (arr->items[i].item != JS_DELETED_SENTINEL_VAL) count++;
+    }
+    return count;
+}
+
+static bool js_array_projected_density_is_sparse(Array* arr, int64_t projected_length,
+                                                 int64_t projected_present) {
+    if (!arr || projected_length <= 0) return false;
+    if (projected_length <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) return false;
+    int64_t min_dense_present = (projected_length + JS_ARRAY_DENSE_MIN_PRESENT_DEN - 1) /
+                                JS_ARRAY_DENSE_MIN_PRESENT_DEN;
+    return projected_present < min_dense_present;
+}
+
+static bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
+    if (!arr || index < 0) return false;
+    int64_t length_gap = index >= arr->length ? index - arr->length : 0;
+    int64_t capacity_gap = index >= arr->capacity ? index - arr->capacity : 0;
+    if (length_gap > SPARSE_GAP_MAX || capacity_gap > SPARSE_GAP_MAX) return true;
+    if (length_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK &&
+        capacity_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) return false;
+    int64_t projected_length = index + 1;
+    int64_t projected_present = js_array_count_dense_present(arr) + 1;
+    return js_array_projected_density_is_sparse(arr, projected_length, projected_present);
+}
+
+static bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
+    if (!arr || new_length <= arr->length) return false;
+    int64_t length_gap = new_length - arr->length;
+    int64_t capacity_gap = new_length > arr->capacity ? new_length - arr->capacity : 0;
+    if (length_gap > SPARSE_GAP_MAX || capacity_gap > SPARSE_GAP_MAX) return true;
+    if (length_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK &&
+        capacity_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) return false;
+    int64_t projected_present = js_array_count_dense_present(arr);
+    return js_array_projected_density_is_sparse(arr, new_length, projected_present);
+}
+
 static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return;
     Array* arr = array_item.array;
@@ -4861,12 +4914,7 @@ static void js_array_store_sparse_property(Item array_item, int64_t index, Item 
     // zero) because GC-induced relocation of the items buffer can leave
     // post-length slots holding stale pointer values that happen to be
     // non-zero — those decode as `[object Object]` in JS-land otherwise.
-    if (arr->items && arr->length < arr->capacity) {
-        Item hole = lam::hole_sentinel_item();
-        for (int64_t i = arr->length; i < arr->capacity; i++) {
-            arr->items[i] = hole;
-        }
-    }
+    js_array_stamp_dense_tail_holes(arr);
     Map* pm = js_array_ensure_props_map(arr);
     if (!pm) return;
     char idx_buf[32];
@@ -5125,11 +5173,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 Array* arr = object.array;
                 if (new_len >= 0) {
                     if (new_len > arr->length) {
-                        // v22: Guard against huge length expansion (> 1M gap)
-                        int64_t gap = new_len - arr->length;
-                        if (gap > SPARSE_GAP_MAX) {
-                            log_debug("js_property_set: array length expansion %lld->%lld (gap %lld) too large, skipping",
-                                      (long long)arr->length, (long long)new_len, (long long)gap);
+                        if (js_array_should_keep_length_sparse(arr, new_len)) {
+                            log_debug("js_property_set: sparse length expansion %lld->%lld (gap %lld), skipping dense holes",
+                                      (long long)arr->length, (long long)new_len,
+                                      (long long)(new_len - arr->length));
+                            js_array_stamp_dense_tail_holes(arr);
                             arr->length = new_len;
                             return value;
                         }
@@ -6724,10 +6772,10 @@ static Item js_array_new_sparse_length(int64_t length) {
     if (length <= 0) return (Item){.array = arr};
 
     arr->length = length;
-    // Pre-allocate only reasonably dense arrays. Spec-valid lengths can be as
-    // large as 2^32 - 1; those must remain sparse instead of overflowing int
-    // callers or trying to allocate terabytes of holes.
-    if (length <= SPARSE_GAP_MAX) {
+    // Pre-allocate only small all-hole arrays. Spec-valid lengths can be as
+    // large as 2^32 - 1; larger hole-only arrays stay length-only sparse
+    // instead of allocating dense hole buffers.
+    if (length <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) {
         // Allocate items array directly
         arr->capacity = length + 4;
         Item* items = (Item*)mem_alloc(arr->capacity * sizeof(Item), MEM_CAT_JS_RUNTIME);
@@ -7140,11 +7188,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             js_array_store_sparse_property(array, index, value, false);
             return value;
         }
-        int64_t gap = index - arr->length;
-        if (gap > SPARSE_GAP_MAX) {
-            // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
+        if (js_array_should_store_sparse_for_index(arr, index)) {
             log_debug("js_array_set_int: sparse index %lld (gap %lld), skipping dense expansion",
-                      (long long)index, (long long)gap);
+                      (long long)index,
+                      (long long)(index >= arr->length ? index - arr->length : 0));
             js_array_store_sparse_property(array, index, value, true);
             return value;
         }
@@ -7265,11 +7312,10 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
             js_array_store_sparse_property(array, idx, value, false);
             return value;
         }
-        int64_t gap = idx - arr->length;
-        if (gap > SPARSE_GAP_MAX) {
-            // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
+        if (js_array_should_store_sparse_for_index(arr, idx)) {
             log_debug("js_array_set: sparse index %lld (gap %lld), skipping dense expansion",
-                      (long long)idx, (long long)gap);
+                      (long long)idx,
+                      (long long)(idx >= arr->length ? idx - arr->length : 0));
             js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
             return value;
         }
@@ -23705,7 +23751,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         int64_t new_len = length + (int64_t)argc;
         if (argc > 0 &&
             (new_len > 0xFFFFFFFFLL ||
-             (length >= arr.array->capacity && length - arr.array->capacity > SPARSE_GAP_MAX))) {
+             js_array_should_store_sparse_for_index(arr.array, length))) {
             for (int i = 0; i < argc; i++) {
                 Item idx_key = js_array_index_key(length + (int64_t)i);
                 js_property_set_strict(arr, idx_key, args[i]);

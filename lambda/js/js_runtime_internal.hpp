@@ -518,14 +518,12 @@ enum JsBuiltinId {
 };
 
 
-// v22 / P8 + Js58.1: Maximum gap allowed for dense array expansion; beyond
-// this, store in the sparse companion Map. Js57 lowered this to 10,000 after
-// the `arr[999999] = ...` test262 pattern exposed dense-fill corruption in
-// every/some callback counts. Js58.1 rechecked the ES-scale 1,000,000 cap:
-// correctness now holds, but the giant dense hole fill makes those tests
-// retry-only/slow and grows RSS by hundreds of MB. Keep the 10K cap until the
-// dense-hole representation itself is made sublinear.
-#define SPARSE_GAP_MAX 10000
+// v22 / P8 + Js58.2: Maximum index/capacity gap considered for dense array
+// expansion before forcing sparse companion-map storage. Js58.2 restores the
+// ES-scale cap and relies on density conversion in js_runtime.cpp to keep
+// low-density writes such as `arr[999999] = ...` sparse instead of
+// dense-filling almost one million holes.
+#define SPARSE_GAP_MAX 1000000
 
 // Forward declarations for Unicode normalization (implemented in utf_string.cpp)
 extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);

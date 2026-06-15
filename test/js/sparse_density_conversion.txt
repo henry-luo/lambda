@@ -1,0 +1,8 @@
+length 1000000
+every true 7
+some true 7
+hole-before-edge false undefined
+edge true edge
+key-count 7
+len-only 999999 false undefined
+push-after-sparse-length 1000000 false tail
