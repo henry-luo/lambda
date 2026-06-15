@@ -5461,6 +5461,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             bool has_css_height = css_height_decl && css_height_decl->value &&
                 !(css_height_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                   css_height_decl->value->data.keyword == CSS_VALUE_AUTO);
+            const char* html_width_attr = block->get_attribute("width");
+            const char* html_height_attr = block->get_attribute("height");
+            bool has_html_width = html_width_attr && html_width_attr[0] >= '0' && html_width_attr[0] <= '9';
+            bool has_html_height = html_height_attr && html_height_attr[0] >= '0' && html_height_attr[0] <= '9';
             if (alt_text && alt_text[0] != '\0' && !has_css_width && !has_css_height) {
                 if (!block->embed) {
                     block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
@@ -5484,9 +5488,22 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 if (block->embed) {
                     block->embed->broken_alt_fallback = false;
                 }
-                // Empty or absent alt text keeps the explicit image dimensions when
-                // present; otherwise synthesize the broken-image icon size.
-                if (lycon->block.given_width < 0.0f) {
+                if (has_css_width && !has_html_width) {
+                    lycon->block.given_width = -1.0f;
+                }
+                if (has_css_height && !has_html_height) {
+                    lycon->block.given_height = -1.0f;
+                }
+                // Empty or absent alt text keeps explicit dimensions when present.
+                // A block-level missing-image indicator with auto width participates
+                // in normal block width resolution, while inline-level indicators use
+                // the UA broken-image icon size.
+                bool has_width_percent = block->blk && !isnan(block->blk->given_width_percent);
+                bool block_auto_width = block->display.outer == CSS_VALUE_BLOCK &&
+                    (!block->blk || block->blk->given_width_type == CSS_VALUE_AUTO ||
+                     block->blk->given_width_type == CSS_VALUE__UNDEF) &&
+                    !has_width_percent;
+                if (lycon->block.given_width < 0.0f && !block_auto_width) {
                     lycon->block.given_width = 16.0f;
                 }
                 if (lycon->block.given_height < 0.0f) {

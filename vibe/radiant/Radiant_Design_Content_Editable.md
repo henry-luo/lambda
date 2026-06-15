@@ -323,6 +323,14 @@ before dispatch (spec §[plaintext-only paste/drop]).
 
 ## 9. Explicitly NOT supported (the "no legacy" line)
 
+> **⚠️ Superseded for `execCommand`.** This section reflects the original
+> "modern contract, no legacy" scope. The follow-on proposal
+> [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md)
+> **reverses the execCommand decision** — `execCommand` / `queryCommand*` /
+> `designMode` are now in scope, implemented as a built-in editing-command
+> *consumer* layered on the `InputEvent` plumbing (the rest of this section
+> still holds). See that doc §2 for the reconciliation.
+
 This proposal **deliberately does not implement** any of the following.
 Each entry says what the JS-visible behaviour is, so feature detection
 fails cleanly and tests are unambiguous.

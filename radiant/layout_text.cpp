@@ -1167,15 +1167,24 @@ CssEnum get_white_space_value(DomNode* node) {
         }
         // Fallback: check specified_style when blk is not yet resolved
         // (e.g. during intrinsic sizing measurement before full layout)
+        bool has_specified_white_space = false;
         if (elem->specified_style) {
             CssDeclaration* ws_decl = style_tree_get_declaration(
                 elem->specified_style, CSS_PROPERTY_WHITE_SPACE);
             if (ws_decl && ws_decl->value && ws_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                has_specified_white_space = true;
                 CssEnum ws = ws_decl->value->data.keyword;
                 if (is_concrete_white_space_value(ws)) {
                     return ws;
                 }
             }
+        }
+        // HTML UA stylesheet default: preformatted elements preserve whitespace.
+        // Intrinsic sizing may ask before full style resolution has populated blk.
+        uintptr_t tag = elem->tag();
+        if (!has_specified_white_space &&
+            (tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP)) {
+            return CSS_VALUE_PRE;
         }
         current = current->parent;
     }
@@ -2728,12 +2737,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Trailing spaces already stripped here — don't double-subtract in line_break
                 lycon->line.trailing_space_width = 0;
             }
-            // Output any text before the newline
-            if (str > text_start + rect->start_index) {
-                output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
-            }
             // Handle CRLF as single line break
+            int break_length = 1;
             if (*str == '\r' && *(str + 1) == '\n') {
+                break_length = 2;
+            }
+            // CSS Text preserved segment breaks force a line break but remain part
+            // of the DOM text range for Range.getClientRects(). They have no
+            // glyph advance, so include the source bytes without changing width.
+            output_text(lycon, text_view, rect,
+                str - text_start - rect->start_index + break_length, rect->width);
+            if (break_length == 2) {
                 str += 2;
             } else {
                 str++;
@@ -2916,11 +2930,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         emoji_presentation = true;
                     }
                 }
-                // For layout metrics, use the regular font path even for Emoji_Presentation=Yes
-                // codepoints (without explicit VS16). The regular fallback chain gives metrics
-                // consistent with browser layout. The raster renderer (render.cpp) separately
-                // forces emoji font for color output. VS16-preceded codepoints still use
-                // emoji font since the author explicitly requested emoji presentation.
+                // for layout metrics, only explicit VS16 forces the emoji font.
+                // default emoji-presentation codepoints still use the regular
+                // fallback path, matching browser symbol fallback.
                 LoadedGlyph* glyph = emoji_presentation
                     ? font_load_glyph_emoji(lycon->font.font_handle, &_sd, codepoint, false)
                     : font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);

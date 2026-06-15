@@ -28,6 +28,14 @@ static bool should_use_ct_advance_override(FontHandle* handle) {
     // CoreText catalog lookup can resolve to a fallback/non-exact face, so keep
     // the raster/table advance from the loaded font file for layout.
     if (handle->is_document_font) return false;
+
+    // system color bitmap fonts can expose different advances when CoreText is
+    // created from raw font bytes than when the same font is resolved through
+    // the platform catalog. browser font matching uses the catalog font.
+    if (handle->ct_raster_ref && font_platform_has_color_glyphs(handle->ct_font_ref)) {
+        return true;
+    }
+
     if (!handle->ct_raster_ref) return true;
 
     // system UI fonts rely on CoreText's catalog font so variable optical-size
@@ -108,7 +116,9 @@ static uint64_t loaded_glyph_cache_hash(const void* item, uint64_t seed0, uint64
     const LoadedGlyphCacheEntry* entry = (const LoadedGlyphCacheEntry*)item;
     uint64_t data[2];
     data[0] = (uint64_t)(uintptr_t)entry->caller_handle;
-    data[1] = ((uint64_t)entry->codepoint << 1) | (uint64_t)(entry->for_rendering ? 1 : 0);
+    data[1] = ((uint64_t)entry->codepoint << 2) |
+              ((uint64_t)(entry->for_rendering ? 1 : 0) << 1) |
+              (uint64_t)(entry->emoji_presentation ? 1 : 0);
     return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
 }
 
@@ -119,6 +129,7 @@ static int loaded_glyph_cache_compare(const void* a, const void* b, void* udata)
     if (ea->caller_handle != eb->caller_handle) return ea->caller_handle < eb->caller_handle ? -1 : 1;
     if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
     if (ea->for_rendering != eb->for_rendering) return ea->for_rendering ? 1 : -1;
+    if (ea->emoji_presentation != eb->emoji_presentation) return ea->emoji_presentation ? 1 : -1;
     return 0;
 }
 
@@ -133,7 +144,8 @@ static struct hashmap* ensure_loaded_glyph_cache(FontContext* ctx) {
 
 // deep-copy the current s_loaded_glyph into the loaded glyph cache
 static void cache_loaded_glyph(FontContext* ctx, FontHandle* caller_handle,
-                                uint32_t codepoint, bool for_rendering) {
+                                uint32_t codepoint, bool for_rendering,
+                                bool emoji_presentation) {
     struct hashmap* cache = ensure_loaded_glyph_cache(ctx);
     if (!cache) return;
 
@@ -147,6 +159,7 @@ static void cache_loaded_glyph(FontContext* ctx, FontHandle* caller_handle,
     entry.caller_handle = caller_handle;
     entry.codepoint = codepoint;
     entry.for_rendering = for_rendering;
+    entry.emoji_presentation = emoji_presentation;
     entry.glyph = s_loaded_glyph;
 
     // deep-copy bitmap buffer into glyph_arena for persistence
@@ -677,6 +690,12 @@ static LoadedGlyph* try_load_from_handle_ct(FontHandle* h, uint32_t codepoint) {
     // advance: CT returns CSS pixels, font_load_glyph expects physical pixels
     s_loaded_glyph.advance_x = info.advance_x * pixel_ratio;
     s_loaded_glyph.advance_y = 0;
+    if (should_use_ct_advance_override(h)) {
+        float ct_adv = font_platform_get_glyph_advance(h->ct_font_ref, codepoint);
+        if (ct_adv >= 0.0f) {
+            s_loaded_glyph.advance_x = ct_adv * pixel_ratio;
+        }
+    }
 
     return &s_loaded_glyph;
 }
@@ -738,6 +757,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
             search.caller_handle = handle;
             search.codepoint = codepoint;
             search.for_rendering = for_rendering;
+            search.emoji_presentation = false;
             LoadedGlyphCacheEntry* cached = (LoadedGlyphCacheEntry*)hashmap_get(lgcache, &search);
             if (cached) {
                 s_loaded_glyph = cached->glyph;
@@ -766,7 +786,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
             }
         }
 #endif
-        if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+        if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering, false);
         return result;
     }
 
@@ -785,7 +805,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                     s_loaded_glyph.advance_x = ct_adv * pixel_ratio;
                 }
             }
-            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering, false);
             return result;
         }
     }
@@ -795,7 +815,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         result = try_load_from_handle_tvg(handle, codepoint);
         if (result) {
             fill_loaded_glyph_font_metrics(handle);
-            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering, false);
             return result;
         }
     }
@@ -820,7 +840,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
             // populate metrics from the fallback font, not the primary
             fill_loaded_glyph_font_metrics(fallback);
             // Phase 17: cache with caller's handle so subsequent lookups hit
-            cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            cache_loaded_glyph(ctx, handle, codepoint, for_rendering, false);
         }
         font_handle_release(fallback); // release the ref from font_find_codepoint_fallback
         if (result) return result;
@@ -842,6 +862,7 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
         search.caller_handle = handle;
         search.codepoint = codepoint;
         search.for_rendering = for_rendering;
+        search.emoji_presentation = true;
         LoadedGlyphCacheEntry* cached = (LoadedGlyphCacheEntry*)hashmap_get(lgcache, &search);
         if (cached) {
             s_loaded_glyph = cached->glyph;
@@ -906,7 +927,7 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
             font_handle_release(emoji_handle);
         if (result) {
             // cache with caller's handle so subsequent lookups hit
-            cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            cache_loaded_glyph(ctx, handle, codepoint, for_rendering, true);
             return result;
         }
     }
