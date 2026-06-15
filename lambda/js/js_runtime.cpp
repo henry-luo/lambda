@@ -2768,6 +2768,22 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
     // properties, so never dereference `type->shape` here.
     if (m->map_kind == MAP_KIND_ITERATOR) { if (out_found) *out_found = false; return ItemNull; }
     TypeMap* map_type = (TypeMap*)m->type;
+    // P0 safety: m->type can be corrupt when m points at memory that was
+    // never a real Map (lib_marked.js hits this — a callback receives a
+    // value that types as LMD_TYPE_MAP but whose `type` field reads as a
+    // garbage tagged-Item value like 0x340007000020004). Reject obviously-
+    // invalid pointers: anything with bits set in the upper 16 (typical
+    // userspace addresses on macOS / Linux are ≤ 2^48).
+    if (map_type && (uintptr_t)map_type > 0x0000FFFFFFFFFFFFULL) {
+        static int p0_corrupt_log = 0;
+        if (p0_corrupt_log < 3) {
+            log_error("js_map_get_fast: corrupt m->type=%p on m=%p — key='%.*s'",
+                (void*)map_type, (void*)m, key_len, key_str);
+            p0_corrupt_log++;
+        }
+        if (out_found) *out_found = false;
+        return ItemNull;
+    }
     if (!map_type || !map_type->shape) { if (out_found) *out_found = false; return ItemNull; }
 
     // A1: Try hash table first for O(1) lookup (covers >99% of JS objects).
@@ -7596,6 +7612,24 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     } else if (arg_count > fn->param_count && fn->param_count >= 0) {
         // Clamp to declared param count — excess args accessible via arguments object
         effective_count = fn->param_count;
+    }
+
+    // P0 safety: func_ptr must be a valid code address. NULL stub is handled
+    // below; very small non-NULL values indicate corruption (lib_marked.js
+    // ran into this — a JsFunction object survived its type check but
+    // func_ptr was 0x1b, causing an unrecoverable jump to that address).
+    // Treat <0x10000 (typical unmapped low range on macOS / Linux) as
+    // corrupt and return undefined rather than crash.
+    if (fn->func_ptr && (uintptr_t)fn->func_ptr < 0x10000) {
+        static int p0_corrupt_log = 0;
+        if (p0_corrupt_log < 3) {
+            log_error("js_invoke_fn: corrupt func_ptr=%p on fn=%p name=%.*s — returning undefined",
+                (void*)fn->func_ptr, (void*)fn,
+                fn->name ? (int)fn->name->len : 6,
+                fn->name ? fn->name->chars : "(anon)");
+            p0_corrupt_log++;
+        }
+        return make_js_undefined();
     }
 
     if (fn->env) {
@@ -23700,20 +23734,24 @@ includes_slow_path:
         bool src_has_proto = js_proto_chain_has_numeric_keys(arr);
         if (result_is_plain_array) {
             Array* dst = result.array;
+            int64_t src_cap = src->capacity;
             for (int i = 0; i < count; i++) {
-                Item elem = src->items[start + i];
+                int idx = start + i;
+                // js58 P2: for sparse arrays, indices past dense capacity are holes
+                Item elem = ((int64_t)idx < src_cap) ? src->items[idx]
+                          : (Item){.item = JS_DELETED_SENTINEL_VAL};
                 if (elem.item == JS_DELETED_SENTINEL_VAL) {
                     // hole: check prototype chain to find value (Array.prototype or Object.prototype)
                     if (src_has_proto) {
                         Item proto_elem = ItemNull;
-                        bool found = js_array_has_element(arr, lam::gc_borrow(src), start + i, &proto_elem, true);
+                        bool found = js_array_has_element(arr, lam::gc_borrow(src), idx, &proto_elem, true);
                         if (found && proto_elem.item != ItemNull.item) elem = proto_elem;
                     } else {
                         // still check Array.prototype directly (may have numeric properties
                         // stored as array items, not shape entries, so js_proto_chain_has_numeric_keys
                         // may miss them)
                         char idx_buf[32];
-                        int blen = snprintf(idx_buf, sizeof(idx_buf), "%d", start + i);
+                        int blen = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
                         Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, blen))};
                         Item p = js_property_get(arr, idx_key);
                         if (p.item != ItemNull.item && get_type_id(p) != LMD_TYPE_UNDEFINED)
@@ -23724,8 +23762,12 @@ includes_slow_path:
             }
             dst->length = count;
         } else {
+            int64_t src_cap = src->capacity;
             for (int i = 0; i < count; i++) {
-                js_create_data_property_or_throw(result, i, src->items[start + i]);
+                int idx = start + i;
+                Item src_elem = ((int64_t)idx < src_cap) ? src->items[idx]
+                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
+                js_create_data_property_or_throw(result, i, src_elem);
                 if (js_exception_pending) return make_js_undefined();
             }
             if (get_type_id(result) == LMD_TYPE_ARRAY) {
@@ -24235,15 +24277,21 @@ includes_slow_path:
         Item deleted = js_array_species_create(arr, delete_count);
         if (js_exception_pending) return make_js_undefined();
         bool del_is_plain_array = (get_type_id(deleted) == LMD_TYPE_ARRAY && deleted.array->extra == 0);
+        // js58 P2: for sparse arrays (length > capacity), reads past capacity are holes
+        int64_t a_cap = a->capacity;
         if (del_is_plain_array) {
             Array* del_arr = deleted.array;
             for (int i = 0; i < delete_count; i++) {
-                if (i < del_arr->length) del_arr->items[i] = a->items[start + i];
-                else js_array_push_item_direct(del_arr, a->items[start + i]);
+                Item src_elem = ((int64_t)(start + i) < a_cap) ? a->items[start + i]
+                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
+                if (i < del_arr->length) del_arr->items[i] = src_elem;
+                else js_array_push_item_direct(del_arr, src_elem);
             }
         } else {
             for (int i = 0; i < delete_count; i++) {
-                js_create_data_property_or_throw(deleted, i, a->items[start + i]);
+                Item src_elem = ((int64_t)(start + i) < a_cap) ? a->items[start + i]
+                              : (Item){.item = JS_DELETED_SENTINEL_VAL};
+                js_create_data_property_or_throw(deleted, i, src_elem);
                 if (js_exception_pending) return make_js_undefined();
             }
             if (get_type_id(deleted) == LMD_TYPE_ARRAY) {
@@ -24258,18 +24306,23 @@ includes_slow_path:
         int shift = insert_count - delete_count;
         int old_len = a->length;
         int new_len = old_len + shift;
+        // js58 P2: only memmove the DENSE portion. Items past capacity are holes
+        // (sparse). The dense range is [0, min(old_len, capacity)).
+        int dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
         if (shift > 0) {
             // grow: ensure capacity, then memmove
             if (new_len + 4 > a->capacity) {
                 int new_cap = new_len + 4;
                 Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                     if (a->items && a->length > 0) {
-                        memcpy(new_items, a->items, a->length * sizeof(Item));
+                        int copy_cnt = (int)((int64_t)a->length < a->capacity ? a->length : a->capacity);
+                        memcpy(new_items, a->items, copy_cnt * sizeof(Item));
                     }
                     js_array_install_runtime_items(a, new_items, new_cap);
+                    dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
                 }
             // move elements after delete region to their new positions
-            int elements_to_move = old_len - start - delete_count;
+            int elements_to_move = dense_end - start - delete_count;
             if (elements_to_move > 0) {
                 memmove(&a->items[start + insert_count], &a->items[start + delete_count],
                         elements_to_move * sizeof(Item));
@@ -24277,7 +24330,7 @@ includes_slow_path:
             a->length = new_len;
         } else if (shift < 0) {
             // shrink: memmove left, then adjust length
-            int elements_to_move = old_len - start - delete_count;
+            int elements_to_move = dense_end - start - delete_count;
             if (elements_to_move > 0) {
                 memmove(&a->items[start + insert_count], &a->items[start + delete_count],
                         elements_to_move * sizeof(Item));

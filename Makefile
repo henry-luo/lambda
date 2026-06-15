@@ -369,9 +369,16 @@ $(MIR_LIB):
 		git clone https://github.com/vnmakarov/mir.git $(MIR_BUILD_DIR); \
 	fi
 	@if [ -f "$(MIR_PATCH)" ]; then \
-		echo "Applying MIR patches..."; \
-		cd $(MIR_BUILD_DIR) && git apply "$(CURDIR)/$(MIR_PATCH)" 2>/dev/null || \
-		echo "  (MIR patch already applied or skipped)"; \
+		echo "Applying MIR patch $(MIR_PATCH)..."; \
+		if git -C "$(MIR_BUILD_DIR)" apply --reverse --check "$(CURDIR)/$(MIR_PATCH)" >/dev/null 2>&1; then \
+			echo "  MIR patch already applied — skipping."; \
+		elif git -C "$(MIR_BUILD_DIR)" apply --check "$(CURDIR)/$(MIR_PATCH)" >/dev/null 2>&1; then \
+			git -C "$(MIR_BUILD_DIR)" apply "$(CURDIR)/$(MIR_PATCH)" && echo "  MIR patch applied."; \
+		else \
+			echo "ERROR: $(MIR_PATCH) does not apply cleanly and is not already applied;" >&2; \
+			echo "       MIR would be built WITHOUT the patch. Aborting." >&2; \
+			exit 1; \
+		fi; \
 	fi
 ifeq ($(IS_MSYS2),yes)
 	@cd $(MIR_BUILD_DIR) && CC=/clang64/bin/clang.exe AR=/clang64/bin/llvm-ar.exe \

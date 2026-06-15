@@ -117,6 +117,16 @@ enum JsClass : uint8_t {
     JS_CLASS__COUNT  // sentinel
 };
 
+// P0 safety: typical userspace pointers on macOS / Linux fit in 48 bits.
+// Anything above that is a tagged Item value that somehow ended up in the
+// `type` slot of a Map struct (lib_marked.js triggers this — a Map struct's
+// `type` field reads as 0x1a00000000000000). Use this to gate every
+// `m->type` dereference under js_class.h so we never read past a garbage
+// pointer.
+static inline bool js_typemap_ptr_is_plausible(void* p) {
+    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
+}
+
 // Read the JsClass tag carried by an object. Returns JS_CLASS_NONE for
 // non-MAP items, for MAPs without a TypeMap (`type==NULL`), and for MAPs
 // whose TypeMap was zero-init'd (the common case until a writer stamps it).
@@ -124,7 +134,7 @@ enum JsClass : uint8_t {
 static inline JsClass js_class_get(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
     Map* m = obj.map;
-    if (!m || !m->type) return JS_CLASS_NONE;
+    if (!m || !js_typemap_ptr_is_plausible(m->type)) return JS_CLASS_NONE;
     return (JsClass)((TypeMap*)m->type)->js_class;
 }
 
@@ -358,7 +368,7 @@ static inline JsClass js_class_id(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
     Map* m = obj.map;
     if (!m) return JS_CLASS_NONE;
-    if (m->type) {
+    if (js_typemap_ptr_is_plausible(m->type)) {
         JsClass cls = (JsClass)((TypeMap*)m->type)->js_class;
         if (cls != JS_CLASS_NONE) return cls;
     }

@@ -48,24 +48,40 @@ extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
 
 // Locate the underlying TypeMap holding shape entries for a JS object.
 // Arrays use a companion Map stored in arr->extra (NULL if not yet allocated).
+// P0 safety: typical userspace pointers on macOS / Linux fit in 48 bits.
+// Anything above that is a tagged Item value that somehow ended up in the
+// `type` slot of a Map struct (lib_marked.js triggers this — a callback
+// receives an object whose Map.type field reads as 0x1a00000000000000).
+// Returning nullptr makes the prototype-chain walks short-circuit cleanly
+// instead of dereferencing the garbage TypeMap pointer.
+static inline bool js_is_plausible_typemap_ptr(void* p) {
+    return p && (uintptr_t)p <= 0x0000FFFFFFFFFFFFULL;
+}
+
 static TypeMap* js_obj_typemap(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) {
         Map* m = obj.map;
-        return m ? (TypeMap*)m->type : nullptr;
+        if (!m) return nullptr;
+        TypeMap* tm = (TypeMap*)m->type;
+        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
     }
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
         if (!arr || arr->extra == 0) return nullptr;
         Map* m = (Map*)(uintptr_t)arr->extra;
-        return m ? (TypeMap*)m->type : nullptr;
+        if (!m) return nullptr;
+        TypeMap* tm = (TypeMap*)m->type;
+        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
     }
     if (t == LMD_TYPE_FUNC) {
         JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
         if (!fn || fn->properties_map.item == 0) return nullptr;
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
         Map* m = fn->properties_map.map;
-        return m ? (TypeMap*)m->type : nullptr;
+        if (!m) return nullptr;
+        TypeMap* tm = (TypeMap*)m->type;
+        return js_is_plausible_typemap_ptr(tm) ? tm : nullptr;
     }
     return nullptr;
 }
