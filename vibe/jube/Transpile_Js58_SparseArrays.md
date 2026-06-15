@@ -84,7 +84,7 @@ The audit's findings (verified by direct read of the implementations, not grep):
 
 ## 3. The Phases
 
-Js58 is four phases. P1 fixes the severe gaps, P2 fixes the partials with a one-line helper change, P3 fixes the length-truncation orphan, P4 is an optional perf optimisation for sparse-heavy paths that we only land if profiling justifies it.
+Js58 lands in four sparse-correctness phases, followed by two threshold-admission followups. P1 fixes the severe gaps, P2 fixes the partials with a one-line helper change, P3 fixes the length-truncation orphan, and P4 adds the admitted local sparse-key cursor. Js58.1 rechecks the historical 1M threshold and identifies the dense-hole memory blocker; Js58.2 adds density-based sparse conversion and restores the 1M cap safely.
 
 ### Phase 1 — Centralise iteration on the sparse-aware helper
 
@@ -158,6 +158,18 @@ Both changes are sparse-side only — dense fast path stays byte-identical.
 
 **Landed variant:** the first Phase 4 tranche avoids `Map` / `TypeMap` layout changes. Instead, each sparse-aware array iteration creates a local sorted sparse-key cursor from the companion Map's numeric shape entries, uses binary search for next/previous sparse candidates, and refreshes the cursor when callback code changes the companion Map shape. Candidate values are still read from the current companion Map slot, so deletes and re-adds remain visible during iteration. Dense arrays do not allocate a cursor buffer.
 
+### Js58.2 — density-based sparse conversion
+
+After Phase 4, restoring the historical `SPARSE_GAP_MAX = 1000000` threshold was semantically correct but still too memory-heavy because element writes below that cap could dense-fill nearly one million holes. Js58.2 fixes the representation choice rather than lowering the cap again:
+
+- writes with small length/capacity gaps (`<= 10000`) stay dense;
+- writes with gaps above the restored 1M cap force sparse storage;
+- medium/large writes project post-write density and store sparse when present dense slots would be below 25% of projected length;
+- all-hole `new Array(n)` and `arr.length = n` expansions above 10K stay length-only sparse;
+- `Array.prototype.push` uses the same sparse decision when array length is far beyond dense capacity.
+
+This admits the restored 1M cap while keeping the `arr[999999] = ...` every/some pattern sparse and sublinear.
+
 ## 4. Acceptance Gates
 
 Each phase has the same gate:
@@ -199,8 +211,9 @@ These tests target the gaps test262 doesn't reach with implementation-level spar
 | `sparse_length_extend.{js,txt}` | `arr.length = N` where N > current length adds holes (not sparse entries); existing sparse entries preserved. |
 | `sparse_already_robust.{js,txt}` | Regression-lock for the helper-routed methods: `every`, `some`, `indexOf`, `lastIndexOf`, `forEach`, `map`, `filter`, `find`, `findIndex`. Asserts callback counts and return values on the same sparse fixtures used by the broken-method tests, so any future regression in the helper itself is caught. |
 | `sparse_gc_survival.{js,txt}` | Allocate a sparse array, trigger several GC cycles via large string concatenation, then verify sparse entries survive intact. Pins the GC tracing of `arr->extra`. |
+| `sparse_density_conversion.{js,txt}` | Restored-cap density support: `arr[999999]` remains sparse with correct every/some callback counts; length-only sparse expansion and `push` after sparse length stay correct. |
 
-Implementation note: the landed suite groups related rows into 10 fixtures rather than one file per method family. The grouped files are `sparse_basic`, `sparse_reduce`, `sparse_find`, `sparse_includes`, `sparse_concat_flat`, `sparse_slice_splice`, `sparse_mutate`, `sparse_length`, `sparse_already_robust`, and `sparse_gc_survival`.
+Implementation note: the landed suite groups related rows into 11 fixtures rather than one file per method family. The grouped files are `sparse_basic`, `sparse_reduce`, `sparse_find`, `sparse_includes`, `sparse_concat_flat`, `sparse_slice_splice`, `sparse_mutate`, `sparse_length`, `sparse_already_robust`, `sparse_gc_survival`, and `sparse_density_conversion`.
 
 15 test files were the original split-plan target; each `.js` ≤ 80 lines, `.txt` ≤ 30 lines. The grouped suite keeps the same coverage with less fixture duplication.
 
@@ -221,9 +234,10 @@ The robustness-lock file (`sparse_already_robust`) is the safety net: if Phase 1
 | P2 — `has_property` companion-Map check | 1 (.cpp) | ~12 | low | 30 min |
 | P3 — length-truncation cleanup | 1 (.cpp) | ~8 | low | 30 min |
 | P4 — sub-linear sparse-key lookup | 1 (.cpp) + struct change | ~100 | low (sparse-side only) | 1 day (only if needed) |
-| Test authoring | 10 grouped (.js+.txt pairs) | ~700 LOC total | — | 1 day |
+| Js58.2 — density conversion + cap restore | 2 (.cpp/.hpp) | ~80 | medium (storage policy) | 0.5 day |
+| Test authoring | 11 grouped (.js+.txt pairs) | ~730 LOC total | — | 1 day |
 
-**Total**: 3-4 days for full correctness; Phase 4 only if profiling justifies.
+**Total**: 3-4 days for sparse correctness, plus the Js58.2 threshold-admission followup.
 
 ## 8. Why This Doesn't Regress Test262
 
@@ -235,11 +249,13 @@ Phases 1-3 only change behaviour when `arr->extra != 0`; Js58.2 additionally cha
 
 ## 9. Why This Doesn't Regress Perf
 
-The instruction-level invariant: every method's dense path is gated on `if (arr->extra == 0)`. For dense arrays, the new sparse-aware branches never execute. The `if` itself is a single int compare-and-branch that the predictor wins on every iteration of a dense-only loop.
+The instruction-level invariant for array methods: every method's dense path is gated on `if (arr->extra == 0)`. For dense arrays, the sparse-aware method branches never execute. The `if` itself is a single int compare-and-branch that the predictor wins on every iteration of a dense-only loop.
+
+The Js58.2 density gate sits on array growth/set paths, not hot dense iteration. Sequential or near-sequential writes stay dense through the `<= 10000` always-dense gap rule. Only medium/large projected extensions pay the dense-present count, and that count prevents far larger dense hole allocation/fill work.
 
 Empirical check at each phase: re-run `test_js_transpile_timing_gtest` on the headline 7 corpora (lib_acorn, lib_lodash, lib_ajv, lib_yup, ramda, underscore, dom_jquery). Saved baselines in `temp/js58_perf/js57_baseline.tsv` from before Phase 1.
 
-The only sparse-path perf hit comes in Phase 1's `sort`/`reverse` refactor for arrays with both dense and sparse content — those are O(n + s) instead of O(n). Acceptable, since sparse `sort` was previously *wrong*, not fast.
+The sparse-path perf costs are intentional: Phase 1's `sort`/`reverse` refactor handles arrays with both dense and sparse content in O(n + s) instead of dense-only O(n), and Js58.2 routes low-density large writes through companion-map storage. Acceptable, since sparse `sort` was previously *wrong*, not fast, and the restored-cap `arr[999999]` case was previously retry-only/slow when dense-filled.
 
 ## 10. Final Js58 Numbers (verified)
 
@@ -249,13 +265,14 @@ The only sparse-path perf hit comes in Phase 1's `sort`/`reverse` refactor for a
 | Non-fully-passing | 0 | 0 |
 | Regressions | 0 | 0 |
 | Failures in baseline | 0 | 0 |
-| Sparse-path correctness | partial (9 broken methods + length leak) | full |
+| Sparse-path correctness | partial (9 broken methods + length leak) | full, including density-based restored-cap writes |
 | Dense-path wall-clock | n | timing smoke passed; formal `±2 %` comparison pending baseline file |
 | Sparse-key lookup microbench | n/a | `forEach` 59 ms → 51 ms; `indexOf` 44 ms → 35 ms on 2,500 sparse keys |
-| `test/js/sparse_*` test files | 0 | 10 grouped fixtures covering the 15 split-plan method families |
+| `test/js/sparse_*` test files | 0 | 11 grouped fixtures covering the 15 split-plan method families plus density conversion |
+| `SPARSE_GAP_MAX` | 10,000 workaround | restored to 1,000,000 with density conversion |
 | Scope line | ES2024 | ES2024 (Js58 is last ES2024 proposal) |
 
-Js58 is the closer for ES2024 sparse semantics. With the Phase 1-3 sparse fixes admitted, Lambda's array implementation now matches the intended V8/SpiderMonkey sparse-array behaviour for the test262-relevant method families covered here. The dense-workload timing smoke passes all 7 headline transpile corpora; the saved `temp/js58_perf/js57_baseline.tsv` comparison file is not present in this checkout, so the final `±2 %` claim remains a follow-up measurement rather than a hard admission fact.
+Js58 is the closer for ES2024 sparse semantics. With the Phase 1-4 sparse fixes and Js58.2 density conversion admitted, Lambda's array implementation now matches the intended V8/SpiderMonkey sparse-array behaviour for the test262-relevant method families covered here and no longer needs the 10K threshold workaround. The dense-workload timing smoke passes all 7 headline transpile corpora; the saved `temp/js58_perf/js57_baseline.tsv` comparison file is not present in this checkout, so the final `±2 %` claim remains a follow-up measurement rather than a hard admission fact.
 
 ## 10.1. Js58 P0.1 — Slice/Splice OOB Fix (landed)
 
