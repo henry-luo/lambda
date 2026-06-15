@@ -1,0 +1,4 @@
+find-30 30
+find-string undefined
+findIndex-string -1
+find-missing undefined

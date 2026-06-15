@@ -4833,6 +4833,24 @@ static Map* js_array_ensure_props_map(Array* arr) {
 static void js_array_store_sparse_property(Item array_item, int64_t index, Item value, bool update_length) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY || index < 0) return;
     Array* arr = array_item.array;
+    // Js58 P0: before flipping the array into sparse mode (or pushing the
+    // spec length past the dense buffer), stamp the hole sentinel into any
+    // dense slots that sit between `arr->length` and `arr->capacity`. The
+    // generic `expand_list` path (used by array literals + push) doesn't
+    // initialise those tail slots — they read as raw 0, which decodes as
+    // `null` to JS and falsely registers as "present" in
+    // `find_next_own_element`. Stamping them with the hole sentinel keeps
+    // every dense-iteration helper correct without growing the Array struct.
+    // We unconditionally write the sentinel (rather than only if currently
+    // zero) because GC-induced relocation of the items buffer can leave
+    // post-length slots holding stale pointer values that happen to be
+    // non-zero — those decode as `[object Object]` in JS-land otherwise.
+    if (arr->items && arr->length < arr->capacity) {
+        Item hole = lam::hole_sentinel_item();
+        for (int64_t i = arr->length; i < arr->capacity; i++) {
+            arr->items[i] = hole;
+        }
+    }
     Map* pm = js_array_ensure_props_map(arr);
     if (!pm) return;
     char idx_buf[32];
@@ -21611,7 +21629,10 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
     // J39-7: spec [[Get]] for index >= length returns undefined (after array
     // mutation during iteration, find/forEach/map etc. may visit indices that
     // were captured before splice/pop reduced the array length).
-    if (idx < 0 || idx >= arr->length) {
+    // Js58 P0: also bound by `capacity` — for sparse arrays `length` is the
+    // spec length (can be 20K) but `capacity` is the dense buffer size (can
+    // be 6). Reading `arr->items[idx]` with idx >= capacity is OOB.
+    if (idx < 0 || idx >= arr->length || idx >= arr->capacity) {
         return make_js_undefined();
     }
     // v25: check for deleted sentinel (array hole) — return undefined

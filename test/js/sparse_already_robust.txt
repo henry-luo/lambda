@@ -1,0 +1,15 @@
+length 20001
+every true calls 4
+some true calls 4
+forEach 0=10|1=20|2=30|20000=sparse
+map.length 20001 [0] number [20000] string
+filter.length 4
+indexOf-sparse 20000
+indexOf-30 2
+indexOf-missing -1
+lastIndexOf-sparse 20000
+keys-includes-20000 true
+keys-includes-0 true
+0-in true
+20000-in true
+9999-in false
