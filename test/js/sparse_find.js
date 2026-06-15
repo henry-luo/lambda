@@ -2,7 +2,7 @@
 // companion-map DATA entries, not just dense items.
 
 var arr = [10, 20, 30];
-arr[20000] = "sparse";
+arr[1000004] = "sparse";
 
 console.log("find-30", arr.find(function (v) { return v === 30; }));
 console.log("find-string", arr.find(function (v) { return typeof v === "string"; }));

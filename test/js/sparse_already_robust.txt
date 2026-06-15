@@ -1,20 +1,20 @@
-length 20001
+length 1000005
 every true calls 4
 some true calls 4
-forEach 0=10|1=20|2=30|20000=sparse
-map.length 20001 [0] number [20000] string
+forEach 0=10|1=20|2=30|1000004=sparse
+map.length 1000005 [0] number [1000004] string
 filter.length 4
-indexOf-sparse 20000
+indexOf-sparse 1000004
 indexOf-30 2
 indexOf-missing -1
-lastIndexOf-sparse 20000
-keys-includes-20000 true
+lastIndexOf-sparse 1000004
+keys-includes-1000004 true
 keys-includes-0 true
 0-in true
-20000-in true
+1000004-in true
 9999-in false
 delete-sparse true
 after-delete-in false
 after-delete-value undefined
-dynamic-add 20000=a|40000=new|60000=z
-dynamic-delete 20000=a|60000=z
+dynamic-add 1000004=a|1050004=new|1100004=z
+dynamic-delete 1000004=a|1100004=z

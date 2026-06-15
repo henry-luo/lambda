@@ -30,27 +30,27 @@ console.log("copy-a4[4]", a4[4]);
 
 // --- fill across sparse-only range ---
 var a5 = [1, 2, 3];
-a5[20000] = "x";
-a5.fill("f", 19999, 20001);
-console.log("fill-a5[19999]", a5[19999]);
-console.log("fill-a5[20000]", a5[20000]);
+a5[1000004] = "x";
+a5.fill("f", 1000003, 1000005);
+console.log("fill-a5[1000003]", a5[1000003]);
+console.log("fill-a5[1000004]", a5[1000004]);
 
 // --- copyWithin from sparse source ---
 var a6 = [1, 2, 3];
-a6[20000] = "x";
-a6.copyWithin(0, 20000);
+a6[1000004] = "x";
+a6.copyWithin(0, 1000004);
 console.log("copy-a6[0]", a6[0]);
 
 // --- reverse sparse entry to front and dense front to sparse end ---
 var a7 = [1, 2, 3];
-a7[20000] = "x";
+a7[1000004] = "x";
 a7.reverse();
 console.log("reverse-a7[0]", a7[0]);
-console.log("reverse-a7[20000]", a7[20000]);
+console.log("reverse-a7[1000004]", a7[1000004]);
 
 // --- sort sparse entries with dense present values, holes at end ---
 var a8 = [3, 1, 2];
-a8[20000] = 0;
+a8[1000004] = 0;
 a8.sort(function (x, y) { return x - y; });
 console.log("sort-a8[0]", a8[0]);
 console.log("sort-a8[3]", a8[3]);

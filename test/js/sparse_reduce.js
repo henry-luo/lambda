@@ -8,7 +8,7 @@
 // regress it.
 
 var arr = [10, 20, 30];
-arr[20000] = 200000;
+arr[1000004] = 200000;
 
 // initial-value reduce: 0 + 10 + 20 + 30 + 200000 = 200060
 console.log("reduce-sum", arr.reduce(function (a, v) { return a + v; }, 0));
@@ -22,6 +22,6 @@ console.log("reduceRight-keys",
 
 // reduceRight with string-typed accumulator: should pick up "sparse"
 var arr2 = [10, 20, 30];
-arr2[20000] = "sparse";
+arr2[1000004] = "sparse";
 console.log("reduceRight-first-string",
     arr2.reduceRight(function (a, v) { return a !== null ? a : (typeof v === "string" ? v : null); }, null));

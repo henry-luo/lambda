@@ -2,7 +2,7 @@
 // reading past the dense items buffer.
 
 var arr = [10, 20, 30];
-arr[20000] = "sparse";
+arr[1000004] = "sparse";
 
 // slice the dense range — no sparse should appear
 var s1 = arr.slice(0, 100);
@@ -15,24 +15,24 @@ console.log("slice-100[50]", s1[50]);
 var s2 = arr.slice(0, arr.length);
 console.log("slice-all-length", s2.length);
 console.log("slice-all[0]", s2[0]);
-console.log("slice-all[20000]", s2[20000]);
+console.log("slice-all[1000004]", s2[1000004]);
 
 // splice — remove 2 from start, no sparse entries in [0,2)
 var arr2 = [1, 2, 3];
-arr2[20000] = "x";
+arr2[1000004] = "x";
 var removed = arr2.splice(0, 2);
 console.log("splice-removed-length", removed.length);
 console.log("splice-arr2-length", arr2.length);
 console.log("splice-arr2[0]", arr2[0]);
-console.log("splice-arr2[19998]", arr2[19998]);
-console.log("splice-arr2[20000]", arr2[20000]);
+console.log("splice-arr2[1000002]", arr2[1000002]);
+console.log("splice-arr2[1000004]", arr2[1000004]);
 
 // splice — remove a range containing a sparse entry
 var arr3 = [1, 2, 3];
-arr3[20000] = "y";
-var removed2 = arr3.splice(19999, 2);
+arr3[1000004] = "y";
+var removed2 = arr3.splice(1000003, 2);
 console.log("splice-removed2-length", removed2.length);
 console.log("splice-removed2[0]", removed2[0]);
 console.log("splice-removed2[1]", removed2[1]);
 console.log("splice-arr3-length", arr3.length);
-console.log("splice-arr3[20000]", arr3[20000]);
+console.log("splice-arr3[1000004]", arr3[1000004]);

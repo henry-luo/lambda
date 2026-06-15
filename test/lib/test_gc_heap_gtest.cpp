@@ -192,6 +192,28 @@ TEST_F(GCHeapTest, DataZoneMultipleAllocs) {
     EXPECT_NE(b, c);
 }
 
+TEST_F(GCHeapTest, DataZoneReuseAfterPartialResetIsZeroed) {
+    // reset must scrub the previously used prefix even when the most recent
+    // allocation only touched a smaller prefix of the same block.
+    uint8_t* large = (uint8_t*)gc_data_alloc(gc, 1024);
+    ASSERT_NE(large, nullptr);
+    memset(large, 0xA5, 1024);
+
+    gc_data_zone_reset(gc->data_zone);
+
+    uint8_t* small = (uint8_t*)gc_data_alloc(gc, 128);
+    ASSERT_NE(small, nullptr);
+    memset(small, 0x5A, 128);
+
+    gc_data_zone_reset(gc->data_zone);
+
+    uint8_t* reused = (uint8_t*)gc_data_alloc(gc, 1024);
+    ASSERT_NE(reused, nullptr);
+    for (int i = 0; i < 1024; i++) {
+        EXPECT_EQ(reused[i], 0) << "byte " << i << " was not zeroed after partial reset";
+    }
+}
+
 // ============================================================================
 // 3. Root Registration
 // ============================================================================

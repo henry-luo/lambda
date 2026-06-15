@@ -3,8 +3,8 @@
 // live after a large index gap.
 
 var arr = [1, 2, 3];
-arr[20000] = "keep";
-arr[30000] = { tag: "object" };
+arr[1000004] = "keep";
+arr[1100004] = { tag: "object" };
 
 function churn() {
   var hold = [];
@@ -14,15 +14,15 @@ function churn() {
       hold.shift();
     }
     var tmp = [i, i + 1, i + 2];
-    tmp[20000] = "tmp-" + i;
+    tmp[1000004] = "tmp-" + i;
   }
   return hold.length;
 }
 
-console.log("before-20000", arr[20000]);
-console.log("before-30000", arr[30000].tag);
+console.log("before-1000004", arr[1000004]);
+console.log("before-1100004", arr[1100004].tag);
 console.log("churn-hold", churn());
-console.log("after-20000", arr[20000]);
-console.log("after-30000", arr[30000].tag);
-console.log("key-20000", Object.keys(arr).indexOf("20000") >= 0);
-console.log("key-30000", Object.keys(arr).indexOf("30000") >= 0);
+console.log("after-1000004", arr[1000004]);
+console.log("after-1100004", arr[1100004].tag);
+console.log("key-1000004", Object.keys(arr).indexOf("1000004") >= 0);
+console.log("key-1100004", Object.keys(arr).indexOf("1100004") >= 0);

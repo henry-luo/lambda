@@ -518,14 +518,13 @@ enum JsBuiltinId {
 };
 
 
-// v22 / P8: Maximum gap allowed for dense array expansion; beyond this, store
-// in the sparse companion Map. Lowered from 1,000,000 to 10,000 — the larger
-// threshold tickled a `gc_data_zone` block-overlap corruption inside
-// multi-million-item dense fills (Array.prototype.every / some on
-// `arr[999999] = …` looped 163,840× instead of 7×). 10,000 keeps the dense
-// fast path for common moderate-density patterns (`arr[100] = …`,
-// `arr[1000] = …`) that downstream search/iteration helpers rely on, while
-// shunting genuinely sparse stores through the sparse-Map.
+// v22 / P8 + Js58.1: Maximum gap allowed for dense array expansion; beyond
+// this, store in the sparse companion Map. Js57 lowered this to 10,000 after
+// the `arr[999999] = ...` test262 pattern exposed dense-fill corruption in
+// every/some callback counts. Js58.1 rechecked the ES-scale 1,000,000 cap:
+// correctness now holds, but the giant dense hole fill makes those tests
+// retry-only/slow and grows RSS by hundreds of MB. Keep the 10K cap until the
+// dense-hole representation itself is made sublinear.
 #define SPARSE_GAP_MAX 10000
 
 // Forward declarations for Unicode normalization (implemented in utf_string.cpp)

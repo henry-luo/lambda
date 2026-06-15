@@ -12,7 +12,7 @@
 // slice, splice, fill, copyWithin, reverse, sort, length-truncate.
 
 var arr = [10, 20, 30];
-arr[20000] = "sparse";   // gap=19997 > SPARSE_GAP_MAX=10000 → routes through extra Map
+arr[1000004] = "sparse";   // gap=1000001 > SPARSE_GAP_MAX, routes through extra Map
 
 console.log("length", arr.length);
 
@@ -29,7 +29,7 @@ arr.forEach(function (v, i) { seen.push(i + "=" + v); });
 console.log("forEach", seen.join("|"));
 
 var mapped = arr.map(function (v) { return typeof v; });
-console.log("map.length", mapped.length, "[0]", mapped[0], "[20000]", mapped[20000]);
+console.log("map.length", mapped.length, "[0]", mapped[0], "[1000004]", mapped[1000004]);
 
 var filtered = arr.filter(function () { return true; });
 console.log("filter.length", filtered.length);
@@ -40,36 +40,36 @@ console.log("indexOf-missing", arr.indexOf("missing"));
 console.log("lastIndexOf-sparse", arr.lastIndexOf("sparse"));
 
 var keys = Object.keys(arr);
-console.log("keys-includes-20000", keys.indexOf("20000") >= 0);
+console.log("keys-includes-1000004", keys.indexOf("1000004") >= 0);
 console.log("keys-includes-0", keys.indexOf("0") >= 0);
 
 console.log("0-in", 0 in arr);
-console.log("20000-in", 20000 in arr);
+console.log("1000004-in", 1000004 in arr);
 console.log("9999-in", 9999 in arr);
 
-console.log("delete-sparse", delete arr[20000]);
-console.log("after-delete-in", 20000 in arr);
-console.log("after-delete-value", arr[20000]);
+console.log("delete-sparse", delete arr[1000004]);
+console.log("after-delete-in", 1000004 in arr);
+console.log("after-delete-value", arr[1000004]);
 
 // Phase 4 sparse-key cursor safety: callbacks can still add/delete future
 // sparse entries while iteration is in progress.
 var dynAdd = [];
-dynAdd[20000] = "a";
-dynAdd[60000] = "z";
+dynAdd[1000004] = "a";
+dynAdd[1100004] = "z";
 var dynAddSeen = [];
 dynAdd.forEach(function (v, i) {
   dynAddSeen.push(i + "=" + v);
-  if (i === 20000) dynAdd[40000] = "new";
+  if (i === 1000004) dynAdd[1050004] = "new";
 });
 console.log("dynamic-add", dynAddSeen.join("|"));
 
 var dynDel = [];
-dynDel[20000] = "a";
-dynDel[40000] = "drop";
-dynDel[60000] = "z";
+dynDel[1000004] = "a";
+dynDel[1050004] = "drop";
+dynDel[1100004] = "z";
 var dynDelSeen = [];
 dynDel.forEach(function (v, i) {
   dynDelSeen.push(i + "=" + v);
-  if (i === 20000) delete dynDel[40000];
+  if (i === 1000004) delete dynDel[1050004];
 });
 console.log("dynamic-delete", dynDelSeen.join("|"));

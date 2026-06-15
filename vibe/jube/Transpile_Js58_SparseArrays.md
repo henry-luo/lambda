@@ -2,9 +2,9 @@
 
 Date: 2026-06-16
 
-Status: sparse correctness Phases 1-3 implemented and admitted; Phase 4 sparse-key cursor implemented as the next optimization tranche. Js57 closed the ES2024 module-evaluation work and the sparse-array `SPARSE_GAP_MAX = 10000` perf workaround in P8. The P8 workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable" — any JS that does `arr[20000] = …` followed by `reduce` / `findLast` / `fill` / `sort` / `arr.length = N` now hits the real sparse path. Js58 finishes that integration with grouped `test/js/sparse_*.{js,txt}` fixtures and a clean test262 admission gate.
+Status: sparse correctness Phases 1-3 implemented and admitted; Phase 4 sparse-key cursor implemented; Js58.1 investigated restoring the sparse/dense gap threshold to `SPARSE_GAP_MAX = 1000000` but did not admit it. Js57 closed the ES2024 module-evaluation work and temporarily lowered the sparse-array threshold to 10,000 in P8. That workaround moved 9 partially-broken array methods from "subtly wrong but invisible" to "subtly wrong and more reachable". Js58 finishes that sparse-path integration with grouped `test/js/sparse_*.{js,txt}` fixtures, retargets those fixtures to index `1000004`, and keeps a clean test262 admission gate with the 10K cap.
 
-The audit in Js57 §13 P8 documented the gaps (`reduce` / `reduceRight` / `findLast` / `findLastIndex` / `fill` / `copyWithin` / `reverse` / `sort` ignore sparse entries; `includes` / `flat` / `flatMap` / `concat` / `slice` / `splice` partially miss them; `arr.length` truncation leaks orphaned sparse entries). Test262 doesn't exercise these gaps for arrays with gap > 10K because its sparse fixtures use smaller gaps that still ride the dense path. Js58 fixes the gaps **and** authors a focused `test/js/sparse_*.{js,txt}` suite to lock the behaviour in.
+The audit in Js57 §13 P8 documented the gaps (`reduce` / `reduceRight` / `findLast` / `findLastIndex` / `fill` / `copyWithin` / `reverse` / `sort` ignore sparse entries; `includes` / `flat` / `flatMap` / `concat` / `slice` / `splice` partially miss them; `arr.length` truncation leaks orphaned sparse entries). Test262 doesn't exercise these gaps for arrays with implementation-level sparse gaps because its sparse fixtures use smaller gaps that ride the dense path. Js58 fixes the gaps **and** authors a focused `test/js/sparse_*.{js,txt}` suite to lock the behaviour in.
 
 ## 1. Starting Baseline
 
@@ -41,7 +41,9 @@ Per-phase pre/post timing snapshots saved to `temp/js58_perf/`.
 
 ## 2. Diagnosis (from Js57 P8 audit)
 
-Js57 P8 lowered `SPARSE_GAP_MAX` from 1,000,000 to 10,000 to dodge a `gc_data_zone` block-overlap corruption in multi-MB dense fills. Side effect: any `arr[N] = …` with `N - arr.length > 10000` now routes through `js_array_store_sparse_property` (`js_runtime.cpp:4833`), which writes to the companion `Map*` stored at `arr->extra` and bumps `arr->length` but doesn't touch the dense buffer.
+At Js58 start, Js57 P8 had lowered `SPARSE_GAP_MAX` from 1,000,000 to 10,000 to dodge a `gc_data_zone` block-overlap corruption in multi-MB dense fills. Side effect of that temporary setting: any `arr[N] = …` with `N - arr.length > 10000` routed through `js_array_store_sparse_property` (`js_runtime.cpp:4833`), which writes to the companion `Map*` stored at `arr->extra` and bumps `arr->length` but doesn't touch the dense buffer.
+
+**Js58.1 decision:** keep `SPARSE_GAP_MAX = 10000`. Rechecking the old 1,000,000 cap showed the historical `arr[999999]` every/some cases are now semantically correct, but full `make test262-baseline` made those two cases non-fully-passing/retry-only and memory profiling showed ~557 MB RSS growth per case from dense-filling almost one million holes. The active blocker is the linear dense-hole representation, not a simple `gc_data_zone_reset` stale-prefix bug. A future threshold raise needs sublinear dense-hole storage or density-based conversion to sparse storage.
 
 The audit's findings (verified by direct read of the implementations, not grep):
 
@@ -175,11 +177,11 @@ Pass conditions:
 
 ## 5. Test Plan (`test/js/sparse_*`)
 
-These tests target the gaps test262 doesn't reach with `SPARSE_GAP_MAX = 10000`. Each is a `.js` script whose stdout is matched against a paired `.txt`.
+These tests target the gaps test262 doesn't reach with implementation-level sparse storage. The landed suite uses `1000004` as the first sparse index, which is safely above both the current `SPARSE_GAP_MAX = 10000` cap and any future attempt to restore a 1M cap from a three-element dense prefix. Each is a `.js` script whose stdout is matched against a paired `.txt`.
 
 | Test file | What it covers |
 |---|---|
-| `sparse_basic.{js,txt}` | `arr[20000] = X; arr[k]` for k in/out of sparse range; `'k' in arr`; `Object.keys(arr)`; baseline sanity. |
+| `sparse_basic.{js,txt}` | `arr[1000004] = X; arr[k]` for k in/out of sparse range; `'k' in arr`; `Object.keys(arr)`; baseline sanity. |
 | `sparse_iter_reduce.{js,txt}` | `reduce` over sparse — assert callback fires exactly N times for N present entries, accumulator carries sparse values. |
 | `sparse_iter_reduce_right.{js,txt}` | `reduceRight` mirror. |
 | `sparse_iter_find_last.{js,txt}` | `findLast` / `findLastIndex` return sparse entry past the dense range. |
@@ -204,7 +206,7 @@ The robustness-lock file (`sparse_already_robust`) is the safety net: if Phase 1
 
 ## 6. Out Of Scope
 
-- **Raising `SPARSE_GAP_MAX` back up.** The latent `gc_data_zone` block-overlap that Js57 P8 dodged is a separate proposal. Js58 fixes correctness of the sparse path; the allocator-layer fix is its own ~3-day investigation (track per-allocation high-water marks across `data_zone_reset`, or have `allocate_block` reject ranges that overlap existing live allocations).
+- **Raising or removing `SPARSE_GAP_MAX`.** Js58.1 showed that the 1M cap is now semantically correct but not admissible: the historical every/some test262 cases become retry-only/slow because the dense hole fill is still linear and memory-heavy.
 - **`Proxy` arrays with non-default `has` / `get` / `set` traps.** Sparse + Proxy is a known complex interaction; covered separately in the Js59 ES2025 proposal if needed.
 - **TypedArrays** — these have their own fixed-buffer model, not affected by sparse-Map.
 - **`Array.from` / `Array.of` / `new Array(N)`** — already sparse-aware (use `js_array_new_sparse_length`).
@@ -226,7 +228,7 @@ The robustness-lock file (`sparse_already_robust`) is the safety net: if Phase 1
 
 Phases 1-3 only change behaviour when `arr->extra != 0`. Across the 40261 test262 baseline:
 
-- ~0 tests reach the sparse path under `SPARSE_GAP_MAX = 10000` (any test with gap > 10K). Verified by tracing: no baseline test calls `js_array_store_sparse_property` more than once per test scope.
+- At Js58 start, ~0 baseline tests reached the sparse path under `SPARSE_GAP_MAX = 10000` (any test with gap > 10K). Js58.1 confirmed that restoring 1M makes the exact historical `arr[999999]` every/some cases dense and semantically correct, but too slow/memory-heavy for admission.
 - The handful that do hit sparse storage already pass via the robust paths (`indexOf`, `every`, etc.).
 - The broken-path tests are excluded *because* the broken paths return wrong results that happen to match the slot-being-undefined-coincidence — these tests don't assert sparse behaviour explicitly. Phase 1's fix changes them from "accidentally pass" to "correctly pass"; no observable diff at the test262 level.
 
@@ -500,8 +502,21 @@ The original persistent companion-Map cache idea was not landed because `Map` si
 
 Follow-up only if needed: a persistent per-companion-map cache can still be considered later, but it should be designed with the `Map` layout/JIT offset constraints in mind.
 
+## 10.9. Js58.1 — sparse gap threshold restoration attempt
+
+Js57 P8's `SPARSE_GAP_MAX = 10000` setting was a conservative workaround for the historical `arr[999999] = ...` corruption. Js58.1 rechecked the `1000000` cap directly and did **not** admit it:
+
+- `GCHeapTest.DataZoneReuseAfterPartialResetIsZeroed` covers the suspected `gc_data_zone_reset` high-water/reset hole and passes, so the simple stale-prefix hypothesis is not the active failure.
+- The exact historical test262 every/some cases pass semantically with the restored threshold: both `built_ins_Array_prototype_every_15_4_4_16_7_c_ii_2_js` and `built_ins_Array_prototype_some_15_4_4_17_7_c_ii_2_js` pass in a focused batch.
+- Full `make test262-baseline` with the restored threshold reports `Fully passed: 40259 / 40261`, `Non-fully-passing: 2`, `Failed: 0`, `Regressions: 0`; the two non-fully-passing tests are exactly the every/some `arr[999999]` cases, recovered only in Phase 4 retry.
+- Memory profiling under the restored threshold points at the dense hole fill: `some` grows RSS by ~557 MB and `every` by ~557 MB. That is the active blocker, not a simple allocator reset hole.
+- `SPARSE_GAP_MAX` therefore remains `10000` until dense hole runs get a sublinear representation or a general density-based sparse conversion.
+- `test/js/sparse_*` fixtures now use first sparse index `1000004`, keeping them on the sparse companion-map path under both the current 10K cap and a future 1M restoration attempt.
+- Focused sparse gate passes: `test/test_js_gtest.exe --gtest_filter='*sparse*' --gtest_brief=1` runs 10 sparse JS fixtures and passes.
+- Final stable-cap admission rerun passes: `make test262-baseline` reports `Fully passed: 40261 / 40261`, `Non-fully-passing: 0`, `Failed: 0`, `Regressions: 0` in 140.5s.
+
 ## 11. Followups After Js58
 
-- **`gc_data_zone` block-overlap fix** (Js58.1 or its own micro-proposal) — root-cause the corruption that made P8 lower `SPARSE_GAP_MAX` to 10K. Once fixed, the threshold can rise back to 1M (or be removed entirely) without losing the sparse-path correctness Js58 added — those are independent fixes.
+- **Dense-hole representation / density conversion** — the old P8 corruption no longer reproduces semantically at 1M, but dense-filling nearly one million holes is too slow and memory-heavy. A future threshold raise needs a general representation fix, not another cap tweak.
 - **Sparse Proxy interaction** (Js59 candidate) — `new Proxy(sparseArr, traps)` invocations.
 - **Performance benches for sparse paths** — currently no `test_js_transpile_timing` corpus is sparse-heavy. Add one based on real-world JSON-tree-walk workloads where `arr[id] = node` patterns create accidental sparse arrays.

@@ -5,9 +5,9 @@
 // helper refactor doesn't regress them.
 
 var arr = [10, 20, 30];
-arr[20000] = "sparse";
+arr[1000004] = "sparse";
 
-// concat: [99] + arr → length 1+20001 = 20002, sparse at index 1+20000 = 20001
+// concat: [99] + arr -> length 1+1000005, sparse at index 1+1000004
 var combined = [99].concat(arr);
 console.log("concat-length", combined.length);
 console.log("concat[0]", combined[0]);
@@ -23,7 +23,7 @@ console.log("flat-x-index", flat.indexOf("x"));
 
 // flatMap on a sparse array
 var arr2 = [1, 2, 3];
-arr2[20000] = "z";
+arr2[1000004] = "z";
 var out = arr2.flatMap(function (v) { return [v]; });
 console.log("flatMap-length", out.length);
 console.log("flatMap-find-z", out.indexOf("z"));
