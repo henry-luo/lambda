@@ -29722,6 +29722,7 @@ static Item js_promise_all_settled_iterable(Item iterable) {
 // =============================================================================
 
 #define JS_MAX_MODULES 64
+#define JS_MAX_ASYNC_PARENTS 16
 
 struct JsModule {
     String* specifier;
@@ -29735,6 +29736,22 @@ struct JsModule {
     // the imported module's [[TopLevelCapability]]" requirement closely enough
     // for the fulfillment/rejection-order tests' resolution order.
     Item    awaited_target;
+
+    // Js57 P7d (Track B3 full impl): per-module TLA evaluation state, mirrors
+    // the spec's `[[HasTLA]]`, `[[PendingAsyncDependencies]]`,
+    // `[[AsyncParentModules]]`. Used by transpile_js_module_to_mir to defer
+    // the importing module's body until every TLA-transitive dependency has
+    // run its post-await chunk.
+    int     has_tla;                       // 1 if module body has top-level await
+    int     pending_async_deps;            // count of TLA deps not yet completed
+    int     async_parent_count;            // entries in async_parents[]
+    int     async_parents[JS_MAX_ASYNC_PARENTS];  // module indices waiting on this one
+    void*   deferred_main_ptr;             // C function pointer (js_main) for deferred body
+    int     body_executed;                 // 1 once the body function has been invoked
+    int     post_await_pending;            // 1 between pre-await emit and post-await drain
+    int     body_state;                    // P7d-C body-split dispatch: 0=initial, 1=post-await
+    int     async_eval_order;              // P7d AEO assignment (-1 = not yet async-eligible)
+    Item*   saved_module_vars;             // P7d module-vars slot pointer (saved at transpile time)
 };
 
 static JsModule js_modules[JS_MAX_MODULES];
@@ -29817,6 +29834,11 @@ extern "C" void js_tla_enter_module(void) {
     g_tla_module_depth++;
 }
 
+// Forward declarations for module-vars/namespace state accessors defined in
+// js_runtime_state.cpp. Avoids including js_mir_internal.hpp here.
+extern "C" Item* js_get_active_module_vars(void);
+extern "C" void  js_set_active_module_vars(Item* vars);
+
 extern "C" void js_tla_exit_module(void) {
     if (g_tla_module_depth > 0) g_tla_module_depth--;
     if (g_tla_module_depth != 0) return;
@@ -29847,6 +29869,46 @@ extern "C" void js_tla_exit_module(void) {
         if (get_type_id(func) == LMD_TYPE_FUNC) {
             js_call_function(func, ItemNull, NULL, 0);
         }
+    }
+
+    // Js57 P7d (TLA suspension drain): all sibling/importer module bodies have
+    // either run (sync path) or been deferred (pending_async_deps > 0). Iterate
+    // through TLA modules in AEO order, fire their post-await chunks, and let
+    // js_module_complete_tla_body propagate completions to importers.
+    typedef Item (*js_main_fn)(Context*);
+    extern Context* _lambda_rt;
+    while (1) {
+        int best = -1, best_aeo = -1;
+        for (int i = 0; i < js_module_count_v14; i++) {
+            JsModule* m = &js_modules[i];
+            if (!m->post_await_pending || m->body_executed) continue;
+            if (!m->deferred_main_ptr) continue;
+            if (m->async_eval_order < 0) continue;
+            if (best < 0 || m->async_eval_order < best_aeo) {
+                best = i;
+                best_aeo = m->async_eval_order;
+            }
+        }
+        if (best < 0) break;
+        JsModule* m = &js_modules[best];
+        log_debug("P7d: depth-0 drain firing post-await for '%.*s' (AEO=%d)",
+            (int)m->specifier->len, m->specifier->chars, m->async_eval_order);
+        js_main_fn main_fn = (js_main_fn)m->deferred_main_ptr;
+        m->deferred_main_ptr = NULL;
+        // Restore the module's evaluation context (module-vars, namespace, _lambda_rt)
+        // so the re-entered js_main sees the same state it had during the pre-
+        // await phase.
+        Item* prev_vars = js_get_active_module_vars();
+        Item prev_ns = js_set_active_module_namespace(m->namespace_obj);
+        if (m->saved_module_vars) js_set_active_module_vars(m->saved_module_vars);
+        Context* prev_rt = _lambda_rt;
+        _lambda_rt = (Context*)context;
+        main_fn(context);
+        _lambda_rt = prev_rt;
+        js_set_active_module_vars(prev_vars);
+        js_set_active_module_namespace(prev_ns);
+        Item spec = (Item){.item = s2it(m->specifier)};
+        js_module_complete_tla_body(spec);
     }
 }
 
@@ -29904,6 +29966,15 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     m->specifier = spec;
     m->namespace_obj = namespace_obj;
     m->awaited_target = ItemNull;  // Js57 P5
+    m->has_tla = 0;                // Js57 P7d
+    m->pending_async_deps = 0;
+    m->async_parent_count = 0;
+    m->deferred_main_ptr = NULL;
+    m->body_executed = 0;
+    m->post_await_pending = 0;
+    m->body_state = 0;
+    m->async_eval_order = -1;
+    m->saved_module_vars = NULL;
 }
 
 // Js57 P5 (fulfillment/rejection-order): module TLA awaited-target tracking.
@@ -29977,6 +30048,257 @@ extern "C" void js_module_inherit_awaited_target(Item current_specifier, Item de
     log_debug("P5: module '%.*s' inherits awaited target from '%.*s'",
         (int)cur->specifier->len, cur->specifier->chars,
         (int)dep->specifier->len, dep->specifier->chars);
+}
+
+// =============================================================================
+// Js57 P7d: per-module TLA evaluation tracking. Maps to the spec's
+// `[[HasTLA]]`, `[[PendingAsyncDependencies]]`, `[[AsyncParentModules]]`.
+// =============================================================================
+
+static int js_module_find_index(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return -1;
+    String* spec = it2s(specifier);
+    for (int i = 0; i < js_module_count_v14; i++) {
+        if (js_modules[i].specifier->len == spec->len &&
+            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern "C" void js_module_mark_has_tla(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    m->has_tla = 1;
+    log_debug("P7d: module '%.*s' marked has_tla=1",
+        (int)m->specifier->len, m->specifier->chars);
+}
+
+extern "C" int js_module_get_has_tla(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    return m ? m->has_tla : 0;
+}
+
+extern "C" void js_module_save_context(Item specifier, Item* module_vars) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    m->saved_module_vars = module_vars;
+}
+
+extern "C" Item* js_module_get_saved_module_vars(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    return m ? m->saved_module_vars : NULL;
+}
+
+// Returns 1 if the module needs deferral — either it has TLA itself OR its
+// pending_async_deps counter is still positive (a TLA-transitive dep hasn't
+// settled yet). Used by jm_load_imports to decide whether an importer should
+// register itself as a parent of the just-loaded dep.
+extern "C" int js_module_needs_async_settle(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return 0;
+    if (m->has_tla && !m->body_executed) return 1;
+    if (m->post_await_pending) return 1;
+    if (m->pending_async_deps > 0) return 1;
+    return 0;
+}
+
+// Register `parent_specifier` as an async parent of `dep_specifier`. Increments
+// the parent's pending_async_deps counter. The parent will be notified when
+// the dep's body fully completes via js_module_complete_tla_body.
+extern "C" void js_module_register_async_parent(Item dep_specifier, Item parent_specifier) {
+    int dep_idx = js_module_find_index(dep_specifier);
+    int par_idx = js_module_find_index(parent_specifier);
+    if (dep_idx < 0 || par_idx < 0) return;
+    if (dep_idx == par_idx) return;  // ignore self
+    JsModule* dep = &js_modules[dep_idx];
+    JsModule* par = &js_modules[par_idx];
+    // Avoid duplicate parent entries — the spec counts each requested dep at
+    // most once per importer.
+    for (int i = 0; i < dep->async_parent_count; i++) {
+        if (dep->async_parents[i] == par_idx) return;
+    }
+    if (dep->async_parent_count >= JS_MAX_ASYNC_PARENTS) {
+        log_error("P7d: module '%.*s' async_parents overflow (%d)",
+            (int)dep->specifier->len, dep->specifier->chars, JS_MAX_ASYNC_PARENTS);
+        return;
+    }
+    dep->async_parents[dep->async_parent_count++] = par_idx;
+    par->pending_async_deps++;
+    log_debug("P7d: module '%.*s' registered as async parent of '%.*s' (par pending=%d)",
+        (int)par->specifier->len, par->specifier->chars,
+        (int)dep->specifier->len, dep->specifier->chars,
+        par->pending_async_deps);
+}
+
+// Store the C function pointer (js_main) for the deferred body. Called by the
+// transpiler when a module has pending_async_deps > 0 at the time js_main
+// would normally be invoked — instead of calling it directly, the pointer is
+// stashed here and invoked later from js_module_complete_tla_body.
+extern "C" void js_module_set_deferred_main_ptr(Item specifier, void* main_ptr) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    m->deferred_main_ptr = main_ptr;
+    log_debug("P7d: module '%.*s' deferred_main_ptr=%p (pending=%d)",
+        (int)m->specifier->len, m->specifier->chars, main_ptr, m->pending_async_deps);
+}
+
+extern "C" int js_module_pending_async_deps(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    return m ? m->pending_async_deps : 0;
+}
+
+extern "C" void js_module_mark_post_await_pending(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    m->post_await_pending = 1;
+}
+
+extern "C" int js_module_get_body_state(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    return m ? m->body_state : 0;
+}
+
+extern "C" void js_module_set_body_state(Item specifier, int state) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return;
+    m->body_state = state;
+}
+
+// AEO assignment — counter assigns ascending integers in DFS post-order. Each
+// module gets at most one AEO; subsequent calls are no-ops.
+static int g_async_eval_order_counter = 0;
+extern "C" int js_module_assign_async_eval_order(Item specifier) {
+    JsModule* m = js_module_find(specifier);
+    if (!m) return -1;
+    if (m->async_eval_order < 0) {
+        m->async_eval_order = ++g_async_eval_order_counter;
+        log_debug("P7d: module '%.*s' AEO=%d",
+            (int)m->specifier->len, m->specifier->chars, m->async_eval_order);
+    }
+    return m->async_eval_order;
+}
+
+extern "C" void js_module_reset_aeo_counter(void) {
+    g_async_eval_order_counter = 0;
+}
+
+// Ready queue: modules whose pending_async_deps just reached 0 and need their
+// deferred body invoked. Drained in AEO order from js_tla_exit_module after
+// the existing g_tla_continuations queue.
+#define JS_TLA_READY_QUEUE_MAX 128
+static int g_tla_ready_queue[JS_TLA_READY_QUEUE_MAX];
+static int g_tla_ready_queue_count = 0;
+static int g_tla_draining_depth = 0;  // recursion guard
+
+static void js_tla_ready_enqueue(int module_idx) {
+    if (g_tla_ready_queue_count >= JS_TLA_READY_QUEUE_MAX) {
+        log_error("P7d: ready queue overflow (%d)", JS_TLA_READY_QUEUE_MAX);
+        return;
+    }
+    for (int i = 0; i < g_tla_ready_queue_count; i++) {
+        if (g_tla_ready_queue[i] == module_idx) return;  // already queued
+    }
+    g_tla_ready_queue[g_tla_ready_queue_count++] = module_idx;
+}
+
+// Pop the module with the lowest AEO. Returns -1 if queue is empty.
+static int js_tla_ready_pop_lowest_aeo(void) {
+    if (g_tla_ready_queue_count == 0) return -1;
+    int best = 0;
+    int best_aeo = js_modules[g_tla_ready_queue[0]].async_eval_order;
+    for (int i = 1; i < g_tla_ready_queue_count; i++) {
+        int aeo = js_modules[g_tla_ready_queue[i]].async_eval_order;
+        if (aeo >= 0 && (best_aeo < 0 || aeo < best_aeo)) {
+            best = i;
+            best_aeo = aeo;
+        }
+    }
+    int idx = g_tla_ready_queue[best];
+    // Compact: shift remaining entries left
+    for (int i = best + 1; i < g_tla_ready_queue_count; i++) {
+        g_tla_ready_queue[i - 1] = g_tla_ready_queue[i];
+    }
+    g_tla_ready_queue_count--;
+    return idx;
+}
+
+// Called when a module's body fully completes (either a non-TLA body finishing,
+// or a TLA module's post-await continuation finishing). Notifies async parents
+// by decrementing their pending_async_deps; when a parent's counter reaches
+// zero, its deferred body is invoked.
+extern "C" void js_module_complete_tla_body(Item specifier) {
+    int idx = js_module_find_index(specifier);
+    if (idx < 0) return;
+    JsModule* m = &js_modules[idx];
+    if (m->body_executed) return;  // idempotent
+    m->body_executed = 1;
+    m->post_await_pending = 0;
+    log_debug("P7d: module '%.*s' body_executed=1, notifying %d parents",
+        (int)m->specifier->len, m->specifier->chars, m->async_parent_count);
+    // Snapshot parent list because js_module_register_async_parent may run
+    // during deferred-body invocation if a parent itself triggers more imports.
+    int parents[JS_MAX_ASYNC_PARENTS];
+    int parent_count = m->async_parent_count;
+    for (int i = 0; i < parent_count; i++) parents[i] = m->async_parents[i];
+
+    // First pass: just decrement and enqueue ready parents. Do NOT execute
+    // them yet — the AEO-order drain below handles execution.
+    for (int i = 0; i < parent_count; i++) {
+        JsModule* par = &js_modules[parents[i]];
+        if (par->pending_async_deps > 0) par->pending_async_deps--;
+        if (par->pending_async_deps == 0 && !par->body_executed && par->deferred_main_ptr) {
+            log_debug("P7d: module '%.*s' all deps settled — enqueued for AEO drain",
+                (int)par->specifier->len, par->specifier->chars);
+            js_tla_ready_enqueue(parents[i]);
+        }
+    }
+
+    // Drain the ready queue in AEO order, but only at the outermost
+    // js_module_complete_tla_body invocation. Nested calls (e.g. when a child
+    // module's body itself completes synchronously) just enqueue.
+    if (g_tla_draining_depth > 0) return;
+    g_tla_draining_depth++;
+    extern Context* _lambda_rt;
+    while (1) {
+        int next = js_tla_ready_pop_lowest_aeo();
+        if (next < 0) break;
+        JsModule* par = &js_modules[next];
+        if (par->body_executed) continue;
+        if (!par->deferred_main_ptr) continue;
+        log_debug("P7d: module '%.*s' invoking deferred main (AEO=%d)",
+            (int)par->specifier->len, par->specifier->chars, par->async_eval_order);
+        typedef Item (*js_main_fn)(Context*);
+        js_main_fn main_fn = (js_main_fn)par->deferred_main_ptr;
+        par->deferred_main_ptr = NULL;  // single-shot
+        // Restore the module's evaluation context (module-vars, namespace,
+        // _lambda_rt) so the deferred body sees its own state, not the
+        // drain caller's.
+        Item* prev_vars = js_get_active_module_vars();
+        Item prev_ns = js_set_active_module_namespace(par->namespace_obj);
+        if (par->saved_module_vars) js_set_active_module_vars(par->saved_module_vars);
+        Context* prev_rt = _lambda_rt;
+        _lambda_rt = (Context*)context;
+        main_fn(context);
+        // Drain microtasks scheduled by the deferred body before propagating
+        // completion. Without this, Promise.then handlers queued by the body
+        // never fire and async-flagged tests miss $DONE().
+        extern int js_dynamic_import_suppress_module_drain;
+        if (js_dynamic_import_suppress_module_drain <= 0) {
+            js_event_loop_drain();
+        }
+        _lambda_rt = prev_rt;
+        js_set_active_module_vars(prev_vars);
+        js_set_active_module_namespace(prev_ns);
+        // After the parent's body returns, mark it complete unless its own
+        // TLA pre-await split scheduled a post-await continuation.
+        if (!par->post_await_pending) {
+            Item par_spec = (Item){.item = s2it(par->specifier)};
+            js_module_complete_tla_body(par_spec);
+        }
+    }
+    g_tla_draining_depth--;
 }
 
 // Js57 P5: per-dynamic-import namespace slots. A pre-allocated bank of C

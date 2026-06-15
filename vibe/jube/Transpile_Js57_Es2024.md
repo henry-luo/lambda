@@ -661,3 +661,38 @@ The minimum infrastructure required to admit the two failures without breaking t
 Estimated 3–5 days of focused work, with non-trivial regression risk during integration. **Not landed in this session.**
 
 **Final Js57 state — confirmed.** 40257 / 40257 baseline passing, 0 regressions, 0 batch-lost, 0 crashes. CRASH_139 cleared (P7b), Gate K admitted (P7a). Sibling-modules + dynamic-import-of-waiting-module remain in the deferred set, both blocked on the same `PendingAsyncDependencies` infrastructure described above. Recommend filing them as a dedicated "ES Module Evaluation Algorithm" proposal (Js58 candidate).
+
+### P7d — TLA suspension landed (2026-06-15, follow-up pass)
+
+The P7c "needs full async state machine" finding was reopened and the full `PendingAsyncDependencies` infrastructure was implemented in a single pass. Both targeted tests admitted.
+
+**Final numbers:** 40259 / 40259 baseline passing, 0 regressions, 0 batch-lost, 0 crashes (release-mode stability guard).
+
+**Admissions (2):**
+- `language/module-code/top-level-await/async-module-does-not-block-sibling-modules.js`
+- `language/module-code/top-level-await/dynamic-import-of-waiting-module.js`
+
+**Components landed:**
+
+1. **JsModule struct extensions** (`lambda/js/js_runtime.cpp:29726+`) — added `has_tla`, `pending_async_deps`, `async_parents[]`, `async_parent_count`, `deferred_main_ptr`, `body_executed`, `post_await_pending`, `body_state`, `async_eval_order`, `saved_module_vars`. Together these map to the spec's `[[HasTLA]]`, `[[PendingAsyncDependencies]]`, `[[AsyncParentModules]]`, `[[AsyncEvaluationOrder]]` and the runtime book-keeping needed to drain deferred bodies.
+2. **Runtime helpers** (same file) — `js_module_mark_has_tla`, `js_module_needs_async_settle`, `js_module_register_async_parent`, `js_module_set_deferred_main_ptr`, `js_module_set_body_state` / `_get_body_state`, `js_module_assign_async_eval_order`, `js_module_save_context` / `_get_saved_module_vars`, `js_module_mark_post_await_pending`, `js_module_complete_tla_body`. All exposed through `lambda/sys_func_registry.c` so JIT-emitted MIR can call them.
+3. **AEO drain integrated** (`js_module_complete_tla_body` + the per-module drain inside `js_tla_exit_module`) — when a module's body settles, its async parents' counters decrement; parents that reach zero get enqueued by AEO and the queue is drained in lowest-AEO-first order. The drain restores per-module evaluation context (`module-vars`, `namespace`, `_lambda_rt`) before invoking the stored `js_main` so the deferred body sees its own state, and runs `js_event_loop_drain` after so microtasks queued by the body fire before completion propagates.
+4. **TLA detection at AST scan** (P7d-A, `lambda/js/js_mir_module_batch_lowering.cpp:6378`) — uses the existing `jm_count_awaits` walker (which skips nested function/class scopes) to flag any module with a real top-level await. Gated on `g_tla_module_depth >= 2 && js_dynamic_import_suppress_module_drain == 0` so the entry module and dynamic-import callees keep their existing sync-with-microtask-drain semantics — that's what protected the top-level-ticks family and the `await import(...)` pattern from regression.
+5. **Importer dependency wiring** (P7d-B, `jm_load_imports`) — after each dep is loaded (or hit the cached/circular path), if it still needs an async settle the importer is registered as the dep's async parent and the importer's `pending_async_deps` counter increments.
+6. **Module body pre/post-await split** (P7d-C, `transpile_js_mir_ast` in `js_mir_module_batch_lowering.cpp:4470+`) — for TLA-eligible modules a state-dispatch is emitted right before the main statement loop: load `body_state`, branch to `POST_AWAIT` if it's already 1. The body emit loop catches the first top-level `ExpressionStatement(AwaitExpression)`, evaluates the awaited value (routing pending Promises through P5 publish), flips `body_state=1`, calls `js_module_mark_post_await_pending`, assigns an AEO, and returns the namespace early. The post-await label lands right after so subsequent statements run on re-entry.
+7. **Deferred body invocation** (P7d-D, `transpile_js_module_to_mir`) — after `jm_load_imports` finishes, if the module's `pending_async_deps > 0` the body is *not* invoked synchronously; instead the `js_main` function pointer is stashed in `deferred_main_ptr`. The AEO drain calls it when every dep has settled.
+8. **`js_module_complete_tla_body` at body end** — the body emission appends a call to `js_module_complete_tla_body(specifier)` after the post-await label (or at the natural end of the body for sync modules), so every module's "I'm done" signal propagates to its async parents.
+
+**Why these don't break existing tests:**
+
+- **`dfs-invariant.js`** — `async_FIXTURE.js` is nested-load TLA, so its body splits (pre-await empty, post-await sets `globalThis.test262 = 'async'` deferred). Importer `direct-1_FIXTURE.js` gets registered as parent; its body is deferred (pending=1). The AEO drain fires async's post first (sets `test262 = 'async'`), then direct-1's deferred body runs (`test262 += ':direct-1'` yields `'async:direct-1'`), then direct-2 and indirect follow in AEO order. Final string matches.
+- **`pending-async-dep-from-cycle.js`** — same shape; both cycle-leaf and cycle-root have TLA, both bodies split. The AEO order matches the spec's `[[AsyncEvaluationOrder]]` and the log array assertion gets the expected `[leaf_start, leaf_end, root_start, root_end, importer]` shape.
+- **`module-import-resolution.js`** — fixture has `await 1; await 2; export default await Promise.resolve(42); …`. The first `await 1` triggers the split; post-await runs `await 2` (sync via `js_await_sync`) and the export-default chain still produces 42. The entry test module is at depth 1, so its `await import(...)` sees the fully-evaluated namespace because dynamic import keeps the sync path under the suppress gate.
+- **`top-level-ticks{,_2}.js`** — entry-level module (depth 1), so the depth gate keeps it on the sync-with-microtask-drain path. The `await N; actual.push(...)` interleaving is preserved.
+
+**Acceptance criteria met:**
+- Baseline passing: 40259 / 40259
+- Regressions: 0
+- Batch-lost: 0
+- Crashes: 0
+- Wall-clock: within tolerance of the prior P7b run (no perf hotspots introduced; AEO drain only fires for the small set of TLA modules per session).

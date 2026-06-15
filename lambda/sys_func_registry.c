@@ -1835,6 +1835,21 @@ JitImport jit_runtime_imports[] = {
     {"js_module_get_awaited_target", FPTR(js_module_get_awaited_target)},
     {"js_module_inherit_awaited_target", FPTR(js_module_inherit_awaited_target)},
     {"js_p5_module_await", FPTR(js_p5_module_await)},
+    // Js57 P7d: per-module TLA evaluation tracking
+    {"js_module_mark_has_tla", FPTR(js_module_mark_has_tla)},
+    {"js_module_get_has_tla", FPTR(js_module_get_has_tla)},
+    {"js_module_needs_async_settle", FPTR(js_module_needs_async_settle)},
+    {"js_module_register_async_parent", FPTR(js_module_register_async_parent)},
+    {"js_module_set_deferred_main_ptr", FPTR(js_module_set_deferred_main_ptr)},
+    {"js_module_pending_async_deps", FPTR(js_module_pending_async_deps)},
+    {"js_module_mark_post_await_pending", FPTR(js_module_mark_post_await_pending)},
+    {"js_module_get_body_state", FPTR(js_module_get_body_state)},
+    {"js_module_set_body_state", FPTR(js_module_set_body_state)},
+    {"js_module_assign_async_eval_order", FPTR(js_module_assign_async_eval_order)},
+    {"js_module_reset_aeo_counter", FPTR(js_module_reset_aeo_counter)},
+    {"js_module_complete_tla_body", FPTR(js_module_complete_tla_body)},
+    {"js_module_save_context", FPTR(js_module_save_context)},
+    {"js_module_get_saved_module_vars", FPTR(js_module_get_saved_module_vars)},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support
