@@ -4016,6 +4016,19 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // creating a CSS_PROPERTY_FONT_FAMILY declaration)
             // Apply for any parent with computed font->family (handles font shorthand case)
             if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->font->family) {
+                if (dom_elem->tag() == HTM_TAG_TEXTAREA) {
+                    CssDeclaration* own_font_family = style_tree_get_declaration(
+                        style_tree, CSS_PROPERTY_FONT_FAMILY);
+                    CssDeclaration* own_font = style_tree_get_declaration(
+                        style_tree, CSS_PROPERTY_FONT);
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    bool has_ua_textarea_family = span && span->font && span->font->family &&
+                        str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
+                    if (!own_font_family && !own_font && has_ua_textarea_family) {
+                        log_debug("[FONT INHERIT] Textarea keeps UA monospace font-family");
+                        continue;
+                    }
+                }
                 log_debug("[FONT INHERIT] Found computed font-family in parent <%s>: %s",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->family);
                 ViewSpan* span = lam::view_require_element(lycon->view);
