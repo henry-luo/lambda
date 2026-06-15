@@ -2301,6 +2301,67 @@ static bool inline_span_has_multiple_child_y(ViewSpan* span) {
     return false;
 }
 
+static bool block_recompute_view_is_out_of_flow(ViewBlock* block) {
+    return block && block->position &&
+        (block->position->position == CSS_VALUE_ABSOLUTE ||
+         block->position->position == CSS_VALUE_FIXED ||
+         block->position->float_prop == CSS_VALUE_LEFT ||
+         block->position->float_prop == CSS_VALUE_RIGHT);
+}
+
+static bool inline_span_has_in_flow_block_child_for_recompute(ViewSpan* span) {
+    if (!span) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            bool is_inline_level_table = child->view_type == RDT_VIEW_TABLE &&
+                (block->display.outer == CSS_VALUE_INLINE ||
+                 block->display.outer == CSS_VALUE_INLINE_BLOCK);
+            if (!block_recompute_view_is_out_of_flow(block) &&
+                child->view_type != RDT_VIEW_INLINE_BLOCK &&
+                !is_inline_level_table) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool block_recompute_view_is_inline_level_atomic(View* child, ViewBlock* block) {
+    if (!child || !block) return false;
+    if (child->view_type == RDT_VIEW_INLINE_BLOCK) return true;
+    return child->view_type == RDT_VIEW_TABLE &&
+        (block->display.outer == CSS_VALUE_INLINE ||
+         block->display.outer == CSS_VALUE_INLINE_BLOCK);
+}
+
+static bool inline_span_has_inline_level_atomic_child_for_recompute(ViewSpan* span) {
+    if (!span) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        ViewBlock* block = lam::view_as_block(child);
+        if (!block || block_recompute_view_is_out_of_flow(block)) continue;
+        if (block_recompute_view_is_inline_level_atomic(child, block)) return true;
+    }
+    return false;
+}
+
+static bool inline_span_has_recomputable_child_box(ViewSpan* span) {
+    if (!span) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE) continue;
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            if (block_recompute_view_is_out_of_flow(block)) continue;
+            if (block_recompute_view_is_inline_level_atomic(child, block)) continue;
+            return true;
+        }
+        if (child->view_type == RDT_VIEW_TEXT) {
+            if (child->width > 0.0f || child->height > 0.0f) return true;
+            continue;
+        }
+        if (child->width > 0.0f || child->height > 0.0f) return true;
+    }
+    return false;
+}
+
 static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_fh) {
     if (!view || !view->is_element()) return;
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(view);
@@ -2309,6 +2370,9 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
     }
     if (view->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (!inline_span_has_recomputable_child_box(span)) return;
+        if (inline_span_has_inline_level_atomic_child_for_recompute(span)) return;
+        if (inline_span_has_in_flow_block_child_for_recompute(span)) return;
         compute_span_bounding_box(span, inline_span_has_multiple_child_y(span), fallback_fh);
     }
 }
@@ -4667,6 +4731,32 @@ static void shift_current_line_content_before_float(ViewBlock* float_block, floa
     }
 }
 
+static float line_trimmable_end_space_width(Linebox* line) {
+    if (!line) return 0.0f;
+
+    float trimmable_width = 0.0f;
+    if (line->trailing_space_width > 0.0f) {
+        trimmable_width = line->trailing_space_width;
+    } else if (line->committed_trailing_space > 0.0f) {
+        trimmable_width = line->committed_trailing_space;
+    }
+    if (line->hanging_space_width > 0.0f) {
+        trimmable_width += line->hanging_space_width;
+    }
+    return trimmable_width;
+}
+
+static float current_line_used_width_for_float(Linebox* line, float line_left) {
+    if (!line) return 0.0f;
+
+    // CSS 2.1 §16.6.1 and CSS Text §4.1.3: trailing collapsible or
+    // hanging spaces do not consume line-box width. line_break() trims
+    // these fields later; same-line float placement must make the same
+    // fit decision before the line is finalized.
+    float used_width = line->advance_x - line_left - line_trimmable_end_space_width(line);
+    return max(used_width, 0.0f);
+}
+
 static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Linebox* pa_line,
                                                       BlockContext* bfc, ViewBlock* float_block) {
     if (!pa_block || !pa_line || !bfc || !float_block) return;
@@ -4681,8 +4771,19 @@ static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Li
     if (float_side == CSS_VALUE_LEFT && !space.has_left_float) return;
     if (float_side == CSS_VALUE_RIGHT && !space.has_right_float) return;
 
-    float new_effective_left = max(space.left - pa_block->bfc_offset_x, pa_line->left);
-    float new_effective_right = min(space.right - pa_block->bfc_offset_x, pa_line->right);
+    // block_context_space_at_y() reports float intrusions in BFC content
+    // coordinates. Its unconstrained edge is the BFC content-width edge, while
+    // line boxes here are local border-box coordinates (line.left already
+    // includes border + padding). Only convert the side that is actually
+    // constrained by a float; keep the unconstrained side at the line edge.
+    float local_left = space.has_left_float
+        ? space.left - pa_block->bfc_offset_x
+        : pa_line->left;
+    float local_right = space.has_right_float
+        ? space.right - pa_block->bfc_offset_x
+        : pa_line->right;
+    float new_effective_left = max(local_left, pa_line->left);
+    float new_effective_right = min(local_right, pa_line->right);
     if (float_side == CSS_VALUE_RIGHT) {
         if (new_effective_right >= pa_line->effective_right - 0.01f) return;
         pa_line->effective_left = new_effective_left;
@@ -4696,7 +4797,7 @@ static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Li
     if (new_effective_left <= pa_line->effective_left + 0.01f) return;
 
     float old_effective_left = pa_line->has_float_intrusion ? pa_line->effective_left : pa_line->left;
-    float current_line_width = max(pa_line->advance_x - old_effective_left, 0.0f);
+    float current_line_width = current_line_used_width_for_float(pa_line, old_effective_left);
     float available_width = max(new_effective_right - new_effective_left, 0.0f);
     if (current_line_width > available_width + 0.5f) {
         log_debug("%s same-line float: current line content %.1f does not fit in %.1f, leaving line unchanged",
@@ -4714,6 +4815,31 @@ static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Li
     pa_line->has_float_intrusion = true;
     log_debug("%s same-line float: shifted current line by %.1f to effective_left %.1f",
         float_block->source_loc(), offset, new_effective_left);
+}
+
+static bool same_line_float_needs_next_line(BlockContext* pa_block, Linebox* pa_line,
+                                            ViewBlock* float_block) {
+    if (!pa_block || !pa_line || !float_block || !float_block->position) return false;
+    if (pa_line->is_line_start || !pa_line->start_view) return false;
+
+    CssEnum float_side = float_block->position->float_prop;
+    if (float_side != CSS_VALUE_LEFT && float_side != CSS_VALUE_RIGHT) return false;
+
+    float margin_left = float_block->bound ? float_block->bound->margin.left : 0.0f;
+    float margin_right = float_block->bound ? float_block->bound->margin.right : 0.0f;
+    float float_outer_width = float_block->width + margin_left + margin_right;
+
+    float line_left = pa_line->has_float_intrusion ? pa_line->effective_left : pa_line->left;
+    float line_right = pa_line->has_float_intrusion ? pa_line->effective_right : pa_line->right;
+    float current_line_used = current_line_used_width_for_float(pa_line, line_left);
+    float available_width = max(line_right - line_left, 0.0f);
+
+    bool needs_next_line = current_line_used + float_outer_width > available_width + 0.5f;
+    if (needs_next_line) {
+        log_debug("%s same-line float measured too wide: used=%.1f, float_w=%.1f, avail=%.1f",
+                  float_block->source_loc(), current_line_used, float_outer_width, available_width);
+    }
+    return needs_next_line;
 }
 
 static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
@@ -4761,52 +4887,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
-    bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
-
-    // CSS 2.1 §9.5.1: When a float appears after inline content on the current line,
-    // check if there is enough horizontal room. Per §9.5: "If there is not enough
-    // horizontal room on the current line for the float, it is shifted downward,
-    // line by line, until a line has room for the float."
-    // If the float fits alongside existing inline content, place at current line top
-    // (§9.5.1 Rule 4). If not, shift to the next line.
-    if (is_float && !pa_line->is_line_start) {
-        // Estimate float's outer width from resolved CSS properties
-        float float_outer_width = 0;
-        bool has_known_width = (block->blk && block->blk->given_width >= 0);
-        if (has_known_width) {
-            float_outer_width = block->blk->given_width;
-            if (block->bound) {
-                float_outer_width += block->bound->margin.left + block->bound->margin.right;
-                float_outer_width += block->bound->padding.left + block->bound->padding.right;
-                if (block->bound->border) {
-                    float_outer_width += block->bound->border->width.left + block->bound->border->width.right;
-                }
-            }
-        }
-        float current_line_used = pa_line->advance_x - pa_line->left;
-        float available_width = pa_block->content_width;
-
-        // Determine if float fits on the current line:
-        // - Known width: check if content + float > container width
-        // - Auto width: float will shrink-to-fit; if current line has content
-        //   that already exceeds half the container, shift down conservatively
-        bool needs_shift = false;
-        if (has_known_width) {
-            needs_shift = (current_line_used + float_outer_width > available_width);
-        } else {
-            // Auto-width float: can't know width before layout. If the current
-            // line already has substantial content, shift to next line.
-            needs_shift = (current_line_used > 0 && available_width > 0);
-        }
-
-        if (needs_shift) {
-            float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
-            block->y = pa_block->advance_y + line_height;
-            log_debug("%s Float shifted to next line: used=%.1f, float_w=%.1f, avail=%.1f, y=%.1f",
-                      block->source_loc(), current_line_used, float_outer_width, available_width, block->y);
-        }
-        // else: float fits alongside current line content — keep at advance_y
-    }
+    bool is_float = block->position &&
+        (block->position->float_prop == CSS_VALUE_LEFT ||
+         block->position->float_prop == CSS_VALUE_RIGHT);
 
     log_debug("%s block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d", block->source_loc(),
         block->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
@@ -6715,6 +6798,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // IMPORTANT: Floats must be added to the BFC root, not just the immediate parent
     if (block->position && element_has_float(block)) {
         log_debug("%s Element has float property, applying float layout", block->source_loc());
+
+        // CSS 2.1 §9.5.1: A float encountered on a non-empty line can stay on
+        // that line only if the measured margin box leaves enough room for the
+        // existing line content. Auto-width floats must be checked here after
+        // shrink-to-fit has produced the used width.
+        if (same_line_float_needs_next_line(pa_block, pa_line, block)) {
+            float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
+            float margin_top = block->bound ? block->bound->margin.top : 0.0f;
+            block->y = pa_block->advance_y + line_height + margin_top;
+            log_debug("%s same-line float shifted to next line at y=%.1f",
+                      block->source_loc(), block->y);
+        }
 
         // Position the float using the parent's BlockContext
         // layout_float_element uses block_context_find_bfc which walks up parent chain
