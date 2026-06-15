@@ -180,6 +180,85 @@ static const char* select_intrinsic_font_family(LayoutContext* lycon, const CssV
     return fallback;
 }
 
+static const char* intrinsic_join_font_family_values(LayoutContext* lycon, const CssValue* list,
+                                                     size_t start, size_t end) {
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
+        !list || list->type != CSS_VALUE_TYPE_LIST || start >= end) {
+        return NULL;
+    }
+    size_t list_count = (size_t)list->data.list.count;
+    if (end > list_count) end = list_count;
+    if (start >= end) return NULL;
+
+    if (end == start + 1) {
+        return css_font_family_name_from_value(list->data.list.values[start]);
+    }
+
+    size_t total_len = 0;
+    size_t part_count = 0;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
+        if (!part || !*part) continue;
+        total_len += strlen(part);
+        part_count++;
+    }
+    if (part_count == 0) return NULL;
+    total_len += part_count - 1;
+
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    if (!combined) return NULL;
+    combined[0] = '\0';
+
+    size_t pos = 0;
+    bool first = true;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
+        if (!part || !*part) continue;
+        if (!first) {
+            pos = str_cat(combined, pos, total_len + 1, " ", 1);
+        }
+        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
+        first = false;
+    }
+    return combined;
+}
+
+static const char* select_intrinsic_font_shorthand_family(LayoutContext* lycon,
+                                                          const CssValue* shorthand_value,
+                                                          const CssValue* main_group,
+                                                          size_t family_start_index) {
+    const char* selected = NULL;
+    const char* fallback = NULL;
+
+    if (main_group && main_group->type == CSS_VALUE_TYPE_LIST) {
+        selected = intrinsic_join_font_family_values(
+            lycon, main_group, family_start_index, main_group->data.list.count);
+        fallback = selected;
+        if (selected) return selected;
+    }
+
+    if (shorthand_value && shorthand_value->type == CSS_VALUE_TYPE_LIST &&
+        shorthand_value->data.list.count >= 2 &&
+        shorthand_value->data.list.values[0] &&
+        shorthand_value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+        size_t shorthand_count = (size_t)shorthand_value->data.list.count;
+        for (size_t i = 1; i < shorthand_count; i++) {
+            const CssValue* item = shorthand_value->data.list.values[i];
+            const char* family = NULL;
+            if (item && item->type == CSS_VALUE_TYPE_LIST) {
+                family = intrinsic_join_font_family_values(lycon, item, 0, item->data.list.count);
+            } else {
+                family = css_font_family_name_from_value(item);
+            }
+            if (!family) continue;
+            fallback = family;
+            if (css_font_family_available_for_intrinsic(lycon, family)) return family;
+        }
+    }
+
+    return fallback;
+}
+
 static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
                                                       FontProp* parent_font) {
     if (!font || !font->family || font->font_size <= 0.0f ||
@@ -1780,9 +1859,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             } else if (fv->type == CSS_VALUE_TYPE_LIST && fv->data.list.count >= 2) {
                 // Full shorthand: [style] [variant] [weight] size[/line-height] family
-                size_t count = fv->data.list.count;
+                const CssValue* font_group = fv;
+                if (fv->data.list.values[0] &&
+                    fv->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+                    font_group = fv->data.list.values[0];
+                }
+                size_t count = font_group->data.list.count;
                 for (size_t fi = 0; fi < count; fi++) {
-                    const CssValue* v = fv->data.list.values[fi];
+                    const CssValue* v = font_group->data.list.values[fi];
                     if (!v) continue;
                     if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
                         // font-size found
@@ -1796,7 +1880,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         // skip /line-height, then extract font-family
                         size_t fam_idx = fi + 1;
                         if (fam_idx < count) {
-                            const CssValue* next = fv->data.list.values[fam_idx];
+                            const CssValue* next = font_group->data.list.values[fam_idx];
                             if (next && next->type == CSS_VALUE_TYPE_CUSTOM &&
                                 next->data.custom_property.name &&
                                 strcmp(next->data.custom_property.name, "/") == 0) {
@@ -1804,20 +1888,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             }
                         }
                         if (fam_idx < count) {
-                            const CssValue* fam = fv->data.list.values[fam_idx];
-                            if (fam) {
-                                if (fam->type == CSS_VALUE_TYPE_STRING) css_family = fam->data.string;
-                                else if (fam->type == CSS_VALUE_TYPE_KEYWORD) {
-                                    CssEnum kw = fam->data.keyword;
-                                    if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
-                                    else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
-                                    else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
-                                    else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
-                                    else { const CssEnumInfo* ki = css_enum_info(kw); if (ki) css_family = ki->name; }
-                                } else if (fam->type == CSS_VALUE_TYPE_CUSTOM && fam->data.custom_property.name) {
-                                    css_family = fam->data.custom_property.name;
-                                }
-                            }
+                            css_family = select_intrinsic_font_shorthand_family(
+                                lycon, fv, font_group, fam_idx);
                         }
                         need_font_setup = true;
                         break;
@@ -1841,20 +1913,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 // everything after is font-family
                                 size_t fam_idx = fi + 1;
                                 if (fam_idx < count) {
-                                    const CssValue* fam = fv->data.list.values[fam_idx];
-                                    if (fam) {
-                                        if (fam->type == CSS_VALUE_TYPE_STRING) css_family = fam->data.string;
-                                        else if (fam->type == CSS_VALUE_TYPE_KEYWORD) {
-                                            CssEnum kw = fam->data.keyword;
-                                            if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
-                                            else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
-                                            else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
-                                            else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
-                                            else { const CssEnumInfo* ki = css_enum_info(kw); if (ki) css_family = ki->name; }
-                                        } else if (fam->type == CSS_VALUE_TYPE_CUSTOM && fam->data.custom_property.name) {
-                                            css_family = fam->data.custom_property.name;
-                                        }
-                                    }
+                                    css_family = select_intrinsic_font_shorthand_family(
+                                        lycon, fv, font_group, fam_idx);
                                 }
                                 need_font_setup = true;
                                 break;

@@ -28,7 +28,22 @@ static bool should_use_ct_advance_override(FontHandle* handle) {
     // CoreText catalog lookup can resolve to a fallback/non-exact face, so keep
     // the raster/table advance from the loaded font file for layout.
     if (handle->is_document_font) return false;
-    return true;
+    if (!handle->ct_raster_ref) return true;
+
+    // system UI fonts rely on CoreText's catalog font so variable optical-size
+    // selection matches browser layout.
+    if (handle->family_name && strcmp(handle->family_name, "System Font") == 0) {
+        return true;
+    }
+
+    // for an exact loaded face at the requested style, the raw-data CoreText
+    // face has the correct advances. Use the catalog face only when CSS asks
+    // for a different weight/style and CoreText is needed to match that face.
+    int actual_weight = handle->actual_font_weight;
+    if (actual_weight > 0 && actual_weight != (int)handle->weight) return true;
+    if (handle->slant == FONT_SLANT_ITALIC || handle->slant == FONT_SLANT_OBLIQUE) return true;
+
+    return false;
 }
 #endif
 

@@ -379,21 +379,33 @@ runner and status-doc pattern are copied from
 
 ### 11.1 Tier A — Conformance baseline (must be 100% on the curated subset)
 
-Wired into `make test-radiant-baseline`. Lives in a new
-`test/wpt/test_wpt_contenteditable_gtest.cpp`, modelled on
+Built as an `extended` test (`test_wpt_contenteditable_gtest.exe`, registered
+in `build_lambda_config.json`). **Not yet wired into
+`make test-radiant-baseline`** — 14 real failures remain (see baseline below).
+Lives in `test/wpt/test_wpt_contenteditable_gtest.cpp`, modelled on
 `test/wpt/test_wpt_selection_gtest.cpp` and driven through the existing
-`test/wpt/wpt_testharness_shim.js` (extended with the editing helpers).
+`test/wpt/wpt_testharness_shim.js`. It shares the selection runner's parallel
+custom `main()`; reftests / `*-manual` / testdriver tests auto-skip, and crash
+tests pass by surviving the `--document` load.
 
-**Concrete scope — this runner pulls in exactly four WPT directories.**
-Everything else that merely mentions `contenteditable` is excluded for the
-reasons in §11.6.
+**Concrete scope — this runner pulls in exactly four WPT directories** (every
+`*.html`, except `html/interaction/focus/` which is filtered to its
+contenteditable subset — the dir otherwise holds ~170 generic focus tests).
+Everything else that mentions `contenteditable` is excluded per §11.6.
 
-| WPT dir | Files (testharness / total) | What it pins | This doc § |
+| WPT dir | Cases | What it pins / status | This doc § |
 |---|---|---|---|
-| `ref/wpt/input-events/` | 15 / 15 | The whole §6 `InputEvent` surface — `beforeinput`/`input`, `getTargetRanges`, typing, cut/paste, delete-selection. Skips the one `input-events-exec-command.html` (rejected API, §9). | §6 |
-| `ref/wpt/editing/crashtests/` | 0 / 77 | Engine robustness: each passes purely by completing without crashing the runtime (no assertions — same crash-test convention as `selection/crashtests/`). | §4–§6 |
-| `ref/wpt/html/interaction/focus/` | 6 / 7 | Implicit focusability of editing hosts, `activeElement`, focus/blur. | §5 |
-| `ref/wpt/html/editing/editing-0/` | 6 / 17 | `contentEditable`/`isContentEditable`/`designMode` IDL + editing-host basics. **Note:** the other 11 are reftests (spelling-markers, overflow-height, autocapitalization) that auto-skip in the JS harness and belong to the layout-compare path. | §4 |
+| `ref/wpt/input-events/` | 25 | The §6 `InputEvent` surface. **Blocked headless today:** 23/25 drive synthetic typing via `test_driver`, which the `js` runtime does not deliver, so they auto-skip (Phase 8F); `input-events-exec-command` is skipped (rejected API, §9). Genuine conformance begins once synthetic input lands (CE-3). | §6 |
+| `ref/wpt/editing/crashtests/` | 137 | Engine robustness — pass iff the runtime survives the `--document` load (no crash *signal*; a clean error exit, e.g. an uncaught exception on an unimplemented API, still counts as survived). | §4–§6 |
+| `ref/wpt/html/interaction/focus/` | 7 | Focusability / `activeElement` / tabindex of editing hosts (contenteditable subset of the dir). | §5 |
+| `ref/wpt/html/editing/editing-0/` | 25 | `contentEditable` / `isContentEditable` / `designMode` / `spellcheck` / `autocapitalize` IDL + editing-host basics; ~15 are reftests that auto-skip (layout-compare path). | §4 |
+
+**Initial baseline (2026-06, debug build): 194 cases → 139 pass, 41 skip, 14
+fail.** The failures are real CE-1/CE-2 conformance gaps — IDL reflection for
+`contentEditable` / `designMode` / `spellcheck` / `autocapitalize` /
+`writingsuggestions`, and the focus-fixup / tabindex / autofocus model — plus
+**one genuine engine crash** (`editing/crashtests/insertparagraph-in-listitem-in-svg-followed-by-collapsible-spaces`
+→ SIGABRT). Tracked in the status doc (§11.5).
 
 The **selection-side** editing-host Tier-A tests
 (`selection/contenteditable/`, `selection/textcontrols/`) already run under
@@ -494,11 +506,14 @@ not editing-host conformance.**
 | `inert/` `virtual-keyboard/` `custom-elements/` `shadow-dom/` `mathml/` `dom/` | ~15 | Inertness, on-screen keyboard, components, shadow trees — `contenteditable` is incidental |
 | `contenteditable/` (top-level) | 4 | Ad-hoc grab-bag — see the §11.4 row |
 
-Even within the four included dirs, two are mostly non-testharness:
-`editing/crashtests/` is crash-only (0 assertions) and 11 of the 17
-`html/editing/editing-0/` files are reftests. Those auto-skip in the JS
-harness (no `<script>` / no `WPT_RESULT`), so the runner's effective
-assertion coverage there is the testharness subset noted in §11.1.
+Even within the four included dirs, much is non-assertion-bearing and
+auto-skips: `editing/crashtests/` is crash-only (0 assertions, pass by
+surviving); ~15 of the 25 `html/editing/editing-0/` files are reftests; and
+23/25 `input-events/` tests need `test_driver` synthetic input the headless
+`js` runtime does not provide (Phase 8F). So the runner's effective
+assertion-bearing coverage today is the small testharness subset of focus +
+editing-0, plus the 137-case crash-survival net — the InputEvent surface
+stays dark until synthetic input lands.
 
 ---
 
