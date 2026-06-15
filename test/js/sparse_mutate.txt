@@ -1,0 +1,10 @@
+fill-a1[0] 99
+fill-a1[3] 99
+fill-a1[100] x
+reverse-a2[0] 3
+reverse-a2[2] 1
+sort-a3[0] 10
+sort-a3[2] 30
+copy-a4[0] 4
+copy-a4[1] 5
+copy-a4[4] 5

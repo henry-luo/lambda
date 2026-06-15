@@ -5768,7 +5768,11 @@ extern "C" Item js_in(Item key, Item object) {
             }
         }
         Array* arr = object.array;
-        if (idx >= 0 && idx < arr->length) {
+        // Js58 P0: bound-check `idx < arr->capacity` too — for sparse arrays
+        // `arr->length` is the spec length (e.g. 20001) but `arr->capacity` is
+        // the dense-buffer size (e.g. 3). Reading `arr->items[idx]` with
+        // `idx >= capacity` is an out-of-bounds heap read.
+        if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype
             if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
                 return (Item){.item = b2it(true)};
@@ -8876,7 +8880,13 @@ extern "C" Item js_object_keys(Item object) {
         int len = object.array->length;
         Item result = js_array_new(0);
         Map* pm = js_array_props_map(object.array);
-        for (int i = 0; i < len; i++) {
+        // Js58 P0: dense iteration bound — for sparse arrays `len` is the
+        // spec length but `arr->capacity` is the dense buffer size. Limit
+        // to capacity to avoid OOB; sparse entries get picked up by the
+        // companion-Map walk below.
+        int dense_lim = len;
+        if ((int)object.array->capacity < dense_lim) dense_lim = (int)object.array->capacity;
+        for (int i = 0; i < dense_lim; i++) {
             // v25: skip deleted elements (holes)... unless an accessor descriptor
             // is registered for this index in the companion map (Object.defineProperty
             // on an array index installs the data slot as a hole and stores get/set in pm).

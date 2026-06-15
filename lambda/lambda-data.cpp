@@ -419,8 +419,18 @@ const char* fn_to_cstr(Item itm) {
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {
-    int64_t prev_capacity = list->capacity;   // for reverting if growth fails
-    list->capacity = list->capacity ? list->capacity * 2 : 8;
+    // P8 fix: do NOT bump list->capacity until the new buffer has been allocated
+    // and populated. If heap_data_alloc triggers GC, gc_compact_data reads
+    // (capacity, items) as a pair to memcpy `capacity * sizeof(Item)` bytes out
+    // of the items buffer into the tenured zone. Bumping capacity first while
+    // items still points at the old (half-sized) buffer makes the compactor
+    // read `new_capacity * 8` bytes from a `(new_capacity/2) * 8`-byte buffer,
+    // copying garbage past the buffer end into tenured. That garbage then
+    // surfaces as "non-hole" slots in iteration paths (Array.every/some on
+    // sparse arrays trip on this — items[6..N] read as zeros instead of the
+    // hole sentinel that was written there).
+    int64_t prev_capacity = list->capacity;
+    int64_t new_capacity = list->capacity ? list->capacity * 2 : 8;
 
     // Determine which allocator to use
     Item* old_items = list->items;
@@ -441,36 +451,41 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // tree (siblings of a retransformed subtree).  Freeing it allows the
         // arena to recycle that memory for new DomElement allocations, which
         // overwrites the items data and causes use-after-free crashes.
-        Item* new_items = (Item*)arena_alloc(arena, list->capacity * sizeof(Item));
+        Item* new_items = (Item*)arena_alloc(arena, new_capacity * sizeof(Item));
         if (new_items && old_items) {
-            memcpy(new_items, old_items, (list->capacity/2) * sizeof(Item));
+            memcpy(new_items, old_items, prev_capacity * sizeof(Item));
         }
         list->items = new_items;
+        list->capacity = new_capacity;
     } else {
         // Use data zone allocation for GC-managed runtime containers.
         // Allocate new buffer; old buffer is abandoned in the data zone
         // and will be reclaimed on next GC compaction/reset.
-        size_t old_size = (list->capacity/2) * sizeof(Item);
+        size_t old_size = prev_capacity * sizeof(Item);
         size_t new_size;
-        if (!lam::checked_mul((size_t)list->capacity, sizeof(Item), &new_size)) {
-            list->capacity = prev_capacity;   // revert doubling; growth not possible
-            return;
+        if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) {
+            return;   // overflow: growth not possible, leave capacity untouched
         }
         Item* new_items = (Item*)heap_data_alloc(new_size);
         if (!new_items) {
-            // OOM: do not memcpy into / publish a NULL buffer. Revert the capacity so
-            // the list stays consistent with its existing (still-valid) items buffer.
-            list->capacity = prev_capacity;
+            // OOM: leave capacity untouched (old buffer still valid).
             return;
         }
         // Re-read old_items after allocation: GC may have fired during
         // heap_data_alloc, compacting list->items from nursery to tenured.
-        // The local old_items would then point to freed nursery memory.
+        // The local old_items would then point to freed nursery memory. The
+        // compactor only ever sees the OLD (consistent) capacity here because
+        // we haven't bumped list->capacity yet.
         old_items = list->items;
         if (old_items && old_size > 0) {
             memcpy(new_items, old_items, old_size);
         }
+        // Publish both the new buffer pointer and the new capacity atomically
+        // from the compactor's perspective: it sees old/old or new/new but
+        // never the new_capacity/old_items combination that overruns the
+        // source buffer.
         list->items = new_items;
+        list->capacity = new_capacity;
     }
 
     // copy extra items to the end of the list

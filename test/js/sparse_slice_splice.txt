@@ -1,0 +1,10 @@
+slice-100-length 100
+slice-100[0] 10
+slice-100[2] 30
+slice-100[50] null
+slice-all-length 20001
+slice-all[0] 10
+slice-all[20000] null
+splice-removed-length 2
+splice-arr2-length 19999
+splice-arr2[0] 3

@@ -1,0 +1,11 @@
+before-length 20001
+before-arr[20000] z
+after-length 100
+after-arr[20000] undefined
+after-arr[2] 3
+after-keys-length 3
+ext-length 50000
+ext-arr[20000] undefined
+zero-length 0
+zero-arr2[0] undefined
+zero-keys-length 0
