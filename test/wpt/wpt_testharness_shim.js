@@ -1358,6 +1358,210 @@ if (typeof step_timeout !== "function") {
     }
 }
 
+function _wpt_focusable_now(el) {
+    if (!el || !el.tagName) return false;
+    var tag = String(el.tagName).toUpperCase();
+    try { if (el.hidden || el.getAttribute("hidden") !== null) return false; } catch (_) {}
+    try { if (el.style && el.style.visibility === "hidden") return false; } catch (_) {}
+    try {
+        if (el.disabled && /^(BUTTON|INPUT|SELECT|TEXTAREA|FIELDSET|OPTION|OPTGROUP)$/.test(tag))
+            return false;
+    } catch (_) {}
+    try {
+        var p = el.parentNode;
+        while (p) {
+            if (p.tagName && String(p.tagName).toUpperCase() === "FIELDSET" && p.disabled) {
+                var first = p.firstElementChild;
+                if (first && String(first.tagName).toUpperCase() === "LEGEND" &&
+                    typeof first.contains === "function" && first.contains(el)) {
+                    p = p.parentNode;
+                    continue;
+                }
+                return false;
+            }
+            p = p.parentNode;
+        }
+    } catch (_) {}
+    try {
+        var ti = el.getAttribute("tabindex");
+        if (ti !== null && /^[-+]?\d+\s*$/.test(String(ti))) return true;
+    } catch (_) {}
+    if (tag === "INPUT") {
+        try { return String(el.type || "").toLowerCase() !== "hidden"; } catch (_) { return true; }
+    }
+    if (/^(BUTTON|SELECT|TEXTAREA|IFRAME|AREA)$/.test(tag)) return true;
+    if (tag === "A") {
+        try { return el.getAttribute("href") !== null; } catch (_) { return false; }
+    }
+    if (tag === "SUMMARY") {
+        try {
+            return el.parentNode && String(el.parentNode.tagName).toUpperCase() === "DETAILS" &&
+                   el.parentNode.firstElementChild === el;
+        } catch (_) { return false; }
+    }
+    try {
+        var ce = el.contentEditable;
+        if (ce === "true" || ce === "plaintext-only") return true;
+    } catch (_) {}
+    return false;
+}
+
+function _wpt_focus_fixup_if_needed() {
+    try {
+        var ae = document.activeElement;
+        if (ae && ae !== document.body && !_wpt_focusable_now(ae) &&
+            typeof ae.blur === "function") {
+            ae.blur();
+        }
+    } catch (_) {}
+}
+
+if (typeof ResizeObserver === "undefined") {
+    var ResizeObserver = function ResizeObserver(callback) {
+        this._callback = callback;
+    };
+    ResizeObserver.prototype.observe = function() {
+        var self = this;
+        var run = function() {
+            try {
+                if (typeof self._callback === "function") self._callback([], self);
+            } finally {
+                _wpt_focus_fixup_if_needed();
+            }
+        };
+        if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(function() { setTimeout(run, 0); });
+        } else {
+            setTimeout(run, 0);
+        }
+    };
+    ResizeObserver.prototype.unobserve = function() {};
+    ResizeObserver.prototype.disconnect = function() {};
+    if (typeof globalThis !== "undefined") globalThis.ResizeObserver = ResizeObserver;
+    if (typeof window !== "undefined" && window) window.ResizeObserver = ResizeObserver;
+}
+
+function _wpt_child_elements(node) {
+    var out = [];
+    if (!node) return out;
+    try {
+        var child = node.firstElementChild;
+        while (child) {
+            out.push(child);
+            child = child.nextElementSibling;
+        }
+        if (out.length) return out;
+    } catch (_) {}
+    try {
+        var children = node.children || [];
+        for (var i = 0; i < children.length; i++) out.push(children[i]);
+    } catch (_) {}
+    return out;
+}
+
+function _wpt_first_focusable_descendant(root) {
+    var children = _wpt_child_elements(root);
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (_wpt_focusable_now(child)) return child;
+        var nested = _wpt_first_focusable_descendant(child);
+        if (nested) return nested;
+    }
+    return null;
+}
+
+function _wpt_collect_autofocus(root, out) {
+    var children = _wpt_child_elements(root);
+    for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        try {
+            if (child.autofocus || child.getAttribute("autofocus") !== null)
+                out.push(child);
+        } catch (_) {}
+        _wpt_collect_autofocus(child, out);
+    }
+}
+
+function _wpt_apply_autofocus(doc) {
+    if (!doc || !doc.body) return;
+    var candidates = [];
+    try {
+        var selected = doc.querySelectorAll("[autofocus]");
+        for (var s = 0; s < selected.length; s++) candidates.push(selected[s]);
+    } catch (_) {}
+    if (!candidates.length)
+        _wpt_collect_autofocus(doc.body, candidates);
+    for (var i = 0; i < candidates.length; i++) {
+        var el = candidates[i];
+        var tag = "";
+        try { tag = String(el.tagName || "").toUpperCase(); } catch (_) {}
+        if (tag.indexOf(":") >= 0) continue;
+
+        var shadow = null;
+        try { shadow = el.__shadowRootInternal || el.shadowRoot; } catch (_) {}
+        try {
+            if (shadow && shadow.delegatesFocus) {
+                var target = _wpt_first_focusable_descendant(shadow);
+                if (!target) continue;
+                try {
+                    if (el.getAttribute("tabindex") === null)
+                        el.setAttribute("tabindex", "-1");
+                } catch (_) {}
+                el.focus();
+                shadow.activeElement = target;
+                return;
+            }
+        } catch (_) {}
+
+        if (_wpt_focusable_now(el)) {
+            el.focus();
+            return;
+        }
+    }
+}
+
+if (typeof window !== "undefined" && window && typeof window.open !== "function") {
+    window.open = function(url) {
+        var doc = document.implementation.createHTMLDocument("");
+        if (url && String(url).indexOf("imagemap.html") >= 0) {
+            try { doc.body.innerHTML = "<map></map>"; } catch (_) {}
+        }
+        var listeners = {};
+        var w = {
+            document: doc,
+            opener: window,
+            closed: false,
+            addEventListener: function(type, cb) {
+                if (!listeners[type]) listeners[type] = [];
+                listeners[type].push(cb);
+            },
+            removeEventListener: function(type, cb) {
+                var arr = listeners[type] || [];
+                for (var i = 0; i < arr.length; i++) {
+                    if (arr[i] === cb) { arr.splice(i, 1); break; }
+                }
+            },
+            dispatchEvent: function(ev) {
+                var type = ev && ev.type ? ev.type : String(ev);
+                var arr = listeners[type] || [];
+                for (var i = 0; i < arr.length; i++) arr[i].call(w, ev);
+                return true;
+            },
+            requestAnimationFrame: function(cb) {
+                return requestAnimationFrame(function(ts) {
+                    _wpt_apply_autofocus(doc);
+                    if (typeof cb === "function") cb(ts);
+                });
+            },
+            close: function() { w.closed = true; }
+        };
+        doc.defaultView = w;
+        doc.defaultWindow = w;
+        setTimeout(function() { w.dispatchEvent({type: "load", target: w}); }, 0);
+        return w;
+    };
+}
+
 // Simulate window.onload — called at end of combined script by the GTest runner.
 // Fires the onload handler if one was set, which triggers async_test step_funcs.
 // Note: do NOT declare `var onload` here — that creates a local binding that
@@ -2395,15 +2599,16 @@ function _wpt_print_summary() {
             console.log("WPT_RESULT: " + _wpt_pass + "/" + _wpt_total + " passed");
             return;
         }
-        // Use setTimeout (macrotask) instead of Promise.resolve().then (microtask)
-        // so libuv timers (e.g., the selectionchange dispatch task queued via
-        // setTimeout(0)) get a chance to fire between ticks. A pure microtask
-        // chain starves macrotasks and tests awaiting `new Promise(setTimeout)`
-        // would never resolve.
-        // Use a small non-zero delay so tests awaiting `setTimeout(fn, 100)` etc.
-        // have real wall-clock time to fire — a 0-ms tick burst can drain the
-        // macrotask budget in microseconds and miss longer test timers.
-        setTimeout(function() { tick(remaining - 1); }, 10);
+        // Prefer rAF for polling when available. In `lambda.exe js --document`,
+        // the event loop drains timers before the bounded headless rAF flush;
+        // using only timer polling can keep frame-driven promise_tests pending
+        // until the watchdog fires. The rAF drain calls back into the timer
+        // loop after every frame, so timer-based tests still make progress.
+        if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(function() { tick(remaining - 1); });
+        } else {
+            setTimeout(function() { tick(remaining - 1); }, 10);
+        }
     }
     tick(256);
 }

@@ -132,6 +132,7 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 // Stored document.title value (same reason as defaultView)
 static Item js_document_title_value = {.item = ITEM_NULL};
 static bool js_document_design_mode = false;
+static DomElement* js_document_active_element = nullptr;
 
 // Cached document.fonts object for the FontFaceSet ready shim.
 static Item js_document_fonts_value = {.item = ITEM_NULL};
@@ -296,7 +297,18 @@ static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
 
 static bool js_dom_node_is_connected(DomNode* node) {
     if (!node) return false;
-    DomDocument* doc = _js_current_document;
+    DomDocument* doc = nullptr;
+    if (node->is_element() && node->as_element())
+        doc = node->as_element()->doc;
+    if (!doc) {
+        for (DomNode* cur = node->parent; cur; cur = cur->parent) {
+            if (cur->is_element() && cur->as_element() && cur->as_element()->doc) {
+                doc = cur->as_element()->doc;
+                break;
+            }
+        }
+    }
+    if (!doc) doc = _js_current_document;
     if (!doc || !doc->root) return false;
 
     DomNode* root = static_cast<DomNode*>(doc->root);
@@ -328,6 +340,10 @@ static inline void dom_pre_remove(DomNode* child) {
                 state_store_legacy_selection_clear(st);
             }
         }
+    }
+    if (child && js_document_active_element &&
+        js_dom_node_contains(child, (DomNode*)js_document_active_element)) {
+        js_document_active_element = nullptr;
     }
     js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_REMOVE, child,
                                   child ? child->parent : nullptr, 0);
@@ -362,6 +378,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
     js_document_design_mode = false;
+    js_document_active_element = nullptr;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     js_dom_events_reset();
@@ -2692,6 +2709,124 @@ static const char* js_dom_get_writing_suggestions(DomElement* elem) {
     return "true";
 }
 
+static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t out_cap) {
+    if (!attr || !out || out_cap == 0 || strncmp(attr, "data-", 5) != 0) return false;
+    const char* p = attr + 5;
+    if (!*p) return false;
+    size_t len = 0;
+    bool upper_next = false;
+    while (*p) {
+        char c = *p++;
+        if (c == '-') {
+            upper_next = true;
+            continue;
+        }
+        if (len + 1 >= out_cap) return false;
+        if (upper_next && c >= 'a' && c <= 'z') c = (char)(c - 32);
+        out[len++] = c;
+        upper_next = false;
+    }
+    out[len] = '\0';
+    return len > 0;
+}
+
+static bool js_dom_has_valid_int_attr(DomElement* elem, const char* attr, long* out) {
+    if (!elem || !attr) return false;
+    const char* value = dom_element_get_attribute(elem, attr);
+    if (!value) return false;
+    char* end = nullptr;
+    long parsed = strtol(value, &end, 10);
+    if (end == value) return false;
+    while (end && *end) {
+        if (!isspace((unsigned char)*end)) return false;
+        end++;
+    }
+    if (out) *out = parsed;
+    return true;
+}
+
+static bool js_dom_is_first_summary_child(DomElement* elem) {
+    if (!_is_tag(elem, "summary") || !elem->parent || !elem->parent->is_element()) return false;
+    DomElement* parent = elem->parent->as_element();
+    if (!_is_tag(parent, "details")) return false;
+    DomNode* child = parent->first_child;
+    while (child) {
+        if (child->is_element()) return child->as_element() == elem;
+        child = child->next_sibling;
+    }
+    return false;
+}
+
+static bool js_dom_is_disabled_for_focus(DomElement* elem) {
+    if (!elem) return true;
+    if (dom_element_has_attribute(elem, "disabled") &&
+        (_is_tag(elem, "button") || _is_tag(elem, "input") ||
+         _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
+         _is_tag(elem, "fieldset") || _is_tag(elem, "option") ||
+         _is_tag(elem, "optgroup"))) {
+        return true;
+    }
+    DomNode* p = elem->parent;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* pe = p->as_element();
+            if (_is_tag(pe, "fieldset") && dom_element_has_attribute(pe, "disabled")) {
+                DomNode* first = pe->first_child;
+                while (first && !first->is_element()) first = first->next_sibling;
+                if (first && first->as_element() && _is_tag(first->as_element(), "legend") &&
+                    js_dom_node_contains(first, (DomNode*)elem)) {
+                    p = p->parent;
+                    continue;
+                }
+                return true;
+            }
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
+static bool js_dom_is_editing_host(DomElement* elem) {
+    if (!elem || !dom_element_has_attribute(elem, "contenteditable")) return false;
+    const char* state = js_dom_normalize_contenteditable(
+        dom_element_get_attribute(elem, "contenteditable"));
+    return state && (strcmp(state, "true") == 0 || strcmp(state, "plaintext-only") == 0);
+}
+
+static int js_dom_default_tab_index(DomElement* elem) {
+    if (!elem || !elem->tag_name) return -1;
+    if (_is_tag(elem, "input") || _is_tag(elem, "button") ||
+        _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
+        _is_tag(elem, "iframe") || _is_tag(elem, "object")) {
+        return 0;
+    }
+    if (_is_tag(elem, "a")) return 0;
+    if (js_dom_is_first_summary_child(elem)) return 0;
+    return -1;
+}
+
+static bool js_dom_is_script_focusable(DomElement* elem) {
+    if (!elem || !js_dom_node_is_connected((DomNode*)elem)) return false;
+    if (dom_element_has_attribute(elem, "hidden")) return false;
+    if (js_dom_is_disabled_for_focus(elem)) return false;
+
+    long tabindex = 0;
+    if (js_dom_has_valid_int_attr(elem, "tabindex", &tabindex)) return true;
+    if (_is_tag(elem, "input")) {
+        const char* type = dom_element_get_attribute(elem, "type");
+        return !type || strcasecmp(type, "hidden") != 0;
+    }
+    if (_is_tag(elem, "button") || _is_tag(elem, "select") ||
+        _is_tag(elem, "textarea") || _is_tag(elem, "iframe") ||
+        _is_tag(elem, "area")) {
+        return true;
+    }
+    if (_is_tag(elem, "a")) return dom_element_has_attribute(elem, "href");
+    if (js_dom_is_first_summary_child(elem)) return true;
+    if (js_dom_is_editing_host(elem)) return true;
+    return false;
+}
+
 static void js_dom_throw_syntax_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
     Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
@@ -3709,7 +3844,12 @@ extern "C" Item js_document_get_property(Item prop_name) {
             return js_dom_wrap_element(((DomNode*)focused)->as_element());
         }
         DomElement* active_element = tc_get_active_element(state);
-        if (active_element) return js_dom_wrap_element(active_element);
+        if (active_element && active_element->doc == doc) return js_dom_wrap_element(active_element);
+        if (js_document_active_element &&
+            js_document_active_element->doc == doc &&
+            js_dom_node_is_connected((DomNode*)js_document_active_element)) {
+            return js_dom_wrap_element(js_document_active_element);
+        }
         // default to <body> if available
         DomNode* child = root ? root->first_child : nullptr;
         while (child) {
@@ -5046,8 +5186,7 @@ static bool _is_bool_reflected(DomElement* elem, const char* prop) {
         return input || textarea;
     if (strcmp(prop, "noValidate") == 0) return form;
     if (strcmp(prop, "formNoValidate") == 0) return input || button;
-    if (strcmp(prop, "autofocus") == 0)
-        return input || button || select || textarea;
+    if (strcmp(prop, "autofocus") == 0) return true;
     if (strcmp(prop, "defaultChecked") == 0) return input;
     if (strcmp(prop, "defaultSelected") == 0) return option;
     return false;
@@ -5436,6 +5575,8 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // nodeType
     if (strcmp(prop, "nodeType") == 0) {
+        if (_is_tag(elem, "#document-fragment"))
+            return (Item){.item = i2it(11)};
         return (Item){.item = i2it((int64_t)elem->node_type)};
     }
 
@@ -6192,14 +6333,13 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         strbuf_free(sb);
         return (Item){.item = s2it(s)};
     }
-    // tabIndex — reflects `tabindex` as integer (default 0 for elements that
-    // are normally focusable; we use 0 unconditionally — spec-conformant for
-    // form controls, anchors, and any element with tabindex set).
+    // tabIndex — reflects `tabindex` as integer, otherwise returns the HTML
+    // default for elements that are naturally focusable.
     if (strcmp(prop, "tabIndex") == 0) {
-        const char* v = dom_element_get_attribute(elem, "tabindex");
-        if (!v) return (Item){.item = i2it(0)};
-        char* end = nullptr; long n = strtol(v, &end, 10);
-        return (Item){.item = i2it((end != v) ? n : 0)};
+        long parsed = 0;
+        if (js_dom_has_valid_int_attr(elem, "tabindex", &parsed))
+            return (Item){.item = i2it(parsed)};
+        return (Item){.item = i2it(js_dom_default_tab_index(elem))};
     }
     // CE-4 (Radiant_Design_Content_Editable.md §7): inputMode/enterKeyHint
     // are enumerated reflected attributes. The IDL getter canonicalises the
@@ -6289,10 +6429,22 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     if (strcmp(prop, "writingSuggestions") == 0) {
         return (Item){.item = s2it(heap_create_name(js_dom_get_writing_suggestions(elem)))};
     }
-    // autofocus boolean reflection (input/button/select/textarea)
-    if (strcmp(prop, "autofocus") == 0 &&
-        (_is_tag(elem, "input") || _is_tag(elem, "button") ||
-         _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
+    if (strcmp(prop, "dataset") == 0) {
+        Item dataset = js_new_object();
+        int attr_count = 0;
+        const char** names = dom_element_get_attribute_names(elem, &attr_count);
+        for (int i = 0; i < attr_count; i++) {
+            char key_buf[128];
+            if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
+            const char* value = dom_element_get_attribute(elem, names[i]);
+            js_property_set(dataset,
+                (Item){.item = s2it(heap_create_name(key_buf))},
+                (Item){.item = s2it(heap_create_name(value ? value : ""))});
+        }
+        return dataset;
+    }
+    // autofocus boolean reflection (HTML global attribute).
+    if (strcmp(prop, "autofocus") == 0) {
         return (Item){.item = b2it(dom_element_has_attribute(elem, "autofocus"))};
     }
 
@@ -7611,19 +7763,29 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return ItemNull;
     }
 
-    // attachShadow(init) -> ShadowRoot facade. Radiant does not have a full
-    // Shadow DOM tree yet, but WPT editing-host inheritance tests only need a
-    // stable root object whose innerHTML can be assigned while light DOM stays
-    // addressable for Selection.deleteFromDocument().
+    // attachShadow(init) -> lightweight DocumentFragment-backed ShadowRoot.
+    // Radiant does not render a full shadow tree yet, but WPT focus/editing
+    // tests need a stable root object that supports appendChild/activeElement
+    // while light DOM stays addressable.
     if (strcmp(method, "attachShadow") == 0) {
         const char* mode = "open";
+        bool delegates_focus = false;
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
             Item mode_item = js_property_get(args[0],
                 (Item){.item = s2it(heap_create_name("mode"))});
             const char* mode_text = fn_to_cstr(mode_item);
             if (mode_text && mode_text[0]) mode = mode_text;
+            Item delegates_item = js_property_get(args[0],
+                (Item){.item = s2it(heap_create_name("delegatesFocus"))});
+            delegates_focus = js_is_truthy(delegates_item);
         }
-        Item root = js_new_object();
+
+        MarkBuilder builder(elem->doc ? elem->doc->input : nullptr);
+        Item frag_item = builder.element("#document-fragment").final();
+        Element* frag_elem = frag_item.element;
+        DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_elem);
+        Item root = js_dom_wrap_element(frag);
+
         js_property_set(root, (Item){.item = s2it(heap_create_name("host"))}, elem_item);
         js_property_set(root, (Item){.item = s2it(heap_create_name("mode"))},
             (Item){.item = s2it(heap_create_name(mode))});
@@ -7631,6 +7793,8 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             (Item){.item = s2it(heap_create_name(""))});
         js_property_set(root, (Item){.item = s2it(heap_create_name("nodeType"))},
             (Item){.item = i2it(11)});
+        js_property_set(root, (Item){.item = s2it(heap_create_name("delegatesFocus"))},
+            (Item){.item = b2it(delegates_focus)});
 
         Item exp_map = expando_get_or_create_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
@@ -7638,6 +7802,9 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             js_property_set(exp_map,
                 (Item){.item = s2it(heap_create_name("shadowRoot"))},
                 visible_root);
+            js_property_set(exp_map,
+                (Item){.item = s2it(heap_create_name("__shadowRootInternal"))},
+                root);
         }
         return root;
     }
@@ -8436,10 +8603,12 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         DocState* state = js_dom_current_state();
         if (strcmp(method, "focus") == 0) {
-            if (js_dom_node_is_connected((DomNode*)elem)) {
+            if (js_dom_is_script_focusable(elem)) {
+                js_document_active_element = elem;
                 focus_set(state, (View*)elem, false);
             }
         } else {
+            if (js_document_active_element == elem) js_document_active_element = nullptr;
             if (focus_get(state) == (View*)elem) focus_clear(state);
         }
         return make_js_undefined();
