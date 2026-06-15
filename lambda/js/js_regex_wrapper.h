@@ -30,6 +30,7 @@ enum JsRegexFilterType {
     JS_PF_REJECT_MATCH,      // reject match if rejection pattern matches at the boundary
     JS_PF_GROUP_EQUALITY,    // require capture group[a] == capture group[b] (backreference)
     JS_PF_ASSERT_MATCH,      // require absorbed positive lookahead to equal its anchored match
+    JS_PF_ASSERT_AT_MARKER,  // require positive lookahead subpattern at zero-width marker
     JS_PF_LOOKBEHIND,        // require/forbid lookbehind subpattern matching ending at marker pos
 };
 

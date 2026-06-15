@@ -1,4 +1,4 @@
-// Test positive lookahead — wrapper converts X(?=Y) to X(Y) with post-filter trim
+// Test positive lookahead wrapper behavior
 
 // --- Test 1: Trailing positive lookahead (?=...) ---
 var re1 = /foo(?=bar)/;
@@ -31,3 +31,23 @@ console.log("t5:" + (matches ? matches.join(",") : "null"));
 var re6 = /\w+(?=\.|$)/;
 var m6 = re6.exec("hello.world");
 console.log("t6:" + (m6 ? m6[0] : "null"));
+
+// --- Test 7: Middle positive lookahead should be zero-width ---
+var re7 = /a(?=b)b/;
+var m7 = re7.exec("ab");
+console.log("t7:" + (m7 ? m7[0] : "null"));
+
+// --- Test 8: Leading positive lookahead should be zero-width ---
+var re8 = /(?=a)a/;
+var m8 = re8.exec("a");
+console.log("t8:" + (m8 ? m8[0] : "null"));
+
+// --- Test 9: Marked heading shape keeps the full match span ---
+var re9 = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/;
+var m9 = re9.exec("# H1");
+console.log("t9:" + (m9 ? m9[0] : "null") + "," + (m9 ? m9[0].length : -1) + "," + (m9 ? m9[1] : "null") + "," + (m9 ? m9[2] : "null"));
+
+// --- Test 10: Lookahead branch failure must allow alternation fallback ---
+var re10 = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/;
+var m10 = re10.exec("hello world");
+console.log("t10:" + (m10 ? m10[0] : "null") + "," + (m10 ? m10[1] : "null"));

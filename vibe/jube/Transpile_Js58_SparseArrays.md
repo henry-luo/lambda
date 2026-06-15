@@ -311,6 +311,44 @@ carry the expected output) and retire the `probe` wrapper. The fix vehicle is a 
   real correctness fix that was stale in the prebuilt lib).
 - Sparse `slice`/`splice` OOB fixes (§10.1) and the runtime corruption safety nets.
 
+## 10.6. lib_marked Follow-up — no-mir-gen workaround found
+
+This supersedes the §10.5 quarantine decision. `lib_marked.js` now runs the real markdown parse
+assertions again, with no `lambda/mir.c` / mir-gen patch and no MIR patch pipeline dependency.
+
+Two independent issues were hiding behind the same symptom:
+
+1. **Stale closure-env readback metadata.** The previous Js56 Gate K assumption preserved
+   `last_closure_*` across member calls. In `_Lexer.blockTokens`, skipped callback branches left
+   stale closure env state behind; later unrelated method calls read it back into the current lexer
+   path and corrupted the fresh `_Lexer` object. The durable workaround is to clear closure tracking
+   before lowering the current member-call arguments, then let any closure created by those arguments
+   repopulate the tracking state for the post-call readback. `jm_readback_closure_env` also now has a
+   runtime null-env guard, so a stale zero register cannot become a native null dereference.
+2. **No-capture positive lookahead in the regex wrapper.** Marked's heading rule relies on
+   `(?=\s|$)` being zero-width. The old `X(?=Y) -> X(Y) + trim` rewrite works for simple trailing
+   lookaheads, but it changes the full-match span for middle/leading no-capture assertions. The
+   wrapper now rewrites safe no-capture positive lookaheads to a synthetic zero-width marker with a
+   post-filter assertion. Lookaheads under an alternation parent keep the older rewrite path so a
+   failing assertion does not reject the whole match before JS-style alternation fallback can run.
+
+Validation from the follow-up:
+
+- `test/js/lib_marked.js` emits the real expected HTML for paragraph, heading, bold/italic,
+  inline-code, fenced-code, lists, links, and `parseInline`.
+- `test/js/regex_lookahead.js` now covers middle/leading zero-width lookahead, the marked heading
+  shape, and the marked inline alternation fallback.
+- `make build`, `make release`, and `make build-test` pass.
+- `test/test_js_gtest.exe --gtest_filter='*lib_marked*:*regex_lookahead*' --gtest_brief=1` passes
+  2/2 tests.
+- `test/test_js_transpile_timing_gtest.exe --gtest_brief=1` passes all 7 timing corpora. The saved
+  `temp/js58_perf/js57_baseline.tsv` comparison file was not present in this checkout, so this pass
+  was a timing smoke rerun rather than a formal per-corpus `±2 %` comparison.
+- Documented 12-worker test262 gate:
+  `test/test_js_test262_gtest.exe --baseline-only --run-async --async-list=test/js262/test262_baseline.txt --js-timeout=10 --jobs=12 --write-failures=temp/js58_lib_marked_guard.tsv`
+  finished with `Fully passed: 40261 / 40261`, `Failed: 0`, `Regressions: 0`, and header-only
+  failure manifests under `temp/`.
+
 ## 10.4. lib_marked — reload-from-MIR_ALLOCA-home attempt (tried, reverted)
 
 Definitive root cause confirmed via disassembly: `_Lexer.blockTokens`'s `scope_env` pointer

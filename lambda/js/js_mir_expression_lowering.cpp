@@ -6066,11 +6066,23 @@ bool jm_is_window_getComputedStyle(JsCallNode* call) {
            prop->name && prop->name->len == 16 && strncmp(prop->name->chars, "getComputedStyle", 16) == 0;
 }
 
+static void jm_clear_last_closure_tracking(JsMirTranspiler* mt) {
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
+}
+
 // Read back captured variables from closure env after synchronous callback calls
 // (e.g., forEach, reduce, map). The callback may have modified captured variables
 // via env write-back, and we need to propagate those changes to the caller's registers.
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure_has_env) return;
+    if (mt->last_closure_env_reg == 0) return;
+    MIR_label_t readback_done = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+        MIR_new_label_op(mt->ctx, readback_done),
+        MIR_new_reg_op(mt->ctx, mt->last_closure_env_reg),
+        MIR_new_int_op(mt->ctx, 0)));
     for (int i = 0; i < mt->last_closure_capture_count; i++) {
         if (mt->last_closure_capture_is_nfe[i]) continue;
         JsMirVarEntry* var = jm_find_var(mt, mt->last_closure_capture_names[i]);
@@ -6132,6 +6144,7 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
     // env value matches the var->reg already (no spurious work at runtime —
     // just an extra mem load that lands in the same value).
     (void)mt->preserve_last_closure_env_after_readback;  // flag now unused at this site
+    jm_emit_label(mt, readback_done);
 }
 
 // P6: Check if a function is eligible for call-site inlining.
@@ -8384,17 +8397,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // Js56 Gate K: preserve closure env tracking across the method call.
-            // The previous "reset before arguments" prevented stale readback when
-            // no new closure was created during arg eval, but it also defeated
-            // the readback path for indirectly-invoked closures (e.g.
-            // `rab.resize({valueOf() { called = true; }})` where valueOf runs
-            // inside resize). Argument evaluation overrides last_closure_* when
-            // it creates a new closure; otherwise the previous closure's env
-            // is the right one to refresh after the call. Readback on the
-            // wrong env is idempotent (just copies the same value back), so
-            // preserving is safe.
-
             MIR_reg_t recv = jm_transpile_box_item(mt, m->object);
             String* method_key_name = jm_resolve_private_name(mt, (JsAstNode*)m->property, prop->name);
             MIR_reg_t method_name = jm_box_string_literal(mt, method_key_name->chars, method_key_name->len);
@@ -8434,6 +8436,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+                jm_clear_last_closure_tracking(mt);
                 MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                 MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
                 MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
@@ -8481,6 +8484,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+                jm_clear_last_closure_tracking(mt);
                 MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                 MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
                 MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
@@ -8503,6 +8507,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
             if (method_has_spread) {
                 // Build expanded args array and use js_map_method_apply
+                jm_clear_last_closure_tracking(mt);
                 MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
                 MIR_reg_t r = jm_call_3(mt, "js_method_call_apply", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
@@ -8592,6 +8597,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         // Transpile arguments FIRST, before changing 'this'.
                         // Args may reference 'this' (e.g., object.add(name, this.readValue()))
                         // and must see the original 'this', not the P3 receiver.
+                        jm_clear_last_closure_tracking(mt);
                         MIR_reg_t* p3_arg_regs = (MIR_reg_t*)alloca(p3_param_count * sizeof(MIR_reg_t));
                         JsAstNode* p3_arg = call->arguments;
                         for (int i = 0; i < p3_param_count; i++) {
@@ -8689,6 +8695,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (recv_needs_yield_spill) {
                 recv_yield_spill = jm_gen_spill_save(mt, recv);
             }
+            jm_clear_last_closure_tracking(mt);
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             mt->allow_loop_let_scope_env_for_immediate_call = p3_saved_immediate_callback_env;
             if (recv_needs_yield_spill) {

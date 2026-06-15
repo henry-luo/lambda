@@ -2470,35 +2470,15 @@ const parse = marked.parse;
 console.log(typeof marked);
 console.log(typeof parse);
 
-// === Tests 2-10: markdown parsing — SKIPPED (known mir-gen bug) ===
-// These trip a mir-gen register-allocator spill bug: the scope_env pointer is
-// lost across _Lexer.blockTokens' (and inlineTokens') call-heavy loop back-edge,
-// corrupting the freshly-built Lexer. The runtime safety nets degrade the
-// would-be SIGSEGV into a catchable TypeError, which we catch here and report as
-// SKIP so the rest of the JS suite stays green. Full analysis + the four
-// exhausted no-mir-gen fixes: vibe/jube/Transpile_Js58_SparseArrays.md §10.1-10.5.
-// RE-ENABLE: once the mir-gen spill bug is fixed these parses will succeed and
-// emit real HTML, which will MISMATCH the SKIP lines in lib_marked.txt — that
-// failure is the signal to restore the real expected output below.
-function probe(label, fn) {
-    try {
-        console.log(fn());
-    } catch (e) {
-        if (e instanceof TypeError) {
-            console.log('SKIP ' + label + ' (mir-gen blockTokens bug)');
-        } else {
-            throw e;  // unrelated error — do NOT mask it
-        }
-    }
-}
-probe('paragraph',   () => parse('hello world').trim());        // <p>hello world</p>
-probe('heading',     () => parse('# H1').trim());                // <h1>H1</h1>
-probe('bold-italic', () => parse('**bold** _it_').trim());       // <p><strong>bold</strong> <em>it</em></p>
-probe('inline-code', () => parse('use `x` here').trim());        // <p>use <code>x</code> here</p>
-probe('fenced-code', () => parse('```\nfoo\n```').trim());       // <pre><code>foo\n</code></pre>
-probe('ul',          () => parse('- a\n- b').trim());            // <ul><li>a</li><li>b</li></ul>
-probe('ol',          () => parse('1. one\n2. two').trim());      // <ol><li>one</li><li>two</li></ol>
-probe('link',        () => parse('[click](https://x.com)').trim()); // <p><a href="https://x.com">click</a></p>
-probe('parseInline', () => marked.parseInline('**inline**').trim()); // <strong>inline</strong>
+// === Tests 2-10: markdown parsing ===
+console.log(parse('hello world').trim());
+console.log(parse('# H1').trim());
+console.log(parse('**bold** _it_').trim());
+console.log(parse('use `x` here').trim());
+console.log(parse('```\nfoo\n```').trim());
+console.log(parse('- a\n- b').trim());
+console.log(parse('1. one\n2. two').trim());
+console.log(parse('[click](https://x.com)').trim());
+console.log(marked.parseInline('**inline**').trim());
 
 console.log("MARKED_DONE");

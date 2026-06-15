@@ -6,6 +6,7 @@
  *
  * Strategy per assertion type:
  * - Trailing positive lookahead  X(?=Y)   → X(Y) + PF_TRIM_GROUP[Y]
+ * - No-capture positive lookahead (?=Y)   → () + PF_ASSERT_AT_MARKER[Y]
  * - Leading negative lookahead   (?!Y)X   → X + PF_REJECT_MATCH[Y] at start
  * - Trailing negative lookahead  X(?!Y)   → X + PF_REJECT_MATCH[Y] at end
  * - Backreference \N (where N=group idx)  → (.+) + PF_GROUP_EQUALITY[N,new]
@@ -123,6 +124,66 @@ static bool replace_capture_group_by_index(std::string* pat, int target_group,
     if (!pat || !find_capture_group_span(*pat, target_group, &open_pos, &close_pos)) return false;
     pat->replace(open_pos, close_pos - open_pos + 1, replacement);
     return true;
+}
+
+static bool assertion_parent_has_alternation(const std::string& pat, size_t assertion_pos) {
+    int depth = 0;
+    size_t group_stack[128];
+    for (size_t i = 0; i < pat.size() && i < assertion_pos; i++) {
+        if (pat[i] == '\\' && i + 1 < pat.size()) {
+            i++;
+            continue;
+        }
+        if (pat[i] == '[') {
+            i++;
+            while (i < pat.size() && pat[i] != ']') {
+                if (pat[i] == '\\' && i + 1 < pat.size()) i++;
+                i++;
+            }
+            continue;
+        }
+        if (pat[i] == '(') {
+            if (depth < 128) group_stack[depth] = i;
+            depth++;
+        } else if (pat[i] == ')' && depth > 0) {
+            depth--;
+        }
+    }
+
+    int target_depth = depth;
+    size_t segment_start = 0;
+    size_t segment_end = pat.size();
+    if (target_depth > 0 && target_depth <= 128) {
+        size_t parent_open = group_stack[target_depth - 1];
+        segment_start = parent_open + 1;
+        size_t parent_close = find_matching_paren(pat, parent_open);
+        if (parent_close != std::string::npos) segment_end = parent_close;
+    }
+
+    depth = 0;
+    for (size_t i = 0; i < pat.size() && i < segment_end; i++) {
+        if (pat[i] == '\\' && i + 1 < pat.size()) {
+            i++;
+            continue;
+        }
+        if (pat[i] == '[') {
+            i++;
+            while (i < pat.size() && pat[i] != ']') {
+                if (pat[i] == '\\' && i + 1 < pat.size()) i++;
+                i++;
+            }
+            continue;
+        }
+        if (i >= segment_start && pat[i] == '|' && depth == target_depth) {
+            return true;
+        }
+        if (pat[i] == '(') {
+            depth++;
+        } else if (pat[i] == ')' && depth > 0) {
+            depth--;
+        }
+    }
+    return false;
 }
 
 static bool is_utf8_boundary(const char* input, int input_len, int pos) {
@@ -406,6 +467,28 @@ static re2::RE2* compile_lookbehind_re(const std::string& inner, bool ignore_cas
     re2::RE2* re = new re2::RE2(pat, o);
     if (!re->ok()) {
         log_debug("js regex wrapper: lookbehind subpattern compile failed '%s': %s",
+                  pat.c_str(), re->error().c_str());
+        delete re;
+        return nullptr;
+    }
+    return re;
+}
+
+static re2::RE2* compile_positive_assert_re(const std::string& inner, bool ignore_case,
+                                            bool multiline, bool dot_all) {
+    std::string pat = multiline ? "(?m)" : "";
+    pat.append("(?:");
+    pat.append(inner);
+    pat.append(")");
+    re2::RE2::Options o;
+    o.set_log_errors(false);
+    o.set_encoding(re2::RE2::Options::EncodingUTF8);
+    o.set_case_sensitive(!ignore_case);
+    o.set_one_line(!multiline);
+    o.set_dot_nl(dot_all);
+    re2::RE2* re = new re2::RE2(pat, o);
+    if (!re->ok()) {
+        log_debug("js regex wrapper: positive assertion subpattern compile failed '%s': %s",
                   pat.c_str(), re->error().c_str());
         delete re;
         return nullptr;
@@ -1330,6 +1413,7 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
     }
 
     out->filter_count = 0;
+    memset(out->filters, 0, sizeof(out->filters));
     out->group_remap = nullptr;
     out->group_remap_count = 0;
     out->original_group_count = count_capture_groups(original);
@@ -1385,6 +1469,45 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
                         }
                     }
                     break;
+                }
+                if (count_capture_groups(info.inner) == 0 &&
+                    !assertion_parent_has_alternation(original, info.start_pos)) {
+                    re2::RE2* assert_re = compile_positive_assert_re(
+                        info.inner, ignore_case, multiline, dot_all);
+                    JsRegexCompiled* assert_wrapper = nullptr;
+                    if (!assert_re) {
+                        char assert_flags[4];
+                        int assert_flags_len = 0;
+                        if (ignore_case) assert_flags[assert_flags_len++] = 'i';
+                        if (multiline) assert_flags[assert_flags_len++] = 'm';
+                        if (dot_all) assert_flags[assert_flags_len++] = 's';
+                        if (unicode_sets) assert_flags[assert_flags_len++] = 'v';
+                        assert_wrapper = js_regex_wrapper_compile(
+                            info.inner.c_str(), (int)info.inner.size(),
+                            assert_flags, assert_flags_len, nullptr);
+                    }
+                    if (assert_re || assert_wrapper) {
+                        std::string replacement = "()";
+                        size_t syn_pos = info.start_pos;
+                        result.replace(info.start_pos, old_len, replacement);
+                        int delta = (int)replacement.size() - (int)old_len;
+                        for (int s = 0; s < synthetic_count; s++) {
+                            if (synthetic[s].position > syn_pos) {
+                                synthetic[s].position = (size_t)((int)synthetic[s].position + delta);
+                            }
+                        }
+
+                        int fi = out->filter_count;
+                        JsRegexFilter& f = out->filters[out->filter_count++];
+                        f.type = JS_PF_ASSERT_AT_MARKER;
+                        f.trim_group_idx = -1;
+                        f.reject_pattern = assert_re;
+                        f.reject_wrapper = assert_wrapper;
+                        f.reject_at_start = -1; // placeholder, fixed after pattern walk
+
+                        synthetic[synthetic_count++] = {syn_pos, fi};
+                        break;
+                    }
                 }
                 // X(?=Y) → X(Y) with PF_TRIM_GROUP. A leading assertion is
                 // still absorbed so its captures are available to later
@@ -1691,6 +1814,8 @@ static bool rewrite_pattern(const std::string& original_in, RewriteResult* out, 
 
             if (f.type == JS_PF_TRIM_GROUP || f.type == JS_PF_ASSERT_MATCH) {
                 f.trim_group_idx = syn_re2_idx[s];
+            } else if (f.type == JS_PF_ASSERT_AT_MARKER) {
+                f.reject_at_start = syn_re2_idx[s];
             } else if (f.type == JS_PF_REJECT_MATCH || f.type == JS_PF_LOOKBEHIND) {
                 // store the marker group's RE2 index in reject_at_start
                 // (repurposed: positive values = marker group index)
@@ -2025,6 +2150,30 @@ static bool js_regex_assert_filter_accepts(JsRegexFilter& f, const char* input, 
     }
     return asserted.data() == groups[f.trim_group_idx].data() &&
            asserted.size() == groups[f.trim_group_idx].size();
+}
+
+static bool js_regex_assert_marker_matches(JsRegexFilter& f, const char* input, int input_len,
+                                           re2::StringPiece* groups, int ngroups) {
+    int marker_group = f.reject_at_start;
+    if (marker_group <= 0 || marker_group >= ngroups) return false;
+    if (!groups[marker_group].data()) return false;
+
+    const char* check_start = groups[marker_group].data();
+    int check_offset = (int)(check_start - input);
+    if (check_offset < 0 || check_offset > input_len) return false;
+
+    int check_len = input_len - check_offset;
+    if (f.reject_wrapper) {
+        int starts[JS_REGEX_MAX_GROUPS], ends[JS_REGEX_MAX_GROUPS];
+        return js_regex_wrapper_exec(f.reject_wrapper, check_start, check_len, 0, true,
+                                     starts, ends, JS_REGEX_MAX_GROUPS) > 0;
+    }
+    if (f.reject_pattern) {
+        re2::StringPiece check_text(check_start, check_len);
+        return f.reject_pattern->Match(check_text, 0, check_len,
+                                       re2::RE2::ANCHOR_START, nullptr, 0);
+    }
+    return false;
 }
 
 static bool js_regex_reject_filter_matches(JsRegexFilter& f, const char* check_start, int check_len) {
@@ -2484,6 +2633,13 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             match_begin_offset + 1, anchor_start,
                             match_starts, match_ends, max_groups);
                     }
+                } else if (f.type == JS_PF_ASSERT_AT_MARKER) {
+                    if (!js_regex_assert_marker_matches(f, input, input_len, groups, ngroups)) {
+                        if (anchor_start) return 0;
+                        return js_regex_wrapper_exec(compiled, input, input_len,
+                            match_begin_offset + 1, anchor_start,
+                            match_starts, match_ends, max_groups);
+                    }
                 } else if (f.type == JS_PF_LOOKBEHIND) {
                     if (f.reject_at_start > 0 && f.reject_at_start < ngroups &&
                         groups[f.reject_at_start].data()) {
@@ -2582,6 +2738,12 @@ int js_regex_wrapper_exec(JsRegexCompiled* compiled, const char* input, int inpu
                             break; // shouldn't happen in this path
                         case JS_PF_ASSERT_MATCH: {
                             if (!js_regex_assert_filter_accepts(f, input, input_len, groups, ngroups)) {
+                                rejected = true;
+                            }
+                            break;
+                        }
+                        case JS_PF_ASSERT_AT_MARKER: {
+                            if (!js_regex_assert_marker_matches(f, input, input_len, groups, ngroups)) {
                                 rejected = true;
                             }
                             break;
