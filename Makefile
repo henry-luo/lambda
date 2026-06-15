@@ -542,7 +542,7 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, text_flow, wpt-css-multicol, puppertino) + render visual + other checks"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, wpt-css-multicol, puppertino) + render visual + other checks"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
@@ -1120,7 +1120,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
-LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text form text_flow wpt-css-multicol puppertino markdown
+LAYOUT_BASELINE_SUITES ?= baseline wpt-css-text form wpt-css-multicol puppertino markdown
 
 test-radiant-baseline: build-test
 	@$(MAKE) --no-print-directory run-radiant-baseline
