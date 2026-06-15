@@ -10,6 +10,7 @@
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/font/font.h"
+#include "../lib/utf.h"
 
 #include <chrono>
 #include <math.h>
@@ -42,49 +43,6 @@ static bool render_text_background_clip_linear_text(RenderContext* rdcon,
                                                     Rect* out_gradient_rect);
 static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
                                                 float px, float py);
-
-// Check if a codepoint has Emoji_Presentation=Yes (Unicode 15.0, UTS #51).
-// Mirrors is_emoji_presentation_default in layout_text.cpp.
-static inline bool render_text_is_emoji_presentation_default(uint32_t cp) {
-    if (cp >= 0x1F000 && cp <= 0x1FFFF) return true;
-    if (cp >= 0xE0020 && cp <= 0xE007F) return true;
-    if (cp < 0x231A || cp > 0x3299) return false;
-    if (cp <= 0x231B) return true;
-    if (cp >= 0x23E9 && cp <= 0x23F3) return true;
-    if (cp >= 0x23F8 && cp <= 0x23FA) return true;
-    if (cp == 0x25AA || cp == 0x25AB) return true;
-    if (cp == 0x25B6 || cp == 0x25C0) return true;
-    if (cp >= 0x25FB && cp <= 0x25FE) return true;
-    if (cp == 0x2614 || cp == 0x2615) return true;
-    if (cp >= 0x2648 && cp <= 0x2653) return true;
-    if (cp == 0x267F || cp == 0x2693 || cp == 0x26A1) return true;
-    if (cp == 0x26AA || cp == 0x26AB) return true;
-    if (cp == 0x26BD || cp == 0x26BE) return true;
-    if (cp == 0x26C4 || cp == 0x26C5) return true;
-    if (cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA) return true;
-    if (cp == 0x26F2 || cp == 0x26F3 || cp == 0x26F5) return true;
-    if (cp == 0x26FA || cp == 0x26FD) return true;
-    if (cp == 0x2702 || cp == 0x2705) return true;
-    if (cp >= 0x2708 && cp <= 0x270D) return true;
-    if (cp == 0x270F || cp == 0x2712) return true;
-    if (cp == 0x2714 || cp == 0x2716) return true;
-    if (cp == 0x271D || cp == 0x2721 || cp == 0x2728) return true;
-    if (cp == 0x2733 || cp == 0x2734) return true;
-    if (cp == 0x2744 || cp == 0x2747) return true;
-    if (cp == 0x274C || cp == 0x274E) return true;
-    if (cp >= 0x2753 && cp <= 0x2755) return true;
-    if (cp == 0x2757) return true;
-    if (cp == 0x2763 || cp == 0x2764) return true;
-    if (cp >= 0x2795 && cp <= 0x2797) return true;
-    if (cp == 0x27A1 || cp == 0x27B0 || cp == 0x27BF) return true;
-    if (cp == 0x2934 || cp == 0x2935) return true;
-    if (cp >= 0x2B05 && cp <= 0x2B07) return true;
-    if (cp == 0x2B1B || cp == 0x2B1C) return true;
-    if (cp == 0x2B50 || cp == 0x2B55) return true;
-    if (cp == 0x3030 || cp == 0x303D) return true;
-    if (cp == 0x3297 || cp == 0x3299) return true;
-    return false;
-}
 
 static inline bool render_text_preserve_spaces(CssEnum ws) {
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_BREAK_SPACES;
@@ -650,7 +608,7 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint3
             log_debug("render emoji: VS16 peek hit for U+%04X", codepoint);
         }
     }
-    if (!emoji_presentation && render_text_is_emoji_presentation_default(codepoint)) {
+    if (!emoji_presentation && utf_is_emoji_presentation_default(codepoint)) {
         emoji_presentation = true;
     }
 

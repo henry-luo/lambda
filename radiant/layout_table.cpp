@@ -8025,31 +8025,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 log_debug("Caption %d width changed: %.1f -> %.1f, re-laying out", ci, old_width, cap->width);
                 this_cap_height = relayout_table_caption(lycon, cap, table_width);
             } else {
-                // Width didn't change - just re-align text if centered
-                if (cap->blk && cap->blk->text_align == CSS_VALUE_CENTER) {
-                    float inner_left = 0;
-                    float caption_content_w = cap->width;
-                    if (cap->bound) {
-                        if (cap->bound->border) {
-                            inner_left += cap->bound->border->width.left;
-                            caption_content_w -= cap->bound->border->width.left + cap->bound->border->width.right;
-                        }
-                        inner_left += cap->bound->padding.left;
-                        caption_content_w -= cap->bound->padding.left + cap->bound->padding.right;
-                    }
-                    if (caption_content_w < 0) caption_content_w = 0;
-                    for (View* cchild = cap->first_child; cchild; cchild = cchild->next_sibling) {
-                        if (cchild->view_type == RDT_VIEW_TEXT) {
-                            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(cchild);
-                            float text_width = text->width;
-                            float offset = inner_left + (caption_content_w - text_width) / 2.0f;
-                            if (offset > 0) {
-                                text->x = offset;
-                                if (text->rect) text->rect->x = offset;
-                            }
-                        }
-                    }
-                }
                 float margin_v = 0;
                 if (cap->bound) {
                     float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;

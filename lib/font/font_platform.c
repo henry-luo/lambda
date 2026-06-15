@@ -904,6 +904,12 @@ void font_platform_destroy_ct_font(void* ct_font_ref) {
     }
 }
 
+bool font_platform_has_color_glyphs(void* ct_font_ref) {
+    if (!ct_font_ref) return false;
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    return (CTFontGetSymbolicTraits(font) & kCTFontTraitColorGlyphs) != 0;
+}
+
 /**
  * Get the nominal (un-kerned) advance width of a single glyph using CoreText.
  *

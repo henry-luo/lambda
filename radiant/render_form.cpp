@@ -13,6 +13,7 @@
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <string.h>
+#include <stddef.h>
 #include <math.h>
 
 /**
@@ -1323,9 +1324,44 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     float font_size_scaled = render_font ? render_font->font_size * s : 13.333f * s;
     float line_height = font_size_scaled * 1.4f;
 
+    bool has_active_selection = false;
+    int active_sel_start = 0, active_sel_end = 0;
+    if (state && !is_placeholder && !has_preedit) {
+        View* focused = focus_get(state);
+        if (focused == static_cast<View*>(block) &&
+            selection_get_anchor_range(state, focused, &active_sel_start, &active_sel_end)) {
+            const char* value = form->value;
+            int val_len = value ? (int)strlen(value) : 0; // INT_CAST_OK: textarea selection offsets use byte-index ints.
+            if (active_sel_start < 0) active_sel_start = 0;
+            if (active_sel_end > val_len) active_sel_end = val_len;
+            has_active_selection = active_sel_start < active_sel_end && value;
+        }
+    }
+
+    // draw selection highlight before textarea text, matching native text-control paint order
+    if (has_active_selection && block->font) {
+        Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
+        TextControlSelectionPaint paint;
+        memset(&paint, 0, sizeof(paint));
+        paint.rdcon = rdcon;
+        paint.block = block;
+        paint.color = sel_color;
+        paint.scale = s;
+        paint.border_css = form_control_border_left_width(block,
+            has_css_border, use_default_border);
+        paint.padding_css = block->bound ? block->bound->padding.left
+            : FormDefaults::TEXTAREA_PADDING;
+        paint.scroll_x = form ? form->scroll_x * s : 0.0f;
+        paint.scroll_y = form ? form->scroll_y * s : 0.0f;
+        editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
+            static_cast<DomElement*>(block), (uint32_t)active_sel_start,
+            (uint32_t)active_sel_end, paint_text_control_selection_rect, &paint);
+    }
+
     // Render text lines
     if (text && *text && render_font) {
         Color text_color = form_text_color(block, form, is_placeholder);
+        Color selected_text_color = make_color(255, 255, 255);
 
         // Setup font
         FontBox fbox = {0};
@@ -1333,6 +1369,10 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         if (fbox.font_handle) {
             const FontMetrics* fm = font_get_metrics(fbox.font_handle);
             float ascender = fm ? (fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
+            float descender = fm ? (-(fm->hhea_descender) * rdcon->ui_context->pixel_ratio) : 4.0f;
+            float text_lead_y = line_height - (ascender + descender);
+            if (text_lead_y < 0.0f) text_lead_y = 0.0f;
+            text_lead_y *= 0.5f;
 
             Color saved_color = rdcon->color;
             rdcon->color = text_color;
@@ -1353,6 +1393,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 const unsigned char* p = (const unsigned char*)line_start;
                 const unsigned char* p_end = p + line_byte_len;
                 while (p < p_end) {
+                    const unsigned char* glyph_start = p;
                     uint32_t codepoint;
                     int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
                     if (bytes <= 0) { p++; continue; }
@@ -1374,9 +1415,15 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
 
                     if (pen_y + line_height >= y && pen_x + glyph->advance_x >= content_x &&
                         pen_x <= content_x + content_w) {
+                        ptrdiff_t glyph_byte_off = glyph_start - (const unsigned char*)text;
+                        bool selected_glyph = has_active_selection &&
+                            glyph_byte_off >= active_sel_start &&
+                            glyph_byte_off < active_sel_end;
+                        rdcon->color = selected_glyph ? selected_text_color : text_color;
                         draw_glyph(rdcon, &glyph->bitmap,
                                    lroundf(pen_x + glyph->bitmap.bearing_x),
-                                   lroundf(pen_y + ascender - glyph->bitmap.bearing_y));
+                                   lroundf(pen_y + text_lead_y + ascender -
+                                           glyph->bitmap.bearing_y));
                     }
                     pen_x += glyph->advance_x;
                 }
@@ -1387,37 +1434,6 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             }
 
             rdcon->color = saved_color;
-        }
-    }
-
-    // Draw selection highlight if textarea has an active selection
-    if (state && !is_placeholder) {
-        View* focused = focus_get(state);
-        int sel_start = 0, sel_end = 0;
-        if (!has_preedit && focused == static_cast<View*>(block) && selection_get_anchor_range(state, focused, &sel_start, &sel_end)) {
-            const char* value = form->value;
-            int val_len = value ? (int)strlen(value) : 0;
-            if (sel_start < 0) sel_start = 0;
-            if (sel_end > val_len) sel_end = val_len;
-
-            if (sel_start < sel_end && value && block->font) {
-                Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
-                TextControlSelectionPaint paint;
-                memset(&paint, 0, sizeof(paint));
-                paint.rdcon = rdcon;
-                paint.block = block;
-                paint.color = sel_color;
-                paint.scale = s;
-                paint.border_css = form_control_border_left_width(block,
-                    has_css_border, use_default_border);
-                paint.padding_css = block->bound ? block->bound->padding.left
-                    : FormDefaults::TEXTAREA_PADDING;
-                paint.scroll_x = form ? form->scroll_x * s : 0.0f;
-                paint.scroll_y = form ? form->scroll_y * s : 0.0f;
-                editing_geometry_text_control_for_each_selection_rect(rdcon->ui_context,
-                    static_cast<DomElement*>(block), (uint32_t)sel_start,
-                    (uint32_t)sel_end, paint_text_control_selection_rect, &paint);
-            }
         }
     }
 

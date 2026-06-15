@@ -323,6 +323,14 @@ before dispatch (spec §[plaintext-only paste/drop]).
 
 ## 9. Explicitly NOT supported (the "no legacy" line)
 
+> **⚠️ Superseded for `execCommand`.** This section reflects the original
+> "modern contract, no legacy" scope. The follow-on proposal
+> [Radiant_Design_Content_Editable2.md](Radiant_Design_Content_Editable2.md)
+> **reverses the execCommand decision** — `execCommand` / `queryCommand*` /
+> `designMode` are now in scope, implemented as a built-in editing-command
+> *consumer* layered on the `InputEvent` plumbing (the rest of this section
+> still holds). See that doc §2 for the reconciliation.
+
 This proposal **deliberately does not implement** any of the following.
 Each entry says what the JS-visible behaviour is, so feature detection
 fails cleanly and tests are unambiguous.
@@ -379,20 +387,39 @@ runner and status-doc pattern are copied from
 
 ### 11.1 Tier A — Conformance baseline (must be 100% on the curated subset)
 
-Wired into `make test-radiant-baseline`. Lives under a new
-`test/wpt/test_wpt_contenteditable_gtest.cpp` driven through the existing
-`test/wpt/wpt_testharness_shim.js` (extended with the editing helpers).
+Built as an `extended` test (`test_wpt_contenteditable_gtest.exe`, registered
+in `build_lambda_config.json`). **Not yet wired into
+`make test-radiant-baseline`** — 14 real failures remain (see baseline below).
+Lives in `test/wpt/test_wpt_contenteditable_gtest.cpp`, modelled on
+`test/wpt/test_wpt_selection_gtest.cpp` and driven through the existing
+`test/wpt/wpt_testharness_shim.js`. It shares the selection runner's parallel
+custom `main()`; reftests / `*-manual` / testdriver tests auto-skip, and crash
+tests pass by surviving the `--document` load.
 
-| WPT area | What it pins | This doc § |
-|---|---|---|
-| `ref/wpt/selection/contenteditable/` (`collapse`, `modify*`, `cefalse-on-boundaries`) | Caret/selection inside editing hosts; `="false"` island boundary | §4.3, §5 |
-| `ref/wpt/selection/textcontrols/` (`selectionchange`, `selectionchange-bubble`, `focus`) | `selectionchange` + bubbling on focused hosts | §5 |
-| `ref/wpt/input-events/` non-`tentative` (`input-events-typing`, `input-events-get-target-ranges*` non-tentative, `input-events-cut-paste`, `input-events-delete-selection`, idlharness) | The whole §6 `InputEvent` shape + `getTargetRanges` | §6 |
-| `ref/wpt/uievents/keyboard/` (subset), `uievents/constructors`, `uievents/legacy` | `KeyboardEvent.key`/`code`, modifier state, event order | §5, §6 source |
-| `ref/wpt/editing/event.html` + composition fixtures | `compositionstart/update/end` ordering + one-transaction-per-session | editor3 §3.9 (this doc consumes) |
-| `ref/wpt/clipboard-apis/` | Already 19/19 + 8 documented skips | Reused |
-| `ref/wpt/focus/` (subset: `focus-event-targets`, `tabindex-focus-flag`) | `focus()`/`blur()`, `activeElement` on editable hosts | §5 |
-| `ref/wpt/html/interaction/focus/` (subset for contenteditable focus) | Implicit focusability of editing hosts | §5 |
+**Concrete scope — this runner pulls in exactly four WPT directories** (every
+`*.html`, except `html/interaction/focus/` which is filtered to its
+contenteditable subset — the dir otherwise holds ~170 generic focus tests).
+Everything else that mentions `contenteditable` is excluded per §11.6.
+
+| WPT dir | Cases | What it pins / status | This doc § |
+|---|---|---|---|
+| `ref/wpt/input-events/` | 25 | The §6 `InputEvent` surface. **Blocked headless today:** 23/25 drive synthetic typing via `test_driver`, which the `js` runtime does not deliver, so they auto-skip (Phase 8F); `input-events-exec-command` is skipped (rejected API, §9). Genuine conformance begins once synthetic input lands (CE-3). | §6 |
+| `ref/wpt/editing/crashtests/` | 137 | Engine robustness — pass iff the runtime survives the `--document` load (no crash *signal*; a clean error exit, e.g. an uncaught exception on an unimplemented API, still counts as survived). | §4–§6 |
+| `ref/wpt/html/interaction/focus/` | 7 | Focusability / `activeElement` / tabindex of editing hosts (contenteditable subset of the dir). | §5 |
+| `ref/wpt/html/editing/editing-0/` | 25 | `contentEditable` / `isContentEditable` / `designMode` / `spellcheck` / `autocapitalize` IDL + editing-host basics; ~15 are reftests that auto-skip (layout-compare path). | §4 |
+
+**Initial baseline (2026-06, debug build): 194 cases → 139 pass, 41 skip, 14
+fail.** The failures are real CE-1/CE-2 conformance gaps — IDL reflection for
+`contentEditable` / `designMode` / `spellcheck` / `autocapitalize` /
+`writingsuggestions`, and the focus-fixup / tabindex / autofocus model — plus
+**one genuine engine crash** (`editing/crashtests/insertparagraph-in-listitem-in-svg-followed-by-collapsible-spaces`
+→ SIGABRT). Tracked in the status doc (§11.5).
+
+The **selection-side** editing-host Tier-A tests
+(`selection/contenteditable/`, `selection/textcontrols/`) already run under
+the recursive `test_wpt_selection_gtest.cpp` and are **not duplicated**
+here. Clipboard (`clipboard-apis/`, already 19/19) and composition
+(`editing/event.html`, editor3 §3.9) likewise live in their own runners.
 
 ### 11.2 Tier B — Informational gauge (tracked, NEVER gates CI)
 
@@ -415,9 +442,13 @@ Single number in the status doc; movement is reviewed, not required.
 Mined into our own model tests + UI-automation, never run as WPT:
 
 - `ref/wpt/editing/other/*` (deletion, caret-navigation around inline
-  boundaries, double-click range selection in list items)
-- `ref/wpt/editing/whitespaces/*` (white-space normalization scenarios)
-- `ref/wpt/selection/caret/*`, `selection/move-by-word-*`
+  boundaries, double-click range selection in list items) — 84 files,
+  54 execCommand-dependent
+- `ref/wpt/editing/whitespaces/*` (white-space normalization scenarios) —
+  18 files, 12 execCommand-dependent
+- `ref/wpt/selection/caret/*`, `selection/move-by-word-*` — **now executed**
+  by the recursive `test_wpt_selection_gtest.cpp` (tracked there, several
+  currently failing); no longer pure scenario-source.
 
 ### 11.4 Explicitly skipped (with rationale, per Clipboard-WPT-status pattern)
 
@@ -437,6 +468,60 @@ A new [`Radiant_ContentEditable_WPT_Status.md`](Radiant_ContentEditable_WPT_Stat
 (this directory) carries: headline numbers, per-file Tier-A matrix,
 documented `SKIP_SUBSTRINGS` rationale, Tier-B gauge number — same
 template as [Radiant_Clipboard_WPT_Status.md](Radiant_Clipboard_WPT_Status.md).
+
+### 11.6 Why the other `contenteditable` WPT areas are excluded
+
+Across WPT, ~440 HTML files reference `contenteditable`. This runner
+deliberately covers only the four directories in §11.1; the rest fall into
+four exclusion buckets. (Counts verified 2026-06.)
+
+**A. Already covered by another runner — would double-run.**
+
+| Area | Files | Runs instead under |
+|---|---|---|
+| `selection/contenteditable/` | 8 | `test_wpt_selection_gtest.cpp` (recursive); `cefalse-on-boundaries` already 4/4 |
+| `selection/textcontrols/` | 5 | same selection runner |
+| `clipboard-apis/` | — | `radiant/clipboard.cpp` + `Radiant_Clipboard_WPT_Status.md` (19/19) |
+
+**B. execCommand corpus — Radiant rejects the API by design (§9), so these
+fail on purpose.** Kept out of the must-pass runner; tier semantics in
+§11.2/§11.3, skip rationale in §11.4.
+
+| Area | Files (execCommand-dependent) | Disposition |
+|---|---|---|
+| `editing/run/` | 42 full corpus — `bold`, `delete`, `indent`, `createlink`, `fontname`, … (~8 literally contain `contenteditable`; the rest enable editing via `designMode`/data files) | Tier B gauge (§11.2), never gates |
+| `editing/other/` | 84 (54 execCommand) | Tier C scenario source (§11.3) |
+| `editing/whitespaces/` | 18 (12 execCommand) | Tier C scenario source (§11.3) |
+| `editing/plaintext-only/` | 13 (11 execCommand) | Mostly expected-fail; §4.1 `plaintext-only` behaviour is verified by our own authored `inputType`-filtering tests instead (§11.4) |
+
+**C. Tests a different / legacy feature, not the modern editing-host
+contract.**
+
+| Area | Files | Why excluded |
+|---|---|---|
+| `uievents/` (cE subset) | 11 | The `textInput`/`TextEvent` **legacy event** (deprecated) + one manual test — superseded by the modern `beforeinput`/`input` already covered by `input-events/`. General `KeyboardEvent` coverage is a separate UI-events concern, not this runner's. |
+| `editing/edit-context/` | 2 | Experimental `EditContext` successor API; not in Stage A (§11.2) |
+| `editing/manual/`, `*-manual.html` | — | Require human gestures; no headless path |
+| `focus/` (top-level) | 1 | Lone iframe-scroll-into-view case; real focusability coverage is `html/interaction/focus/` (included in §11.1) |
+
+**D. Use `contenteditable` only as a fixture to test something else —
+not editing-host conformance.**
+
+| Area | Files | What it actually tests |
+|---|---|---|
+| `css/` | 100 | CSS **reftests** (caret-color, `user-select`/`user-modify`, `::selection`, white-space) — belong to the layout-compare suites, not the JS harness |
+| `wai-aria/` `core-aam/` `accname/` `accessibility/` `forced-colors-mode/` | ~19 | Accessibility / forced-colors behaviour |
+| `inert/` `virtual-keyboard/` `custom-elements/` `shadow-dom/` `mathml/` `dom/` | ~15 | Inertness, on-screen keyboard, components, shadow trees — `contenteditable` is incidental |
+| `contenteditable/` (top-level) | 4 | Ad-hoc grab-bag — see the §11.4 row |
+
+Even within the four included dirs, much is non-assertion-bearing and
+auto-skips: `editing/crashtests/` is crash-only (0 assertions, pass by
+surviving); ~15 of the 25 `html/editing/editing-0/` files are reftests; and
+23/25 `input-events/` tests need `test_driver` synthetic input the headless
+`js` runtime does not provide (Phase 8F). So the runner's effective
+assertion-bearing coverage today is the small testharness subset of focus +
+editing-0, plus the 137-case crash-survival net — the InputEvent surface
+stays dark until synthetic input lands.
 
 ---
 

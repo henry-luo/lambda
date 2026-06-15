@@ -12,6 +12,7 @@
 #include "../lib/tagged.hpp"
 #include <string.h>
 #include <strings.h>  // for strcasecmp
+#include <sys/stat.h>
 #include <cmath>
 
 // maximum grid span or repeat count to prevent excessive allocation
@@ -58,6 +59,155 @@ static bool css_custom_property_name_matches(const char* stored_name, const char
     const char* stored_body = strncmp(stored_name, "--", 2) == 0 ? stored_name + 2 : stored_name;
     const char* lookup_body = strncmp(lookup_name, "--", 2) == 0 ? lookup_name + 2 : lookup_name;
     return strcmp(stored_body, lookup_body) == 0;
+}
+
+static const char* css_font_family_name_from_value(const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+        return value->data.custom_property.name;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : NULL;
+    }
+    return NULL;
+}
+
+static bool css_font_face_source_is_available(const char* path) {
+    if (!path || !*path) return false;
+    if (strncmp(path, "data:", 5) == 0) return true;
+    if (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0) {
+        return false;
+    }
+
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
+    if (!desc) return false;
+    if (desc->src_entries && desc->src_count > 0) {
+        for (int i = 0; i < desc->src_count; i++) {
+            if (css_font_face_source_is_available(desc->src_entries[i].path)) {
+                return true;
+            }
+        }
+    }
+    return css_font_face_source_is_available(desc->src_local_path);
+}
+
+static bool css_font_family_is_available(LayoutContext* lycon, const char* family) {
+    if (!family) return false;
+    size_t flen = strlen(family);
+    if (str_ieq(family, flen, "serif", 5) ||
+        str_ieq(family, flen, "sans-serif", 10) ||
+        str_ieq(family, flen, "monospace", 9) ||
+        str_ieq(family, flen, "cursive", 7) ||
+        str_ieq(family, flen, "fantasy", 7) ||
+        str_ieq(family, flen, "system-ui", 9) ||
+        str_ieq(family, flen, "ui-serif", 8) ||
+        str_ieq(family, flen, "ui-sans-serif", 13) ||
+        str_ieq(family, flen, "ui-monospace", 12) ||
+        str_ieq(family, flen, "ui-rounded", 10) ||
+        str_ieq(family, flen, "-apple-system", 13) ||
+        str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
+        return true;
+    }
+    if (lycon && lycon->ui_context && lycon->ui_context->font_faces &&
+        lycon->ui_context->font_face_count > 0) {
+        for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
+            FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
+            if (desc && desc->family_name &&
+                str_ieq(desc->family_name, strlen(desc->family_name), family, flen) &&
+                css_font_face_descriptor_is_available(desc)) {
+                return true;
+            }
+        }
+    }
+    if (lycon && lycon->ui_context && lycon->ui_context->font_ctx) {
+        return font_family_exists(lycon->ui_context->font_ctx, family);
+    }
+    return false;
+}
+
+static const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* list,
+                                               size_t start, size_t end) {
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
+        !list || list->type != CSS_VALUE_TYPE_LIST || start >= end) {
+        return NULL;
+    }
+    size_t list_count = (size_t)list->data.list.count;
+    if (end > list_count) end = list_count;
+    if (start >= end) return NULL;
+
+    if (end == start + 1) {
+        return css_font_family_name_from_value(list->data.list.values[start]);
+    }
+
+    size_t total_len = 0;
+    size_t part_count = 0;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
+        if (!part || !*part) continue;
+        total_len += strlen(part);
+        part_count++;
+    }
+    if (part_count == 0) return NULL;
+    total_len += part_count - 1;
+
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    if (!combined) return NULL;
+    combined[0] = '\0';
+
+    size_t pos = 0;
+    bool first = true;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_name_from_value(list->data.list.values[i]);
+        if (!part || !*part) continue;
+        if (!first) {
+            pos = str_cat(combined, pos, total_len + 1, " ", 1);
+        }
+        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
+        first = false;
+    }
+    return combined;
+}
+
+static const char* css_select_font_shorthand_family(LayoutContext* lycon,
+                                                    const CssValue* shorthand_value,
+                                                    const CssValue* main_group,
+                                                    size_t family_start_index) {
+    const char* selected = NULL;
+    const char* fallback = NULL;
+
+    if (main_group && main_group->type == CSS_VALUE_TYPE_LIST) {
+        selected = css_join_font_family_values(
+            lycon, main_group, family_start_index, main_group->data.list.count);
+        fallback = selected;
+        if (selected) return selected;
+    }
+
+    if (shorthand_value && shorthand_value->type == CSS_VALUE_TYPE_LIST &&
+        shorthand_value->data.list.count >= 2 &&
+        shorthand_value->data.list.values[0] &&
+        shorthand_value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
+        size_t shorthand_count = (size_t)shorthand_value->data.list.count;
+        for (size_t i = 1; i < shorthand_count; i++) {
+            const CssValue* item = shorthand_value->data.list.values[i];
+            const char* family = NULL;
+            if (item && item->type == CSS_VALUE_TYPE_LIST) {
+                family = css_join_font_family_values(lycon, item, 0, item->data.list.count);
+            } else {
+                family = css_font_family_name_from_value(item);
+            }
+            if (!family) continue;
+            fallback = family;
+            if (css_font_family_is_available(lycon, family)) return family;
+        }
+    }
+
+    return fallback;
 }
 
 /**
@@ -3866,6 +4016,19 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // creating a CSS_PROPERTY_FONT_FAMILY declaration)
             // Apply for any parent with computed font->family (handles font shorthand case)
             if (prop_id == CSS_PROPERTY_FONT_FAMILY && ancestor && ancestor->font && ancestor->font->family) {
+                if (dom_elem->tag() == HTM_TAG_TEXTAREA) {
+                    CssDeclaration* own_font_family = style_tree_get_declaration(
+                        style_tree, CSS_PROPERTY_FONT_FAMILY);
+                    CssDeclaration* own_font = style_tree_get_declaration(
+                        style_tree, CSS_PROPERTY_FONT);
+                    ViewSpan* span = lam::view_require_element(lycon->view);
+                    bool has_ua_textarea_family = span && span->font && span->font->family &&
+                        str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
+                    if (!own_font_family && !own_font && has_ua_textarea_family) {
+                        log_debug("[FONT INHERIT] Textarea keeps UA monospace font-family");
+                        continue;
+                    }
+                }
                 log_debug("[FONT INHERIT] Found computed font-family in parent <%s>: %s",
                     ancestor->tag_name ? ancestor->tag_name : "?", ancestor->font->family);
                 ViewSpan* span = lam::view_require_element(lycon->view);
@@ -4559,6 +4722,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
 
+                const char* font_family_name = css_select_font_shorthand_family(
+                    lycon, value, effective_value, family_start_index);
+
                 // Apply font-size
                 if (size_value) {
                     float font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, size_value);
@@ -4589,21 +4755,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
 
                 // Apply font-family
-                if (family_value) {
-                    log_debug("[CSS] Font shorthand: applying font-family, value type=%d", family_value->type);
-                    if (family_value->type == CSS_VALUE_TYPE_STRING) {
-                        radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family_value->data.string));
-                        log_debug("[CSS] Font shorthand: set font-family from STRING = '%s'", span->font->family);
-                    } else if (family_value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        const CssEnumInfo* info = css_enum_info(family_value->data.keyword);
-                        if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
-                        else radiant_clear_font_family(span->font);
-                        log_debug("[CSS] Font shorthand: set font-family from KEYWORD = '%s'", span->font->family);
-                    } else if (family_value->type == CSS_VALUE_TYPE_CUSTOM && family_value->data.custom_property.name) {
-                        radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family_value->data.custom_property.name));
-                        log_debug("[CSS] Font shorthand: set font-family from CUSTOM = '%s'", span->font->family);
-                    }
-
+                if (font_family_name) {
+                    radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)font_family_name));
+                    log_debug("[CSS] Font shorthand: set font-family = '%s'", span->font->family);
+                } else if (family_value) {
+                    log_debug("[CSS] Font shorthand: family value present but no usable family name");
                 } else {
                     log_debug("[CSS] Font shorthand: NO font-family found!");
                 }
@@ -4801,43 +4957,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->font = alloc_font_prop(lycon);
             }
 
-            // Helper lambda to check if a font family exists in the database, @font-face, or is a generic family
-            auto is_font_available = [&](const char* family) -> bool {
-                if (!family) return false;
-                // Generic font families are always "available" (resolved later)
-                // Generic font families are always "available" (resolved later)
-                // CSS 2.1: font family names are case-insensitive
-                size_t flen = strlen(family);
-                if (str_ieq(family, flen, "serif", 5) ||
-                    str_ieq(family, flen, "sans-serif", 10) ||
-                    str_ieq(family, flen, "monospace", 9) ||
-                    str_ieq(family, flen, "cursive", 7) ||
-                    str_ieq(family, flen, "fantasy", 7) ||
-                    str_ieq(family, flen, "system-ui", 9) ||
-                    str_ieq(family, flen, "ui-serif", 8) ||
-                    str_ieq(family, flen, "ui-sans-serif", 13) ||
-                    str_ieq(family, flen, "ui-monospace", 12) ||
-                    str_ieq(family, flen, "ui-rounded", 10) ||
-                    str_ieq(family, flen, "-apple-system", 13) ||
-                    str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
-                    return true;
-                }
-                // Check @font-face descriptors first (custom fonts take precedence)
-                if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
-                    for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
-                        FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-                        if (desc && desc->family_name && str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
-                            return true;  // Found in @font-face declarations
-                        }
-                    }
-                }
-                // Check system font database
-                if (lycon->ui_context && lycon->ui_context->font_ctx) {
-                    return font_family_exists(lycon->ui_context->font_ctx, family);
-                }
-                return false;  // No database available, can't verify
-            };
-
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.string));
@@ -4878,7 +4997,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     if (family) {
                         // Check if this font is available
-                        if (is_font_available(family)) {
+                        if (css_font_family_is_available(lycon, family)) {
                             radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
                             log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
                             break;

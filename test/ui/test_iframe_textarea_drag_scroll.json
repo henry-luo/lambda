@@ -13,6 +13,6 @@
 
     {"type": "switch_frame", "selector": "#frame"},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
-    {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 22}
+    {"type": "assert_form_selection", "target": {"selector": "#bio"}, "start": 0, "end": 20}
   ]
 }

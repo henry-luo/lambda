@@ -1206,6 +1206,54 @@ static bool text_white_space_preserves_space_advance(ViewText* text) {
         white_space == CSS_VALUE_BREAK_SPACES;
 }
 
+static bool text_white_space_preserves_segment_break(ViewText* text) {
+    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
+    return white_space == CSS_VALUE_PRE ||
+        white_space == CSS_VALUE_PRE_WRAP ||
+        white_space == CSS_VALUE_BREAK_SPACES ||
+        white_space == CSS_VALUE_PRE_LINE;
+}
+
+static bool text_rect_is_single_segment_break(ViewText* text, TextRect* rect) {
+    if (!text || !rect || rect->length <= 0) return false;
+    unsigned char* data = text->text_data();
+    if (!data) return false;
+    unsigned char* start = data + rect->start_index;
+    if (rect->length == 1) {
+        return start[0] == '\n' || start[0] == '\r';
+    }
+    if (rect->length == 2) {
+        return start[0] == '\r' && start[1] == '\n';
+    }
+    return false;
+}
+
+static void print_text_rect_bounds_json(ViewText* text, StrBuf* buf, int indent,
+        TextRect* rect, TextRect* previous_rect) {
+    if (text_rect_is_single_segment_break(text, rect) &&
+            text_white_space_preserves_segment_break(text) && previous_rect &&
+            previous_rect->width > 0.01f) {
+        TextRect browser_rect = *rect;
+        CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
+        browser_rect.y = previous_rect->y;
+        browser_rect.height = previous_rect->height;
+        if (white_space == CSS_VALUE_PRE_WRAP) {
+            // Blink's Range.getClientRects() groups a standalone preserved newline
+            // with the previous pre-wrap line fragment.
+            browser_rect.x = previous_rect->x;
+            browser_rect.width = previous_rect->width;
+            browser_rect.hanging_trim = previous_rect->hanging_trim;
+        } else {
+            browser_rect.x = previous_rect->x + previous_rect->width;
+            browser_rect.width = 0.0f;
+            browser_rect.hanging_trim = 0.0f;
+        }
+        print_bounds_json(text, buf, indent, &browser_rect);
+        return;
+    }
+    print_bounds_json(text, buf, indent, rect);
+}
+
 static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
     // If text combination is disabled, just print this single text node
     if (!g_combine_text_nodes || text_white_space_preserves_space_advance(first_text)) {
@@ -1215,6 +1263,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         unsigned char* text_data = text->text_data();
 
         bool first_emitted = true;
+        TextRect* previous_emitted_rect = NULL;
         while (rect) {
             if (text_rect_is_collapsed_whitespace(text, rect)) {
                 rect = rect->next;
@@ -1253,12 +1302,13 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "\"layout\": {\n");
-            print_bounds_json(text, buf, indent, rect);
+            print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "}\n");
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "}");
 
+            previous_emitted_rect = rect;
             rect = rect->next;
         }
 
@@ -1295,6 +1345,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         ViewText* text = text_nodes[0].text;
         TextRect* rect = text->rect;
         bool first_emitted = true;
+        TextRect* previous_emitted_rect = NULL;
 
         while (rect) {
             // browsers do not expose DOMRects for fully-collapsed whitespace.
@@ -1353,13 +1404,14 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "\"layout\": {\n");
-            print_bounds_json(text, buf, indent, rect);
+            print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
             strbuf_append_char_n(buf, ' ', indent + 2);
             strbuf_append_str(buf, "}\n");
 
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "}");
 
+            previous_emitted_rect = rect;
             rect = rect->next;
         }
 
@@ -2537,6 +2589,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     TextRect* rect = text->rect;
     if (!rect) return;  // guard against null text rect (fuzzer-found)
     if (!text_has_visible_rect(text)) return;
+    TextRect* previous_emitted_rect = NULL;
 
     NEXT_RECT:
     strbuf_append_char_n(buf, ' ', indent);
@@ -2579,7 +2632,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(text, buf, indent, rect);
+    print_text_rect_bounds_json(text, buf, indent, rect, previous_emitted_rect);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
@@ -2587,6 +2640,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
 
+    previous_emitted_rect = rect;
     rect = rect->next;
     if (rect) { strbuf_append_str(buf, ",\n");  goto NEXT_RECT; }
 }

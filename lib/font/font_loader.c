@@ -90,6 +90,15 @@ static FontHandle* create_handle(FontContext* ctx,
     font_backend_create(handle, memory_buffer, memory_buffer_size,
                         face_index, weight, slant);
 
+    // read actual font weight from OS/2 table for synthetic bold detection
+    // and macOS CoreText advance override decisions.
+    {
+        Os2Table* os2t = font_tables_get_os2(handle->tables);
+        handle->actual_font_weight = (os2t && os2t->weight_class > 0)
+            ? (int)os2t->weight_class
+            : (int)weight;
+    }
+
     return handle;
 }
 #elif defined(LAMBDA_HAS_DWRITE)

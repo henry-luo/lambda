@@ -779,6 +779,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     float start_edge_pending_base = 0.0f;
     bool had_block_child = false;
     bool visible_inline_after_last_block = false;
+    bool visible_inline_before_first_block = false;
     bool had_block_child_before = false;  // tracks if a block was laid out before the current one
     DomElement* last_block_child_elem = nullptr;  // last block child for bottom margin collapse
 
@@ -921,7 +922,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                         float inline_pt = span->bound ? span->bound->padding.top : 0;
 
                         // Top margin collapse: first block, no border/padding barrier
-                        if (!had_block_child_before && cont_bt == 0 && cont_pt == 0 &&
+                        if (!had_block_child_before && !visible_inline_before_first_block &&
+                            cont_bt == 0 && cont_pt == 0 &&
                             inline_bt == 0 && inline_pt == 0 &&
                             child_block->bound->margin.top != 0) {
                             float child_mt = child_block->bound->margin.top;
@@ -974,6 +976,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 lycon->line.is_line_start = (current_advance_x == lycon->line.left);
                 lycon->font = saved_font;
                 lycon->line.vertical_align = saved_vertical_align;
+                update_line_for_bfc_floats(lycon);
 
                 log_debug("%s block-in-inline: starting anonymous inline sequence at advance_y=%f, advance_x=%f", inline_elem->source_loc(),
                          lycon->block.advance_y, lycon->line.advance_x);
@@ -982,6 +985,9 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             log_debug("%s block-in-inline: laying out inline/text child %s at advance_y=%f", inline_elem->source_loc(),
                      child->node_name(), lycon->block.advance_y);
             layout_flow_node(lycon, child);
+            if (!had_block_child && view_has_visible_content(static_cast<View*>(child))) {
+                visible_inline_before_first_block = true;
+            }
             if (had_block_child && view_has_visible_content(static_cast<View*>(child))) {
                 visible_inline_after_last_block = true;
             }
@@ -993,7 +999,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     // CSS 2.1 §9.2.1.1 + §8.3.1: Bottom margin collapse for block-in-inline.
     // After all children are processed, if the last block child has a bottom
     // margin and the container has no bottom border/padding, collapse it.
-    if (last_block_child_elem && !in_inline_sequence) {
+    if (last_block_child_elem && !visible_inline_after_last_block &&
+        (!in_inline_sequence || lycon->line.is_line_start)) {
         ViewBlock* last_blk = layout_inline_as_block_view(last_block_child_elem);
         DomNode* container_node = inline_elem->parent;
         if (last_blk && last_blk->bound && container_node &&

@@ -59,6 +59,44 @@ static void apply_browser_metric_family_alias(FontContext* ctx, FontHandle* hand
     }
 }
 
+static FontHandle* font_resolve_ua_default_family(FontContext* ctx,
+                                                  const FontStyleDesc* style) {
+    if (!ctx || !style) return NULL;
+
+    const char** default_fonts = font_get_generic_family("serif");
+    if (!default_fonts) return NULL;
+
+    float pixel_ratio = ctx->config.pixel_ratio;
+    float physical_size = style->size_px * pixel_ratio;
+
+    for (int i = 0; default_fonts[i]; i++) {
+        FontDatabaseCriteria criteria;
+        memset(&criteria, 0, sizeof(criteria));
+        strncpy(criteria.family_name, default_fonts[i], sizeof(criteria.family_name) - 1);
+        criteria.weight = (int)style->weight;
+        criteria.style = (style->slant == FONT_SLANT_ITALIC) ? 1 : 0;
+
+        FontDatabaseResult result = font_database_find_best_match_internal(
+            ctx->database, &criteria);
+        if (result.font && result.font->file_path &&
+            (result.match_score >= 0.5f || result.exact_family_match)) {
+            int face_index = result.font->is_collection ? result.font->collection_index : 0;
+            FontHandle* handle = font_load_face_internal(ctx, result.font->file_path,
+                                                          face_index,
+                                                          style->size_px, physical_size,
+                                                          style->weight, style->slant);
+            if (handle) {
+                apply_browser_metric_family_alias(ctx, handle, default_fonts[i]);
+                log_info("font_resolve: unresolved family '%s' -> UA default '%s'",
+                         style->family, default_fonts[i]);
+                return handle;
+            }
+        }
+    }
+
+    return NULL;
+}
+
 // ============================================================================
 // Cache lookup
 // ============================================================================
@@ -341,7 +379,15 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
         }
     }
 
-    // 7. fallback font chain
+    // 7. css font matching fallback: use the UA default font family before
+    // walking the broad glyph fallback chain.
+    handle = font_resolve_ua_default_family(ctx, style);
+    if (handle) {
+        font_cache_insert(ctx, key, handle);
+        return handle;
+    }
+
+    // 8. fallback font chain
     handle = font_resolve_fallback(ctx, style);
     if (handle) {
         log_info("font_resolve: using fallback font for '%s'", style->family);

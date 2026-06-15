@@ -102,6 +102,7 @@ static const struct {
     {"Helvetica Neue",    {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
     {"Courier New",       {"Liberation Mono", "DejaVu Sans Mono", "Nimbus Mono PS", NULL}},
     {"Courier",           {"Liberation Mono", "DejaVu Sans Mono", "Nimbus Mono PS", NULL}},
+    {"Lucida Console",    {"Liberation Mono", "DejaVu Sans Mono", "Courier New", NULL}},
     {"Georgia",           {"Liberation Serif", "DejaVu Serif", NULL, NULL}},
     {"Verdana",           {"Liberation Sans", "DejaVu Sans", NULL, NULL}},
     {"Trebuchet MS",      {"Liberation Sans", "DejaVu Sans", NULL, NULL}},

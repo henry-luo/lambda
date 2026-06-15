@@ -111,6 +111,11 @@ bool utf_is_hangul(uint32_t cp);
 bool utf_is_emoji_for_zwj(uint32_t cp);
 
 /**
+ * codepoints with default emoji presentation. (Unicode UTS #51)
+ */
+bool utf_is_emoji_presentation_default(uint32_t cp);
+
+/**
  * Codepoints that can serve as the base (left side) of a ZWJ emoji
  * composition sequence. (Unicode UTS #51, emoji-zwj-sequences.txt)
  */

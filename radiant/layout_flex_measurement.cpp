@@ -1764,15 +1764,16 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 log_debug("calculate_item_intrinsic_sizes: image intrinsic size=%.1fx%.1f (source=%.1fx%.1f)",
                           min_width, min_height, w, h);
             } else {
-                // Failed to load image - use placeholder size
+                // Failed image data has no natural dimensions; use the same
+                // missing-image indicator size as the normal <img> layout path.
                 log_debug("calculate_item_intrinsic_sizes: failed to load image %s", src_value);
-                min_width = max_width = 40;
-                min_height = max_height = 30;
+                min_width = max_width = 16.0f;
+                min_height = max_height = 16.0f;
             }
         } else {
-            // No src attribute - use placeholder
-            min_width = max_width = 40;
-            min_height = max_height = 30;
+            // No current request: <img> has no intrinsic dimensions.
+            min_width = max_width = 0.0f;
+            min_height = max_height = 0.0f;
         }
 
         // Store computed intrinsic sizes

@@ -5,6 +5,7 @@ extern "C" bool js_dom_item_is_range(Item item);
 extern "C" bool js_dom_item_is_selection(Item item);
 extern "C" Item js_dom_range_to_string_value(Item item);
 extern "C" Item js_dom_selection_to_string_value(Item item);
+extern "C" void* js_dom_unwrap_element(Item item);
 extern "C" bool js_is_proxy(Item obj);
 
 // =============================================================================
@@ -1524,6 +1525,12 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 
     default:
+        if (left_type == LMD_TYPE_MAP) {
+            void* left_dom = js_dom_unwrap_element(left);
+            void* right_dom = js_dom_unwrap_element(right);
+            if (left_dom || right_dom)
+                return (Item){.item = b2it(left_dom && left_dom == right_dom)};
+        }
         // Object/function equality is identity equality in JavaScript.
         return (Item){.item = b2it(left.item == right.item)};
     }
