@@ -423,6 +423,7 @@ Mined into our own model tests + UI-automation, never run as WPT:
 
 | Bucket | Why skipped |
 |---|---|
+| `contenteditable/` (top-level dir: `plaintext-only.html`, `select-text-change-crash.html`, `synthetic-height.html`/`-ref`) | Ad-hoc grab-bag, **not** a structured suite — three unrelated WPT test *types* with no coherent editing-host coverage: (1) one IDL-reflection testharness test (`plaintext-only.html`, 2 asserts on `isContentEditable`/`contentEditable === "plaintext-only"`) — already covered by the CE-1 IDL tests authored against §4.1; (2) one crash regression test (`select-text-change-crash.html`, `outerText` on an `<option>` in a `<select contenteditable>` — passes by not crashing, no asserts); (3) one layout **reftest** (`synthetic-height.html` ↔ `-ref`, visual-match that empty editable blocks get a synthesized line height) which needs the render-compare path, not the JS harness. Nothing to gain by wiring it up; the only in-scope assertion (plaintext-only reflection) is covered elsewhere. Contrast `selection/contenteditable/` (§11.1 Tier A), which *is* a structured selection-in-editing-host suite. |
 | `editing/run/*` (Tier B) | execCommand corpus — we reject the API (§9); kept as gauge only. |
 | `editing/manual/*` | Manual gestures; out of automatable scope. |
 | `editing/plaintext-only/*` that depends on legacy execCommand semantics | Replaced by `inputType` filtering tests we author against §4.1's `plaintext-only` mode. |

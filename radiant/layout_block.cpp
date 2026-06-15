@@ -4396,6 +4396,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.effective_right = inner_right;
     lycon->line.has_float_intrusion = false;
     lycon->line.advance_x = inner_left;
+    lycon->line.inline_start_edge_pending = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
     if (block->blk) lycon->block.text_align_last = block->blk->text_align_last;
     // CSS 2.1 §9.2.1: Propagate direction to block context
@@ -4605,13 +4606,20 @@ static void shift_current_line_view_for_float(View* view, float offset, float li
 }
 
 static void shift_current_line_content_before_float(ViewBlock* float_block, float offset, float line_y) {
-    DomNode* node = static_cast<DomNode*>(float_block)->prev_sibling;
-    while (node) {
-        View* view = static_cast<View*>(node);
-        if (view->view_type != RDT_VIEW_NONE) {
-            shift_current_line_view_for_float(view, offset, line_y);
+    DomNode* cursor = static_cast<DomNode*>(float_block);
+    while (cursor) {
+        DomNode* node = cursor->prev_sibling;
+        while (node) {
+            View* view = static_cast<View*>(node);
+            if (view->view_type != RDT_VIEW_NONE) {
+                shift_current_line_view_for_float(view, offset, line_y);
+            }
+            node = node->prev_sibling;
         }
-        node = node->prev_sibling;
+
+        DomNode* parent = cursor->parent;
+        if (!parent || !parent->is_element() || parent->view_type != RDT_VIEW_INLINE) break;
+        cursor = parent;
     }
 }
 
@@ -4619,15 +4627,28 @@ static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Li
                                                       BlockContext* bfc, ViewBlock* float_block) {
     if (!pa_block || !pa_line || !bfc || !float_block) return;
     if (pa_line->is_line_start || !pa_line->start_view) return;
-    if (!float_block->position || float_block->position->float_prop != CSS_VALUE_LEFT) return;
+    if (!float_block->position) return;
+    CssEnum float_side = float_block->position->float_prop;
+    if (float_side != CSS_VALUE_LEFT && float_side != CSS_VALUE_RIGHT) return;
 
     float line_height = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
     float query_y = pa_block->bfc_offset_y + pa_block->advance_y;
     FloatAvailableSpace space = block_context_space_at_y(bfc, query_y, line_height);
-    if (!space.has_left_float) return;
+    if (float_side == CSS_VALUE_LEFT && !space.has_left_float) return;
+    if (float_side == CSS_VALUE_RIGHT && !space.has_right_float) return;
 
     float new_effective_left = max(space.left - pa_block->bfc_offset_x, pa_line->left);
     float new_effective_right = min(space.right - pa_block->bfc_offset_x, pa_line->right);
+    if (float_side == CSS_VALUE_RIGHT) {
+        if (new_effective_right >= pa_line->effective_right - 0.01f) return;
+        pa_line->effective_left = new_effective_left;
+        pa_line->effective_right = new_effective_right;
+        pa_line->has_float_intrusion = true;
+        log_debug("%s same-line right float: effective_right %.1f",
+            float_block->source_loc(), new_effective_right);
+        return;
+    }
+
     if (new_effective_left <= pa_line->effective_left + 0.01f) return;
 
     float old_effective_left = pa_line->has_float_intrusion ? pa_line->effective_left : pa_line->left;
@@ -6133,6 +6154,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block);
+    // Inline children can be moved after their own bounds were computed, for
+    // example when a later same-line float forces earlier line fragments to
+    // reflow around it. Recompute DOMRect-style inline bounds from the final
+    // child positions before block sizing is finalized.
+    recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
 
     // css 2.1 §10.3.2: SVG is a replaced element. Its used width/height
     // come from explicit CSS dimensions or intrinsic SVG attributes, not from

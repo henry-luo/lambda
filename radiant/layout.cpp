@@ -1400,11 +1400,26 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 
+static bool line_align_view_is_out_of_flow(View* view) {
+    if (!view) return false;
+    DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(static_cast<DomNode*>(view));
+    if (!elem || !elem->position) return false;
+    return elem->position->position == CSS_VALUE_ABSOLUTE ||
+        elem->position->position == CSS_VALUE_FIXED ||
+        elem->position->float_prop == CSS_VALUE_LEFT ||
+        elem->position->float_prop == CSS_VALUE_RIGHT;
+}
+
 // CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
 // on a previous line but has continuation content on the current line.
 static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* span) {
+    if (line_align_view_is_out_of_flow(static_cast<View*>(span))) return;
     View* child = static_cast<View*>(span->first_child);
     while (child) {
+        if (line_align_view_is_out_of_flow(child)) {
+            child = child->next();
+            continue;
+        }
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(child);
             TextRect* rect = text->rect;
@@ -1427,10 +1442,13 @@ static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
         log_debug("view line align: %d", view->view_type);
+        if (line_align_view_is_out_of_flow(view)) {
+            view = view->next();
+            continue;
+        }
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
-            text->x += offset;
             TextRect* rect = text->rect;
             while (rect) {
                 rect->x += offset;
@@ -1450,6 +1468,10 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 static int count_spaces_in_view(View* view, float line_y) {
     int count = 0;
     while (view) {
+        if (line_align_view_is_out_of_flow(view)) {
+            view = view->next();
+            continue;
+        }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             const char* text_data = (const char*)text->text_data();
@@ -1484,6 +1506,10 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                                     float line_y, float cumulative_offset,
                                     View** last_view, TextRect** last_rect) {
     while (view) {
+        if (line_align_view_is_out_of_flow(view)) {
+            view = view->next();
+            continue;
+        }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
             const char* text_data = (const char*)text->text_data();

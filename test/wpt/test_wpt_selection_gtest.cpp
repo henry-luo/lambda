@@ -10,11 +10,18 @@
  * Each test file produces PASS/FAIL counts in the output.
  * Individual failing test cases are reported as GTest failures.
  *
- * NOTE: Lambda's JS DOM does not yet implement the Selection / Range API
- * (window.getSelection(), document.createRange(), Selection.prototype.*).
- * Most tests will currently fail with ReferenceError at the first call —
- * that is expected. This test exists as a tracking baseline so progress
- * can be measured incrementally as the Selection API is implemented.
+ * NOTE: Lambda's JS DOM now implements the Selection / Range API
+ * (window.getSelection(), document.createRange(), Selection.prototype.*),
+ * so these run as genuine conformance tests — a FAIL is a real defect or
+ * regression, not a placeholder for a missing API. Tests that need
+ * subsystems Lambda does not implement (Shadow DOM, <canvas>, <video>) or
+ * synthetic testdriver input it does not yet expose are listed in
+ * SKIP_SUBSTRINGS below and reported as SKIPPED.
+ *
+ * Discovery is recursive: it walks ref/wpt/selection and every
+ * subdirectory. Nested cases are named by their path relative to that root
+ * (e.g. "contenteditable/collapse"), and a whole subtree can be excluded
+ * via SKIP_SUBSTRINGS (e.g. "shadow" skips the shadow-dom subtree).
  */
 
 #include <gtest/gtest.h>
@@ -81,11 +88,14 @@ static const char* SKIP_SUBSTRINGS[] = {
     // button that runs the assertions. There is no automated path: the
     // harness never calls done(), so the test cannot complete in headless.
     "dir-manual",
-    // Require WPT testdriver synthetic input (mouse drag / keyboard
-    // dispatch) that Lambda's headless `js` runtime does not yet expose.
-    // Tracked under Phase 8F; see vibe/radiant/Radiant_Design_Selection2.md.
+    // Require WPT testdriver synthetic input (mouse drag / button down-up /
+    // keyboard dispatch via test_driver.Actions()) that Lambda's headless
+    // `js` runtime does not yet expose. Tracked under Phase 8F; see
+    // vibe/radiant/Radiant_Design_Selection2.md.
     "drag-selection-extend-to-user-select-none",
     "onselectstart-on-key-in-contenteditable",
+    "modifying-selection-with-primary-mouse-button",
+    "modifying-selection-with-non-primary-mouse-button",
 };
 static const int SKIP_COUNT = sizeof(SKIP_SUBSTRINGS) / sizeof(SKIP_SUBSTRINGS[0]);
 
@@ -168,15 +178,31 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
             // resource-server paths (testharness.js etc.) covered by the shim.
             // Exception: a small allowlist of known WPT helper scripts is
             // resolved against ref/wpt/ so tests that include e.g.
-            // /editing/include/editor-test-utils.js still get its definitions.
+            // editing/include/editor-test-utils.js (or tests.js) still get
+            // their definitions. These helpers are referenced either
+            // absolutely (/editing/include/foo.js) or, from a subdirectory,
+            // relatively (../../editing/include/foo.js) — match on suffix so
+            // both forms resolve.
             std::string body;
             std::string src_label = src;
             if (src[0] != '/' && src.compare(0, 3, "../") != 0 &&
                 src.find("://") == std::string::npos) {
                 std::string full = html_dir + "/" + src;
                 body = read_file_contents(full.c_str());
-            } else if (src == "/editing/include/editor-test-utils.js") {
-                body = read_file_contents("ref/wpt/editing/include/editor-test-utils.js");
+            } else {
+                static const char* kEditingHelpers[] = {
+                    "editing/include/editor-test-utils.js",
+                    "editing/include/tests.js",
+                };
+                for (const char* helper : kEditingHelpers) {
+                    size_t hlen = strlen(helper);
+                    if (src.size() >= hlen &&
+                        src.compare(src.size() - hlen, hlen, helper) == 0) {
+                        body = read_file_contents(
+                            (std::string("ref/wpt/") + helper).c_str());
+                        break;
+                    }
+                }
             }
             if (!body.empty()) {
                 result += "// ---- inlined " + src_label + " ----\n";
@@ -361,54 +387,59 @@ static std::string now_timestamp() {
     return std::string(buf);
 }
 
-static std::vector<WptSelectionParam> discover_wpt_selection_tests() {
-    std::vector<WptSelectionParam> params;
-
+// Recursively scan `dir` for *.html test files. `rel_prefix` is the path
+// relative to WPT_DIR (empty at the top level) and becomes part of the test
+// name, so nested cases (e.g. contenteditable/collapse) stay unique and
+// identifiable. Subdirectories are traversed; reference files (*-ref.html)
+// are dropped, and SKIP_SUBSTRINGS is matched against the relative path so a
+// whole subtree (e.g. shadow-dom/) can be skipped by directory name.
+static void scan_selection_dir(const std::string& dir,
+                               const std::string& rel_prefix,
+                               std::vector<WptSelectionParam>& params) {
 #ifdef _WIN32
-    char pattern[512];
-    snprintf(pattern, sizeof(pattern), "%s\\*.html", WPT_DIR);
+    std::string pattern = dir + "\\*";
     struct _finddata_t fd;
-    intptr_t handle = _findfirst(pattern, &fd);
-    if (handle == -1) return params;
+    intptr_t handle = _findfirst(pattern.c_str(), &fd);
+    if (handle == -1) return;
     do {
-        if (fd.attrib & _A_SUBDIR) continue;
         const char* name = fd.name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (fd.attrib & _A_SUBDIR) {
+            scan_selection_dir(dir + "/" + name, rel, params);
+            continue;
+        }
 #else
-    DIR* dir = opendir(WPT_DIR);
-    if (!dir) return params;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) continue;
+    while ((entry = readdir(d)) != NULL) {
         const char* name = entry->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (entry->d_type == DT_DIR) {
+            scan_selection_dir(dir + "/" + name, rel, params);
+            continue;
+        }
 #endif
-
         size_t len = strlen(name);
-        if (len < 6 || strcmp(name + len - 5, ".html") != 0) {
-#ifdef _WIN32
-            continue;
-#else
-            continue;
-#endif
-        }
+        if (len < 6 || strcmp(name + len - 5, ".html") != 0) continue;
 
-        std::string base(name, len - 5);
+        std::string rel_base = rel.substr(0, rel.size() - 5);
 
-        // Skip reference files
-        if (base.size() > 4 && base.substr(base.size() - 4) == "-ref") {
-#ifdef _WIN32
-            continue;
-#else
-            continue;
-#endif
-        }
+        // skip reference files
+        if (rel_base.size() > 4 &&
+            rel_base.substr(rel_base.size() - 4) == "-ref") continue;
 
         WptSelectionParam p;
-        p.html_path = std::string(WPT_DIR) + "/" + name;
-        p.test_name = base;
+        p.html_path = dir + "/" + name;
+        p.test_name = rel_base;
         for (auto& c : p.test_name) {
             if (!isalnum((unsigned char)c)) c = '_';
         }
-        p.skip = should_skip(base);
+        p.skip = should_skip(rel_base);
         params.push_back(p);
 
 #ifdef _WIN32
@@ -416,8 +447,13 @@ static std::vector<WptSelectionParam> discover_wpt_selection_tests() {
     _findclose(handle);
 #else
     }
-    closedir(dir);
+    closedir(d);
 #endif
+}
+
+static std::vector<WptSelectionParam> discover_wpt_selection_tests() {
+    std::vector<WptSelectionParam> params;
+    scan_selection_dir(WPT_DIR, "", params);
 
     std::sort(params.begin(), params.end(),
               [](const WptSelectionParam& a, const WptSelectionParam& b) {
