@@ -941,8 +941,7 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
             ? lycon->ui_context->pixel_ratio : 1.0f;
         for (int ti = 0; ti < tt_count; ti++) {
             uint32_t cp = (ti == 0) ? codepoint : tt_out[ti];
-            if (cp == 0 || cp == 0x00AD || cp == 0x200B || cp == 0xFEFF ||
-                cp == 0x200C || cp == 0x200D) {
+            if (cp == 0 || text_codepoint_has_zero_advance(cp)) {
                 continue;
             }
             LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &sd, cp, false);
@@ -1178,6 +1177,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             codepoint = tt_out[0];
             // Add advance widths for extra codepoints from full case mapping
             for (int tti = 1; tti < tt_count; tti++) {
+                if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
                 if (extra_glyph) {
@@ -1213,6 +1213,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         prev_is_zwj_base = is_zwj_composition_base(codepoint);
+
+        if (text_codepoint_has_zero_advance(codepoint)) {
+            i += bytes;
+            continue;
+        }
 
         // CSS font-variant: small-caps — convert lowercase to uppercase glyphs
         // rendered at ~0.7× size (CSS 2.1 §15.8, matching layout_text.cpp)
@@ -1430,6 +1435,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
             codepoint = tt_out[0];
             // Add advance widths for extra codepoints from full case mapping
             for (int tti = 1; tti < tt_count; tti++) {
+                if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
                 if (extra_glyph) {
@@ -1452,6 +1458,10 @@ float compute_text_height_at_width(LayoutContext* lycon,
         is_word_start = false;
 
         float advance = 0;
+        if (text_codepoint_has_zero_advance(codepoint)) {
+            i += bytes;
+            continue;
+        }
         if (has_font) {
             uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
             if (glyph_index) {

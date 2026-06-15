@@ -12,6 +12,7 @@
 #include "../lib/tagged.hpp"
 #include <string.h>
 #include <strings.h>  // for strcasecmp
+#include <sys/stat.h>
 #include <cmath>
 
 // maximum grid span or repeat count to prevent excessive allocation
@@ -73,6 +74,29 @@ static const char* css_font_family_name_from_value(const CssValue* value) {
     return NULL;
 }
 
+static bool css_font_face_source_is_available(const char* path) {
+    if (!path || !*path) return false;
+    if (strncmp(path, "data:", 5) == 0) return true;
+    if (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0) {
+        return false;
+    }
+
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
+    if (!desc) return false;
+    if (desc->src_entries && desc->src_count > 0) {
+        for (int i = 0; i < desc->src_count; i++) {
+            if (css_font_face_source_is_available(desc->src_entries[i].path)) {
+                return true;
+            }
+        }
+    }
+    return css_font_face_source_is_available(desc->src_local_path);
+}
+
 static bool css_font_family_is_available(LayoutContext* lycon, const char* family) {
     if (!family) return false;
     size_t flen = strlen(family);
@@ -95,7 +119,8 @@ static bool css_font_family_is_available(LayoutContext* lycon, const char* famil
         for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
             FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
             if (desc && desc->family_name &&
-                str_ieq(desc->family_name, strlen(desc->family_name), family, flen)) {
+                str_ieq(desc->family_name, strlen(desc->family_name), family, flen) &&
+                css_font_face_descriptor_is_available(desc)) {
                 return true;
             }
         }
@@ -4919,43 +4944,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->font = alloc_font_prop(lycon);
             }
 
-            // Helper lambda to check if a font family exists in the database, @font-face, or is a generic family
-            auto is_font_available = [&](const char* family) -> bool {
-                if (!family) return false;
-                // Generic font families are always "available" (resolved later)
-                // Generic font families are always "available" (resolved later)
-                // CSS 2.1: font family names are case-insensitive
-                size_t flen = strlen(family);
-                if (str_ieq(family, flen, "serif", 5) ||
-                    str_ieq(family, flen, "sans-serif", 10) ||
-                    str_ieq(family, flen, "monospace", 9) ||
-                    str_ieq(family, flen, "cursive", 7) ||
-                    str_ieq(family, flen, "fantasy", 7) ||
-                    str_ieq(family, flen, "system-ui", 9) ||
-                    str_ieq(family, flen, "ui-serif", 8) ||
-                    str_ieq(family, flen, "ui-sans-serif", 13) ||
-                    str_ieq(family, flen, "ui-monospace", 12) ||
-                    str_ieq(family, flen, "ui-rounded", 10) ||
-                    str_ieq(family, flen, "-apple-system", 13) ||
-                    str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
-                    return true;
-                }
-                // Check @font-face descriptors first (custom fonts take precedence)
-                if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
-                    for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
-                        FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-                        if (desc && desc->family_name && str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
-                            return true;  // Found in @font-face declarations
-                        }
-                    }
-                }
-                // Check system font database
-                if (lycon->ui_context && lycon->ui_context->font_ctx) {
-                    return font_family_exists(lycon->ui_context->font_ctx, family);
-                }
-                return false;  // No database available, can't verify
-            };
-
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.string));
@@ -4996,7 +4984,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     if (family) {
                         // Check if this font is available
-                        if (is_font_available(family)) {
+                        if (css_font_family_is_available(lycon, family)) {
                             radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
                             log_debug("[CSS] Font family from list[%zu]: %s (available)", i, family);
                             break;

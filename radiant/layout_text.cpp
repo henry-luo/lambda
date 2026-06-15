@@ -284,6 +284,51 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
     return out[0];
 }
 
+bool text_codepoint_has_zero_advance(uint32_t codepoint) {
+    if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return true;  // emoji modifiers
+    if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return true;    // variation selectors
+    if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return true;  // variation selectors
+
+    switch (codepoint) {
+        case 0x00AD:  // soft hyphen
+        case 0x034F:  // combining grapheme joiner
+        case 0x061C:  // Arabic letter mark
+        case 0x180E:  // Mongolian vowel separator
+        case 0x200B:  // zero width space
+        case 0x200C:  // zero width non-joiner
+        case 0x200D:  // zero width joiner
+        case 0x200E:  // left-to-right mark
+        case 0x200F:  // right-to-left mark
+        case 0x202A:  // directional formatting controls
+        case 0x202B:
+        case 0x202C:
+        case 0x202D:
+        case 0x202E:
+        case 0x2060:  // word joiner
+        case 0x2061:  // function application
+        case 0x2062:  // invisible times
+        case 0x2063:  // invisible separator
+        case 0x2064:  // invisible plus
+        case 0x2066:  // isolate controls
+        case 0x2067:
+        case 0x2068:
+        case 0x2069:
+        case 0x206A:  // inhibit symmetric swapping
+        case 0x206B:
+        case 0x206C:
+        case 0x206D:
+        case 0x206E:
+        case 0x206F:
+        case 0xFEFF:  // zero width no-break space / BOM
+            return true;
+        default:
+            break;
+    }
+
+    utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)codepoint);
+    return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_ME;
+}
+
 /**
  * Get text-transform property from block.
  * @param blk BlockProp structure (can be NULL)
@@ -854,24 +899,9 @@ static inline bool is_zwj_composition_base(uint32_t cp) {
  * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
  */
 static inline float get_unicode_space_width_em(uint32_t codepoint) {
-    // Emoji skin tone modifiers (U+1F3FB-U+1F3FF) modify the preceding emoji
-    // and have zero advance in composed sequences (handled by font shaping)
-    if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return -1.0f;
-
-    // Variation Selectors: VS1-VS16 (U+FE00-U+FE0F) and VS17-VS256 (U+E0100-U+E01EF)
-    // are default-ignorable characters with zero advance width
-    if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return -1.0f;
-    if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return -1.0f;
+    if (text_codepoint_has_zero_advance(codepoint)) return -1.0f;
 
     switch (codepoint) {
-        // Zero-width characters (return negative to distinguish from "use font width")
-        case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
-        case 0x200C: return -1.0f;  // Zero Width Non-Joiner (ZWNJ)
-        case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
-        case 0x00AD: return -1.0f;  // Soft Hyphen (SHY) - invisible unless line breaks here
-        case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
-        case 0x20E3: return -1.0f;  // Combining Enclosing Keycap
-
         // Unicode spaces with defined widths
         case 0x2000: return 0.5f;   // EN QUAD - width of 'n' (nominally 1/2 em)
         case 0x2001: return 1.0f;   // EM QUAD - width of 'm' (nominally 1 em)
@@ -2055,6 +2085,7 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
                 width += (ginfo.id != 0) ? ginfo.advance_x : lycon->font.current_font_size;
                 // Add advance for extra codepoints from full case mapping
                 for (int tti = 1; tti < tt_count; tti++) {
+                    if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
                     GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
                     if (eg.id != 0) width += eg.advance_x;
                 }
@@ -2072,6 +2103,7 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         codepoint = tt_out[0];
         // Add advance widths for extra codepoints from full case mapping
         for (int tti = 1; tti < tt_count; tti++) {
+            if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
             GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
             if (eg.id != 0) width += eg.advance_x + lycon->font.style->letter_spacing;
         }
@@ -2087,7 +2119,8 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         float char_width;
         float unicode_space_em = get_unicode_space_width_em(codepoint);
         if (unicode_space_em < 0.0f) {
-            char_width = 0.0f;  // zero-width character
+            str += char_bytes;
+            continue;
         } else if (unicode_space_em > 0.0f) {
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
             char_width = unicode_space_em * lycon->font.current_font_size * sc_scale;
@@ -2159,6 +2192,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         codepoint = tt_out[0];
         // Add advance widths for extra codepoints from full case mapping
         for (int tti = 1; tti < tt_count; tti++) {
+            if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
             text_width += measure_current_glyph_advance(lycon, tt_out[tti], trim_cjk_spacing) + lycon->font.style->letter_spacing;
         }
         }
@@ -2184,7 +2218,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         if (unicode_space_em < 0.0f) {
             // Zero-width character — U+200B (ZWSP) is a break opportunity like space
             if (codepoint == 0x200B) return RDT_LINE_NOT_FILLED;
-            // Other zero-width chars (BOM, ZWJ, ZWNJ): skip with no width
+            // Other zero-width chars (BOM, ZWJ, ZWNJ, combining marks): skip with no width
+            str += char_bytes;
+            continue;
         } else if (unicode_space_em > 0.0f) {
             // Use Unicode-specified width (fraction of em)
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
@@ -3059,6 +3095,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 for (int ti = 1; ti < tt_count; ti++) {
                     uint32_t extra_cp = tt_out[ti];
                     if (extra_cp == 0) continue;
+                    if (text_codepoint_has_zero_advance(extra_cp)) continue;
                     LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd_extra, extra_cp, false);
                     float extra_wd = extra_glyph ? (extra_glyph->advance_x / pixel_ratio) : 0;
                     if (extra_glyph && trim_cjk_spacing) {
