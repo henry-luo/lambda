@@ -1979,6 +1979,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        radiant_retain_font_family(block->font, lam::GcPtr<char>((char*)"monospace"));
+        block->font->font_size = 13.333333f;
+        block->font->font_size_from_medium = true;
+        block->font->font_style = CSS_VALUE_NORMAL;
+        block->font->font_weight = CSS_VALUE_NORMAL;
+        block->font->font_weight_numeric = 400;
         // Note: textarea uses content-box (CSS default), same as Chrome UA
         // Intrinsic size: Chrome default 182x36 border-box (20 cols, 2 rows)
         block->form->intrinsic_width = 182.0f;

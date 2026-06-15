@@ -3608,6 +3608,15 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             lycon->font.style = span->font;
             lycon->font.current_font_size = span->font->font_size;
         }
+    } else if (dom_elem->tag() == HTM_TAG_TEXTAREA) {
+        ViewSpan* span = lam::view_require_element(lycon->view);
+        if (span && span->font && span->font->font_size > 0) {
+            lycon->font.style = span->font;
+            lycon->font.current_font_size = span->font->font_size;
+            if (span->font->family && lycon->ui_context) {
+                setup_font(lycon->ui_context, &lycon->font, span->font);
+            }
+        }
     }
 
     // Set up font face if a font-family was specified for this element
@@ -3834,8 +3843,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 if (tag == HTM_TAG_INPUT || tag == HTM_TAG_BUTTON ||
                     tag == HTM_TAG_SELECT || tag == HTM_TAG_TEXTAREA) {
                     ViewSpan* span = lam::view_require_element(lycon->view);
+                    bool is_textarea_ua_medium = tag == HTM_TAG_TEXTAREA &&
+                        span->font && span->font->family &&
+                        str_ieq_const(span->font->family, strlen(span->font->family), "monospace") &&
+                        span->font->font_size > 0 && span->font->font_size_from_medium;
                     if (span->font && span->font->font_size > 0 &&
-                        !span->font->font_size_from_medium) {
+                        (!span->font->font_size_from_medium || is_textarea_ua_medium)) {
                         log_debug("[FONT INHERIT] Form control UA font-size keeps %.1f",
                             span->font->font_size);
                         continue;

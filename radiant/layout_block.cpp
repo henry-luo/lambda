@@ -3435,6 +3435,42 @@ static CssEnum get_element_float_value(DomElement* elem) {
  *   <span>Filler Text</span><float/>  -> float at (0,0), text at (96,0) ✓
  *   <span>Long text...</span><float/> -> float at (0,0) - WRONG, should be (0, line2)
  */
+static bool prescan_text_has_line_content(DomText* text) {
+    if (!text || !text->text || text->length == 0) return false;
+    for (size_t i = 0; i < text->length; i++) {
+        char c = text->text[i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        return prescan_text_has_line_content(node->as_text());
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* elem = node->as_element();
+    DisplayValue display = resolve_display_value(node);
+    if (display.outer == CSS_VALUE_NONE) return false;
+    if (elem->position &&
+        (elem->position->position == CSS_VALUE_ABSOLUTE ||
+         elem->position->position == CSS_VALUE_FIXED ||
+         elem->position->float_prop == CSS_VALUE_LEFT ||
+         elem->position->float_prop == CSS_VALUE_RIGHT)) {
+        return false;
+    }
+    if (display.outer != CSS_VALUE_INLINE) return false;
+
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (prescan_node_has_in_flow_inline_content(child)) return true;
+    }
+    return false;
+}
+
 void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* parent_block) {
     if (!first_child) return;
 
@@ -3579,7 +3615,10 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     // This means floats that come AFTER a non-floated block in source order must
     // appear at or below that block's top edge - they cannot be pre-scanned to y=0.
     for (DomNode* child = first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
+        if (!child->is_element()) {
+            if (prescan_node_has_in_flow_inline_content(child)) break;
+            continue;
+        }
 
         DomElement* elem = child->as_element();
 
@@ -3599,6 +3638,11 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
                 log_debug("[FLOAT PRE-SCAN] Encountered non-floated block %s, stopping pre-scan",
                           child->node_name());
                 break;  // Stop pre-scanning - remaining floats go through normal flow
+            }
+            if (prescan_node_has_in_flow_inline_content(child)) {
+                log_debug("[FLOAT PRE-SCAN] Encountered inline line content %s, stopping pre-scan",
+                          child->node_name());
+                break;
             }
             // CSS 2.1 §9.5.2: <br> with clear property forces subsequent floats to
             // appear below cleared floats. Advance advance_y past existing floats so
@@ -4670,6 +4714,42 @@ static void adjust_current_line_after_same_line_float(BlockContext* pa_block, Li
     pa_line->has_float_intrusion = true;
     log_debug("%s same-line float: shifted current line by %.1f to effective_left %.1f",
         float_block->source_loc(), offset, new_effective_left);
+}
+
+static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+                                               Linebox* line, float required_width,
+                                               float min_local_y, float query_height) {
+    if (!bfc || !block_ctx || !line) return min_local_y;
+    if (bfc->left_float_count == 0 && bfc->right_float_count == 0) return min_local_y;
+
+    float y_bfc = block_ctx->bfc_offset_y + min_local_y;
+    int max_iterations = 100;
+    while (max_iterations-- > 0) {
+        FloatAvailableSpace space = block_context_space_at_y(bfc, y_bfc, query_height);
+        float local_left = max(space.left - block_ctx->bfc_offset_x, line->left);
+        float local_right = min(space.right - block_ctx->bfc_offset_x, line->right);
+        float available_width = max(local_right - local_left, 0.0f);
+        if (available_width >= required_width) {
+            return y_bfc - block_ctx->bfc_offset_y;
+        }
+
+        float next_y = FLT_MAX;
+        for (FloatBox* fb = bfc->left_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > y_bfc && fb->margin_box_bottom < next_y) {
+                next_y = fb->margin_box_bottom;
+            }
+        }
+        for (FloatBox* fb = bfc->right_floats; fb; fb = fb->next) {
+            if (fb->margin_box_bottom > y_bfc && fb->margin_box_bottom < next_y) {
+                next_y = fb->margin_box_bottom;
+            }
+        }
+
+        if (next_y <= y_bfc || isinf(next_y) || next_y == FLT_MAX) break;
+        y_bfc = next_y;
+    }
+
+    return y_bfc - block_ctx->bfc_offset_y;
 }
 
 __attribute__((noinline))
@@ -7078,9 +7158,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         effective_left + margin_box_width > effective_right) {
                         BlockContext* bfc = block_context_find_bfc(&lycon->block);
                         if (bfc) {
-                            float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
-                            float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y, inline_block_height);
-                            float local_new_y = new_y - lycon->block.bfc_offset_y;
+                            float local_new_y = find_line_y_for_width_with_floats(
+                                bfc, &lycon->block, &lycon->line, margin_box_width,
+                                lycon->block.advance_y, inline_block_height);
                             if (local_new_y > lycon->block.advance_y) {
                                 lycon->block.advance_y = local_new_y;
                                 line_reset(lycon);
@@ -7138,9 +7218,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // push below the float to find room
                     BlockContext* bfc = block_context_find_bfc(&lycon->block);
                     if (bfc) {
-                        float bfc_y = lycon->block.bfc_offset_y + lycon->block.advance_y;
-                        float new_y = block_context_find_y_for_width(bfc, block->width, bfc_y, inline_block_height);
-                        float local_new_y = new_y - lycon->block.bfc_offset_y;
+                        float local_new_y = find_line_y_for_width_with_floats(
+                            bfc, &lycon->block, &lycon->line, margin_box_width,
+                            lycon->block.advance_y, inline_block_height);
                         if (local_new_y > lycon->block.advance_y) {
                             lycon->block.advance_y = local_new_y;
                             line_reset(lycon);
