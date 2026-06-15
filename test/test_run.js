@@ -62,6 +62,20 @@ const CONFIG_FILE = path.join(ROOT_DIR, 'build_lambda_config.json');
 const TEST_OUTPUT_DIR = path.join(ROOT_DIR, 'test_output');
 const IS_WINDOWS = process.platform === 'win32';
 
+const SCRIPT_TESTS = [
+    {
+        baseName: 'run_lambda_mathlive_markup',
+        script: 'test/lambda/mathlive/run_lambda_mathlive_markup.mjs',
+        suite: 'lambda',
+        category: 'baseline',
+        displayName: 'Lambda MathLive Markup Baseline',
+        icon: '🔢',
+        runner: 'node',
+        args: ['--strict'],
+        exclusive: true,
+    },
+];
+
 // Idle timeout: if a test produces no output for this long, it's stuck.
 // Scale by CPU count first, then add extra headroom for suite-wide parallel
 // runs and already-busy machines so quiet but still-progressing tests do not
@@ -280,6 +294,18 @@ function discoverTests(config) {
         }
     }
 
+    for (const scriptTest of SCRIPT_TESTS) {
+        const scriptPath = path.join(ROOT_DIR, scriptTest.script);
+        if (fs.existsSync(scriptPath)) {
+            tests.push({
+                ...scriptTest,
+                scriptPath,
+                exePath: scriptPath,
+                isGtest: false,
+            });
+        }
+    }
+
     // Deduplicate by baseName
     const seen = new Set();
     return tests.filter(t => {
@@ -326,6 +352,18 @@ function formatDuration(ms) {
     return minutes > 0 ? `${minutes}m${seconds.toString().padStart(2, '0')}s` : `${seconds}s`;
 }
 
+function testArtifactLabel(testInfo) {
+    if (testInfo.runner === 'node') return testInfo.script;
+    return `${testInfo.baseName}.exe`;
+}
+
+function appendArgValue(args, name, value) {
+    if (args.some((arg, index) => arg === name || arg.startsWith(`${name}=`) || args[index - 1] === name)) {
+        return args;
+    }
+    return [...args, name, value];
+}
+
 function scheduleTests(tests) {
     if (!parallelExecution) return tests;
 
@@ -355,12 +393,13 @@ function scheduleTests(tests) {
  */
 function runTest(testInfo) {
     return new Promise((resolve) => {
-        const { baseName, exePath } = testInfo;
+        const { baseName, exePath, scriptPath } = testInfo;
+        const testPath = testInfo.runner === 'node' ? scriptPath : exePath;
 
-        if (!fs.existsSync(exePath)) {
+        if (!testPath || !fs.existsSync(testPath)) {
             resolve({
                 passed: 0, failed: 1, total: 1,
-                status: '❌ ERROR', failedTests: [`[${baseName}] executable not found`],
+                status: '❌ ERROR', failedTests: [`[${baseName}] ${testArtifactLabel(testInfo)} not found`],
                 timedOut: false,
             });
             return;
@@ -377,12 +416,20 @@ function runTest(testInfo) {
         const existingAsan = env.ASAN_OPTIONS || '';
         env.ASAN_OPTIONS = existingAsan ? `${existingAsan}:detect_container_overflow=0` : 'detect_container_overflow=0';
 
-        if (baseName === 'lambda_test_runner') {
+        let command = `./${path.relative(ROOT_DIR, exePath)}`;
+        let spawnArgs = testArgs;
+
+        if (testInfo.runner === 'node') {
+            command = 'node';
+            testArgs = appendArgValue(testInfo.args || [], '--report', jsonFile);
+            spawnArgs = [scriptPath, ...testArgs];
+        } else if (baseName === 'lambda_test_runner') {
             const tapFile = path.join(TEST_OUTPUT_DIR, `${baseName}_results.tap`);
             try { fs.unlinkSync(tapFile); } catch (_) {}
             testArgs = ['--test-dir', 'test/std', '--format', 'both',
                         '--json-output', jsonFile, '--tap-output', tapFile];
             if (rawOutput) testArgs.push('--verbose');
+            spawnArgs = testArgs;
         } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
             testArgs = [`--gtest_output=json:${jsonPath}`];
@@ -396,14 +443,17 @@ function runTest(testInfo) {
                     testArgs.push('--jobs', uiJobs);
                 }
             }
+            spawnArgs = testArgs;
         } else if (baseName === 'test_flex_standalone') {
             // No special args — output parsed manually
+            spawnArgs = testArgs;
         } else {
             // Criterion-based: --json=FILE
             testArgs = [`--json=${jsonFile}`];
+            spawnArgs = testArgs;
         }
 
-        const child = spawn(`./${path.relative(ROOT_DIR, exePath)}`, testArgs, {
+        const child = spawn(command, spawnArgs, {
             cwd: ROOT_DIR,
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -530,6 +580,20 @@ function parseTestResults(baseName, jsonFile, timedOut) {
                 .filter(t => t.passed === false)
                 .map(t => `[${baseName}] ${t.name}`);
         }
+    } else if (
+        data.summary &&
+        typeof data.summary.passed === 'number' &&
+        typeof data.summary.failed === 'number'
+    ) {
+        // Scripted test report format, e.g. Lambda MathLive markup adapter
+        passed = data.summary.passed;
+        failed = data.summary.failed;
+        total = typeof data.summary.total === 'number' ? data.summary.total : passed + failed;
+        if (Array.isArray(data.results)) {
+            failedTests = data.results
+                .filter(t => t.pass === false)
+                .map(t => `[${baseName}] ${t.key || t.name || t.formula || 'unnamed case'}`);
+        }
     } else if (data['test-run']) {
         // Catch2 format
         const totals = data['test-run'].totals?.['test-cases'] || {};
@@ -588,7 +652,7 @@ function parseTestResults(baseName, jsonFile, timedOut) {
 
 // ─── Parallel execution with concurrency limit ─────────────────────────────────
 
-async function runAllTests(tests) {
+async function runAllTests(tests, labelOffset = 0, labelTotal = tests.length) {
     const results = new Map(); // baseName -> result + testInfo
     let nextIndex = 0;
     const running = new Map();
@@ -619,7 +683,7 @@ async function runAllTests(tests) {
             while (running.size < MAX_CONCURRENT && nextIndex < tests.length) {
                 const idx = nextIndex++;
                 const testInfo = tests[idx];
-                const label = `[${idx + 1}/${tests.length}]`;
+                const label = `[${labelOffset + idx + 1}/${labelTotal}]`;
 
                 if (!rawOutput) {
                     console.log(`   ${label} Starting ${testInfo.baseName}...`);
@@ -652,6 +716,33 @@ async function runAllTests(tests) {
 
         startNext();
     });
+}
+
+async function runScheduledTests(tests) {
+    const regularTests = tests.filter(t => !t.exclusive);
+    const exclusiveTests = tests.filter(t => t.exclusive);
+    const results = await runAllTests(regularTests, 0, tests.length);
+
+    for (let i = 0; i < exclusiveTests.length; i++) {
+        const testInfo = exclusiveTests[i];
+        const label = `[${regularTests.length + i + 1}/${tests.length}]`;
+
+        if (!rawOutput) {
+            console.log(`   ${label} Starting ${testInfo.baseName}...`);
+        }
+
+        const startMs = Date.now();
+        const result = await runTest(testInfo);
+        const durationMs = Date.now() - startMs;
+        results.set(testInfo.baseName, { ...result, durationMs, testInfo });
+
+        if (!rawOutput) {
+            const icon = result.status.includes('PASS') ? '✓' : '✗';
+            console.log(`   ${icon} Completed ${testInfo.baseName} (${result.passed}/${result.total} passed, ${formatDuration(durationMs)})`);
+        }
+    }
+
+    return results;
 }
 
 // ─── Display results ────────────────────────────────────────────────────────────
@@ -770,7 +861,7 @@ function displayResults(config, results) {
         console.log(`${suite.displayName} ${suiteStatus} (${suitePassed}/${suiteTotal} tests, ${formatDuration(suiteDurationMs)})`);
 
         for (const t of suite.tests) {
-            console.log(` └─${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${t.baseName}.exe)`);
+            console.log(` └─${t.result.status} (${t.result.passed}/${t.result.total} tests, ${formatDuration(t.result.durationMs || 0)}) ${t.displayName} (${testArtifactLabel(t.result.testInfo)})`);
         }
     }
 
@@ -842,11 +933,11 @@ async function main() {
         process.exit(1);
     }
 
-    console.log(`📋 Found ${tests.length} test executable(s)`);
+    console.log(`📋 Found ${tests.length} test(s)`);
     console.log('');
 
     // Run tests
-    const results = await runAllTests(tests);
+    const results = await runScheduledTests(tests);
 
     // Display and save results
     if (!rawOutput) {
