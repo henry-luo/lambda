@@ -2054,6 +2054,19 @@ if (typeof document !== "undefined" && document &&
 })();
 
 // Minimal XMLSerializer / DOMParser stubs (used by clipboard html tests).
+if (typeof HTMLElement === "undefined") {
+    var HTMLElement = function HTMLElement() {};
+    if (typeof globalThis !== "undefined") globalThis.HTMLElement = HTMLElement;
+    if (typeof window !== "undefined" && window) window.HTMLElement = HTMLElement;
+}
+if (typeof customElements === "undefined") {
+    var customElements = {
+        define: function() {},
+        get: function() { return undefined; }
+    };
+    if (typeof globalThis !== "undefined") globalThis.customElements = customElements;
+    if (typeof window !== "undefined" && window) window.customElements = customElements;
+}
 if (typeof XMLSerializer === "undefined") {
     var XMLSerializer = function XMLSerializer() {};
     XMLSerializer.prototype.serializeToString = function(node) {
@@ -2069,23 +2082,68 @@ if (typeof XMLSerializer === "undefined") {
 if (typeof DOMParser === "undefined") {
     var DOMParser = function DOMParser() {};
     DOMParser.prototype.parseFromString = function(str, _mime) {
-        // Without a real HTML parser available, return a minimal document-like
-        // object whose body.innerHTML is the source string. Tests that compare
-        // round-tripped HTML still get a meaningful value.
-        // We expose enough surface (`head.remove()`, `querySelectorAll('[style]')`,
-        // `documentElement.innerHTML`) for the WPT clipboard html tests, which
-        // call reformatHtml() on both sides of a round-trip and compare.
         var src = (str == null) ? "" : String(str);
         var noopRemove = function() {};
         var emptyList = [];
         emptyList.forEach = Array.prototype.forEach; // already true, defensive
+        var makeElement = function(tag, attrs) {
+            if (typeof document !== "undefined" && document.createElement) {
+                var el = document.createElement(tag);
+                attrs = attrs || "";
+                attrs.replace(/([A-Za-z0-9_-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>\/]+)))?/g,
+                    function(_, name, dq, sq, bare) {
+                        var value = dq !== undefined ? dq : (sq !== undefined ? sq : (bare !== undefined ? bare : ""));
+                        el.setAttribute(name, value);
+                        return "";
+                    });
+                return el;
+            }
+            return { tagName: String(tag).toUpperCase(), setAttribute: noopRemove, remove: noopRemove };
+        };
+        var htmlMatch = src.match(/<html\b([^>]*)>/i);
+        var docEl = makeElement("html", htmlMatch ? htmlMatch[1] : "");
+        var bodyMatch = src.match(/<body\b([^>]*)>([\s\S]*)<\/body>/i);
+        var body = makeElement("body", bodyMatch ? bodyMatch[1] : "");
+        var childSrc = bodyMatch ? bodyMatch[2] : src;
+        var children = [];
+        var childRe = /<(input|textarea|div|span)\b([^>]*)>/ig;
+        var childMatch;
+        while ((childMatch = childRe.exec(childSrc)) !== null) {
+            var child = makeElement(childMatch[1], childMatch[2]);
+            children.push(child);
+            if (body.appendChild) body.appendChild(child);
+        }
+        if (docEl.appendChild) docEl.appendChild(body);
+        if (!body.firstElementChild && body.children && body.children.length)
+            body.firstElementChild = body.children[0];
+        var byTag = function(tag) {
+            var matches = [];
+            tag = String(tag || "").toUpperCase();
+            for (var i = 0; i < children.length; i++) {
+                if (children[i] && children[i].tagName === tag) matches.push(children[i]);
+            }
+            matches.forEach = Array.prototype.forEach;
+            return matches;
+        };
         var doc = {
-            documentElement: { innerHTML: src, outerHTML: "<html>" + src + "</html>", textContent: src, remove: noopRemove },
-            body: { innerHTML: src, outerHTML: "<body>" + src + "</body>", textContent: src, remove: noopRemove },
+            documentElement: docEl,
+            body: body,
             head: { innerHTML: "", outerHTML: "<head></head>", textContent: "", remove: noopRemove },
-            querySelector: function() { return null; },
-            querySelectorAll: function() { return emptyList; },
-            getElementsByTagName: function() { return []; }
+            querySelector: function(sel) {
+                if (String(sel) === "span:last-child") {
+                    var spans = byTag("span");
+                    return spans.length ? spans[spans.length - 1] : null;
+                }
+                var list = byTag(sel);
+                return list.length ? list[0] : null;
+            },
+            querySelectorAll: function(sel) {
+                var list = byTag(sel);
+                return list.length ? list : emptyList;
+            },
+            getElementsByTagName: function(sel) {
+                return byTag(sel);
+            }
         };
         return doc;
     };
@@ -2174,6 +2232,15 @@ if (typeof test_driver !== "undefined" && test_driver) {
 // transfer those representations onto the WPT clipboard store.
 globalThis.__lambda_execCommand_handler = function(cmd) {
     cmd = String(cmd || "").toLowerCase();
+    if (cmd === "delete") {
+        try {
+            var sel = (typeof getSelection === "function") ? getSelection() : null;
+            if (sel && sel.deleteFromDocument) sel.deleteFromDocument();
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
     if (cmd !== "copy" && cmd !== "cut" && cmd !== "paste") return false;
     var dt;
     try { dt = new DataTransfer(); } catch (_) { dt = null; }

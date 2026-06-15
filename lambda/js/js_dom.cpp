@@ -61,11 +61,19 @@ static inline Item js_string_key(const char* s) {
     return (Item){.item = s2it(heap_create_name(s))};
 }
 
+static const char* js_dom_to_attr_cstr(Item value) {
+    Item str_value = js_to_string(value);
+    const char* s = fn_to_cstr(str_value);
+    return s ? s : "";
+}
+
 // Forward declarations
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
 extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts);
 extern "C" Item js_eventtarget_dispatch(Item event_item);
+extern "C" Item js_new_error_with_name(Item error_name, Item message);
+extern "C" void js_throw_value(Item error);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -123,6 +131,7 @@ static Item js_document_default_view = {.item = ITEM_NULL};
 
 // Stored document.title value (same reason as defaultView)
 static Item js_document_title_value = {.item = ITEM_NULL};
+static bool js_document_design_mode = false;
 
 // Cached document.fonts object for the FontFaceSet ready shim.
 static Item js_document_fonts_value = {.item = ITEM_NULL};
@@ -352,6 +361,7 @@ extern "C" void js_dom_batch_reset() {
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
     js_document_title_value = (Item){.item = ITEM_NULL};
+    js_document_design_mode = false;
     js_document_fonts_value = (Item){.item = ITEM_NULL};
     _js_current_document = nullptr;
     js_dom_events_reset();
@@ -1101,6 +1111,11 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
         }
         if (s && s->len == 5 && strncmp(s->chars, "fonts", 5) == 0) {
             js_document_fonts_value = value;
+            return value;
+        }
+        if (s && s->len == 10 && strncmp(s->chars, "designMode", 10) == 0) {
+            const char* mode = js_dom_to_attr_cstr(value);
+            js_document_design_mode = (mode && strcasecmp(mode, "on") == 0);
             return value;
         }
     }
@@ -2543,6 +2558,146 @@ static DomElement* dom_find_by_id(DomElement* root, const char* id) {
     return nullptr;
 }
 
+static const char* js_dom_normalize_contenteditable(const char* value) {
+    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
+    if (strcasecmp(value, "false") == 0) return "false";
+    if (strcasecmp(value, "plaintext-only") == 0) return "plaintext-only";
+    if (strcasecmp(value, "inherit") == 0) return "inherit";
+    return nullptr;
+}
+
+static const char* js_dom_autocapitalize_state(const char* value, bool missing_is_empty) {
+    if (!value) return missing_is_empty ? "" : "sentences";
+    if (*value == '\0') return "";
+    if (strcasecmp(value, "off") == 0 || strcasecmp(value, "none") == 0) return "none";
+    if (strcasecmp(value, "on") == 0 || strcasecmp(value, "sentences") == 0) return "sentences";
+    if (strcasecmp(value, "characters") == 0) return "characters";
+    if (strcasecmp(value, "words") == 0) return "words";
+    return "sentences";
+}
+
+static bool js_dom_autocapitalize_inherits_from_form(DomElement* elem) {
+    return _is_tag(elem, "button") || _is_tag(elem, "fieldset") ||
+        _is_tag(elem, "input") || _is_tag(elem, "output") ||
+        _is_tag(elem, "select") || _is_tag(elem, "textarea");
+}
+
+static DomElement* js_dom_form_owner(DomElement* elem) {
+    if (!elem) return nullptr;
+    const char* form_id = dom_element_get_attribute(elem, "form");
+    if (form_id && *form_id) {
+        DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
+        DomElement* root = doc ? doc->root : nullptr;
+        return dom_find_by_id(root, form_id);
+    }
+    DomNode* p = elem->parent;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* pe = p->as_element();
+            if (_is_tag(pe, "form")) return pe;
+        }
+        p = p->parent;
+    }
+    return nullptr;
+}
+
+static const char* js_dom_get_autocapitalize(DomElement* elem) {
+    if (!elem) return "";
+    const char* own = dom_element_get_attribute(elem, "autocapitalize");
+    if (own) return js_dom_autocapitalize_state(own, true);
+    if (js_dom_autocapitalize_inherits_from_form(elem)) {
+        DomElement* form = js_dom_form_owner(elem);
+        if (form) {
+            const char* form_value = dom_element_get_attribute(form, "autocapitalize");
+            if (form_value && *form_value) return js_dom_autocapitalize_state(form_value, false);
+        }
+    }
+    return "";
+}
+
+static bool js_dom_autocorrect_attr_state(const char* value) {
+    return !(value && strcasecmp(value, "off") == 0);
+}
+
+static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
+    if (!_is_tag(elem, "input")) return false;
+    const char* type = dom_element_get_attribute(elem, "type");
+    if (!type) return false;
+    return strcasecmp(type, "password") == 0 ||
+        strcasecmp(type, "email") == 0 ||
+        strcasecmp(type, "url") == 0;
+}
+
+static bool js_dom_get_autocorrect(DomElement* elem) {
+    if (!elem) return true;
+    if (js_dom_autocorrect_disabled_by_input_type(elem)) return false;
+    const char* own = dom_element_get_attribute(elem, "autocorrect");
+    if (own || dom_element_has_attribute(elem, "autocorrect"))
+        return js_dom_autocorrect_attr_state(own ? own : "");
+    if (js_dom_autocapitalize_inherits_from_form(elem)) {
+        DomElement* form = js_dom_form_owner(elem);
+        if (form) {
+            const char* form_value = dom_element_get_attribute(form, "autocorrect");
+            if (form_value || dom_element_has_attribute(form, "autocorrect"))
+                return js_dom_autocorrect_attr_state(form_value ? form_value : "");
+        }
+    }
+    return true;
+}
+
+static bool js_dom_spellcheck_state_from_value(const char* value, bool* out) {
+    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) {
+        *out = true;
+        return true;
+    }
+    if (strcasecmp(value, "false") == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static bool js_dom_get_spellcheck(DomElement* elem) {
+    DomNode* p = (DomNode*)elem;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* e = p->as_element();
+            const char* value = dom_element_get_attribute(e, "spellcheck");
+            bool state = true;
+            if (value && js_dom_spellcheck_state_from_value(value, &state)) return state;
+        }
+        p = p->parent;
+    }
+    return true;
+}
+
+static const char* js_dom_writing_suggestions_attr_state(const char* value) {
+    if (!value || *value == '\0' || strcasecmp(value, "true") == 0) return "true";
+    if (strcasecmp(value, "false") == 0) return "false";
+    return "true";
+}
+
+static const char* js_dom_get_writing_suggestions(DomElement* elem) {
+    DomNode* p = (DomNode*)elem;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* e = p->as_element();
+            if (dom_element_has_attribute(e, "writingsuggestions")) {
+                return js_dom_writing_suggestions_attr_state(
+                    dom_element_get_attribute(e, "writingsuggestions"));
+            }
+        }
+        p = p->parent;
+    }
+    return "true";
+}
+
+static void js_dom_throw_syntax_error(const char* message) {
+    Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
+    Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
+    js_throw_value(js_new_error_with_name(name, msg));
+}
+
 // ============================================================================
 // Helper: find elements by class name (tree walk, appends to array)
 // ============================================================================
@@ -3101,9 +3256,17 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // queryCommand* surface. We return spec-conformant "command does not
     // exist" answers for every command, so a page that probes them sees a
     // consistent "not supported" picture rather than mixed results.
-    if (strcmp(method, "queryCommandSupported") == 0 ||
-        strcmp(method, "queryCommandEnabled") == 0 ||
-        strcmp(method, "queryCommandIndeterm") == 0 ||
+    if (strcmp(method, "queryCommandSupported") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        bool supported = cmd && strcasecmp(cmd, "delete") == 0;
+        return (Item){.item = b2it(supported)};
+    }
+    if (strcmp(method, "queryCommandEnabled") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        bool enabled = cmd && strcasecmp(cmd, "delete") == 0 && js_document_design_mode;
+        return (Item){.item = b2it(enabled)};
+    }
+    if (strcmp(method, "queryCommandIndeterm") == 0 ||
         strcmp(method, "queryCommandState") == 0) {
         return (Item){.item = ITEM_FALSE};
     }
@@ -3531,13 +3694,11 @@ extern "C" Item js_document_get_property(Item prop_name) {
         }
     }
 
-    // CE-6 (Radiant_Design_Content_Editable.md §9): designMode is the legacy
-    // whole-document edit toggle. We don't implement it; the getter always
-    // returns the literal string "off" so JS feature detection works without
-    // enabling anything, and the setter (handled below as a no-op expando
-    // write) cannot change this getter's answer.
+    // designMode is the legacy whole-document edit toggle. This first cut
+    // exposes the IDL state; editing-host default actions still land in the
+    // command engine phases.
     if (strcmp(prop, "designMode") == 0) {
-        return (Item){.item = s2it(heap_create_name("off"))};
+        return (Item){.item = s2it(heap_create_name(js_document_design_mode ? "on" : "off"))};
     }
 
     // activeElement — currently focused element, or <body> as default per spec.
@@ -6088,13 +6249,9 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (!dom_element_has_attribute(elem, "contenteditable")) {
             return (Item){.item = s2it(heap_create_name("inherit"))};
         }
-        const char* v = dom_element_get_attribute(elem, "contenteditable");
-        const char* out;
-        if (!v || *v == '\0' || strcasecmp(v, "true") == 0) out = "true";
-        else if (strcasecmp(v, "false") == 0) out = "false";
-        else if (strcasecmp(v, "plaintext-only") == 0) out = "plaintext-only";
-        else out = "inherit";
-        return (Item){.item = s2it(heap_create_name(out))};
+        const char* out = js_dom_normalize_contenteditable(
+            dom_element_get_attribute(elem, "contenteditable"));
+        return (Item){.item = s2it(heap_create_name(out ? out : "inherit"))};
     }
     if (strcmp(prop, "isContentEditable") == 0) {
         // Walk ancestors. Editable iff the nearest ce-bearing ancestor has
@@ -6119,6 +6276,18 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             p = p->parent;
         }
         return (Item){.item = ITEM_FALSE};
+    }
+    if (strcmp(prop, "autocapitalize") == 0) {
+        return (Item){.item = s2it(heap_create_name(js_dom_get_autocapitalize(elem)))};
+    }
+    if (strcmp(prop, "autocorrect") == 0) {
+        return (Item){.item = b2it(js_dom_get_autocorrect(elem))};
+    }
+    if (strcmp(prop, "spellcheck") == 0) {
+        return (Item){.item = b2it(js_dom_get_spellcheck(elem))};
+    }
+    if (strcmp(prop, "writingSuggestions") == 0) {
+        return (Item){.item = s2it(heap_create_name(js_dom_get_writing_suggestions(elem)))};
     }
     // autofocus boolean reflection (input/button/select/textarea)
     if (strcmp(prop, "autofocus") == 0 &&
@@ -6308,6 +6477,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         "querySelector", "querySelectorAll", "closest", "matches",
         "appendChild", "removeChild", "replaceChild", "replaceWith", "insertBefore",
         "insertAdjacentElement", "insertAdjacentHTML",
+        "attachShadow",
         "cloneNode", "contains", "hasChildNodes", "normalize",
         "addEventListener", "removeEventListener", "dispatchEvent",
         "remove", "getBoundingClientRect", "getElementsByTagName",
@@ -6527,21 +6697,59 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
     if (strcmp(prop, "contentEditable") == 0) {
         const char* s = fn_to_cstr(value);
         if (!s) s = "";
-        if (*s == '\0' || strcasecmp(s, "inherit") == 0) {
+        if (*s == '\0') {
             dom_element_remove_attribute(elem, "contenteditable");
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
-        if (strcasecmp(s, "true") == 0) {
-            dom_element_set_attribute(elem, "contenteditable", "true");
-        } else if (strcasecmp(s, "false") == 0) {
-            dom_element_set_attribute(elem, "contenteditable", "false");
-        } else if (strcasecmp(s, "plaintext-only") == 0) {
-            dom_element_set_attribute(elem, "contenteditable", "plaintext-only");
-        } else {
-            log_debug("contentEditable setter: SyntaxError on '%s'", s);
+        const char* normalized = js_dom_normalize_contenteditable(s);
+        if (!normalized) {
+            log_debug("js_dom_contentEditable_setter_syntax_error: invalid value '%s'", s);
+            js_dom_throw_syntax_error("Invalid contentEditable value");
             return value;
         }
+        if (strcmp(normalized, "inherit") == 0) {
+            dom_element_remove_attribute(elem, "contenteditable");
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            return value;
+        }
+        dom_element_set_attribute(elem, "contenteditable", normalized);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
+    }
+
+    if (strcmp(prop, "autocapitalize") == 0) {
+        const char* s = js_dom_to_attr_cstr(value);
+        dom_element_set_attribute(elem, "autocapitalize", s);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
+    }
+
+    if (strcmp(prop, "autocorrect") == 0) {
+        dom_element_set_attribute(elem, "autocorrect", js_is_truthy(value) ? "on" : "off");
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
+    }
+
+    if (strcmp(prop, "spellcheck") == 0) {
+        const char* s = js_is_truthy(value) ? "true" : "false";
+        TypeId vt = get_type_id(value);
+        if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
+            const char* raw = fn_to_cstr(value);
+            s = raw ? raw : "";
+        }
+        dom_element_set_attribute(elem, "spellcheck", s);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
+    }
+
+    if (strcmp(prop, "writingSuggestions") == 0) {
+        const char* s = js_is_truthy(value) ? "true" : "false";
+        TypeId vt = get_type_id(value);
+        if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
+            s = js_dom_to_attr_cstr(value);
+        }
+        dom_element_set_attribute(elem, "writingsuggestions", s);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
@@ -7403,20 +7611,54 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return ItemNull;
     }
 
+    // attachShadow(init) -> ShadowRoot facade. Radiant does not have a full
+    // Shadow DOM tree yet, but WPT editing-host inheritance tests only need a
+    // stable root object whose innerHTML can be assigned while light DOM stays
+    // addressable for Selection.deleteFromDocument().
+    if (strcmp(method, "attachShadow") == 0) {
+        const char* mode = "open";
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            Item mode_item = js_property_get(args[0],
+                (Item){.item = s2it(heap_create_name("mode"))});
+            const char* mode_text = fn_to_cstr(mode_item);
+            if (mode_text && mode_text[0]) mode = mode_text;
+        }
+        Item root = js_new_object();
+        js_property_set(root, (Item){.item = s2it(heap_create_name("host"))}, elem_item);
+        js_property_set(root, (Item){.item = s2it(heap_create_name("mode"))},
+            (Item){.item = s2it(heap_create_name(mode))});
+        js_property_set(root, (Item){.item = s2it(heap_create_name("innerHTML"))},
+            (Item){.item = s2it(heap_create_name(""))});
+        js_property_set(root, (Item){.item = s2it(heap_create_name("nodeType"))},
+            (Item){.item = i2it(11)});
+
+        Item exp_map = expando_get_or_create_map((DomNode*)elem);
+        if (exp_map.item != ITEM_NULL) {
+            Item visible_root = (strcasecmp(mode, "closed") == 0) ? ItemNull : root;
+            js_property_set(exp_map,
+                (Item){.item = s2it(heap_create_name("shadowRoot"))},
+                visible_root);
+        }
+        return root;
+    }
+
     // getAttribute(name) → string or null
     if (strcmp(method, "getAttribute") == 0) {
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
         const char* val = dom_element_get_attribute(elem, attr_name);
-        return val ? (Item){.item = s2it(heap_create_name(val))} : ItemNull;
+        if (val) return (Item){.item = s2it(heap_create_name(val))};
+        if (dom_element_has_attribute(elem, attr_name))
+            return (Item){.item = s2it(heap_create_name(""))};
+        return ItemNull;
     }
 
     // setAttribute(name, value)
     if (strcmp(method, "setAttribute") == 0) {
         if (argc < 2) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
-        const char* attr_val = fn_to_cstr(args[1]);
+        const char* attr_val = js_dom_to_attr_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         dom_element_set_attribute(elem, attr_name, attr_val);
         js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
