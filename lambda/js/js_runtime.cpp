@@ -22188,6 +22188,23 @@ static Item js_array_index_key(int64_t index) {
     return (Item){.item = s2it(heap_create_name(buf, blen))};
 }
 
+static bool js_array_try_fast_fill(Item object, Item value, int64_t start, int64_t end) {
+    if (get_type_id(object) != LMD_TYPE_ARRAY) return false;
+    Array* arr = object.array;
+    if (!arr) return false;
+    if (start >= end) return true;
+    if (start < 0 || end < start || end > arr->length) return false;
+    if (arr->is_content == 1 || arr->extra != 0) return false;
+    if (!js_is_extensible(object)) return false;
+    if (end > arr->capacity || !arr->items) return false;
+    if (js_proto_chain_has_numeric_keys(object)) return false;
+
+    for (int64_t k = start; k < end; k++) {
+        arr->items[k] = value;
+    }
+    return true;
+}
+
 static bool js_array_set_length_throw(Item object, Item len_key, int64_t new_len) {
     if (get_type_id(object) == LMD_TYPE_MAP) {
         JsAccessorPair* pair = NULL;
@@ -22552,6 +22569,7 @@ static Item js_array_generic_fill(Item object, Item* args, int argc) {
     if (js_exception_pending) return ItemNull;
     int64_t end = argc > 2 ? js_array_relative_index(args[2], len, len) : len;
     if (js_exception_pending) return ItemNull;
+    if (js_array_try_fast_fill(object, value, start, end)) return object;
     for (int64_t k = start; k < end; k++) {
         js_property_set(object, js_array_index_key(k), value);
         if (js_exception_pending) return ItemNull;

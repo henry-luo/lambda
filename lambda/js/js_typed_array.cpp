@@ -332,6 +332,39 @@ static void js_typed_array_raw_store_number(JsTypedArrayType type, char* data, i
     }
 }
 
+static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* arr, int len) {
+    if (!js_typed_array_raw_fast_enabled()) return false;
+    if (!arr || arr->is_content == 1 || arr->extra != 0) return false;
+    if (len < 0 || (int64_t)len > arr->capacity) return false;
+
+    JsTypedArray* dst = js_get_typed_array_ptr(result.map);
+    if (!dst || !js_typed_array_is_number_element(dst->element_type)) return false;
+    char* data = (char*)js_typed_array_current_data(dst);
+    if (len > 0 && !data) return false;
+
+    for (int i = 0; i < len; i++) {
+        Item val = arr->items[i];
+        if (val.item == JS_DELETED_SENTINEL_VAL) return false;
+        double num_val = 0.0;
+        if (val.item == ITEM_JS_UNDEFINED) {
+            num_val = NAN;
+        } else {
+            TypeId val_type = get_type_id(val);
+            if (val_type == LMD_TYPE_INT) {
+                int64_t iv = it2i(val);
+                if (iv <= -(int64_t)JS_SYMBOL_BASE) return false;
+                num_val = (double)iv;
+            } else if (val_type == LMD_TYPE_FLOAT) {
+                num_val = it2d(val);
+            } else {
+                return false;
+            }
+        }
+        js_typed_array_raw_store_number(dst->element_type, data, i, num_val);
+    }
+    return true;
+}
+
 static bool js_typed_array_try_raw_convert_number(JsTypedArray* dst, JsTypedArray* src,
                                                   int offset, bool allow_overlap) {
     if (!js_typed_array_raw_fast_enabled()) return false;
@@ -1902,6 +1935,7 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         Array* arr = source.array;
         int len = (int)arr->length;
         Item result = js_typed_array_new(type_id, len);
+        if (js_typed_array_try_raw_from_dense_number_array(result, arr, len)) return result;
         Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
         for (int i = 0; i < len; i++) values[i] = arr->items[i];
         for (int i = 0; i < len; i++) {
