@@ -22470,6 +22470,51 @@ static bool js_array_set_length_throw(Item object, Item len_key, int64_t new_len
     return !js_exception_pending;
 }
 
+static bool js_concat_ta_own_name_blocks_fast(const char* name, int len) {
+    if (!name || len <= 0) return false;
+    if (len == 6 && strncmp(name, "length", 6) == 0) return true;
+    if (name[0] >= '0' && name[0] <= '9') return true;
+    return false;
+}
+
+static bool js_concat_ta_has_observable_own_index_or_length(Item element) {
+    if (get_type_id(element) != LMD_TYPE_MAP || !element.map || element.map->data_cap <= 0) return false;
+    TypeMap* tm = element.map->type ? (TypeMap*)element.map->type : NULL;
+    for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+        if (!se->name) continue;
+        const char* name = se->name->str;
+        int len = (int)se->name->length;
+        if (js_concat_ta_own_name_blocks_fast(name, len)) return true;
+    }
+    return false;
+}
+
+static bool js_array_concat_try_append_typed_array(Item result, int64_t* n, Item element, int64_t len) {
+    if (len < 0 || len > INT32_MAX) return false;
+    if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return false;
+    if (result.array->extra != 0 || result.array->length != *n) return false;
+    if (!js_is_extensible(result)) return false;
+    if (!js_is_typed_array(element) || js_is_proxy(element)) return false;
+    if (js_typed_array_is_out_of_bounds_item(element)) return false;
+    if (js_concat_ta_has_observable_own_index_or_length(element)) return false;
+
+    JsTypedArray* ta = js_get_typed_array_ptr(element.map);
+    if (!ta) return false;
+    if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) return false;
+
+    int live_len = js_typed_array_length(element);
+    if (len != (int64_t)live_len) return false;
+    if (live_len == 0) return true;
+
+    void* data = js_typed_array_current_data_ptr(element);
+    if (!data) return false;
+    for (int i = 0; i < live_len; i++) {
+        js_array_push_item_direct(result.array, js_typed_array_raw_get_item(ta, data, i));
+    }
+    *n += live_len;
+    return true;
+}
+
 static Item js_array_generic_push(Item object, Item* args, int argc) {
     const int64_t max_safe_len = 9007199254740991LL;
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -24121,6 +24166,9 @@ includes_slow_path:
                 if (n > MAX_SAFE_LEN - len) {
                     js_throw_type_error("Array.prototype.concat: resulting array length exceeds 2^53 - 1");
                     return make_js_undefined();
+                }
+                if (js_array_concat_try_append_typed_array(result, &n, element, len)) {
+                    continue;
                 }
                 for (int64_t k = 0; k < len; k++) {
                     Item idx_key = js_array_index_key(k);

@@ -2043,18 +2043,8 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
     return js_typed_array_new(type_id, 0);
 }
 
-extern "C" Item js_typed_array_get(Item ta_item, Item index) {
-    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_JS_UNDEFINED};
-
-    Map* m = ta_item.map;
-    JsTypedArray* ta = js_get_typed_array_ptr(m);
-    int idx = (int)it2i(index);
-
-    int current_length = js_typed_array_current_length(ta);
-    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_JS_UNDEFINED};
-    void* data = js_typed_array_current_data(ta);
-    if (!data) return (Item){.item = ITEM_JS_UNDEFINED};
-
+extern "C" Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int idx) {
+    if (!ta || !data || idx < 0) return (Item){.item = ITEM_JS_UNDEFINED};
     switch (ta->element_type) {
     case JS_TYPED_INT8:
         return (Item){.item = i2it((int64_t)((int8_t*)data)[idx])};
@@ -2096,6 +2086,20 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
     default:
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
+}
+
+extern "C" Item js_typed_array_get(Item ta_item, Item index) {
+    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_JS_UNDEFINED};
+
+    Map* m = ta_item.map;
+    JsTypedArray* ta = js_get_typed_array_ptr(m);
+    int idx = (int)it2i(index);
+
+    int current_length = js_typed_array_current_length(ta);
+    if (idx < 0 || idx >= current_length) return (Item){.item = ITEM_JS_UNDEFINED};
+    void* data = js_typed_array_current_data(ta);
+    if (!data) return (Item){.item = ITEM_JS_UNDEFINED};
+    return js_typed_array_raw_get_item(ta, data, idx);
 }
 
 extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {

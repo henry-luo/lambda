@@ -893,6 +893,28 @@ ASAN_OPTIONS=detect_container_overflow=0 \
 
 Focused follow-up result: 4 / 4 passed, 0 failures.
 
+### AnnexB retry cleanup
+
+The four AnnexB rows were later traced to the dynamic-Function cache surviving
+batch rewind through `js_batch_reset_to()`. The cache already reset in the full
+`js_batch_reset()` path, but Phase 4 retry uses the rewind path and could reuse
+compiled dynamic Function factories from the failed batch attempt.
+
+Fix:
+
+- reset the dynamic-Function cache from `js_batch_reset_to()`;
+- keep the existing full-reset cache clear in `js_batch_reset()`.
+
+Verification:
+
+| Gate | Result |
+| --- | ---: |
+| exact 100-test AnnexB batch | 100 / 100 passed |
+| 4-test AnnexB retry manifest | 4 / 4 passed |
+| full release js262 | 40261 / 40261 fully passed |
+| non-fully-passing | 0 |
+| regressions | 0 |
+
 ### Decision
 
 Keep the cache for preamble-independent dynamic Functions. The dependency
@@ -900,12 +922,82 @@ instrumentation gives a concrete safety guard, the focused workload shows real
 reuse, the cache-hit path preserves observable function identity, and the full
 release gate reports zero failed rows and zero regressions.
 
+## P3 TypedArray / Array Bulk Pass
+
+### Implementation
+
+Implemented the P3-A spreadable typed-array concat path.
+
+The generic `Array.prototype.concat` path still performs the observable
+`@@isConcatSpreadable` read and the observable `length` read. After that, it can
+append number typed-array elements directly when all guards pass:
+
+- concat result is a plain extensible Array whose current length matches the
+  concat write index;
+- input is a real typed array, not a proxy;
+- backing buffer is not detached or out-of-bounds;
+- observed concat length equals the live typed-array length;
+- typed array has no own `"length"` property and no own numeric/index-looking
+  property in its upgraded property map;
+- BigInt typed arrays stay on the generic path for this pass.
+
+The element conversion itself was factored into
+`js_typed_array_raw_get_item()` so the raw path reuses the same conversion logic
+as `js_typed_array_get()`.
+
+### Measurement
+
+Previous full-run timing rows:
+
+| Test | Previous full timing |
+| --- | ---: |
+| `Array.prototype.concat_large-typed-array` | 203784 us |
+| `TypedArray.prototype.set typedarray-arg-src-backed-by-resizable-buffer` | 201089 us |
+
+Focused pass after the concat change:
+
+| Test | Focused timing |
+| --- | ---: |
+| `Array.prototype.concat_large-typed-array` | 125 ms |
+| `TypedArray.prototype.set typedarray-arg-src-backed-by-resizable-buffer` | 116 ms |
+
+Full release pass after the concat change:
+
+| Metric | Value |
+| --- | ---: |
+| fully passed | 40261 / 40261 |
+| non-fully-passing | 0 |
+| regressions | 0 |
+| total runtime | 112.1 s |
+| failure manifest rows | 0 |
+| `Array.prototype.concat_large-typed-array` | 193145 us |
+| `TypedArray.prototype.set typedarray-arg-src-backed-by-resizable-buffer` | 230117 us |
+
+P3-B audit using `LAMBDA_JS_TA_RAW_FAST=0` on the same focused manifest:
+
+| Test | Raw-fast-off focused timing |
+| --- | ---: |
+| `Array.prototype.concat_large-typed-array` | 126 ms |
+| `TypedArray.prototype.set typedarray-arg-src-backed-by-resizable-buffer` | 120 ms |
+
+### Decision
+
+Keep the guarded concat path. The full-suite per-test signal is modest but
+positive, the focused run shows the intended direction, and the release gate is
+clean.
+
+Do not change `TypedArray.prototype.set` yet. The raw-fast-off audit does not
+show the current raw-copy/convert switch as the dominant cost for the resizable
+matrix; the next safe step is more detailed set-path instrumentation that counts
+same-type raw copies, raw conversions, and generic fallback entries before
+adding another write-path optimization.
+
 Remaining follow-up:
 
 1. Make the stats report distinguish lifetime cache inserts from currently live
    cache entries, because deferred MIR cleanup resets live entries before the
    process exits.
-2. Investigate the existing batch-retry instability around the four AnnexB
-   global-init tests separately from dynamic-Function caching.
+2. Add opt-in `TypedArray.prototype.set` path counters before changing the
+   resizable-buffer set implementation.
 3. Revisit descriptor walking only after a mutation/version invalidation model
    exists.
