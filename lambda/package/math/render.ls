@@ -544,16 +544,10 @@ fn render_colorbox_command(node, context) {
 fn symbol_font_class(cmd_text, context) {
     let name_str = if (len(cmd_text) > 0 and slice(cmd_text, 0, 1) == "\\")
         slice(cmd_text, 1, len(cmd_text)) else cmd_text
-    if (name_str == "alpha") "lcGreek lm_mathit"
-    else if (name_str == "Gamma" or name_str == "Delta" or name_str == "Theta" or
-             name_str == "Lambda" or name_str == "Pi" or name_str == "Sigma" or
-             name_str == "Upsilon" or name_str == "Phi" or name_str == "Psi" or
-             name_str == "Omega") css.CMR
-    else if (name_str == "dots" or name_str == "ldots" or name_str == "cdots" or
-             name_str == "infty" or name_str == "vert" or name_str == "lvert" or
-             name_str == "rvert") css.CMR
-    else if (name_str == "blacksquare" or name_str == "blacktriangle") css.AMS
-    else css.font_class(context.font)
+    // Centralized lookup in symbols.font_class_map; falls back to the
+    // current rendering context's font (typically lm_mathit) when the
+    // command is not registered.
+    sym.font_class_of(name_str) or css.font_class(context.font)
 }
 
 fn render_colorbox_content(content_arg, context) {

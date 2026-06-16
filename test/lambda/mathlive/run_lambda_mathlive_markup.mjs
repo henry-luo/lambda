@@ -13,11 +13,10 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const SNAPSHOT_PATH = path.join(
-  __dirname,
-  '__snapshots__',
-  'markup.test.ts.snap'
-);
+const SNAPSHOT_PATHS = [
+  path.join(__dirname, '__snapshots__', 'markup.test.ts.snap'),
+  path.join(__dirname, '__snapshots__', 'lambda_input_markup.snap'),
+];
 const TEMP_DIR = path.join(PROJECT_ROOT, 'temp');
 const DEFAULT_SCRIPT_PATH = path.join(
   TEMP_DIR,
@@ -486,7 +485,10 @@ function buildBaselineReport(results, baselineSet, baselinePath) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  const snapshotText = fs.readFileSync(SNAPSHOT_PATH, 'utf8');
+  const snapshotText = SNAPSHOT_PATHS
+    .filter((p) => fs.existsSync(p))
+    .map((p) => fs.readFileSync(p, 'utf8'))
+    .join('\n');
   let cases = buildCases(parseSnapshots(snapshotText));
 
   if (opts.category) {
@@ -512,7 +514,9 @@ async function main() {
   const baseline = buildBaselineReport(results, baselineSet, opts.baseline);
   const report = {
     generatedScript: path.relative(PROJECT_ROOT, opts.script),
-    sourceSnapshot: path.relative(PROJECT_ROOT, SNAPSHOT_PATH),
+    sourceSnapshots: SNAPSHOT_PATHS
+      .filter((p) => fs.existsSync(p))
+      .map((p) => path.relative(PROJECT_ROOT, p)),
     baseline,
     jobs: Math.min(opts.jobs, cases.length),
     summary,

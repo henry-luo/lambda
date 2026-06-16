@@ -712,6 +712,8 @@ function _wpt_send_one_key(elem, code) {
     var aeTag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : "";
     var isTC = (aeTag === "INPUT" || aeTag === "TEXTAREA");
     if (isTC) {
+        if (code === 0xE013 && _wpt_spin_number_control(ae, +1)) return; // ArrowUp
+        if (code === 0xE015 && _wpt_spin_number_control(ae, -1)) return; // ArrowDown
         var v = ae.value || "";
         var ss = ae.selectionStart;
         var se = ae.selectionEnd;
@@ -983,6 +985,83 @@ function _wpt_dispatch_input_event(target, type, inputType, data) {
     return ok !== false && !ev.defaultPrevented;
 }
 
+function _wpt_dispatch_plain_event(target, type) {
+    if (!target) return true;
+    var ev = null;
+    try {
+        ev = new Event(type, {
+            bubbles: true,
+            cancelable: false,
+            composed: true
+        });
+    } catch (_) {
+        ev = { type: type, defaultPrevented: false };
+    }
+    try { return target.dispatchEvent(ev) !== false; } catch (_) { return true; }
+}
+
+function _wpt_owner_frame_for_document(doc) {
+    if (!doc || typeof document === "undefined" || doc === document) return null;
+    var frames = [];
+    try { frames = document.querySelectorAll("iframe"); } catch (_) { frames = []; }
+    for (var i = 0; i < frames.length; i++) {
+        try {
+            if (frames[i].contentDocument === doc) return frames[i];
+        } catch (_) {}
+    }
+    return null;
+}
+
+function _wpt_control_is_connected(el) {
+    if (!el) return false;
+    try {
+        if (el.isConnected === false) return false;
+    } catch (_) {}
+    var doc = null;
+    try { doc = el.ownerDocument || document; } catch (_) { doc = null; }
+    if (!doc) return true;
+    if (typeof document !== "undefined" && doc !== document) {
+        var frame = _wpt_owner_frame_for_document(doc);
+        if (!frame) return false;
+        try {
+            if (document.body && typeof document.body.contains === "function") {
+                return document.body.contains(frame);
+            }
+        } catch (_) {}
+        return !!frame.parentNode;
+    }
+    var cur = el;
+    while (cur) {
+        if (cur === doc || cur === doc.documentElement || cur === doc.body) return true;
+        cur = cur.parentNode;
+    }
+    return false;
+}
+
+function _wpt_spin_number_control(el, delta) {
+    if (!el) return false;
+    var tag = "";
+    var type = "";
+    try { tag = String(el.tagName || "").toUpperCase(); } catch (_) {}
+    try { type = String(el.type || el.getAttribute("type") || "").toLowerCase(); } catch (_) {}
+    if (tag !== "INPUT" || type !== "number") return false;
+    if (!_wpt_dispatch_input_event(el, "beforeinput", "insertReplacementText", null)) {
+        return true;
+    }
+    if (!_wpt_control_is_connected(el)) return true;
+    var raw = "";
+    try { raw = el.value || ""; } catch (_) { raw = ""; }
+    var value = raw === "" ? 0 : Number(raw);
+    if (!(value === value)) value = 0;
+    value += delta;
+    try { el.value = String(value); } catch (_) {}
+    _wpt_dispatch_input_event(el, "input", "insertReplacementText", null);
+    if (_wpt_control_is_connected(el)) {
+        _wpt_dispatch_plain_event(el, "change");
+    }
+    return true;
+}
+
 function _wpt_insert_text_in_control(el, text) {
     if (!el) return false;
     var v = el.value || "";
@@ -1141,6 +1220,7 @@ function _wpt_test_driver_click(elem) {
 function _WptActions() {
     this._steps = [];
     this._origin = null;
+    this._context = null;
     this.ButtonType = _WptActions.prototype.ButtonType;
 }
 _WptActions.prototype.ButtonType = {
@@ -1158,6 +1238,10 @@ _WptActions.prototype.pointerMove = function(x, y, origin) {
     var node = origin;
     if (origin && typeof origin === "object" && origin.origin) {
         node = origin.origin;
+    }
+    if (node === "viewport") {
+        this._steps.push({ type: "move", x: x, y: y, node: null, viewport: true });
+        return this;
     }
     this._steps.push({ type: "move", x: x, y: y, node: node });
     if (node) this._origin = node;
@@ -1184,6 +1268,59 @@ _WptActions.prototype.keyUp = function(key) {
     return this;
 };
 _WptActions.prototype.pause = function(_dur) { return this; };
+_WptActions.prototype.setContext = function(ctx) {
+    this._context = ctx || null;
+    return this;
+};
+
+function _wpt_actions_context_document(ctx) {
+    if (ctx) {
+        try {
+            if (ctx.document) return ctx.document;
+        } catch (_) {}
+        try {
+            if (ctx.querySelectorAll) return ctx;
+        } catch (_) {}
+    }
+    try { return document; } catch (_) { return null; }
+}
+
+function _wpt_actions_number_spin_target(ctx, x, y) {
+    var doc = _wpt_actions_context_document(ctx);
+    if (!doc) return null;
+    var inputs = [];
+    try { inputs = doc.querySelectorAll("input"); } catch (_) { inputs = []; }
+    var fallback = null;
+    var fallback_count = 0;
+    for (var i = 0; i < inputs.length; i++) {
+        var el = inputs[i];
+        var type = "";
+        try { type = String(el.type || el.getAttribute("type") || "").toLowerCase(); } catch (_) {}
+        if (type !== "number") continue;
+        fallback = el;
+        fallback_count++;
+
+        var rect = null;
+        try { rect = el.getBoundingClientRect(); } catch (_) { rect = null; }
+        if (!rect) continue;
+        var left = Number(rect.left !== undefined ? rect.left : rect.x);
+        var top = Number(rect.top !== undefined ? rect.top : rect.y);
+        var width = Number(rect.width);
+        var height = Number(rect.height);
+        if (!(width > 0) || !(height > 0)) continue;
+        var right = left + width;
+        var bottom = top + height;
+        var in_y = y >= top && y <= bottom;
+        var in_spin_gutter = x >= right - Math.min(20, width) && x <= right + 1;
+        if (in_y && in_spin_gutter) {
+            return { el: el, delta: y <= top + height / 2 ? +1 : -1 };
+        }
+    }
+    if (fallback && fallback_count === 1) {
+        return { el: fallback, delta: +1 };
+    }
+    return null;
+}
 
 function _wpt_actions_descend_to_text(n) {
     if (n && n.nodeType === 1 /* ELEMENT */) {
@@ -1208,6 +1345,33 @@ function _wpt_actions_editing_host(node) {
 function _wpt_actions_event_target(node) {
     if (!node) return null;
     return node.nodeType === 3 ? node.parentNode : node;
+}
+
+function _wpt_actions_text_control(node) {
+    if (!node || node.nodeType !== 1 || !node.tagName) return null;
+    var tag = "";
+    try { tag = String(node.tagName).toUpperCase(); } catch (_) {}
+    return (tag === "INPUT" || tag === "TEXTAREA") ? node : null;
+}
+
+function _wpt_actions_text_control_offset_for_x(el, x) {
+    var value = "";
+    try { value = el.value || ""; } catch (_) {}
+    var len = value.length || 0;
+    if (len <= 0) return 0;
+
+    var rect = null;
+    try { rect = el.getBoundingClientRect(); } catch (_) { rect = null; }
+    if (rect) {
+        var left = Number(rect.left !== undefined ? rect.left : rect.x);
+        var width = Number(rect.width);
+        if (width > 0) {
+            var rel = Math.max(0, Math.min(width, x - left));
+            return Math.max(0, Math.min(len, Math.round((rel / width) * len)));
+        }
+    }
+
+    return x <= 0 ? 0 : len;
 }
 
 function _wpt_actions_dispatch_mouse_pair(target, pointer_type, mouse_type,
@@ -1317,10 +1481,17 @@ function _wpt_actions_set_selection(anchor_node, focus_node, mode) {
 _WptActions.prototype.send = function() {
     var pairs = 0;
     var current_origin = this._origin;
+    var current_x = 0;
+    var current_y = 0;
+    var down_spin_target = null;
+    var down_spin_delta = 0;
     var down_anchor = null;
     var down_button = 0;
     var down_default_allowed = false;
     var down_open = false;
+    var down_text_control = null;
+    var down_text_start = 0;
+    var text_select_fired = false;
     var saw_drag_move = false;
     var shift_ptr = false;
     var ctrl_ptr = false;
@@ -1342,8 +1513,24 @@ _WptActions.prototype.send = function() {
             else if (st.key === "\uE03D" || st.key === "\uE03d") meta_ptr = false;
             mods_ptr = { shift: shift_ptr, ctrl: ctrl_ptr, alt: alt_ptr, meta: meta_ptr };
         } else if (st.type === "move") {
+            current_x = st.x || 0;
+            current_y = st.y || 0;
             if (st.node) current_origin = st.node;
-            if (down_open && st.node && st.node !== down_anchor) {
+            if (down_open && down_text_control && st.node === down_text_control &&
+                down_default_allowed && down_button === this.ButtonType.LEFT) {
+                saw_drag_move = true;
+                var text_end = _wpt_actions_text_control_offset_for_x(
+                    down_text_control, current_x);
+                if (text_end !== down_text_start) {
+                    var sel_start = Math.min(down_text_start, text_end);
+                    var sel_end = Math.max(down_text_start, text_end);
+                    try { down_text_control.setSelectionRange(sel_start, sel_end); } catch (_) {}
+                    if (!text_select_fired) {
+                        text_select_fired = true;
+                        _wpt_dispatch_plain_event(down_text_control, "select");
+                    }
+                }
+            } else if (down_open && st.node && st.node !== down_anchor) {
                 saw_drag_move = true;
                 if (down_button === this.ButtonType.LEFT && down_default_allowed) {
                     _wpt_actions_set_selection(down_anchor, st.node, "extend");
@@ -1353,15 +1540,32 @@ _WptActions.prototype.send = function() {
             down_open = true;
             down_button = st.button;
             down_anchor = current_origin || this._origin;
-            var target = _wpt_actions_event_target(down_anchor);
+            var spin = (!down_anchor && down_button === this.ButtonType.LEFT)
+                ? _wpt_actions_number_spin_target(this._context, current_x, current_y)
+                : null;
+            down_spin_target = spin ? spin.el : null;
+            down_spin_delta = spin ? spin.delta : 0;
+            var target = spin ? spin.el : _wpt_actions_event_target(down_anchor);
             var buttons = 1 << down_button;
             var allowed = _wpt_actions_dispatch_mouse_pair(
                 target, "pointerdown", "mousedown", down_button, buttons, mods_ptr);
             down_default_allowed = allowed;
             if (allowed && down_anchor) {
+                var event_target = _wpt_actions_event_target(down_anchor);
+                var text_control = _wpt_actions_text_control(event_target);
+                if (text_control && down_button === this.ButtonType.LEFT) {
+                    down_text_control = text_control;
+                    down_text_start = _wpt_actions_text_control_offset_for_x(
+                        text_control, current_x);
+                    text_select_fired = false;
+                    try { text_control.focus(); } catch (_) {}
+                    try {
+                        text_control.setSelectionRange(down_text_start, down_text_start);
+                    } catch (_) {}
+                    continue;
+                }
                 var host = _wpt_actions_editing_host(down_anchor);
                 try { if (host && typeof host.focus === "function") host.focus(); } catch (_) {}
-                var event_target = _wpt_actions_event_target(down_anchor);
                 var tag = event_target && event_target.tagName ? String(event_target.tagName).toUpperCase() : "";
                 if (shift_ptr && tag !== "A" && down_button !== this.ButtonType.RIGHT) {
                     _wpt_actions_set_selection(down_anchor, down_anchor, "extend");
@@ -1371,13 +1575,16 @@ _WptActions.prototype.send = function() {
             }
         } else if (st.type === "up") {
             var up_anchor = current_origin || down_anchor || this._origin;
-            var up_target = _wpt_actions_event_target(up_anchor);
+            var up_target = down_spin_target || _wpt_actions_event_target(up_anchor);
             if (down_open && down_default_allowed && down_button === this.ButtonType.LEFT &&
                 saw_drag_move && up_anchor && up_anchor !== down_anchor) {
                 _wpt_actions_set_selection(down_anchor, up_anchor, "extend");
             }
             _wpt_actions_dispatch_mouse_pair(up_target, "pointerup", "mouseup",
                 st.button, 0, mods_ptr);
+            if (down_open && down_default_allowed && down_spin_target) {
+                _wpt_spin_number_control(down_spin_target, down_spin_delta || +1);
+            }
             if (down_open) pairs++;
             down_open = false;
             if (!saw_drag_move && down_default_allowed && down_anchor) {
@@ -1386,6 +1593,11 @@ _WptActions.prototype.send = function() {
             }
             saw_drag_move = false;
             down_default_allowed = false;
+            down_spin_target = null;
+            down_spin_delta = 0;
+            down_text_control = null;
+            down_text_start = 0;
+            text_select_fired = false;
             down_anchor = null;
         }
     }

@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button slices landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button slices landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -151,7 +151,7 @@ control focus/selection semantics are covered by the selection runner.
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
 | `test_wpt_selection_gtest` | 159 | 97 pass / 62 skip / 0 fail | SI-3/SI-5 converted nine `testdriver` selectionchange/click-direction/mouse-button cases from skip to pass |
-| `test_wpt_contenteditable_gtest` | 196 | 158 pass / 38 skip / 0 fail | SI-1/SI-2 converted three `testdriver` input-event cases from skip to pass |
+| `test_wpt_contenteditable_gtest` | 196 | 165 pass / 31 skip / 0 fail | SI-1/SI-2/SI-7/SI-8/SI-9 converted ten `testdriver` input/pointer cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
 plus the live WPT guards listed in §5.1.
@@ -294,6 +294,60 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   applies to `innerHTML` replacements and other subtree-removal paths rather
   than special-casing the WPT.
 
+**SI-7 — number-input ArrowUp synthetic input slice: LANDED (2026-06-16).**
+
+- Enabled the WPT number-input ArrowUp files:
+  `input-events-arrow-key-on-number-input`,
+  `input-events-arrow-key-on-number-input-prevent-default`, and
+  `input-events-arrow-key-on-number-input-delete-document`. They now pass all
+  `3/3` runnable assertions.
+- Extended the WPT key shim so ArrowUp/ArrowDown on focused
+  `<input type="number">` dispatch cancelable `beforeinput` with
+  `inputType="insertReplacementText"`, apply the numeric step only when the
+  event is not canceled and the control is still connected, then dispatch
+  `input` and `change`.
+- Fixed the iframe `srcdoc` property setter root cause exposed by the
+  delete-document variant: setting `frame.srcdoc = ...` now reflects the
+  `srcdoc` attribute and schedules the synthetic iframe load path, so the WPT
+  frame document exists before the test sends the key.
+- While closing the global JS gate, fixed an unrelated `lib_joi` fixture
+  root cause: its local `URL` shim defined `href`/`hostname` but not `host`,
+  while Joi's domain normalizer reads `new URL(...).host`.
+
+**SI-8 — number-input spin-button pointer slice: LANDED (2026-06-16).**
+
+- Enabled the WPT number-input spin-button pointer files:
+  `input-events-spin-button-click-on-number-input`,
+  `input-events-spin-button-click-on-number-input-prevent-default`, and
+  `input-events-spin-button-click-on-number-input-delete-document`. They now
+  pass all `3/3` runnable assertions.
+- Extended the WPT `test_driver.Actions` shim so `pointerMove(..., {origin:
+  "viewport"}).pointerDown().pointerUp()` over an `<input type="number">`
+  dispatches pointer/mouse events, then runs the same cancelable
+  `beforeinput` → numeric step → `input` → `change` default action used by the
+  ArrowUp path. If `beforeinput` is canceled or removes the document, the
+  later events are suppressed.
+- Added `Actions.setContext(frame.contentWindow)` support for the iframe
+  delete-document variant. The shim deliberately avoids relying on
+  `typeof document.querySelectorAll === "function"` because Lambda's native DOM
+  dispatcher exposes callable DOM methods through the property bridge even
+  when `typeof` reports a non-function value.
+
+**SI-9 — text-control drag-select pointer slice: LANDED (2026-06-16).**
+
+- Enabled `input-events/select-event-drag-remove.html`; the drag-select case
+  now passes its single assertion and no longer remains behind the Phase SI
+  synthetic-input skip.
+- Extended the WPT `test_driver.Actions` shim for left-button drags over
+  `<input>` and `<textarea>` controls: pointer down focuses the control and
+  anchors its native selection; pointer move maps the x coordinate to a
+  text-control selection range, calls `setSelectionRange()`, and dispatches a
+  `select` event. The target may be removed by that `select` handler, matching
+  the WPT crash-regression shape.
+- Relaxed the plain-event helper so it calls the native DOM bridge's
+  `dispatchEvent` directly instead of depending on `typeof` reporting a
+  JavaScript function.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
@@ -311,25 +365,33 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `modifying-selection-with-primary-mouse-button.tentative` | 7/7 passed |
 | `modifying-selection-with-non-primary-mouse-button.tentative?middle` | 7/7 passed |
 | `modifying-selection-with-non-primary-mouse-button.tentative?secondary` | 7/7 passed |
+| `input-events-arrow-key-on-number-input` | 1/1 passed |
+| `input-events-arrow-key-on-number-input-prevent-default` | 1/1 passed |
+| `input-events-arrow-key-on-number-input-delete-document` | 1/1 passed |
+| `input-events-spin-button-click-on-number-input` | 1/1 passed |
+| `input-events-spin-button-click-on-number-input-prevent-default` | 1/1 passed |
+| `input-events-spin-button-click-on-number-input-delete-document` | 1/1 passed |
+| `select-event-drag-remove` | 1/1 passed |
 | `input-events-get-target-ranges-backspace.tentative` | measured 26/163; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
-| focused WPT test rebuilds | `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` rebuilt |
-| `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
+| focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
+| `test_wpt_contenteditable_gtest` | 196 cases: 165 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 193 passed / 0 failed |
-| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; 0 retry-only cases |
+| `test_js_gtest` | 196 passed / 0 failed |
+| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-6's local WPT/JS guards and the mandatory §1.1
+**Global gate note:** SI-9's local WPT/JS guards and the mandatory §1.1
 JavaScript regression gate are green. The broader SI phase can keep advancing
 from the remaining skipped deletion/pointer matrices without carrying a global
 gate blocker.
 
-**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
-and pointer subset: remaining `getTargetRanges` deletion matrices (starting
-with the measured Backspace blockers), broader text-control delete coverage,
-and general pointer drag/hit-test injection outside the contenteditable
-mouse-button files.
+**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
+number spin-key, number spin-button, and text-control drag-select pointer
+subset: remaining `getTargetRanges` deletion matrices (starting with the
+measured Backspace blockers), broader text-control delete coverage, and richer
+pointer drag/hit-test injection outside the newly enabled text-control and
+contenteditable mouse-button files.
 
 ---
 

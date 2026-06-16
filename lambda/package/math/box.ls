@@ -343,17 +343,27 @@ pub fn vbox(children) {
 // ============================================================
 
 // wrap a box's element with struts for standalone rendering
+// matches MathLive's box.ts makeStruts(): bottom strut is emitted ONLY when
+// depth != 0 (i.e., when the box has content below the baseline).
 pub fn make_struts(bx) {
     let h = bx.height
     let d = bx.depth
-    let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
-    <span;
-        <span class: css.STRUT,
-              style: "height:" ++ util.fmt_em(h)>
-        <span class: css.STRUT_BOTTOM,
-              style: strut_bottom_style>
-        bx.element
-    >
+    if (d != 0.0) {
+        let strut_bottom_style = "height:" ++ util.fmt_em(h + d) ++ ";vertical-align:" ++ util.fmt_em(0.0 - d)
+        <span;
+            <span class: css.STRUT,
+                  style: "height:" ++ util.fmt_em(h)>
+            <span class: css.STRUT_BOTTOM,
+                  style: strut_bottom_style>
+            bx.element
+        >
+    } else {
+        <span;
+            <span class: css.STRUT,
+                  style: "height:" ++ util.fmt_em(h)>
+            bx.element
+        >
+    }
 }
 
 // ============================================================
