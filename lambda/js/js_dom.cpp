@@ -361,6 +361,95 @@ static inline void dom_text_replace_data(DomText* text, uint32_t off,
                                   text ? text->parent : nullptr, 0);
 }
 
+static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
+    if (!text) return 0;
+    uint32_t n = 0;
+    const unsigned char* p = (const unsigned char*)text;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char b = p[i];
+        if ((b & 0xC0) == 0x80) continue;
+        if (b < 0x80) n += 1;
+        else if (b < 0xF0) n += 1;
+        else n += 2;
+    }
+    return n;
+}
+
+static int64_t js_dom_to_integer_or_zero(Item value) {
+    Item num = js_to_number(value);
+    TypeId t = get_type_id(num);
+    double d = 0.0;
+    if (t == LMD_TYPE_INT) d = (double)it2i(num);
+    else if (t == LMD_TYPE_INT64) d = (double)it2l(num);
+    else if (t == LMD_TYPE_FLOAT) d = it2d(num);
+    else if (t == LMD_TYPE_BOOL) d = it2b(num) ? 1.0 : 0.0;
+    if (d != d || d == 0.0) return 0;
+    if (d >= (double)INT64_MAX) return INT64_MAX;
+    if (d <= (double)INT64_MIN) return INT64_MIN;
+    return (int64_t)d;
+}
+
+static DomDocument* js_dom_text_owner_document(DomText* text_node) {
+    DomNode* parent = text_node ? text_node->parent : nullptr;
+    while (parent && !parent->is_element()) parent = parent->parent;
+    if (parent && parent->is_element()) return parent->as_element()->doc;
+    return _js_current_document;
+}
+
+static void js_dom_throw_index_size_error(const char* message) {
+    Item name = (Item){.item = s2it(heap_create_name("IndexSizeError"))};
+    Item msg = (Item){.item = s2it(heap_create_name(
+        message ? message : "The index is not in the allowed range."))};
+    js_throw_value(js_new_error_with_name(name, msg));
+}
+
+static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
+                                     uint32_t count, const char* repl_chars) {
+    if (!text_node) return false;
+    if (!repl_chars) repl_chars = "";
+
+    uint32_t old_u16_len = dom_text_utf16_length(text_node);
+    if (offset > old_u16_len) {
+        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+        return false;
+    }
+    uint32_t available = old_u16_len - offset;
+    if (count > available) count = available;
+
+    uint32_t u8_off = dom_text_utf16_to_utf8(text_node, offset);
+    uint32_t u8_end = dom_text_utf16_to_utf8(text_node, offset + count);
+    if (u8_end < u8_off) u8_end = u8_off;
+
+    size_t repl_len = strlen(repl_chars);
+    uint32_t repl_u16_len = js_dom_utf16_length_from_utf8(repl_chars, repl_len);
+    const char* old_text = text_node->text ? text_node->text : "";
+    size_t old_len = text_node->length;
+    size_t prefix_len = u8_off;
+    size_t suffix_len = old_len > u8_end ? old_len - u8_end : 0;
+    size_t new_len = prefix_len + repl_len + suffix_len;
+
+    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!buf) return false;
+    if (prefix_len) memcpy(buf, old_text, prefix_len);
+    if (repl_len) memcpy(buf + prefix_len, repl_chars, repl_len);
+    if (suffix_len) memcpy(buf + prefix_len + repl_len, old_text + u8_end, suffix_len);
+    buf[new_len] = '\0';
+
+    DomDocument* doc = js_dom_text_owner_document(text_node);
+    String* s = js_dom_create_document_string(doc, buf, new_len);
+    mem_free(buf);
+    if (!s) return false;
+
+    text_node->native_string = s;
+    text_node->text = s->chars;
+    text_node->length = new_len;
+    dom_text_replace_data(text_node, offset, count, repl_u16_len);
+    js_dom_mutation_notify();
+    log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
+              offset, count, repl_u16_len);
+    return true;
+}
+
 /**
  * Reset JS DOM state for batch mode. Clears cached document proxy and
  * document pointer so next file starts fresh.
@@ -898,6 +987,13 @@ extern "C" Item js_dom_wrap_element(void* dom_elem) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        for (int i = 0; attr_names && i < attr_count; i++) {
+            const char* name = attr_names[i];
+            const char* value = dom_element_get_attribute(elem, name);
+            js_dom_compile_event_attr_to_expando(elem, name, value);
+        }
         log_debug("js_dom_wrap_element: wrapped DomElement tag='%s' as Map=%p",
                   elem->tag_name ? elem->tag_name : "(null)", (void*)wrapper);
     } else if (node->is_text()) {
@@ -979,6 +1075,21 @@ static DomElement* _select_options_owner(Item collection, int* out_kind) {
 extern "C" Item js_get_this(void);
 extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* args, int argc);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
+static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
+                                            Item count_arg, Item data_arg);
+static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
+                                           Item data_arg);
+static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg);
+static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
+                                           Item count_arg);
+static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
+                                              Item count_arg);
+static Item js_text_replace_data_method(Item offset_arg, Item count_arg, Item data_arg);
+static Item js_text_insert_data_method(Item offset_arg, Item data_arg);
+static Item js_text_append_data_method(Item data_arg);
+static Item js_text_delete_data_method(Item offset_arg, Item count_arg);
+static Item js_text_substring_data_method(Item offset_arg, Item count_arg);
+static void _value_mark_dirty(DomElement* elem);
 
 static Item _collection_named_item(Item name_arg) {
     const char* name = fn_to_cstr(name_arg);
@@ -2827,6 +2938,127 @@ static bool js_dom_is_script_focusable(DomElement* elem) {
     return false;
 }
 
+static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
+    const char* style = elem ? dom_element_get_attribute(elem, "style") : nullptr;
+    if (!style) return inherited;
+    const char* ws = strstr(style, "white-space");
+    if (!ws) return inherited;
+    return strstr(ws, "pre") != nullptr || strstr(ws, "break-spaces") != nullptr;
+}
+
+static bool js_dom_text_initial_offset(DomText* text, bool preserve_ws, uint32_t* out_offset) {
+    if (!text || !text->text || text->length == 0) return false;
+    if (preserve_ws) {
+        *out_offset = 0;
+        return true;
+    }
+
+    const char* chars = text->text;
+    size_t len = text->length;
+    size_t first_visible = 0;
+    while (first_visible < len) {
+        unsigned char ch = (unsigned char)chars[first_visible];
+        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' && ch != '\f') {
+            break;
+        }
+        first_visible++;
+    }
+    if (first_visible == len) return false;
+    *out_offset = js_dom_utf16_length_from_utf8(chars, first_visible);
+    return true;
+}
+
+static bool js_dom_find_initial_editing_boundary(DomElement* elem,
+                                                 bool preserve_ws,
+                                                 DomBoundary* out_boundary) {
+    if (!elem || !out_boundary) return false;
+    bool child_preserve_ws = js_dom_style_preserves_leading_ws(elem, preserve_ws);
+    uint32_t index = 0;
+    bool have_empty_prefix = false;
+    uint32_t empty_prefix_index = 0;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling, index++) {
+        if (child->is_text()) {
+            uint32_t offset = 0;
+            if (js_dom_text_initial_offset(child->as_text(), child_preserve_ws, &offset)) {
+                out_boundary->node = child;
+                out_boundary->offset = offset;
+                return true;
+            }
+            if (!have_empty_prefix) {
+                have_empty_prefix = true;
+                empty_prefix_index = index;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+
+        DomElement* child_elem = child->as_element();
+        if (dom_element_has_attribute(child_elem, "contenteditable")) {
+            const char* ce = js_dom_normalize_contenteditable(
+                dom_element_get_attribute(child_elem, "contenteditable"));
+            if (ce && strcmp(ce, "false") == 0) {
+                out_boundary->node = (DomNode*)elem;
+                out_boundary->offset = have_empty_prefix ? empty_prefix_index : index;
+                return true;
+            }
+        }
+        if (_is_tag(child_elem, "br") || _is_tag(child_elem, "input") ||
+            _is_tag(child_elem, "textarea") || _is_tag(child_elem, "hr")) {
+            out_boundary->node = (DomNode*)elem;
+            out_boundary->offset = index;
+            return true;
+        }
+        if (js_dom_find_initial_editing_boundary(child_elem, child_preserve_ws, out_boundary)) {
+            return true;
+        }
+        if (!have_empty_prefix) {
+            have_empty_prefix = true;
+            empty_prefix_index = index;
+        }
+    }
+    return false;
+}
+
+static void js_dom_focus_set_selection_for_element(DocState* state, DomElement* elem) {
+    if (!state || !elem) return;
+    const char* exc = nullptr;
+    if (tc_is_text_control_elem(elem) && elem->parent) {
+        uint32_t index = dom_node_child_index((DomNode*)elem);
+        if (index != UINT32_MAX) {
+            DomBoundary boundary = { elem->parent, index };
+            if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
+                log_debug("js_dom_focus_selection_text_control_failed: %s",
+                          exc ? exc : "unknown");
+            }
+        }
+        return;
+    }
+
+    if (js_dom_is_editing_host(elem)) {
+        DomSelection* existing = state->dom_selection;
+        if (existing && existing->range_count > 0 && existing->ranges[0]) {
+            return;
+        }
+        DomBoundary boundary = { (DomNode*)elem, 0 };
+        js_dom_find_initial_editing_boundary(elem, false, &boundary);
+        if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
+            log_debug("js_dom_focus_selection_editing_host_failed: %s",
+                      exc ? exc : "unknown");
+        }
+    }
+}
+
+extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
+    DomNode* node = (DomNode*)dom_node;
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    if (!js_dom_is_editing_host(elem)) return;
+    if (!js_dom_is_script_focusable(elem)) return;
+    DocState* state = js_dom_current_state();
+    js_document_active_element = elem;
+    focus_set(state, (View*)elem, false);
+}
+
 static void js_dom_throw_syntax_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
     Item msg = (Item){.item = s2it(heap_create_name(message ? message : "SyntaxError"))};
@@ -2958,6 +3190,15 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
 // Helper: recursive innerHTML serialization
 // ============================================================================
 
+static void collect_html_attr_value(const char* value, StrBuf* sb) {
+    if (!value) return;
+    for (const char* p = value; *p; p++) {
+        if (*p == '&') strbuf_append_str(sb, "&amp;");
+        else if (*p == '"') strbuf_append_str(sb, "&quot;");
+        else strbuf_append_char(sb, *p);
+    }
+}
+
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
 
@@ -2969,24 +3210,35 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         return;
     }
 
+    if (node->is_comment()) {
+        DomComment* comment = node->as_comment();
+        strbuf_append_str(sb, "<!--");
+        if (comment->content && comment->length > 0) {
+            strbuf_append_str_n(sb, comment->content, (int)comment->length);
+        }
+        strbuf_append_str(sb, "-->");
+        return;
+    }
+
     if (node->is_element()) {
         DomElement* elem = node->as_element();
         // opening tag
         strbuf_append_char(sb, '<');
         strbuf_append_str(sb, elem->tag_name ? elem->tag_name : "unknown");
-        // serialize key attributes (id, class)
-        if (elem->id) {
-            strbuf_append_str(sb, " id=\"");
-            strbuf_append_str(sb, elem->id);
-            strbuf_append_char(sb, '"');
-        }
-        if (elem->class_count > 0) {
-            strbuf_append_str(sb, " class=\"");
-            for (int i = 0; i < elem->class_count; i++) {
-                if (i > 0) strbuf_append_char(sb, ' ');
-                strbuf_append_str(sb, elem->class_names[i]);
+
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        if (attr_names) {
+            for (int i = 0; i < attr_count; i++) {
+                const char* name = attr_names[i];
+                const char* value = dom_element_get_attribute(elem, name);
+                if (!name || !value) continue;
+                strbuf_append_char(sb, ' ');
+                strbuf_append_str(sb, name);
+                strbuf_append_str(sb, "=\"");
+                collect_html_attr_value(value, sb);
+                strbuf_append_char(sb, '"');
             }
-            strbuf_append_char(sb, '"');
         }
         strbuf_append_char(sb, '>');
 
@@ -3947,9 +4199,239 @@ static Item js_text_control_select(void) {
 
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
-    focus_set(js_dom_current_state(), (View*)elem, false);
+    if (js_dom_is_script_focusable(elem)) {
+        focus_set(js_dom_current_state(), (View*)elem, false);
+    }
     form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
     return make_js_undefined();
+}
+
+static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
+                                          uint32_t new_len) {
+    if (!elem || !tc_is_text_control_elem(elem)) return false;
+    tc_ensure_init(elem);
+    FormControlProp* f = tc_get_or_create_form(elem);
+    if (!f) return false;
+
+    char* buf = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_DOM);
+    if (!buf) return false;
+    if (new_val && new_len > 0) memcpy(buf, new_val, new_len);
+    buf[new_len] = '\0';
+
+    if (f->current_value) mem_free(f->current_value);
+    f->current_value = buf;
+    f->current_value_len = new_len;
+    f->current_value_u16_len = tc_utf8_to_utf16_length(buf, new_len);
+    f->tc_initialized = 1;
+    f->value = buf;
+
+    DocState* state = js_dom_current_state();
+    f->state_ref = state;
+    form_control_sync_text_control_state(state, (View*)elem);
+    form_control_sync_text_control_focus_state(state, (View*)elem);
+    bool show_placeholder = f->current_value_len == 0 && f->placeholder && f->placeholder[0];
+    state_set_bool(state, elem, STATE_PLACEHOLDER, show_placeholder);
+    return true;
+}
+
+static Item js_text_control_set_range_text_for_elem(DomElement* elem,
+                                                    Item replacement_arg,
+                                                    Item start_arg,
+                                                    Item end_arg,
+                                                    Item mode_arg) {
+    if (!elem || !tc_is_text_control_elem(elem)) return make_js_undefined();
+    tc_ensure_init(elem);
+    FormControlProp* f = elem->form;
+    if (!f) return make_js_undefined();
+
+    Item replacement_item = js_to_string(replacement_arg);
+    const char* replacement = fn_to_cstr(replacement_item);
+    if (!replacement) replacement = "";
+    uint32_t replacement_len = (uint32_t)strlen(replacement);
+    uint32_t replacement_u16_len = tc_utf8_to_utf16_length(replacement, replacement_len);
+
+    uint32_t old_value_u16_len = f->current_value_u16_len;
+    uint32_t old_selection_start = f->selection_start;
+    uint32_t old_selection_end = f->selection_end;
+    uint8_t old_direction = f->selection_direction;
+
+    uint32_t start = old_selection_start;
+    uint32_t end = old_selection_end;
+    if (!is_js_undefined(start_arg)) {
+        int64_t start_i = js_dom_to_integer_or_zero(start_arg);
+        start = start_i < 0 ? 0 : (uint32_t)start_i;
+    }
+    if (!is_js_undefined(end_arg)) {
+        int64_t end_i = js_dom_to_integer_or_zero(end_arg);
+        end = end_i < 0 ? 0 : (uint32_t)end_i;
+    }
+    if (start > end) {
+        js_dom_throw_index_size_error("The start offset is larger than the end offset.");
+        return make_js_undefined();
+    }
+    if (start > old_value_u16_len) start = old_value_u16_len;
+    if (end > old_value_u16_len) end = old_value_u16_len;
+
+    const char* old_value = f->current_value ? f->current_value : "";
+    uint32_t start_u8 = tc_utf16_to_utf8_offset(old_value, f->current_value_len, start);
+    uint32_t end_u8 = tc_utf16_to_utf8_offset(old_value, f->current_value_len, end);
+    if (end_u8 < start_u8) end_u8 = start_u8;
+
+    uint32_t prefix_len = start_u8;
+    uint32_t suffix_len = f->current_value_len > end_u8 ? f->current_value_len - end_u8 : 0;
+    uint32_t new_len = prefix_len + replacement_len + suffix_len;
+    char* new_value = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!new_value) return make_js_undefined();
+    if (prefix_len > 0) memcpy(new_value, old_value, prefix_len);
+    if (replacement_len > 0) memcpy(new_value + prefix_len, replacement, replacement_len);
+    if (suffix_len > 0) {
+        memcpy(new_value + prefix_len + replacement_len, old_value + end_u8, suffix_len);
+    }
+    new_value[new_len] = '\0';
+
+    uint32_t final_start = old_selection_start;
+    uint32_t final_end = old_selection_end;
+    uint8_t final_direction = old_direction;
+    const char* mode = is_js_undefined(mode_arg) ? "preserve" : fn_to_cstr(mode_arg);
+    if (!mode) mode = "preserve";
+    uint32_t inserted_end = start + replacement_u16_len;
+    if (strcmp(mode, "select") == 0) {
+        final_start = start;
+        final_end = inserted_end;
+        final_direction = 0;
+    } else if (strcmp(mode, "start") == 0) {
+        final_start = start;
+        final_end = start;
+        final_direction = 0;
+    } else if (strcmp(mode, "end") == 0) {
+        final_start = inserted_end;
+        final_end = inserted_end;
+        final_direction = 0;
+    } else {
+        int64_t delta = (int64_t)replacement_u16_len - (int64_t)(end - start);
+        if (final_start > end) {
+            final_start = (uint32_t)((int64_t)final_start + delta);
+        } else if (final_start > start) {
+            final_start = inserted_end;
+        }
+        if (final_end > end) {
+            final_end = (uint32_t)((int64_t)final_end + delta);
+        } else if (final_end > start) {
+            final_end = inserted_end;
+        }
+    }
+
+    if (!js_text_control_set_raw_value(elem, new_value, new_len)) {
+        mem_free(new_value);
+        return make_js_undefined();
+    }
+    mem_free(new_value);
+    _value_mark_dirty(elem);
+    form_control_set_selection(js_dom_current_state(), (View*)elem,
+        final_start, final_end, final_direction);
+    return make_js_undefined();
+}
+
+static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
+                                           Item end_arg, Item mode_arg) {
+    Item self = js_get_this();
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(self);
+    return js_text_control_set_range_text_for_elem(elem, replacement_arg,
+        start_arg, end_arg, mode_arg);
+}
+
+static Item js_dom_text_replace_data_method(DomText* text_node, Item offset_arg,
+                                            Item count_arg, Item data_arg) {
+    if (!text_node) return make_js_undefined();
+    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
+    int64_t count = js_dom_to_integer_or_zero(count_arg);
+    if (offset < 0 || count < 0) {
+        js_dom_throw_index_size_error("The offset or count is negative.");
+        return make_js_undefined();
+    }
+
+    Item data_text_item = js_to_string(data_arg);
+    const char* data_text = fn_to_cstr(data_text_item);
+    if (!data_text) data_text = "";
+    js_dom_replace_text_data(text_node, (uint32_t)offset, (uint32_t)count, data_text);
+    return make_js_undefined();
+}
+
+static Item js_dom_text_insert_data_method(DomText* text_node, Item offset_arg,
+                                           Item data_arg) {
+    return js_dom_text_replace_data_method(text_node, offset_arg, (Item){.item = i2it(0)}, data_arg);
+}
+
+static Item js_dom_text_append_data_method(DomText* text_node, Item data_arg) {
+    if (!text_node) return make_js_undefined();
+    return js_dom_text_replace_data_method(text_node,
+        (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))},
+        (Item){.item = i2it(0)}, data_arg);
+}
+
+static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
+                                           Item count_arg) {
+    return js_dom_text_replace_data_method(text_node, offset_arg, count_arg,
+        (Item){.item = s2it(heap_create_name(""))});
+}
+
+static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
+                                              Item count_arg) {
+    if (!text_node) return (Item){.item = s2it(heap_create_name(""))};
+    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
+    int64_t count = js_dom_to_integer_or_zero(count_arg);
+    if (offset < 0 || count < 0) {
+        js_dom_throw_index_size_error("The offset or count is negative.");
+        return make_js_undefined();
+    }
+    uint32_t old_u16_len = dom_text_utf16_length(text_node);
+    if ((uint64_t)offset > old_u16_len) {
+        js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+        return make_js_undefined();
+    }
+    uint32_t available = old_u16_len - (uint32_t)offset;
+    uint32_t take = (uint64_t)count > available ? available : (uint32_t)count;
+    uint32_t start_u8 = dom_text_utf16_to_utf8(text_node, (uint32_t)offset);
+    uint32_t end_u8 = dom_text_utf16_to_utf8(text_node, (uint32_t)offset + take);
+    if (end_u8 < start_u8) end_u8 = start_u8;
+    const char* chars = text_node->text ? text_node->text : "";
+    String* s = heap_strcpy((char*)chars + start_u8, end_u8 - start_u8);
+    return (Item){.item = s2it(s)};
+}
+
+static Item js_text_replace_data_method(Item offset_arg, Item count_arg, Item data_arg) {
+    Item self = js_get_this();
+    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
+    if (!node || !node->is_text()) return make_js_undefined();
+    return js_dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
+}
+
+static Item js_text_insert_data_method(Item offset_arg, Item data_arg) {
+    Item self = js_get_this();
+    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
+    if (!node || !node->is_text()) return make_js_undefined();
+    return js_dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
+}
+
+static Item js_text_append_data_method(Item data_arg) {
+    Item self = js_get_this();
+    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
+    if (!node || !node->is_text()) return make_js_undefined();
+    return js_dom_text_append_data_method(node->as_text(), data_arg);
+}
+
+static Item js_text_delete_data_method(Item offset_arg, Item count_arg) {
+    Item self = js_get_this();
+    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
+    if (!node || !node->is_text()) return make_js_undefined();
+    return js_dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
+}
+
+static Item js_text_substring_data_method(Item offset_arg, Item count_arg) {
+    Item self = js_get_this();
+    DomNode* node = (DomNode*)js_dom_unwrap_element(self);
+    if (!node || !node->is_text()) return make_js_undefined();
+    return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
 }
 
 // ============================================================================
@@ -5375,7 +5857,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                                    : (Item){.item = s2it(heap_create_name(""))};
         }
         if (strcmp(prop, "length") == 0) {
-            return (Item){.item = i2it((int64_t)text_node->length)};
+            return (Item){.item = i2it((int64_t)dom_text_utf16_length(text_node))};
         }
         if (strcmp(prop, "nodeType") == 0) {
             return (Item){.item = i2it(3)}; // TEXT_NODE
@@ -5422,6 +5904,26 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
                 }
             }
             return js_get_document_object_value();
+        }
+        if (strcmp(prop, "replaceData") == 0) {
+            return js_bind_function(js_new_function((void*)js_text_replace_data_method, 3),
+                elem_item, NULL, 0);
+        }
+        if (strcmp(prop, "insertData") == 0) {
+            return js_bind_function(js_new_function((void*)js_text_insert_data_method, 2),
+                elem_item, NULL, 0);
+        }
+        if (strcmp(prop, "appendData") == 0) {
+            return js_bind_function(js_new_function((void*)js_text_append_data_method, 1),
+                elem_item, NULL, 0);
+        }
+        if (strcmp(prop, "deleteData") == 0) {
+            return js_bind_function(js_new_function((void*)js_text_delete_data_method, 2),
+                elem_item, NULL, 0);
+        }
+        if (strcmp(prop, "substringData") == 0) {
+            return js_bind_function(js_new_function((void*)js_text_substring_data_method, 2),
+                elem_item, NULL, 0);
         }
         log_debug("js_dom_get_property: unknown text node property '%s'", prop);
         return ItemNull;
@@ -6133,7 +6635,7 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         if (strcmp(prop, "select") == 0)
             return js_new_function((void*)js_text_control_select, 0);
         if (strcmp(prop, "setRangeText") == 0)
-            return (Item){.item = ITEM_TRUE};
+            return js_new_function((void*)js_text_control_set_range_text, 4);
     }
 
     // ------------------------------------------------------------------
@@ -6761,20 +7263,7 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         const char* new_text = fn_to_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
-            size_t len = strlen(new_text);
-            DomElement* owner = nullptr;
-            DomNode* parent = text_node->parent;
-            while (parent && !parent->is_element()) parent = parent->parent;
-            if (parent) owner = parent->as_element();
-            DomDocument* doc = owner ? owner->doc : _js_current_document;
-            String* s = js_dom_create_document_string(doc, new_text, len);
-            if (!s) return value;
-            text_node->native_string = s;
-            text_node->text = s->chars;
-            text_node->length = len;
-            uint32_t new_u16_len = dom_text_utf16_length(text_node);
-            dom_text_replace_data(text_node, 0, old_u16_len, new_u16_len);
-            js_dom_mutation_notify();
+            js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
             log_debug("js_dom_set_property: set text node data='%.30s'", new_text);
         }
         return value;
@@ -7757,6 +8246,33 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return js_dom_contains(elem_item, args[0]);
     }
 
+    // CharacterData.replaceData(offset, count, data) — text nodes only.
+    if (node->is_text() && strcmp(method, "replaceData") == 0) {
+        Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
+        Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
+        Item data_arg = argc >= 3 ? args[2] : make_js_undefined();
+        return js_dom_text_replace_data_method(node->as_text(), offset_arg, count_arg, data_arg);
+    }
+    if (node->is_text() && strcmp(method, "insertData") == 0) {
+        Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
+        Item data_arg = argc >= 2 ? args[1] : make_js_undefined();
+        return js_dom_text_insert_data_method(node->as_text(), offset_arg, data_arg);
+    }
+    if (node->is_text() && strcmp(method, "appendData") == 0) {
+        Item data_arg = argc >= 1 ? args[0] : make_js_undefined();
+        return js_dom_text_append_data_method(node->as_text(), data_arg);
+    }
+    if (node->is_text() && strcmp(method, "deleteData") == 0) {
+        Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
+        Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
+        return js_dom_text_delete_data_method(node->as_text(), offset_arg, count_arg);
+    }
+    if (node->is_text() && strcmp(method, "substringData") == 0) {
+        Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
+        Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
+        return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
+    }
+
     // All remaining methods require an element node
     if (!elem) {
         log_debug("js_dom_element_method: '%s' called on non-element node, ignored", method);
@@ -8606,6 +9122,7 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             if (js_dom_is_script_focusable(elem)) {
                 js_document_active_element = elem;
                 focus_set(state, (View*)elem, false);
+                js_dom_focus_set_selection_for_element(state, elem);
             }
         } else {
             if (js_document_active_element == elem) js_document_active_element = nullptr;
@@ -8668,12 +9185,23 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         return make_js_undefined();
     }
 
+    // setRangeText(replacement [, start, end, selectionMode]) — text controls only.
+    if (strcmp(method, "setRangeText") == 0 && tc_is_text_control_elem(elem)) {
+        Item replacement_arg = argc >= 1 ? args[0] : make_js_undefined();
+        Item start_arg = argc >= 2 ? args[1] : make_js_undefined();
+        Item end_arg = argc >= 3 ? args[2] : make_js_undefined();
+        Item mode_arg = argc >= 4 ? args[3] : make_js_undefined();
+        return js_text_control_set_range_text_for_elem(elem, replacement_arg,
+            start_arg, end_arg, mode_arg);
+    }
+
     // select() — text controls only. Selects the entire value and focuses.
     if (strcmp(method, "select") == 0 && tc_is_text_control_elem(elem)) {
         tc_ensure_init(elem);
         FormControlProp* f = elem->form;
-        // Per HTML, select() implicitly focuses the control.
-        focus_set(js_dom_current_state(), (View*)elem, false);
+        if (js_dom_is_script_focusable(elem)) {
+            focus_set(js_dom_current_state(), (View*)elem, false);
+        }
         form_control_set_selection(js_dom_current_state(), (View*)elem, 0, f->current_value_u16_len, 0);
         return make_js_undefined();
     }

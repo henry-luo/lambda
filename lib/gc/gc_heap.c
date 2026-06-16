@@ -23,6 +23,37 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
 
+void gc_native_seen_init(gc_native_seen_t* seen) {
+    if (!seen) return;
+    seen->data = NULL;
+    seen->length = 0;
+    seen->capacity = 0;
+}
+
+void gc_native_seen_dispose(gc_native_seen_t* seen) {
+    if (!seen) return;
+    if (seen->data) free(seen->data);
+    seen->data = NULL;
+    seen->length = 0;
+    seen->capacity = 0;
+}
+
+int gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr) {
+    if (!seen || !ptr) return 1;
+    for (int i = 0; i < seen->length; i++) {
+        if (seen->data[i] == ptr) return 1;
+    }
+    if (seen->length >= seen->capacity) {
+        int new_capacity = seen->capacity ? seen->capacity * 2 : 32;
+        void** new_data = (void**)realloc(seen->data, (size_t)new_capacity * sizeof(void*));
+        if (!new_data) return 1;
+        seen->data = new_data;
+        seen->capacity = new_capacity;
+    }
+    seen->data[seen->length++] = ptr;
+    return 0;
+}
+
 static void* gc_header_user_ptr(gc_header_t* header) {
     return header ? (void*)(header + 1) : NULL;
 }
@@ -186,6 +217,8 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_ERROR_   25
 #define LMD_TYPE_UNDEFINED_ 26
 
+#define MAP_KIND_ITERATOR_ 6
+
 // ============================================================================
 // Lifecycle
 // ============================================================================
@@ -276,7 +309,6 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     // VMap callbacks (set by runtime via lambda-mem.cpp)
     gc->vmap_trace = NULL;
     gc->vmap_destroy = NULL;
-
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
@@ -850,8 +882,13 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_OBJECT_: {
         // Map/Object: { Container(8), type*(8@8), data*(8@16), data_cap(4@24) }
         uint8_t* p = (uint8_t*)obj;
+        uint8_t map_kind = p[1] >> 4;
         void* type_ptr = *(void**)(p + 8);    // TypeMap*
         void* data_ptr = *(void**)(p + 16);   // data buffer
+        if (tag == LMD_TYPE_MAP_ && map_kind == MAP_KIND_ITERATOR_) {
+            if (data_ptr) gc_mark_item(gc, *(uint64_t*)data_ptr);
+            break;
+        }
         if (!type_ptr || !data_ptr) break;
 
         // Walk shape entries to find Item fields
@@ -1267,7 +1304,6 @@ static void gc_sweep(gc_heap_t* gc) {
     gc_header_t* prev = NULL;
     size_t freed_count = 0;
     size_t freed_bytes = 0;
-
     while (current) {
         gc_header_t* next_obj = current->next;
 

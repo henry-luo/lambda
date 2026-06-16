@@ -13908,6 +13908,39 @@ static Item js_global_var_cached_defined_keys[64];
 static int js_global_var_cached_defined_count = 0;
 static uint64_t js_global_var_cached_defined_epoch = 0;
 static Item js_global_var_cached_global = {0};
+static Item js_window_event_value = {.item = ITEM_JS_UNDEFINED};
+static bool js_window_event_rooted = false;
+static bool js_window_event_intercept_enabled = false;
+
+static bool js_key_is_event_name(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* s = it2s(key);
+    return s && s->len == 5 && strncmp(s->chars, "event", 5) == 0;
+}
+
+static void js_window_event_ensure_rooted() {
+    if (js_window_event_rooted) return;
+    extern void heap_register_gc_root(uint64_t* slot);
+    heap_register_gc_root(&js_window_event_value.item);
+    js_window_event_rooted = true;
+}
+
+extern "C" int js_is_window_event_global_property(Item object, Item key) {
+    return js_window_event_intercept_enabled &&
+        js_global_this_obj.item != 0 &&
+        object.item == js_global_this_obj.item &&
+        js_key_is_event_name(key);
+}
+
+extern "C" Item js_get_window_event_global_value(void) {
+    js_window_event_ensure_rooted();
+    return js_window_event_value.item == 0 ? make_js_undefined() : js_window_event_value;
+}
+
+extern "C" void js_set_window_event_global_value(Item value) {
+    js_window_event_ensure_rooted();
+    js_window_event_value = value;
+}
 
 static void js_global_var_define_cache_reset() {
     memset(js_global_var_cached_defined_keys, 0, sizeof(js_global_var_cached_defined_keys));
@@ -13922,6 +13955,8 @@ static void js_global_var_define_cache_reset() {
  */
 extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
+    js_window_event_value = make_js_undefined();
+    js_window_event_intercept_enabled = false;
     js_global_var_define_cache_reset();
     // reset constructor cache (function objects from old pool)
     extern void js_ctor_cache_reset();
@@ -14353,6 +14388,7 @@ extern "C" Item js_get_global_this() {
             {"UIEvent", 7}, {"FocusEvent", 10}, {"MouseEvent", 10},
             {"WheelEvent", 10}, {"KeyboardEvent", 13},
             {"CompositionEvent", 16}, {"InputEvent", 10}, {"PointerEvent", 12},
+            {"StaticRange", 11},
             {NULL, 0}
         };
         for (int i = 0; ctor_names[i].name; i++) {
@@ -14554,6 +14590,9 @@ extern "C" Item js_get_global_this() {
 
         // ES spec: all standard global properties are non-enumerable
         js_mark_all_non_enumerable(js_global_this_obj);
+        js_window_event_value = make_js_undefined();
+        js_window_event_ensure_rooted();
+        js_window_event_intercept_enabled = true;
     }
     return js_global_this_obj;
 }
@@ -15808,6 +15847,7 @@ enum JsConstructorId {
     JS_CTOR_COMPOSITION_EVENT,
     JS_CTOR_INPUT_EVENT,
     JS_CTOR_POINTER_EVENT,
+    JS_CTOR_STATIC_RANGE,
     JS_CTOR_MAX
 };
 
@@ -16457,6 +16497,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_COMPOSITION_EVENT) fn->func_ptr = (void*)js_ctor_composition_event_fn;
     else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
+    else if (ctor_id == JS_CTOR_STATIC_RANGE) fn->func_ptr = (void*)js_ctor_static_range_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_WEAKREF || ctor_id == JS_CTOR_FINALIZATION_REGISTRY ||
@@ -16591,6 +16632,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"CompositionEvent", 16, JS_CTOR_COMPOSITION_EVENT, 2},
         {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
         {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
+        {"StaticRange", 11, JS_CTOR_STATIC_RANGE, 1},
         {NULL, 0, 0, 0}
     };
 

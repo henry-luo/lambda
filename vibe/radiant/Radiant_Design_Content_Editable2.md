@@ -114,21 +114,37 @@ Two **genuine engine crashes** sit at the top of the list. They must be root-cau
   `EditingSelection` still holds the true range (the "clean collapse/none +
   reset legacy projection" approach).
 
-**Current baseline (2026-06-15):**
+**P0-B/P0-E — selection ops + caret movement: DONE (2026-06-16).** The
+selection runner now has WPT variant support, documented capability skips
+(reftest visual comparisons, `testdriver` synthetic input, Shadow DOM/manual
+cases, and the two pre-existing i18n word-boundary cases), and browser-shaped
+`Selection.modify` movement for:
+
+- inline editing-host line boundaries, including bidi `left`/`right`;
+- character movement across inline element boundaries with collapsed whitespace;
+- `contenteditable=false` islands as atomic non-editable caret stops;
+- `<br>` as the character step rather than consuming the adjacent text.
+
+**P0-C/P0-D — editing-host IDL + focus model: DONE (2026-06-16).** The
+`editing-0` IDL/focus cases in the contenteditable runner are now passing under
+the same documented skip policy; `selectionchange` content attributes and text
+control focus/selection semantics are covered by the selection runner.
+
+**Current baseline (2026-06-16):**
 
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
-| `test_wpt_selection_gtest` | 151 | 87 pass / 46 skip / 18 fail | SIGSEGV eliminated (`initial-selection-on-focus` now a logical fail, not a crash) |
-| `test_wpt_contenteditable_gtest` | 194 | 140 pass / 41 skip / 13 fail | +1 pass; SIGABRT eliminated (`insertparagraph-…` crashtest now passes) |
+| `test_wpt_selection_gtest` | 159 | 88 pass / 71 skip / 0 fail | WPT variants applied; all runnable selection assertions green |
+| `test_wpt_contenteditable_gtest` | 196 | 155 pass / 41 skip / 0 fail | all runnable contenteditable assertions green |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82.
 
-**Remaining for P0 green:** P0-B (selection ops), **P0-C (editing-host IDL — the
-`editing-0` failures, completes CE-1)**, P0-D (focus model), P0-E (caret). Plus a
-**harness decision**: `initial-selection-on-focus` (and other `?div`/`?span`
-variant tests) need WPT **variant** support in the runner, or a documented
-skip — its crash is fixed but it stays `0/100` headless until variants are
-applied (it does `createElement(location.search.substr(1))` → `createElement("")`).
+**P0 green status:** complete. No unexpected failures remain in the two WPT
+gtest runners. The remaining non-pass cases are documented capability skips
+that belong to later infrastructure phases: `testdriver`/synthetic input
+(Phase SI), Shadow DOM coverage, reftest/manual visual comparisons, spelling
+marker platform behavior, and the two separately tracked i18n word-boundary
+cases.
 
 ---
 

@@ -784,6 +784,8 @@ extern "C" Item js_selection_collapse(Item node_v, Item offset_v) {
         throw_from_dom_exc(exc, "Selection.collapse failed");
         return make_undef();
     }
+    extern void js_dom_focus_if_editing_host_for_selection(void* dom_node);
+    js_dom_focus_if_editing_host_for_selection((void*)n);
     selection_sync_props(js_get_this(), s);
     return make_undef();
 }
@@ -1134,6 +1136,49 @@ extern "C" Item js_dom_create_range(void) {
     }
     DomRange* r = dom_range_create(state);
     if (!r) return ItemNull;
+    return build_range_object(r);
+}
+
+extern "C" Item js_dom_create_live_range_from_boundaries(Item start_container,
+                                                         int64_t start_offset,
+                                                         Item end_container,
+                                                         int64_t end_offset,
+                                                         const char** out_exception) {
+    if (out_exception) *out_exception = nullptr;
+    if (start_offset < 0 || end_offset < 0) {
+        if (out_exception) *out_exception = "IndexSizeError";
+        return ItemNull;
+    }
+
+    DomNode* start_node = (DomNode*)js_dom_unwrap_element(start_container);
+    DomNode* end_node = (DomNode*)js_dom_unwrap_element(end_container);
+    if (!start_node || !end_node) {
+        if (out_exception) *out_exception = "InvalidNodeTypeError";
+        return ItemNull;
+    }
+
+    DocState* state = get_or_create_state();
+    if (!state) {
+        log_error("create_live_range_from_boundaries: no document state");
+        if (out_exception) *out_exception = "InvalidStateError";
+        return ItemNull;
+    }
+
+    DomRange* r = dom_range_create(state);
+    if (!r) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return ItemNull;
+    }
+
+    const char* exc = nullptr;
+    if (!dom_range_set_start(r, start_node, (uint32_t)start_offset, &exc) ||
+        !dom_range_set_end(r, end_node, (uint32_t)end_offset, &exc)) {
+        dom_range_release(r);
+        if (out_exception) *out_exception = exc ? exc : "InvalidStateError";
+        return ItemNull;
+    }
+
+    dom_range_link_into_state(state, r);
     return build_range_object(r);
 }
 

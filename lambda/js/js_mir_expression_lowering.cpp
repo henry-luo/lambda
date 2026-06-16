@@ -400,9 +400,21 @@ static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_o
 
 static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
     if (mt && mt->current_fc && mt->current_fc->node &&
-        (mt->current_fc->node->is_arrow || mt->current_fc->node->is_generator)) {
+        (mt->current_fc->node->is_arrow || mt->current_fc->node->is_generator ||
+         mt->in_generator)) {
         JsMirVarEntry* var = jm_find_var(mt, "_js_this");
         if (var) {
+            if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+            } else if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+            }
             return jm_call_1(mt, "js_resolve_lexical_this", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
         }
@@ -11629,6 +11641,19 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
     return env_size;
 }
 
+static void jm_promote_capture_to_scope_env(JsMirTranspiler* mt, JsMirVarEntry* var, int slot) {
+    if (!mt || !var || mt->scope_env_reg == 0 || slot < 0) return;
+    var->in_scope_env = true;
+    var->scope_env_slot = slot;
+    var->scope_env_reg = mt->scope_env_reg;
+    MIR_reg_t val = var->reg;
+    if (jm_is_native_type(var->type_id))
+        val = jm_box_native(mt, var->reg, var->type_id);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+        MIR_new_reg_op(mt->ctx, val)));
+}
+
 MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
@@ -11645,6 +11670,13 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (cv && cv->in_scope_env && cv->scope_env_reg == mt->scope_env_reg &&
                 cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
                 fc->captures[ci].scope_env_slot = cv->scope_env_slot;
+            }
+            if (cv && mt->scope_env_reg != 0 && fc->captures[ci].scope_env_slot >= 0 &&
+                (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                 cv->scope_env_slot != fc->captures[ci].scope_env_slot) &&
+                (mt->iteration_depth <= 0 || !cv->is_let_const ||
+                 mt->allow_loop_let_scope_env_for_immediate_call)) {
+                jm_promote_capture_to_scope_env(mt, cv, fc->captures[ci].scope_env_slot);
             }
         }
         // Check if this closure should use the parent's shared scope env.
@@ -11718,7 +11750,13 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
                 MIR_reg_t val;
                 if (var) {
-                    if (var->from_env) {
+                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                        val = jm_new_reg(mt, "cenv_senv_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+                    } else if (var->from_env) {
                         val = jm_new_reg(mt, "cenv_live", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, val),
@@ -11845,6 +11883,14 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 cv->scope_env_slot >= 0 && fc->captures[ci].scope_env_slot < 0) {
                 fc->captures[ci].scope_env_slot = cv->scope_env_slot;
             }
+            if (!fc->captures[ci].is_nfe_binding &&
+                cv && mt->scope_env_reg != 0 && fc->captures[ci].scope_env_slot >= 0 &&
+                (!cv->in_scope_env || cv->scope_env_reg != mt->scope_env_reg ||
+                 cv->scope_env_slot != fc->captures[ci].scope_env_slot) &&
+                (mt->iteration_depth <= 0 || !cv->is_let_const ||
+                 mt->allow_loop_let_scope_env_for_immediate_call)) {
+                jm_promote_capture_to_scope_env(mt, cv, fc->captures[ci].scope_env_slot);
+            }
             if (cv && cv->is_let_const) {
                 fc->captures[ci].is_let_const = true;
             }
@@ -11953,7 +11999,13 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 JsMirVarEntry* var = jm_find_var(mt, fc->captures[i].name);
                 if (var) {
                     MIR_reg_t value_to_store;
-                    if (var->from_env) {
+                    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+                        value_to_store = jm_new_reg(mt, "fenv_senv_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, value_to_store),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+                    } else if (var->from_env) {
                         value_to_store = jm_new_reg(mt, "fenv_live", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, value_to_store),

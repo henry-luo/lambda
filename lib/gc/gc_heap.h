@@ -76,6 +76,20 @@ typedef void (*gc_vmap_trace_fn)(void* data, gc_heap_t* gc);
  */
 typedef void (*gc_vmap_destroy_fn)(void* data);
 
+/**
+ * Small per-cleanup native-pointer set used by runtime finalizers that own
+ * external memory through GC-managed wrapper objects.
+ */
+typedef struct gc_native_seen {
+    void** data;
+    int length;
+    int capacity;
+} gc_native_seen_t;
+
+void gc_native_seen_init(gc_native_seen_t* seen);
+void gc_native_seen_dispose(gc_native_seen_t* seen);
+int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
+
 // Default data zone usage threshold (75% of block size) to trigger GC
 #define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
 

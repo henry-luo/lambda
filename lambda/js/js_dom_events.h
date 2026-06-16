@@ -102,6 +102,7 @@ Item js_ctor_keyboard_event_fn(Item type, Item init);
 Item js_ctor_composition_event_fn(Item type, Item init);
 Item js_ctor_input_event_fn(Item type, Item init);
 Item js_ctor_pointer_event_fn(Item type, Item init);
+Item js_ctor_static_range_fn(Item init);
 
 // ============================================================================
 // Native event factories (Radiant input bridge — §7 of Radiant_Design_Event.md).

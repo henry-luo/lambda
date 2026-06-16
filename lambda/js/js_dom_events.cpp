@@ -10,6 +10,7 @@
 
 #include "js_dom_events.h"
 #include "js_dom.h"
+#include "js_dom_selection.h"
 #include "js_runtime.h"
 #include "js_class.h"
 #include "../lambda-data.hpp"
@@ -1207,7 +1208,7 @@ static Item js_input_event_snapshot_range(Item range) {
     return js_ctor_static_range_fn(init);
 }
 
-static Item js_input_event_snapshot_target_ranges(Item target_ranges) {
+static Item js_input_event_static_target_ranges(Item target_ranges) {
     Item ranges = js_array_new(0);
     if (get_type_id(target_ranges) != LMD_TYPE_ARRAY) return ranges;
 
@@ -1232,8 +1233,9 @@ extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
     event_set_str(ev, "inputType", init_str(init_arg, "inputType", ""));
     event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
     event_set_item(ev, "dataTransfer", init_item(init_arg, "dataTransfer"));
-    js_input_event_install_target_ranges(ev,
-        js_input_event_snapshot_target_ranges(init_item(init_arg, "targetRanges")));
+    Item target_ranges = js_input_event_static_target_ranges(init_item(init_arg, "targetRanges"));
+    if (js_check_exception()) return make_js_undefined();
+    js_input_event_install_target_ranges(ev, target_ranges);
     return ev;
 }
 
@@ -1362,17 +1364,7 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     for (int64_t i = 0; i < len; i++) {
         Item range = js_array_get_int(stashed, i);
         if (get_type_id(range) != LMD_TYPE_MAP) continue;
-
-        Item init = js_new_object();
-        event_set_item(init, "startContainer",
-            js_property_get(range, (Item){.item = s2it(heap_create_name("startContainer"))}));
-        event_set_int(init, "startOffset",
-            init_int(range, "startOffset", 0));
-        event_set_item(init, "endContainer",
-            js_property_get(range, (Item){.item = s2it(heap_create_name("endContainer"))}));
-        event_set_int(init, "endOffset",
-            init_int(range, "endOffset", 0));
-        js_array_push(ranges, js_ctor_static_range_fn(init));
+        js_array_push(ranges, js_input_event_snapshot_range(range));
     }
     return ranges;
 }
