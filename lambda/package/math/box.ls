@@ -84,7 +84,15 @@ fn text_has_tall_delim(text) {
     contains(text, "(") or contains(text, ")") or
     contains(text, "[") or contains(text, "]") or
     contains(text, "{") or contains(text, "}") or
-    contains(text, "|")
+    contains(text, "|") or
+    // Unicode delimiters and operators with tall (~0.75em) cmsy heights
+    contains(text, "⟨") or contains(text, "⟩") or  // langle/rangle
+    contains(text, "∣") or contains(text, "∥") or  // mid/parallel
+    contains(text, "‖") or                          // Vert
+    contains(text, "⌊") or contains(text, "⌋") or  // lfloor/rfloor
+    contains(text, "⌈") or contains(text, "⌉") or  // lceil/rceil
+    contains(text, "∅") or                          // emptyset
+    contains(text, "∖")                             // setminus
 }
 
 fn text_height(text) {
@@ -107,18 +115,28 @@ fn text_height(text) {
 
 fn text_depth(text) {
     if (text_has_tall_delim(text)) 0.25
-    else if (text == "■" or text == "▲") 0.0
-    else if (is_number_text(text)) 0.0
     else if (text == "_") 0.31
-    else if (text == "x") 0.0
-    else if (text == "o") 0.0
     else if (text == "," or text == ";") 0.19
-    // For single-character text: descender letters get 0.19. For multi-char
-    // strings (operator names like "log", "lim sup"), check whether any
-    // descender appears; if so use 0.19. MathLive's cmr/cmmi font metrics
-    // give descender chars (g/j/p/q/y/f, plus Q) depth ≈ 0.19444.
+    // For descender letters (g/j/p/q/y/f/Q, plus multi-char strings like
+    // "log"/"lim sup"), use cmmi descent ≈ 0.19444.
     else if (text_has_descender(text)) 0.19
-    else 0.08
+    // Binary operators that have depth in MathLive's cmr metrics
+    // (+, −, ÷, ×, =, <, >, etc. have depth ≈ 0.08319).
+    else if (is_operator_with_depth(text)) 0.08
+    // Default is 0 — matches MathLive's cmr/cmmi/ams tables where
+    // letters, most symbols, and accents have depth 0. The lm_strut--bottom
+    // is then conditionally omitted by make_struts() when there's no descent.
+    else 0.0
+}
+
+fn is_operator_with_depth(text) {
+    // Operators whose MathLive cmr/cmsy metric has depth ≈ 0.08 (or close).
+    // Operators with NEGATIVE depth (=, ≈, ≃, ≅ — all rendered above baseline)
+    // are excluded — treated as depth 0.
+    if (len(text) != 1) false
+    else
+        text == "+" or text == "−" or text == "-" or
+        text == "<" or text == ">" or text == "*" or text == "/"
 }
 
 fn text_has_descender(text) {
