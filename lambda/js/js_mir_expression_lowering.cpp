@@ -9992,7 +9992,7 @@ JsMirVarEntry* jm_get_js_array_var(JsMirTranspiler* mt, JsAstNode* obj_node) {
 //   offset 16: int64_t length (8 bytes)
 //   offset 24: int64_t extra (8 bytes)
 //   offset 32: int64_t capacity (8 bytes)
-// Emits inline bounds check + indexed load, falls back to js_array_get_int.
+// Emits inline plain-dense-array checks + indexed load, falls back to js_array_get_int.
 // P4h: When h_items/h_len are provided (non-zero), uses pre-loaded pointers instead of reloading.
 MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                  MIR_reg_t idx_native,
@@ -10001,6 +10001,35 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
     MIR_label_t l_slow = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
     MIR_reg_t result = jm_new_reg(mt, "agi", MIR_T_I64);
+
+    // Plain dense arrays have no companion map descriptors and are not the
+    // arguments-exotic array representation. Other arrays must use the runtime
+    // path so numeric accessors, sparse companion entries, and overflow args
+    // keep their observable behavior.
+    MIR_reg_t type_reg = jm_new_reg(mt, "atyp", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, type_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, arr_reg, 0, 1)));
+    MIR_reg_t type_is_array = jm_new_reg(mt, "atya", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, type_is_array),
+        MIR_new_reg_op(mt->ctx, type_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, type_is_array)));
+    MIR_reg_t flags_reg = jm_new_reg(mt, "aflg", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_reg, 0, 1)));
+    MIR_reg_t is_content = jm_new_reg(mt, "acnt", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, is_content),
+        MIR_new_reg_op(mt->ctx, flags_reg), MIR_new_int_op(mt->ctx, 1)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, is_content)));
+    MIR_reg_t extra_reg = jm_new_reg(mt, "aext", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, extra_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 24, arr_reg, 0, 1)));
+    MIR_reg_t extra_is_zero = jm_new_reg(mt, "aexz", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, extra_is_zero),
+        MIR_new_reg_op(mt->ctx, extra_reg), MIR_new_int_op(mt->ctx, 0)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+        MIR_new_reg_op(mt->ctx, extra_is_zero)));
 
     // load length: arr->length at offset 16 (or use hoisted)
     MIR_reg_t len_reg;

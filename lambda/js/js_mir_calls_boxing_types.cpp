@@ -1707,9 +1707,8 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                 JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
                 MIR_reg_t boxed_result;
                 if (arr_var) {
-                    boxed_result = jm_call_2(mt, "js_array_get_int", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_var->reg),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                    boxed_result = jm_transpile_array_get_inline(mt, arr_var->reg,
+                        idx_native, arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
                 } else {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
                     boxed_result = jm_call_2(mt, "js_array_get_int", MIR_T_I64,

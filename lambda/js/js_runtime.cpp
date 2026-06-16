@@ -1724,6 +1724,19 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                     eff_args = merged_buf;
                 }
             }
+            // The MIR frontend already lowers direct `new URL(...)` to the
+            // native URL constructor by name. Preserve that behavior when the
+            // constructor has been copied through an object slot and reaches
+            // the dynamic construct path, e.g. `var C = { URL }.URL; new C()`.
+            if (nl == 3 && strncmp(n, "URL", 3) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                extern Item js_url_construct(Item input);
+                extern Item js_url_construct_with_base(Item input, Item base);
+                Item input = (eff_argc > 0 && eff_args) ? eff_args[0] : ItemNull;
+                if (eff_argc > 1 && eff_args) return js_url_construct_with_base(input, eff_args[1]);
+                return js_url_construct(input);
+            }
             if (!js_is_intrinsic_constructor_named(callee, n, nl)) {
                 n = "";
                 nl = 0;
