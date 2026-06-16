@@ -8,6 +8,7 @@
 #include "js_job_queue.h"
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
+#include "js_exec_profile.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
 
@@ -377,6 +378,7 @@ static JsCollectionData* js_get_collection_data(Item obj);
 
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
 extern "C" Item js_new_object() {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT);
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
     m->type = &EmptyMap;
@@ -2484,6 +2486,7 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
 // js_property_set will find the existing key via hash table and do a fast
 // in-place update instead of extending the shape.
 extern "C" Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_NEW_OBJECT_SHAPE);
     if (!js_input || count <= 0) return js_new_object();
 
     Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
@@ -2752,6 +2755,7 @@ static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t
 }
 
 extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_F);
     Map* m = (Map*)object.map;
     void* field_ptr = (char*)m->data + byte_offset;
     // Guard: if the runtime ShapeEntry type is INT, convert int→double
@@ -2766,6 +2770,7 @@ extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
 }
 
 extern "C" int64_t js_get_slot_i(Item object, int64_t byte_offset) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_I);
     Map* m = (Map*)object.map;
     void* field_ptr = (char*)m->data + byte_offset;
     // Guard: if the runtime ShapeEntry type is FLOAT, convert double→int
@@ -2780,6 +2785,7 @@ extern "C" int64_t js_get_slot_i(Item object, int64_t byte_offset) {
 }
 
 extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SET_SLOT_F);
     Map* m = (Map*)object.map;
     *(double*)((char*)m->data + byte_offset) = value;
     // Update ShapeEntry type to FLOAT if currently NULL (first write).
@@ -2802,6 +2808,7 @@ extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
 }
 
 extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SET_SLOT_I);
     Map* m = (Map*)object.map;
     *(int64_t*)((char*)m->data + byte_offset) = value;
     // Update ShapeEntry type to INT if currently NULL (first write).
@@ -3462,6 +3469,7 @@ static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
 }
 
 extern "C" Item js_property_get(Item object, Item key) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_GET);
     TypeId type = get_type_id(object);
     bool proxy_key = false;
     if (type == LMD_TYPE_MAP && object.map && object.map->map_kind == MAP_KIND_PROXY) {
@@ -5124,6 +5132,7 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_SET);
     // Fast path: result[i] = v where i is an existing own dense element of a
     // plain array. Bypasses the symbol/marker/accessor/proto preamble below,
     // which is all no-op for a non-negative integer key on such an array.
@@ -6088,6 +6097,7 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
 }
 
 extern "C" Item js_property_access(Item object, Item key) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_ACCESS);
     bool trace_enabled = js_runtime_trace_enabled();
     // TRACE: ring buffer of last 8 property accesses for debugging
     static struct { const char* key; int klen; TypeId obj_type; TypeId result_type; } _ring[8] = {
@@ -7048,6 +7058,7 @@ extern "C" Item js_string_get_int(Item str_item, int64_t index) {
 }
 
 extern "C" Item js_array_get_int(Item array, int64_t index) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_GET_INT);
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         if (index < 0) {
             char idx_buf[32];
@@ -7130,6 +7141,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
 
 // P10e: Fast array set with native int index
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_SET_INT);
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         // fast path for typed arrays
         if (js_is_typed_array(array)) {
@@ -7419,6 +7431,7 @@ extern "C" int64_t js_array_length(Item array) {
 }
 
 extern "C" Item js_array_push(Item array, Item value) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_PUSH);
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return (Item){.item = i2it(0)};
     }
@@ -8101,6 +8114,7 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
 
 // Dispatch a built-in method call by builtin_id
 static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_DISPATCH_BUILTIN);
     Item undef = make_js_undefined();
     Item arg0 = arg_count > 0 && args ? args[0] : undef;
     Item arg1 = arg_count > 1 && args ? args[1] : undef;
@@ -11621,6 +11635,7 @@ extern "C" Item js_super_apply_native(Item callee, Item this_val, Item args_arra
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item)) {

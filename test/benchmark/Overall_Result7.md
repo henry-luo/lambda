@@ -356,3 +356,95 @@ Fall back immediately when a prototype or relevant constructor is mutated.
 4. Only then rerun the full 62 benchmark sweep.
 
 This keeps the feedback loop short while still protecting the JS conformance surface.
+
+---
+
+## Latest Rerun After P1 Dense-Array Fast Path
+
+**Date:** 2026-06-16  
+**Build:** release build from `make release` (`./lambda.exe` 15 MB)  
+**Runner:** `python3 test/benchmark/run_benchmarks.py -e lambdajs -n 3`  
+**Corrected follow-up:** `python3 test/benchmark/run_benchmarks.py -s jetstream -b cube3d -e lambdajs -n 3`  
+**Results source:** `test/benchmark/benchmark_results_v3.json`  
+**Comparison baseline:** `temp/benchmark_results_v3_before_inline_array.json`
+
+This section records the fresh LambdaJS benchmark run after wiring guarded inline dense-array element reads into native numeric expressions. The earlier Round 7 report above is intentionally preserved; this is an incremental update on top of it.
+
+The full rerun produced one noisy `jetstream/cube3d` median (`35.30s`). A targeted rerun immediately afterward produced `21.62s` with `--no-save`, then `23.46s` with saving enabled. The saved result therefore uses the corrected `23.46s` median.
+
+### Performance Delta vs Previous Round 7 JSON
+
+| Metric | Result |
+|---|---:|
+| Comparable LambdaJS benchmarks | 57 |
+| Geometric mean speedup | **1.035x** |
+| Geometric mean improvement | **+3.49%** |
+| Summed runtime before | 57,822 ms |
+| Summed runtime after | 54,181 ms |
+| Summed runtime improvement | **+6.30%** |
+| Benchmarks faster by >2% | 32 |
+| Benchmarks slower by >2% | 2 |
+| Benchmarks within +/-2% | 23 |
+
+### Suite-Level Delta
+
+| Suite | Comparable | Geo mean improvement | Summed runtime improvement |
+|---|---:|---:|---:|
+| R7RS | 10 | +2.05% | +1.34% |
+| AWFY | 12 | +6.36% | +4.18% |
+| BENG | 10 | +2.95% | -3.23% |
+| KOSTYA | 7 | +6.22% | +6.33% |
+| LARCENY | 12 | +0.64% | +2.06% |
+| JetStream | 6 | +3.80% | +8.12% |
+
+### Largest Wins
+
+| Benchmark | Before (ms) | After (ms) | Speedup | Improvement |
+|---|---:|---:|---:|---:|
+| kostya/matmul | 2360.82 | 1867.47 | 1.264x | +20.90% |
+| awfy/mandelbrot | 1136.84 | 920.86 | 1.235x | +19.00% |
+| awfy/sieve | 0.474 | 0.417 | 1.138x | +12.12% |
+| awfy/towers | 56.44 | 50.75 | 1.112x | +10.07% |
+| jetstream/nbody | 1013.48 | 914.50 | 1.108x | +9.77% |
+| beng/pidigits | 0.246 | 0.222 | 1.108x | +9.75% |
+| jetstream/cube3d | 25869.7 | 23460.4 | 1.103x | +9.31% |
+| awfy/bounce | 7.65 | 7.06 | 1.084x | +7.73% |
+| beng/revcomp | 60.95 | 57.23 | 1.065x | +6.11% |
+| beng/spectralnorm | 67.57 | 63.86 | 1.058x | +5.50% |
+
+### Regressions to Watch
+
+| Benchmark | Before (ms) | After (ms) | Speedup | Change |
+|---|---:|---:|---:|---:|
+| beng/nbody | 996.45 | 1057.59 | 0.942x | -6.14% |
+| larceny/primes | 13.50 | 14.08 | 0.959x | -4.32% |
+
+`beng/nbody` is the only substantial slowdown in a benchmark directly related to the dense numeric-array work. It should be rechecked with a focused 5-run or 10-run pass before treating it as a real regression, because the same run showed clear gains in `jetstream/nbody`, `kostya/matmul`, `beng/spectralnorm`, and `awfy/mandelbrot`.
+
+### Current LambdaJS vs Node.js Snapshot
+
+Node.js was not rerun in this latest pass; the ratios below use the existing Node.js medians already stored in `benchmark_results_v3.json`.
+
+| Suite | Total | LambdaJS timed | Missing LambdaJS | Geo mean LambdaJS / Node.js |
+|---|---:|---:|---:|---:|
+| R7RS | 10 | 10 | 0 | 6.80x |
+| AWFY | 14 | 12 | 2 | 49.01x |
+| BENG | 10 | 10 | 0 | 6.43x |
+| KOSTYA | 7 | 7 | 0 | 18.51x |
+| LARCENY | 12 | 12 | 0 | 9.66x |
+| JetStream | 9 | 6 | 3 | 207.86x |
+| **Overall timed** | **62** | **57** | **5** | **17.81x** |
+
+Missing LambdaJS timings remain unchanged:
+
+- `awfy/havlak`
+- `awfy/cd`
+- `jetstream/navier_stokes`
+- `jetstream/hashmap`
+- `jetstream/raytrace3d`
+
+### Interpretation
+
+The inline dense-array fast path is a net positive. The strongest gains landed exactly where expected: dense numeric loops and array-heavy workloads (`matmul`, `mandelbrot`, `cube3d`, `spectralnorm`, `sieve`). The optimization also improved the current LambdaJS/Node geometric ratio from the earlier Round 7 snapshot's **18.43x** to **17.81x** over the same 57 timed benchmarks.
+
+The remaining large gaps are still dominated by object dispatch, allocation pressure, boxed float traffic, and long-running JetStream cases that do not complete under the current harness timeout. The next performance pass should keep P2/P3 from the proposal above as the main targets: shaped-slot field fast paths and broader typed-array/array propagation through object fields.

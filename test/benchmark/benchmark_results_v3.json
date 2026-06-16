@@ -4,7 +4,7 @@
       "category": "recursive",
       "mir": 2.453,
       "c2mir": 2.137,
-      "lambdajs": 15.343834,
+      "lambdajs": 15.298791,
       "quickjs": 18.464,
       "nodejs": 1.721458,
       "python": 21.967
@@ -13,7 +13,7 @@
       "category": "recursive",
       "mir": 3.742,
       "c2mir": 3.522,
-      "lambdajs": 19.680167,
+      "lambdajs": 19.519125,
       "quickjs": 18.885,
       "nodejs": 1.303958,
       "python": 23.499
@@ -22,7 +22,7 @@
       "category": "recursive",
       "mir": 0.153,
       "c2mir": 0.164,
-      "lambdajs": 1.200333,
+      "lambdajs": 1.150209,
       "quickjs": 2.883,
       "nodejs": 0.301375,
       "python": 2.208
@@ -31,7 +31,7 @@
       "category": "closure",
       "mir": 0.303,
       "c2mir": 0.339,
-      "lambdajs": 2.387958,
+      "lambdajs": 2.328333,
       "quickjs": 5.653,
       "nodejs": 0.429208,
       "python": 4.472
@@ -40,7 +40,7 @@
       "category": "iterative",
       "mir": 0.27,
       "c2mir": 1.764,
-      "lambdajs": 20.949042,
+      "lambdajs": 20.527083,
       "quickjs": 31.874,
       "nodejs": 0.807542,
       "python": 38.385
@@ -49,7 +49,7 @@
       "category": "iterative",
       "mir": 0.067,
       "c2mir": 0.331,
-      "lambdajs": 1.350375,
+      "lambdajs": 1.313958,
       "quickjs": 3.796,
       "nodejs": 0.804625,
       "python": 2.826
@@ -58,7 +58,7 @@
       "category": "backtrack",
       "mir": 6.655,
       "c2mir": 6.595,
-      "lambdajs": 3.052416,
+      "lambdajs": 3.007166,
       "quickjs": 9.733,
       "nodejs": 1.479458,
       "python": 3.494
@@ -67,7 +67,7 @@
       "category": "numeric",
       "mir": 0.179,
       "c2mir": 1.033,
-      "lambdajs": 5.955375,
+      "lambdajs": 5.811042,
       "quickjs": 2.833,
       "nodejs": 1.024625,
       "python": 4.35
@@ -76,7 +76,7 @@
       "category": "numeric",
       "mir": 0.59,
       "c2mir": 0.743,
-      "lambdajs": 25.196959,
+      "lambdajs": 24.485417,
       "quickjs": 18.422,
       "nodejs": 0.8045,
       "python": 14.807
@@ -85,7 +85,7 @@
       "category": "recursive",
       "mir": 9.85,
       "c2mir": 9.846,
-      "lambdajs": 78.111875,
+      "lambdajs": 77.468666,
       "quickjs": null,
       "nodejs": 14.701417,
       "python": 155.768
@@ -96,7 +96,7 @@
       "category": "micro",
       "mir": 0.052,
       "c2mir": 0.052,
-      "lambdajs": 0.474166,
+      "lambdajs": 0.416708,
       "quickjs": 0.602,
       "nodejs": 0.369791,
       "python": 1763.242
@@ -105,7 +105,7 @@
       "category": "micro",
       "mir": 0.064,
       "c2mir": 0.068,
-      "lambdajs": 27.773,
+      "lambdajs": 26.670834,
       "quickjs": 1.6,
       "nodejs": 0.297834,
       "python": 2112.672
@@ -114,7 +114,7 @@
       "category": "micro",
       "mir": 0.146,
       "c2mir": 0.138,
-      "lambdajs": 18.237625,
+      "lambdajs": 18.150542,
       "quickjs": 1.087,
       "nodejs": 0.443292,
       "python": 1142.995
@@ -123,7 +123,7 @@
       "category": "micro",
       "mir": 0.216,
       "c2mir": 0.112,
-      "lambdajs": 56.435625,
+      "lambdajs": 50.754084,
       "quickjs": 2.349,
       "nodejs": 0.390125,
       "python": 1112.589
@@ -132,7 +132,7 @@
       "category": "micro",
       "mir": 0.194,
       "c2mir": 0.139,
-      "lambdajs": 7.653833,
+      "lambdajs": 7.061875,
       "quickjs": 0.96,
       "nodejs": 0.365125,
       "python": 1389.051
@@ -141,7 +141,7 @@
       "category": "micro",
       "mir": 0.023,
       "c2mir": 0.621,
-      "lambdajs": 9.0995,
+      "lambdajs": 8.65625,
       "quickjs": 0.921,
       "nodejs": 0.213833,
       "python": 976.12
@@ -150,7 +150,7 @@
       "category": "micro",
       "mir": 0.194,
       "c2mir": 0.317,
-      "lambdajs": 28.871375,
+      "lambdajs": 27.981375,
       "quickjs": 2.691,
       "nodejs": 0.369375,
       "python": 1273.902
@@ -159,7 +159,7 @@
       "category": "compute",
       "mir": 31.61,
       "c2mir": 54.51,
-      "lambdajs": 1136.841084,
+      "lambdajs": 920.854667,
       "quickjs": 888.468,
       "nodejs": 21.183375,
       "python": 740.552
@@ -168,7 +168,7 @@
       "category": "compute",
       "mir": 46.865,
       "c2mir": 84.204,
-      "lambdajs": 526.398708,
+      "lambdajs": 516.356542,
       "quickjs": 166.959,
       "nodejs": 6.355958,
       "python": 135.031
@@ -177,7 +177,7 @@
       "category": "macro",
       "mir": 252.576,
       "c2mir": 218.783,
-      "lambdajs": 4171.98125,
+      "lambdajs": 4126.064084,
       "quickjs": 194.481,
       "nodejs": 38.959458,
       "python": 168.444
@@ -186,7 +186,7 @@
       "category": "macro",
       "mir": 1.5,
       "c2mir": 2.15,
-      "lambdajs": 70.680208,
+      "lambdajs": 68.977208,
       "quickjs": 11.669,
       "nodejs": 1.523917,
       "python": 7.14
@@ -195,7 +195,7 @@
       "category": "macro",
       "mir": 64.108,
       "c2mir": 78.054,
-      "lambdajs": 2871.936334,
+      "lambdajs": 2781.520958,
       "quickjs": 113.121,
       "nodejs": 7.817917,
       "python": 67.862
@@ -224,7 +224,7 @@
       "category": "allocation",
       "mir": 7.273,
       "c2mir": 7.686,
-      "lambdajs": 45.183042,
+      "lambdajs": 43.42325,
       "quickjs": 27.936,
       "nodejs": 4.427958,
       "python": 10.425
@@ -233,7 +233,7 @@
       "category": "permutation",
       "mir": 0.755,
       "c2mir": 1.117,
-      "lambdajs": 1.813541,
+      "lambdajs": 1.801334,
       "quickjs": 7.31,
       "nodejs": 2.890458,
       "python": 5.084
@@ -242,7 +242,7 @@
       "category": "generation",
       "mir": 1.126,
       "c2mir": 0.841,
-      "lambdajs": 7.760167,
+      "lambdajs": 7.560125,
       "quickjs": 10.74,
       "nodejs": 4.516791,
       "python": 2.032
@@ -251,7 +251,7 @@
       "category": "hashing",
       "mir": 2.875,
       "c2mir": 3.81,
-      "lambdajs": 104.910167,
+      "lambdajs": 105.239209,
       "quickjs": null,
       "nodejs": 4.899542,
       "python": 3.876
@@ -260,7 +260,7 @@
       "category": "numeric",
       "mir": 142.474,
       "c2mir": 238.313,
-      "lambdajs": 133.733417,
+      "lambdajs": 128.22275,
       "quickjs": 697.866,
       "nodejs": 10.881792,
       "python": 1368.435
@@ -269,7 +269,7 @@
       "category": "numeric",
       "mir": 47.089,
       "c2mir": 84.822,
-      "lambdajs": 996.4455,
+      "lambdajs": 1057.585541,
       "quickjs": 154.905,
       "nodejs": 6.819833,
       "python": 171.722
@@ -278,7 +278,7 @@
       "category": "bignum",
       "mir": 0.462,
       "c2mir": 0.297,
-      "lambdajs": 0.246125,
+      "lambdajs": 0.222125,
       "quickjs": 0.156,
       "nodejs": 2.265208,
       "python": 0.102
@@ -287,7 +287,7 @@
       "category": "regex",
       "mir": 1.248,
       "c2mir": 1.432,
-      "lambdajs": 15.250917,
+      "lambdajs": 14.998709,
       "quickjs": null,
       "nodejs": 2.373958,
       "python": 1.462
@@ -296,7 +296,7 @@
       "category": "string",
       "mir": 1.846,
       "c2mir": 1.834,
-      "lambdajs": 60.952083,
+      "lambdajs": 57.226209,
       "quickjs": null,
       "nodejs": 3.602375,
       "python": 0.085
@@ -305,7 +305,7 @@
       "category": "numeric",
       "mir": 13.017,
       "c2mir": 10.221,
-      "lambdajs": 67.574792,
+      "lambdajs": 63.855167,
       "quickjs": 63.747,
       "nodejs": 2.078084,
       "python": 46.82
@@ -316,7 +316,7 @@
       "category": "interpreter",
       "mir": 165.231,
       "c2mir": 279.537,
-      "lambdajs": 718.685416,
+      "lambdajs": 698.197792,
       "quickjs": 906.104,
       "nodejs": 32.470208,
       "python": 691.407
@@ -325,7 +325,7 @@
       "category": "numeric",
       "mir": 8.758,
       "c2mir": 128.389,
-      "lambdajs": 2360.817541,
+      "lambdajs": 1867.471583,
       "quickjs": 545.924,
       "nodejs": 14.106208,
       "python": 534.88
@@ -334,7 +334,7 @@
       "category": "numeric",
       "mir": 7.279,
       "c2mir": 10.266,
-      "lambdajs": 14.462709,
+      "lambdajs": 13.784292,
       "quickjs": 97.309,
       "nodejs": 4.597125,
       "python": 96.725
@@ -343,7 +343,7 @@
       "category": "string",
       "mir": 219.817,
       "c2mir": 221.309,
-      "lambdajs": 1596.391667,
+      "lambdajs": 1548.872292,
       "quickjs": 182.45,
       "nodejs": 14.31,
       "python": 84.822
@@ -352,7 +352,7 @@
       "category": "string",
       "mir": 7.699,
       "c2mir": 13.463,
-      "lambdajs": 54.678541,
+      "lambdajs": 54.086584,
       "quickjs": 55.12,
       "nodejs": 2.514166,
       "python": 70.629
@@ -361,7 +361,7 @@
       "category": "data",
       "mir": 64.78,
       "c2mir": 67.226,
-      "lambdajs": 40.786583,
+      "lambdajs": 38.766083,
       "quickjs": 21.227,
       "nodejs": 4.889334,
       "python": 8.343
@@ -370,7 +370,7 @@
       "category": "numeric",
       "mir": 439.163,
       "c2mir": 339.761,
-      "lambdajs": 5885.601792,
+      "lambdajs": 5774.489542,
       "quickjs": 6217.803,
       "nodejs": 1223.267875,
       "python": 7999.201
@@ -381,7 +381,7 @@
       "category": "search",
       "mir": 178.528,
       "c2mir": 1105.38,
-      "lambdajs": 1679.10625,
+      "lambdajs": 1675.775333,
       "quickjs": 2229.426,
       "nodejs": 65.140208,
       "python": 2682.797
@@ -390,7 +390,7 @@
       "category": "array",
       "mir": 0.547,
       "c2mir": 5.78,
-      "lambdajs": 3.062041,
+      "lambdajs": 3.074625,
       "quickjs": 36.909,
       "nodejs": 1.682292,
       "python": 40.353
@@ -399,7 +399,7 @@
       "category": "symbolic",
       "mir": 20.092,
       "c2mir": 20.621,
-      "lambdajs": 92.851875,
+      "lambdajs": 90.32825,
       "quickjs": 69.215,
       "nodejs": 2.392125,
       "python": 26.488
@@ -408,7 +408,7 @@
       "category": "iterative",
       "mir": 271.504,
       "c2mir": 271.292,
-      "lambdajs": 2527.126417,
+      "lambdajs": 2434.113416,
       "quickjs": 26852.822,
       "nodejs": 385.747584,
       "python": 26252.263
@@ -417,7 +417,7 @@
       "category": "recursive",
       "mir": 0.845,
       "c2mir": 7.353,
-      "lambdajs": 26.271417,
+      "lambdajs": 26.36925,
       "quickjs": 38.272,
       "nodejs": 7.8085,
       "python": 44.818
@@ -426,7 +426,7 @@
       "category": "allocation",
       "mir": 468.515,
       "c2mir": 438.727,
-      "lambdajs": 1039.083875,
+      "lambdajs": 1021.3455,
       "quickjs": 667.433,
       "nodejs": 20.826584,
       "python": 256.711
@@ -435,7 +435,7 @@
       "category": "combinat",
       "mir": 0.326,
       "c2mir": 0.92,
-      "lambdajs": 1.555042,
+      "lambdajs": 1.557958,
       "quickjs": 2.837,
       "nodejs": 0.613209,
       "python": 2.93
@@ -444,7 +444,7 @@
       "category": "numeric",
       "mir": 58.511,
       "c2mir": 52.619,
-      "lambdajs": 126.852542,
+      "lambdajs": 128.985333,
       "quickjs": 206.262,
       "nodejs": 4.001875,
       "python": 111.932
@@ -453,7 +453,7 @@
       "category": "iterative",
       "mir": 7.162,
       "c2mir": 9.69,
-      "lambdajs": 13.500709,
+      "lambdajs": 14.084125,
       "quickjs": 97.374,
       "nodejs": 4.373166,
       "python": 121.115
@@ -462,7 +462,7 @@
       "category": "search",
       "mir": 3.756,
       "c2mir": 16.834,
-      "lambdajs": 20.657083,
+      "lambdajs": 20.745542,
       "quickjs": 29.209,
       "nodejs": 2.13625,
       "python": 20.711
@@ -471,7 +471,7 @@
       "category": "sorting",
       "mir": 3.116,
       "c2mir": 6.813,
-      "lambdajs": 25.570083,
+      "lambdajs": 24.726958,
       "quickjs": 19.12,
       "nodejs": 1.633041,
       "python": 25.584
@@ -480,7 +480,7 @@
       "category": "numeric",
       "mir": 7.1,
       "c2mir": 6.896,
-      "lambdajs": 14.012458,
+      "lambdajs": 13.579,
       "quickjs": 14.251,
       "nodejs": 1.479083,
       "python": 11.552
@@ -491,7 +491,7 @@
       "category": "numeric",
       "mir": 47.158,
       "c2mir": 84.928,
-      "lambdajs": 1013.476,
+      "lambdajs": 914.5,
       "quickjs": null,
       "nodejs": 4.161,
       "python": 146.127
@@ -500,7 +500,7 @@
       "category": "3d",
       "mir": 23.524,
       "c2mir": 81.107,
-      "lambdajs": 25869.723,
+      "lambdajs": 23460.383,
       "quickjs": 228.5,
       "nodejs": 12.983,
       "python": 45.6
@@ -518,7 +518,7 @@
       "category": "macro",
       "mir": 259.38,
       "c2mir": 244.978,
-      "lambdajs": 654.411,
+      "lambdajs": 651.714,
       "quickjs": null,
       "nodejs": 4.879,
       "python": 225.104
@@ -527,7 +527,7 @@
       "category": "data",
       "mir": 164.758,
       "c2mir": null,
-      "lambdajs": 1501.933,
+      "lambdajs": 1496.892,
       "quickjs": 198.7,
       "nodejs": 9.06,
       "python": 326.1
@@ -536,7 +536,7 @@
       "category": "macro",
       "mir": 17.399,
       "c2mir": 18.004,
-      "lambdajs": 1767.235,
+      "lambdajs": 1765.647,
       "quickjs": null,
       "nodejs": 5.889,
       "python": 18.075
@@ -554,7 +554,7 @@
       "category": "crypto",
       "mir": 16.546,
       "c2mir": 20.282,
-      "lambdajs": 240.776,
+      "lambdajs": 237.299,
       "quickjs": 222.1,
       "nodejs": 7.731,
       "python": 321.4
