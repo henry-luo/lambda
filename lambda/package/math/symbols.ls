@@ -115,11 +115,11 @@ let misc_symbols = {
     degree: "°", copyright: "©",
     dots: "…", ldots: "…", cdots: "⋯",
     vdots: "⋮", ddots: "⋱",
-    colon: ":", vert: "∣", Vert: "‖",
+    colon: ":", vert: "∣", Vert: "∥",
     langle: "⟨", rangle: "⟩",
     lceil: "⌈", rceil: "⌉", lfloor: "⌊", rfloor: "⌋",
     lbrace: "{", rbrace: "}",
-    lvert: "∣", rvert: "∣", lVert: "‖", rVert: "‖"
+    lvert: "∣", rvert: "∣", lVert: "∥", rVert: "∥"
 }
 
 // ============================================================
@@ -257,16 +257,46 @@ let font_class_map = {
 
     // -- upright math symbols (CMR) --
     infty: "lm_cmr", nabla: "lm_cmr", partial: "lm_cmr",
+    mid: "lm_cmr", parallel: "lm_cmr", perp: "lm_cmr",
     ell: "lm_cmr", hbar: "lm_cmr",
-    imath: "lm_cmr", jmath: "lm_cmr",
+    imath: "lm_cmr", jmath: "lm_cmr", aleph: "lm_cmr",
     cdot: "lm_cmr", times: "lm_cmr", div: "lm_cmr",
     vert: "lm_cmr", Vert: "lm_cmr",
     lvert: "lm_cmr", rvert: "lm_cmr", lVert: "lm_cmr", rVert: "lm_cmr",
     dots: "lm_cmr", ldots: "lm_cmr", cdots: "lm_cmr",
     vdots: "lm_cmr", ddots: "lm_cmr",
     forall: "lm_cmr", exists: "lm_cmr",
-    emptyset: "lm_cmr", varnothing: "lm_cmr",
-    angle: "lm_cmr", triangle: "lm_cmr",
+    angle: "lm_cmr",
+    // Relations rendered upright in MathLive
+    approx: "lm_cmr", sim: "lm_cmr", simeq: "lm_cmr", cong: "lm_cmr",
+    propto: "lm_cmr", asymp: "lm_cmr", equiv: "lm_cmr",
+    leq: "lm_cmr", le: "lm_cmr", geq: "lm_cmr", ge: "lm_cmr",
+    neq: "lm_cmr", ne: "lm_cmr",
+    subset: "lm_cmr", supset: "lm_cmr",
+    subseteq: "lm_cmr", supseteq: "lm_cmr",
+    'in': "lm_cmr", ni: "lm_cmr", notin: "lm_cmr",
+    odot: "lm_cmr", oplus: "lm_cmr", otimes: "lm_cmr",
+    // Arrows rendered upright in MathLive
+    rightarrow: "lm_cmr", leftarrow: "lm_cmr",
+    Rightarrow: "lm_cmr", Leftarrow: "lm_cmr",
+    leftrightarrow: "lm_cmr", Leftrightarrow: "lm_cmr",
+    longrightarrow: "lm_cmr", longleftarrow: "lm_cmr",
+    Longrightarrow: "lm_cmr", Longleftarrow: "lm_cmr",
+    Longleftrightarrow: "lm_cmr", longleftrightarrow: "lm_cmr",
+    to: "lm_cmr", gets: "lm_cmr", implies: "lm_cmr", iff: "lm_cmr",
+    hookrightarrow: "lm_cmr", hookleftarrow: "lm_cmr",
+    mapsto: "lm_cmr", longmapsto: "lm_cmr",
+    uparrow: "lm_cmr", downarrow: "lm_cmr", updownarrow: "lm_cmr",
+    Uparrow: "lm_cmr", Downarrow: "lm_cmr", Updownarrow: "lm_cmr",
+    // AMS triangles
+    triangle: "lm_ams",
+    // More CMR symbols
+    cup: "lm_cmr", cap: "lm_cmr", setminus: "lm_cmr",
+    pm: "lm_cmr", mp: "lm_cmr",
+    // More AMS symbols
+    emptyset: "lm_ams", varnothing: "lm_ams",
+    beth: "lm_ams", gimel: "lm_ams", daleth: "lm_ams",
+    neg: "lm_ams", lnot: "lm_ams",
 
     // -- AMS symbols --
     blacksquare: "lm_ams", blacktriangle: "lm_ams",
