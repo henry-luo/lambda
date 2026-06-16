@@ -1695,18 +1695,15 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             continue; // handle after we know if there are other captures
         }
         if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
-        // Skip module-level constants — they're resolved at compile time via module_consts,
-        // not at runtime via closure environment.
-        // BUT: if a parent function declares a local with the same name, the parent's
-        // local shadows the module constant, so we must capture it.
+        // Skip module-level bindings; identifier lowering resolves them via
+        // module_consts (and MCONST_MODVAR uses live js_get_module_var reads).
+        // If a parent function declares a local with the same name, that local
+        // shadows the module binding, so we still capture the parent binding.
         if (module_consts && !(ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name))) {
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", ref->name);
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
-            if (mc && !(mc->const_type == MCONST_MODVAR &&
-                        (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST))) {
-                continue;  // resolved via module_consts, no capture needed
-            }
+            if (mc) continue;  // resolved via module_consts, no capture needed
         }
         bool force_env_capture = false;
         if (module_consts && ancestor_func_locals && jm_name_set_has(ancestor_func_locals, ref->name)) {

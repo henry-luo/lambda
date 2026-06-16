@@ -6,11 +6,12 @@ var initRange = {
   endContainer: endNode,
   endOffset: 5
 };
+var staticRange = new StaticRange(initRange);
 var ev = new InputEvent("beforeinput", {
   inputType: "insertText",
   data: "x",
   isComposing: true,
-  targetRanges: [initRange]
+  targetRanges: [staticRange]
 });
 
 initRange.startOffset = 99;

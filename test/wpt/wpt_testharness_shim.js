@@ -480,7 +480,10 @@ function promise_test(func, name) {
     _wpt_total++;
     var t = {
         _name: name,
-        add_cleanup: function(fn) {},
+        _cleanups: [],
+        add_cleanup: function(fn) {
+            if (typeof fn === "function") this._cleanups.push(fn);
+        },
         step: function(fn) { fn.apply(this, Array.prototype.slice.call(arguments, 1)); },
         step_func: function(fn) { var self=this; return function(){ fn.apply(self, arguments); }; },
         step_func_done: function(fn) { var self=this; return function(){ if (fn) fn.apply(self, arguments); }; },
@@ -494,6 +497,11 @@ function promise_test(func, name) {
         },
         done: function() {},
     };
+    function run_cleanups() {
+        for (var i = 0; i < t._cleanups.length; i++) {
+            try { t._cleanups[i](); } catch (_) {}
+        }
+    }
     _wpt_pending_promises++;
     _promise_test_queue = _promise_test_queue.then(function() {
         var p;
@@ -503,20 +511,23 @@ function promise_test(func, name) {
             _wpt_fail++;
             _wpt_pending_promises--;
             console.log("FAIL: " + name + " - " + (e && e.message ? e.message : e));
+            run_cleanups();
             return;
         }
         if (p && typeof p.then === "function") {
             return p.then(
-                function() { _wpt_pass++; _wpt_pending_promises--; },
+                function() { _wpt_pass++; _wpt_pending_promises--; run_cleanups(); },
                 function(e) {
                     _wpt_fail++;
                     _wpt_pending_promises--;
                     console.log("FAIL: " + name + " - " + (e && e.message ? e.message : e));
+                    run_cleanups();
                 }
             );
         }
         _wpt_pass++;
         _wpt_pending_promises--;
+        run_cleanups();
     });
 }
 
@@ -665,7 +676,7 @@ EditorTestUtils.prototype.sendKey = function() { return Promise.resolve(); };
 // ---------------------------------------------------------------------------
 // send_keys helper — synthesize a single key code's effect.
 // Recognized: Backspace (\uE003), End (\uE010), Home (\uE011),
-// ArrowLeft (\uE012), ArrowRight (\uE014).
+// ArrowLeft (\uE012), ArrowRight (\uE014), Delete (\uE017).
 // Operates on whichever surface currently owns the caret: focused text
 // control, otherwise the document selection.
 // ---------------------------------------------------------------------------
@@ -680,6 +691,14 @@ function _wpt_collect_text_nodes(root, out) {
     if (root.nodeType === 3) { out.push(root); return; }
     var c = root.firstChild;
     while (c) { _wpt_collect_text_nodes(c, out); c = c.nextSibling; }
+}
+function _wpt_dispatch_native_edit_key(code, shift, ctrl, alt, meta) {
+    if (typeof __lambda_testdriver_key !== "function") return false;
+    try {
+        return !!__lambda_testdriver_key(code, !!shift, !!ctrl, !!alt, !!meta);
+    } catch (_) {
+        return false;
+    }
 }
 function _wpt_send_one_key(elem, code) {
     // Text-control path
@@ -703,6 +722,17 @@ function _wpt_send_one_key(elem, code) {
                 if (ss === 0) return;
                 ae.value = v.slice(0, ss - 1) + v.slice(ss);
                 try { ae.setSelectionRange(ss - 1, ss - 1); } catch (_) {}
+            } else {
+                ae.value = v.slice(0, ss) + v.slice(se);
+                try { ae.setSelectionRange(ss, ss); } catch (_) {}
+            }
+            return;
+        }
+        if (code === 0xE017) { // Delete
+            if (ss === se) {
+                if (se >= v.length) return;
+                ae.value = v.slice(0, se) + v.slice(se + 1);
+                try { ae.setSelectionRange(se, se); } catch (_) {}
             } else {
                 ae.value = v.slice(0, ss) + v.slice(se);
                 try { ae.setSelectionRange(ss, ss); } catch (_) {}
@@ -763,6 +793,10 @@ function _wpt_send_one_key(elem, code) {
     }
     if (sel.rangeCount === 0) return;
     var r = sel.getRangeAt(0);
+    if ((code === 0xE003 || code === 0xE017) &&
+        _wpt_dispatch_native_edit_key(code, false, false, false, false)) {
+        return;
+    }
     if (code === 0xE010 || code === 0xE011) {
         // End / Home — collapse to end / start of the host element's
         // text content (use `elem` arg as host if it's an element).
@@ -849,6 +883,28 @@ function _wpt_send_one_key(elem, code) {
                     try { child.data = cs.slice(0, cs.length - 1); } catch (_) {}
                     try { sel.collapse(child, cs.length - 1); } catch (_) {}
                 }
+            }
+        }
+        return;
+    }
+    if (code === 0xE017) { // Delete
+        if (!r.collapsed) {
+            try {
+                var sc2 = r.startContainer; var so2 = r.startOffset;
+                r.deleteContents();
+                sel.collapse(sc2, so2);
+            } catch (_) {}
+            return;
+        }
+        var dn = r.startContainer; var doff = r.startOffset;
+        if (!dn) return;
+        if (dn.nodeType === 3) {
+            var ds = dn.data || dn.textContent || "";
+            if (doff < ds.length) {
+                try { dn.data = ds.slice(0, doff) + ds.slice(doff + 1); } catch (_) {
+                    try { dn.textContent = ds.slice(0, doff) + ds.slice(doff + 1); } catch (_) {}
+                }
+                try { sel.collapse(dn, doff); } catch (_) {}
             }
         }
         return;
@@ -1269,30 +1325,40 @@ _WptActions.prototype.send = function() {
     try {
         var sel2 = (typeof getSelection === "function") ? getSelection() : null;
         var shift_held = false;
-        var modifier_held = false;  // Cmd (Mac) or Ctrl (others)
+        var ctrl_held = false;
+        var alt_held = false;
+        var meta_held = false;
         for (var ki = 0; ki < this._steps.length; ki++) {
             var ks = this._steps[ki];
             if (ks.type === "keyDown") {
                 if (ks.key === "\uE008") shift_held = true;       // Shift
-                else if (ks.key === "\uE03D" || ks.key === "\uE03d" ||
-                         ks.key === "\uE009") modifier_held = true; // META / CONTROL
+                else if (ks.key === "\uE009") ctrl_held = true;   // Control
+                else if (ks.key === "\uE00A" || ks.key === "\uE00a") alt_held = true; // Alt
+                else if (ks.key === "\uE03D" || ks.key === "\uE03d") meta_held = true; // Meta
                 else if (ks.key === "\uE012" && shift_held && sel2) {
                     _wpt_extend_focus_left(sel2);                // ArrowLeft
                 } else if (ks.key === "\uE014" && shift_held && sel2) {
                     _wpt_extend_focus_right(sel2);               // ArrowRight
-                } else if (modifier_held && (ks.key === "v" || ks.key === "V")) {
+                } else if ((ctrl_held || meta_held) && (ks.key === "v" || ks.key === "V")) {
                     _wpt_dispatch_clipboard_event("paste");
-                } else if (modifier_held && (ks.key === "c" || ks.key === "C")) {
+                } else if ((ctrl_held || meta_held) && (ks.key === "c" || ks.key === "C")) {
                     _wpt_dispatch_clipboard_event("copy");
-                } else if (modifier_held && (ks.key === "x" || ks.key === "X")) {
+                } else if ((ctrl_held || meta_held) && (ks.key === "x" || ks.key === "X")) {
                     _wpt_dispatch_clipboard_event("cut");
-                } else if (!modifier_held) {
+                } else if ((ks.key === "\uE003" || ks.key === "\uE017") &&
+                           _wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
+                               shift_held, ctrl_held, alt_held, meta_held)) {
+                    // handled by Radiant's editing transaction path
+                } else if (ks.key === "\uE003" || ks.key === "\uE017") {
+                    _wpt_send_one_key(null, ks.key.charCodeAt(0));
+                } else if (!(ctrl_held || alt_held || meta_held)) {
                     _wpt_type_printable_key(ks.key);
                 }
             } else if (ks.type === "keyUp") {
                 if (ks.key === "\uE008") shift_held = false;
-                else if (ks.key === "\uE03D" || ks.key === "\uE03d" ||
-                         ks.key === "\uE009") modifier_held = false;
+                else if (ks.key === "\uE009") ctrl_held = false;
+                else if (ks.key === "\uE00A" || ks.key === "\uE00a") alt_held = false;
+                else if (ks.key === "\uE03D" || ks.key === "\uE03d") meta_held = false;
             }
         }
     } catch (_) {}
