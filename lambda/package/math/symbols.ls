@@ -207,6 +207,74 @@ pub fn get_accent(name) {
     accents[name]
 }
 
+// ============================================================
+// Font-variant table — command name → class string
+//
+// MathLive selects an HTML class per symbol (lm_cmr upright, lm_mathit italic,
+// lm_ams). Lambda previously hard-coded ~12 entries inline; this table is the
+// canonical source. Lookup falls back to the rendering context's font when a
+// command is absent.
+// ============================================================
+
+let font_class_map = {
+    // -- lowercase Greek: italic with lcGreek marker class --
+    alpha: "lcGreek lm_mathit", beta: "lcGreek lm_mathit",
+    gamma: "lcGreek lm_mathit", delta: "lcGreek lm_mathit",
+    epsilon: "lcGreek lm_mathit", varepsilon: "lcGreek lm_mathit",
+    zeta: "lcGreek lm_mathit", eta: "lcGreek lm_mathit",
+    theta: "lcGreek lm_mathit", vartheta: "lcGreek lm_mathit",
+    iota: "lcGreek lm_mathit", kappa: "lcGreek lm_mathit",
+    lambda: "lcGreek lm_mathit", mu: "lcGreek lm_mathit",
+    nu: "lcGreek lm_mathit", xi: "lcGreek lm_mathit",
+    omicron: "lcGreek lm_mathit", pi: "lcGreek lm_mathit",
+    varpi: "lcGreek lm_mathit", rho: "lcGreek lm_mathit",
+    varrho: "lcGreek lm_mathit", sigma: "lcGreek lm_mathit",
+    varsigma: "lcGreek lm_mathit", tau: "lcGreek lm_mathit",
+    upsilon: "lcGreek lm_mathit", phi: "lcGreek lm_mathit",
+    varphi: "lcGreek lm_mathit", chi: "lcGreek lm_mathit",
+    psi: "lcGreek lm_mathit", omega: "lcGreek lm_mathit",
+
+    // -- uppercase Greek: upright (CMR) --
+    Gamma: "lm_cmr", Delta: "lm_cmr", Theta: "lm_cmr", Lambda: "lm_cmr",
+    Xi: "lm_cmr", Pi: "lm_cmr", Sigma: "lm_cmr", Upsilon: "lm_cmr",
+    Phi: "lm_cmr", Psi: "lm_cmr", Omega: "lm_cmr",
+
+    // -- upright math symbols (CMR) --
+    infty: "lm_cmr", nabla: "lm_cmr", partial: "lm_cmr",
+    ell: "lm_cmr", hbar: "lm_cmr",
+    imath: "lm_cmr", jmath: "lm_cmr",
+    cdot: "lm_cmr", times: "lm_cmr", div: "lm_cmr",
+    vert: "lm_cmr", Vert: "lm_cmr",
+    lvert: "lm_cmr", rvert: "lm_cmr", lVert: "lm_cmr", rVert: "lm_cmr",
+    dots: "lm_cmr", ldots: "lm_cmr", cdots: "lm_cmr",
+    vdots: "lm_cmr", ddots: "lm_cmr",
+    forall: "lm_cmr", exists: "lm_cmr",
+    emptyset: "lm_cmr", varnothing: "lm_cmr",
+    angle: "lm_cmr", triangle: "lm_cmr",
+
+    // -- AMS symbols --
+    blacksquare: "lm_ams", blacktriangle: "lm_ams",
+    twoheadleftarrow: "lm_ams", twoheadrightarrow: "lm_ams",
+    boxplus: "lm_ams", boxtimes: "lm_ams",
+    boxminus: "lm_ams", boxdot: "lm_ams",
+    preceq: "lm_ams", succeq: "lm_ams",
+    nmid: "lm_ams", rightsquigarrow: "lm_ams",
+    leftleftarrows: "lm_ams", rightrightarrows: "lm_ams",
+    leftrightarrows: "lm_ams", rightleftarrows: "lm_ams",
+    upuparrows: "lm_ams", downdownarrows: "lm_ams",
+    leftharpoonup: "lm_ams", rightharpoonup: "lm_ams",
+    leftharpoondown: "lm_ams", rightharpoondown: "lm_ams",
+    Lleftarrow: "lm_ams", Rrightarrow: "lm_ams",
+    looparrowleft: "lm_ams", looparrowright: "lm_ams",
+    curvearrowleft: "lm_ams", curvearrowright: "lm_ams"
+}
+
+// Look up the font class for a symbol command. Returns null if the command
+// is not in the table — caller should fall back to the context's font.
+pub fn font_class_of(name) {
+    font_class_map[name]
+}
+
 // look up a delimiter size by name
 pub fn get_delim_size(name) {
     delim_sizes[name]
