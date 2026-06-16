@@ -88,8 +88,13 @@ fn text_has_tall_delim(text) {
 }
 
 fn text_height(text) {
-    if (text == "x") 0.44
-    else if (text == "o") 0.44
+    // Short-body italic letters (Math-Italic cmmi metrics: height ≈ 0.43056)
+    if (text == "x" or text == "o" or text == "m" or text == "n" or
+        text == "a" or text == "c" or text == "e" or text == "r" or
+        text == "s" or text == "u" or text == "v" or text == "w" or
+        text == "z") 0.44
+    // Descender letters with short upper body (cmmi height 0.43)
+    else if (text == "g" or text == "y") 0.44
     else if (text == "α") 0.69
     else if (text == "Γ" or text == "Δ" or text == "Θ" or text == "Λ" or
              text == "Π" or text == "Σ" or text == "Υ" or text == "Φ" or
