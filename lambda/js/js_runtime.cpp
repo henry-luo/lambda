@@ -110,6 +110,13 @@ static const int JS_PRIVATE_CLASS_INDEX_KEY_LEN = 23;
 static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
 static const int JS_BOUND_TARGET_KEY_LEN = 16;
 
+static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
+static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
+
+static inline Item js_native_function_source_item() {
+    return (Item){.item = s2it(heap_create_name(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN))};
+}
+
 struct JsGlobalVarModuleBinding {
     Item key;
     int index;
@@ -9077,12 +9084,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // NativeFunction allows the class/construction name to be omitted.
                 // Built-in constructors are walked heavily by test262's intrinsic
                 // source validator, so use the short canonical native form here.
-                StrBuf* sb_ts = strbuf_new();
-                strbuf_append_str_n(sb_ts, "function ", 9);
-                strbuf_append_str_n(sb_ts, "() { [native code] }", 20);
-                String* result_ts = heap_create_name(sb_ts->str, sb_ts->length);
-                strbuf_free(sb_ts);
-                return (Item){.item = s2it(result_ts)};
+                return js_native_function_source_item();
             }
             // Proxy with non-callable target: throw TypeError
             if (js_is_proxy(this_val)) {
@@ -9096,7 +9098,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     return ItemNull;
                 }
                 if (proxy_class_target) {
-                    return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+                    return js_native_function_source_item();
                 }
                 // proxy of function: use NativeFunction format (do not expose target source)
                 JsFunction* pfn = (JsFunction*)proxy_target.function;
@@ -9132,25 +9134,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // The IdentifierName is optional; omit it for implementation-native
             // functions so native-source validation does not spend most of its
             // time rechecking every built-in name through large Unicode regexes.
-            StrBuf* sb = strbuf_new();
-            strbuf_append_str_n(sb, "function ", 9);
-            bool include_native_name = false;
-            if (include_native_name && VALID_STR_PTR(fn->name) && fn->name->len > 0) {
-                // NativeFunction syntax allows only a single IdentifierName (no spaces).
-                // Bound functions have names like "bound f" — use only first word.
-                int name_len = fn->name->len;
-                for (int i = 0; i < (int)fn->name->len; i++) {
-                    if (fn->name->chars[i] == ' ') { name_len = i; break; }
-                }
-                strbuf_append_str_n(sb, fn->name->chars, name_len);
-            }
             #undef VALID_STR_PTR
-            strbuf_append_str_n(sb, "() { [native code] }", 20);
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
+            return js_native_function_source_item();
         }
-        return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+        return js_native_function_source_item();
     }
     case JS_BUILTIN_FUNC_HAS_INSTANCE: {
         // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
@@ -12468,6 +12455,7 @@ struct JsRegexRange {
 
 static bool js_regexp_is_han_cp(uint32_t cp);
 static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
+static int js_regex_generated_property_canonical_kind(int kind);
 static bool js_regex_generated_property_contains(int kind, int cp);
 static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor);
 
@@ -12535,7 +12523,7 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
         js_regex_match_property_name(name, name_len, "Pat_WS")) return JS_REGEX_PROP_PATTERN_WHITE_SPACE;
 
     int generated_kind = js_regex_generated_property_kind_from_name(name, name_len);
-    if (generated_kind) return generated_kind;
+    if (generated_kind) return js_regex_generated_property_canonical_kind(generated_kind);
 
     if (js_regex_match_property_name(name, name_len, "Regional_Indicator") ||
         js_regex_match_property_name(name, name_len, "RI")) return JS_REGEX_PROP_REGIONAL_INDICATOR;
@@ -15757,7 +15745,11 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         start_pos = 0;
     }
 
-    int property_mode = (!rd->global && !rd->sticky) ? js_regexp_property_all_mode(regex) : 0;
+    int property_mode = 0;
+    if (!rd->global && !rd->sticky) {
+        property_mode = rd->special_property_kind != 0 ?
+            rd->special_property_kind : js_regexp_property_all_mode(regex);
+    }
     if (property_mode != 0) {
         bool matched = js_regexp_test_property_all(input_s, property_mode);
         if (matched) {

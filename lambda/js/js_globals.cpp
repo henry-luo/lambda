@@ -9991,6 +9991,9 @@ static void js_validate_native_throw_syntax() {
     js_throw_syntax_error((Item){.item = s2it(heap_create_name("Invalid native function source", 30))});
 }
 
+static const char* JS_CANONICAL_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
+static const int JS_CANONICAL_NATIVE_FUNCTION_SOURCE_LEN = 29;
+
 extern "C" void js_validate_native_function_source(Item source_item) {
     if (get_type_id(source_item) != LMD_TYPE_STRING) {
         source_item = js_to_string(source_item);
@@ -10003,6 +10006,10 @@ extern "C" void js_validate_native_function_source(Item source_item) {
     }
     const char* s = source->chars;
     int len = (int)source->len;
+    if (len == JS_CANONICAL_NATIVE_FUNCTION_SOURCE_LEN &&
+            strncmp(s, JS_CANONICAL_NATIVE_FUNCTION_SOURCE, JS_CANONICAL_NATIVE_FUNCTION_SOURCE_LEN) == 0) {
+        return;
+    }
     int pos = 0;
     while (pos < len && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r')) pos++;
     if (pos + 8 > len || strncmp(s + pos, "function", 8) != 0) {

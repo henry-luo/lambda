@@ -1,5 +1,7 @@
 #include "js_mir_internal.hpp"
 
+extern "C" void js_dynfunc_cache_reset(void);
+
 // ============================================================================
 // ES Module support: deferred MIR cleanup and path resolution
 // ============================================================================
@@ -698,6 +700,7 @@ void jm_defer_mir_cleanup(MIR_context_t ctx) {
 }
 
 void jm_cleanup_deferred_mir() {
+    js_dynfunc_cache_reset();
     for (int i = 0; i < module_mir_context_count; i++) {
         MIR_finish(module_mir_contexts[i]);
         if (module_mir_name_pools[i]) name_pool_release(module_mir_name_pools[i]);

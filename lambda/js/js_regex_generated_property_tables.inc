@@ -7825,13 +7825,90 @@ static const JsRegexGeneratedPropertyTable js_regex_generated_property_tables[] 
     {"XIDS", js_regex_generated_ranges_440_xid_start, (int)(sizeof(js_regex_generated_ranges_440_xid_start) / sizeof(js_regex_generated_ranges_440_xid_start[0]))},
 };
 
-static int js_regex_generated_property_kind_from_name(const char* name, int name_len) {
-    for (int i = 0; i < (int)(sizeof(js_regex_generated_property_tables) / sizeof(js_regex_generated_property_tables[0])); i++) {
+static bool js_regex_generated_property_has_prefix(const char* name, int name_len,
+                                                   const char* prefix, int prefix_len) {
+    return name && name_len > prefix_len && memcmp(name, prefix, prefix_len) == 0;
+}
+
+static int js_regex_generated_property_kind_scan_range(const char* name, int name_len,
+                                                       int start, int end) {
+    for (int i = start; i < end; i++) {
         if (js_regex_match_property_name(name, name_len, js_regex_generated_property_tables[i].name)) {
             return JS_REGEX_PROP_GENERATED_BASE + i;
         }
     }
     return 0;
+}
+
+static void js_regex_generated_property_init_script_buckets(int* script_start, int* script_end,
+                                                           int* scx_start, int* scx_end) {
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    *script_start = table_count;
+    *script_end = 0;
+    *scx_start = table_count;
+    *scx_end = 0;
+    for (int i = 0; i < table_count; i++) {
+        const char* table_name = js_regex_generated_property_tables[i].name;
+        bool is_script = strncmp(table_name, "Script=", 7) == 0 ||
+                         strncmp(table_name, "sc=", 3) == 0;
+        bool is_scx = strncmp(table_name, "Script_Extensions=", 18) == 0 ||
+                      strncmp(table_name, "scx=", 4) == 0;
+        if (is_script) {
+            if (i < *script_start) *script_start = i;
+            if (i + 1 > *script_end) *script_end = i + 1;
+        }
+        if (is_scx) {
+            if (i < *scx_start) *scx_start = i;
+            if (i + 1 > *scx_end) *scx_end = i + 1;
+        }
+    }
+    if (*script_start > *script_end) *script_start = *script_end = 0;
+    if (*scx_start > *scx_end) *scx_start = *scx_end = 0;
+}
+
+static int js_regex_generated_property_kind_from_name(const char* name, int name_len) {
+    static bool script_buckets_ready = false;
+    static int script_start = 0;
+    static int script_end = 0;
+    static int scx_start = 0;
+    static int scx_end = 0;
+
+    bool is_script_name =
+        js_regex_generated_property_has_prefix(name, name_len, "Script=", 7) ||
+        js_regex_generated_property_has_prefix(name, name_len, "sc=", 3);
+    bool is_scx_name =
+        js_regex_generated_property_has_prefix(name, name_len, "Script_Extensions=", 18) ||
+        js_regex_generated_property_has_prefix(name, name_len, "scx=", 4);
+    if (is_script_name || is_scx_name) {
+        if (!script_buckets_ready) {
+            js_regex_generated_property_init_script_buckets(&script_start, &script_end,
+                                                            &scx_start, &scx_end);
+            script_buckets_ready = true;
+        }
+        return is_scx_name
+            ? js_regex_generated_property_kind_scan_range(name, name_len, scx_start, scx_end)
+            : js_regex_generated_property_kind_scan_range(name, name_len, script_start, script_end);
+    }
+
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    return js_regex_generated_property_kind_scan_range(name, name_len, 0, table_count);
+}
+
+static int js_regex_generated_property_canonical_kind(int kind) {
+    int index = kind - JS_REGEX_PROP_GENERATED_BASE;
+    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
+                            sizeof(js_regex_generated_property_tables[0]));
+    if (index < 0 || index >= table_count) return kind;
+    const JsRegexGeneratedPropertyTable* table = &js_regex_generated_property_tables[index];
+    for (int i = index - 1; i >= 0; i--) {
+        const JsRegexGeneratedPropertyTable* prev = &js_regex_generated_property_tables[i];
+        if (prev->ranges == table->ranges && prev->count == table->count) {
+            kind = JS_REGEX_PROP_GENERATED_BASE + i;
+        }
+    }
+    return kind;
 }
 
 static bool js_regex_generated_property_contains(int kind, int cp) {
