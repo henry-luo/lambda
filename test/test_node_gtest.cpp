@@ -19,9 +19,9 @@
 //   --timeout=<ms>               Per-test timeout in ms (default: 10000)
 //
 // Usage:
-//   ./test/test_node_official_gtest.exe                    # run all enabled modules
-//   ./test/test_node_official_gtest.exe --modules=path,os  # run only path + os
-//   ./test/test_node_official_gtest.exe --update-baseline  # update baseline
+//   ./test/test_node_gtest.exe                    # run all enabled modules
+//   ./test/test_node_gtest.exe --modules=path,os  # run only path + os
+//   ./test/test_node_gtest.exe --update-baseline  # update baseline
 //
 // =============================================================================
 
