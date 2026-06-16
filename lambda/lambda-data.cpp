@@ -23,6 +23,16 @@ extern "C" {
     void* heap_data_alloc(size_t size) {
         return raw_malloc(size);  // RAWALLOC_OK: GC heap allocation — managed by garbage collector, not memtrack
     }
+
+    __attribute__((weak))
+    void heap_register_gc_root(uint64_t* slot) {
+        (void)slot;
+    }
+
+    __attribute__((weak))
+    void heap_unregister_gc_root(uint64_t* slot) {
+        (void)slot;
+    }
 }
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
@@ -466,8 +476,12 @@ void expand_list(List *list, Arena* arena = nullptr) {
         if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) {
             return;   // overflow: growth not possible, leave capacity untouched
         }
+        uint64_t list_root = (uint64_t)(uintptr_t)list;
+        heap_register_gc_root(&list_root);
         Item* new_items = (Item*)heap_data_alloc(new_size);
+        list = (List*)(uintptr_t)list_root;
         if (!new_items) {
+            heap_unregister_gc_root(&list_root);
             // OOM: leave capacity untouched (old buffer still valid).
             return;
         }
@@ -486,6 +500,7 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // source buffer.
         list->items = new_items;
         list->capacity = new_capacity;
+        heap_unregister_gc_root(&list_root);
     }
 
     // copy extra items to the end of the list

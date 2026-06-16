@@ -2327,14 +2327,6 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
         ctor_name = id->name->chars;
         ctor_len = (int)id->name->len;
-    } else if (call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-        // Handle new namespace.ClassName(args) — e.g. new som.Random()
-        JsMemberNode* mem = (JsMemberNode*)call->callee;
-        if (!mem->computed && mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
-            ctor_name = prop_id->name->chars;
-            ctor_len = (int)prop_id->name->len;
-        }
     }
 
     if (!ctor_name) {
@@ -2357,6 +2349,10 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         return jm_call_2(mt, "js_apply_constructor", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+    }
+
+    if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) {
+        return jm_emit_dynamic_new_expr(mt, call, arg_count);
     }
 
     // Check if it's a built-in type that needs early first-arg evaluation

@@ -32,6 +32,7 @@ extern "C" Item js_new_boolean_wrapper(Item arg);
 extern "C" Item js_new_string_wrapper(Item arg);
 extern "C" Item js_new_async_function_from_string(Item* args, int argc);
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async);
+extern "C" Item js_get_constructor(Item name_item);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -277,6 +278,14 @@ static Item js_bound_function_ultimate_target(Item func_item) {
         current = target;
     }
     return current;
+}
+
+static bool js_is_intrinsic_constructor_named(Item constructor, const char* name, int len) {
+    if (get_type_id(constructor) != LMD_TYPE_FUNC || !name || len <= 0) return false;
+    Item target = js_bound_function_ultimate_target(constructor);
+    Item name_item = (Item){.item = s2it(heap_create_name(name, len))};
+    Item intrinsic = js_get_constructor(name_item);
+    return target.item == intrinsic.item;
 }
 
 static Item js_bound_function_effective_new_target(Item callee, Item new_target) {
@@ -1406,8 +1415,8 @@ extern "C" Item js_constructor_create_object(Item callee) {
                                 }
                                 // v37: Promise — create promise
                                 if (pcn_s->len == 7 && strncmp(pcn_s->chars, "Promise", 7) == 0) {
-                                    extern Item js_promise_create(Item executor);
-                                    obj = js_promise_create(ItemNull);
+                                    extern Item js_promise_create_pending(void);
+                                    obj = js_promise_create_pending();
                                     break;
                                 }
                             }
@@ -1714,6 +1723,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                     for (int i = 0; i < argc; i++) merged_buf[fn->bound_argc + i] = args ? args[i] : ItemNull;
                     eff_args = merged_buf;
                 }
+            }
+            if (!js_is_intrinsic_constructor_named(callee, n, nl)) {
+                n = "";
+                nl = 0;
             }
 
             if (nl == 6 && strncmp(n, "String", 6) == 0) {
@@ -25305,6 +25318,8 @@ void js_reset_262_object() {
 }
 
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
+extern "C" Item js_get_current_this(void);
+extern "C" void js_set_this(Item this_val);
 
 extern "C" int64_t js_262_eval_script_is_active() {
     return js_262_eval_script_active;
@@ -30988,7 +31003,10 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     // Eval the code in global scope.
     // bit 8: vm context — each runInContext unit gets its own module-var slot
     // namespace so units sharing this context don't clobber each other's slots.
+    Item prev_this = js_get_current_this();
+    js_set_this(global);
     Item result = js_builtin_eval(code, 1 | 8);
+    js_set_this(prev_this);
 
     // Restore original globals
     for (int64_t i = 0; i < nkeys; i++) {

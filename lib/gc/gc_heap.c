@@ -224,7 +224,13 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 // ============================================================================
 
 gc_heap_t* gc_heap_create(void) {
-    Pool* pool = pool_create();
+    // The GC keeps object slabs/bump blocks and data-zone blocks alive
+    // independently until heap teardown or data-zone reset. rpmalloc first-class
+    // heaps can hand a later large allocation an address range that overlaps a
+    // still-retained data-zone block under heavy JS allocation churn. Use the
+    // mmap-backed bump pool for GC arenas so each retained block owns a distinct
+    // virtual-memory mapping.
+    Pool* pool = pool_create_mmap();
     if (!pool) {
         log_error("gc_heap_create: failed to create pool");
         return NULL;
