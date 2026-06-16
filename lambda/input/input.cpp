@@ -200,6 +200,67 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     }
 }
 
+bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
+        Input* input, uint8_t shape_flags) {
+    if (!mp || !keys || count <= 0 || !input || !input->pool) return false;
+    for (int i = 0; i < count; i++) {
+        if (!keys[i]) return false;
+    }
+
+    TypeMap *map_type = (TypeMap*)mp->type;
+    if (map_type == &EmptyMap) {
+        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!map_type) return false;
+        mp->type = map_type;
+        arraylist_append(input->type_list, map_type);
+        map_type->type_index = input->type_list->length - 1;
+    }
+    if (!map_type) return false;
+
+    int bsize = type_info[LMD_TYPE_UNDEFINED].byte_size;
+    int64_t old_byte_size = map_type->byte_size;
+    int64_t new_byte_size = old_byte_size + ((int64_t)bsize * count);
+    if (new_byte_size > mp->data_cap) {
+        int byte_cap = MAX(mp->data_cap, (int)new_byte_size) * 2;
+        if (byte_cap < 64) byte_cap = 64;
+        void* new_data = pool_calloc(input->pool, byte_cap);
+        if (!new_data) return false;
+        if (mp->data && old_byte_size > 0) {
+            memcpy(new_data, mp->data, (size_t)old_byte_size);
+            pool_free(input->pool, mp->data);
+        }
+        mp->data = new_data;
+        mp->data_cap = byte_cap;
+    } else if (!mp->data && new_byte_size > 0) {
+        int byte_cap = (int)new_byte_size;
+        if (byte_cap < 64) byte_cap = 64;
+        mp->data = pool_calloc(input->pool, byte_cap);
+        if (!mp->data) return false;
+        mp->data_cap = byte_cap;
+    }
+
+    ShapeEntry* prev = map_type->last;
+    int64_t byte_offset = old_byte_size;
+    for (int i = 0; i < count; i++) {
+        ShapeEntry* shape_entry = alloc_shape_entry(input->pool, keys[i],
+            LMD_TYPE_UNDEFINED, prev);
+        if (!shape_entry) return false;
+        shape_entry->byte_offset = byte_offset;
+        shape_entry->flags = shape_flags;
+        if (!map_type->shape) map_type->shape = shape_entry;
+        map_type->last = shape_entry;
+        map_type->length++;
+        typemap_hash_insert(map_type, shape_entry);
+        if (mp->data) {
+            *(bool*)((char*)mp->data + byte_offset) = false;
+        }
+        byte_offset += bsize;
+        prev = shape_entry;
+    }
+    map_type->byte_size = byte_offset;
+    return true;
+}
+
 extern TypeElmt EmptyElmt;
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);

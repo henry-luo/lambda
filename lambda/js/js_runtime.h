@@ -30,6 +30,11 @@ static inline bool js_map_kind_uses_default_object_to_primitive(uint8_t map_kind
 // including null, undefined, false, 0, or empty string.
 #define JS_ITER_DONE_SENTINEL (0x7F00DEAD00000000ULL)
 
+// Maximum module-level live bindings tracked in the compact slot table.
+// Generated Unicode identifier tests declare thousands of top-level vars; keep
+// this above those rows so they stay on the indexed binding path.
+#define JS_MAX_MODULE_VARS 16384
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -531,9 +536,12 @@ void js_runtime_set_input(void* input);
 
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
+void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
+    int count, int define_global_var_properties);
 void js_reset_module_vars(void);
 void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
+void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);
 
 /**
  * Reset all JS runtime global state between batch test runs.

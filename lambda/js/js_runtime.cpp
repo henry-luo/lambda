@@ -123,7 +123,9 @@ struct JsGlobalVarModuleBinding {
     int index;
 };
 
-static JsGlobalVarModuleBinding js_global_var_module_bindings[512];
+#define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
+
+static JsGlobalVarModuleBinding js_global_var_module_bindings[JS_GLOBAL_VAR_MODULE_BINDING_CAP];
 static int js_global_var_module_binding_count = 0;
 static uint64_t js_global_var_module_binding_epoch = 0;
 static Item js_global_var_module_binding_global = {0};
@@ -162,10 +164,34 @@ extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
             return;
         }
     }
-    if (js_global_var_module_binding_count >= 512) return;
+    if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
     js_global_var_module_bindings[js_global_var_module_binding_count].key = key;
     js_global_var_module_bindings[js_global_var_module_binding_count].index = (int)index;
     js_global_var_module_binding_count++;
+}
+
+extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
+        const int* indices, int count) {
+    js_global_var_binding_refresh();
+    if (!keys || !indices || count <= 0) return;
+    for (int i = 0; i < count; i++) {
+        Item key = keys[i];
+        int index = indices[i];
+        if (get_type_id(key) != LMD_TYPE_STRING || index < 0) continue;
+        bool updated = false;
+        for (int j = 0; j < js_global_var_module_binding_count; j++) {
+            if (js_global_var_binding_key_same(js_global_var_module_bindings[j].key, key)) {
+                js_global_var_module_bindings[j].index = index;
+                updated = true;
+                break;
+            }
+        }
+        if (updated) continue;
+        if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
+        js_global_var_module_bindings[js_global_var_module_binding_count].key = key;
+        js_global_var_module_bindings[js_global_var_module_binding_count].index = index;
+        js_global_var_module_binding_count++;
+    }
 }
 
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {

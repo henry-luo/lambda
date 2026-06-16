@@ -15185,6 +15185,94 @@ extern "C" void js_define_global_var_property(Item key, Item value) {
     }
 }
 
+static bool js_define_global_var_property_fast_absent(Item global, Item key, Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+    String* str = it2s(key);
+    if (!str || str->len <= 0 || str->len >= 200) return true;
+    if (get_type_id(global) != LMD_TYPE_MAP || !global.map || !js_input || !js_input->pool) {
+        return false;
+    }
+    JsOwnSlotStatus st = js_ordinary_own_status(global, str->chars, (int)str->len);
+    if (st == JS_HAS_PRESENT) return true;
+    if (st != JS_HAS_ABSENT) return false;
+
+    map_put(global.map, str, value, js_input);
+    TypeMap* tm = (TypeMap*)global.map->type;
+    ShapeEntry* se = tm ? tm->last : NULL;
+    if (se && se->name && (int)se->name->length == (int)str->len &&
+            memcmp(se->name->str, str->chars, (size_t)str->len) == 0) {
+        jspd_set_configurable(se, false);
+    } else {
+        js_attr_set_configurable(global, str->chars, (int)str->len, false);
+    }
+    return true;
+}
+
+static bool js_define_global_var_properties_bulk_absent(Item global, const Item* keys,
+        int count) {
+    if (!keys || count <= 0) return false;
+    if (get_type_id(global) != LMD_TYPE_MAP || !global.map || !js_input || !js_input->pool) {
+        return false;
+    }
+    String** strings = (String**)mem_alloc(sizeof(String*) * (size_t)count, MEM_CAT_JS_RUNTIME);
+    if (!strings) return false;
+
+    for (int i = 0; i < count; i++) {
+        if (get_type_id(keys[i]) != LMD_TYPE_STRING) {
+            mem_free(strings);
+            return false;
+        }
+        String* str = it2s(keys[i]);
+        if (!str || str->len <= 0 || str->len >= 200) {
+            mem_free(strings);
+            return false;
+        }
+        JsOwnSlotStatus st = js_ordinary_own_status(global, str->chars, (int)str->len);
+        if (st != JS_HAS_ABSENT) {
+            mem_free(strings);
+            return false;
+        }
+        strings[i] = str;
+    }
+
+    bool ok = map_put_undefined_unique_absent_bulk(global.map, strings, count,
+        js_input, JSPD_NON_CONFIGURABLE);
+    mem_free(strings);
+    return ok;
+}
+
+extern "C" void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
+        int count, int define_global_var_properties) {
+    if (!indices || count <= 0) return;
+    Item undef = make_js_undefined();
+    Item global = ItemNull;
+    if (define_global_var_properties && keys) {
+        global = js_get_global_this();
+        if (js_define_global_var_properties_bulk_absent(global, keys, count)) {
+            for (int i = 0; i < count; i++) {
+                int index = indices[i];
+                if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
+                js_set_module_var(index, undef);
+            }
+            js_register_global_var_module_bindings_bulk(keys, indices, count);
+            return;
+        }
+    }
+    for (int i = 0; i < count; i++) {
+        int index = indices[i];
+        if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
+        js_set_module_var(index, undef);
+        if (define_global_var_properties && keys) {
+            if (!js_define_global_var_property_fast_absent(global, keys[i], undef)) {
+                js_define_global_var_property(keys[i], undef);
+            }
+        }
+    }
+    if (define_global_var_properties && keys) {
+        js_register_global_var_module_bindings_bulk(keys, indices, count);
+    }
+}
+
 extern "C" void js_define_global_eval_var_property(Item key, Item value) {
     Item global = js_get_global_this();
     Item name = js_to_string(key);

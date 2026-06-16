@@ -243,12 +243,43 @@ static void jm_declare_evalscript_global_lexical_if_needed(JsMirTranspiler* mt,
     jm_emit_label(mt, skip_global_lex);
 }
 
+static bool jm_can_skip_plain_top_level_var_decl_without_init(
+        JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
+    if (!mt || !var || var->kind != JS_VAR_VAR || !mt->in_main ||
+            mt->is_eval_direct || !mt->module_consts) {
+        return false;
+    }
+    bool at_module_var_scope = (mt->scope_depth <= 1) || (mt->var_hoist_depth <= 1);
+    if (!at_module_var_scope) return false;
+    JsAstNode* decl = var->declarations;
+    if (!decl) return false;
+    while (decl) {
+        if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
+        if (d->init || !d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsModuleConstEntry lookup;
+        memset(&lookup, 0, sizeof(lookup));
+        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (!mc || mc->const_type != MCONST_MODVAR || (int)mc->int_val < 0) return false;
+        decl = decl->next;
+    }
+    return true;
+}
+
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
     // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
     // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
     int saved_hoist = mt->var_hoist_depth;
     if (var->kind == JS_VAR_VAR && mt->scope_depth > 1 && mt->var_hoist_depth < 0) {
         mt->var_hoist_depth = 1;
+    }
+    if (jm_can_skip_plain_top_level_var_decl_without_init(mt, var)) {
+        mt->var_hoist_depth = saved_hoist;
+        return;
     }
     JsAstNode* decl = var->declarations;
     while (decl) {

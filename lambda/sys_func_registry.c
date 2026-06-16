@@ -888,6 +888,8 @@ extern void js_set_global_property(Item key, Item value, int64_t strict);
 extern void js_set_global_var_property_fast(Item key, Item value);
 extern void js_set_global_property_strict_prechecked(Item key, Item value, int64_t binding_exists_at_lhs);
 extern void js_register_global_var_module_binding(Item key, int64_t index);
+extern void js_init_module_vars_undefined_bulk(const int* indices, const Item* keys,
+    int count, int define_global_var_properties);
 extern void js_mark_private_method_non_writable(Item object, Item name);
 extern void js_set_method_home_from_target(Item target, Item fn_item);
 extern void js_init_class_instance_fields(Item callee, Item object);
@@ -1699,6 +1701,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding)},
+    {"js_init_module_vars_undefined_bulk", FPTR(js_init_module_vars_undefined_bulk)},
     // v12: Language features
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
