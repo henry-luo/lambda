@@ -3924,41 +3924,25 @@ int main(int argc, char *argv[]) {
         }
 
         // In hot-reload batch mode the worker process exits immediately after
-        // this point.  Do not walk the persistent JS heap during process-exit
-        // teardown: stressy generated RegExp suites can leave a very large,
-        // repeatedly reset heap, and final GC walking is unnecessary when the
-        // OS is about to reclaim the worker. In-batch heap recycling above still
-        // performs full cleanup when the process needs to continue.
+        // this point. Do not walk the persistent JS heap or preamble MIR state
+        // during process-exit teardown: stressy generated RegExp suites can
+        // leave a very large, repeatedly reset heap, and final GC/JIT walking is
+        // unnecessary when the OS is about to reclaim the worker. In-batch heap
+        // recycling above still performs full cleanup when the process needs to
+        // continue.
         if (hot_reload) {
-            context = &batch_context;
-            js_batch_reset();
-            if (batch_context.name_pool) {
-                name_pool_release(batch_context.name_pool);
-                batch_context.name_pool = NULL;
-            }
-            if (batch_context.heap) {
-                heap_destroy();
-                batch_context.heap = NULL;
-            }
-            if (batch_context.nursery) {
-                gc_nursery_destroy(batch_context.nursery);
-                batch_context.nursery = NULL;
-            }
-            if (batch_context.type_list) {
-                arraylist_free((ArrayList*)batch_context.type_list);
-                batch_context.type_list = NULL;
-            }
             context = NULL;
-        }
+        } else {
+            // Clean up deferred MIR contexts after the JS batch state has been
+            // released. This matches the in-batch heap recycle path: heap
+            // objects may still reference JIT code pages until the batch state
+            // is gone.
+            jm_cleanup_deferred_mir();
 
-        // Clean up deferred MIR contexts after the JS batch state has been
-        // released. This matches the in-batch heap recycle path: heap objects
-        // may still reference JIT code pages until the batch state is gone.
-        jm_cleanup_deferred_mir();
-
-        if (has_preamble) {
-            preamble_state_destroy(&preamble);
-            has_preamble = false;
+            if (has_preamble) {
+                preamble_state_destroy(&preamble);
+                has_preamble = false;
+            }
         }
         if (saved_harness_src) { mem_free(saved_harness_src); saved_harness_src = NULL; }
 
