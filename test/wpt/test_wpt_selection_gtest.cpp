@@ -94,8 +94,6 @@ static const char* SKIP_SUBSTRINGS[] = {
     // vibe/radiant/Radiant_Design_Selection2.md.
     "drag-selection-extend-to-user-select-none",
     "onselectstart-on-key-in-contenteditable",
-    "modifying-selection-with-primary-mouse-button",
-    "modifying-selection-with-non-primary-mouse-button",
 };
 static const int SKIP_COUNT = sizeof(SKIP_SUBSTRINGS) / sizeof(SKIP_SUBSTRINGS[0]);
 
@@ -563,6 +561,8 @@ static WptSelectionResult run_selection_case(const WptSelectionParam& p) {
         p.html_path.find("fire-selectionchange-event-on-deleting-single-character-inside-inline-element") != std::string::npos ||
         p.html_path.find("fire-selectionchange-event-on-pressing-backspace") != std::string::npos ||
         p.html_path.find("fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace") != std::string::npos ||
+        p.html_path.find("modifying-selection-with-primary-mouse-button") != std::string::npos ||
+        p.html_path.find("modifying-selection-with-non-primary-mouse-button") != std::string::npos ||
         p.html_path.find("selection-direction-on-single-click") != std::string::npos ||
         p.html_path.find("selection-direction-on-double-click") != std::string::npos ||
         p.html_path.find("selection-direction-on-triple-click") != std::string::npos;

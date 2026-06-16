@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction slices landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button slices landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -150,7 +150,7 @@ control focus/selection semantics are covered by the selection runner.
 
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
-| `test_wpt_selection_gtest` | 159 | 94 pass / 65 skip / 0 fail | SI-3/SI-4 converted six `testdriver` selectionchange/click-direction cases from skip to pass |
+| `test_wpt_selection_gtest` | 159 | 97 pass / 62 skip / 0 fail | SI-3/SI-5 converted nine `testdriver` selectionchange/click-direction/mouse-button cases from skip to pass |
 | `test_wpt_contenteditable_gtest` | 196 | 158 pass / 38 skip / 0 fail | SI-1/SI-2 converted three `testdriver` input-event cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
@@ -253,6 +253,47 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 - The trio now passes all `3/3` runnable assertions and moves the full
   selection runner to 94 pass / 65 skip / 0 fail.
 
+**SI-5 — pointer mouse-button selection slice: LANDED (2026-06-16).**
+
+- Extended the WPT `test_driver.Actions` pointer shim to dispatch real
+  cancelable `pointerdown`/`mousedown` and `pointerup`/`mouseup` events with
+  `button`/`buttons` and modifier state, then run the selection default action
+  only when the down events are not canceled.
+- Primary clicks now focus the editing host and collapse the caret at the hit
+  text node; canceled `pointerdown`/`mousedown` keeps the old selection;
+  Shift+click extends selection except for link/right-click cases that should
+  collapse under the shim's no-`contextmenu` model.
+- Primary drag extends selection before `pointerup`/`mouseup` listeners run,
+  while middle/right drags preserve the collapsed down-position selection.
+- Enabled the WPT mouse-button files:
+  `selection/contenteditable/modifying-selection-with-primary-mouse-button`
+  and both `modifying-selection-with-non-primary-mouse-button` variants. They
+  now pass all `21/21` runnable assertions and move the full selection runner
+  to 97 pass / 62 skip / 0 fail.
+
+**SI probe — Backspace target-range matrix: MEASURED / NOT ENABLED (2026-06-16).**
+
+- Temporarily allowed
+  `input-events-get-target-ranges-backspace.tentative.html` to measure the
+  next deletion frontier. It currently passes only `26/163` assertions, with
+  root failures around block joins, empty inline cleanup, atomic element
+  deletion, table-cell selections, and modifier/whitespace target-range
+  semantics. The file stays skipped until those mutation/range gaps are fixed
+  rather than broadening the allowlist to a known-red case.
+
+**SI-6 — stale editing-surface cleanup after DOM replacement: LANDED (2026-06-16).**
+
+- Fixed a debug-only `DocState` invariant crash in the enabled
+  `fire-selectionchange-event-on-pressing-backspace` WPT: one promise test
+  replaced an editing host's `innerHTML`, but `editing.active_surface` still
+  pointed at the removed subtree, so the next rich edit failed preflight with
+  "active editing surface no longer resolves."
+- `view_state_prune_orphans()` now clears active editing/composition surface
+  state when the stored owner/view is detached or no longer resolves to the
+  same editing host. The fix is in the shared DOM mutation cleanup path, so it
+  applies to `innerHTML` replacements and other subtree-removal paths rather
+  than special-casing the WPT.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
@@ -267,17 +308,28 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `selection-direction-on-single-click` | 1/1 passed |
 | `selection-direction-on-double-click.tentative` | 1/1 passed |
 | `selection-direction-on-triple-click.tentative` | 1/1 passed |
+| `modifying-selection-with-primary-mouse-button.tentative` | 7/7 passed |
+| `modifying-selection-with-non-primary-mouse-button.tentative?middle` | 7/7 passed |
+| `modifying-selection-with-non-primary-mouse-button.tentative?secondary` | 7/7 passed |
+| `input-events-get-target-ranges-backspace.tentative` | measured 26/163; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
-| `make build-test` | passed |
+| focused WPT test rebuilds | `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` rebuilt |
 | `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
-| `test_wpt_selection_gtest` | 159 cases: 94 pass / 65 skip / 0 fail |
+| `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
 | `test_js_gtest` | 193 passed / 0 failed |
-| `make test262-baseline` | fully passed 40261 / 40261; regressions 0; retry phase 0.0s |
+| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; 0 retry-only cases |
+
+**Global gate note:** SI-6's local WPT/JS guards and the mandatory §1.1
+JavaScript regression gate are green. The broader SI phase can keep advancing
+from the remaining skipped deletion/pointer matrices without carrying a global
+gate blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
-and click-direction subset: remaining `getTargetRanges` deletion matrices,
-broader text-control delete coverage, and pointer drag/mouse-button injection.
+and pointer subset: remaining `getTargetRanges` deletion matrices (starting
+with the measured Backspace blockers), broader text-control delete coverage,
+and general pointer drag/hit-test injection outside the contenteditable
+mouse-button files.
 
 ---
 

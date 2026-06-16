@@ -2614,6 +2614,41 @@ static bool view_state_tree_contains_view(DomNode* node, View* view) {
     return false;
 }
 
+static bool editing_surface_is_stale(DomNode* root,
+                                     const EditingSurface* surface) {
+    if (!surface || surface->kind == EDIT_SURFACE_NONE) return false;
+    if (!surface->owner || !surface->view) return true;
+    if (!view_state_tree_contains_view(root, static_cast<View*>(surface->owner)) ||
+        !view_state_tree_contains_view(root, surface->view)) {
+        return true;
+    }
+
+    EditingSurface resolved;
+    if (!editing_surface_from_target(surface->view, &resolved)) return true;
+    return resolved.kind != surface->kind ||
+        resolved.mode != surface->mode ||
+        resolved.owner != surface->owner ||
+        resolved.view != surface->view;
+}
+
+static void doc_state_clear_editing_interaction_surface(DocState* state) {
+    if (!state) return;
+    editing_surface_clear(&state->editing.active_surface);
+    state->editing.has_active_surface = false;
+    state->editing.composing = false;
+    state->editing.composition.active = false;
+    editing_surface_clear(&state->editing.composition.surface);
+    state->editing.composition.anchor_view = NULL;
+    state->editing.composition.anchor_offset = 0;
+    state->editing.composition.preedit_len = 0;
+    state->editing.composition.dom_preedit_len = 0;
+    state->editing.composition.commit_len = 0;
+    state->editing.composition.caret = 0;
+    state->editing.composition.update_count = 0;
+    state->editing.composition.committed = false;
+    state->editing.composition.canceled = false;
+}
+
 static uint32_t view_state_clear_interaction_flag(DocState* state, const char* name) {
     if (!state || !state->view_state_map || !name) return 0;
     uint32_t changed = 0;
@@ -2687,6 +2722,16 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
     }
     if (state->last_focused_text_control && !view_state_tree_contains_view(root, static_cast<View*>(state->last_focused_text_control))) {
         state->last_focused_text_control = NULL;
+        changed++;
+    }
+    bool stale_active_surface = state->editing.has_active_surface &&
+        editing_surface_is_stale(root, &state->editing.active_surface);
+    bool stale_composition_surface = state->editing.composition.active &&
+        (editing_surface_is_stale(root, &state->editing.composition.surface) ||
+         (state->editing.composition.anchor_view &&
+          !view_state_tree_contains_view(root, state->editing.composition.anchor_view)));
+    if (stale_active_surface || stale_composition_surface) {
+        doc_state_clear_editing_interaction_surface(state);
         changed++;
     }
 

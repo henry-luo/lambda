@@ -1141,7 +1141,15 @@ function _wpt_test_driver_click(elem) {
 function _WptActions() {
     this._steps = [];
     this._origin = null;
+    this.ButtonType = _WptActions.prototype.ButtonType;
 }
+_WptActions.prototype.ButtonType = {
+    LEFT: 0,
+    MIDDLE: 1,
+    RIGHT: 2,
+    BACK: 3,
+    FORWARD: 4
+};
 _WptActions.prototype.pointerMove = function(x, y, origin) {
     // origin is either a Node (DOM element/text) or {origin: node}.
     // NOTE: Lambda's DOM accessor returns null (not undefined) for missing
@@ -1155,12 +1163,16 @@ _WptActions.prototype.pointerMove = function(x, y, origin) {
     if (node) this._origin = node;
     return this;
 };
-_WptActions.prototype.pointerDown = function() {
-    this._steps.push({ type: "down" });
+_WptActions.prototype.pointerDown = function(opts) {
+    opts = opts || {};
+    var button = (typeof opts.button === "number") ? opts.button : this.ButtonType.LEFT;
+    this._steps.push({ type: "down", button: button });
     return this;
 };
-_WptActions.prototype.pointerUp = function() {
-    this._steps.push({ type: "up" });
+_WptActions.prototype.pointerUp = function(opts) {
+    opts = opts || {};
+    var button = (typeof opts.button === "number") ? opts.button : this.ButtonType.LEFT;
+    this._steps.push({ type: "up", button: button });
     return this;
 };
 _WptActions.prototype.keyDown = function(key) {
@@ -1172,150 +1184,211 @@ _WptActions.prototype.keyUp = function(key) {
     return this;
 };
 _WptActions.prototype.pause = function(_dur) { return this; };
+
+function _wpt_actions_descend_to_text(n) {
+    if (n && n.nodeType === 1 /* ELEMENT */) {
+        var fc = n.firstChild;
+        if (fc && fc.nodeType === 3 /* TEXT */) return fc;
+    }
+    return n;
+}
+
+function _wpt_actions_editing_host(node) {
+    var cur = node;
+    if (cur && cur.nodeType === 3) cur = cur.parentNode;
+    while (cur && cur.nodeType === 1) {
+        var state = _wpt_contenteditable_state(cur);
+        if (state === "true") return cur;
+        if (state === "false") return null;
+        cur = cur.parentNode;
+    }
+    return null;
+}
+
+function _wpt_actions_event_target(node) {
+    if (!node) return null;
+    return node.nodeType === 3 ? node.parentNode : node;
+}
+
+function _wpt_actions_dispatch_mouse_pair(target, pointer_type, mouse_type,
+                                          button, buttons, mods) {
+    if (!target || typeof target.dispatchEvent !== "function") return true;
+    var init = {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        button: button,
+        buttons: buttons,
+        clientX: 0,
+        clientY: 0,
+        screenX: 0,
+        screenY: 0,
+        pageX: 0,
+        pageY: 0,
+        detail: 1,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        shiftKey: !!(mods && mods.shift),
+        ctrlKey: !!(mods && mods.ctrl),
+        altKey: !!(mods && mods.alt),
+        metaKey: !!(mods && mods.meta)
+    };
+    var ok = true;
+    try {
+        var pe = new PointerEvent(pointer_type, init);
+        var pok = target.dispatchEvent(pe);
+        ok = ok && pok !== false && !pe.defaultPrevented;
+    } catch (_) {}
+    try {
+        var me = new MouseEvent(mouse_type, init);
+        var mok = target.dispatchEvent(me);
+        ok = ok && mok !== false && !me.defaultPrevented;
+    } catch (_) {}
+    return ok;
+}
+
+function _wpt_actions_set_selection(anchor_node, focus_node, mode) {
+    var sel = null;
+    try { sel = (typeof getSelection === "function") ? getSelection() : null; } catch (_) {}
+    if (!sel || !anchor_node) return;
+    anchor_node = _wpt_actions_descend_to_text(anchor_node);
+    focus_node = _wpt_actions_descend_to_text(focus_node || anchor_node);
+    if (!anchor_node) return;
+    try {
+        if (mode === "extend" && focus_node) {
+            var anchor_base = sel.anchorNode || anchor_node;
+            var anchor_offset = (typeof sel.anchorOffset === "number") ? sel.anchorOffset : 0;
+            if (typeof sel.setBaseAndExtent === "function") {
+                sel.setBaseAndExtent(anchor_base, anchor_offset, focus_node, 0);
+            } else {
+                var re = document.createRange();
+                re.setStart(anchor_base, anchor_offset);
+                re.setEnd(focus_node, 0);
+                sel.removeAllRanges();
+                sel.addRange(re);
+            }
+            return;
+        }
+        if (mode === "word" && anchor_node.nodeType === 3) {
+            var s = anchor_node.data || anchor_node.textContent || "";
+            var end = 0;
+            while (end < s.length) {
+                var ch = s.charCodeAt(end);
+                var isLetter = (ch >= 0x30 && ch <= 0x39) ||
+                               (ch >= 0x41 && ch <= 0x5A) ||
+                               (ch >= 0x61 && ch <= 0x7A) ||
+                               (ch >= 0x80);
+                if (!isLetter) break;
+                end++;
+            }
+            if (end === 0) end = (s.length > 0 ? 1 : 0);
+            var rw = document.createRange();
+            rw.setStart(anchor_node, 0);
+            rw.setEnd(anchor_node, end);
+            sel.removeAllRanges();
+            sel.addRange(rw);
+            try {
+                if (sel.__forceDirection) sel.__forceDirection("none");
+            } catch (_) {}
+            return;
+        }
+        if (mode === "block") {
+            var container = anchor_node.parentNode || anchor_node;
+            var childCount = 0;
+            var c = container.firstChild;
+            while (c) { childCount++; c = c.nextSibling; }
+            var rb = document.createRange();
+            rb.setStart(container, 0);
+            rb.setEnd(container, childCount);
+            sel.removeAllRanges();
+            sel.addRange(rb);
+            try {
+                if (sel.__forceDirection) sel.__forceDirection("none");
+            } catch (_) {}
+            return;
+        }
+        sel.collapse(anchor_node, 0);
+        try {
+            if (sel.__forceDirection) sel.__forceDirection("none");
+        } catch (_) {}
+    } catch (_) {}
+}
 _WptActions.prototype.send = function() {
-    // Walk the step sequence. Track:
-    //   - pairs: how many down/up cycles occurred (1=single, 2=double, ...)
-    //   - anchor_node: origin of the most recent pointerMove BEFORE the
-    //                  first pointerDown (the press location)
-    //   - focus_node:  origin of any pointerMove AFTER pointerDown but
-    //                  BEFORE pointerUp with a DIFFERENT node — that's a drag
     var pairs = 0;
-    var anchor_node = null;
-    var focus_node = null;
+    var current_origin = this._origin;
+    var down_anchor = null;
+    var down_button = 0;
+    var down_default_allowed = false;
     var down_open = false;
-    var seen_down = false;
     var saw_drag_move = false;
+    var shift_ptr = false;
+    var ctrl_ptr = false;
+    var alt_ptr = false;
+    var meta_ptr = false;
+    var mods_ptr = { shift: false, ctrl: false, alt: false, meta: false };
     for (var i = 0; i < this._steps.length; i++) {
         var st = this._steps[i];
-        if (st.type === "move") {
-            if (down_open) {
-                // pointer move during drag
+        if (st.type === "keyDown") {
+            if (st.key === "\uE008") shift_ptr = true;
+            else if (st.key === "\uE009") ctrl_ptr = true;
+            else if (st.key === "\uE00A" || st.key === "\uE00a") alt_ptr = true;
+            else if (st.key === "\uE03D" || st.key === "\uE03d") meta_ptr = true;
+            mods_ptr = { shift: shift_ptr, ctrl: ctrl_ptr, alt: alt_ptr, meta: meta_ptr };
+        } else if (st.type === "keyUp") {
+            if (st.key === "\uE008") shift_ptr = false;
+            else if (st.key === "\uE009") ctrl_ptr = false;
+            else if (st.key === "\uE00A" || st.key === "\uE00a") alt_ptr = false;
+            else if (st.key === "\uE03D" || st.key === "\uE03d") meta_ptr = false;
+            mods_ptr = { shift: shift_ptr, ctrl: ctrl_ptr, alt: alt_ptr, meta: meta_ptr };
+        } else if (st.type === "move") {
+            if (st.node) current_origin = st.node;
+            if (down_open && st.node && st.node !== down_anchor) {
                 saw_drag_move = true;
-                if (st.node && st.node !== anchor_node) {
-                    focus_node = st.node;
+                if (down_button === this.ButtonType.LEFT && down_default_allowed) {
+                    _wpt_actions_set_selection(down_anchor, st.node, "extend");
                 }
-            } else if (!seen_down && st.node) {
-                anchor_node = st.node;
             }
         } else if (st.type === "down") {
             down_open = true;
-            seen_down = true;
-        } else if (st.type === "up") {
-            if (down_open) { pairs++; down_open = false; }
-        }
-    }
-    if (!anchor_node) anchor_node = this._origin;
-    // Drag fully within a single non-text element (e.g. <img>): select
-    // that element via its parent so deleteFromDocument() removes it.
-    if (saw_drag_move && anchor_node && !focus_node &&
-        anchor_node.nodeType === 1 &&
-        !(anchor_node.firstChild && anchor_node.firstChild.nodeType === 3)) {
-        var p = anchor_node.parentNode;
-        if (p) {
-            var idx = 0, k = p.firstChild;
-            while (k && k !== anchor_node) { idx++; k = k.nextSibling; }
-            try {
-                var rImg = document.createRange();
-                rImg.setStart(p, idx);
-                rImg.setEnd(p, idx + 1);
-                var selImg = (typeof getSelection === "function") ? getSelection() : null;
-                if (selImg) { selImg.removeAllRanges(); selImg.addRange(rImg); }
-            } catch (_) {}
-            return Promise.resolve();
-        }
-    }
-    // For element origins with a text first-child, descend so the selection
-    // anchor becomes the text node (matches real browser hit-test behavior
-    // for clicks/drags that land inside an element's text content).
-    function _descend_to_text(n) {
-        if (n && n.nodeType === 1 /* ELEMENT */) {
-            var fc = n.firstChild;
-            if (fc && fc.nodeType === 3 /* TEXT */) return fc;
-        }
-        return n;
-    }
-    anchor_node = _descend_to_text(anchor_node);
-    focus_node = _descend_to_text(focus_node);
-    try {
-        var sel = (typeof getSelection === "function") ? getSelection() : null;
-        if (sel && anchor_node) {
-            // origin is the target node for pointerMove(0,0,origin)
-            var isText = (anchor_node.nodeType === 3);
-            var textNode = isText ? anchor_node : null;
-            var parent = anchor_node.parentNode || null;
-            if (focus_node && focus_node !== anchor_node) {
-                // Drag selection: anchor at (anchor_node, 0) → focus at
-                // end of focus_node's text content (or focus_node itself).
-                try {
-                    var r = document.createRange();
-                    r.setStart(anchor_node, 0);
-                    var fend = focus_node;
-                    var foff = 0;
-                    if (fend.nodeType === 3) {
-                        foff = (fend.data || "").length;
-                    } else {
-                        // use child count (end of element's children)
-                        var cc = 0;
-                        var ch = fend.firstChild;
-                        while (ch) { cc++; ch = ch.nextSibling; }
-                        foff = cc;
-                    }
-                    r.setEnd(fend, foff);
-                    sel.removeAllRanges();
-                    sel.addRange(r);
-                } catch (_) {}
-            } else if (pairs >= 3) {
-                // Triple-click: select the block-level container's content.
-                var container = parent || anchor_node;
-                var childCount = 0;
-                try {
-                    var c = container.firstChild;
-                    while (c) { childCount++; c = c.nextSibling; }
-                } catch (_) {}
-                try {
-                    var r3 = document.createRange();
-                    r3.setStart(container, 0);
-                    r3.setEnd(container, childCount);
-                    sel.removeAllRanges();
-                    sel.addRange(r3);
-                } catch (_) {}
-            } else if (pairs === 2 && textNode) {
-                // Double-click: select word starting at offset 0.
-                var s = textNode.data || textNode.textContent || "";
-                var end = 0;
-                while (end < s.length) {
-                    var ch2 = s.charCodeAt(end);
-                    var isLetter = (ch2 >= 0x30 && ch2 <= 0x39) ||
-                                   (ch2 >= 0x41 && ch2 <= 0x5A) ||
-                                   (ch2 >= 0x61 && ch2 <= 0x7A) ||
-                                   (ch2 >= 0x80);
-                    if (!isLetter) break;
-                    end++;
+            down_button = st.button;
+            down_anchor = current_origin || this._origin;
+            var target = _wpt_actions_event_target(down_anchor);
+            var buttons = 1 << down_button;
+            var allowed = _wpt_actions_dispatch_mouse_pair(
+                target, "pointerdown", "mousedown", down_button, buttons, mods_ptr);
+            down_default_allowed = allowed;
+            if (allowed && down_anchor) {
+                var host = _wpt_actions_editing_host(down_anchor);
+                try { if (host && typeof host.focus === "function") host.focus(); } catch (_) {}
+                var event_target = _wpt_actions_event_target(down_anchor);
+                var tag = event_target && event_target.tagName ? String(event_target.tagName).toUpperCase() : "";
+                if (shift_ptr && tag !== "A" && down_button !== this.ButtonType.RIGHT) {
+                    _wpt_actions_set_selection(down_anchor, down_anchor, "extend");
+                } else {
+                    _wpt_actions_set_selection(down_anchor, down_anchor, "collapse");
                 }
-                if (end === 0) end = (s.length > 0 ? 1 : 0);
-                try {
-                    var r2 = document.createRange();
-                    r2.setStart(textNode, 0);
-                    r2.setEnd(textNode, end);
-                    sel.removeAllRanges();
-                    sel.addRange(r2);
-                } catch (_) {}
-            } else if (pairs >= 1) {
-                // Single click: collapse at (anchor_node, 0).
-                try {
-                    sel.collapse(anchor_node, 0);
-                } catch (_) {}
             }
-            // Click-driven (non-drag) selections are directionless per
-            // Selection API issue #177. Drag selections keep their
-            // direction (forward, since we set anchor first).
-            try {
-                if (!focus_node && sel.__forceDirection) {
-                    sel.__forceDirection("none");
-                }
-            } catch (_) {}
+        } else if (st.type === "up") {
+            var up_anchor = current_origin || down_anchor || this._origin;
+            var up_target = _wpt_actions_event_target(up_anchor);
+            if (down_open && down_default_allowed && down_button === this.ButtonType.LEFT &&
+                saw_drag_move && up_anchor && up_anchor !== down_anchor) {
+                _wpt_actions_set_selection(down_anchor, up_anchor, "extend");
+            }
+            _wpt_actions_dispatch_mouse_pair(up_target, "pointerup", "mouseup",
+                st.button, 0, mods_ptr);
+            if (down_open) pairs++;
+            down_open = false;
+            if (!saw_drag_move && down_default_allowed && down_anchor) {
+                if (pairs >= 3) _wpt_actions_set_selection(down_anchor, down_anchor, "block");
+                else if (pairs === 2) _wpt_actions_set_selection(down_anchor, down_anchor, "word");
+            }
+            saw_drag_move = false;
+            down_default_allowed = false;
+            down_anchor = null;
         }
-    } catch (_) {}
+    }
     // ----- Keyboard step handling -----
     // Process keyDown(ArrowLeft|ArrowRight) events while Shift is held to
     // extend the document selection. Also handle Cmd/Ctrl + V/C/X to
