@@ -1100,8 +1100,196 @@ Remaining follow-up:
 
 1. Move the generated `ID_Start` / `ID_Continue` table ownership to a neutral
    helper module only when another translation unit needs direct table access.
-2. Use the new identifier counters with MIR-volume or execute-path probes on the
-   large generated `language_identifiers_start_unicode_*` rows before changing
-   parser logic.
+2. Keep parser/scanner edits gated on generated-grammar workflow and a focused
+   root-cause measurement.
+
+## Phase 5 - TypedArray `set` Counters And Unicode MIR/Execute Probes
+
+Date: 2026-06-16
+
+### Implementation
+
+Added two opt-in diagnostics:
+
+- `LAMBDA_JS_TA_SET_STATS=1` writes per-process
+  `TypedArray.prototype.set` branch counters under
+  `./temp/js_ta_set_stats` by default, or under
+  `LAMBDA_JS_TA_SET_STATS_DIR`.
+- `LAMBDA_JS_MIR_VOLUME_STATS=1` writes per-process MIR-volume samples under
+  `./temp/js_mir_volume_stats` by default, or under
+  `LAMBDA_JS_MIR_VOLUME_STATS_DIR`.
+
+The TypedArray counters are recorded at the `js_typed_array_set_from()` branch
+points, so they only describe `%TypedArray%.prototype.set`, not constructor
+cloning or other helper users. Counted paths:
+
+- typed-array source calls and element volume;
+- array-like source calls and looped element volume;
+- same-type raw copy attempts/hits;
+- numeric raw conversion attempts/hits;
+- BigInt raw conversion attempts/hits;
+- boxed generic fallback entries/elements;
+- empty typed-array sources.
+
+The MIR-volume stats keep both the last transpile volume and aggregate per
+process samples. In one-test js262 probe batches this maps directly to the
+focused row; in multi-test workers it remains useful as process aggregate data.
+
+### TypedArray Set Probe
+
+Command shape:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 \
+LAMBDA_JS_TA_SET_STATS=1 \
+LAMBDA_JS_TA_SET_STATS_DIR=./temp/js_ta_set_stats_tune9_p5 \
+./test/test_js_test262_gtest.exe \
+  --batch-only \
+  --batch-file=temp/js262_tune9_typedarray_set_probe.txt \
+  --jobs=1 \
+  --batch-chunk-size=1 \
+  --write-failures=temp/js262_tune9_typedarray_set_probe_failures.tsv \
+  --gtest_brief=1
+```
+
+Result:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_typedarray_set_probe.txt` |
+| tests | 9 / 9 passed |
+| failure rows | 0 |
+
+Aggregated branch counters across the probe:
+
+| Counter | Value |
+| --- | ---: |
+| total `set` calls | 4,784 |
+| typed-array source calls | 4,184 |
+| array-like source calls | 600 |
+| typed-array source elements | 4,784 |
+| array-like source elements | 1,272 |
+| same-type raw attempts | 4,184 |
+| same-type raw hits | 480 |
+| numeric raw convert attempts | 3,704 |
+| numeric raw convert hits | 3,592 |
+| BigInt raw convert attempts | 112 |
+| BigInt raw convert hits | 48 |
+| boxed fallback calls | 64 |
+| boxed fallback elements | 128 |
+| array-like loop elements | 1,272 |
+| empty typed-array sources | 0 |
+
+This confirms the current bulk work covers the dominant typed-array-source
+paths in the focused `set` rows. The remaining generic boxed fallback is small
+in this probe; array-like sources still correctly flow through observable
+property reads.
+
+### Unicode Identifier MIR/Execute Probe
+
+Command shape:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 \
+LAMBDA_JS_PHASE_TIMING=1 \
+LAMBDA_JS_IDENTIFIER_STATS=1 \
+LAMBDA_JS_IDENTIFIER_STATS_DIR=./temp/js_identifier_stats_tune9_p5 \
+LAMBDA_JS_MIR_VOLUME_STATS=1 \
+LAMBDA_JS_MIR_VOLUME_STATS_DIR=./temp/js_mir_volume_stats_tune9_p5 \
+./test/test_js_test262_gtest.exe \
+  --batch-only \
+  --batch-file=temp/js262_tune9_unicode_identifier_probe.txt \
+  --jobs=1 \
+  --batch-chunk-size=1 \
+  --write-failures=temp/js262_tune9_unicode_identifier_probe_failures.tsv \
+  --gtest_brief=1
+```
+
+Result:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_unicode_identifier_probe.txt` |
+| tests | 6 / 6 passed |
+| failure rows | 0 |
+| phase timing file | `temp/_t262_phase_timing_o0.tsv` |
+
+Key per-row timing and MIR volume:
+
+| Test row | AST ids | Escaped ids | Non-ASCII ids | AST | MIR | Execute | MIR insns |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `language_identifiers_start_unicode_10_0_0_escaped_js` | 8,770 | 8,327 | 8,327 | 73.5 ms | 30.8 ms | 67.8 ms | 66,493 |
+| `language_identifiers_start_unicode_10_0_0_js` | 8,770 | 0 | 8,327 | 77.2 ms | 35.3 ms | 67.2 ms | 66,493 |
+| `language_identifiers_start_unicode_17_0_0_escaped_js` | 5,090 | 4,647 | 4,647 | 56.7 ms | 18.1 ms | 64.1 ms | 40,733 |
+| `language_identifiers_start_unicode_17_0_0_js` | 5,090 | 0 | 4,647 | 27.6 ms | 17.8 ms | 64.6 ms | 40,733 |
+| `language_identifiers_start_unicode_17_0_0_class_escaped_js` | 443 | 0 | 0 | 3.2 ms | 0.3 ms | 2.7 ms | 293 |
+| `language_identifiers_start_unicode_17_0_0_class_js` | 443 | 0 | 0 | 3.3 ms | 0.3 ms | 3.3 ms | 293 |
+
+Aggregate identifier counters:
+
+| Counter | Value |
+| --- | ---: |
+| AST identifiers | 28,606 |
+| AST escaped identifiers | 12,974 |
+| AST non-ASCII decoded identifiers | 25,948 |
+| AST source bytes | 186,182 |
+| AST decoded bytes | 121,396 |
+| early identifier checks | 26,404 |
+| early escape checks | 12,974 |
+| early Unicode normalizations | 12,974 |
+| early reserved hits | 0 |
+| early contextual escape hits | 0 |
+
+Aggregate MIR-volume counters:
+
+| Counter | Value |
+| --- | ---: |
+| samples | 12 |
+| total MIR insns | 251,758 |
+| max per-row MIR insns | 66,493 |
+
+### Full Release Gate
+
+Command:
+
+```bash
+ASAN_OPTIONS=detect_container_overflow=0 \
+./test/test_js_test262_gtest.exe \
+  --batch-only \
+  --run-async \
+  --async-list=test/js262/test262_baseline.txt \
+  --write-failures=temp/js262_tune9_p5_full_failures.tsv \
+  --feature-summary \
+  --gtest_brief=1
+```
+
+Result:
+
+| Metric | Result |
+| --- | ---: |
+| fully passed | 40261 / 40261 |
+| non-fully-passing | 0 |
+| regressions | 0 |
+| total runtime | 122.7 s |
+| failure rows | 0 |
+
+### Decision
+
+Keep both diagnostics. They are cold unless their environment variables are set
+and they make later suite-wide attribution cheaper.
+
+For Unicode identifiers, the probe confirms the previous decision: early-error
+Unicode validation is not the bottleneck. The large generated rows spend real
+time in AST construction, MIR build/volume, and execution of large generated
+programs. Parser/scanner changes should remain gated until a root-cause probe
+shows they reduce one of those measured buckets.
+
+Remaining follow-up:
+
+1. Move the generated `ID_Start` / `ID_Continue` table ownership to a neutral
+   helper module only when another translation unit needs direct table access.
+2. Use the new `TypedArray.prototype.set` counters on a broader release run if
+   the next slow-test snapshot shows `set` rows still near the top; otherwise do
+   not add more bulk paths speculatively.
 3. Keep parser/scanner edits gated on generated-grammar workflow and a focused
    root-cause measurement.
