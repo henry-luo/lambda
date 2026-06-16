@@ -12,6 +12,7 @@ static const int JS_FUNC_CACHE_SIZE = 512;
 static void* js_func_cache_keys[512];
 static JsFunction* js_func_cache_vals[512];
 static int js_func_cache_count = 0;
+static int js_func_cache_suppress_depth = 0;
 
 static JsFunction* js_func_cache_lookup(void* func_ptr) {
     for (int i = 0; i < js_func_cache_count; i++) {
@@ -30,6 +31,15 @@ static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
 
 void js_func_cache_reset() {
     js_func_cache_count = 0;
+    js_func_cache_suppress_depth = 0;
+}
+
+extern "C" void js_func_cache_suppress_push(void) {
+    js_func_cache_suppress_depth++;
+}
+
+extern "C" void js_func_cache_suppress_pop(void) {
+    if (js_func_cache_suppress_depth > 0) js_func_cache_suppress_depth--;
 }
 
 // =============================================================================
@@ -156,7 +166,8 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     // Return cached wrapper if the same MIR function was already wrapped.
     // This ensures Foo.prototype = {...} and (new Foo()) share the same JsFunction*.
     bool has_with_env = js_with_depth_active() != 0;
-    JsFunction* cached = has_with_env ? NULL : js_func_cache_lookup(func_ptr);
+    bool suppress_cache = js_func_cache_suppress_depth > 0;
+    JsFunction* cached = (has_with_env || suppress_cache) ? NULL : js_func_cache_lookup(func_ptr);
     if (cached) return (Item){.function = (Function*)cached};
 
     // Pool-allocate: JS functions are module-lifetime objects that must not be
@@ -171,7 +182,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
     js_function_capture_with_env(fn);
-    if (!has_with_env) js_func_cache_insert(func_ptr, fn);
+    if (!has_with_env && !suppress_cache) js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
 }
 

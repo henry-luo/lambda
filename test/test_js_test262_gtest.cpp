@@ -36,7 +36,7 @@
 //
 // Execution model:
 //   - Phase 1:  Parse metadata, partition tests into two groups:
-//       (a) CLEAN    — safe to batch (50 tests per process, CPU count - 1 parallel workers)
+//       (a) CLEAN    — safe to batch (default 100 tests/process, CPU count - 1 parallel workers)
 //       (b) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
 //                       previous run. They are included in CLEAN every run so
 //                       the partial list can be rebuilt from fresh results.
@@ -1271,10 +1271,12 @@ struct BatchResult {
     long phase_total_us;
 };
 
-static const size_t T262_BATCH_CHUNK_SIZE = 50;
-static const size_t T262_ASYNC_BATCH_CHUNK_SIZE = 50;
+static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
+static const size_t T262_MAX_BATCH_CHUNK_SIZE = 200;
 static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
-static size_t g_t262_async_chunk_size = T262_ASYNC_BATCH_CHUNK_SIZE;
+static size_t g_t262_batch_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
+static size_t g_t262_async_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
+static bool g_t262_async_chunk_size_explicit = false;
 
 struct SubBatch { size_t start; size_t end; bool native; bool module; bool slow_test; size_t group; };
 
@@ -1451,6 +1453,7 @@ static bool g_update_baseline = false;
 static bool g_baseline_only = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
+static bool g_persistent_workers = false; // --persistent-workers: one lambda worker handles many manifests
 static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
@@ -2062,7 +2065,7 @@ static void write_baseline_file(const char* path, std::vector<std::string>& pass
     fprintf(f, "# Runtime: %.1fs per-test sum (fully passing baseline tests)\n",
             baseline_test_elapsed_secs);
     fprintf(f, "# Batch size: batched %zu tests/process; async %zu tests/process\n",
-            T262_BATCH_CHUNK_SIZE, g_t262_async_chunk_size);
+            g_t262_batch_chunk_size, g_t262_async_chunk_size);
     fprintf(f, "# Phase timing: prepare %.1fs\n", g_prep_secs);
     fprintf(f, "# Phase timing: batch-execute-batched %.1fs\n", g_phase_batch_batched_secs);
     fprintf(f, "# Phase timing: batch-execute-sync-batched %.1fs\n", g_phase_batch_sync_batched_secs);
@@ -2374,13 +2377,18 @@ static int hard_timeout_per_test_secs() {
     return std::max(T262_HARD_TIMEOUT_PER_TEST, timeout_secs);
 }
 
+static long long t262_steady_now_ms() {
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+}
+
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
 #ifdef _WIN32
 static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
-    size_t num_tests = T262_BATCH_CHUNK_SIZE)
+    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE)
 {
     // Windows implementation using CreateProcess + anonymous pipes
     HANDLE pipe_rd = NULL, pipe_wr = NULL;
@@ -2498,7 +2506,7 @@ static int run_t262_sub_batch(
 static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
-    size_t num_tests = T262_BATCH_CHUNK_SIZE)
+    size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE)
 {
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) return -1;
@@ -2639,12 +2647,270 @@ static int run_t262_sub_batch(
 }
 #endif // _WIN32
 
+static bool write_t262_sub_batch_manifest(
+    FILE* mf,
+    const std::vector<Test262Prepared>& prepared,
+    const std::vector<size_t>& native_indices,
+    const std::vector<JsBatchGroup>& js_groups,
+    const std::vector<SubBatch>& batches,
+    size_t batch_index)
+{
+    if (!mf) return false;
+
+    const SubBatch& batch = batches[batch_index];
+    const auto& idx_vec = batch.native ? native_indices : js_groups[batch.group].indices;
+    std::unordered_set<std::string> preamble_include_set;
+
+    if (!batch.native && !batch.module) {
+        // JS-harness batch: send harness preamble via harness: protocol
+        const auto& special_includes = js_groups[batch.group].special_includes;
+        preamble_include_set = make_preamble_include_set(special_includes);
+        std::string harness = assemble_harness_source(special_includes);
+        fprintf(mf, "harness:%zu\n", harness.size());
+        fwrite(harness.data(), 1, harness.size(), mf);
+        fputc('\n', mf);
+    }
+    // else: native-harness batch — no harness preamble (transpiler intercepts calls)
+
+    // Send each test source
+    for (size_t idx = batch.start; idx < batch.end; idx++) {
+        size_t pi = idx_vec[idx];
+        const auto& p = prepared[pi];
+        std::string test_src = batch.module
+            ? assemble_module_test_source(p)
+            : batch.native
+            ? assemble_native_test_source(p)
+            : assemble_test_source(p, &preamble_include_set);
+        fprintf(mf, "%s:%s:%s:%zu\n",
+                batch.module ? "module-source" : "source",
+                p.test_name.c_str(), p.test_path.c_str(), test_src.size());
+        fwrite(test_src.data(), 1, test_src.size(), mf);
+        fputc('\n', mf);
+    }
+    return true;
+}
+
+#ifndef _WIN32
+static int run_t262_persistent_sub_batches(
+    const char* manifest_path,
+    const std::vector<size_t>& batch_order,
+    std::vector<std::unordered_map<std::string, BatchResult>>& thread_results,
+    std::vector<BatchTiming>& batch_timings,
+    std::vector<int>& batch_statuses,
+    const std::vector<SubBatch>& batches,
+    const std::vector<JsBatchGroup>& js_groups,
+    size_t worker_index,
+    std::chrono::steady_clock::time_point execute_wall_start)
+{
+    if (batch_order.empty()) return 0;
+
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) != 0) return -1;
+    fcntl(stdout_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(stdout_pipe[1], F_SETFD, FD_CLOEXEC);
+
+    int manifest_fd = open(manifest_path, O_RDONLY);
+    if (manifest_fd < 0) {
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        return -1;
+    }
+    fcntl(manifest_fd, F_SETFD, FD_CLOEXEC);
+
+    posix_spawn_file_actions_t file_actions;
+    posix_spawn_file_actions_init(&file_actions);
+    posix_spawn_file_actions_adddup2(&file_actions, manifest_fd, STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&file_actions, stdout_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&file_actions, stdout_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&file_actions, manifest_fd);
+    posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
+    posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
+
+    char* argv[10] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", g_js_timeout_arg, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    };
+    int argi = 3;
+    if (g_no_hot_reload) {
+        argv[argi++] = (char*)"--no-hot-reload";
+    }
+    if (g_opt_level >= 0) {
+        argv[argi++] = g_opt_level_arg;
+    }
+    if (g_mir_interp) {
+        argv[argi++] = (char*)"--mir-interp";
+    }
+    if (g_diagnose_mode) {
+        argv[argi++] = (char*)"--diagnose";
+    }
+    extern char** environ;
+    pid_t pid;
+    int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&file_actions);
+
+    close(manifest_fd);
+    close(stdout_pipe[1]);
+
+    if (ret != 0) {
+        close(stdout_pipe[0]);
+        return -1;
+    }
+
+    std::atomic<bool> worker_done{false};
+    std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
+    int no_progress_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, hard_timeout_per_test_secs());
+    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
+        while (!worker_done.load(std::memory_order_relaxed)) {
+            long long idle_ms = t262_steady_now_ms() - last_progress_ms.load(std::memory_order_relaxed);
+            if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
+                fprintf(stderr, "\n[test262] WARNING: Persistent worker PID %d made no progress for %ds — sending SIGKILL\n",
+                        pid, no_progress_timeout_secs);
+                kill(pid, SIGKILL);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
+    FILE* fp = fdopen(stdout_pipe[0], "r");
+    size_t batch_pos = 0;
+    auto batch_start = std::chrono::steady_clock::now();
+    std::string current_script;
+    std::string current_output;
+    bool in_script = false;
+    if (fp) {
+        char buffer[4096];
+        while (fgets(buffer, sizeof(buffer), fp) != nullptr) {
+            if (buffer[0] == '\x01') {
+                if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
+                    current_script = std::string(buffer + 13);
+                    while (!current_script.empty() &&
+                           (current_script.back() == '\n' || current_script.back() == '\r'))
+                        current_script.pop_back();
+                    current_output.clear();
+                    in_script = true;
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
+                } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
+                    int status = 0;
+                    long elapsed_us = 0;
+                    size_t rss_before = 0, rss_after = 0;
+                    long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
+                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                           &status, &elapsed_us, &rss_before, &rss_after,
+                           &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                    if (batch_pos < batch_order.size()) {
+                        size_t batch_index = batch_order[batch_pos];
+                        thread_results[batch_index][current_script] =
+                            {current_output, status, elapsed_us, rss_before, rss_after,
+                             parse_us, ast_us, early_us, imports_us, mir_us,
+                             link_us, execute_us, cleanup_us, phase_total_us};
+                    }
+                    in_script = false;
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
+                } else if (strncmp(buffer + 1, "BATCH_MANIFEST_END ", 19) == 0) {
+                    if (batch_pos < batch_order.size()) {
+                        size_t batch_index = batch_order[batch_pos];
+                        auto batch_end = std::chrono::steady_clock::now();
+                        size_t batch_num_tests = batches[batch_index].end - batches[batch_index].start;
+                        bool is_non_batched = batch_num_tests == 1;
+                        bool is_async_batch = !batches[batch_index].native &&
+                            js_groups[batches[batch_index].group].is_async;
+                        batch_timings[batch_index] = {
+                            batch_index,
+                            std::chrono::duration<double>(batch_end - batch_start).count(),
+                            std::chrono::duration<double>(batch_start - execute_wall_start).count(),
+                            std::chrono::duration<double>(batch_end - execute_wall_start).count(),
+                            batch_num_tests,
+                            is_non_batched,
+                            is_async_batch
+                        };
+                        batch_statuses[batch_index] = 0;
+                        size_t produced = thread_results[batch_index].size();
+                        {
+                            std::lock_guard<std::mutex> lock(g_progress_mutex);
+                            fprintf(stderr, "[test262] batch[%zu/%zu] %s persistent-worker=%zu status=0 results=%zu/%zu elapsed=%.1fs\n",
+                                    batch_index + 1, batches.size(),
+                                    batch_worker_status_label(0, produced, batch_num_tests),
+                                    worker_index, produced, batch_num_tests,
+                                    batch_timings[batch_index].elapsed_secs);
+                        }
+                        batch_pos++;
+                        batch_start = batch_end;
+                    }
+                    in_script = false;
+                    current_script.clear();
+                    current_output.clear();
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
+                } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
+                           strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
+                    fprintf(stderr, "[test262] Child diagnostic: %s", buffer + 1);
+                    last_progress_ms.store(t262_steady_now_ms(), std::memory_order_relaxed);
+                }
+            } else if (in_script) {
+                current_output += buffer;
+            }
+        }
+        fclose(fp);
+    } else {
+        close(stdout_pipe[0]);
+    }
+
+    int wstatus;
+    waitpid(pid, &wstatus, 0);
+    int worker_status = 0;
+    if (WIFSIGNALED(wstatus)) {
+        int sig = WTERMSIG(wstatus);
+        worker_status = 128 + sig;
+        fprintf(stderr, "[test262] Persistent worker PID %d killed by signal %d (%s), completed %zu/%zu batches\n",
+                pid, sig, strsignal(sig), batch_pos, batch_order.size());
+    } else if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) != 0) {
+        worker_status = WEXITSTATUS(wstatus);
+        fprintf(stderr, "[test262] Persistent worker PID %d exited with status %d, completed %zu/%zu batches\n",
+                pid, WEXITSTATUS(wstatus), batch_pos, batch_order.size());
+    }
+    worker_done.store(true, std::memory_order_relaxed);
+    watchdog.join();
+
+    int unfinished_status = worker_status == 0 ? 1 : worker_status;
+    auto batch_end = std::chrono::steady_clock::now();
+    for (size_t pos = batch_pos; pos < batch_order.size(); pos++) {
+        size_t batch_index = batch_order[pos];
+        if (batch_statuses[batch_index] != -1) continue;
+        size_t batch_num_tests = batches[batch_index].end - batches[batch_index].start;
+        bool is_non_batched = batch_num_tests == 1;
+        bool is_async_batch = !batches[batch_index].native &&
+            js_groups[batches[batch_index].group].is_async;
+        batch_timings[batch_index] = {
+            batch_index,
+            pos == batch_pos ? std::chrono::duration<double>(batch_end - batch_start).count() : 0.0,
+            std::chrono::duration<double>(batch_start - execute_wall_start).count(),
+            std::chrono::duration<double>(batch_end - execute_wall_start).count(),
+            batch_num_tests,
+            is_non_batched,
+            is_async_batch
+        };
+        batch_statuses[batch_index] = unfinished_status;
+        size_t produced = thread_results[batch_index].size();
+        {
+            std::lock_guard<std::mutex> lock(g_progress_mutex);
+            fprintf(stderr, "[test262] batch[%zu/%zu] %s persistent-worker=%zu status=%d results=%zu/%zu elapsed=%.1fs\n",
+                    batch_index + 1, batches.size(),
+                    batch_worker_status_label(unfinished_status, produced, batch_num_tests),
+                    worker_index, unfinished_status, produced, batch_num_tests,
+                    batch_timings[batch_index].elapsed_secs);
+        }
+    }
+
+    return worker_status;
+}
+#endif
+
 // Phase 2: Execute all prepared tests through js-test-batch (reusable manifest files + stdout pipes)
-// chunk_size: number of tests per sub-batch process (default T262_BATCH_CHUNK_SIZE=50, use 1 for non-batch)
+// chunk_size: number of tests per sub-batch process (default 100, use 1 for non-batch)
 static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     const std::vector<Test262Prepared>& prepared,
     const std::vector<size_t>& indices,
-    size_t chunk_size = T262_BATCH_CHUNK_SIZE)
+    size_t chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE)
 {
     auto execute_wall_start = std::chrono::steady_clock::now();
     std::unordered_map<std::string, BatchResult> results;
@@ -2746,14 +3012,60 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     // This avoids per-batch file create/unlink overhead while keeping fast file-based stdin.
     std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
     std::vector<BatchTiming> batch_timings(batches.size());
-    std::atomic<size_t> next_batch{0};
+    std::vector<int> batch_worker_statuses(batches.size(), -1);
     size_t target_workers = t262_target_worker_count();
     size_t num_workers = std::min(target_workers, batches.size());
-    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, async_chunk=%zu, %s)\n",
+#ifdef _WIN32
+    if (g_persistent_workers) {
+        fprintf(stderr, "[test262] --persistent-workers is not implemented on Windows; using spawn-per-batch mode\n");
+        g_persistent_workers = false;
+    }
+#endif
+    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, chunk=%zu, async_chunk=%zu, %s, %s)\n",
             num_workers, target_workers, batches.size(),
-            g_t262_async_chunk_size,
-            g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs");
+            g_t262_batch_chunk_size, g_t262_async_chunk_size,
+            g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs",
+            g_persistent_workers ? "persistent" : "spawn-per-batch");
     std::vector<std::thread> threads;
+    std::vector<std::vector<size_t>> worker_batch_order;
+    std::atomic<size_t> next_batch{0};
+
+#ifndef _WIN32
+    if (g_persistent_workers) {
+        worker_batch_order.resize(num_workers);
+        for (size_t di = 0; di < dispatch_order.size(); di++) {
+            worker_batch_order[di % num_workers].push_back(dispatch_order[di]);
+        }
+
+        for (size_t w = 0; w < num_workers; w++) {
+            threads.emplace_back([&, w]() {
+                char manifest_path[256];
+                snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_worker_%zu.manifest", w);
+                FILE* mf = fopen(manifest_path, "wb");
+                if (!mf) return;
+
+                size_t worker_tests = 0;
+                for (size_t i : worker_batch_order[w]) {
+                    write_t262_sub_batch_manifest(mf, prepared, native_indices, js_groups, batches, i);
+                    fprintf(mf, "batch-boundary:%zu\n", i);
+                    worker_tests += batches[i].end - batches[i].start;
+                }
+                fclose(mf);
+
+                {
+                    std::lock_guard<std::mutex> lock(g_progress_mutex);
+                    fprintf(stderr, "[test262] persistent worker=%zu start batches=%zu tests=%zu\n",
+                            w, worker_batch_order[w].size(), worker_tests);
+                }
+                run_t262_persistent_sub_batches(
+                    manifest_path, worker_batch_order[w], thread_results, batch_timings,
+                    batch_worker_statuses, batches, js_groups, w, execute_wall_start);
+                unlink(manifest_path);
+            });
+        }
+    } else
+#endif
+    {
     for (size_t w = 0; w < num_workers; w++) {
         threads.emplace_back([&, w]() {
             // Each worker has its own reusable manifest file
@@ -2767,36 +3079,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 // Write manifest for this sub-batch
                 FILE* mf = fopen(manifest_path, "wb");
                 if (!mf) continue;
-
-                const auto& idx_vec = batches[i].native ? native_indices : js_groups[batches[i].group].indices;
-                std::unordered_set<std::string> preamble_include_set;
-
-                if (!batches[i].native && !batches[i].module) {
-                    // JS-harness batch: send harness preamble via harness: protocol
-                    const auto& special_includes = js_groups[batches[i].group].special_includes;
-                    preamble_include_set = make_preamble_include_set(special_includes);
-                    std::string harness = assemble_harness_source(special_includes);
-                    fprintf(mf, "harness:%zu\n", harness.size());
-                    fwrite(harness.data(), 1, harness.size(), mf);
-                    fputc('\n', mf);
-                }
-                // else: native-harness batch — no harness preamble (transpiler intercepts calls)
-
-                // Send each test source
-                for (size_t idx = batches[i].start; idx < batches[i].end; idx++) {
-                    size_t pi = idx_vec[idx];
-                    const auto& p = prepared[pi];
-                    std::string test_src = batches[i].module
-                        ? assemble_module_test_source(p)
-                        : batches[i].native
-                        ? assemble_native_test_source(p)
-                        : assemble_test_source(p, &preamble_include_set);
-                    fprintf(mf, "%s:%s:%s:%zu\n",
-                            batches[i].module ? "module-source" : "source",
-                            p.test_name.c_str(), p.test_path.c_str(), test_src.size());
-                    fwrite(test_src.data(), 1, test_src.size(), mf);
-                    fputc('\n', mf);
-                }
+                write_t262_sub_batch_manifest(mf, prepared, native_indices, js_groups, batches, i);
                 fclose(mf);
 
                 // Execute: fork/exec with stdin from manifest, read stdout via pipe
@@ -2821,6 +3104,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                                     std::chrono::duration<double>(t0 - execute_wall_start).count(),
                                     std::chrono::duration<double>(t1 - execute_wall_start).count(),
                                     batch_num_tests, is_non_batched, is_async_batch};
+                batch_worker_statuses[i] = worker_status;
                 size_t produced = thread_results[i].size();
                 {
                     std::lock_guard<std::mutex> lock(g_progress_mutex);
@@ -2833,6 +3117,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             }
             unlink(manifest_path);
         });
+    }
     }
     for (auto& t : threads) t.join();
 
@@ -2996,9 +3281,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu previous-partial included)\n",
             prep_secs, batch_indices.size(), clean_indices.size(), previous_partial_count);
 
-    // Phase 2: execute clean tests through js-test-batch (batch size 50)
+    // Phase 2: execute clean tests through js-test-batch (default batch size 100)
     auto batch_exec_start = std::chrono::steady_clock::now();
-    auto batch_results = execute_t262_batch(prepared, clean_indices);
+    auto batch_results = execute_t262_batch(prepared, clean_indices, g_t262_batch_chunk_size);
     auto batch_exec_done = std::chrono::steady_clock::now();
     double batch_exec_secs = std::chrono::duration<double>(batch_exec_done - batch_exec_start).count();
 
@@ -3009,17 +3294,17 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         std::vector<size_t> native_clean_idx;
         std::vector<JsBatchGroup> js_clean_groups;
         partition_batch_indices(prepared, clean_indices, native_clean_idx, js_clean_groups);
-        size_t native_batches = (native_clean_idx.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+        size_t native_batches = (native_clean_idx.size() + g_t262_batch_chunk_size - 1) / g_t262_batch_chunk_size;
         size_t js_batches = 0;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
+                (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             js_batches += (group.indices.size() + group_chunk_size - 1) / group_chunk_size;
         }
         size_t num_batches    = native_batches + js_batches;
         g_batch_contents.resize(num_batches);
         for (size_t i = 0; i < native_clean_idx.size(); i++) {
-            size_t bi = i / T262_BATCH_CHUNK_SIZE;
+            size_t bi = i / g_t262_batch_chunk_size;
             const auto& name = prepared[native_clean_idx[i]].test_name;
             g_batch_assignment[name] = bi;
             g_batch_contents[bi].push_back(name);
@@ -3027,7 +3312,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t js_batch_base = native_batches;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
+                (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             for (size_t i = 0; i < group.indices.size(); i++) {
                 size_t bi = js_batch_base + (i / group_chunk_size);
                 const auto& name = prepared[group.indices[i]].test_name;
@@ -3097,10 +3382,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         label, killed_batches, total_lost);
         };
 
-        analyze_group(native_clean, "native", T262_BATCH_CHUNK_SIZE);
+        analyze_group(native_clean, "native", g_t262_batch_chunk_size);
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
-                (group.is_async ? g_t262_async_chunk_size : T262_BATCH_CHUNK_SIZE);
+                (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             std::string label = group.is_slow_test
                 ? "js-slow"
                 : group.special_includes.empty()
@@ -3857,9 +4142,12 @@ static void print_test262_help(const char* program) {
     printf("                            Without an allowlist, async tests remain skipped.\n");
     printf("  --async-list=<path>       Async allowlist, one test name per line.\n");
     printf("                            Defaults to --batch-file when --batch-file is present.\n");
+    printf("  --batch-chunk-size=<n>    Tests per js-test-batch process, clamped to\n");
+    printf("                            1..%zu (default: %zu).\n",
+           T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
     printf("  --async-chunk-size=<n>    Async tests per js-test-batch process, clamped to\n");
     printf("                            1..%zu (default: %zu, same as sync batches).\n",
-           T262_BATCH_CHUNK_SIZE, T262_ASYNC_BATCH_CHUNK_SIZE);
+           T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
     printf("  --diagnose                Run diagnose list and pass --diagnose to Lambda.\n");
     printf("  --diagnose-list=<path>    Override diagnose list path (default: test/js262/diagnose_list.txt).\n");
     printf("  --write-failures=<path>   Write TSV failure/regression details.\n");
@@ -3868,6 +4156,8 @@ static void print_test262_help(const char* program) {
     printf("  --opt-level=<0..3>        Pass the MIR optimization level to Lambda.\n");
     printf("  --feature-summary         Print failure counts grouped by feature.\n");
     printf("  --no-hot-reload           Disable batch hot reload behavior.\n");
+    printf("  --persistent-workers      Reuse one Lambda worker process for all manifests\n");
+    printf("                            assigned to each test262 worker (POC timing mode).\n");
     printf("  --mir-interp              Run Lambda through MIR interpreter mode.\n");
     printf("  --no-stripped             Use canonical test files instead of stripped files.\n");
     printf("  --help, -h                Print this help and exit without running tests.\n");
@@ -3879,7 +4169,9 @@ static void print_test262_help(const char* program) {
     printf("\n");
     printf("Examples:\n");
     printf("  %s --batch-only --baseline-only\n", program);
+    printf("  %s --batch-only --baseline-only --batch-chunk-size=100\n", program);
     printf("  %s --batch-only --batch-file=temp/js44_batch.txt --jobs=1 --write-failures=temp/out.tsv\n", program);
+    printf("  %s --batch-only --baseline-only --persistent-workers\n", program);
     printf("  %s --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline\n", program);
     printf("  %s --batch-only --run-async --batch-file=temp/js47_async.txt --jobs=1\n", program);
     printf("  %s --batch-only --run-async --batch-file=temp/js47_async.txt --async-chunk-size=1 --jobs=1\n", program);
@@ -3953,6 +4245,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
         }
+        if (strcmp(argv[i], "--persistent-workers") == 0) {
+            g_persistent_workers = true;
+        }
         if (strcmp(argv[i], "--mir-interp") == 0) {
             g_mir_interp = true;
         }
@@ -3969,15 +4264,26 @@ int main(int argc, char** argv) {
         if (strncmp(argv[i], "--async-list=", 13) == 0) {
             g_async_list_file = argv[i] + 13;
         }
+        if (strncmp(argv[i], "--batch-chunk-size=", 19) == 0) {
+            int requested_chunk = atoi(argv[i] + 19);
+            if (requested_chunk < 1) {
+                requested_chunk = 1;
+            }
+            if ((size_t)requested_chunk > T262_MAX_BATCH_CHUNK_SIZE) {
+                requested_chunk = (int)T262_MAX_BATCH_CHUNK_SIZE;
+            }
+            g_t262_batch_chunk_size = (size_t)requested_chunk;
+        }
         if (strncmp(argv[i], "--async-chunk-size=", 19) == 0) {
             int requested_chunk = atoi(argv[i] + 19);
             if (requested_chunk < 1) {
                 requested_chunk = 1;
             }
-            if ((size_t)requested_chunk > T262_BATCH_CHUNK_SIZE) {
-                requested_chunk = (int)T262_BATCH_CHUNK_SIZE;
+            if ((size_t)requested_chunk > T262_MAX_BATCH_CHUNK_SIZE) {
+                requested_chunk = (int)T262_MAX_BATCH_CHUNK_SIZE;
             }
             g_t262_async_chunk_size = (size_t)requested_chunk;
+            g_t262_async_chunk_size_explicit = true;
         }
         if (strncmp(argv[i], "--write-failures=", 17) == 0) {
             g_write_failures_path = argv[i] + 17;
@@ -4001,6 +4307,12 @@ int main(int argc, char** argv) {
             if (jobs < 1) jobs = 1;
             g_t262_jobs = (size_t)jobs;
         }
+    }
+
+    if (!g_t262_async_chunk_size_explicit) {
+        g_t262_async_chunk_size = g_t262_batch_chunk_size;
+    } else if (g_t262_async_chunk_size > g_t262_batch_chunk_size) {
+        g_t262_async_chunk_size = g_t262_batch_chunk_size;
     }
 
     if (g_diagnose_mode) {
@@ -4286,7 +4598,7 @@ int main(int argc, char** argv) {
 
         // Run as a single batch (all tests in one lambda.exe js-test-batch process)
         fprintf(stderr, "[test262] Running %zu tests in a single batch...\n", indices.size());
-        auto results = execute_t262_batch(prepared, indices);
+        auto results = execute_t262_batch(prepared, indices, g_t262_batch_chunk_size);
 
         // Evaluate and report per-test results
         int passed = 0, failed = 0;
@@ -4508,7 +4820,7 @@ int main(int argc, char** argv) {
                     if (diag) {
                         fprintf(diag, "# Phase 4 batch-kill diagnostic\n");
                         fprintf(diag, "# %zu tests recovered from %zu batches (batch size = %zu)\n",
-                                recovered_names.size(), recovered_by_batch.size(), T262_BATCH_CHUNK_SIZE);
+                                recovered_names.size(), recovered_by_batch.size(), g_t262_batch_chunk_size);
                         fprintf(diag, "# Format: batch[N] — M recovered / K total tests in batch\n");
                         fprintf(diag, "# Tests marked [RECOVERED] passed individually but failed in batch\n\n");
                         for (auto& [bi, names] : recovered_by_batch) {

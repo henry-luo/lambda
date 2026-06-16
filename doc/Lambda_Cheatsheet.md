@@ -192,7 +192,7 @@ symbol("href", 'xlink_url') // Namespaced symbol
 
 ## Variables & Declarations
 
-**Let Expressions:**
+**Let Expressions (immutable):**
 ```lambda
 (let x = 5, x + 1, x * 2)      // Single binding
 (let a = 1, b = 2, a + b)      // Multiple bindings

@@ -1,5 +1,28 @@
 #include "js_mir_internal.hpp"
 #include "js_runtime_state.hpp"
+#include "../../lib/hash.h"
+#ifdef _WIN32
+#include <direct.h>
+#include <fcntl.h>
+#include <io.h>
+#include <process.h>
+#include <sys/stat.h>
+#define JS_DYNFUNC_MKDIR(path) _mkdir(path)
+#define JS_DYNFUNC_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
+#define JS_DYNFUNC_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
+#define JS_DYNFUNC_CLOSE(fd) _close(fd)
+#define JS_DYNFUNC_PID() _getpid()
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#define JS_DYNFUNC_MKDIR(path) mkdir(path, 0755)
+#define JS_DYNFUNC_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
+#define JS_DYNFUNC_WRITE(fd, buf, len) write(fd, buf, len)
+#define JS_DYNFUNC_CLOSE(fd) close(fd)
+#define JS_DYNFUNC_PID() getpid()
+#endif
 
 JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
@@ -14,6 +37,89 @@ extern "C" void js_eval_preamble_cache_reset(void) {
 
 static uint64_t js_eval_template_site_counter = 0;
 
+#define JS_DYNFUNC_STATS_CAP 512
+#define JS_DYNFUNC_CACHE_CAP 256
+
+typedef Item (*JsDynFuncMainFunc)(Context*);
+
+typedef struct JsDynFuncDependency {
+    int preamble_name_hits;
+    int escaped_identifier_hits;
+    char first_name[64];
+} JsDynFuncDependency;
+
+struct JsDynFuncStatsEntry {
+    uint64_t hash;
+    int source_len;
+    int argc;
+    int kind;
+    int preamble_entries;
+    int preamble_vars;
+    uint64_t preamble_hash;
+    int count;
+    int return_body_count;
+    int preamble_name_hits;
+    int escaped_identifier_hits;
+    int cacheable_count;
+    int cache_hit_count;
+    char sample[96];
+};
+
+struct JsDynFuncCacheEntry {
+    uint64_t hash;
+    size_t source_len;
+    int argc;
+    int kind;
+    char* source;
+    MIR_context_t ctx;
+    JsDynFuncMainFunc js_main_fn;
+    int hits;
+};
+
+static bool js_dynfunc_stats_checked = false;
+static bool js_dynfunc_stats_enabled = false;
+static bool js_dynfunc_stats_registered = false;
+static JsDynFuncStatsEntry js_dynfunc_stats[JS_DYNFUNC_STATS_CAP];
+static int js_dynfunc_stats_count = 0;
+static int js_dynfunc_stats_total = 0;
+static int js_dynfunc_stats_repeated = 0;
+static int js_dynfunc_stats_overflow = 0;
+static int js_dynfunc_stats_return_body_total = 0;
+static int js_dynfunc_stats_with_preamble = 0;
+static int js_dynfunc_stats_preamble_independent = 0;
+static int js_dynfunc_stats_preamble_dependent = 0;
+static int js_dynfunc_stats_cacheable = 0;
+static int js_dynfunc_stats_cache_hits = 0;
+static int js_dynfunc_stats_cache_inserts = 0;
+
+static JsDynFuncCacheEntry js_dynfunc_cache[JS_DYNFUNC_CACHE_CAP];
+static int js_dynfunc_cache_count = 0;
+static int js_dynfunc_cache_overflow = 0;
+
+static bool js_dynfunc_stats_is_enabled(void);
+static void js_dynfunc_stats_record(const char* parse_prefix, const char* source, size_t source_len,
+        String* body, int argc, const JsDynFuncDependency* dep, bool cacheable, bool cache_hit);
+static void js_dynfunc_stats_report(void);
+static void js_dynfunc_stats_write_line(int fd, const char* line);
+static int js_dynfunc_kind_from_prefix(const char* parse_prefix);
+static const char* js_dynfunc_kind_name(int kind);
+static bool js_dynfunc_body_is_return(String* body);
+static void js_dynfunc_copy_sample(char* dst, int dst_cap, const char* source, size_t source_len);
+static uint64_t js_dynfunc_preamble_hash(void);
+static JsDynFuncDependency js_dynfunc_scan_preamble_dependency(const char* source, size_t source_len);
+static bool js_dynfunc_is_ident_start(char ch);
+static bool js_dynfunc_is_ident_part(char ch);
+static bool js_dynfunc_preamble_matches_token(const char* token, size_t token_len, char* first_name, int first_name_cap);
+static bool js_dynfunc_dependency_is_independent(const JsDynFuncDependency* dep);
+static JsDynFuncCacheEntry* js_dynfunc_cache_lookup(uint64_t hash, const char* source, size_t source_len,
+        int argc, int kind);
+static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_len, int argc, int kind,
+        MIR_context_t ctx, JsDynFuncMainFunc js_main_fn);
+static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int argc, const char* source_prefix);
+static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix);
+extern "C" void js_func_cache_suppress_push(void);
+extern "C" void js_func_cache_suppress_pop(void);
+
 static bool js_source_contains_import_meta(const char* source, size_t len);
 static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
@@ -23,6 +129,426 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item);
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
     js_throw_syntax_error((Item){.item = s2it(heap_create_name(message, (int)strlen(message)))});
     return ItemNull;
+}
+
+static bool js_dynfunc_stats_is_enabled(void) {
+    if (!js_dynfunc_stats_checked) {
+        const char* flag = getenv("LAMBDA_JS_DYNFUNC_STATS");
+        js_dynfunc_stats_enabled = flag && flag[0] && strcmp(flag, "0") != 0;
+        js_dynfunc_stats_checked = true;
+    }
+    return js_dynfunc_stats_enabled;
+}
+
+static int js_dynfunc_kind_from_prefix(const char* parse_prefix) {
+    if (!parse_prefix) return 0;
+    if (strcmp(parse_prefix, "async function*") == 0) return 3;
+    if (strcmp(parse_prefix, "function*") == 0) return 2;
+    if (strcmp(parse_prefix, "async function") == 0) return 1;
+    return 0;
+}
+
+static const char* js_dynfunc_kind_name(int kind) {
+    switch (kind) {
+    case 1: return "async-function";
+    case 2: return "generator-function";
+    case 3: return "async-generator-function";
+    default: return "function";
+    }
+}
+
+static bool js_dynfunc_body_is_return(String* body) {
+    if (!body) return false;
+    const char* s = body->chars;
+    size_t len = body->len;
+    size_t pos = 0;
+    while (pos < len && (s[pos] == ' ' || s[pos] == '\t' ||
+            s[pos] == '\n' || s[pos] == '\r')) pos++;
+    if (pos + 6 > len || memcmp(s + pos, "return", 6) != 0) return false;
+    if (pos + 6 < len) {
+        char ch = s[pos + 6];
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+            (ch >= '0' && ch <= '9') || ch == '_' || ch == '$') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void js_dynfunc_copy_sample(char* dst, int dst_cap, const char* source, size_t source_len) {
+    if (!dst || dst_cap <= 0) return;
+    int lim = (int)source_len;
+    if (lim > dst_cap - 1) lim = dst_cap - 1;
+    for (int i = 0; i < lim; i++) {
+        char ch = source[i];
+        if (ch == '\n' || ch == '\r' || ch == '\t') ch = ' ';
+        dst[i] = ch;
+    }
+    dst[lim] = '\0';
+}
+
+static uint64_t js_dynfunc_preamble_hash(void) {
+    if (!g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) return 0;
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (int i = 0; i < g_eval_preamble_entry_count; i++) {
+        JsModuleConstEntry* entry = &g_eval_preamble_entries[i];
+        size_t name_len = strlen(entry->name);
+        h ^= hash_fnv1a_64(entry->name, name_len);
+        h *= 0x100000001b3ULL;
+        h ^= (uint64_t)entry->const_type; h *= 0x100000001b3ULL;
+        h ^= (uint64_t)entry->int_val; h *= 0x100000001b3ULL;
+        h ^= (uint64_t)entry->modvar_type; h *= 0x100000001b3ULL;
+        h ^= (uint64_t)entry->var_kind; h *= 0x100000001b3ULL;
+        h ^= entry->is_int ? 0x11ULL : 0x22ULL; h *= 0x100000001b3ULL;
+        h ^= entry->is_iife_var ? 0x33ULL : 0x44ULL; h *= 0x100000001b3ULL;
+        h ^= entry->is_implicit_global ? 0x55ULL : 0x66ULL; h *= 0x100000001b3ULL;
+        h ^= entry->is_nested_func_hoist ? 0x77ULL : 0x88ULL; h *= 0x100000001b3ULL;
+        h ^= entry->annexb_suppressed ? 0x99ULL : 0xaaULL; h *= 0x100000001b3ULL;
+    }
+    h ^= (uint64_t)g_eval_preamble_entry_count; h *= 0x100000001b3ULL;
+    h ^= (uint64_t)g_eval_preamble_var_count; h *= 0x100000001b3ULL;
+    return h;
+}
+
+static bool js_dynfunc_is_ident_start(char ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+        ch == '_' || ch == '$';
+}
+
+static bool js_dynfunc_is_ident_part(char ch) {
+    return js_dynfunc_is_ident_start(ch) || (ch >= '0' && ch <= '9');
+}
+
+static bool js_dynfunc_preamble_matches_token(const char* token, size_t token_len,
+        char* first_name, int first_name_cap) {
+    if (!token || token_len == 0 || !g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) {
+        return false;
+    }
+    for (int i = 0; i < g_eval_preamble_entry_count; i++) {
+        const char* name = g_eval_preamble_entries[i].name;
+        if (!name) continue;
+        if (strncmp(name, "_js_", 4) == 0) name += 4;
+        size_t name_len = strlen(name);
+        if (name_len == token_len && memcmp(name, token, token_len) == 0) {
+            if (first_name && first_name_cap > 0 && first_name[0] == '\0') {
+                int copy_len = (int)token_len;
+                if (copy_len > first_name_cap - 1) copy_len = first_name_cap - 1;
+                memcpy(first_name, token, copy_len);
+                first_name[copy_len] = '\0';
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+static JsDynFuncDependency js_dynfunc_scan_preamble_dependency(const char* source, size_t source_len) {
+    JsDynFuncDependency dep;
+    memset(&dep, 0, sizeof(dep));
+    if (!source || source_len == 0 || !g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) {
+        return dep;
+    }
+
+    enum ScanState {
+        SCAN_DEFAULT,
+        SCAN_SQ,
+        SCAN_DQ,
+        SCAN_LINE_COMMENT,
+        SCAN_BLOCK_COMMENT
+    };
+    ScanState state = SCAN_DEFAULT;
+    bool escaped = false;
+    for (size_t i = 0; i < source_len; i++) {
+        char ch = source[i];
+        char next = (i + 1 < source_len) ? source[i + 1] : '\0';
+        if (state == SCAN_LINE_COMMENT) {
+            if (ch == '\n' || ch == '\r') state = SCAN_DEFAULT;
+            continue;
+        }
+        if (state == SCAN_BLOCK_COMMENT) {
+            if (ch == '*' && next == '/') {
+                i++;
+                state = SCAN_DEFAULT;
+            }
+            continue;
+        }
+        if (state == SCAN_SQ || state == SCAN_DQ) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+            if ((state == SCAN_SQ && ch == '\'') || (state == SCAN_DQ && ch == '"')) {
+                state = SCAN_DEFAULT;
+            }
+            continue;
+        }
+
+        if (ch == '/' && next == '/') {
+            i++;
+            state = SCAN_LINE_COMMENT;
+            continue;
+        }
+        if (ch == '/' && next == '*') {
+            i++;
+            state = SCAN_BLOCK_COMMENT;
+            continue;
+        }
+        if (ch == '\'') {
+            state = SCAN_SQ;
+            continue;
+        }
+        if (ch == '"') {
+            state = SCAN_DQ;
+            continue;
+        }
+        if (ch == '\\' && next == 'u') {
+            dep.escaped_identifier_hits++;
+            continue;
+        }
+        if (js_dynfunc_is_ident_start(ch)) {
+            size_t start = i;
+            i++;
+            while (i < source_len && js_dynfunc_is_ident_part(source[i])) i++;
+            size_t token_len = i - start;
+            if (js_dynfunc_preamble_matches_token(source + start, token_len,
+                    dep.first_name, (int)sizeof(dep.first_name))) {
+                dep.preamble_name_hits++;
+            }
+            i--;
+        }
+    }
+    return dep;
+}
+
+static bool js_dynfunc_dependency_is_independent(const JsDynFuncDependency* dep) {
+    if (!dep) return true;
+    return dep->preamble_name_hits == 0 && dep->escaped_identifier_hits == 0;
+}
+
+static void js_dynfunc_stats_record(const char* parse_prefix, const char* source, size_t source_len,
+        String* body, int argc, const JsDynFuncDependency* dep, bool cacheable, bool cache_hit) {
+    if (!js_dynfunc_stats_is_enabled() || !source) return;
+    if (!js_dynfunc_stats_registered) {
+        atexit(js_dynfunc_stats_report);
+        js_dynfunc_stats_registered = true;
+    }
+    int kind = js_dynfunc_kind_from_prefix(parse_prefix);
+    bool is_return_body = js_dynfunc_body_is_return(body);
+    uint64_t hash = hash_fnv1a_64(source, source_len);
+    int preamble_entries = g_eval_preamble_entry_count;
+    int preamble_vars = g_eval_preamble_var_count;
+    uint64_t preamble_hash = js_dynfunc_preamble_hash();
+    js_dynfunc_stats_total++;
+    if (is_return_body) js_dynfunc_stats_return_body_total++;
+    if (preamble_entries > 0 || preamble_vars > 0 || g_eval_preamble_entries) {
+        js_dynfunc_stats_with_preamble++;
+    }
+    if (dep && !js_dynfunc_dependency_is_independent(dep)) js_dynfunc_stats_preamble_dependent++;
+    else js_dynfunc_stats_preamble_independent++;
+    if (cacheable) js_dynfunc_stats_cacheable++;
+    if (cache_hit) js_dynfunc_stats_cache_hits++;
+    for (int i = 0; i < js_dynfunc_stats_count; i++) {
+        JsDynFuncStatsEntry* entry = &js_dynfunc_stats[i];
+        if (entry->hash == hash && entry->source_len == (int)source_len &&
+            entry->argc == argc && entry->kind == kind &&
+            entry->preamble_entries == preamble_entries &&
+            entry->preamble_vars == preamble_vars &&
+            entry->preamble_hash == preamble_hash) {
+            entry->count++;
+            if (is_return_body) entry->return_body_count++;
+            if (dep) {
+                entry->preamble_name_hits += dep->preamble_name_hits;
+                entry->escaped_identifier_hits += dep->escaped_identifier_hits;
+            }
+            if (cacheable) entry->cacheable_count++;
+            if (cache_hit) entry->cache_hit_count++;
+            js_dynfunc_stats_repeated++;
+            return;
+        }
+    }
+    if (js_dynfunc_stats_count >= JS_DYNFUNC_STATS_CAP) {
+        js_dynfunc_stats_overflow++;
+        return;
+    }
+    JsDynFuncStatsEntry* entry = &js_dynfunc_stats[js_dynfunc_stats_count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->hash = hash;
+    entry->source_len = (int)source_len;
+    entry->argc = argc;
+    entry->kind = kind;
+    entry->preamble_entries = preamble_entries;
+    entry->preamble_vars = preamble_vars;
+    entry->preamble_hash = preamble_hash;
+    entry->count = 1;
+    entry->return_body_count = is_return_body ? 1 : 0;
+    if (dep) {
+        entry->preamble_name_hits = dep->preamble_name_hits;
+        entry->escaped_identifier_hits = dep->escaped_identifier_hits;
+    }
+    entry->cacheable_count = cacheable ? 1 : 0;
+    entry->cache_hit_count = cache_hit ? 1 : 0;
+    js_dynfunc_copy_sample(entry->sample, (int)sizeof(entry->sample), source, source_len);
+}
+
+static void js_dynfunc_stats_report(void) {
+    if (!js_dynfunc_stats_enabled || js_dynfunc_stats_total == 0) return;
+    const char* dir = getenv("LAMBDA_JS_DYNFUNC_STATS_DIR");
+    if (!dir || !dir[0]) dir = "./temp/js_dynfunc_stats";
+    JS_DYNFUNC_MKDIR(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_DYNFUNC_PID());
+    int fd = JS_DYNFUNC_OPEN(path);
+    if (fd < 0) return;
+    char line[512];
+    snprintf(line, sizeof(line),
+        "# dynfunc-stats total=%d unique=%d repeated=%d overflow=%d return_bodies=%d with_preamble=%d independent=%d dependent=%d cacheable=%d cache_hits=%d cache_inserts=%d cache_entries=%d cache_overflow=%d\n",
+        js_dynfunc_stats_total, js_dynfunc_stats_count, js_dynfunc_stats_repeated,
+        js_dynfunc_stats_overflow, js_dynfunc_stats_return_body_total,
+        js_dynfunc_stats_with_preamble, js_dynfunc_stats_preamble_independent,
+        js_dynfunc_stats_preamble_dependent, js_dynfunc_stats_cacheable,
+        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts,
+        js_dynfunc_cache_count, js_dynfunc_cache_overflow);
+    js_dynfunc_stats_write_line(fd, line);
+    js_dynfunc_stats_write_line(fd,
+        "rank\tcount\tkind\targc\tsource_len\tpreamble_entries\tpreamble_vars\tpreamble_hash\treturn_count\tpreamble_refs\tescaped_refs\tcacheable\tcache_hits\thash\tsample\n");
+    log_notice("dynfunc-stats: total=%d unique=%d repeated=%d overflow=%d return_bodies=%d with_preamble=%d independent=%d dependent=%d cacheable=%d cache_hits=%d cache_inserts=%d cache_entries=%d cache_overflow=%d",
+        js_dynfunc_stats_total, js_dynfunc_stats_count, js_dynfunc_stats_repeated,
+        js_dynfunc_stats_overflow, js_dynfunc_stats_return_body_total,
+        js_dynfunc_stats_with_preamble, js_dynfunc_stats_preamble_independent,
+        js_dynfunc_stats_preamble_dependent, js_dynfunc_stats_cacheable,
+        js_dynfunc_stats_cache_hits, js_dynfunc_stats_cache_inserts,
+        js_dynfunc_cache_count, js_dynfunc_cache_overflow);
+    bool used[JS_DYNFUNC_STATS_CAP];
+    memset(used, 0, sizeof(used));
+    int max_lines = js_dynfunc_stats_count;
+    for (int rank = 0; rank < max_lines; rank++) {
+        int best = -1;
+        for (int i = 0; i < js_dynfunc_stats_count; i++) {
+            if (used[i]) continue;
+            if (best < 0 || js_dynfunc_stats[i].count > js_dynfunc_stats[best].count) {
+                best = i;
+            }
+        }
+        if (best < 0) break;
+        used[best] = true;
+        JsDynFuncStatsEntry* entry = &js_dynfunc_stats[best];
+        snprintf(line, sizeof(line), "%d\t%d\t%s\t%d\t%d\t%d\t%d\t%llx\t%d\t%d\t%d\t%d\t%d\t%llx\t%s\n",
+            rank + 1, entry->count, js_dynfunc_kind_name(entry->kind), entry->argc,
+            entry->source_len, entry->preamble_entries, entry->preamble_vars,
+            (unsigned long long)entry->preamble_hash, entry->return_body_count,
+            entry->preamble_name_hits, entry->escaped_identifier_hits,
+            entry->cacheable_count, entry->cache_hit_count,
+            (unsigned long long)entry->hash, entry->sample);
+        js_dynfunc_stats_write_line(fd, line);
+        if (rank < 12) {
+            log_notice("dynfunc-stats: top=%d count=%d kind=%s argc=%d source_len=%d preamble=%d/%d return_count=%d refs=%d cache_hits=%d hash=%llx sample=\"%s\"",
+                rank + 1, entry->count, js_dynfunc_kind_name(entry->kind), entry->argc,
+                entry->source_len, entry->preamble_entries, entry->preamble_vars,
+                entry->return_body_count, entry->preamble_name_hits,
+                entry->cache_hit_count, (unsigned long long)entry->hash, entry->sample);
+        }
+    }
+    JS_DYNFUNC_CLOSE(fd);
+}
+
+static void js_dynfunc_stats_write_line(int fd, const char* line) {
+    if (fd < 0 || !line) return;
+    size_t len = strlen(line);
+    const char* cur = line;
+    while (len > 0) {
+        int wrote = (int)JS_DYNFUNC_WRITE(fd, cur, len);
+        if (wrote <= 0) return;
+        cur += wrote;
+        len -= (size_t)wrote;
+    }
+}
+
+static JsDynFuncCacheEntry* js_dynfunc_cache_lookup(uint64_t hash, const char* source, size_t source_len,
+        int argc, int kind) {
+    if (!source) return NULL;
+    for (int i = 0; i < js_dynfunc_cache_count; i++) {
+        JsDynFuncCacheEntry* entry = &js_dynfunc_cache[i];
+        if (entry->hash != hash || entry->source_len != source_len ||
+            entry->argc != argc || entry->kind != kind || !entry->source ||
+            !entry->js_main_fn) {
+            continue;
+        }
+        if (memcmp(entry->source, source, source_len) == 0) return entry;
+    }
+    return NULL;
+}
+
+static void js_dynfunc_cache_insert(uint64_t hash, char* source, size_t source_len, int argc, int kind,
+        MIR_context_t ctx, JsDynFuncMainFunc js_main_fn) {
+    if (!source || !ctx || !js_main_fn) return;
+    if (js_dynfunc_cache_lookup(hash, source, source_len, argc, kind)) return;
+    if (js_dynfunc_cache_count >= JS_DYNFUNC_CACHE_CAP) {
+        js_dynfunc_cache_overflow++;
+        return;
+    }
+    JsDynFuncCacheEntry* entry = &js_dynfunc_cache[js_dynfunc_cache_count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->hash = hash;
+    entry->source_len = source_len;
+    entry->argc = argc;
+    entry->kind = kind;
+    entry->source = source;
+    entry->ctx = ctx;
+    entry->js_main_fn = js_main_fn;
+    js_dynfunc_stats_cache_inserts++;
+}
+
+extern "C" void js_dynfunc_cache_reset(void) {
+    memset(js_dynfunc_cache, 0, sizeof(js_dynfunc_cache));
+    js_dynfunc_cache_count = 0;
+    js_dynfunc_cache_overflow = 0;
+}
+
+static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int argc, const char* source_prefix) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    Item anon_name = (Item){.item = s2it(heap_create_name("anonymous", 9))};
+    js_set_function_name(fn_item, anon_name);
+
+    StrBuf* src_buf = strbuf_new_cap(256);
+    strbuf_append_str(src_buf, source_prefix);
+    strbuf_append_str(src_buf, "(");
+    for (int i = 0; i < argc - 1; i++) {
+        if (i > 0) strbuf_append_str(src_buf, ",");
+        String* ps2 = it2s(args[i]);
+        if (!ps2) {
+            Item si = js_to_string(args[i]);
+            ps2 = it2s(si);
+        }
+        if (ps2 && ps2->len > 0)
+            strbuf_append_str_n(src_buf, ps2->chars, (int)ps2->len);
+    }
+    strbuf_append_str(src_buf, "\n) {\n");
+    String* body2 = (argc > 0) ? it2s(args[argc - 1]) : NULL;
+    if (!body2 && argc > 0) {
+        Item si = js_to_string(args[argc - 1]);
+        body2 = it2s(si);
+    }
+    if (body2 && body2->len > 0)
+        strbuf_append_str_n(src_buf, body2->chars, (int)body2->len);
+    strbuf_append_str(src_buf, "\n}");
+    String* src_str = heap_create_name(src_buf->str, src_buf->length);
+    strbuf_free(src_buf);
+    Item src_item = (Item){.item = s2it(src_str)};
+    js_set_function_source(fn_item, src_item);
+}
+
+static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int argc, const char* source_prefix) {
+    if (!entry || !entry->js_main_fn) return ItemNull;
+    js_func_cache_suppress_push();
+    Item fn_item = entry->js_main_fn((Context*)context);
+    js_func_cache_suppress_pop();
+    entry->hits++;
+    js_dynfunc_apply_function_metadata(fn_item, args, argc, source_prefix);
+    return fn_item;
 }
 
 // ============================================================================
@@ -94,18 +620,37 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     strbuf_append_str(sb, "})");
 
+    size_t source_len = sb->length;
+
     // null-terminate — use malloc; the transpiler will copy as needed
-    char* source = (char*)mem_alloc(sb->length + 1, MEM_CAT_JS_RUNTIME);
+    char* source = (char*)mem_alloc(source_len + 1, MEM_CAT_JS_RUNTIME);
     if (!source) {
         strbuf_free(sb);
         log_error("js-new-function: malloc failed for source buffer");
         return ItemNull;
     }
-    memcpy(source, sb->str, sb->length);
-    source[sb->length] = '\0';
+    memcpy(source, sb->str, source_len);
+    source[source_len] = '\0';
     strbuf_free(sb);
 
-    log_debug("js-new-function: compiling dynamic function body (len=%d)", (int)strlen(source));
+    int dynfunc_kind = js_dynfunc_kind_from_prefix(parse_prefix);
+    uint64_t source_hash = hash_fnv1a_64(source, source_len);
+    JsDynFuncDependency dep = js_dynfunc_scan_preamble_dependency(source, source_len);
+    bool cacheable = js_dynfunc_dependency_is_independent(&dep);
+    if (cacheable) {
+        JsDynFuncCacheEntry* cached = js_dynfunc_cache_lookup(source_hash, source, source_len,
+            argc, dynfunc_kind);
+        if (cached) {
+            js_dynfunc_stats_record(parse_prefix, source, source_len, body, argc, &dep, true, true);
+            Item cached_fn = js_dynfunc_cache_execute(cached, args, argc, source_prefix);
+            mem_free(source);
+            return cached_fn;
+        }
+    }
+
+    js_dynfunc_stats_record(parse_prefix, source, source_len, body, argc, &dep, cacheable, false);
+
+    log_debug("js-new-function: compiling dynamic function body (len=%d)", (int)source_len);
 
     // Compile the function expression as a mini JS module.
     // Since the source is a top-level expression statement "(function(...) { ... })",
@@ -117,7 +662,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
-    if (!js_transpiler_parse(tp, source, strlen(source))) {
+    if (!js_transpiler_parse(tp, source, source_len)) {
         log_error("js-new-function: parse failed for '%s'", source);
         mem_free(source);
         js_transpiler_destroy(tp);
@@ -217,6 +762,10 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         module_mir_source_buffers[module_mir_context_count - 1] = source;
         module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
         module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+        if (cacheable && get_type_id(fn_item) == LMD_TYPE_FUNC) {
+            js_dynfunc_cache_insert(source_hash, source, source_len, argc, dynfunc_kind,
+                ctx, js_main_fn);
+        }
         source = NULL;
     }
     // Detach from transpiler so js_transpiler_destroy doesn't free them.
@@ -229,37 +778,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // Set spec-correct name and toString() source:
     // "function anonymous(params\n) {\nbody\n}" and generator/async variants.
     // The internal source was (function(params) { body }) which doesn't match the spec.
-    if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
-        Item anon_name = (Item){.item = s2it(heap_create_name("anonymous", 9))};
-        js_set_function_name(fn_item, anon_name);
-
-        StrBuf* src_buf = strbuf_new_cap(256);
-        strbuf_append_str(src_buf, source_prefix);
-        strbuf_append_str(src_buf, "(");
-        for (int i = 0; i < argc - 1; i++) {
-            if (i > 0) strbuf_append_str(src_buf, ",");
-            String* ps2 = it2s(args[i]);
-            if (!ps2) {
-                Item si = js_to_string(args[i]);
-                ps2 = it2s(si);
-            }
-            if (ps2 && ps2->len > 0)
-                strbuf_append_str_n(src_buf, ps2->chars, (int)ps2->len);
-        }
-        strbuf_append_str(src_buf, "\n) {\n");
-        String* body2 = (argc > 0) ? it2s(args[argc - 1]) : NULL;
-        if (!body2 && argc > 0) {
-            Item si = js_to_string(args[argc - 1]);
-            body2 = it2s(si);
-        }
-        if (body2 && body2->len > 0)
-            strbuf_append_str_n(src_buf, body2->chars, (int)body2->len);
-        strbuf_append_str(src_buf, "\n}");
-        String* src_str = heap_create_name(src_buf->str, src_buf->length);
-        strbuf_free(src_buf);
-        Item src_item = (Item){.item = s2it(src_str)};
-        js_set_function_source(fn_item, src_item);
-    }
+    js_dynfunc_apply_function_metadata(fn_item, args, argc, source_prefix);
 
     return fn_item;
 }

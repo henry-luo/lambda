@@ -145,6 +145,8 @@ Item js_get_length_item(Item object);
 Item js_new_function(void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
+void js_func_cache_suppress_push(void);
+void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
 // transient JIT call-argument stack (see js_runtime_function.cpp)
 Item* js_args_push(int count);

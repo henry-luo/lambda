@@ -110,6 +110,13 @@ static const int JS_PRIVATE_CLASS_INDEX_KEY_LEN = 23;
 static const char* JS_BOUND_TARGET_KEY = "__bound_target__";
 static const int JS_BOUND_TARGET_KEY_LEN = 16;
 
+static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
+static const int JS_NATIVE_FUNCTION_SOURCE_LEN = 29;
+
+static inline Item js_native_function_source_item() {
+    return (Item){.item = s2it(heap_create_name(JS_NATIVE_FUNCTION_SOURCE, JS_NATIVE_FUNCTION_SOURCE_LEN))};
+}
+
 struct JsGlobalVarModuleBinding {
     Item key;
     int index;
@@ -9077,12 +9084,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // NativeFunction allows the class/construction name to be omitted.
                 // Built-in constructors are walked heavily by test262's intrinsic
                 // source validator, so use the short canonical native form here.
-                StrBuf* sb_ts = strbuf_new();
-                strbuf_append_str_n(sb_ts, "function ", 9);
-                strbuf_append_str_n(sb_ts, "() { [native code] }", 20);
-                String* result_ts = heap_create_name(sb_ts->str, sb_ts->length);
-                strbuf_free(sb_ts);
-                return (Item){.item = s2it(result_ts)};
+                return js_native_function_source_item();
             }
             // Proxy with non-callable target: throw TypeError
             if (js_is_proxy(this_val)) {
@@ -9096,7 +9098,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     return ItemNull;
                 }
                 if (proxy_class_target) {
-                    return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+                    return js_native_function_source_item();
                 }
                 // proxy of function: use NativeFunction format (do not expose target source)
                 JsFunction* pfn = (JsFunction*)proxy_target.function;
@@ -9132,25 +9134,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // The IdentifierName is optional; omit it for implementation-native
             // functions so native-source validation does not spend most of its
             // time rechecking every built-in name through large Unicode regexes.
-            StrBuf* sb = strbuf_new();
-            strbuf_append_str_n(sb, "function ", 9);
-            bool include_native_name = false;
-            if (include_native_name && VALID_STR_PTR(fn->name) && fn->name->len > 0) {
-                // NativeFunction syntax allows only a single IdentifierName (no spaces).
-                // Bound functions have names like "bound f" — use only first word.
-                int name_len = fn->name->len;
-                for (int i = 0; i < (int)fn->name->len; i++) {
-                    if (fn->name->chars[i] == ' ') { name_len = i; break; }
-                }
-                strbuf_append_str_n(sb, fn->name->chars, name_len);
-            }
             #undef VALID_STR_PTR
-            strbuf_append_str_n(sb, "() { [native code] }", 20);
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
+            return js_native_function_source_item();
         }
-        return (Item){.item = s2it(heap_create_name("function () { [native code] }", 29))};
+        return js_native_function_source_item();
     }
     case JS_BUILTIN_FUNC_HAS_INSTANCE: {
         // Function.prototype[@@hasInstance](V) — ES spec §19.2.3.6
@@ -12468,6 +12455,7 @@ struct JsRegexRange {
 
 static bool js_regexp_is_han_cp(uint32_t cp);
 static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
+static int js_regex_generated_property_canonical_kind(int kind);
 static bool js_regex_generated_property_contains(int kind, int cp);
 static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor);
 
@@ -12535,7 +12523,7 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
         js_regex_match_property_name(name, name_len, "Pat_WS")) return JS_REGEX_PROP_PATTERN_WHITE_SPACE;
 
     int generated_kind = js_regex_generated_property_kind_from_name(name, name_len);
-    if (generated_kind) return generated_kind;
+    if (generated_kind) return js_regex_generated_property_canonical_kind(generated_kind);
 
     if (js_regex_match_property_name(name, name_len, "Regional_Indicator") ||
         js_regex_match_property_name(name, name_len, "RI")) return JS_REGEX_PROP_REGIONAL_INDICATOR;
@@ -15757,7 +15745,11 @@ extern "C" Item js_regex_test(Item regex, Item str) {
         start_pos = 0;
     }
 
-    int property_mode = (!rd->global && !rd->sticky) ? js_regexp_property_all_mode(regex) : 0;
+    int property_mode = 0;
+    if (!rd->global && !rd->sticky) {
+        property_mode = rd->special_property_kind != 0 ?
+            rd->special_property_kind : js_regexp_property_all_mode(regex);
+    }
     if (property_mode != 0) {
         bool matched = js_regexp_test_property_all(input_s, property_mode);
         if (matched) {
@@ -22478,6 +22470,51 @@ static bool js_array_set_length_throw(Item object, Item len_key, int64_t new_len
     return !js_exception_pending;
 }
 
+static bool js_concat_ta_own_name_blocks_fast(const char* name, int len) {
+    if (!name || len <= 0) return false;
+    if (len == 6 && strncmp(name, "length", 6) == 0) return true;
+    if (name[0] >= '0' && name[0] <= '9') return true;
+    return false;
+}
+
+static bool js_concat_ta_has_observable_own_index_or_length(Item element) {
+    if (get_type_id(element) != LMD_TYPE_MAP || !element.map || element.map->data_cap <= 0) return false;
+    TypeMap* tm = element.map->type ? (TypeMap*)element.map->type : NULL;
+    for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
+        if (!se->name) continue;
+        const char* name = se->name->str;
+        int len = (int)se->name->length;
+        if (js_concat_ta_own_name_blocks_fast(name, len)) return true;
+    }
+    return false;
+}
+
+static bool js_array_concat_try_append_typed_array(Item result, int64_t* n, Item element, int64_t len) {
+    if (len < 0 || len > INT32_MAX) return false;
+    if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return false;
+    if (result.array->extra != 0 || result.array->length != *n) return false;
+    if (!js_is_extensible(result)) return false;
+    if (!js_is_typed_array(element) || js_is_proxy(element)) return false;
+    if (js_typed_array_is_out_of_bounds_item(element)) return false;
+    if (js_concat_ta_has_observable_own_index_or_length(element)) return false;
+
+    JsTypedArray* ta = js_get_typed_array_ptr(element.map);
+    if (!ta) return false;
+    if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) return false;
+
+    int live_len = js_typed_array_length(element);
+    if (len != (int64_t)live_len) return false;
+    if (live_len == 0) return true;
+
+    void* data = js_typed_array_current_data_ptr(element);
+    if (!data) return false;
+    for (int i = 0; i < live_len; i++) {
+        js_array_push_item_direct(result.array, js_typed_array_raw_get_item(ta, data, i));
+    }
+    *n += live_len;
+    return true;
+}
+
 static Item js_array_generic_push(Item object, Item* args, int argc) {
     const int64_t max_safe_len = 9007199254740991LL;
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -24129,6 +24166,9 @@ includes_slow_path:
                 if (n > MAX_SAFE_LEN - len) {
                     js_throw_type_error("Array.prototype.concat: resulting array length exceeds 2^53 - 1");
                     return make_js_undefined();
+                }
+                if (js_array_concat_try_append_typed_array(result, &n, element, len)) {
+                    continue;
                 }
                 for (int64_t k = 0; k < len; k++) {
                     Item idx_key = js_array_index_key(k);
