@@ -129,7 +129,7 @@ Diagram sources live beside the docs in `doc/dev/js/diagram/` and are compiled t
 - **Mermaid** (`*.mmd`) — flow, sequence, state, and class diagrams.
 - **Structurizr DSL** (`architecture.dsl`) — the C4 system-context / container / component views in [§2](#2-architecture-c4).
 
-Regenerate everything with `bash utils/render_js_diagrams.sh` (Mermaid → SVG via `npx mmdc`; Structurizr DSL → per-view SVG via `structurizr-cli` export to Mermaid, then `mmdc`). The `.dsl` path needs a JDK (`JAVA_HOME`) and `structurizr-cli` (`STRUCTURIZR_CLI`); the script prints a skip notice if they are absent. `render_js_diagrams.sh name …` re-renders specific diagrams.
+Regenerate everything with `bash utils/render_md_diagrams.sh doc/dev/js/diagram` (Mermaid → SVG via `npx mmdc`; Structurizr DSL → per-view SVG via `structurizr-cli` export to Mermaid, then `mmdc`). The `.dsl` path needs a JDK (`JAVA_HOME`) and `structurizr-cli` (`STRUCTURIZR_CLI`); the script prints a skip notice if they are absent. `render_md_diagrams.sh doc/dev/js/diagram <name>` re-renders specific diagrams.
 
 ---
 
