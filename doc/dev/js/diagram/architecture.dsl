@@ -35,15 +35,15 @@ workspace "LambdaJS" "Embedded JavaScript runtime inside Lambda" {
   }
 
   views {
-    systemContext lambda "c4ctx" {
+    systemContext lambda "c4_context" {
       include *
       autolayout lr
     }
-    container lambda "c4cont" {
+    container lambda "c4_container" {
       include *
       autolayout lr
     }
-    component js "c4comp" {
+    component js "c4_component" {
       include *
       autolayout lr
     }

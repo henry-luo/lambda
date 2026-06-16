@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
-# Render the LambdaJS design diagrams (doc/dev/js/diagram/) to SVG.
-#   Mermaid (.mmd)         -> <name>.svg            via mermaid-cli (npx -p @mermaid-js/mermaid-cli mmdc)
-#   Structurizr DSL (.dsl) -> c4_<view>.svg per view via structurizr-cli (export to mermaid) + mmdc
+# Render Markdown design-doc diagrams to SVG (for any doc set under doc/dev/*/).
+#   Mermaid (.mmd)         -> <name>.svg              via mermaid-cli (npx -p @mermaid-js/mermaid-cli mmdc)
+#   Structurizr DSL (.dsl) -> <view-key>.svg per view via structurizr-cli (export to mermaid) + mmdc
 # Files whose name starts with "_" are scratch and skipped.
+#
+# Usage: bash utils/render_md_diagrams.sh <diagram-dir> [name ...]
+#   no names  -> render every *.mmd and *.dsl in <diagram-dir>
+#   name      -> "foo" / "foo.mmd" renders foo.mmd; "bar.dsl" renders the DSL workspace bar.dsl
+#
+# Structurizr output naming: each view is written to "<view-key>.svg", so name your views in the
+#   .dsl to be the filenames your docs embed (e.g. a view key "c4_context" -> c4_context.svg).
+#
 # Requirements: node/npx (for mmdc). For .dsl also a JDK + structurizr-cli:
-#   export JAVA_HOME=<jdk>            (default: /opt/homebrew/opt/openjdk)
-#   export STRUCTURIZR_CLI=<path to structurizr.sh>   (default: <repo>/temp/tools/structurizr-cli/structurizr.sh)
-# Usage: bash utils/render_js_diagrams.sh [name ...]   (no args = render all *.mmd and *.dsl)
-# Note: this mmdc build rejects `Note over` in sequence diagrams — use plain messages instead.
+#   JAVA_HOME       (default: /opt/homebrew/opt/openjdk)
+#   STRUCTURIZR_CLI (default: <repo>/temp/tools/structurizr-cli/structurizr.sh)
+# Notes: this mmdc build rejects `Note over` in Mermaid sequence diagrams (use plain messages);
+#   Structurizr DSL is line-oriented (one statement per line; no inline ';').
 set -u
+if [ "$#" -lt 1 ]; then echo "usage: $(basename "$0") <diagram-dir> [name ...]" >&2; exit 2; fi
+DIR="$(cd "$1" 2>/dev/null && pwd)" || { echo "no such directory: $1" >&2; exit 2; }
+shift
 SELF="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SELF/.." && pwd)"
-DIR="$REPO/doc/dev/js/diagram"
-CFG="$DIR/puppeteer-config.json"
+CFG="$SELF/puppeteer-config.json"
 ERRLOG="$DIR/.render_err"
 : "${JAVA_HOME:=/opt/homebrew/opt/openjdk}"
 export JAVA_HOME; export PATH="$JAVA_HOME/bin:$PATH"
 : "${STRUCTURIZR_CLI:=$REPO/temp/tools/structurizr-cli/structurizr.sh}"
 fail=0
+PCFG=(); [ -f "$CFG" ] && PCFG=(-p "$CFG")
 
 mmdc_render() {  # $1 input, $2 output svg, $3 label
   printf 'rendering %s ... ' "$3"
-  if npx -y -p @mermaid-js/mermaid-cli mmdc -i "$1" -o "$2" -p "$CFG" >/dev/null 2>"$ERRLOG"; then
+  if npx -y -p @mermaid-js/mermaid-cli mmdc -i "$1" -o "$2" "${PCFG[@]}" >/dev/null 2>"$ERRLOG"; then
     printf 'ok (%s bytes)\n' "$(wc -c < "$2" | tr -d ' ')"
   else
     printf 'FAILED\n'; tail -6 "$ERRLOG"; fail=1
@@ -36,7 +47,7 @@ render_mmd() {
 }
 
 render_dsl() {
-  local f="$1" base tmp m b key out
+  local f="$1" base tmp m b out
   base="$(basename "$f" .dsl)"
   case "$base" in _*) return 0;; esac
   if [ ! -f "$STRUCTURIZR_CLI" ]; then
@@ -48,14 +59,8 @@ render_dsl() {
   fi
   for m in "$tmp"/*.mmd; do
     [ -e "$m" ] || continue
-    b="$(basename "$m" .mmd)"; key="${b#structurizr-}"
-    case "$key" in
-      c4ctx)  out=c4_context;;
-      c4cont) out=c4_container;;
-      c4comp) out=c4_component;;
-      *)      out="c4_$key";;
-    esac
-    mmdc_render "$m" "$DIR/$out.svg" "$base.dsl[$key] -> $out.svg"
+    b="$(basename "$m" .mmd)"; out="${b#structurizr-}"
+    mmdc_render "$m" "$DIR/$out.svg" "$base.dsl[$out] -> $out.svg"
   done
   rm -rf "$tmp"
 }
