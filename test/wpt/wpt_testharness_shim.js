@@ -871,6 +871,110 @@ function _wpt_prev_text_node(n) {
     return null;
 }
 
+function _wpt_contenteditable_state(el) {
+    if (!el || el.nodeType !== 1 || !el.getAttribute) return null;
+    var raw = null;
+    try { raw = el.getAttribute("contenteditable"); } catch (_) { raw = null; }
+    if (raw === null) return null;
+    raw = String(raw).toLowerCase();
+    if (raw === "" || raw === "true" || raw === "plaintext-only") return "true";
+    if (raw === "false") return "false";
+    return null;
+}
+
+function _wpt_editing_host_for_node(node) {
+    var cur = node;
+    if (cur && cur.nodeType === 3) cur = cur.parentNode;
+    while (cur && cur.nodeType === 1) {
+        var state = _wpt_contenteditable_state(cur);
+        if (state === "true") return cur;
+        if (state === "false") return null;
+        cur = cur.parentNode;
+    }
+    try {
+        if (document.designMode === "on") return document.body || document.documentElement;
+    } catch (_) {}
+    return null;
+}
+
+function _wpt_dispatch_input_event(target, type, inputType, data) {
+    if (!target || typeof target.dispatchEvent !== "function") return true;
+    var ev = null;
+    try {
+        ev = new InputEvent(type, {
+            bubbles: true,
+            cancelable: type === "beforeinput",
+            composed: true,
+            inputType: inputType || "",
+            data: data === undefined ? null : data
+        });
+    } catch (_) {
+        try {
+            ev = new Event(type, {
+                bubbles: true,
+                cancelable: type === "beforeinput",
+                composed: true
+            });
+            ev.inputType = inputType || "";
+            ev.data = data === undefined ? null : data;
+        } catch (_) {
+            ev = { type: type, defaultPrevented: false,
+                   preventDefault: function() { this.defaultPrevented = true; } };
+        }
+    }
+    var ok = true;
+    try { ok = target.dispatchEvent(ev); } catch (_) { ok = true; }
+    return ok !== false && !ev.defaultPrevented;
+}
+
+function _wpt_insert_text_in_control(el, text) {
+    if (!el) return false;
+    var v = el.value || "";
+    var ss = el.selectionStart;
+    var se = el.selectionEnd;
+    if (typeof ss !== "number") ss = v.length;
+    if (typeof se !== "number") se = v.length;
+    if (ss > se) { var tmp = ss; ss = se; se = tmp; }
+    if (!_wpt_dispatch_input_event(el, "beforeinput", "insertText", text)) return true;
+    el.value = v.slice(0, ss) + text + v.slice(se);
+    try { el.setSelectionRange(ss + text.length, ss + text.length); } catch (_) {}
+    _wpt_dispatch_input_event(el, "input", "insertText", text);
+    return true;
+}
+
+function _wpt_insert_text_in_document_selection(text) {
+    var sel = null;
+    try { sel = (typeof getSelection === "function") ? getSelection() : null; } catch (_) {}
+    if (!sel || sel.rangeCount === 0) return false;
+    var r = null;
+    try { r = sel.getRangeAt(0); } catch (_) { r = null; }
+    if (!r) return false;
+    var host = _wpt_editing_host_for_node(r.startContainer);
+    if (!host) return false;
+    if (!_wpt_dispatch_input_event(host, "beforeinput", "insertText", text)) return true;
+    try {
+        r.deleteContents();
+        var tn = document.createTextNode(text);
+        r.insertNode(tn);
+        sel.collapse(tn, text.length);
+    } catch (_) {
+        return false;
+    }
+    _wpt_dispatch_input_event(host, "input", "insertText", text);
+    return true;
+}
+
+function _wpt_type_printable_key(key) {
+    if (typeof key !== "string" || key.length !== 1) return false;
+    var ae = null;
+    try { ae = document.activeElement; } catch (_) {}
+    var tag = (ae && ae.tagName) ? String(ae.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+        return _wpt_insert_text_in_control(ae, key);
+    }
+    return _wpt_insert_text_in_document_selection(key);
+}
+
 
 // ---------------------------------------------------------------------------
 function _wpt_test_driver_click(elem) {
@@ -1182,6 +1286,8 @@ _WptActions.prototype.send = function() {
                     _wpt_dispatch_clipboard_event("copy");
                 } else if (modifier_held && (ks.key === "x" || ks.key === "X")) {
                     _wpt_dispatch_clipboard_event("cut");
+                } else if (!modifier_held) {
+                    _wpt_type_printable_key(ks.key);
                 }
             } else if (ks.type === "keyUp") {
                 if (ks.key === "\uE008") shift_held = false;

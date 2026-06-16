@@ -1208,7 +1208,13 @@ static Item js_input_event_snapshot_range(Item range) {
     return js_ctor_static_range_fn(init);
 }
 
-static Item js_input_event_static_target_ranges(Item target_ranges) {
+static void js_input_event_throw_dom_exception(const char* name, const char* message) {
+    Item err_name = (Item){.item = s2it(heap_create_name(name ? name : "InvalidStateError"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(message ? message : ""))};
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+static Item js_input_event_live_target_ranges(Item target_ranges) {
     Item ranges = js_array_new(0);
     if (get_type_id(target_ranges) != LMD_TYPE_ARRAY) return ranges;
 
@@ -1221,7 +1227,21 @@ static Item js_input_event_static_target_ranges(Item target_ranges) {
             range_type != LMD_TYPE_VMAP) {
             continue;
         }
-        js_array_push(ranges, js_input_event_snapshot_range(range));
+        const char* exc = nullptr;
+        Item live_range = js_dom_create_live_range_from_boundaries(
+            init_item(range, "startContainer"),
+            init_int(range, "startOffset", 0),
+            init_item(range, "endContainer"),
+            init_int(range, "endOffset", 0),
+            &exc);
+        if (live_range.item == ItemNull.item || js_check_exception()) {
+            if (!js_check_exception()) {
+                js_input_event_throw_dom_exception(exc ? exc : "InvalidStateError",
+                    "Invalid InputEvent targetRanges boundary");
+            }
+            return ranges;
+        }
+        js_array_push(ranges, live_range);
     }
     return ranges;
 }
@@ -1233,7 +1253,7 @@ extern "C" Item js_ctor_input_event_fn(Item type_arg, Item init_arg) {
     event_set_str(ev, "inputType", init_str(init_arg, "inputType", ""));
     event_set_bool(ev, "isComposing", init_bool(init_arg, "isComposing", false));
     event_set_item(ev, "dataTransfer", init_item(init_arg, "dataTransfer"));
-    Item target_ranges = js_input_event_static_target_ranges(init_item(init_arg, "targetRanges"));
+    Item target_ranges = js_input_event_live_target_ranges(init_item(init_arg, "targetRanges"));
     if (js_check_exception()) return make_js_undefined();
     js_input_event_install_target_ranges(ev, target_ranges);
     return ev;
@@ -1346,11 +1366,11 @@ extern "C" Item js_create_native_focus_event(const char* type, Item related_targ
     return ev;
 }
 
-// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1): StaticRange[]
-// list for `event.getTargetRanges()`. The snapshot is stashed on the event
-// at construction time as the hidden property `__target_ranges`. This
-// closure reads it back via `js_get_this()` — matching the existing
-// getModifierState pattern.
+// CE-3 follow-up (Radiant_Design_Content_Editable.md §6.1): Range-backed
+// target list for `event.getTargetRanges()`. Script-created InputEvents store
+// live Range wrappers so DOM mutations between construction and
+// getTargetRanges() are reflected as StaticRange snapshots. Native editing
+// events may also stash already-snapshotted StaticRange-shaped maps.
 static Item js_input_event_get_target_ranges(Item* args, int argc) {
     (void)args; (void)argc;
     Item ev = js_get_this();
