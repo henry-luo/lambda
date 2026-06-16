@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_exec_profile.h"
 
 // ============================================================================
 // Tune8 Phase 0 §1.3: opt-in emit telemetry
@@ -152,6 +153,7 @@ JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
 // ============================================================================
 
 MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
+    js_exec_profile_note_mir_call(fn_name);
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 0, NULL, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 3,
@@ -163,6 +165,7 @@ MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_typ
 
 MIR_reg_t jm_call_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[1] = {{a1t, "a", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 1, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -176,6 +179,7 @@ MIR_reg_t jm_call_1(JsMirTranspiler* mt, const char* fn_name,
 MIR_reg_t jm_call_2(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 2, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -189,6 +193,7 @@ MIR_reg_t jm_call_2(JsMirTranspiler* mt, const char* fn_name,
 MIR_reg_t jm_call_3(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 3, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -203,6 +208,7 @@ MIR_reg_t jm_call_4(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 4, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -217,6 +223,7 @@ MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 5, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -233,6 +240,7 @@ MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
     MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
     MIR_type_t a6t, MIR_op_t a6) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[6] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}, {a6t, "f", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 6, args, 1);
     MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
@@ -244,6 +252,7 @@ MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
 }
 
 void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name) {
+    js_exec_profile_note_mir_call(fn_name);
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 0, NULL, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 2,
         MIR_new_ref_op(mt->ctx, ie->proto),
@@ -252,6 +261,7 @@ void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name) {
 
 void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[1] = {{a1t, "a", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 1, args, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 3,
@@ -261,6 +271,7 @@ void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
 
 void jm_call_void_2(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[2] = {{a1t, "a", 0}, {a2t, "b", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 2, args, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 4,
@@ -271,6 +282,7 @@ void jm_call_void_2(JsMirTranspiler* mt, const char* fn_name,
 void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[3] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 3, args, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 5,
@@ -281,6 +293,7 @@ void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
 void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 4, args, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 6,
@@ -292,6 +305,7 @@ void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
     MIR_type_t a5t, MIR_op_t a5) {
+    js_exec_profile_note_mir_call(fn_name);
     MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
     JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, MIR_T_I64, 5, args, 0);
     jm_emit(mt, MIR_new_call_insn(mt->ctx, 7,

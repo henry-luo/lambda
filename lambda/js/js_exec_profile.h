@@ -1,0 +1,66 @@
+#pragma once
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum JsExecProfileEvent {
+    JS_EXEC_PROF_PROPERTY_GET = 0,
+    JS_EXEC_PROF_PROPERTY_SET,
+    JS_EXEC_PROF_PROPERTY_ACCESS,
+    JS_EXEC_PROF_ARRAY_GET_INT,
+    JS_EXEC_PROF_ARRAY_SET_INT,
+    JS_EXEC_PROF_ARRAY_PUSH,
+    JS_EXEC_PROF_CALL_FUNCTION,
+    JS_EXEC_PROF_DISPATCH_BUILTIN,
+    JS_EXEC_PROF_NEW_OBJECT,
+    JS_EXEC_PROF_NEW_OBJECT_SHAPE,
+    JS_EXEC_PROF_GET_SLOT_F,
+    JS_EXEC_PROF_GET_SLOT_I,
+    JS_EXEC_PROF_SET_SLOT_F,
+    JS_EXEC_PROF_SET_SLOT_I,
+    JS_EXEC_PROF_BOX_FLOAT,
+    JS_EXEC_PROF_UNBOX_INT,
+    JS_EXEC_PROF_UNBOX_FLOAT,
+    JS_EXEC_PROF_COERCE,
+    JS_EXEC_PROF_OTHER_RUNTIME_CALL,
+    JS_EXEC_PROF_EVENT_COUNT
+} JsExecProfileEvent;
+
+extern int g_js_exec_profile_mode;
+
+int js_exec_profile_mode(void);
+void js_exec_profile_reset(void);
+uint64_t js_exec_profile_enter(JsExecProfileEvent event);
+void js_exec_profile_leave(JsExecProfileEvent event, uint64_t token);
+void js_exec_profile_count(JsExecProfileEvent event);
+void js_exec_profile_note_mir_call(const char* fn_name);
+void js_exec_profile_dump(void);
+
+#ifdef __cplusplus
+}
+
+struct JsExecProfileScope {
+    JsExecProfileEvent event;
+    uint64_t token;
+
+    explicit JsExecProfileScope(JsExecProfileEvent ev) : event(ev), token(0) {
+        int mode = g_js_exec_profile_mode;
+        if (mode == 0) return;
+        if (mode < 0) mode = js_exec_profile_mode();
+        if (mode > 0) token = js_exec_profile_enter(event);
+    }
+
+    ~JsExecProfileScope() {
+        if (token != 0) js_exec_profile_leave(event, token);
+    }
+};
+
+#define JS_EXEC_PROFILE_CONCAT_INNER(a, b) a##b
+#define JS_EXEC_PROFILE_CONCAT(a, b) JS_EXEC_PROFILE_CONCAT_INNER(a, b)
+#define JS_EXEC_PROFILE_SCOPE(event_id) \
+    JsExecProfileScope JS_EXEC_PROFILE_CONCAT(_js_exec_profile_scope_, __LINE__)(event_id)
+
+#endif
