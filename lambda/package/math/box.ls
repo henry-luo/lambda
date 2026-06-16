@@ -108,8 +108,25 @@ fn text_depth(text) {
     else if (text == "x") 0.0
     else if (text == "o") 0.0
     else if (text == "," or text == ";") 0.19
-    else if (text == "y") 0.19
+    // For single-character text: descender letters get 0.19. For multi-char
+    // strings (operator names like "log", "lim sup"), check whether any
+    // descender appears; if so use 0.19. MathLive's cmr/cmmi font metrics
+    // give descender chars (g/j/p/q/y/f, plus Q) depth ≈ 0.19444.
+    else if (text_has_descender(text)) 0.19
     else 0.08
+}
+
+fn text_has_descender(text) {
+    has_descender_at(text, 0)
+}
+
+fn has_descender_at(text, i) {
+    if (i >= len(text)) false
+    else
+        (let ch = slice(text, i, i + 1),
+         if (ch == "g" or ch == "j" or ch == "p" or ch == "q" or
+             ch == "y" or ch == "f" or ch == "Q") true
+         else has_descender_at(text, i + 1))
 }
 
 fn is_number_text(text) {

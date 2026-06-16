@@ -240,17 +240,21 @@ fn render_command(node, context) {
 }
 
 fn render_limit_operator_symbol(text, context) {
-    let op_size = if (ctx.is_display(context)) "lm_large-op" else "lm_small-op"
+    // MathLive consistently uses lm_large-op for top-level big operators
+    // (\\sum, \\int, \\prod, etc.) regardless of inline vs display mode.
+    // Only nested/script-style contexts demote to small-op.
+    let use_large = ctx.is_display(context) or not ctx.is_script(context)
+    let op_size = if (use_large) "lm_large-op" else "lm_small-op"
     let op_cls = css.classes(["lm_op-symbol", op_size])
     {
         element: <span class: css.OP_GROUP;
             <span class: op_cls; text>
         >,
-        height: if (ctx.is_display(context)) 1.61 else 0.9,
-        depth: if (ctx.is_display(context)) 0.2 else 0.1,
-        render_height: if (ctx.is_display(context)) 1.61 else 0.9,
-        render_depth: if (ctx.is_display(context)) 0.2 else 0.1,
-        render_total: if (ctx.is_display(context)) 1.81 else 1.0,
+        height: if (use_large) 1.61 else 0.9,
+        depth: if (use_large) 0.2 else 0.1,
+        render_height: if (use_large) 1.61 else 0.9,
+        render_depth: if (use_large) 0.2 else 0.1,
+        render_total: if (use_large) 1.81 else 1.0,
         width: 0.6,
         type: "mop",
         italic: 0.0,
