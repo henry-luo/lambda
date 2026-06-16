@@ -37,7 +37,9 @@ let bin_operators = {
     oslash: "⊘", odot: "⊙", dagger: "†", ddagger: "‡",
     cap: "∩", cup: "∪", sqcap: "⊓", sqcup: "⊔",
     vee: "∨", wedge: "∧", setminus: "∖", wr: "≀",
-    amalg: "⨿", land: "∧", lor: "∨"
+    amalg: "⨿", land: "∧", lor: "∨",
+    // AMS binary operators (boxed family)
+    boxplus: "⊞", boxtimes: "⊠", boxminus: "⊟", boxdot: "⊡"
 }
 
 // ============================================================
@@ -55,7 +57,10 @@ let relations = {
     mid: "∣", parallel: "∥", perp: "⊥",
     propto: "∝", asymp: "≍", bowtie: "⋈",
     ll: "≪", gg: "≫", doteq: "≐",
-    trianglelefteq: "⊴", trianglerighteq: "⊵"
+    trianglelefteq: "⊴", trianglerighteq: "⊵",
+    // AMS relations
+    preceq: "⪯", succeq: "⪰", nmid: "∤",
+    nleq: "≰", ngeq: "≱"
 }
 
 // ============================================================
@@ -72,7 +77,18 @@ let arrows = {
     hookrightarrow: "↪", hookleftarrow: "↩",
     mapsto: "↦", longmapsto: "⟼",
     nearrow: "↗", nwarrow: "↖", searrow: "↘", swarrow: "↙",
-    to: "→", gets: "←", implies: "⟹", iff: "⟺"
+    to: "→", gets: "←", implies: "⟹", iff: "⟺",
+    // AMS arrows
+    twoheadleftarrow: "↞", twoheadrightarrow: "↠",
+    leftleftarrows: "⇇", rightrightarrows: "⇉",
+    leftrightarrows: "⇆", rightleftarrows: "⇄",
+    upuparrows: "⇈", downdownarrows: "⇊",
+    Lleftarrow: "⇚", Rrightarrow: "⇛",
+    looparrowleft: "↫", looparrowright: "↬",
+    curvearrowleft: "↶", curvearrowright: "↷",
+    leftharpoonup: "↼", rightharpoonup: "⇀",
+    leftharpoondown: "↽", rightharpoondown: "⇁",
+    rightsquigarrow: "⇝", leftrightsquigarrow: "↭"
 }
 
 // ============================================================
