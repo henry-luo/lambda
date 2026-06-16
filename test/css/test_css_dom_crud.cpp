@@ -1139,24 +1139,24 @@ TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
 TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     DomElement* parent = create_dom_element("div");
 
-    // Start with non-empty string
+    // start with non-empty string
     DomText* text = dom_element_append_text(parent, "Initial");
     ASSERT_NE(text, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text));
 
-    // Update to single space (empty strings become "lambda.nil" in MarkBuilder)
-    EXPECT_TRUE(dom_text_set_content(text, " "));
+    // update to an actual empty DOM string
+    EXPECT_TRUE(dom_text_set_content(text, ""));
 
-    // Verify DomText updated
-    EXPECT_STREQ(text->text, " ");
-    EXPECT_EQ(text->length, 1u);
+    // verify DomText updated
+    EXPECT_STREQ(text->text, "");
+    EXPECT_EQ(text->length, 0u);
 
-    // Verify Lambda String updated
+    // verify Lambda String updated
     Item child = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
     String* str = child.get_string();
-    EXPECT_EQ(str->len, 1u);
-    EXPECT_STREQ(str->chars, " ");
+    EXPECT_EQ(str->len, 0u);
+    EXPECT_STREQ(str->chars, "");
 }
 
 TEST_F(DomIntegrationTest, DomText_LongString_Backed) {

@@ -527,11 +527,12 @@ static Item js_dom_testdriver_key(Item key_item,
     bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
     if (ok && mutated && _js_current_document) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
+        js_dom_queue_selectionchange(state->dom_selection);
     }
     log_debug("js_dom_testdriver_key: key=%u inputType=%s ok=%d prevented=%d mutated=%d",
               wpt_key, input_intent_type_name(intent.type),
               ok ? 1 : 0, prevented ? 1 : 0, mutated ? 1 : 0);
-    return (Item){.item = b2it(ok)};
+    return (Item){.item = b2it(ok && (prevented || mutated))};
 }
 
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
