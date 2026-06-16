@@ -986,7 +986,7 @@ function _wpt_dispatch_input_event(target, type, inputType, data) {
 }
 
 function _wpt_dispatch_plain_event(target, type) {
-    if (!target || typeof target.dispatchEvent !== "function") return true;
+    if (!target) return true;
     var ev = null;
     try {
         ev = new Event(type, {
@@ -1347,6 +1347,33 @@ function _wpt_actions_event_target(node) {
     return node.nodeType === 3 ? node.parentNode : node;
 }
 
+function _wpt_actions_text_control(node) {
+    if (!node || node.nodeType !== 1 || !node.tagName) return null;
+    var tag = "";
+    try { tag = String(node.tagName).toUpperCase(); } catch (_) {}
+    return (tag === "INPUT" || tag === "TEXTAREA") ? node : null;
+}
+
+function _wpt_actions_text_control_offset_for_x(el, x) {
+    var value = "";
+    try { value = el.value || ""; } catch (_) {}
+    var len = value.length || 0;
+    if (len <= 0) return 0;
+
+    var rect = null;
+    try { rect = el.getBoundingClientRect(); } catch (_) { rect = null; }
+    if (rect) {
+        var left = Number(rect.left !== undefined ? rect.left : rect.x);
+        var width = Number(rect.width);
+        if (width > 0) {
+            var rel = Math.max(0, Math.min(width, x - left));
+            return Math.max(0, Math.min(len, Math.round((rel / width) * len)));
+        }
+    }
+
+    return x <= 0 ? 0 : len;
+}
+
 function _wpt_actions_dispatch_mouse_pair(target, pointer_type, mouse_type,
                                           button, buttons, mods) {
     if (!target || typeof target.dispatchEvent !== "function") return true;
@@ -1462,6 +1489,9 @@ _WptActions.prototype.send = function() {
     var down_button = 0;
     var down_default_allowed = false;
     var down_open = false;
+    var down_text_control = null;
+    var down_text_start = 0;
+    var text_select_fired = false;
     var saw_drag_move = false;
     var shift_ptr = false;
     var ctrl_ptr = false;
@@ -1486,7 +1516,21 @@ _WptActions.prototype.send = function() {
             current_x = st.x || 0;
             current_y = st.y || 0;
             if (st.node) current_origin = st.node;
-            if (down_open && st.node && st.node !== down_anchor) {
+            if (down_open && down_text_control && st.node === down_text_control &&
+                down_default_allowed && down_button === this.ButtonType.LEFT) {
+                saw_drag_move = true;
+                var text_end = _wpt_actions_text_control_offset_for_x(
+                    down_text_control, current_x);
+                if (text_end !== down_text_start) {
+                    var sel_start = Math.min(down_text_start, text_end);
+                    var sel_end = Math.max(down_text_start, text_end);
+                    try { down_text_control.setSelectionRange(sel_start, sel_end); } catch (_) {}
+                    if (!text_select_fired) {
+                        text_select_fired = true;
+                        _wpt_dispatch_plain_event(down_text_control, "select");
+                    }
+                }
+            } else if (down_open && st.node && st.node !== down_anchor) {
                 saw_drag_move = true;
                 if (down_button === this.ButtonType.LEFT && down_default_allowed) {
                     _wpt_actions_set_selection(down_anchor, st.node, "extend");
@@ -1507,9 +1551,21 @@ _WptActions.prototype.send = function() {
                 target, "pointerdown", "mousedown", down_button, buttons, mods_ptr);
             down_default_allowed = allowed;
             if (allowed && down_anchor) {
+                var event_target = _wpt_actions_event_target(down_anchor);
+                var text_control = _wpt_actions_text_control(event_target);
+                if (text_control && down_button === this.ButtonType.LEFT) {
+                    down_text_control = text_control;
+                    down_text_start = _wpt_actions_text_control_offset_for_x(
+                        text_control, current_x);
+                    text_select_fired = false;
+                    try { text_control.focus(); } catch (_) {}
+                    try {
+                        text_control.setSelectionRange(down_text_start, down_text_start);
+                    } catch (_) {}
+                    continue;
+                }
                 var host = _wpt_actions_editing_host(down_anchor);
                 try { if (host && typeof host.focus === "function") host.focus(); } catch (_) {}
-                var event_target = _wpt_actions_event_target(down_anchor);
                 var tag = event_target && event_target.tagName ? String(event_target.tagName).toUpperCase() : "";
                 if (shift_ptr && tag !== "A" && down_button !== this.ButtonType.RIGHT) {
                     _wpt_actions_set_selection(down_anchor, down_anchor, "extend");
@@ -1539,6 +1595,9 @@ _WptActions.prototype.send = function() {
             down_default_allowed = false;
             down_spin_target = null;
             down_spin_delta = 0;
+            down_text_control = null;
+            down_text_start = 0;
+            text_select_fired = false;
             down_anchor = null;
         }
     }

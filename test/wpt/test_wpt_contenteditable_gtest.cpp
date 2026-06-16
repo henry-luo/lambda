@@ -461,7 +461,8 @@ static WptCeResult run_ce_case(const WptCeParam& p) {
         p.html_path.find("input-events-arrow-key-on-number-input") != std::string::npos ||
         p.html_path.find("input-events-spin-button-click-on-number-input") != std::string::npos ||
         p.html_path.find("input-events-delete-selection") != std::string::npos ||
-        p.html_path.find("input-events-get-target-ranges-during-and-after-dispatch") != std::string::npos;
+        p.html_path.find("input-events-get-target-ranges-during-and-after-dispatch") != std::string::npos ||
+        p.html_path.find("select-event-drag-remove") < p.html_path.size();
     if (!is_crash_test && !supported_testdriver_case &&
         (html.find("testdriver") != std::string::npos ||
          html.find("test_driver") != std::string::npos)) {

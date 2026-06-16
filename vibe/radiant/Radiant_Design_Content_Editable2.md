@@ -151,7 +151,7 @@ control focus/selection semantics are covered by the selection runner.
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
 | `test_wpt_selection_gtest` | 159 | 97 pass / 62 skip / 0 fail | SI-3/SI-5 converted nine `testdriver` selectionchange/click-direction/mouse-button cases from skip to pass |
-| `test_wpt_contenteditable_gtest` | 196 | 164 pass / 32 skip / 0 fail | SI-1/SI-2/SI-7/SI-8 converted nine `testdriver` input-event cases from skip to pass |
+| `test_wpt_contenteditable_gtest` | 196 | 165 pass / 31 skip / 0 fail | SI-1/SI-2/SI-7/SI-8/SI-9 converted ten `testdriver` input/pointer cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
 plus the live WPT guards listed in §5.1.
@@ -333,6 +333,21 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   dispatcher exposes callable DOM methods through the property bridge even
   when `typeof` reports a non-function value.
 
+**SI-9 — text-control drag-select pointer slice: LANDED (2026-06-16).**
+
+- Enabled `input-events/select-event-drag-remove.html`; the drag-select case
+  now passes its single assertion and no longer remains behind the Phase SI
+  synthetic-input skip.
+- Extended the WPT `test_driver.Actions` shim for left-button drags over
+  `<input>` and `<textarea>` controls: pointer down focuses the control and
+  anchors its native selection; pointer move maps the x coordinate to a
+  text-control selection range, calls `setSelectionRange()`, and dispatches a
+  `select` event. The target may be removed by that `select` handler, matching
+  the WPT crash-regression shape.
+- Relaxed the plain-event helper so it calls the native DOM bridge's
+  `dispatchEvent` directly instead of depending on `typeof` reporting a
+  JavaScript function.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
@@ -356,25 +371,27 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `input-events-spin-button-click-on-number-input` | 1/1 passed |
 | `input-events-spin-button-click-on-number-input-prevent-default` | 1/1 passed |
 | `input-events-spin-button-click-on-number-input-delete-document` | 1/1 passed |
+| `select-event-drag-remove` | 1/1 passed |
 | `input-events-get-target-ranges-backspace.tentative` | measured 26/163; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
-| focused WPT test rebuilds | `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` rebuilt |
-| `test_wpt_contenteditable_gtest` | 196 cases: 164 pass / 32 skip / 0 fail |
+| focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
+| `test_wpt_contenteditable_gtest` | 196 cases: 165 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
 | `test_js_gtest` | 196 passed / 0 failed |
 | `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-8's local WPT/JS guards and the mandatory §1.1
+**Global gate note:** SI-9's local WPT/JS guards and the mandatory §1.1
 JavaScript regression gate are green. The broader SI phase can keep advancing
 from the remaining skipped deletion/pointer matrices without carrying a global
 gate blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
-number spin-key, number spin-button, and pointer subset: remaining
-`getTargetRanges` deletion matrices (starting with the measured Backspace
-blockers), broader text-control delete coverage, and general pointer
-drag/hit-test injection outside the contenteditable mouse-button files.
+number spin-key, number spin-button, and text-control drag-select pointer
+subset: remaining `getTargetRanges` deletion matrices (starting with the
+measured Backspace blockers), broader text-control delete coverage, and richer
+pointer drag/hit-test injection outside the newly enabled text-control and
+contenteditable mouse-button files.
 
 ---
 
