@@ -103,11 +103,28 @@ fn text_height(text) {
         text == "z") 0.44
     // Descender letters with short upper body (cmmi height 0.43)
     else if (text == "g" or text == "y") 0.44
-    else if (text == "α") 0.69
+    else if (text == "α") 0.44
     else if (text == "Γ" or text == "Δ" or text == "Θ" or text == "Λ" or
              text == "Π" or text == "Σ" or text == "Υ" or text == "Φ" or
              text == "Ψ" or text == "Ω") 0.69
     else if (text == "+" or text == "−") 0.69
+    // Mid-height math operators (cmsy/cmr metrics ≈ 0.55-0.63em)
+    else if (text == "⋅" or text == "∗" or text == "⋆" or text == "∘" or
+             text == "∙" or text == "⋄") 0.55
+    // X-height symbols (cmr/cmsy ≈ 0.44em)
+    else if (text == "∞" or text == "∝") 0.44
+    // Relations: cmsy M68/M80 metrics ≈ 0.64em
+    else if (text == "≤" or text == "≥" or text == "≪" or text == "≫" or
+             text == "≺" or text == "≻" or text == "⪯" or text == "⪰" or
+             text == "<" or text == ">") 0.64
+    // Horizontal arrows: cmr metric M12 = [-0.13, 0.37, ...] — height 0.37
+    else if (text == "→" or text == "←" or text == "↔" or
+             text == "⇒" or text == "⇐" or text == "⇔" or
+             text == "⟶" or text == "⟵" or text == "⟷" or
+             text == "⟹" or text == "⟸" or text == "⟺" or
+             text == "↦" or text == "⟼" or
+             text == "↪" or text == "↩" or
+             text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.37
     else if (text == "■" or text == "▲") 0.68
     else if (is_number_text(text)) 0.65
     else if (text_has_tall_delim(text)) 0.75 else met.DEFAULT_CHAR_HEIGHT
@@ -120,6 +137,20 @@ fn text_depth(text) {
     // For descender letters (g/j/p/q/y/f/Q, plus multi-char strings like
     // "log"/"lim sup"), use cmmi descent ≈ 0.19444.
     else if (text_has_descender(text)) 0.19
+    // Vertical arrows have descent 0.19 in MathLive's cmsy metrics.
+    else if (text == "↑" or text == "↓" or text == "↕" or
+             text == "⇑" or text == "⇓" or text == "⇕") 0.19
+    // Horizontal arrows have NEGATIVE depth -0.13 in cmr (M12) — they sit
+    // entirely above the baseline. The bottom strut accommodates this with
+    // a positive vertical-align (height:h+d = 0.37+(-0.13) = 0.24em,
+    // vertical-align:-d = 0.13em).
+    else if (text == "→" or text == "←" or text == "↔" or
+             text == "⇒" or text == "⇐" or text == "⇔" or
+             text == "⟶" or text == "⟵" or text == "⟷" or
+             text == "⟹" or text == "⟸" or text == "⟺" or
+             text == "↦" or text == "⟼" or
+             text == "↪" or text == "↩" or
+             text == "↗" or text == "↖" or text == "↘" or text == "↙") 0.0 - 0.14
     // Binary operators that have depth in MathLive's cmr metrics
     // (+, −, ÷, ×, =, <, >, etc. have depth ≈ 0.08319).
     else if (is_operator_with_depth(text)) 0.08
@@ -136,7 +167,9 @@ fn is_operator_with_depth(text) {
     if (len(text) != 1) false
     else
         text == "+" or text == "−" or text == "-" or
-        text == "<" or text == ">" or text == "*" or text == "/"
+        text == "<" or text == ">" or text == "*" or text == "/" or
+        // Circled operators (cmsy) — observed MathLive output has -0.08em va
+        text == "⊕" or text == "⊗" or text == "⊙" or text == "⊖" or text == "⊘"
 }
 
 fn text_has_descender(text) {

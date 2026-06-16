@@ -149,7 +149,14 @@ fn render_operator(node, context) {
 
 fn render_relation(node, context) {
     let text = get_text(node)
-    box.text_box(text, css.CMR, "mrel")
+    // If this is a command-form relation (e.g., \uparrow, \downarrow), look
+    // up its Unicode glyph. The grammar tokenizes these as relation nodes
+    // rather than commands, so render_command's symbol lookup isn't invoked.
+    let display = if (len(text) > 0 and slice(text, 0, 1) == "\\") {
+        let unicode = sym.lookup_symbol(text)
+        if (unicode != null) unicode else text
+    } else text
+    box.text_box(display, css.CMR, "mrel")
 }
 
 fn render_punct(node, context) {
