@@ -153,4 +153,4 @@ Async-flagged tests rely on test262's `doneprintHandle.js` calling a host `$DONE
 - [JS_09 — Async, Promises, Event Loop & Modules](JS_09_Async_Modules.md) — event-loop drain behind the `$DONE` runner.
 - [JS_11 — RegExp](JS_11_RegExp.md) — the backtracking matcher exercised by `test_js_bt_regex_gtest`.
 - [JS_14 — Node Compatibility](JS_14_Node_Compat.md) — Node-API semantics covered by the official-test harness.
-- [JS_15 — Performance & Optimization](JS_15_Performance.md) — fast paths verified by diagnose mode; the timing benchmark.
+- [JS_15 — Performance & Optimization](JS_15_Performance.md) — fast paths verified by diagnose mode; the `test/benchmark/` performance suites and the current as-shipped JS pass rate (≈83%, §7), an additional broad real-world correctness signal beyond test262/Node/GTest.

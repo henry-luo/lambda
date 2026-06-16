@@ -102,6 +102,53 @@ Caching compiled output across repeated compiles (the web-template suite recompi
 
 ---
 
+## 7. Benchmark suite & current JS pass rate
+
+LambdaJS's primary performance test is the multi-suite benchmark harness under `test/benchmark/`. It doubles as a broad real-world correctness check: each suite is a set of standard JavaScript programs (ported from the V8/AWFY/Octane and Scheme R7RS/Larceny corpora, plus the Benchmarks-Game and kostya cross-language sets) that a conformant engine should run to completion and — where the program self-verifies — produce the correct result. The historical performance ratios versus V8 are in [§4](#4-benchmark-results-vs-v8node-development-time); this section records the *current, as-shipped* run on the release engine.
+
+### 7.1 Suites and how Lambda JS runs them
+
+Invocation is `./lambda.exe js <file>` from the repo root (the engine exposes `console.log`, `process`, `process.stdout.write`, `process.hrtime.bigint()`, and `performance.now()`; it does NOT expose `require`, `load`, `read`, `gc`, or `window`, which is why the modular `*2.js` AWFY form and the stock Octane drivers do not run as-shipped). The master driver `test/benchmark/run_benchmarks.py` compares LambdaJS against Node/QuickJS/CPython and the Lambda `.ls` path; the per-suite `run_bench.py` scripts drive the non-JS engines; `test/benchmark/jetstream/run_jetstream_ljs.py` is the JS-on-LambdaJS JetStream runner; result snapshots live in `test/benchmark/Overall_Result*.md`.
+
+| Suite | What it is | JS form run under Lambda JS | Pass criterion |
+|---|---|---|---|
+| awfy | Are-We-Fast-Yet micro + macro | self-contained `*2_bundle.js` (the `*2.js` form uses Node `require`) | self-prints `<Name>: PASS/FAIL` from `verifyResult()` |
+| r7rs | Scheme-derived micro | self-contained `*2.js` with a `main()` | self-prints `<name>: PASS` against a hardcoded checksum |
+| larceny | Larceny/Gambit Scheme ports | plain self-contained `*.js` | checksum `PASS/FAIL` (2 print only `DONE`/nothing) |
+| kostya | kostya cross-language set | self-contained `*.js` | checksum `PASS/FAIL` (2 print only `DONE`/nothing) |
+| beng | Benchmarks Game | self-contained `beng/js/*.js` | none built in — compute + `console.log` only (pass = ran to completion) |
+| octane | V8 Octane | each file only registers a `BenchmarkSuite`; needs a synchronous driver (none ships for Lambda JS) | internal `throw` on checksum mismatch |
+| jetstream | JetStream subset | `run_jetstream_ljs.py` strips the trailing `class Benchmark {}` and appends a timing loop | ran-to-completion (only crypto-md5 self-checks a result) |
+
+### 7.2 Current pass rate (release build `lambda.exe`, 2026-06-16)
+
+Measured on the `make release` build. "Verified" means the benchmark self-checked a result/checksum; "ran-only" means it completed without error but the program has no built-in result check (so it confirms "executes without error", not "verified correct").
+
+| Suite | Pass / total | Quality | Failures |
+|---|---:|---|---|
+| awfy | 11 / 14 | verified | bounce FAIL; havlak, cd timeout |
+| r7rs | 10 / 10 | verified | — |
+| larceny | 12 / 12 | verified (gcbench, pnpoly ran-only) | — |
+| kostya | 6 / 7 | verified (brainfuck, matmul ran-only) | levenshtein FAIL |
+| beng | 10 / 10 | ran-only (no self-check) | — |
+| octane | 2 / 6 | checksum-throw (custom driver) | box2d FAIL; pdfjs, typescript error; earley-boyer timeout |
+| jetstream | 9 / 13 | ran-to-completion | crypto-md5 wrong result; navier-stokes, hashmap, raytrace3d timeout |
+| **Overall** | **60 / 72 (≈83%)** | — | **not 100%** |
+
+Caveats: Octane needs a hand-rolled synchronous driver because no in-repo Lambda-JS Octane runner exists (under the stricter "runnable as shipped" reading, Octane is effectively 0/6); roughly a third of the passes are "ran-only", confirming execution but not result correctness; and timeouts are single-run wall-time, so a heavy macro-benchmark that is merely very slow on this machine is not distinguished from one that hangs.
+
+### 7.3 Failures (open correctness bugs & gaps)
+
+The wrong-result cases are the most actionable — they are real correctness bugs the benchmark's own verification caught, independent of timing:
+
+- **Wrong result (correctness bug).** `awfy/bounce` computes 1331-expected as **1321** (an off-by-10 in the `Ball.bounce()` boundary arithmetic; the RNG, `%`, `&`, and loop iteration each verify bit-identical to Node in isolation). `kostya/levenshtein` returns the wrong edit distance on the cost-0 (matching-character) DP path, isolating to the `Int32Array` prev/curr ping-pong inside the hot loop (a likely JIT bug). `jetstream/crypto-md5` produces the wrong MD5 digest. `octane/box2d` throws `Cannot read properties of null (reading 'x')`.
+- **Feature gap / late error.** `octane/pdfjs` runs ~80 s then throws `Promise resolver is not a function` — the `Promise` constructor does not invoke the executor callback (see [JS_09 — Async & Modules](JS_09_Async_Modules.md)). `octane/typescript` runs ~83 s then throws `... is not a function` (a missing builtin on the TS-compiler path).
+- **Timeout (heavy/slow or hung).** `awfy/havlak`, `awfy/cd`, `octane/earley-boyer`, `jetstream/navier-stokes`, `jetstream/hashmap`, `jetstream/raytrace3d` exceeded the run cutoff (45–120 s) — historically the engine's hardest macro-benchmarks, where the float-boxing and polymorphic-dispatch gaps in [§5](#5-open-performance-gaps--regressions) bite hardest.
+
+These benchmark failures are tracked as future-improvement work alongside the performance gaps below; the four wrong-result cases in particular are correctness defects, not timing artifacts.
+
+---
+
 ## Known Issues & Future Improvements
 
 Still-open performance work, distilled from the logs:
