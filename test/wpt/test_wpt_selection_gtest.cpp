@@ -331,6 +331,7 @@ static std::string execute_js_with_doc(const char* js_path, const char* html_pat
 struct WptSelectionParam {
     std::string html_path;
     std::string test_name;
+    std::string variant_query;
     bool        skip;
 };
 
@@ -387,6 +388,70 @@ static std::string now_timestamp() {
     return std::string(buf);
 }
 
+static void add_selection_param(std::vector<WptSelectionParam>& params,
+                                const std::string& path,
+                                const std::string& rel_base,
+                                const std::string& variant_query) {
+    WptSelectionParam p;
+    p.html_path = path;
+    p.test_name = rel_base;
+    if (!variant_query.empty()) {
+        p.test_name += "_";
+        p.test_name += variant_query.substr(1);
+    }
+    for (auto& c : p.test_name) {
+        if (!isalnum((unsigned char)c)) c = '_';
+    }
+    p.variant_query = variant_query;
+    p.skip = should_skip(rel_base);
+    params.push_back(p);
+}
+
+static void append_variant_params(std::vector<WptSelectionParam>& params,
+                                  const std::string& path,
+                                  const std::string& rel_base) {
+    std::string html = read_file_contents(path.c_str());
+    bool found_variant = false;
+    size_t pos = 0;
+    while (pos < html.size()) {
+        size_t tag_start = html.find("<meta", pos);
+        if (tag_start == std::string::npos) break;
+        size_t tag_end = html.find('>', tag_start);
+        if (tag_end == std::string::npos) break;
+        std::string tag = html.substr(tag_start, tag_end - tag_start + 1);
+        std::string name = extract_attr(tag, "name");
+        if (name == "variant") {
+            std::string content = extract_attr(tag, "content");
+            if (!content.empty()) {
+                add_selection_param(params, path, rel_base, content);
+                found_variant = true;
+            }
+        }
+        pos = tag_end + 1;
+    }
+    if (!found_variant) {
+        add_selection_param(params, path, rel_base, "");
+    }
+}
+
+static std::string js_string_escape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (char ch : text) {
+        if (ch == '\\' || ch == '"') {
+            out += '\\';
+            out += ch;
+        } else if (ch == '\n') {
+            out += "\\n";
+        } else if (ch == '\r') {
+            out += "\\r";
+        } else {
+            out += ch;
+        }
+    }
+    return out;
+}
+
 // Recursively scan `dir` for *.html test files. `rel_prefix` is the path
 // relative to WPT_DIR (empty at the top level) and becomes part of the test
 // name, so nested cases (e.g. contenteditable/collapse) stay unique and
@@ -433,14 +498,7 @@ static void scan_selection_dir(const std::string& dir,
         if (rel_base.size() > 4 &&
             rel_base.substr(rel_base.size() - 4) == "-ref") continue;
 
-        WptSelectionParam p;
-        p.html_path = dir + "/" + name;
-        p.test_name = rel_base;
-        for (auto& c : p.test_name) {
-            if (!isalnum((unsigned char)c)) c = '_';
-        }
-        p.skip = should_skip(rel_base);
-        params.push_back(p);
+        append_variant_params(params, dir + "/" + name, rel_base);
 
 #ifdef _WIN32
     } while (_findnext(handle, &fd) == 0);
@@ -494,6 +552,18 @@ static WptSelectionResult run_selection_case(const WptSelectionParam& p) {
         result.failures.push_back("Could not read test file: " + p.html_path);
         return result;
     }
+    if (html.find("rel=\"match\"") != std::string::npos ||
+        html.find("rel=match") != std::string::npos ||
+        html.find("rel='match'") != std::string::npos) {
+        result.skipped = true;
+        result.skip_reason = "Reftest requires visual comparison: " + p.html_path;
+        return result;
+    }
+    if (html.find("testdriver") != std::string::npos) {
+        result.skipped = true;
+        result.skip_reason = "Requires WPT testdriver synthetic input: " + p.html_path;
+        return result;
+    }
 
     std::string scripts = extract_inline_scripts(html, WPT_DIR);
     if (scripts.empty()) {
@@ -512,7 +582,14 @@ static WptSelectionResult run_selection_case(const WptSelectionParam& p) {
 
     // Compose: shim + extracted scripts + onload simulation + summary.
     scripts += extract_local_iframe_helper_scripts(scripts, WPT_DIR);
-    std::string combined = shim + "\n" + scripts +
+    std::string variant_preamble;
+    if (!p.variant_query.empty()) {
+        variant_preamble =
+            "history.replaceState(null, \"\", \"" +
+            js_string_escape(p.variant_query) +
+            "\");\n";
+    }
+    std::string combined = shim + "\n" + variant_preamble + scripts +
                            "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
     std::string temp_js = std::string(TEMP_DIR) + "/wpt_selection_" + p.test_name + ".js";

@@ -246,7 +246,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         if (existing) {
             // v15: In generators, preserve env slot info from hoisted variables
             if (mt->in_generator && existing->from_env &&
-                (existing_in_target_scope || existing->tdz_active)) {
+                (existing_in_target_scope || existing->tdz_active || existing->from_hoist)) {
                 entry.var.from_env = true;
                 entry.var.env_slot = existing->env_slot;
                 entry.var.env_reg = existing->env_reg;
@@ -263,7 +263,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                 entry.var.from_catch_param = true;
             }
             if (existing->in_scope_env &&
-                (existing_in_target_scope || existing->tdz_active)) {
+                (existing_in_target_scope || existing->tdz_active || existing->from_hoist)) {
                 entry.var.in_scope_env = true;
                 entry.var.scope_env_slot = existing->scope_env_slot;
                 entry.var.scope_env_reg = existing->scope_env_reg;

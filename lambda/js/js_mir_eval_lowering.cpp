@@ -1686,9 +1686,13 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         // whose JIT pointers must remain valid, and string literals from the
         // name_pool/ast_pool may be captured by variables or closures.
         jm_defer_mir_cleanup(eval_ctx);
-        // Do NOT destroy the transpiler eagerly — its name_pool backs string
-        // literals that may still be referenced.  Cleanup at program exit.
-        // js_transpiler_destroy(tp);
+        if (module_mir_context_count > 0) {
+            module_mir_name_pools[module_mir_context_count - 1] = tp->name_pool;
+            module_mir_ast_pools[module_mir_context_count - 1] = tp->ast_pool;
+        }
+        tp->name_pool = NULL;
+        tp->ast_pool = NULL;
+        js_transpiler_destroy(tp);
 
         return result;
     }

@@ -1466,6 +1466,7 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, binding_reg),
                         MIR_new_reg_op(mt->ctx, fn_reg)));
+                    jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
                 }
             }
         }

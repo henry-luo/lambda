@@ -9,6 +9,7 @@
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "../../lib/lambda_typed.hpp"
+#include "../../lib/gc/gc_heap.h"
 
 extern "C" Item js_to_property_key(Item key);
 extern __thread EvalContext* context;
@@ -123,7 +124,9 @@ struct JsGlobalVarModuleBinding {
     int index;
 };
 
-static JsGlobalVarModuleBinding js_global_var_module_bindings[512];
+#define JS_GLOBAL_VAR_MODULE_BINDING_CAP 512
+
+static JsGlobalVarModuleBinding js_global_var_module_bindings[JS_GLOBAL_VAR_MODULE_BINDING_CAP];
 static int js_global_var_module_binding_count = 0;
 static uint64_t js_global_var_module_binding_epoch = 0;
 static Item js_global_var_module_binding_global = {0};
@@ -162,10 +165,34 @@ extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
             return;
         }
     }
-    if (js_global_var_module_binding_count >= 512) return;
+    if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
     js_global_var_module_bindings[js_global_var_module_binding_count].key = key;
     js_global_var_module_bindings[js_global_var_module_binding_count].index = (int)index;
     js_global_var_module_binding_count++;
+}
+
+extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
+        const int* indices, int count) {
+    js_global_var_binding_refresh();
+    if (!keys || !indices || count <= 0) return;
+    for (int i = 0; i < count; i++) {
+        Item key = keys[i];
+        int index = indices[i];
+        if (get_type_id(key) != LMD_TYPE_STRING || index < 0) continue;
+        bool updated = false;
+        for (int j = 0; j < js_global_var_module_binding_count; j++) {
+            if (js_global_var_binding_key_same(js_global_var_module_bindings[j].key, key)) {
+                js_global_var_module_bindings[j].index = index;
+                updated = true;
+                break;
+            }
+        }
+        if (updated) continue;
+        if (js_global_var_module_binding_count >= JS_GLOBAL_VAR_MODULE_BINDING_CAP) return;
+        js_global_var_module_bindings[js_global_var_module_binding_count].key = key;
+        js_global_var_module_bindings[js_global_var_module_binding_count].index = index;
+        js_global_var_module_binding_count++;
+    }
 }
 
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
@@ -3415,6 +3442,13 @@ extern "C" Item js_property_get(Item object, Item key) {
         proxy_key = true;
     }
     if (js_key_is_symbol(key) && !proxy_key) key = js_symbol_to_key(key);
+    {
+        extern int js_is_window_event_global_property(Item object, Item key);
+        extern Item js_get_window_event_global_value(void);
+        if (js_is_window_event_global_property(object, key)) {
+            return js_get_window_event_global_value();
+        }
+    }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
         if (private_key && private_key->len > 10 &&
@@ -5078,6 +5112,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
     // Convert Symbol keys to unique string keys for property storage
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+
+    {
+        extern int js_is_window_event_global_property(Item object, Item key);
+        extern void js_set_window_event_global_value(Item value);
+        if (js_is_window_event_global_property(object, key)) {
+            js_set_window_event_global_value(value);
+            return value;
+        }
+    }
 
     // Phase 4 intercept: if `key` matches __get_X / __set_X marker pattern,
     // route through `js_define_accessor_partial` to merge into a JsAccessorPair
@@ -12263,6 +12306,30 @@ struct JsRegexData {
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
 };
+
+extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native) {
+    if (!map) return;
+    Item obj = (Item){.map = map};
+    if (js_class_id(obj) != JS_CLASS_REGEXP) return;
+
+    bool found = false;
+    Item rd_item = js_map_get_fast_ext(map, JS_REGEX_DATA_KEY, 4, &found);
+    if (!found) return;
+    TypeId tid = get_type_id(rd_item);
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return;
+
+    int64_t ptr_val = it2i(rd_item);
+    if (ptr_val == 0) return;
+    JsRegexData* rd = (JsRegexData*)(uintptr_t)ptr_val;
+    if (gc_native_seen_seen_or_add(seen_native, rd)) return;
+
+    JsRegexCompiled* wrapper = rd->wrapper;
+    if (wrapper) {
+        rd->wrapper = nullptr;
+        if (rd->re2 == wrapper->re2) rd->re2 = nullptr;
+        js_regex_compiled_free(wrapper);
+    }
+}
 
 // Regex compilation cache: avoids re-compiling the same regex literal in loops.
 // Keyed by (pattern_ptr, flags_ptr) — pointer identity from AST nodes.

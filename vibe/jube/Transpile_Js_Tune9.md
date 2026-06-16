@@ -1293,3 +1293,146 @@ Remaining follow-up:
    not add more bulk paths speculatively.
 3. Keep parser/scanner edits gated on generated-grammar workflow and a focused
    root-cause measurement.
+
+## Phase 6 - Generated Identifier AST/MIR/Execution Bulk Init
+
+Date: 2026-06-16
+
+### Implementation
+
+The Phase 5 probe showed the generated identifier-start rows were no longer
+limited by Unicode validation. The hot buckets were AST construction, MIR volume,
+and execution of thousands of generated top-level `var` declarations.
+
+Implemented the first real generated-identifier performance pass:
+
+- raised the compact module-var slot cap through shared `JS_MAX_MODULE_VARS`
+  from 2048 to 16384 so the generated identifier rows stay on indexed module
+  bindings;
+- added `js_init_module_vars_undefined_bulk()` and
+  `js_register_global_var_module_bindings_bulk()` so hoisted `var` module slots
+  are initialized by one/two runtime calls instead of thousands of MIR calls;
+- added a fast absent global-var property path that inserts an `undefined`
+  property and sets `JSPD_NON_CONFIGURABLE` directly on the new shape entry;
+- skipped no-op top-level `var x;` statement bodies after the hoist/bulk init
+  has already handled the declaration;
+- changed simple binding identifiers in JS/TS variable declarations to avoid
+  declaration-site `js_scope_lookup()`, removing the generated-row AST O(n^2)
+  lookup pattern.
+
+### Measurement
+
+Focused Unicode identifier probe:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_unicode_identifier_probe.txt` |
+| tests | 6 / 6 passed |
+| failure rows | 0 |
+| stats dirs | `temp/js_identifier_stats_tune9_p6h`, `temp/js_mir_volume_stats_tune9_p6h` |
+
+Key per-row timing after Phase 6:
+
+| Test row | Elapsed | AST | MIR | Execute | MIR body insns |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `language_identifiers_start_unicode_10_0_0_js` | 106.6 ms | 2.7 ms | 8.3 ms | 80.1 ms | 35 |
+| `language_identifiers_start_unicode_10_0_0_escaped_js` | 107.8 ms | 2.8 ms | 8.9 ms | 79.7 ms | 35 |
+| `language_identifiers_start_unicode_17_0_0_js` | 43.1 ms | 1.4 ms | 4.4 ms | 27.9 ms | 35 |
+| `language_identifiers_start_unicode_17_0_0_escaped_js` | 46.0 ms | 1.5 ms | 4.4 ms | 30.4 ms | 35 |
+
+The big rows had previously spent about 72 ms in AST construction and emitted
+about 40K-66K MIR instructions for the generated declaration bodies. After this
+pass the declaration body MIR volume fell to 35 instructions and AST build fell
+to about 1.4-2.8 ms.
+
+### Decision
+
+Keep the Phase 6 generated-identifier work. It is general to large generated
+top-level declaration bodies and removes measured AST/MIR construction waste.
+
+The remaining generated-identifier cost after Phase 6 was execution, dominated
+by thousands of global `var` property creations. More parser/scanner work is not
+the right lever for that tail.
+
+## Phase 7 - Bulk Absent Global Var Property Append
+
+Date: 2026-06-16
+
+### Implementation
+
+Implemented the execution-tail pass for generated identifier rows.
+
+New map/runtime pieces:
+
+- added `map_put_undefined_unique_absent_bulk()` in the shared map layer;
+- the helper appends many `undefined` slots to a map in one pass, allocating or
+  growing the packed data buffer once and appending shape entries directly;
+- added `js_define_global_var_properties_bulk_absent()` as the JS-specific guard:
+  it verifies that every key is a valid string and currently absent on the
+  global object, then bulk-appends with `JSPD_NON_CONFIGURABLE`;
+- if any key is non-string, invalid, present, deleted/tombstoned, or the bulk
+  append fails, the code falls back to the existing per-key descriptor path.
+
+This keeps the spec-sensitive checks in the JS layer and makes the map helper a
+mechanical append primitive with a narrow caller contract: keys are unique and
+already proven absent.
+
+### Measurement
+
+Focused Unicode identifier probe:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_unicode_identifier_probe.txt` |
+| tests | 6 / 6 passed |
+| failure rows | 0 |
+| stats dirs | `temp/js_identifier_stats_tune9_p7a`, `temp/js_mir_volume_stats_tune9_p7a` |
+
+Key per-row timing after Phase 7:
+
+| Test row | Elapsed | AST | MIR | Execute | Previous execute |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `language_identifiers_start_unicode_10_0_0_js` | 31.6 ms | 2.7 ms | 8.5 ms | 5.0 ms | 80.1 ms |
+| `language_identifiers_start_unicode_10_0_0_escaped_js` | 32.7 ms | 2.7 ms | 8.3 ms | 4.9 ms | 79.7 ms |
+| `language_identifiers_start_unicode_17_0_0_js` | 18.8 ms | 1.4 ms | 4.3 ms | 4.0 ms | 27.9 ms |
+| `language_identifiers_start_unicode_17_0_0_escaped_js` | 20.2 ms | 1.4 ms | 4.6 ms | 4.0 ms | 30.4 ms |
+
+The two largest identifier rows moved from about 106-108 ms elapsed to about
+32 ms elapsed. Their execution bucket dropped from about 80 ms to about 5 ms.
+
+Focused global-var semantics probe:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_global_var_bulk_probe.txt` |
+| tests | 7 / 7 passed |
+| failure rows | 0 |
+
+Full release gate:
+
+| Metric | Result |
+| --- | ---: |
+| fully passed | 40261 / 40261 |
+| non-fully-passing | 0 |
+| regressions | 0 |
+| total runtime | 111.4 s |
+| failure rows | 0 |
+
+### Decision
+
+Keep the bulk absent global-var property append. It directly addresses the
+measured execution tail, preserves fallback semantics for unusual global objects,
+and passed the full release gate.
+
+Remaining follow-up:
+
+1. URI codec rows remain intentionally deferred.
+2. Use the `TypedArray.prototype.set` counters on a broader snapshot if `set`
+   rows remain near the top; the Phase 7 full run still shows `set` rows in hot
+   typed-array batches.
+3. Revisit descriptor walking only after mutation/version invalidation exists.
+4. Move generated `ID_Start` / `ID_Continue` table ownership to a neutral helper
+   module only when another translation unit needs direct table access.
+5. Do not pursue parser/scanner changes for generated identifier rows unless a
+   new focused measurement shows parse/scanner work, not declaration execution,
+   has become the bottleneck.

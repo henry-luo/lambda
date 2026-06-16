@@ -800,7 +800,6 @@ static void* s_vmap_trace_last_data = nullptr;
 static gc_heap_t* s_vmap_trace_last_gc = nullptr;
 static int s_vmap_destroy_calls = 0;
 static void* s_vmap_destroy_last_data = nullptr;
-
 // Track Items marked during trace callback
 static uint64_t s_traced_items[64];
 static int s_traced_item_count = 0;
@@ -985,4 +984,18 @@ TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
     EXPECT_EQ(gc->object_count, 0u);
     // Manually free since no callback was set
     free(fake_data);
+}
+
+TEST_F(GCHeapTest, NativeSeenSetDeduplicatesPointers) {
+    gc_native_seen_t seen;
+    gc_native_seen_init(&seen);
+
+    int first = 1;
+    int second = 2;
+    EXPECT_EQ(gc_native_seen_seen_or_add(&seen, &first), 0);
+    EXPECT_EQ(gc_native_seen_seen_or_add(&seen, &first), 1);
+    EXPECT_EQ(gc_native_seen_seen_or_add(&seen, &second), 0);
+    EXPECT_EQ(gc_native_seen_seen_or_add(&seen, NULL), 1);
+
+    gc_native_seen_dispose(&seen);
 }

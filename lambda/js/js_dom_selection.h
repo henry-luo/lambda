@@ -28,6 +28,11 @@ Item js_ctor_static_range_fn(Item init);
 // selection.getRangeAt). Returns ItemNull on failure. Takes a strong
 // reference (caller can release theirs).
 Item js_dom_wrap_range(void* dom_range);
+Item js_dom_create_live_range_from_boundaries(Item start_container,
+                                              int64_t start_offset,
+                                              Item end_container,
+                                              int64_t end_offset,
+                                              const char** out_exception);
 
 // Test/extract helpers
 bool js_dom_is_range_object(Item item);

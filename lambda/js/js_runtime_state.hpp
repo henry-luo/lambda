@@ -18,8 +18,6 @@ struct JsRegexpLastMatch {
     int match_end;
 };
 
-#define JS_MAX_MODULE_VARS 2048
-
 struct JsRuntimeState {
     Input* input = NULL;
     bool strict_mode = false;

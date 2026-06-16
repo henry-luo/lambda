@@ -453,17 +453,17 @@ static WptCeResult run_ce_case(const WptCeParam& p) {
     bool is_crash_test = (p.test_name.find("crash") != std::string::npos);
     bool has_testharness = (html.find("testharness.js") != std::string::npos);
 
-    // testdriver tests synthesize input (keyboard / pointer) via test_driver,
-    // which Lambda's headless `js` runtime does not deliver — every such
-    // assertion sees zero events and fails wholesale. Skip them (tracked as
-    // Phase 8F synthetic-input work; see Radiant_Design_Selection2.md) rather
-    // than report noise. This blocks ~23/25 input-events tests today. Crash
-    // tests never rely on testdriver.
-    if (!is_crash_test &&
+    // testdriver tests synthesize input (keyboard / pointer) via test_driver.
+    // Phase SI has a first narrow keyboard slice for the designMode /
+    // contenteditable=false override test; the broader input-events corpus
+    // remains skipped until Delete/Backspace/pointer default actions land.
+    bool supported_testdriver_case =
+        p.html_path.find("contenteditable-false-in-design-mode") != std::string::npos;
+    if (!is_crash_test && !supported_testdriver_case &&
         (html.find("testdriver") != std::string::npos ||
          html.find("test_driver") != std::string::npos)) {
         result.skipped = true;
-        result.skip_reason = "requires testdriver synthetic input (Phase 8F): " +
+        result.skip_reason = "requires testdriver synthetic input (Phase SI): " +
                              p.html_path;
         return result;
     }

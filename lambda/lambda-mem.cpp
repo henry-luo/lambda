@@ -33,17 +33,8 @@ static __thread JitGcRootFrame* jit_gc_root_frame_top = NULL;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 
-static bool gc_finalize_seen_native(ArrayList* seen, void* ptr) {
-    if (!seen || !ptr) return true;
-    for (int i = 0; i < seen->length; i++) {
-        if (seen->data[i] == ptr) return true;
-    }
-    arraylist_append(seen, ptr);
-    return false;
-}
-
-static void gc_finalize_arraybuffer(JsArrayBuffer* ab, ArrayList* seen_native) {
-    if (!ab || gc_finalize_seen_native(seen_native, ab)) return;
+static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
+    if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
     if (ab->data) {
         mem_free(ab->data);
         ab->data = NULL;
@@ -51,8 +42,8 @@ static void gc_finalize_arraybuffer(JsArrayBuffer* ab, ArrayList* seen_native) {
     mem_free(ab);
 }
 
-static void gc_finalize_typed_array(JsTypedArray* ta, ArrayList* seen_native) {
-    if (!ta || gc_finalize_seen_native(seen_native, ta)) return;
+static void gc_finalize_typed_array(JsTypedArray* ta, gc_native_seen_t* seen_native) {
+    if (!ta || gc_native_seen_seen_or_add(seen_native, ta)) return;
     if (!ta->buffer && ta->data) {
         mem_free(ta->data);
         ta->data = NULL;
@@ -60,7 +51,9 @@ static void gc_finalize_typed_array(JsTypedArray* ta, ArrayList* seen_native) {
     mem_free(ta);
 }
 
-static void gc_finalize_js_native_map(Map* map, ArrayList* seen_native) {
+extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_native);
+
+static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     if (!map) return;
     switch (map->map_kind) {
     case MAP_KIND_TYPED_ARRAY: {
@@ -98,13 +91,13 @@ static void gc_finalize_js_native_map(Map* map, ArrayList* seen_native) {
             Item dv_val = js_map_get_fast_ext(map, "__dv__", 6, &found);
             if (found) dv = (JsDataView*)(uintptr_t)it2i(dv_val);
         }
-        if (dv && !gc_finalize_seen_native(seen_native, dv)) mem_free(dv);
+        if (dv && !gc_native_seen_seen_or_add(seen_native, dv)) mem_free(dv);
         map->data = NULL;
         break;
     }
     case MAP_KIND_ITERATOR:
     case MAP_KIND_PROXY:
-        if (map->data && !gc_finalize_seen_native(seen_native, map->data)) {
+        if (map->data && !gc_native_seen_seen_or_add(seen_native, map->data)) {
             mem_free(map->data);
         }
         map->data = NULL;
@@ -112,6 +105,7 @@ static void gc_finalize_js_native_map(Map* map, ArrayList* seen_native) {
     default:
         break;
     }
+    js_regex_map_heap_destroy(map, seen_native);
 }
 
 static void jit_gc_root_register_active_ranges(gc_heap_t* gc) {
@@ -603,7 +597,8 @@ void heap_destroy() {
 // items[], data buffers, closure_env are in the data zone — no free needed.
 // Only external resources (mpd_t, VMap backing HashMap) need explicit cleanup.
 static void gc_finalize_all_objects(gc_heap_t *gc) {
-    ArrayList* seen_native = arraylist_new(32);
+    gc_native_seen_t seen_native;
+    gc_native_seen_init(&seen_native);
     gc_header_t *current = gc->all_objects;
     while (current) {
         if (current->gc_flags & GC_FLAG_FREED) {
@@ -635,13 +630,13 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
             }
         }
         else if (tag == LMD_TYPE_MAP) {
-            gc_finalize_js_native_map((Map*)obj, seen_native);
+            gc_finalize_js_native_map((Map*)obj, &seen_native);
         }
         // All other types: items[], data, closure_env are zone-managed (data zone or object zone)
         // and will be bulk-freed by zone/pool destruction. No individual free needed.
         current = current->next;
     }
-    arraylist_free(seen_native);
+    gc_native_seen_dispose(&seen_native);
 }
 
 void print_heap_entries() {

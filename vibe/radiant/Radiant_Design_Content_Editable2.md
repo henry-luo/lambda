@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Proposal
+**Status:** Active implementation — P0 complete; Phase SI started.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -17,6 +17,22 @@ Three deliberate enhancements to Radiant's editing surface, in dependency order:
 3. **Adopt the Chrome (Blink) `editing/` test corpus** (`caret`, `deleting`, `inserting`, `execCommand`, `selection`, `style`, …) as a structured, phased conformance target — imported into the sibling **`lambda-test/editing/`** repo and driven by a new runner in `lambda`.
 
 These are sequenced: **(1) gates (2) and (3); synthetic input (§5) gates the interactive parts of both.**
+
+### 1.1 Mandatory per-phase regression gate
+
+Every implementation phase in this document (**P0, SI, EC-\*, and CET-\***)
+must close with the global JavaScript regression gate green. A phase is not
+considered complete until both commands pass:
+
+| Gate | Required result |
+|---|---|
+| `make test262-baseline` | `0` regressions and `0` retries |
+| `./test/test_js_gtest.exe --gtest_brief=1` | `0` failed tests |
+
+This gate is in addition to each phase's local WPT/Chrome-editing exit
+criteria. If either command cannot be run, or reports any regression, retry, or
+failure, the phase remains **in progress** and the blocker must be recorded in
+the phase progress notes.
 
 ---
 
@@ -114,27 +130,44 @@ Two **genuine engine crashes** sit at the top of the list. They must be root-cau
   `EditingSelection` still holds the true range (the "clean collapse/none +
   reset legacy projection" approach).
 
-**Current baseline (2026-06-15):**
+**P0-B/P0-E — selection ops + caret movement: DONE (2026-06-16).** The
+selection runner now has WPT variant support, documented capability skips
+(reftest visual comparisons, `testdriver` synthetic input, Shadow DOM/manual
+cases, and the two pre-existing i18n word-boundary cases), and browser-shaped
+`Selection.modify` movement for:
+
+- inline editing-host line boundaries, including bidi `left`/`right`;
+- character movement across inline element boundaries with collapsed whitespace;
+- `contenteditable=false` islands as atomic non-editable caret stops;
+- `<br>` as the character step rather than consuming the adjacent text.
+
+**P0-C/P0-D — editing-host IDL + focus model: DONE (2026-06-16).** The
+`editing-0` IDL/focus cases in the contenteditable runner are now passing under
+the same documented skip policy; `selectionchange` content attributes and text
+control focus/selection semantics are covered by the selection runner.
+
+**Current baseline (2026-06-16):**
 
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
-| `test_wpt_selection_gtest` | 151 | 87 pass / 46 skip / 18 fail | SIGSEGV eliminated (`initial-selection-on-focus` now a logical fail, not a crash) |
-| `test_wpt_contenteditable_gtest` | 194 | 140 pass / 41 skip / 13 fail | +1 pass; SIGABRT eliminated (`insertparagraph-…` crashtest now passes) |
+| `test_wpt_selection_gtest` | 159 | 88 pass / 71 skip / 0 fail | WPT variants applied; all runnable selection assertions green |
+| `test_wpt_contenteditable_gtest` | 196 | 156 pass / 40 skip / 0 fail | SI-1 converted one `testdriver` keyboard case from skip to pass |
 
-Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82.
+Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
+plus the live WPT guards listed in §5.1.
 
-**Remaining for P0 green:** P0-B (selection ops), **P0-C (editing-host IDL — the
-`editing-0` failures, completes CE-1)**, P0-D (focus model), P0-E (caret). Plus a
-**harness decision**: `initial-selection-on-focus` (and other `?div`/`?span`
-variant tests) need WPT **variant** support in the runner, or a documented
-skip — its crash is fixed but it stays `0/100` headless until variants are
-applied (it does `createElement(location.search.substr(1))` → `createElement("")`).
+**P0 green status:** complete. No unexpected failures remain in the two WPT
+gtest runners. The remaining non-pass cases are documented capability skips
+that belong to later infrastructure phases: `testdriver`/synthetic input
+(Phase SI), Shadow DOM coverage, reftest/manual visual comparisons, spelling
+marker platform behavior, and the two separately tracked i18n word-boundary
+cases.
 
 ---
 
 ## 5. Phase SI — Synthetic input (shared infrastructure)
 
-Both the WPT `input-events` tests **and** the Chrome `editing/` corpus need synthetic keyboard/pointer input that Lambda's headless `js` runtime does not yet deliver (the long-noted "Phase 8F" gap; today it auto-skips 23/25 `input-events` tests and the selection mouse-button tests).
+Both the WPT `input-events` tests **and** the Chrome `editing/` corpus need synthetic keyboard/pointer input that Lambda's headless `js` runtime does not yet deliver (the long-noted "Phase 8F" gap; before SI it auto-skipped 23/25 `input-events` tests and the selection mouse-button tests).
 
 This is a **shared dependency** of Directions 2 and 3, so it gets its own phase:
 
@@ -145,6 +178,42 @@ This is a **shared dependency** of Directions 2 and 3, so it gets its own phase:
 - **Unblocks:** 23 `input-events` WPT tests, the selection pointer tests, and essentially the entire *interactive* Chrome editing corpus (typing, caret navigation by key, selection by drag).
 
 Sequencing SI early is high-leverage: it is the single capability that most of Directions 2 and 3 wait on.
+
+### 5.1 Progress
+
+**SI-1 — WPT keyboard insertion slice: STARTED / FIRST PASS (2026-06-16).**
+
+- Added a WPT `test_driver.Actions().keyDown(<printable>).send()` path for
+  focused text controls and document selections inside editable hosts. The
+  path dispatches cancelable `beforeinput`, applies the headless default text
+  insertion, updates the selection, then dispatches `input`.
+- The shim honors editability: a nearest `contenteditable="false"` boundary
+  blocks mutation, while an inner `contenteditable="true"` host inside a false
+  island remains editable; `designMode="on"` is used only when there is no
+  nearer contenteditable state.
+- Enabled the first formerly skipped WPT `testdriver` case:
+  `html/editing/editing-0/.../contenteditable-false-in-design-mode.html`
+  now runs and passes `2/2`.
+- While opening this path, fixed the `InputEvent` constructor's
+  `targetRanges` handling: script-created `InputEventInit.targetRanges` are
+  validated as live DOM `Range` objects and snapshotted when
+  `getTargetRanges()` is called, matching
+  `input-events-range-exceptions.tentative.html`.
+
+**Current SI verification (2026-06-16):**
+
+| Check | Result |
+|---|---|
+| `contenteditable-false-in-design-mode` | 2/2 passed |
+| `input-events-range-exceptions.tentative` | 4/4 passed |
+| `test_wpt_contenteditable_gtest` | 196 cases: 156 pass / 40 skip / 0 fail |
+| `test_wpt_selection_gtest` | 159 cases: 88 pass / 71 skip / 0 fail |
+| `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
+
+**Next SI slice:** Delete/Backspace default actions with real
+`beforeinput`/`input` target ranges. This is the blocker for the
+`input-events-get-target-ranges-*`, `input-events-delete-selection`, and the
+selectionchange-on-Backspace cases.
 
 ---
 
@@ -333,6 +402,10 @@ P0  (clear WPT gtests) ──┬─────────────► EC-1 
 | **EC-1…6** | execCommand engine + default-action mutations + queryCommand* + designMode, tiered | P0 (SI for interactive verification) | each tier's WPT `editing/run` + Chrome `execCommand` subset passes to a tracked rate |
 | **CET-1…7** | Import Chrome `editing/` subdirs into `lambda-test/editing/` + runner | SI + matching EC tier | per-subdir tracked pass rate; runner wired into `make` |
 
+All phase exits above also require the global JavaScript regression gate in
+§1.1: `make test262-baseline` with `0` regressions / `0` retries, and
+`./test/test_js_gtest.exe --gtest_brief=1` with `0` failures.
+
 A new **`Radiant_ContentEditable_WPT_Status.md`** (planned in Content_Editable.md §11.5) carries the headline numbers for all three runners (selection, contenteditable, chrome-editing) plus the EC command-coverage matrix and the CET per-subdir gauge.
 
 ---
@@ -363,6 +436,10 @@ A new **`Radiant_ContentEditable_WPT_Status.md`** (planned in Content_Editable.m
 
 ## 11. Acceptance criteria
 
+- **Global per-phase gate:** every phase's change set must pass
+  `make test262-baseline` with `0` regressions / `0` retries and
+  `./test/test_js_gtest.exe --gtest_brief=1` with `0` failures before that
+  phase is marked complete.
 - **Phase 0:** `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` both green (only documented capability skips remain); the two engine crashes root-caused and fixed.
 - **Phase SI:** `input-events` WPT tests no longer auto-skipped; `eventSender` / `test_driver` injection works headless.
 - **Direction 1:** `document.execCommand` + `queryCommand*` + `designMode` implemented; the EC-tiered command set passes its WPT `editing/run` + Chrome `execCommand` subset to a tracked, rising rate; every edit still flows through cancelable `beforeinput` → mutation → `input` (the §6 contract holds).

@@ -2055,6 +2055,30 @@ static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstN
     }
 }
 
+static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!mt || !node || mt->is_module || mt->is_eval_direct || !mt->module_consts) return false;
+    if (node->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
+    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
+    if (vd->kind != JS_VAR_VAR || !vd->declarations) return false;
+    for (JsAstNode* d = vd->declarations; d; d = d->next) {
+        if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
+        if (decl->init || !decl->id || decl->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsModuleConstEntry lookup;
+        memset(&lookup, 0, sizeof(lookup));
+        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (!mc || mc->const_type != MCONST_MODVAR || mc->var_kind != JS_VAR_VAR ||
+                mc->is_implicit_global || (int)mc->int_val < 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
@@ -2193,7 +2217,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 (int)vid->name->len, vid->name->chars);
                             JsModuleConstEntry lookup;
                             snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                 JsModuleConstEntry mce;
                                 memset(&mce, 0, sizeof(mce));
                                 snprintf(mce.name, sizeof(mce.name), "%s", vname);
@@ -2233,7 +2257,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 JsNameSetEntry* ne = (JsNameSetEntry*)pitem;
                                 JsModuleConstEntry lookup;
                                 snprintf(lookup.name, sizeof(lookup.name), "%s", ne->name);
-                                if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                                if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                     JsModuleConstEntry mce;
                                     memset(&mce, 0, sizeof(mce));
                                     snprintf(mce.name, sizeof(mce.name), "%s", ne->name);
@@ -2309,7 +2333,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
             JsModuleConstEntry lookup;
             snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
-            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+            if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 JsModuleConstEntry mce;
                 memset(&mce, 0, sizeof(mce));
                 snprintf(mce.name, sizeof(mce.name), "%s", e->name);
@@ -2357,7 +2381,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         strcmp(resolved_pp, mt->filename) == 0);
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
                         snprintf(mce.name, sizeof(mce.name), "%s", vname);
@@ -2381,7 +2405,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         (int)imp->namespace_name->len, imp->namespace_name->chars);
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
                         snprintf(mce.name, sizeof(mce.name), "%s", vname);
@@ -2402,7 +2426,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             (int)isp->local_name->len, isp->local_name->chars);
                         JsModuleConstEntry lookup;
                         snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                        if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                        if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                             JsModuleConstEntry mce;
                             memset(&mce, 0, sizeof(mce));
                             snprintf(mce.name, sizeof(mce.name), "%s", vname);
@@ -2804,7 +2828,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     }
                                     JsModuleConstEntry lookup;
                                     snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
-                                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                                         JsModuleConstEntry mce;
                                         memset(&mce, 0, sizeof(mce));
                                         snprintf(mce.name, sizeof(mce.name), "%s", vname);
@@ -2839,7 +2863,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (jm_name_set_has(iife_lex_collisions, e->name)) continue;
                     JsModuleConstEntry lookup;
                     snprintf(lookup.name, sizeof(lookup.name), "%s", e->name);
-                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 2048) {
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < JS_MAX_MODULE_VARS) {
                         JsModuleConstEntry mce;
                         memset(&mce, 0, sizeof(mce));
                         snprintf(mce.name, sizeof(mce.name), "%s", e->name);
@@ -2977,7 +3001,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         JsClassEntry* ce = &mt->class_entries[ci];
         for (int fi = 0; fi < ce->static_field_count; fi++) {
             JsStaticFieldEntry* sf = &ce->static_fields[fi];
-            if (sf->name && ce->name && mt->module_var_count < 2048) {
+            if (sf->name && ce->name && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 sf->module_var_index = mt->module_var_count;
                 // Register as module const for ClassName.fieldName access pattern
                 JsModuleConstEntry mce;
@@ -2996,7 +3020,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
         for (int fi = 0; fi < ce->static_field_count; fi++) {
             JsStaticFieldEntry* sf = &ce->static_fields[fi];
-            if (sf->computed && sf->key_expr && mt->module_var_count < 2048) {
+            if (sf->computed && sf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 sf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: static field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
@@ -3005,7 +3029,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
         for (int fi = 0; fi < ce->instance_field_count; fi++) {
             JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-            if (inf->computed && inf->key_expr && mt->module_var_count < 2048) {
+            if (inf->computed && inf->key_expr && mt->module_var_count < JS_MAX_MODULE_VARS) {
                 inf->key_module_var_index = mt->module_var_count++;
                 log_debug("js-mir: instance field computed key slot class=%.*s field=%d module_var[%d]",
                     ce->name ? (int)ce->name->len : 0, ce->name ? ce->name->chars : "",
@@ -4298,12 +4322,40 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Initialize declared var module vars to undefined (not implicit globals,
     // and not preamble-inherited entries from outer scope e.g. eval)
     if (mt->module_consts) {
+        int bulk_capacity = (int)hashmap_count(mt->module_consts);
+        int* bulk_indices_no_global = NULL;
+        int* bulk_indices_global = NULL;
+        Item* bulk_keys_global = NULL;
+        int bulk_no_global_count = 0;
+        int bulk_global_count = 0;
+        if (bulk_capacity > 0) {
+            bulk_indices_no_global = (int*)pool_calloc(mt->tp->ast_pool, sizeof(int) * bulk_capacity);
+            bulk_indices_global = (int*)pool_calloc(mt->tp->ast_pool, sizeof(int) * bulk_capacity);
+            bulk_keys_global = (Item*)pool_calloc(mt->tp->ast_pool, sizeof(Item) * bulk_capacity);
+        }
         size_t var_iter = 0; void* var_item;
         while (hashmap_iter(mt->module_consts, &var_iter, &var_item)) {
             JsModuleConstEntry* mce = (JsModuleConstEntry*)var_item;
             if (mce->const_type == MCONST_MODVAR &&
                 mce->var_kind == JS_VAR_VAR && !mce->is_implicit_global &&
                 (int)mce->int_val >= preamble_var_limit) {
+                bool needs_eval_bridge = mt->is_eval_direct && mce->is_nested_func_hoist;
+                bool should_define_global = !mt->is_module && !mt->is_eval_direct &&
+                    !mce->is_iife_var && !mce->is_implicit_global;
+                if (!needs_eval_bridge && bulk_capacity > 0) {
+                    if (should_define_global) {
+                        const char* js_name = mce->name;
+                        if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
+                        NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+                        String* interned = name_pool_create_len(np, js_name, (int)strlen(js_name));
+                        bulk_indices_global[bulk_global_count] = (int)mce->int_val;
+                        bulk_keys_global[bulk_global_count] = (Item){.item = s2it(interned)};
+                        bulk_global_count++;
+                    } else {
+                        bulk_indices_no_global[bulk_no_global_count++] = (int)mce->int_val;
+                    }
+                    continue;
+                }
                 MIR_reg_t init_val = 0;
                 if (mt->is_eval_direct && mce->is_nested_func_hoist) {
                     const char* js_name = mce->name;
@@ -4355,18 +4407,30 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        if (bulk_no_global_count > 0) {
+            jm_call_void_4(mt, "js_init_module_vars_undefined_bulk",
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_indices_no_global),
+                MIR_T_P, MIR_new_int_op(mt->ctx, 0),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, bulk_no_global_count),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        }
+        if (bulk_global_count > 0) {
+            jm_call_void_4(mt, "js_init_module_vars_undefined_bulk",
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_indices_global),
+                MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)bulk_keys_global),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, bulk_global_count),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+        }
     }
 
     // v24: Set strict mode flag in runtime — always emit to reset from previous test in batch mode
     jm_call_void_1(mt, "js_set_strict_mode",
         MIR_T_I64, MIR_new_int_op(mt->ctx, (mt->is_global_strict || mt->is_module) ? 1 : 0));
 
-    if (!mt->is_global_strict && !mt->is_module) {
+    if (!mt->is_global_strict && !mt->is_module && mt->is_eval_direct) {
         JsAstNode* precheck_stmt = program->body;
         while (precheck_stmt) {
-            if (mt->is_eval_direct) {
-                jm_emit_evalscript_global_lex_decl_precheck(mt, precheck_stmt);
-            }
+            jm_emit_evalscript_global_lex_decl_precheck(mt, precheck_stmt);
             jm_emit_evalscript_global_decl_prechecks(mt, precheck_stmt);
             precheck_stmt = precheck_stmt->next;
         }
@@ -5711,6 +5775,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_new_reg_op(mt->ctx, val)));
             }
         } else {
+            if (!current_export && jm_is_plain_script_module_var_decl_without_init(mt, actual_stmt)) {
+                stmt = stmt->next;
+                continue;
+            }
             jm_transpile_statement(mt, actual_stmt);
             // Module mode: after transpiling exported variable declarations,
             // emit exports for each declared name

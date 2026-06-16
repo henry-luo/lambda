@@ -2449,6 +2449,19 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
             }
         }
     }
+    if (!comment_node->content) {
+        ElementReader reader(native_element);
+        const char* data_attr = reader.get_attr_string("data");
+        if (!data_attr) {
+            ConstItem attr_value = native_element->get_attr("data");
+            String* data_string = attr_value.string();
+            if (data_string) data_attr = data_string->chars;
+        }
+        if (data_attr) {
+            comment_node->content = data_attr;
+            comment_node->length = strlen(data_attr);
+        }
+    }
 
     if (!comment_node->content) {
         comment_node->content = "";
@@ -2510,6 +2523,19 @@ DomComment* dom_comment_create_detached(Element* native_element, DomDocument* do
                 comment_node->content = content_str->chars;
                 comment_node->length = content_str->len;
             }
+        }
+    }
+    if (!comment_node->content) {
+        ElementReader reader(native_element);
+        const char* data_attr = reader.get_attr_string("data");
+        if (!data_attr) {
+            ConstItem attr_value = native_element->get_attr("data");
+            String* data_string = attr_value.string();
+            if (data_string) data_attr = data_string->chars;
+        }
+        if (data_attr) {
+            comment_node->content = data_attr;
+            comment_node->length = strlen(data_attr);
         }
     }
 

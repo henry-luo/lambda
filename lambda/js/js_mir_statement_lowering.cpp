@@ -47,6 +47,19 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
     }
 }
 
+static void jm_write_env_backing_if_needed(JsMirTranspiler* mt, JsMirVarEntry* var,
+        MIR_reg_t val_reg, TypeId type_id) {
+    if (!mt || !var || !var->from_env || var->env_reg == 0 || var->env_slot < 0) return;
+    MIR_reg_t val = val_reg;
+    if (jm_is_native_type(type_id)) {
+        val = jm_box_native(mt, val_reg, type_id);
+    }
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1),
+        MIR_new_reg_op(mt->ctx, val)));
+}
+
 static bool jm_has_outer_block_func_binding(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return false;
     for (int depth = 2; depth < mt->scope_depth && depth < 64; depth++) {
@@ -243,12 +256,43 @@ static void jm_declare_evalscript_global_lexical_if_needed(JsMirTranspiler* mt,
     jm_emit_label(mt, skip_global_lex);
 }
 
+static bool jm_can_skip_plain_top_level_var_decl_without_init(
+        JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
+    if (!mt || !var || var->kind != JS_VAR_VAR || !mt->in_main ||
+            mt->is_eval_direct || !mt->module_consts) {
+        return false;
+    }
+    bool at_module_var_scope = (mt->scope_depth <= 1) || (mt->var_hoist_depth <= 1);
+    if (!at_module_var_scope) return false;
+    JsAstNode* decl = var->declarations;
+    if (!decl) return false;
+    while (decl) {
+        if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) return false;
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)decl;
+        if (d->init || !d->id || d->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+        JsIdentifierNode* id = (JsIdentifierNode*)d->id;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsModuleConstEntry lookup;
+        memset(&lookup, 0, sizeof(lookup));
+        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+        JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+        if (!mc || mc->const_type != MCONST_MODVAR || (int)mc->int_val < 0) return false;
+        decl = decl->next;
+    }
+    return true;
+}
+
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) {
     // JS spec: 'var' is function-scoped. Redirect variable creation to scope 1
     // (the function body scope after jm_push_scope) so vars survive after block scopes pop.
     int saved_hoist = mt->var_hoist_depth;
     if (var->kind == JS_VAR_VAR && mt->scope_depth > 1 && mt->var_hoist_depth < 0) {
         mt->var_hoist_depth = 1;
+    }
+    if (jm_can_skip_plain_top_level_var_decl_without_init(mt, var)) {
+        mt->var_hoist_depth = saved_hoist;
+        return;
     }
     JsAstNode* decl = var->declarations;
     while (decl) {
@@ -358,6 +402,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, existing_var->reg),
                                 MIR_new_reg_op(mt->ctx, boxed_val)));
+                            jm_write_env_backing_if_needed(mt, existing_var, boxed_val, LMD_TYPE_ANY);
                             jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_val);
                         } else {
@@ -366,6 +411,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 MIR_new_reg_op(mt->ctx, reg),
                                 MIR_new_reg_op(mt->ctx, boxed_val)));
                             jm_set_var(mt, vname, reg, MIR_T_I64, LMD_TYPE_ANY);
+                            jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_ANY);
                             jm_scope_env_mark_and_writeback(mt, vname, reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, boxed_val);
                         }
@@ -498,6 +544,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, existing_var->reg),
                                 MIR_new_reg_op(mt->ctx, val)));
+                            jm_write_env_backing_if_needed(mt, existing_var, val, LMD_TYPE_ANY);
                             jm_scope_env_mark_and_writeback(mt, vname, existing_var->reg);
                             jm_define_global_var_property_for_main_var(mt, var, id, val);
                             // v18: function name inference for anonymous function expressions
@@ -581,6 +628,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 cv->tdz_active = false;
                             }
                         }
+                        jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_INT);
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_INT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_INT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
@@ -608,6 +656,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 cv->tdz_active = false;
                             }
                         }
+                        jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_FLOAT);
                         jm_scope_env_mark_and_writeback(mt, vname, reg, LMD_TYPE_FLOAT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_FLOAT);
                         if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
@@ -637,6 +686,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 cv->tdz_active = false;
                             }
                         }
+                        jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, init_type);
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, init_type);
                         jm_declare_evalscript_global_lexical_if_needed(mt, var, id, val);
@@ -822,6 +872,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                                 cv->tdz_active = false;
                             }
                         }
+                        jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_ANY);
                         jm_scope_env_mark_and_writeback(mt, vname, reg);
                     }
                 }
@@ -1063,6 +1114,7 @@ static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* s
     jm_set_var(mt, vname, fn_reg);
     JsMirVarEntry* ve = jm_find_var(mt, vname);
     if (ve) ve->from_block_func_decl = true;
+    jm_scope_env_mark_and_writeback(mt, vname, fn_reg);
 }
 
 // transpile one if-branch body with the same scope/TDZ handling as the inline
@@ -4567,6 +4619,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, p19_block_func_existing->reg),
                         MIR_new_reg_op(mt->ctx, fn_reg)));
+                    jm_scope_env_mark_and_writeback(mt, fn_vname, p19_block_func_existing->reg);
                 }
                 if (existing) {
                     // Update existing var-scoped binding with function value

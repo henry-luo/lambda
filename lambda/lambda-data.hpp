@@ -618,6 +618,10 @@ Element* elmt_arena(Arena* arena);
 List* list_arena(Arena* arena);
 
 void map_put(Map* mp, String* key, Item value, Input *input);
+// bulk append for callers that have already proven every key is unique and
+// absent from the target map. Values are JS `undefined` slots.
+bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
+    Input* input, uint8_t shape_flags);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
 // Shape finalization - deduplicate map/element shapes using shape pool

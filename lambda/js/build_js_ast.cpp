@@ -487,6 +487,37 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     return (JsAstNode*)identifier;
 }
 
+static JsAstNode* build_js_binding_identifier(JsTranspiler* tp, TSNode id_node) {
+    if (ts_node_is_null(id_node)) {
+        log_error("Cannot build binding identifier from null node");
+        return NULL;
+    }
+
+    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp,
+        JS_AST_NODE_IDENTIFIER, id_node, sizeof(JsIdentifierNode));
+
+    StrView source = js_node_source(tp, id_node);
+    if (source.length == 0) {
+        log_error("Empty binding identifier source");
+        return NULL;
+    }
+
+    identifier->name = js_decode_identifier_name(tp, source.str, (int)source.length);
+    if (!identifier->name) {
+        log_error("Failed to create binding identifier name");
+        return NULL;
+    }
+    if (js_identifier_counters_is_enabled()) {
+        bool has_escape = memchr(source.str, '\\', source.length) != NULL;
+        bool has_non_ascii = js_identifier_bytes_have_non_ascii(identifier->name->chars, identifier->name->len);
+        js_identifier_counters_record_ast((int)source.length, identifier->name->len,
+            has_escape ? 1 : 0, has_non_ascii ? 1 : 0);
+    }
+    identifier->entry = NULL;
+    identifier->base.type = &TYPE_ANY;
+    return (JsAstNode*)identifier;
+}
+
 static JsAstNode* make_js_identifier_name(JsTranspiler* tp, TSNode node, const char* name, int len) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
     identifier->name = name_pool_create_len(tp->name_pool, name, len);
@@ -1626,7 +1657,7 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 if (strcmp(id_type, "array_pattern") == 0 || strcmp(id_type, "object_pattern") == 0) {
                     declarator->id = build_js_expression(tp, id_node);
                 } else {
-                    declarator->id = build_js_identifier(tp, id_node);
+                    declarator->id = build_js_binding_identifier(tp, id_node);
                 }
             } else {
                 declarator->id = NULL;
@@ -4444,7 +4475,7 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node) {
             if (strcmp(id_type, "array_pattern") == 0 || strcmp(id_type, "object_pattern") == 0) {
                 declarator->id = build_js_expression(tp, name_node);
             } else {
-                declarator->id = build_js_identifier(tp, name_node);
+                declarator->id = build_js_binding_identifier(tp, name_node);
             }
         }
 
