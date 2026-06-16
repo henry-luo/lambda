@@ -1,9 +1,30 @@
 #include "js_mir_internal.hpp"
 #include "../../lib/mem_factory.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
+#define JS_MIR_VOL_STATS_MKDIR(path) mkdir(path, 0755)
+#define JS_MIR_VOL_STATS_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
+#define JS_MIR_VOL_STATS_WRITE(fd, buf, len) write(fd, buf, len)
+#define JS_MIR_VOL_STATS_CLOSE(fd) close(fd)
+#define JS_MIR_VOL_STATS_PID() getpid()
 #else
+#include <direct.h>
+#include <fcntl.h>
+#include <io.h>
+#include <process.h>
+#include <sys/stat.h>
 #include <windows.h>
+#define JS_MIR_VOL_STATS_MKDIR(path) _mkdir(path)
+#define JS_MIR_VOL_STATS_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
+#define JS_MIR_VOL_STATS_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
+#define JS_MIR_VOL_STATS_CLOSE(fd) _close(fd)
+#define JS_MIR_VOL_STATS_PID() _getpid()
 #endif
 
 int js_dynamic_import_suppress_module_drain = 0;
@@ -31,6 +52,71 @@ extern "C" void js_mir_get_last_phase_timing(JsMirPhaseTiming* out) {
 
 // Tune6 §3.2: MIR generated-code volume for the last transpile.
 static JsMirVolumeCounters g_last_js_mir_volume;
+static bool g_js_mir_volume_stats_enabled = false;
+static bool g_js_mir_volume_stats_checked = false;
+static bool g_js_mir_volume_stats_registered = false;
+static long g_js_mir_volume_stats_samples = 0;
+static long g_js_mir_volume_stats_total_functions = 0;
+static long g_js_mir_volume_stats_total_insns = 0;
+static long g_js_mir_volume_stats_max_insns = 0;
+
+static void js_mir_volume_stats_report(void);
+
+static int js_mir_volume_stats_is_enabled(void) {
+    if (!g_js_mir_volume_stats_checked) {
+        const char* flag = getenv("LAMBDA_JS_MIR_VOLUME_STATS");
+        if (flag && flag[0] && strcmp(flag, "0") != 0) {
+            g_js_mir_volume_stats_enabled = true;
+        }
+        g_js_mir_volume_stats_checked = true;
+    }
+    if (g_js_mir_volume_stats_enabled && !g_js_mir_volume_stats_registered) {
+        atexit(js_mir_volume_stats_report);
+        g_js_mir_volume_stats_registered = true;
+    }
+    return g_js_mir_volume_stats_enabled ? 1 : 0;
+}
+
+static void js_mir_volume_stats_write_line(int fd, const char* line) {
+    if (fd < 0 || !line) return;
+    size_t len = strlen(line);
+    const char* cur = line;
+    while (len > 0) {
+        int wrote = (int)JS_MIR_VOL_STATS_WRITE(fd, cur, len);
+        if (wrote <= 0) return;
+        cur += wrote;
+        len -= (size_t)wrote;
+    }
+}
+
+static void js_mir_volume_stats_report(void) {
+    if (!g_js_mir_volume_stats_enabled || g_js_mir_volume_stats_samples == 0) return;
+    const char* dir = getenv("LAMBDA_JS_MIR_VOLUME_STATS_DIR");
+    if (!dir || !dir[0]) dir = "./temp/js_mir_volume_stats";
+    JS_MIR_VOL_STATS_MKDIR(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_MIR_VOL_STATS_PID());
+    int fd = JS_MIR_VOL_STATS_OPEN(path);
+    if (fd < 0) return;
+    js_mir_volume_stats_write_line(fd,
+        "samples\tlast_functions_discovered\tlast_mir_insns_emitted\ttotal_functions_discovered\ttotal_mir_insns_emitted\tmax_mir_insns_emitted\n");
+    char line[512];
+    snprintf(line, sizeof(line), "%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
+        g_js_mir_volume_stats_samples,
+        g_last_js_mir_volume.functions_discovered,
+        g_last_js_mir_volume.mir_insns_emitted,
+        g_js_mir_volume_stats_total_functions,
+        g_js_mir_volume_stats_total_insns,
+        g_js_mir_volume_stats_max_insns);
+    js_mir_volume_stats_write_line(fd, line);
+    JS_MIR_VOL_STATS_CLOSE(fd);
+    log_notice("js-mir-volume-stats: samples=%ld last_funcs=%ld last_insns=%ld total_insns=%ld max_insns=%ld",
+        g_js_mir_volume_stats_samples,
+        g_last_js_mir_volume.functions_discovered,
+        g_last_js_mir_volume.mir_insns_emitted,
+        g_js_mir_volume_stats_total_insns,
+        g_js_mir_volume_stats_max_insns);
+}
 
 extern "C" void js_mir_volume_counters_reset(void) {
     g_last_js_mir_volume.functions_discovered = 0;
@@ -40,6 +126,14 @@ extern "C" void js_mir_volume_counters_reset(void) {
 extern "C" void js_mir_volume_counters_set(long functions_discovered, long mir_insns_emitted) {
     g_last_js_mir_volume.functions_discovered = functions_discovered;
     g_last_js_mir_volume.mir_insns_emitted = mir_insns_emitted;
+    if (js_mir_volume_stats_is_enabled()) {
+        g_js_mir_volume_stats_samples++;
+        g_js_mir_volume_stats_total_functions += functions_discovered;
+        g_js_mir_volume_stats_total_insns += mir_insns_emitted;
+        if (mir_insns_emitted > g_js_mir_volume_stats_max_insns) {
+            g_js_mir_volume_stats_max_insns = mir_insns_emitted;
+        }
+    }
 }
 
 extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {

@@ -9,7 +9,30 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include "../../lib/mem.h"
+
+#ifdef _WIN32
+#include <direct.h>
+#include <fcntl.h>
+#include <io.h>
+#include <process.h>
+#include <sys/stat.h>
+#define JS_IDENT_STATS_MKDIR(path) _mkdir(path)
+#define JS_IDENT_STATS_OPEN(path) _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
+#define JS_IDENT_STATS_WRITE(fd, buf, len) _write(fd, buf, (unsigned int)(len))
+#define JS_IDENT_STATS_CLOSE(fd) _close(fd)
+#define JS_IDENT_STATS_PID() _getpid()
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#define JS_IDENT_STATS_MKDIR(path) mkdir(path, 0755)
+#define JS_IDENT_STATS_OPEN(path) open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644)
+#define JS_IDENT_STATS_WRITE(fd, buf, len) write(fd, buf, len)
+#define JS_IDENT_STATS_CLOSE(fd) close(fd)
+#define JS_IDENT_STATS_PID() getpid()
+#endif
 
 // TypeScript parser (unified: handles both JS and TS)
 extern "C" {
@@ -23,6 +46,14 @@ extern "C" {
 static bool g_js_scope_counters_enabled = false;
 static JsScopeCounters g_js_scope_counters = {0, 0, 0};
 
+static bool g_js_identifier_counters_enabled = false;
+static bool g_js_identifier_counters_checked = false;
+static bool g_js_identifier_counters_registered = false;
+static JsIdentifierCounters g_js_identifier_counters = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+static void js_identifier_counters_report(void);
+static void js_identifier_counters_write_line(int fd, const char* line);
+
 extern "C" void js_scope_counters_set_enabled(int enabled) {
     g_js_scope_counters_enabled = (enabled != 0);
 }
@@ -35,6 +66,105 @@ extern "C" void js_scope_counters_reset(void) {
 
 extern "C" void js_scope_counters_get(JsScopeCounters* out) {
     if (out) *out = g_js_scope_counters;
+}
+
+extern "C" void js_identifier_counters_set_enabled(int enabled) {
+    g_js_identifier_counters_enabled = (enabled != 0);
+}
+
+extern "C" void js_identifier_counters_reset(void) {
+    memset(&g_js_identifier_counters, 0, sizeof(g_js_identifier_counters));
+}
+
+extern "C" void js_identifier_counters_get(JsIdentifierCounters* out) {
+    if (out) *out = g_js_identifier_counters;
+}
+
+extern "C" int js_identifier_counters_is_enabled(void) {
+    if (!g_js_identifier_counters_checked) {
+        const char* flag = getenv("LAMBDA_JS_IDENTIFIER_STATS");
+        if (flag && flag[0] && strcmp(flag, "0") != 0) {
+            g_js_identifier_counters_enabled = true;
+        }
+        g_js_identifier_counters_checked = true;
+    }
+    if (g_js_identifier_counters_enabled && !g_js_identifier_counters_registered) {
+        atexit(js_identifier_counters_report);
+        g_js_identifier_counters_registered = true;
+    }
+    return g_js_identifier_counters_enabled ? 1 : 0;
+}
+
+extern "C" void js_identifier_counters_record_ast(int source_len, int decoded_len,
+        int has_escape, int has_non_ascii) {
+    if (!js_identifier_counters_is_enabled()) return;
+    g_js_identifier_counters.ast_identifiers++;
+    if (has_escape) g_js_identifier_counters.ast_escaped_identifiers++;
+    if (has_non_ascii) g_js_identifier_counters.ast_non_ascii_identifiers++;
+    if (source_len > 0) g_js_identifier_counters.ast_source_bytes += source_len;
+    if (decoded_len > 0) g_js_identifier_counters.ast_decoded_bytes += decoded_len;
+}
+
+extern "C" void js_identifier_counters_record_early_check(void) {
+    if (!js_identifier_counters_is_enabled()) return;
+    g_js_identifier_counters.early_identifier_checks++;
+}
+
+extern "C" void js_identifier_counters_record_early_escape(int normalized,
+        int reserved_hit, int contextual_hit) {
+    if (!js_identifier_counters_is_enabled()) return;
+    g_js_identifier_counters.early_escape_checks++;
+    if (normalized) g_js_identifier_counters.early_unicode_normalizations++;
+    if (reserved_hit) g_js_identifier_counters.early_reserved_hits++;
+    if (contextual_hit) g_js_identifier_counters.early_contextual_escape_hits++;
+}
+
+static void js_identifier_counters_report(void) {
+    if (!g_js_identifier_counters_enabled || g_js_identifier_counters.ast_identifiers == 0) return;
+    const char* dir = getenv("LAMBDA_JS_IDENTIFIER_STATS_DIR");
+    if (!dir || !dir[0]) dir = "./temp/js_identifier_stats";
+    JS_IDENT_STATS_MKDIR(dir);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)JS_IDENT_STATS_PID());
+    int fd = JS_IDENT_STATS_OPEN(path);
+    if (fd < 0) return;
+    js_identifier_counters_write_line(fd,
+        "ast_identifiers\tast_escaped_identifiers\tast_non_ascii_identifiers\tast_source_bytes\tast_decoded_bytes\tearly_identifier_checks\tearly_escape_checks\tearly_unicode_normalizations\tearly_reserved_hits\tearly_contextual_escape_hits\n");
+    char line[512];
+    snprintf(line, sizeof(line), "%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n",
+        g_js_identifier_counters.ast_identifiers,
+        g_js_identifier_counters.ast_escaped_identifiers,
+        g_js_identifier_counters.ast_non_ascii_identifiers,
+        g_js_identifier_counters.ast_source_bytes,
+        g_js_identifier_counters.ast_decoded_bytes,
+        g_js_identifier_counters.early_identifier_checks,
+        g_js_identifier_counters.early_escape_checks,
+        g_js_identifier_counters.early_unicode_normalizations,
+        g_js_identifier_counters.early_reserved_hits,
+        g_js_identifier_counters.early_contextual_escape_hits);
+    js_identifier_counters_write_line(fd, line);
+    JS_IDENT_STATS_CLOSE(fd);
+    log_notice("js-ident-stats: ast=%ld escaped=%ld non_ascii=%ld early=%ld escape_checks=%ld normalized=%ld reserved_hits=%ld contextual_hits=%ld",
+        g_js_identifier_counters.ast_identifiers,
+        g_js_identifier_counters.ast_escaped_identifiers,
+        g_js_identifier_counters.ast_non_ascii_identifiers,
+        g_js_identifier_counters.early_identifier_checks,
+        g_js_identifier_counters.early_escape_checks,
+        g_js_identifier_counters.early_unicode_normalizations,
+        g_js_identifier_counters.early_reserved_hits,
+        g_js_identifier_counters.early_contextual_escape_hits);
+}
+
+static void js_identifier_counters_write_line(int fd, const char* line) {
+    if (fd < 0 || !line) return;
+    size_t len = strlen(line);
+    const char* cur = line;
+    while (len > 0) {
+        int wrote = (int)JS_IDENT_STATS_WRITE(fd, cur, len);
+        if (wrote <= 0) return;
+        cur += wrote;
+        len -= (size_t)wrote;
+    }
 }
 
 // Scope management functions

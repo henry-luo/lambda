@@ -6,6 +6,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "js_job_queue.h"
+#include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "../../lib/lambda_typed.hpp"
 
@@ -12448,16 +12449,7 @@ enum JsRegexSpecialPropertyKind {
 
 #define JS_REGEX_PROP_SEARCH_MODE 10000
 
-struct JsRegexRange {
-    int first;
-    int last;
-};
-
 static bool js_regexp_is_han_cp(uint32_t cp);
-static int js_regex_generated_property_kind_from_name(const char* name, int name_len);
-static int js_regex_generated_property_canonical_kind(int kind);
-static bool js_regex_generated_property_contains(int kind, int cp);
-static bool js_regex_generated_property_contains_cursor(int kind, int cp, int* cursor);
 
 static bool js_regex_match_gc_alias(const char* name, int len, const char* long_name,
                                     const char* short_name, const char* loose_name) {
@@ -12522,8 +12514,8 @@ static int js_regex_property_kind_from_name(const char* name, int name_len) {
     if (js_regex_match_property_name(name, name_len, "Pattern_White_Space") ||
         js_regex_match_property_name(name, name_len, "Pat_WS")) return JS_REGEX_PROP_PATTERN_WHITE_SPACE;
 
-    int generated_kind = js_regex_generated_property_kind_from_name(name, name_len);
-    if (generated_kind) return js_regex_generated_property_canonical_kind(generated_kind);
+    int generated_kind = js_regex_generated_property_lookup_kind(name, name_len);
+    if (generated_kind) return js_regex_generated_property_canonicalize_kind(generated_kind);
 
     if (js_regex_match_property_name(name, name_len, "Regional_Indicator") ||
         js_regex_match_property_name(name, name_len, "RI")) return JS_REGEX_PROP_REGIONAL_INDICATOR;
@@ -12634,84 +12626,6 @@ static bool js_regex_sorted_range_contains(const JsRegexRange* ranges, int count
         }
     }
     return false;
-}
-
-// resumable variant of js_regex_sorted_range_contains: *cursor holds the range
-// index that contained (or bracketed just below) the previous code point. for
-// monotonically increasing input the cursor advances in O(1); on any miss it
-// falls back to a binary search of the relevant half and re-anchors the cursor.
-// result is identical to js_regex_sorted_range_contains for every code point.
-static bool js_regex_sorted_range_contains_cursor(const JsRegexRange* ranges, int count, int cp, int* cursor) {
-    if (count <= 0) return false;
-    int c = *cursor;
-    if (c >= 0 && c < count) {
-        if (cp >= ranges[c].first && cp <= ranges[c].last) return true;
-        if (cp > ranges[c].last) {
-            int next = c + 1;
-            if (next < count) {
-                if (cp < ranges[next].first) { *cursor = c; return false; }
-                if (cp <= ranges[next].last) { *cursor = next; return true; }
-            } else {
-                *cursor = c; return false;  // cp is above the last range
-            }
-            // cp lies beyond range c+1: binary search the upper tail
-            int lo = next + 1, hi = count - 1;
-            while (lo <= hi) {
-                int mid = lo + ((hi - lo) / 2);
-                if (cp < ranges[mid].first) hi = mid - 1;
-                else if (cp > ranges[mid].last) lo = mid + 1;
-                else { *cursor = mid; return true; }
-            }
-            *cursor = hi >= 0 ? hi : 0;  // anchor at range just below cp
-            return false;
-        }
-        // cp < ranges[c].first: backward jump, search the lower half
-        int lo = 0, hi = c - 1;
-        while (lo <= hi) {
-            int mid = lo + ((hi - lo) / 2);
-            if (cp < ranges[mid].first) hi = mid - 1;
-            else if (cp > ranges[mid].last) lo = mid + 1;
-            else { *cursor = mid; return true; }
-        }
-        *cursor = hi >= 0 ? hi : 0;
-        return false;
-    }
-    // cursor out of range: full binary search
-    int lo = 0, hi = count - 1;
-    while (lo <= hi) {
-        int mid = lo + ((hi - lo) / 2);
-        if (cp < ranges[mid].first) hi = mid - 1;
-        else if (cp > ranges[mid].last) lo = mid + 1;
-        else { *cursor = mid; return true; }
-    }
-    *cursor = hi >= 0 ? hi : 0;
-    return false;
-}
-
-#include "js_regex_generated_property_tables.inc"
-
-// Js54: expose property-table lookup to the /v-flag rewriter (js_regex_wrapper.cpp).
-// Returns the number of ranges written to out_pairs (each pair is {lo, hi},
-// inclusive). Returns 0 if the property name is not found. The caller must
-// provide enough space — currently every generated table fits in 16K pairs.
-extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int name_len,
-                                                       int* out_pairs, int max_pairs) {
-    if (!name || name_len <= 0 || !out_pairs || max_pairs <= 0) return 0;
-    int table_count = (int)(sizeof(js_regex_generated_property_tables) /
-                            sizeof(js_regex_generated_property_tables[0]));
-    for (int i = 0; i < table_count; i++) {
-        const JsRegexGeneratedPropertyTable& t = js_regex_generated_property_tables[i];
-        if (js_regex_match_property_name(name, name_len, t.name)) {
-            int n = t.count;
-            if (n > max_pairs) n = max_pairs;
-            for (int k = 0; k < n; k++) {
-                out_pairs[k * 2 + 0] = t.ranges[k].first;
-                out_pairs[k * 2 + 1] = t.ranges[k].last;
-            }
-            return n;
-        }
-    }
-    return 0;
 }
 
 static int js_regex_detect_simple_property_repeat(const char* pattern, int pattern_len) {
@@ -12913,7 +12827,7 @@ static bool js_regex_append_property_class_escape(std::string& out, const char* 
 static bool js_regex_special_property_contains(int kind, int cp) {
     if (kind == JS_REGEX_PROP_ASCII) return cp >= 0 && cp <= 0x7F;
     if (kind == JS_REGEX_PROP_ANY) return cp >= 0 && cp <= 0x10FFFF;
-    if (kind >= JS_REGEX_PROP_GENERATED_BASE) return js_regex_generated_property_contains(kind, cp);
+    if (kind >= JS_REGEX_PROP_GENERATED_BASE) return js_regex_generated_property_kind_contains(kind, cp);
     if (kind == JS_REGEX_PROP_ASCII_DIGIT) return cp >= '0' && cp <= '9';
     if (kind == JS_REGEX_PROP_ASCII_HEX_DIGIT) {
         return (cp >= '0' && cp <= '9') ||
@@ -14178,24 +14092,6 @@ static bool js_regex_decode_name_escapes(const char* pat, int len, std::string& 
     return false;
 }
 
-static bool js_regex_cp_is_id_start(uint32_t cp) {
-    if (cp == '$' || cp == '_') return true;
-    if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
-    return js_regex_sorted_range_contains(js_regex_generated_ranges_70_id_start,
-        (int)(sizeof(js_regex_generated_ranges_70_id_start) / sizeof(js_regex_generated_ranges_70_id_start[0])),
-        (int)cp);
-}
-
-static bool js_regex_cp_is_id_continue(uint32_t cp) {
-    // ZWNJ (U+200C) and ZWJ (U+200D) are valid in IdentifierPart per spec.
-    if (cp == '$' || cp == '_' || cp == 0x200C || cp == 0x200D) return true;
-    if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
-                          (cp >= '0' && cp <= '9');
-    return js_regex_sorted_range_contains(js_regex_generated_ranges_69_id_continue,
-        (int)(sizeof(js_regex_generated_ranges_69_id_continue) / sizeof(js_regex_generated_ranges_69_id_continue[0])),
-        (int)cp);
-}
-
 // Validate that every named-group identifier in the (already name-decoded) pattern
 // is a valid ECMAScript IdentifierName (first code point ID_Start, rest
 // ID_Continue, plus $ _ ZWNJ ZWJ). Only names containing a non-ASCII code point
@@ -14226,8 +14122,8 @@ static bool js_regex_named_groups_valid(const char* pat, int len) {
                     uint32_t cp = 0;
                     int adv = utf8_decode(pat + k, j - k, &cp);
                     if (adv <= 0) return false;
-                    if (first) { if (!js_regex_cp_is_id_start(cp)) return false; first = false; }
-                    else if (!js_regex_cp_is_id_continue(cp)) return false;
+                    if (first) { if (!js_unicode_id_is_start(cp)) return false; first = false; }
+                    else if (!js_unicode_id_is_continue(cp)) return false;
                     k += adv;
                 }
             }
@@ -15664,7 +15560,7 @@ static bool js_regexp_test_property_all(String* input, int mode) {
     while (pos < input->len) {
         uint32_t cp = js_decode_utf8(input->chars, input->len, &pos);
         bool contains = use_cursor
-            ? js_regex_generated_property_contains_cursor(kind, (int)cp, &range_cursor)
+            ? js_regex_generated_property_kind_contains_cursor(kind, (int)cp, &range_cursor)
             : js_regex_special_property_contains(kind, (int)cp);
         if (search_mode && (negate ? !contains : contains)) {
             g_regex_property_cache_chars = input->chars;
