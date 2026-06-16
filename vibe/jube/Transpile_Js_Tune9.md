@@ -1001,3 +1001,107 @@ Remaining follow-up:
    resizable-buffer set implementation.
 3. Revisit descriptor walking only after a mutation/version invalidation model
    exists.
+
+## P4 Unicode Identifier Instrumentation and Helper Pass
+
+### Implementation
+
+Implemented the low-risk shared helper portion of P4 without touching scanner
+grammar or generated parser files.
+
+Changes:
+
+- exposed `js_unicode_id_is_start()` and `js_unicode_id_is_continue()` from
+  `lambda/js/js_runtime.h`;
+- backed those helpers with the existing generated Unicode `ID_Start` and
+  `ID_Continue` range tables already used by RegExp property support;
+- changed runtime named-group validation to call the shared helper names instead
+  of regex-local `js_regex_cp_is_id_*` functions;
+- changed `js_regexp_compile_frontend()` named capture/backreference scanning to
+  decode UTF-8 and validate the full decoded name through the shared helpers,
+  replacing the previous byte-level `>= 0x80` acceptance shortcut.
+- added opt-in identifier counters for AST construction and early-error Unicode
+  normalization, gated by `LAMBDA_JS_IDENTIFIER_STATS=1`;
+- counter output is per worker under `./temp/js_identifier_stats` by default, or
+  under `LAMBDA_JS_IDENTIFIER_STATS_DIR` when set.
+
+This keeps RegExp named-group validation, frontend pre-scan behavior, and the
+generated Unicode property tables on one identifier policy.
+
+### Measurement
+
+Focused Unicode identifier probe:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_unicode_identifier_focus.txt` |
+| tests | 16 / 16 passed |
+| failure rows | 0 |
+| phase timing file | `temp/_t262_phase_timing_o0.tsv` |
+
+Phase timing totals across the focused identifier manifest:
+
+| Phase | Total |
+| --- | ---: |
+| parse | 43.5 ms |
+| AST build | 136.7 ms |
+| early errors | 3.0 ms |
+| MIR build | 93.7 ms |
+| execute | 378.4 ms |
+| phase total | 719.3 ms |
+
+Identifier counter output with `LAMBDA_JS_IDENTIFIER_STATS=1`:
+
+| Counter | Value |
+| --- | ---: |
+| stats file | `temp/js_identifier_stats_tune9_p4/9181.tsv` |
+| AST identifiers | 27103 |
+| AST escaped identifiers | 13300 |
+| AST non-ASCII decoded identifiers | 26600 |
+| AST source bytes | 179521 |
+| AST decoded bytes | 111887 |
+| early identifier checks | 26706 |
+| early escape checks | 13300 |
+| early Unicode normalizations | 13300 |
+| early reserved hits | 0 |
+| early contextual escape hits | 0 |
+
+Focused RegExp named-group probe:
+
+| Metric | Result |
+| --- | ---: |
+| manifest | `temp/js262_tune9_regexp_named_groups_focus.txt` |
+| tests | 22 / 22 passed |
+| failure rows | 0 |
+
+Full release gate:
+
+| Metric | Result |
+| --- | ---: |
+| fully passed | 40261 / 40261 |
+| non-fully-passing | 0 |
+| regressions | 0 |
+| total runtime | 112.5 s |
+| failure rows | 0 |
+
+### Decision
+
+Keep the shared helper cleanup. It removes a duplicate Unicode identifier policy
+and makes the RegExp frontend fail invalid non-ASCII names through the same
+generated tables as runtime validation.
+
+Do not proceed to parser/scanner changes yet. The focused timing shows early
+errors are tiny for these rows, while execution, AST build, and MIR build are
+the larger buckets. A safe next performance phase should instrument or optimize
+the generated identifier-start row execution/AST/MIR shape rather than changing
+grammar acceptance first.
+
+Remaining follow-up:
+
+1. Move the generated `ID_Start` / `ID_Continue` table ownership to a neutral
+   helper module only when another translation unit needs direct table access.
+2. Use the new identifier counters with MIR-volume or execute-path probes on the
+   large generated `language_identifiers_start_unicode_*` rows before changing
+   parser logic.
+3. Keep parser/scanner edits gated on generated-grammar workflow and a focused
+   root-cause measurement.

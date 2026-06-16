@@ -15,6 +15,7 @@
 
 #include "js_ast.hpp"
 #include "js_transpiler.hpp"
+#include "js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include "../lib/utf.h"
@@ -304,6 +305,9 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
     JsIdentifierNode* id = (JsIdentifierNode*)node;
     if (!id->name) return;
     const char* name = id->name->chars;
+    if (js_identifier_counters_is_enabled()) {
+        js_identifier_counters_record_early_check();
+    }
 
     // check if the name itself is a reserved word
     if (is_reserved_word(name, ctx->in_strict)) {
@@ -341,8 +345,18 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
         }
         if (has_backslash) {
             char normalized[512];
-            if (normalize_unicode_escapes(raw, slen, normalized, sizeof(normalized))) {
-                if (is_reserved_word(normalized, ctx->in_strict)) {
+            bool reserved_hit = false;
+            bool contextual_hit = false;
+            bool normalized_ok = normalize_unicode_escapes(raw, slen, normalized, sizeof(normalized));
+            if (normalized_ok) {
+                reserved_hit = is_reserved_word(normalized, ctx->in_strict);
+                contextual_hit = !reserved_hit &&
+                    (strcmp(normalized, "await") == 0 || strcmp(normalized, "yield") == 0);
+            }
+            js_identifier_counters_record_early_escape(normalized_ok ? 1 : 0,
+                reserved_hit ? 1 : 0, contextual_hit ? 1 : 0);
+            if (normalized_ok) {
+                if (reserved_hit) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);
                 }
                 // P7b: contextually-reserved keywords ('await' / 'yield') must
@@ -353,8 +367,7 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
                 // / IdentifierReference. Treat the escape form as a hard
                 // SyntaxError so test262's `early-no-escaped-await.js` /
                 // `early-no-escaped-yield.js` family stops crashing.
-                else if (strcmp(normalized, "await") == 0 ||
-                         strcmp(normalized, "yield") == 0) {
+                else if (contextual_hit) {
                     ee_error(ctx, node, "'%s' may not contain escape sequences", normalized);
                 }
             }

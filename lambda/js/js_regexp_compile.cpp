@@ -1,7 +1,9 @@
 #include "js_regexp_compile.h"
 #include "js_regex_wrapper.h"
+#include "js_runtime.h"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/utf.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,17 +16,26 @@ typedef struct JsRegExpNameRef {
     int len;
 } JsRegExpNameRef;
 
-static bool js_regexp_is_ascii_name_start(unsigned char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-        ch == '_' || ch == '$' || ch >= 0x80;
-}
-
-static bool js_regexp_is_ascii_name_continue(unsigned char ch) {
-    return js_regexp_is_ascii_name_start(ch) || (ch >= '0' && ch <= '9');
-}
-
 static bool js_regexp_same_name(const JsRegExpNameRef* a, const char* b, int b_len) {
     return a && a->len == b_len && memcmp(a->name, b, b_len) == 0;
+}
+
+static bool js_regexp_name_is_identifier(const char* name, int name_len) {
+    if (!name || name_len <= 0) return false;
+
+    int i = 0;
+    uint32_t cp = 0;
+    int adv = utf8_decode(name, (size_t)name_len, &cp);
+    if (adv <= 0 || !js_unicode_id_is_start(cp)) return false;
+    i += adv;
+
+    while (i < name_len) {
+        cp = 0;
+        adv = utf8_decode(name + i, (size_t)(name_len - i), &cp);
+        if (adv <= 0 || !js_unicode_id_is_continue(cp)) return false;
+        i += adv;
+    }
+    return true;
 }
 
 static void js_regexp_set_error(JsRegExpCompileInfo* out, const char* fmt,
@@ -64,24 +75,7 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
                     continue;
                 }
                 int name_len = j - name_start;
-                if (name_len <= 0 || !js_regexp_is_ascii_name_start((unsigned char)pattern[name_start])) {
-                    if (strict_names) {
-                        js_regexp_set_error(out,
-                            "Invalid regular expression: /%.*s/%.*s: invalid named backreference%s",
-                            pattern, pattern_len, flags, flags_len, "");
-                        return false;
-                    }
-                    i = j;
-                    continue;
-                }
-                bool valid_backref_name = true;
-                for (int k = name_start + 1; k < j; k++) {
-                    if (!js_regexp_is_ascii_name_continue((unsigned char)pattern[k])) {
-                        valid_backref_name = false;
-                        break;
-                    }
-                }
-                if (!valid_backref_name) {
+                if (!js_regexp_name_is_identifier(pattern + name_start, name_len)) {
                     if (strict_names) {
                         js_regexp_set_error(out,
                             "Invalid regular expression: /%.*s/%.*s: invalid named backreference%s",
@@ -124,19 +118,11 @@ static bool js_regexp_scan_named_groups(const char* pattern, int pattern_len,
             return false;
         }
         int name_len = j - name_start;
-        if (name_len <= 0 || !js_regexp_is_ascii_name_start((unsigned char)pattern[name_start])) {
+        if (!js_regexp_name_is_identifier(pattern + name_start, name_len)) {
             js_regexp_set_error(out,
                 "Invalid regular expression: /%.*s/%.*s: invalid named capture%s",
                 pattern, pattern_len, flags, flags_len, "");
             return false;
-        }
-        for (int k = name_start + 1; k < j; k++) {
-            if (!js_regexp_is_ascii_name_continue((unsigned char)pattern[k])) {
-                js_regexp_set_error(out,
-                    "Invalid regular expression: /%.*s/%.*s: invalid named capture%s",
-                    pattern, pattern_len, flags, flags_len, "");
-                return false;
-            }
         }
         for (int g = 0; g < group_count; g++) {
             if (js_regexp_same_name(&groups[g], pattern + name_start, name_len)) {

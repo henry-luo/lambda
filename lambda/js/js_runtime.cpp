@@ -14178,7 +14178,7 @@ static bool js_regex_decode_name_escapes(const char* pat, int len, std::string& 
     return false;
 }
 
-static bool js_regex_cp_is_id_start(uint32_t cp) {
+extern "C" bool js_unicode_id_is_start(uint32_t cp) {
     if (cp == '$' || cp == '_') return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
     return js_regex_sorted_range_contains(js_regex_generated_ranges_70_id_start,
@@ -14186,7 +14186,7 @@ static bool js_regex_cp_is_id_start(uint32_t cp) {
         (int)cp);
 }
 
-static bool js_regex_cp_is_id_continue(uint32_t cp) {
+extern "C" bool js_unicode_id_is_continue(uint32_t cp) {
     // ZWNJ (U+200C) and ZWJ (U+200D) are valid in IdentifierPart per spec.
     if (cp == '$' || cp == '_' || cp == 0x200C || cp == 0x200D) return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
@@ -14226,8 +14226,8 @@ static bool js_regex_named_groups_valid(const char* pat, int len) {
                     uint32_t cp = 0;
                     int adv = utf8_decode(pat + k, j - k, &cp);
                     if (adv <= 0) return false;
-                    if (first) { if (!js_regex_cp_is_id_start(cp)) return false; first = false; }
-                    else if (!js_regex_cp_is_id_continue(cp)) return false;
+                    if (first) { if (!js_unicode_id_is_start(cp)) return false; first = false; }
+                    else if (!js_unicode_id_is_continue(cp)) return false;
                     k += adv;
                 }
             }
