@@ -562,7 +562,10 @@ static WptSelectionResult run_selection_case(const WptSelectionParam& p) {
     bool supported_testdriver_case =
         p.html_path.find("fire-selectionchange-event-on-deleting-single-character-inside-inline-element") != std::string::npos ||
         p.html_path.find("fire-selectionchange-event-on-pressing-backspace") != std::string::npos ||
-        p.html_path.find("fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace") != std::string::npos;
+        p.html_path.find("fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace") != std::string::npos ||
+        p.html_path.find("selection-direction-on-single-click") != std::string::npos ||
+        p.html_path.find("selection-direction-on-double-click") != std::string::npos ||
+        p.html_path.find("selection-direction-on-triple-click") != std::string::npos;
     if (!supported_testdriver_case &&
         html.find("testdriver") != std::string::npos) {
         result.skipped = true;

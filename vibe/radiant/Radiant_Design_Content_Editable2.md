@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange slices landed.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction slices landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -150,7 +150,7 @@ control focus/selection semantics are covered by the selection runner.
 
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
-| `test_wpt_selection_gtest` | 159 | 91 pass / 68 skip / 0 fail | SI-3 converted three Backspace `testdriver` selectionchange cases from skip to pass |
+| `test_wpt_selection_gtest` | 159 | 94 pass / 65 skip / 0 fail | SI-3/SI-4 converted six `testdriver` selectionchange/click-direction cases from skip to pass |
 | `test_wpt_contenteditable_gtest` | 196 | 158 pass / 38 skip / 0 fail | SI-1/SI-2 converted three `testdriver` input-event cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
@@ -240,6 +240,19 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   prevented or the native mutation actually changed the DOM. Unsupported rich
   boundary deletes therefore fall back to the JS shim instead of being swallowed.
 
+**SI-4 — click-direction selection slice: LANDED (2026-06-16).**
+
+- Enabled the WPT selection-direction click files:
+  `selection-direction-on-single-click`,
+  `selection-direction-on-double-click.tentative`, and
+  `selection-direction-on-triple-click.tentative`.
+- These ride the existing WPT `Actions` pointer shim: single click collapses at
+  the hit text node, double click selects the first word, triple click selects
+  the containing block, and click-driven selections force
+  `Selection.direction` to `none`.
+- The trio now passes all `3/3` runnable assertions and moves the full
+  selection runner to 94 pass / 65 skip / 0 fail.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
@@ -251,17 +264,20 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `fire-selectionchange-event-on-deleting-single-character-inside-inline-element` | 3/3 passed |
 | `fire-selectionchange-event-on-pressing-backspace` | 2/2 passed |
 | `fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace` | 1/1 passed |
+| `selection-direction-on-single-click` | 1/1 passed |
+| `selection-direction-on-double-click.tentative` | 1/1 passed |
+| `selection-direction-on-triple-click.tentative` | 1/1 passed |
 | `DomText_EmptyString_Backed` | passed |
 | `make build-test` | passed |
 | `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
-| `test_wpt_selection_gtest` | 159 cases: 91 pass / 68 skip / 0 fail |
+| `test_wpt_selection_gtest` | 159 cases: 94 pass / 65 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
 | `test_js_gtest` | 193 passed / 0 failed |
 | `make test262-baseline` | fully passed 40261 / 40261; regressions 0; retry phase 0.0s |
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
-subset: remaining `getTargetRanges` deletion matrices, broader text-control
-delete coverage, and pointer/mouse injection.
+and click-direction subset: remaining `getTargetRanges` deletion matrices,
+broader text-control delete coverage, and pointer drag/mouse-button injection.
 
 ---
 
