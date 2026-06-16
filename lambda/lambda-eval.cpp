@@ -4862,6 +4862,10 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         return;
     }
 
+    // Shaped JS objects use slot_entries and fixed 8-byte slots.  Keep that
+    // layout even when a field type changes; compiled slot access uses slot*8.
+    bool preserve_slot_layout = old_map_type->slot_entries && old_map_type->slot_count > 0;
+
     // build new shape chain with updated type for the changed field
     ShapeEntry* first = NULL;
     ShapeEntry* prev = NULL;
@@ -4884,7 +4888,7 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         nv->length = e->name->length;
         ne->name = nv;
         ne->type = type_info[ft].type;
-        ne->byte_offset = byte_offset;
+        ne->byte_offset = preserve_slot_layout ? e->byte_offset : byte_offset;
         ne->next = NULL;
         ne->ns = e->ns;
         // Preserve property attribute flags (JSPD_IS_ACCESSOR, NW, NE, NC, etc.)
@@ -4898,15 +4902,29 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         if (prev) prev->next = ne;
         last = ne;
         prev = ne;
-        byte_offset += type_info[ft].byte_size;
+        if (!preserve_slot_layout) {
+            byte_offset += type_info[ft].byte_size;
+        }
         e = e->next;
     }
-    int64_t new_byte_size = byte_offset;
+    int64_t new_byte_size = preserve_slot_layout ? old_map_type->byte_size : byte_offset;
+    if (preserve_slot_layout) {
+        int64_t slot_byte_size = (int64_t)old_map_type->slot_count * (int64_t)sizeof(void*);
+        if (new_byte_size < slot_byte_size) new_byte_size = slot_byte_size;
+    }
 
     // allocate new data buffer
     // For heap containers: calloc (consistent with map_fill, freed by free_container)
     // For markup containers: pool_calloc from runtime pool (data migrated from input pool)
     bool use_pool = !container->is_heap;
+    bool roots_registered = !use_pool;
+    uint64_t container_root = (uint64_t)(uintptr_t)container;
+    uint64_t value_root = new_value.item;
+    if (roots_registered) {
+        heap_register_gc_root(&container_root);
+        heap_register_gc_root(&value_root);
+    }
+
     void* new_data;
     if (use_pool) {
         new_data = pool_calloc(context->pool, new_byte_size > 0 ? new_byte_size : 1);
@@ -4914,6 +4932,10 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_data = heap_data_calloc(new_byte_size > 0 ? new_byte_size : 1);
     }
     if (!new_data) {
+        if (roots_registered) {
+            heap_unregister_gc_root(&value_root);
+            heap_unregister_gc_root(&container_root);
+        }
         log_error("map_rebuild: data allocation failed");
         return;
     }
@@ -4937,7 +4959,8 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
             map_field_store(new_field, new_value, new_value_type);
         } else {
             // unchanged field — copy bytes (ref count unchanged, same pointers)
-            int sz = type_info[old_e->type->type_id].byte_size;
+            int sz = preserve_slot_layout ? (int)sizeof(void*) :
+                type_info[old_e->type->type_id].byte_size;
             memcpy(new_field, old_field, sz);
         }
         old_e = old_e->next;
@@ -5022,6 +5045,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // mark data as migrated for future mutations
     if (use_pool) {
         container->is_data_migrated = 1;
+    }
+
+    if (roots_registered) {
+        heap_unregister_gc_root(&value_root);
+        heap_unregister_gc_root(&container_root);
     }
 
     log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",
@@ -5188,6 +5216,19 @@ void fn_map_set(Item map_item, Item key, Item value) {
                         return;
                     }
                 }
+            }
+
+            // Shaped JS objects preallocate fixed 8-byte slots and publish
+            // slot_entries for slot-indexed access.  Do not run the generic
+            // Lambda map rebuild here: it packs fields by type byte size and
+            // breaks the slot*8 layout used by compiled JS accessors.
+            if (map_type->slot_entries && map_type->slot_count > 0) {
+                map_field_decrement_ref(field_ptr, field_type);
+                map_field_store(field_ptr, value, value_type);
+                if (value_type != LMD_TYPE_NULL) {
+                    entry->type = type_info[value_type].type;
+                }
+                return;
             }
 
             // type change — rebuild shape with new field type

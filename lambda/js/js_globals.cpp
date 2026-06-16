@@ -7361,6 +7361,21 @@ struct JsFuncProps {
     Item properties_map;
 };
 
+extern "C" Item js_get_constructor(Item name_item);
+
+static bool js_func_is_intrinsic_ctor_named(Item fn, const char* name, int len) {
+    if (!name || len <= 0) return false;
+    Item name_item = (Item){.item = s2it(heap_create_name(name, len))};
+    Item ctor = js_get_constructor(name_item);
+    return ctor.item == fn.item;
+}
+
+static bool js_func_is_synthetic_function_ctor(JsFuncProps* fn) {
+    return fn->func_ptr == (void*)js_gen_func_ctor_placeholder ||
+           fn->func_ptr == (void*)js_async_gen_func_ctor_placeholder ||
+           fn->func_ptr == (void*)js_async_func_ctor_placeholder;
+}
+
 // ES spec: built-in constructor's `prototype` data property is non-writable,
 // non-enumerable, non-configurable. This helper is consulted by both
 // js_object_get_own_property_descriptor (descriptor synthesis) and
@@ -7368,36 +7383,11 @@ struct JsFuncProps {
 extern "C" bool js_func_is_builtin_ctor(Item fn) {
     if (get_type_id(fn) != LMD_TYPE_FUNC) return false;
     JsFuncProps* efn = (JsFuncProps*)fn.function;
+    if (js_func_is_synthetic_function_ctor(efn)) return true;
     if (!efn->name) return false;
     const char* en = efn->name->chars;
     int el = (int)efn->name->len;
-    return (el == 5 && strncmp(en, "Error", 5) == 0) ||
-        (el == 9 && strncmp(en, "TypeError", 9) == 0) ||
-        (el == 10 && strncmp(en, "RangeError", 10) == 0) ||
-        (el == 14 && strncmp(en, "ReferenceError", 14) == 0) ||
-        (el == 11 && strncmp(en, "SyntaxError", 11) == 0) ||
-        (el == 8 && strncmp(en, "URIError", 8) == 0) ||
-        (el == 9 && strncmp(en, "EvalError", 9) == 0) ||
-        (el == 14 && strncmp(en, "AggregateError", 14) == 0) ||
-        (el == 3 && strncmp(en, "Map", 3) == 0) ||
-        (el == 3 && strncmp(en, "Set", 3) == 0) ||
-        (el == 7 && strncmp(en, "WeakMap", 7) == 0) ||
-        (el == 7 && strncmp(en, "WeakSet", 7) == 0) ||
-        (el == 7 && strncmp(en, "WeakRef", 7) == 0) ||
-        (el == 20 && strncmp(en, "FinalizationRegistry", 20) == 0) ||
-        (el == 7 && strncmp(en, "Promise", 7) == 0) ||
-        (el == 11 && strncmp(en, "ArrayBuffer", 11) == 0) ||
-        (el == 17 && strncmp(en, "SharedArrayBuffer", 17) == 0) ||
-        (el == 8 && strncmp(en, "DataView", 8) == 0) ||
-        (el == 5 && strncmp(en, "Array", 5) == 0) ||
-        (el == 7 && strncmp(en, "Boolean", 7) == 0) ||
-        (el == 6 && (strncmp(en, "Number", 6) == 0 || strncmp(en, "String", 6) == 0 || strncmp(en, "Object", 6) == 0 || strncmp(en, "RegExp", 6) == 0 || strncmp(en, "Symbol", 6) == 0 || strncmp(en, "BigInt", 6) == 0)) ||
-        (el == 4 && strncmp(en, "Date", 4) == 0) ||
-        (el == 8 && strncmp(en, "Function", 8) == 0) ||
-        (el == 17 && strncmp(en, "GeneratorFunction", 17) == 0) ||
-        (el == 22 && strncmp(en, "AsyncGeneratorFunction", 22) == 0) ||
-        (el == 13 && strncmp(en, "AsyncFunction", 13) == 0) ||
-        js_is_typed_array_ctor_name(en, el);
+    return js_func_is_intrinsic_ctor_named(fn, en, el);
 }
 
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
