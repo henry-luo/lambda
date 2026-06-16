@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI started.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction slices landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -150,8 +150,8 @@ control focus/selection semantics are covered by the selection runner.
 
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
-| `test_wpt_selection_gtest` | 159 | 88 pass / 71 skip / 0 fail | WPT variants applied; all runnable selection assertions green |
-| `test_wpt_contenteditable_gtest` | 196 | 156 pass / 40 skip / 0 fail | SI-1 converted one `testdriver` keyboard case from skip to pass |
+| `test_wpt_selection_gtest` | 159 | 94 pass / 65 skip / 0 fail | SI-3/SI-4 converted six `testdriver` selectionchange/click-direction cases from skip to pass |
+| `test_wpt_contenteditable_gtest` | 196 | 158 pass / 38 skip / 0 fail | SI-1/SI-2 converted three `testdriver` input-event cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
 plus the live WPT guards listed in §5.1.
@@ -200,20 +200,84 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   `getTargetRanges()` is called, matching
   `input-events-range-exceptions.tentative.html`.
 
+**SI-2 — Delete/Backspace default action slice: LANDED (2026-06-16).**
+
+- Added a native headless testdriver key hook for WPT Backspace/Delete. It
+  targets the focused rich editing surface, maps plain Backspace/Delete and
+  word-modified variants to Radiant `InputIntent`s, dispatches cancelable
+  `beforeinput`, runs the rich default mutation, updates selection, then
+  dispatches `input`.
+- Implemented rich default deletion for `deleteContentBackward`,
+  `deleteContentForward`, `deleteWordBackward`, and `deleteWordForward`.
+  Non-collapsed selections delete the selected range; collapsed deletions use
+  the existing UTF-8/word boundary helpers.
+- Target ranges now follow the Input Events contract for this path:
+  `beforeinput.getTargetRanges()` returns the pre-mutation static range, while
+  the follow-up `input` event returns an empty range list.
+- While enabling the WPT cases, fixed two root causes that would otherwise
+  keep the headless path flaky:
+  `innerHTML` now keeps DOM children and the backing Lambda `Element::items`
+  tree in sync for parsed fragments, and top-level JS `let`/`const` module
+  bindings captured by event-listener closures remain live instead of being
+  copied into stale closure environments.
+- The standalone JS `InputEvent` constructor test now uses explicit
+  `StaticRange` objects for non-DOM snapshots, while DOM-backed
+  `StaticRange`s still validate offsets through the live range path.
+
+**SI-3 — selectionchange-on-Backspace slice: LANDED (2026-06-16).**
+
+- Enabled the WPT Backspace selectionchange files:
+  `fire-selectionchange-event-on-deleting-single-character-inside-inline-element`,
+  `fire-selectionchange-event-on-pressing-backspace`, and
+  `fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace`.
+  They now pass all `6/6` runnable assertions.
+- Fixed the DOM-backed text empty-string root cause: rich Backspace can now
+  replace the final character with a real zero-length Lambda `String` instead
+  of hitting `MarkBuilder::createStringItem("")`'s empty-as-null behavior.
+  The regression is covered by `DomText_EmptyString_Backed`.
+- The native WPT key hook now queues document `selectionchange` after successful
+  rich text mutations, and reports a key as handled only when `beforeinput` was
+  prevented or the native mutation actually changed the DOM. Unsupported rich
+  boundary deletes therefore fall back to the JS shim instead of being swallowed.
+
+**SI-4 — click-direction selection slice: LANDED (2026-06-16).**
+
+- Enabled the WPT selection-direction click files:
+  `selection-direction-on-single-click`,
+  `selection-direction-on-double-click.tentative`, and
+  `selection-direction-on-triple-click.tentative`.
+- These ride the existing WPT `Actions` pointer shim: single click collapses at
+  the hit text node, double click selects the first word, triple click selects
+  the containing block, and click-driven selections force
+  `Selection.direction` to `none`.
+- The trio now passes all `3/3` runnable assertions and moves the full
+  selection runner to 94 pass / 65 skip / 0 fail.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
 |---|---|
 | `contenteditable-false-in-design-mode` | 2/2 passed |
+| `input-events-delete-selection` | 6/6 passed |
+| `input-events-get-target-ranges-during-and-after-dispatch.tentative` | 3/3 passed |
 | `input-events-range-exceptions.tentative` | 4/4 passed |
-| `test_wpt_contenteditable_gtest` | 196 cases: 156 pass / 40 skip / 0 fail |
-| `test_wpt_selection_gtest` | 159 cases: 88 pass / 71 skip / 0 fail |
+| `fire-selectionchange-event-on-deleting-single-character-inside-inline-element` | 3/3 passed |
+| `fire-selectionchange-event-on-pressing-backspace` | 2/2 passed |
+| `fire-selectionchange-event-on-textcontrol-element-on-pressing-backspace` | 1/1 passed |
+| `selection-direction-on-single-click` | 1/1 passed |
+| `selection-direction-on-double-click.tentative` | 1/1 passed |
+| `selection-direction-on-triple-click.tentative` | 1/1 passed |
+| `DomText_EmptyString_Backed` | passed |
+| `make build-test` | passed |
+| `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
+| `test_wpt_selection_gtest` | 159 cases: 94 pass / 65 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
+| `test_js_gtest` | 193 passed / 0 failed |
+| `make test262-baseline` | fully passed 40261 / 40261; regressions 0; retry phase 0.0s |
 
-**Next SI slice:** Delete/Backspace default actions with real
-`beforeinput`/`input` target ranges. This is the blocker for the
-`input-events-get-target-ranges-*`, `input-events-delete-selection`, and the
-selectionchange-on-Backspace cases.
+**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
+and click-direction subset: remaining `getTargetRanges` deletion matrices,
+broader text-control delete coverage, and pointer drag/mouse-button injection.
 
 ---
 

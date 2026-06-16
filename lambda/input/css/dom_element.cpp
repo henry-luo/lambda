@@ -87,6 +87,25 @@ static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value)
     return candidate;
 }
 
+static String* dom_create_mutation_string(MarkBuilder* builder, const char* content, bool use_dom_text_string) {
+    if (!builder || !content) return nullptr;
+    size_t len = strlen(content);
+    if (use_dom_text_string) {
+        return builder->createDomTextString(content, len);
+    }
+    if (len > 0) {
+        return builder->createString(content, len);
+    }
+
+    // dom text mutations need a real empty string, while normal Lambda "" maps to null.
+    String* s = (String*)arena_alloc(builder->arena(), sizeof(String) + 1);
+    if (!s) return nullptr;
+    s->len = 0;
+    s->is_ascii = 1;
+    s->chars[0] = '\0';
+    return s;
+}
+
 // helper: extract a name string from a CssValue (works for counter names, attr names, etc.)
 static const char* css_value_extract_name(const CssValue* value) {
     if (!value) return nullptr;
@@ -2154,19 +2173,13 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item new_string_item;
-    if (parent->doc->input->ui_mode) {
-        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
-        String* new_s = editor.builder()->createDomTextString(new_content, strlen(new_content));
-        if (!new_s) { log_error("dom_text_set_content: failed to create DomText string"); return false; }
-        new_string_item = (Item){.item = s2it(new_s)};
-    } else {
-        new_string_item = editor.builder()->createStringItem(new_content);
-        if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
-            log_error("dom_text_set_content: failed to create string");
-            return false;
-        }
+    String* new_s = dom_create_mutation_string(
+        editor.builder(), new_content, parent->doc->input->ui_mode);
+    if (!new_s) {
+        log_error("dom_text_set_content: failed to create string");
+        return false;
     }
+    Item new_string_item = (Item){.item = s2it(new_s)};
 
     // Replace child in parent Element's items array
     Item result = editor.elmt_replace_child(
@@ -2328,19 +2341,13 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
 
     // Create String item via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item string_item;
-    if (parent->doc->input->ui_mode) {
-        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
-        String* s = editor.builder()->createDomTextString(text_content, strlen(text_content));
-        if (!s) { log_error("dom_element_append_text: failed to create DomText string"); return nullptr; }
-        string_item = (Item){.item = s2it(s)};
-    } else {
-        string_item = editor.builder()->createStringItem(text_content);
-        if (get_type_id(string_item) != LMD_TYPE_STRING) {
-            log_error("dom_element_append_text: failed to create string");
-            return nullptr;
-        }
+    String* s = dom_create_mutation_string(
+        editor.builder(), text_content, parent->doc->input->ui_mode);
+    if (!s) {
+        log_error("dom_element_append_text: failed to create string");
+        return nullptr;
     }
+    Item string_item = (Item){.item = s2it(s)};
 
     // Append to parent Element's children via MarkEditor
     Item result = editor.elmt_append_child(
@@ -2608,19 +2615,13 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
 
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item new_string_item;
-    if (parent->doc->input->ui_mode) {
-        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
-        String* new_s = editor.builder()->createDomTextString(new_content, strlen(new_content));
-        if (!new_s) { log_error("dom_comment_set_content: failed to create DomText string"); return false; }
-        new_string_item = (Item){.item = s2it(new_s)};
-    } else {
-        new_string_item = editor.builder()->createStringItem(new_content);
-        if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
-            log_error("dom_comment_set_content: failed to create string");
-            return false;
-        }
+    String* new_s = dom_create_mutation_string(
+        editor.builder(), new_content, parent->doc->input->ui_mode);
+    if (!new_s) {
+        log_error("dom_comment_set_content: failed to create string");
+        return false;
     }
+    Item new_string_item = (Item){.item = s2it(new_s)};
 
     // Replace or append String child in comment Element
     Item result;

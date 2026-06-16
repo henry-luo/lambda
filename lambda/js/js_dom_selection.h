@@ -58,6 +58,9 @@ void js_dom_selection_install_globals(void);
 // Reset internal pools (call from js_dom batch reset).
 void js_dom_selection_reset(void);
 
+struct DomSelection;
+void js_dom_queue_selectionchange(struct DomSelection* sel);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

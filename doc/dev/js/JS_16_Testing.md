@@ -2,7 +2,7 @@
 
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how LambdaJS conformance and unit tests run: the test262 batch runner (GTest orchestrator → `posix_spawn` worker pool → persistent hot-reload process → wire protocol), batch execution phases and slowest-first dispatch, the three-layer crash recovery, batch-state reset, baseline management, the async/`$DONE` runner, diagnose mode, the Node.js official-test harness and shims, and the GTest unit suites.
 >
-> **Primary sources:** `test/test_js_test262_gtest.cpp` (orchestrator), `lambda/main.cpp` (`js-test-batch` worker + crash recovery), `lambda/js/js_runtime_state.cpp` (`js_batch_reset`/`js_batch_reset_to`), `test/test_node_official_gtest.cpp` + `lambda/js/test_shim/` (Node harness), `test/test_js_gtest.cpp`, `test/test_js_coerce_gtest.cpp`, `test/test_js_bt_regex_gtest.cpp`, `test/test_jsx_roundtrip{,_new}_gtest.cpp`, `test/test_js_transpile_timing_gtest.cpp`, baseline data under `test/js262/`.
+> **Primary sources:** `test/test_js_test262_gtest.cpp` (orchestrator), `lambda/main.cpp` (`js-test-batch` worker + crash recovery), `lambda/js/js_runtime_state.cpp` (`js_batch_reset`/`js_batch_reset_to`), `test/test_node_gtest.cpp` + `lambda/js/test_shim/` (Node harness), `test/test_js_gtest.cpp`, `test/test_js_coerce_gtest.cpp`, `test/test_js_bt_regex_gtest.cpp`, `test/test_jsx_roundtrip{,_new}_gtest.cpp`, `test/test_js_transpile_timing_gtest.cpp`, baseline data under `test/js262/`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -105,7 +105,7 @@ Async-flagged tests rely on test262's `doneprintHandle.js` calling a host `$DONE
 
 ## 9. Node.js official-test harness, shims & GTest unit suites
 
-**Node official runner** (`test_node_official_gtest.cpp`). Discovers `test-*.js` under `ref/node/test/parallel/` and assigns each to a module by filename prefix via `g_feature_modules` (`:104`) (`assert`, `buffer`, `fs`, `path`, `stream`, … plus a large `misc` catch-all). Unlike test262, each test runs as its **own** `lambda.exe js` subprocess via `popen` (`run_single_test`, `:461`), with a `timeout` and ASAN-related env vars stripped, executed inside `temp/node_test/`; there is no batch worker. A `skip_list.txt` (loaded at runtime, `:322`) excludes unsupported tests, `--modules=X,Y` narrows the set, and `--update-baseline` rewrites `test/node/official_baseline.txt` for regression tracking. The Node **harness shims** in `lambda/js/test_shim/` (`common_index.js`, `tmpdir.js`, `fixtures.js`, `package.json`) reimplement `ref/node/test/common/` against LambdaJS's runtime so the upstream tests' `require('../common')` resolves; Node-API semantics they cover are in [JS_14 — Node Compatibility](JS_14_Node_Compat.md).
+**Node official runner** (`test_node_gtest.cpp`). Discovers `test-*.js` under `ref/node/test/parallel/` and assigns each to a module by filename prefix via `g_feature_modules` (`:104`) (`assert`, `buffer`, `fs`, `path`, `stream`, … plus a large `misc` catch-all). Unlike test262, each test runs as its **own** `lambda.exe js` subprocess via `popen` (`run_single_test`, `:461`), with a `timeout` and ASAN-related env vars stripped, executed inside `temp/node_test/`; there is no batch worker. A `skip_list.txt` (loaded at runtime, `:322`) excludes unsupported tests, `--modules=X,Y` narrows the set, and `--update-baseline` rewrites `test/node/official_baseline.txt` for regression tracking. The Node **harness shims** in `lambda/js/test_shim/` (`common_index.js`, `tmpdir.js`, `fixtures.js`, `package.json`) reimplement `ref/node/test/common/` against LambdaJS's runtime so the upstream tests' `require('../common')` resolves; Node-API semantics they cover are in [JS_14 — Node Compatibility](JS_14_Node_Compat.md).
 
 **Focused GTest suites** — each targets one kernel and most drive the full JIT path by subprocess so they validate lowering, not just the C kernel:
 
@@ -138,7 +138,7 @@ Async-flagged tests rely on test262's `doneprintHandle.js` calling a host `$DONE
 | `test/test_js_test262_gtest.cpp` | test262 orchestrator: discovery, partition, `posix_spawn` pool, wire protocol, phases, dispatch, evaluation, baseline gate, diagnose mode. |
 | `lambda/main.cpp` | `js-test-batch` worker: protocol read loop, preamble compile, three-layer `sigsetjmp`/`longjmp` crash recovery, per-test reset/recycle. |
 | `lambda/js/js_runtime_state.cpp` | `js_batch_reset`, `js_batch_reset_to`, `js_heap_epoch`. |
-| `test/test_node_official_gtest.cpp` | Node official-test runner: `g_feature_modules`, per-test subprocess, skip list, baseline. |
+| `test/test_node_gtest.cpp` | Node official-test runner: `g_feature_modules`, per-test subprocess, skip list, baseline. |
 | `lambda/js/test_shim/` | Node harness shims (`common_index.js`, `tmpdir.js`, `fixtures.js`). |
 | `test/test_js_gtest.cpp` | `.js` fixture suite + mini batch runner + REPL/fuzz checks. |
 | `test/test_js_coerce_gtest.cpp` | ToPrimitive coercion matrix. |

@@ -454,11 +454,12 @@ static WptCeResult run_ce_case(const WptCeParam& p) {
     bool has_testharness = (html.find("testharness.js") != std::string::npos);
 
     // testdriver tests synthesize input (keyboard / pointer) via test_driver.
-    // Phase SI has a first narrow keyboard slice for the designMode /
-    // contenteditable=false override test; the broader input-events corpus
-    // remains skipped until Delete/Backspace/pointer default actions land.
+    // Phase SI enables narrow keyboard slices as the native headless injector
+    // grows; broader structural deletion/pointer matrices remain skipped.
     bool supported_testdriver_case =
-        p.html_path.find("contenteditable-false-in-design-mode") != std::string::npos;
+        p.html_path.find("contenteditable-false-in-design-mode") != std::string::npos ||
+        p.html_path.find("input-events-delete-selection") != std::string::npos ||
+        p.html_path.find("input-events-get-target-ranges-during-and-after-dispatch") != std::string::npos;
     if (!is_crash_test && !supported_testdriver_case &&
         (html.find("testdriver") != std::string::npos ||
          html.find("test_driver") != std::string::npos)) {

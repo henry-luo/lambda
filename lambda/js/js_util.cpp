@@ -1022,7 +1022,7 @@ extern "C" Item js_util_debuglog(Item section) {
 // Strips ANSI escape codes from a string
 static Item js_util_stripVTControlCharacters(Item str) {
     if (get_type_id(str) != LMD_TYPE_STRING) {
-        return js_throw_type_error("The \"str\" argument must be of type string");
+        return js_throw_invalid_arg_type("str", "string", str);
     }
     String* s = it2s(str);
     if (!s || s->len == 0) return str;
@@ -1032,23 +1032,58 @@ static Item js_util_stripVTControlCharacters(Item str) {
     int out = 0;
     for (int i = 0; i < (int)s->len; i++) {
         unsigned char c = (unsigned char)s->chars[i];
-        if (c == 0x1b || c == 0x9b) {
-            // skip ESC [ ... final_byte sequence
-            i++;
-            if (i < (int)s->len && (s->chars[i] == '[' || c == 0x9b)) {
-                if (c == 0x1b) i++; // skip '['
-                // skip parameter bytes (0x30-0x3f), intermediate bytes (0x20-0x2f), final byte (0x40-0x7e)
+        if (c == 0x1b) {
+            if (i + 1 >= (int)s->len) continue;
+            unsigned char next = (unsigned char)s->chars[i + 1];
+            if (next == '[') {
+                i += 2;
                 while (i < (int)s->len) {
                     unsigned char cc = (unsigned char)s->chars[i];
-                    if (cc >= 0x40 && cc <= 0x7e) { break; } // final byte — consumed
+                    if (cc >= 0x40 && cc <= 0x7e) break;
                     i++;
                 }
-            } else if (i < (int)s->len) {
-                // single-char ESC sequence (e.g. ESC D, ESC M) — skip the char after ESC
+                continue;
             }
-        } else {
-            buf[out++] = s->chars[i];
+            if (next == ']') {
+                i += 2;
+                while (i < (int)s->len) {
+                    unsigned char cc = (unsigned char)s->chars[i];
+                    if (cc == 0x07 || cc == 0x9c) break;
+                    if (cc == 0x1b && i + 1 < (int)s->len && s->chars[i + 1] == '\\') {
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            i++;
+            continue;
         }
+        if (c == 0x9b) {
+            i++;
+            while (i < (int)s->len) {
+                unsigned char cc = (unsigned char)s->chars[i];
+                if (cc >= 0x40 && cc <= 0x7e) break;
+                i++;
+            }
+            continue;
+        }
+        if (c == 0x9d) {
+            i++;
+            while (i < (int)s->len) {
+                unsigned char cc = (unsigned char)s->chars[i];
+                if (cc == 0x07 || cc == 0x9c) break;
+                if (cc == 0x1b && i + 1 < (int)s->len && s->chars[i + 1] == '\\') {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (c == 0x9c) continue;
+        buf[out++] = s->chars[i];
     }
     return (Item){.item = s2it(heap_create_name(buf, out))};
 }
