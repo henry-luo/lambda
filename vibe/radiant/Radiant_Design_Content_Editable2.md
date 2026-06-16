@@ -151,7 +151,7 @@ control focus/selection semantics are covered by the selection runner.
 | Runner | Cases | Result | Δ from §3 start |
 |---|---|---|---|
 | `test_wpt_selection_gtest` | 159 | 97 pass / 62 skip / 0 fail | SI-3/SI-5 converted nine `testdriver` selectionchange/click-direction/mouse-button cases from skip to pass |
-| `test_wpt_contenteditable_gtest` | 196 | 158 pass / 38 skip / 0 fail | SI-1/SI-2 converted three `testdriver` input-event cases from skip to pass |
+| `test_wpt_contenteditable_gtest` | 196 | 161 pass / 35 skip / 0 fail | SI-1/SI-2/SI-7 converted six `testdriver` input-event cases from skip to pass |
 
 Regression guards green: `dom_range` 66, `source_pos_bridge` 22, `cmdedit` 82,
 plus the live WPT guards listed in §5.1.
@@ -294,6 +294,26 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   applies to `innerHTML` replacements and other subtree-removal paths rather
   than special-casing the WPT.
 
+**SI-7 — number-input ArrowUp synthetic input slice: LANDED (2026-06-16).**
+
+- Enabled the WPT number-input ArrowUp files:
+  `input-events-arrow-key-on-number-input`,
+  `input-events-arrow-key-on-number-input-prevent-default`, and
+  `input-events-arrow-key-on-number-input-delete-document`. They now pass all
+  `3/3` runnable assertions.
+- Extended the WPT key shim so ArrowUp/ArrowDown on focused
+  `<input type="number">` dispatch cancelable `beforeinput` with
+  `inputType="insertReplacementText"`, apply the numeric step only when the
+  event is not canceled and the control is still connected, then dispatch
+  `input` and `change`.
+- Fixed the iframe `srcdoc` property setter root cause exposed by the
+  delete-document variant: setting `frame.srcdoc = ...` now reflects the
+  `srcdoc` attribute and schedules the synthetic iframe load path, so the WPT
+  frame document exists before the test sends the key.
+- While closing the global JS gate, fixed an unrelated `lib_joi` fixture
+  root cause: its local `URL` shim defined `href`/`hostname` but not `host`,
+  while Joi's domain normalizer reads `new URL(...).host`.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
@@ -311,25 +331,28 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `modifying-selection-with-primary-mouse-button.tentative` | 7/7 passed |
 | `modifying-selection-with-non-primary-mouse-button.tentative?middle` | 7/7 passed |
 | `modifying-selection-with-non-primary-mouse-button.tentative?secondary` | 7/7 passed |
+| `input-events-arrow-key-on-number-input` | 1/1 passed |
+| `input-events-arrow-key-on-number-input-prevent-default` | 1/1 passed |
+| `input-events-arrow-key-on-number-input-delete-document` | 1/1 passed |
 | `input-events-get-target-ranges-backspace.tentative` | measured 26/163; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_selection_gtest` and `test_wpt_contenteditable_gtest` rebuilt |
-| `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
+| `test_wpt_contenteditable_gtest` | 196 cases: 161 pass / 35 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 193 passed / 0 failed |
-| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; 0 retry-only cases |
+| `test_js_gtest` | 196 passed / 0 failed |
+| `make test262-baseline` | regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-6's local WPT/JS guards and the mandatory §1.1
+**Global gate note:** SI-7's local WPT/JS guards and the mandatory §1.1
 JavaScript regression gate are green. The broader SI phase can keep advancing
 from the remaining skipped deletion/pointer matrices without carrying a global
 gate blocker.
 
-**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
-and pointer subset: remaining `getTargetRanges` deletion matrices (starting
-with the measured Backspace blockers), broader text-control delete coverage,
-and general pointer drag/hit-test injection outside the contenteditable
-mouse-button files.
+**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
+number spin-key, and pointer subset: remaining `getTargetRanges` deletion
+matrices (starting with the measured Backspace blockers), broader text-control
+delete coverage, number spin-button pointer coverage, and general pointer
+drag/hit-test injection outside the contenteditable mouse-button files.
 
 ---
 

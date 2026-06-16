@@ -7566,6 +7566,14 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         }
     }
 
+    if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
+        const char* srcdoc = fn_to_cstr(value);
+        dom_element_set_attribute(elem, "srcdoc", srcdoc ? srcdoc : "");
+        _schedule_iframe_load(elem);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        return value;
+    }
+
     // className
     if (strcmp(prop, "className") == 0) {
         const char* class_str = fn_to_cstr(value);

@@ -458,6 +458,7 @@ static WptCeResult run_ce_case(const WptCeParam& p) {
     // grows; broader structural deletion/pointer matrices remain skipped.
     bool supported_testdriver_case =
         p.html_path.find("contenteditable-false-in-design-mode") != std::string::npos ||
+        p.html_path.find("input-events-arrow-key-on-number-input") != std::string::npos ||
         p.html_path.find("input-events-delete-selection") != std::string::npos ||
         p.html_path.find("input-events-get-target-ranges-during-and-after-dispatch") != std::string::npos;
     if (!is_crash_test && !supported_testdriver_case &&

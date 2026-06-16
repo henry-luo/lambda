@@ -712,6 +712,8 @@ function _wpt_send_one_key(elem, code) {
     var aeTag = (ae && ae.tagName) ? ae.tagName.toUpperCase() : "";
     var isTC = (aeTag === "INPUT" || aeTag === "TEXTAREA");
     if (isTC) {
+        if (code === 0xE013 && _wpt_spin_number_control(ae, +1)) return; // ArrowUp
+        if (code === 0xE015 && _wpt_spin_number_control(ae, -1)) return; // ArrowDown
         var v = ae.value || "";
         var ss = ae.selectionStart;
         var se = ae.selectionEnd;
@@ -981,6 +983,83 @@ function _wpt_dispatch_input_event(target, type, inputType, data) {
     var ok = true;
     try { ok = target.dispatchEvent(ev); } catch (_) { ok = true; }
     return ok !== false && !ev.defaultPrevented;
+}
+
+function _wpt_dispatch_plain_event(target, type) {
+    if (!target || typeof target.dispatchEvent !== "function") return true;
+    var ev = null;
+    try {
+        ev = new Event(type, {
+            bubbles: true,
+            cancelable: false,
+            composed: true
+        });
+    } catch (_) {
+        ev = { type: type, defaultPrevented: false };
+    }
+    try { return target.dispatchEvent(ev) !== false; } catch (_) { return true; }
+}
+
+function _wpt_owner_frame_for_document(doc) {
+    if (!doc || typeof document === "undefined" || doc === document) return null;
+    var frames = [];
+    try { frames = document.querySelectorAll("iframe"); } catch (_) { frames = []; }
+    for (var i = 0; i < frames.length; i++) {
+        try {
+            if (frames[i].contentDocument === doc) return frames[i];
+        } catch (_) {}
+    }
+    return null;
+}
+
+function _wpt_control_is_connected(el) {
+    if (!el) return false;
+    try {
+        if (el.isConnected === false) return false;
+    } catch (_) {}
+    var doc = null;
+    try { doc = el.ownerDocument || document; } catch (_) { doc = null; }
+    if (!doc) return true;
+    if (typeof document !== "undefined" && doc !== document) {
+        var frame = _wpt_owner_frame_for_document(doc);
+        if (!frame) return false;
+        try {
+            if (document.body && typeof document.body.contains === "function") {
+                return document.body.contains(frame);
+            }
+        } catch (_) {}
+        return !!frame.parentNode;
+    }
+    var cur = el;
+    while (cur) {
+        if (cur === doc || cur === doc.documentElement || cur === doc.body) return true;
+        cur = cur.parentNode;
+    }
+    return false;
+}
+
+function _wpt_spin_number_control(el, delta) {
+    if (!el) return false;
+    var tag = "";
+    var type = "";
+    try { tag = String(el.tagName || "").toUpperCase(); } catch (_) {}
+    try { type = String(el.type || el.getAttribute("type") || "").toLowerCase(); } catch (_) {}
+    if (tag !== "INPUT" || type !== "number") return false;
+    if (!_wpt_dispatch_input_event(el, "beforeinput", "insertReplacementText", null)) {
+        return true;
+    }
+    if (!_wpt_control_is_connected(el)) return true;
+    var raw = "";
+    try { raw = el.value || ""; } catch (_) { raw = ""; }
+    var value = raw === "" ? 0 : Number(raw);
+    if (!(value === value)) value = 0;
+    value += delta;
+    try { el.value = String(value); } catch (_) {}
+    _wpt_dispatch_input_event(el, "input", "insertReplacementText", null);
+    if (_wpt_control_is_connected(el)) {
+        _wpt_dispatch_plain_event(el, "change");
+    }
+    return true;
 }
 
 function _wpt_insert_text_in_control(el, text) {

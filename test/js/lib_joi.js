@@ -3,7 +3,11 @@ var exports = module.exports;
 globalThis.global = globalThis;
 globalThis.self = globalThis;
 if (!Error.captureStackTrace) { Error.captureStackTrace = function(obj, cons) {}; }
-function URL(s) { this.href = s; this.hostname = ""; }
+function URL(s) {
+  this.href = s;
+  this.host = String(s).replace(/^https?:\/\//, "").split("/", 1)[0];
+  this.hostname = this.host.split(":", 1)[0];
+}
 function TextEncoder() {}
 TextEncoder.prototype.encode = function(s) {
   var arr = [];
