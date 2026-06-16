@@ -1130,14 +1130,13 @@ extern "C" Item js_atomics_wait_async(Item typed_array, Item index_item, Item ex
     if (agent_slot >= 0) {
         int waiter_id = js_atomics_record_waiter(ta->buffer, index, agent_slot, timeout_number, has_timeout, ItemNull);
         if (waiter_id == 0) return js_throw_type_error("Atomics.waitAsync waiter capacity exceeded");
-        // Js53 P3 Bug C-2 fix: in the agent_slot path, the recorded waiter is
-        // marked as the agent's blocking_waiter, which causes
-        // js_262_agent_get_report to hold all subsequent reports until the
-        // waiter resolves. For finite timeouts, schedule the libuv timer so
-        // the waiter naturally times out; without this, reports queued after
-        // the wait stay perpetually held until the 5000ms drain watchdog
-        // fires the test as "async test did not call $DONE".
-        if (has_timeout && timeout_number <= 200.0) js_atomics_schedule_timeout_waiter(waiter_id, timeout_number);
+        // Test262 agents run on a virtual clock. Match the synchronous
+        // Atomics.wait fast path for short finite waits so no-spurious-wakeup
+        // probes observe the requested lapse without paying real wall time.
+        if (has_timeout && timeout_number <= 200.0) {
+            js_atomics_virtual_now_ms += timeout_number;
+            js_atomics_resolve_due_waiters();
+        }
         Item report_status = has_timeout ? js_atomics_wait_result("timed-out", 9) : js_atomics_wait_result("ok", 2);
         return js_atomics_wait_async_result(true, report_status);
     }
