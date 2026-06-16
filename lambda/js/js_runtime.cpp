@@ -21515,34 +21515,105 @@ extern "C" Item js_throw_error_with_code(const char* code, const char* message) 
     return ItemNull;
 }
 
-// Helper: get JS typeof string for error messages (returns static string)
-static const char* js_typeof_cstr(Item value) {
-    TypeId type = get_type_id(value);
-    switch (type) {
-    case LMD_TYPE_UNDEFINED: return "undefined";
-    case LMD_TYPE_NULL:      return "object";
-    case LMD_TYPE_BOOL:      return "boolean";
-    case LMD_TYPE_INT:
-    case LMD_TYPE_FLOAT:     return js_key_is_symbol(value) ? "symbol" : "number";
-    case LMD_TYPE_DECIMAL:   return "bigint";
-    case LMD_TYPE_STRING:    return "string";
-    case LMD_TYPE_SYMBOL:    return "symbol";
-    case LMD_TYPE_FUNC:      return "function";
-    default:                 return "object";
+static void js_format_invalid_arg_string(char* out, int out_size, String* str) {
+    if (out_size <= 0) return;
+    if (!str) {
+        snprintf(out, out_size, "''");
+        return;
+    }
+    int limit = (int)(str->len > 25 ? 25 : str->len);
+    int pos = snprintf(out, out_size, "'");
+    for (int i = 0; i < limit && pos < out_size - 1; i++) {
+        unsigned char ch = (unsigned char)str->chars[i];
+        if (ch == '\'' || ch == '\\') {
+            pos += snprintf(out + pos, out_size - pos, "\\%c", ch);
+        } else if (ch == '\n') {
+            pos += snprintf(out + pos, out_size - pos, "\\n");
+        } else if (ch == '\r') {
+            pos += snprintf(out + pos, out_size - pos, "\\r");
+        } else if (ch == '\t') {
+            pos += snprintf(out + pos, out_size - pos, "\\t");
+        } else {
+            out[pos++] = (char)ch;
+            out[pos] = '\0';
+        }
+    }
+    if ((int)str->len > 28 && pos < out_size - 1) {
+        pos += snprintf(out + pos, out_size - pos, "...");
+    }
+    if (pos < out_size - 1) {
+        out[pos++] = '\'';
+        out[pos] = '\0';
     }
 }
 
-// Node.js-style error: The "name" argument must be of type expected. Received type actual
+static const char* js_invalid_arg_object_class(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_ARRAY) return "Array";
+    if (type == LMD_TYPE_FUNC) return "Function";
+    if (type == LMD_TYPE_MAP) {
+        JsClass cls = js_class_id(value);
+        const char* class_name = js_class_to_name(cls);
+        return class_name ? class_name : "Object";
+    }
+    return "Object";
+}
+
+static int js_format_invalid_arg_received(char* buf, int buf_size, Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_UNDEFINED) return snprintf(buf, buf_size, " Received undefined");
+    if (type == LMD_TYPE_NULL) return snprintf(buf, buf_size, " Received null");
+    if (type == LMD_TYPE_BOOL) {
+        return snprintf(buf, buf_size, " Received type boolean (%s)", it2b(value) ? "true" : "false");
+    }
+    if (type == LMD_TYPE_INT) {
+        if (js_key_is_symbol(value)) {
+            Item sym_str = js_symbol_to_string(value);
+            String* sym = get_type_id(sym_str) == LMD_TYPE_STRING ? it2s(sym_str) : NULL;
+            return snprintf(buf, buf_size, " Received type symbol (%.*s)",
+                sym ? (int)sym->len : 6, sym ? sym->chars : "Symbol");
+        }
+        return snprintf(buf, buf_size, " Received type number (%lld)", (long long)it2i(value));
+    }
+    if (type == LMD_TYPE_FLOAT) {
+        double d = it2d(value);
+        if (d != d) return snprintf(buf, buf_size, " Received type number (NaN)");
+        if (d == 1.0/0.0) return snprintf(buf, buf_size, " Received type number (Infinity)");
+        if (d == -1.0/0.0) return snprintf(buf, buf_size, " Received type number (-Infinity)");
+        return snprintf(buf, buf_size, " Received type number (%g)", d);
+    }
+    if (type == LMD_TYPE_STRING) {
+        char inspected[64];
+        js_format_invalid_arg_string(inspected, sizeof(inspected), it2s(value));
+        return snprintf(buf, buf_size, " Received type string (%s)", inspected);
+    }
+    if (type == LMD_TYPE_DECIMAL) {
+        return snprintf(buf, buf_size, " Received type bigint");
+    }
+    if (type == LMD_TYPE_SYMBOL) {
+        return snprintf(buf, buf_size, " Received type symbol");
+    }
+    if (type == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)value.function;
+        if (fn && fn->name && fn->name->len > 0) {
+            return snprintf(buf, buf_size, " Received function %.*s", (int)fn->name->len, fn->name->chars);
+        }
+        return snprintf(buf, buf_size, " Received function ");
+    }
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_OBJECT ||
+        type == LMD_TYPE_VMAP) {
+        return snprintf(buf, buf_size, " Received an instance of %s", js_invalid_arg_object_class(value));
+    }
+    return snprintf(buf, buf_size, " Received type object");
+}
+
+// Node.js-style error: The "name" argument must be of type expected.
 extern "C" Item js_throw_invalid_arg_type(const char* name, const char* expected, Item actual) {
     char msg[512];
-    const char* actual_type = js_typeof_cstr(actual);
-    if (get_type_id(actual) == LMD_TYPE_UNDEFINED) {
-        snprintf(msg, sizeof(msg),
-            "The \"%s\" argument must be of type %s. Received undefined", name, expected);
-    } else {
-        snprintf(msg, sizeof(msg),
-            "The \"%s\" argument must be of type %s. Received type %s", name, expected, actual_type);
-    }
+    int pos = snprintf(msg, sizeof(msg), "The \"%s\" argument must be of type %s.", name, expected);
+    if (pos < 0) pos = 0;
+    if (pos >= (int)sizeof(msg)) pos = (int)sizeof(msg) - 1;
+    js_format_invalid_arg_received(msg + pos, (int)sizeof(msg) - pos, actual);
     return js_throw_type_error_code("ERR_INVALID_ARG_TYPE", msg);
 }
 
@@ -29252,6 +29323,7 @@ struct JsAsyncContext {
     int env_size;
     int state;           // current resume state
     int promise_idx;     // index into js_promises[] for the async function's result promise
+    Item this_val;       // receiver captured when the async wrapper was called
 };
 
 #define JS_MAX_ASYNC_CONTEXTS 256
@@ -29260,6 +29332,18 @@ static int js_async_context_count = 0;
 
 // Cached resolved value from js_async_must_suspend (fast-path)
 static Item js_async_resolved_value;
+
+static void js_async_register_roots_once() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+
+    extern void heap_register_gc_root_range(uint64_t* base, int count);
+    for (int i = 0; i < JS_MAX_ASYNC_CONTEXTS; i++) {
+        heap_register_gc_root_range((uint64_t*)&js_async_contexts[i].this_val, 1);
+    }
+    heap_register_gc_root_range((uint64_t*)&js_async_resolved_value, 1);
+}
 
 // Check if an awaited value requires suspension (pending promise)
 // Returns: 1 = pending (must suspend), 0 = resolved/rejected/non-promise
@@ -29315,7 +29399,10 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
 static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
     typedef Item (*AsyncSmFn)(Item*, Item, int64_t);
+    Item prev_this = js_current_this;
+    js_current_this = ctx->this_val;
     Item result = ((AsyncSmFn)ctx->state_fn)(ctx->env, input, state);
+    js_current_this = prev_this;
 
     // Parse result: [value, next_state]
     if (get_type_id(result) != LMD_TYPE_ARRAY) {
@@ -29380,7 +29467,8 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
 }
 
 // Create an async context: allocates promise, returns context index
-extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size) {
+extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val) {
+    js_async_register_roots_once();
     if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
         log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
         return (Item){.item = i2it(-1)};
@@ -29391,6 +29479,7 @@ extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_siz
     ctx->env = env;
     ctx->env_size = (int)env_size;
     ctx->state = 0;
+    ctx->this_val = this_val;
 
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
@@ -30861,7 +30950,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     // If no sandbox or it's not an object, just eval directly
     if (sandbox.item == 0 || sandbox.item == ITEM_NULL || sandbox.item == ITEM_UNDEFINED ||
         get_type_id(sandbox) != LMD_TYPE_MAP) {
-        return js_builtin_eval(code, 1);
+        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
     }
 
     // Get sandbox keys
@@ -30869,7 +30958,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     int64_t nkeys = js_array_length(keys);
 
     if (nkeys == 0) {
-        return js_builtin_eval(code, 1);
+        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
     }
 
     // Get globalThis to inject sandbox variables
@@ -30896,8 +30985,10 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
         js_property_set(global, k, js_property_get(sandbox, k));
     }
 
-    // Eval the code in global scope
-    Item result = js_builtin_eval(code, 1);
+    // Eval the code in global scope.
+    // bit 8: vm context — each runInContext unit gets its own module-var slot
+    // namespace so units sharing this context don't clobber each other's slots.
+    Item result = js_builtin_eval(code, 1 | 8);
 
     // Restore original globals
     for (int64_t i = 0; i < nkeys; i++) {

@@ -1315,6 +1315,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int saved_func_index_sm = mt->current_func_index;
             bool saved_in_generator = mt->in_generator;
             bool saved_in_async = mt->in_async;
+            MIR_label_t saved_except_label_sm = mt->func_except_label;
 
             if (jm_has_use_strict_directive(fn)) {
                 fc->is_strict = true;
@@ -1333,6 +1334,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_reg = 0;
             mt->scope_env_slot_count = 0;
             mt->current_func_index = (int)(fc - mt->func_entries);
+            mt->func_except_label = 0;
 
             // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
             mt->in_generator = true;
@@ -1357,6 +1359,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 mt->gen_state_labels[si] = jm_new_label(mt);
             }
             mt->gen_done_label = jm_new_label(mt);
+            MIR_label_t async_sm_catch_label = jm_new_label(mt);
+            mt->func_except_label = async_sm_catch_label;
 
             // Emit state dispatch: switch on state
             for (int si = 0; si <= await_count; si++) {
@@ -1642,7 +1646,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
 
             // Push implicit try context for async exception handling
-            MIR_label_t async_sm_catch_label = jm_new_label(mt);
             if (mt->try_ctx_depth < 16) {
                 JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
                 tc->catch_label = async_sm_catch_label;
@@ -1733,6 +1736,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->scope_env_reg = saved_scope_env_reg_sm;
             mt->scope_env_slot_count = saved_scope_env_slot_sm;
             mt->current_func_index = saved_func_index_sm;
+            mt->func_except_label = saved_except_label_sm;
             mt->in_generator = saved_in_generator;
             mt->in_async = saved_in_async;
 
@@ -2292,15 +2296,17 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_new_reg_op(mt->ctx, args_obj)));
         }
 
-        // Create async context: js_async_context_create(sm_fn_ptr, env, env_size) → ctx_idx
+        // Create async context: js_async_context_create(sm_fn_ptr, env, env_size, this) → ctx_idx
         MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "asmfn", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
-        MIR_reg_t ctx_idx = jm_call_3(mt, "js_async_context_create", MIR_T_I64,
+        MIR_reg_t async_this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+        MIR_reg_t ctx_idx = jm_call_4(mt, "js_async_context_create", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, async_env),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, async_this_val));
 
         // Start execution (runs synchronously until suspend or completion)
         jm_call_1(mt, "js_async_start", MIR_T_I64,

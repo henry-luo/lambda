@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI started.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete slices landed.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -200,20 +200,48 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   `getTargetRanges()` is called, matching
   `input-events-range-exceptions.tentative.html`.
 
+**SI-2 — Delete/Backspace default action slice: LANDED (2026-06-16).**
+
+- Added a native headless testdriver key hook for WPT Backspace/Delete. It
+  targets the focused rich editing surface, maps plain Backspace/Delete and
+  word-modified variants to Radiant `InputIntent`s, dispatches cancelable
+  `beforeinput`, runs the rich default mutation, updates selection, then
+  dispatches `input`.
+- Implemented rich default deletion for `deleteContentBackward`,
+  `deleteContentForward`, `deleteWordBackward`, and `deleteWordForward`.
+  Non-collapsed selections delete the selected range; collapsed deletions use
+  the existing UTF-8/word boundary helpers.
+- Target ranges now follow the Input Events contract for this path:
+  `beforeinput.getTargetRanges()` returns the pre-mutation static range, while
+  the follow-up `input` event returns an empty range list.
+- While enabling the WPT cases, fixed two root causes that would otherwise
+  keep the headless path flaky:
+  `innerHTML` now keeps DOM children and the backing Lambda `Element::items`
+  tree in sync for parsed fragments, and top-level JS `let`/`const` module
+  bindings captured by event-listener closures remain live instead of being
+  copied into stale closure environments.
+- The standalone JS `InputEvent` constructor test now uses explicit
+  `StaticRange` objects for non-DOM snapshots, while DOM-backed
+  `StaticRange`s still validate offsets through the live range path.
+
 **Current SI verification (2026-06-16):**
 
 | Check | Result |
 |---|---|
 | `contenteditable-false-in-design-mode` | 2/2 passed |
+| `input-events-delete-selection` | 6/6 passed |
+| `input-events-get-target-ranges-during-and-after-dispatch.tentative` | 3/3 passed |
 | `input-events-range-exceptions.tentative` | 4/4 passed |
-| `test_wpt_contenteditable_gtest` | 196 cases: 156 pass / 40 skip / 0 fail |
+| `make build-test` | passed |
+| `test_wpt_contenteditable_gtest` | 196 cases: 158 pass / 38 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 88 pass / 71 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
+| `test_js_gtest` | 189 passed / 0 failed |
+| `make test262-baseline` | fully passed 40261 / 40261; regressions 0 |
 
-**Next SI slice:** Delete/Backspace default actions with real
-`beforeinput`/`input` target ranges. This is the blocker for the
-`input-events-get-target-ranges-*`, `input-events-delete-selection`, and the
-selectionchange-on-Backspace cases.
+**Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete
+subset: selectionchange-on-Backspace cases, remaining `getTargetRanges`
+deletion matrices, text-control delete coverage, and pointer/mouse injection.
 
 ---
 

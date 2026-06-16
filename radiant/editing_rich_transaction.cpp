@@ -2,6 +2,7 @@
 
 #include "dom_range.hpp"
 #include "state_store.hpp"
+#include "text_edit.hpp"
 #include "view.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -292,6 +293,8 @@ static const char* rich_text_default_mutation_operation(
         case INPUT_INTENT_DELETE_BY_CUT:
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
         case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+        case INPUT_INTENT_DELETE_WORD_BACKWARD:
+        case INPUT_INTENT_DELETE_WORD_FORWARD:
             return "delete";
         default:
             return "replace";
@@ -317,7 +320,9 @@ bool editing_rich_default_replace(DocState* state,
         intent->type != INPUT_INTENT_DELETE_BY_CUT &&
         intent->type != INPUT_INTENT_DELETE_BY_DRAG &&
         intent->type != INPUT_INTENT_DELETE_CONTENT_BACKWARD &&
-        intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD) {
+        intent->type != INPUT_INTENT_DELETE_CONTENT_FORWARD &&
+        intent->type != INPUT_INTENT_DELETE_WORD_BACKWARD &&
+        intent->type != INPUT_INTENT_DELETE_WORD_FORWARD) {
         return false;
     }
 
@@ -381,7 +386,9 @@ bool editing_rich_default_replace(DocState* state,
                intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
         data = "";
     } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
-               intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD) {
+               intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
+               intent->type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
+               intent->type == INPUT_INTENT_DELETE_WORD_FORWARD) {
         data = "";
         if (start == end) {
             if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
@@ -392,13 +399,21 @@ bool editing_rich_default_replace(DocState* state,
                     prev--;
                 }
                 start = prev;
-            } else {
+            } else if (intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD) {
                 if (end >= old_len) return false;
                 uint32_t next = end + 1;
                 while (next < old_len &&
                        (((unsigned char)old_text[next] & 0xC0) == 0x80)) {
                     next++;
                 }
+                end = next;
+            } else if (intent->type == INPUT_INTENT_DELETE_WORD_BACKWARD) {
+                uint32_t prev = te_prev_word_byte(old_text, old_len, start);
+                if (prev >= start) return false;
+                start = prev;
+            } else if (intent->type == INPUT_INTENT_DELETE_WORD_FORWARD) {
+                uint32_t next = te_next_word_byte(old_text, old_len, end);
+                if (next <= end) return false;
                 end = next;
             }
         }

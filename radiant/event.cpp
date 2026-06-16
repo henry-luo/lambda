@@ -4541,7 +4541,11 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     EditingTargetRange ranges[1];
     const EditingTargetRange* range_snapshot = nullptr;
     uint32_t n_ranges = 0;
-    if (evcon->editing_target_ranges_active) {
+    bool wants_target_ranges = strcmp(type, "beforeinput") == 0;
+    if (!wants_target_ranges) {
+        range_snapshot = nullptr;
+        n_ranges = 0;
+    } else if (evcon->editing_target_ranges_active) {
         range_snapshot = evcon->editing_target_ranges;
         n_ranges = evcon->editing_target_range_count;
     } else {

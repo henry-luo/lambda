@@ -28,6 +28,12 @@ JsModuleConstEntry* g_eval_preamble_entries = NULL;
 int g_eval_preamble_entry_count = 0;
 int g_eval_preamble_var_count = 0;
 
+// Per-unit module-var management (defined in js_runtime_state.cpp). Used by the
+// vm.runInContext path to give each unit its own module-var slot namespace.
+extern "C" Item* js_get_active_module_vars(void);
+extern "C" void js_set_active_module_vars(Item* vars);
+extern "C" Item* js_alloc_module_vars(void);
+
 extern "C" void js_eval_preamble_cache_reset(void) {
     mem_free(g_eval_preamble_entries);
     g_eval_preamble_entries = NULL;
@@ -1651,7 +1657,26 @@ extern "C" Item js_builtin_eval(Item code_item, int64_t eval_flags) {
         Item prev_nt = js_get_new_target();
         js_set_direct_new_target((Item){.item = ITEM_JS_UNDEFINED});
 
+        // vm.runInContext (eval_flags bit 8): give this unit its own module-var
+        // slot namespace. Units sharing a context each assign slot indices from 0,
+        // so without isolation a later unit's top-level globals clobber an earlier
+        // unit's slots in the shared js_module_vars array — breaking cross-unit
+        // references (e.g. a constructor defined in base.js, invoked from box2d.js,
+        // read the wrong slot for its own name). Functions capture fn->module_vars
+        // at creation and js_call_function restores it per call, so cross-unit
+        // invocation still resolves against the defining unit's array.
+        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0;
+        Item* js_eval_prev_module_vars = NULL;
+        if (js_eval_fresh_module_scope) {
+            js_eval_prev_module_vars = js_get_active_module_vars();
+            js_set_active_module_vars(js_alloc_module_vars());
+        }
+
         Item result = js_main_fn((Context*)context);
+
+        if (js_eval_fresh_module_scope) {
+            js_set_active_module_vars(js_eval_prev_module_vars);
+        }
 
         js_set_direct_new_target(prev_nt);
 

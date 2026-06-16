@@ -1208,6 +1208,13 @@ static Item js_input_event_snapshot_range(Item range) {
     return js_ctor_static_range_fn(init);
 }
 
+static bool js_input_event_is_static_range(Item range) {
+    if (get_type_id(range) != LMD_TYPE_MAP) return false;
+    Item key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    const char* class_name = fn_to_cstr(js_property_get(range, key));
+    return class_name && strcmp(class_name, "StaticRange") == 0;
+}
+
 static void js_input_event_throw_dom_exception(const char* name, const char* message) {
     Item err_name = (Item){.item = s2it(heap_create_name(name ? name : "InvalidStateError"))};
     Item err_msg = (Item){.item = s2it(heap_create_name(message ? message : ""))};
@@ -1227,11 +1234,21 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
             range_type != LMD_TYPE_VMAP) {
             continue;
         }
+        Item start_container = init_item(range, "startContainer");
+        Item end_container = init_item(range, "endContainer");
+        bool static_range = js_input_event_is_static_range(range);
+        bool static_range_has_dom_boundary =
+            js_dom_unwrap_element(start_container) ||
+            js_dom_unwrap_element(end_container);
+        if (static_range && !static_range_has_dom_boundary) {
+            js_array_push(ranges, js_input_event_snapshot_range(range));
+            continue;
+        }
         const char* exc = nullptr;
         Item live_range = js_dom_create_live_range_from_boundaries(
-            init_item(range, "startContainer"),
+            start_container,
             init_int(range, "startOffset", 0),
-            init_item(range, "endContainer"),
+            end_container,
             init_int(range, "endOffset", 0),
             &exc);
         if (live_range.item == ItemNull.item || js_check_exception()) {

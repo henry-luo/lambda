@@ -1,0 +1,3 @@
+kitten->sitting=3
+saturday->sunday=3
+flaw->lawn=2
