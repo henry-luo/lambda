@@ -29185,6 +29185,7 @@ struct JsAsyncContext {
     int env_size;
     int state;           // current resume state
     int promise_idx;     // index into js_promises[] for the async function's result promise
+    Item this_val;       // receiver captured when the async wrapper was called
 };
 
 #define JS_MAX_ASYNC_CONTEXTS 256
@@ -29193,6 +29194,18 @@ static int js_async_context_count = 0;
 
 // Cached resolved value from js_async_must_suspend (fast-path)
 static Item js_async_resolved_value;
+
+static void js_async_register_roots_once() {
+    static bool registered = false;
+    if (registered) return;
+    registered = true;
+
+    extern void heap_register_gc_root_range(uint64_t* base, int count);
+    for (int i = 0; i < JS_MAX_ASYNC_CONTEXTS; i++) {
+        heap_register_gc_root_range((uint64_t*)&js_async_contexts[i].this_val, 1);
+    }
+    heap_register_gc_root_range((uint64_t*)&js_async_resolved_value, 1);
+}
 
 // Check if an awaited value requires suspension (pending promise)
 // Returns: 1 = pending (must suspend), 0 = resolved/rejected/non-promise
@@ -29248,7 +29261,10 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
 static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
     typedef Item (*AsyncSmFn)(Item*, Item, int64_t);
+    Item prev_this = js_current_this;
+    js_current_this = ctx->this_val;
     Item result = ((AsyncSmFn)ctx->state_fn)(ctx->env, input, state);
+    js_current_this = prev_this;
 
     // Parse result: [value, next_state]
     if (get_type_id(result) != LMD_TYPE_ARRAY) {
@@ -29313,7 +29329,8 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
 }
 
 // Create an async context: allocates promise, returns context index
-extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size) {
+extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val) {
+    js_async_register_roots_once();
     if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
         log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
         return (Item){.item = i2it(-1)};
@@ -29324,6 +29341,7 @@ extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_siz
     ctx->env = env;
     ctx->env_size = (int)env_size;
     ctx->state = 0;
+    ctx->this_val = this_val;
 
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
@@ -30794,7 +30812,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     // If no sandbox or it's not an object, just eval directly
     if (sandbox.item == 0 || sandbox.item == ITEM_NULL || sandbox.item == ITEM_UNDEFINED ||
         get_type_id(sandbox) != LMD_TYPE_MAP) {
-        return js_builtin_eval(code, 1);
+        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
     }
 
     // Get sandbox keys
@@ -30802,7 +30820,7 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
     int64_t nkeys = js_array_length(keys);
 
     if (nkeys == 0) {
-        return js_builtin_eval(code, 1);
+        return js_builtin_eval(code, 1 | 8);  // bit 8: vm context — isolate module-var slots
     }
 
     // Get globalThis to inject sandbox variables
@@ -30829,8 +30847,10 @@ static Item js_vm_run_with_sandbox(Item code, Item sandbox) {
         js_property_set(global, k, js_property_get(sandbox, k));
     }
 
-    // Eval the code in global scope
-    Item result = js_builtin_eval(code, 1);
+    // Eval the code in global scope.
+    // bit 8: vm context — each runInContext unit gets its own module-var slot
+    // namespace so units sharing this context don't clobber each other's slots.
+    Item result = js_builtin_eval(code, 1 | 8);
 
     // Restore original globals
     for (int64_t i = 0; i < nkeys; i++) {

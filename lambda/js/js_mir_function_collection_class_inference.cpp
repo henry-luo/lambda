@@ -1230,6 +1230,69 @@ JsClassEntry* jm_match_class_from_fields(JsMirTranspiler* mt,
 // P4h: Scan loop body AST for subscript array accesses (arr[idx]).
 // Collects unique identifier names used as array objects in computed member expressions.
 // Also tracks whether any collected name appears as an assignment target (unsafe for hoisting).
+// mark identifier targets of a destructuring assignment LHS ([a,b]=…, {x}=…) as
+// unsafe for the P4h typed-array pointer hoist: such a target is rebound each time,
+// so a hoisted data pointer for it would go stale (e.g. kostya/levenshtein's
+// [prev,curr]=[curr,prev] swap). find-or-add so the result is order-independent.
+static void jm_mark_destructure_targets_unsafe(JsAstNode* node, char names[][64],
+                                               bool unsafe[], int* count, int max_names) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        if (!id->name) return;
+        for (int i = 0; i < *count; i++) {
+            if ((int)strlen(names[i]) == (int)id->name->len &&
+                strncmp(names[i], id->name->chars, id->name->len) == 0) {
+                unsafe[i] = true;
+                return;
+            }
+        }
+        // not yet tracked: record it as unsafe so a later subscript use stays unsafe
+        if (*count < max_names) {
+            int len = (int)id->name->len < 63 ? (int)id->name->len : 63;
+            memcpy(names[*count], id->name->chars, len);
+            names[*count][len] = 0;
+            unsafe[*count] = true;
+            (*count)++;
+        }
+        return;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+        for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next)
+            jm_mark_destructure_targets_unsafe(e, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+        for (JsAstNode* e = ((JsArrayNode*)node)->elements; e; e = e->next)
+            jm_mark_destructure_targets_unsafe(e, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_OBJECT_PATTERN:
+        for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next)
+            jm_mark_destructure_targets_unsafe(p, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+        for (JsAstNode* p = ((JsObjectNode*)node)->properties; p; p = p->next)
+            jm_mark_destructure_targets_unsafe(p, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_PROPERTY:
+        // the value side is the binding target ({ key: target })
+        jm_mark_destructure_targets_unsafe(((JsPropertyNode*)node)->value, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        // default: target = default; only the left is a binding target
+        jm_mark_destructure_targets_unsafe(((JsAssignmentPatternNode*)node)->left, names, unsafe, count, max_names);
+        return;
+    case JS_AST_NODE_SPREAD_ELEMENT:
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+        jm_mark_destructure_targets_unsafe(((JsSpreadElementNode*)node)->argument, names, unsafe, count, max_names);
+        return;
+    default:
+        // member-expression target (a[i]=) does not rebind the variable; ignore
+        return;
+    }
+}
+
 void jm_scan_subscript_arrays(JsAstNode* node, char names[][64], bool unsafe[],
                                       int* count, int max_names) {
     if (!node || *count >= max_names) return;
@@ -1276,6 +1339,9 @@ void jm_scan_subscript_arrays(JsAstNode* node, char names[][64], bool unsafe[],
                     }
                 }
             }
+        } else if (asgn->left) {
+            // destructuring/pattern LHS ([a,b]=…, {x}=…): every bound identifier is rebound
+            jm_mark_destructure_targets_unsafe(asgn->left, names, unsafe, count, max_names);
         }
         jm_scan_subscript_arrays(asgn->left, names, unsafe, count, max_names);
         jm_scan_subscript_arrays(asgn->right, names, unsafe, count, max_names);

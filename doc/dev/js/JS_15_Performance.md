@@ -120,32 +120,34 @@ Invocation is `./lambda.exe js <file>` from the repo root (the engine exposes `c
 | octane | V8 Octane | each file only registers a `BenchmarkSuite`; needs a synchronous driver (none ships for Lambda JS) | internal `throw` on checksum mismatch |
 | jetstream | JetStream subset | `run_jetstream_ljs.py` strips the trailing `class Benchmark {}` and appends a timing loop | ran-to-completion (only crypto-md5 self-checks a result) |
 
-### 7.2 Current pass rate (release build `lambda.exe`, 2026-06-16)
+### 7.2 Current pass rate
 
-Measured on the `make release` build. "Verified" means the benchmark self-checked a result/checksum; "ran-only" means it completed without error but the program has no built-in result check (so it confirms "executes without error", not "verified correct").
+The table is the initial audit (release build, 2026-06-16) **updated for the three wrong-result fixes landed afterward** (bounce, levenshtein, crypto-md5 — see §7.3). Those are correctness fixes in the transpiler, so they hold on any build; each was verified by the benchmark passing on JIT *and* interpreter and `make test-lambda-baseline` at 3169/3169. Timing figures should be refreshed on a fresh release build. "Verified" means the benchmark self-checked a result/checksum; "ran-only" means it completed without error but the program has no built-in result check (so it confirms "executes without error", not "verified correct").
 
-| Suite | Pass / total | Quality | Failures |
+| Suite | Pass / total | Quality | Remaining failures |
 |---|---:|---|---|
-| awfy | 11 / 14 | verified | bounce FAIL; havlak, cd timeout |
+| awfy | 12 / 14 | verified | havlak, cd timeout |
 | r7rs | 10 / 10 | verified | — |
 | larceny | 12 / 12 | verified (gcbench, pnpoly ran-only) | — |
-| kostya | 6 / 7 | verified (brainfuck, matmul ran-only) | levenshtein FAIL |
+| kostya | 7 / 7 | verified (brainfuck, matmul ran-only) | — |
 | beng | 10 / 10 | ran-only (no self-check) | — |
-| octane | 2 / 6 | checksum-throw (custom driver) | box2d FAIL; pdfjs, typescript error; earley-boyer timeout |
-| jetstream | 9 / 13 | ran-to-completion | crypto-md5 wrong result; navier-stokes, hashmap, raytrace3d timeout |
-| **Overall** | **60 / 72 (≈83%)** | — | **not 100%** |
+| octane | 2 / 6 | checksum-throw (custom driver) | box2d wrong result; pdfjs, typescript error; earley-boyer timeout |
+| jetstream | 10 / 13 | ran-to-completion | navier-stokes, hashmap, raytrace3d timeout |
+| **Overall** | **63 / 72 (≈88%)** | — | box2d + 2 errors + 5 timeouts remain |
 
 Caveats: Octane needs a hand-rolled synchronous driver because no in-repo Lambda-JS Octane runner exists (under the stricter "runnable as shipped" reading, Octane is effectively 0/6); roughly a third of the passes are "ran-only", confirming execution but not result correctness; and timeouts are single-run wall-time, so a heavy macro-benchmark that is merely very slow on this machine is not distinguished from one that hangs.
 
-### 7.3 Failures (open correctness bugs & gaps)
+### 7.3 Failures — fixed and open
 
-The wrong-result cases are the most actionable — they are real correctness bugs the benchmark's own verification caught, independent of timing:
+**Fixed (this session)** — three wrong-result correctness bugs, all in the transpiler's optimization passes (not the runtime); each verified by the benchmark passing on JIT *and* interpreter plus a clean `make test-lambda-baseline` (3169/3169):
 
-- **Wrong result (correctness bug).** `awfy/bounce` computes 1331-expected as **1321** (an off-by-10 in the `Ball.bounce()` boundary arithmetic; the RNG, `%`, `&`, and loop iteration each verify bit-identical to Node in isolation). `kostya/levenshtein` returns the wrong edit distance on the cost-0 (matching-character) DP path, isolating to the `Int32Array` prev/curr ping-pong inside the hot loop (a likely JIT bug). `jetstream/crypto-md5` produces the wrong MD5 digest. `octane/box2d` throws `Cannot read properties of null (reading 'x')`.
-- **Feature gap / late error.** `octane/pdfjs` runs ~80 s then throws `Promise resolver is not a function` — the `Promise` constructor does not invoke the executor callback (see [JS_09 — Async & Modules](JS_09_Async_Modules.md)). `octane/typescript` runs ~83 s then throws `... is not a function` (a missing builtin on the TS-compiler path).
-- **Timeout (heavy/slow or hung).** `awfy/havlak`, `awfy/cd`, `octane/earley-boyer`, `jetstream/navier-stokes`, `jetstream/hashmap`, `jetstream/raytrace3d` exceeded the run cutoff (45–120 s) — historically the engine's hardest macro-benchmarks, where the float-boxing and polymorphic-dispatch gaps in [§5](#5-open-performance-gaps--regressions) bite hardest.
+- `awfy/bounce` (was 1321 vs 1331) — the §7 shaped-slot fast path did a raw `MIR_DMOV`/`MIR_MOV` load trusting the compile-time field type, but a FLOAT-inferred field can hold a tagged int at runtime (`this.x = … % 500`); fixed by reading through the type-guarded `js_get_slot_f`/`js_get_slot_i`, which coerces by the slot's runtime `entry->type` (`js_mir_calls_boxing_types.cpp`, `js_mir_expression_lowering.cpp`).
+- `kostya/levenshtein` — the P4h loop-invariant typed-array data-pointer hoist did not treat `[prev,curr]=[curr,prev]` as a reassignment, so it cached stale `Int32Array` pointers across the swap; fixed by marking destructuring-LHS targets unsafe (`jm_mark_destructure_targets_unsafe`, `js_mir_function_collection_class_inference.cpp`).
+- `jetstream/crypto-md5` — the P6 single-return inliner bound each parameter before evaluating later arguments with no hygiene, so an inlined argument's free variable was shadowed by a same-named just-bound parameter; fixed by evaluating all arguments in the caller scope before pushing the inline scope (`jm_transpile_inline_native`, `js_mir_expression_lowering.cpp`).
 
-These benchmark failures are tracked as future-improvement work alongside the performance gaps below; the four wrong-result cases in particular are correctness defects, not timing artifacts.
+**Open — wrong result / error.** `octane/box2d` throws `Cannot read properties of null (reading 'x')` (object/prototype semantics — not yet investigated). `octane/pdfjs` runs ~80 s then throws `Promise resolver is not a function` — the `Promise` constructor does not invoke the executor callback (see [JS_09 — Async & Modules](JS_09_Async_Modules.md)); `octane/typescript` runs ~83 s then throws `... is not a function` (a missing builtin on the TS-compiler path).
+
+**Open — timeout (heavy/slow or hung).** `awfy/havlak`, `awfy/cd`, `octane/earley-boyer`, `jetstream/navier-stokes`, `jetstream/hashmap`, `jetstream/raytrace3d` exceeded the run cutoff (45–120 s) — historically the engine's hardest macro-benchmarks, where the float-boxing and polymorphic-dispatch gaps in [§5](#5-open-performance-gaps--regressions) bite hardest.
 
 ---
 

@@ -1560,16 +1560,14 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, match_reg)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_slow)));
-                            // Fast path: direct memory load — zero function calls
+                            // shape match: the slot's runtime type may differ from the
+                            // compile-time FLOAT inference (e.g. `x % 500` stores a tagged
+                            // int), so a raw double load would read garbage (AWFY bounce).
+                            // use the type-guarded helper, which coerces by entry->type.
                             jm_emit_label(mt, l_fast);
-                            MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, data_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
-                            MIR_reg_t fast_f = jm_new_reg(mt, "s7v", MIR_T_D);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                                MIR_new_reg_op(mt->ctx, fast_f),
-                                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t fast_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                                 MIR_new_reg_op(mt->ctx, result_f),
                                 MIR_new_reg_op(mt->ctx, fast_f)));
@@ -1635,16 +1633,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, match_reg)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_slow)));
-                            // Fast path: direct memory load — zero function calls
+                            // shape match: the slot's runtime type may differ from the
+                            // compile-time INT inference, so a raw int load could read a
+                            // boxed double's bits. use the type-guarded helper.
                             jm_emit_label(mt, l_fast);
-                            MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, data_reg),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
-                            MIR_reg_t fast_i = jm_new_reg(mt, "s7v", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, fast_i),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t fast_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, result_i),
                                 MIR_new_reg_op(mt->ctx, fast_i)));

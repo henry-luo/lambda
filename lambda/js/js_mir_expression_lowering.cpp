@@ -6190,11 +6190,41 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
     JsFunctionNode* fn = fc->node;
     JsReturnNode* ret_stmt = (JsReturnNode*)((JsBlockNode*)fn->body)->statements;
 
+    // Phase 1: evaluate ALL argument expressions in the CALLER's scope, BEFORE the
+    // inline parameter scope is pushed. JS evaluates call arguments at the call site
+    // before the callee frame exists; doing this first also prevents a later
+    // argument's free variable from being shadowed by an already-bound inline
+    // parameter of the same name (the crypto-md5 P6 hygiene/eval-order bug).
+    // param_count is <= 4 here (jm_should_inline), so 8 slots is a safe bound.
+    MIR_reg_t arg_regs[8];
+    MIR_type_t arg_mir_types[8];
+    bool has_arg[8];
+    JsAstNode* arg_node = call->arguments;
+    for (int i = 0; i < fc->param_count && i < 8; i++) {
+        has_arg[i] = (arg_node != NULL);
+        if (arg_node) {
+            TypeId ptype = fc->param_types[i];
+            TypeId actual = jm_get_effective_type(mt, arg_node);
+            if (ptype == LMD_TYPE_FLOAT) {
+                arg_regs[i] = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_FLOAT);
+                arg_mir_types[i] = MIR_T_D;
+            } else if (ptype == LMD_TYPE_INT) {
+                arg_regs[i] = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_INT);
+                arg_mir_types[i] = MIR_T_I64;
+            } else {
+                arg_regs[i] = jm_transpile_box_item(mt, arg_node);
+                arg_mir_types[i] = MIR_T_I64;
+            }
+            arg_node = arg_node->next;
+        }
+    }
+
     jm_push_scope(mt);
 
-    // Bind each parameter to its argument's evaluated value
+    // Phase 2: bind each parameter. An actual argument uses its register from phase 1;
+    // a missing argument's default is evaluated here, in the callee scope, after
+    // earlier parameters are bound (per spec).
     JsAstNode* param_node = fn->params;
-    JsAstNode* arg_node = call->arguments;
     for (int i = 0; i < fc->param_count && param_node; i++) {
         // resolve param name: plain identifier, TsParameterNode, or assignment pattern (default)
         JsAstNode* pid_node = NULL;
@@ -6218,21 +6248,12 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
             TypeId ptype = fc->param_types[i];
             MIR_reg_t arg_reg;
             MIR_type_t arg_mir_type;
-            if (arg_node) {
-                TypeId actual = jm_get_effective_type(mt, arg_node);
-                if (ptype == LMD_TYPE_FLOAT) {
-                    arg_reg = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_FLOAT);
-                    arg_mir_type = MIR_T_D;
-                } else if (ptype == LMD_TYPE_INT) {
-                    arg_reg = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_INT);
-                    arg_mir_type = MIR_T_I64;
-                } else {
-                    arg_reg = jm_transpile_box_item(mt, arg_node);
-                    arg_mir_type = MIR_T_I64;
-                }
-                arg_node = arg_node->next;
+            if (i < 8 && has_arg[i]) {
+                // argument already evaluated in the caller scope (phase 1)
+                arg_reg = arg_regs[i];
+                arg_mir_type = arg_mir_types[i];
             } else if (default_expr) {
-                // Missing argument with default value: evaluate default expression
+                // missing argument with default value: evaluate default expression
                 TypeId actual = jm_get_effective_type(mt, default_expr);
                 if (ptype == LMD_TYPE_FLOAT) {
                     arg_reg = jm_transpile_as_native(mt, default_expr, actual, LMD_TYPE_FLOAT);
@@ -6245,7 +6266,7 @@ MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFu
                     arg_mir_type = MIR_T_I64;
                 }
             } else {
-                // Missing argument: default to undefined (JS semantics)
+                // missing argument: default to undefined (JS semantics)
                 arg_mir_type = (ptype == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                 arg_reg = jm_new_reg(mt, "ia0", arg_mir_type);
                 if (ptype == LMD_TYPE_FLOAT) {
@@ -10861,32 +10882,30 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                             MIR_new_label_op(mt->ctx, l_slow)));
 
-                        // Fast path: direct memory load + inline boxing — zero function calls
+                        // shape match: the slot's runtime type may differ from the
+                        // compile-time inference (e.g. `x % 500` stores a tagged int into a
+                        // FLOAT-inferred field), so a raw typed load would read garbage
+                        // (AWFY bounce). use the type-guarded slot helper, which coerces by
+                        // the slot's runtime entry->type.
                         jm_emit_label(mt, l_fast);
-                        MIR_reg_t data_reg = jm_new_reg(mt, "s7d", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, data_reg),
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, obj_reg, 0, 1)));
                         if (field_type == LMD_TYPE_INT) {
-                            MIR_reg_t native_i = jm_new_reg(mt, "s7i", MIR_T_I64);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, native_i),
-                                MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
                             MIR_reg_t boxed = jm_box_int_reg(mt, native_i);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, result),
                                 MIR_new_reg_op(mt->ctx, boxed)));
                         } else {
-                            MIR_reg_t native_f = jm_new_reg(mt, "s7v", MIR_T_D);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                                MIR_new_reg_op(mt->ctx, native_f),
-                                MIR_new_mem_op(mt->ctx, MIR_T_D, (int)byte_offset, data_reg, 0, 1)));
+                            MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
                             MIR_reg_t boxed = jm_box_float(mt, native_f);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, result),
                                 MIR_new_reg_op(mt->ctx, boxed)));
                         }
-                        log_debug("P4b§7: shape guard + direct load %.*s.%.*s → slot %d type %s",
+                        log_debug("P4b§7: shape guard + guarded slot load %.*s.%.*s → slot %d type %s",
                                   (int)p4_obj->name->len, p4_obj->name->chars,
                                   (int)p4_prop->name->len, p4_prop->name->chars,
                                   p4_slot, get_type_name(field_type));
