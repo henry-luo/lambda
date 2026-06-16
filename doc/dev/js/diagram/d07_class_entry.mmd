@@ -1,0 +1,60 @@
+classDiagram
+    class JsClassEntry {
+        JsClassNode* node
+        String* name
+        String* alias_name
+        JsClassMethodEntry methods[128]
+        int method_count
+        JsClassMethodEntry* constructor
+        JsClassEntry* superclass
+        bool has_self_extends
+        bool is_declaration
+        int inner_module_var_index
+        JsStaticFieldEntry static_fields[16]
+        int static_field_count
+        JsInstanceFieldEntry instance_fields[32]
+        int instance_field_count
+        JsAstNode* static_blocks[8]
+        int static_block_count
+        void** shape_cache_ptr
+    }
+    class JsClassMethodEntry {
+        String* name
+        JsFuncCollected* fc
+        int param_count
+        bool is_constructor
+        bool is_static
+        bool is_getter
+        bool is_setter
+        bool computed
+        JsAstNode* key_expr
+    }
+    class JsStaticFieldEntry {
+        String* name
+        JsAstNode* key_expr
+        JsAstNode* initializer
+        int module_var_index
+        int key_module_var_index
+        bool computed
+    }
+    class JsInstanceFieldEntry {
+        String* name
+        JsAstNode* key_expr
+        JsAstNode* initializer
+        int key_module_var_index
+        bool computed
+    }
+    class JsFuncCollected {
+        int ctor_prop_count
+        const char* ctor_prop_ptrs[16]
+        int ctor_prop_lens[16]
+        TypeId ctor_prop_types[16]
+        int ctor_prop_param_idx[16]
+        bool is_constructor
+        bool is_derived_constructor
+    }
+    JsClassEntry o-- JsClassMethodEntry : methods[128] + constructor
+    JsClassEntry o-- JsStaticFieldEntry : static_fields[16]
+    JsClassEntry o-- JsInstanceFieldEntry : instance_fields[32]
+    JsClassEntry --> JsClassEntry : superclass
+    JsClassMethodEntry --> JsFuncCollected : fc

@@ -1,0 +1,19 @@
+flowchart TB
+  SRC["JS source (.js / .mjs / .cjs)"]
+  TS["Tree-sitter parse<br/>js_transpiler_parse"]
+  AST["build_js_ast<br/>JsAstNode tree"]
+  EE["js_check_early_errors<br/>6-phase validator + strict-mode"]
+  CTX["EvalContext / GC heap / name pool / Input<br/>(reused in batch hot-reload)"]
+  IMP["import precompile / load<br/>jm_precompile_js_imports / jm_load_imports"]
+  JIT["jit_init(opt)<br/>MIR_init (+ MIR_gen_init unless pure-interp)"]
+  MT["jm_create_mir_transpiler<br/>JsMirTranspiler (~45-55 MB)"]
+  LOWER["transpile_js_mir_ast<br/>Phases 1..3 produce MIR module"]
+  SEL{"interp or JIT?<br/>insn-count / document / env"}
+  LINK["MIR_link(import_resolver)<br/>gen vs interp interface"]
+  RUN["find_func js_main<br/>js_main(Context*) returns Item"]
+  DRAIN["js_event_loop_drain<br/>(before MIR_finish)"]
+  RES["Item result<br/>(float to int normalize)"]
+  SRC --> TS --> AST --> EE --> CTX --> IMP --> JIT --> MT --> LOWER --> SEL
+  SEL -->|gen interface| LINK
+  SEL -->|interp interface| LINK
+  LINK --> RUN --> DRAIN --> RES

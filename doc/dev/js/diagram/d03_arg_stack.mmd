@@ -1,0 +1,17 @@
+flowchart TB
+  A["call expression lowered"]
+  S["mark = js_args_save()<br/>(current bump top)"]
+  P["p = js_args_push(count)<br/>reserve zeroed slots"]
+  F["JIT fills p[0..count-1]<br/>(may nest calls, pushing more frames)"]
+  C["callee reads its frame"]
+  R["js_args_restore(mark)<br/>re-zero popped slots, len = mark"]
+  INV["invariant: slots in [len, cap) always zeroed<br/>GC marks whole [0, cap) range safely"]
+  OF{"len + count &gt; cap?"}
+  FB["js_alloc_env(count)<br/>standalone GC-rooted buffer<br/>(pathological depth)"]
+
+  A --> S --> P --> OF
+  OF -->|no| F
+  OF -->|yes| FB
+  F --> C --> R
+  P -.-> INV
+  R -.-> INV

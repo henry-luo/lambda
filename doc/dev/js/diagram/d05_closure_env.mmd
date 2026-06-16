@@ -1,0 +1,20 @@
+flowchart TB
+  CAP["capture analysis output<br/>fc.captures[], scope_env_slot"]
+  ENTRY["parent function entry (jm_define_function)<br/>has_scope_env? allocate scope env"]
+  REUSE{"reuse_parent_env<br/>and all scope vars from_env?"}
+  SHARE["share env: scope_env_reg = parent env_reg<br/>(no allocation)"]
+  ALLOC["scope_env_reg = js_alloc_env(scope_env_count)<br/>populate slots from live vars, mark in_scope_env"]
+  MKCLO["child closure (jm_create_func_or_closure)"]
+  USESH{"scope_env_reg != 0<br/>and captures slotted<br/>and not loop let/const?"}
+  CLOSHARE["js_new_closure(func, pc, scope_env_reg, slot_count)<br/>shares parent-owned env"]
+  CLODENSE["js_alloc_env(dense) + copy each capture<br/>js_new_closure(func, pc, env, size)<br/>register last_closure_* (writeback)"]
+  WB["outer assignment to captured var<br/>jm_scope_env_mark_and_writeback -> store into env slot"]
+  RB["after a call to the closure<br/>jm_readback_closure_env -> reload var.reg from env slots"]
+  CAP --> ENTRY --> REUSE
+  REUSE -->|yes| SHARE
+  REUSE -->|no| ALLOC
+  SHARE --> MKCLO
+  ALLOC --> MKCLO
+  MKCLO --> USESH
+  USESH -->|yes| CLOSHARE --> WB
+  USESH -->|no| CLODENSE --> RB

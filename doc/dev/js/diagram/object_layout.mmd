@@ -1,0 +1,36 @@
+classDiagram
+  class Container {
+    +TypeId type_id
+    +uint8 flags
+    +map_kind 4 bits of flags
+  }
+  class Map {
+    +TypeMap type
+    +void data
+    +int data_cap
+  }
+  class TypeMap {
+    +int64 length
+    +ShapeEntry shape
+    +ShapeEntry last
+    +ShapeEntry field_index_FNV1a_32
+    +ShapeEntry slot_entries
+    +bool is_private_clone
+    +uint8 js_class
+  }
+  class ShapeEntry {
+    +StrView name
+    +Type type
+    +int64 byte_offset
+    +uint8 flags_JSPD
+    +ShapeEntry next
+  }
+  class JsAccessorPair {
+    +uint8 type_id_FUNC
+    +Item getter
+    +Item setter
+  }
+  Container <|-- Map
+  Map --> TypeMap : type
+  TypeMap --> ShapeEntry : shape linked list
+  ShapeEntry ..> JsAccessorPair : data slot when JSPD_IS_ACCESSOR

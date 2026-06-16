@@ -1,0 +1,21 @@
+flowchart TD
+    SRC["js_create_regex(pattern, flags) — js_runtime.cpp:14400"] --> CACHE{"literal AST ptr in g_regex_compile_cache?"}
+    CACHE -->|"hit (same source ptr)"| BUILD["js_regex_build_object_from_cache — reuse JsRegexData"]
+    CACHE -->|"miss"| SPECIAL{"special_property_kind != 0?<br/>(simple property-repeat, e.g. ^\\d+$)"}
+    SPECIAL -->|"yes"| FASTP["JsRegexData.special_property_kind path<br/>(no RE2, no AST)"]
+    SPECIAL -->|"no"| FRONT["js_regexp_compile_frontend: flags, /v validate, named-group scan"]
+    FRONT --> PREP["preprocess: \\u name decode, named-backref rewrite,<br/>/v class rewrite, property-escape canonicalize"]
+    PREP --> BT{"js_regex_needs_backtrack?<br/>backref, hard lookbehind, lookahead-with-capture,<br/>nullable-discard quantifier"}
+    BT -->|"yes"| BTC["js_bt_compile → JsBtRegex<br/>(ES backtracking matcher)"]
+    BTC -->|"compile fails"| WRAPQ
+    BT -->|"no"| LITQ{"literal_fast? (plain substring, no flags)"}
+    LITQ -->|"yes"| LIT["JsRegexData.literal_fast: memcmp scan"]
+    LITQ -->|"no"| WRAPQ{"js_regex_needs_wrapper?<br/>lookahead / lookbehind / \\N backref"}
+    WRAPQ -->|"yes"| WRAP["js_regex_wrapper_compile → JsRegexCompiled<br/>(RE2 + post-filters)"]
+    WRAPQ -->|"no"| RE2["plain re2::RE2 (direct linear path)"]
+    WRAP -->|"wrapper null / no RE2"| RE2
+    WRAP --> RD["JsRegexData {re2, wrapper, bt, ...}"]
+    RE2 --> RD
+    BTC --> RD
+    LIT --> RD
+    FASTP --> RD

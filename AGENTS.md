@@ -140,6 +140,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
 | Output formatters | `lambda/format/` |
 | CSS & layout | `radiant/layout.cpp`, `radiant/layout_*.cpp` |
+| LambdaJS (JS engine) | `lambda/js/` — detailed design in `doc/dev/js/JS_00_Overview.md` |
 | Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |
 | Tests | `test/*.cpp` (GTest), `test/lambda/*.ls` (integration), `test/layout/` (HTML/CSS) |
 
@@ -158,3 +159,4 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
 - `doc/dev/Radiant_Layout_Design.md` — Radiant CSS layout engine design
+- `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)

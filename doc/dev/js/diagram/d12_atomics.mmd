@@ -1,0 +1,15 @@
+flowchart TD
+    A["Atomics.wait(ta, i, expected, timeout)"] --> B["js_validate_atomic_typed_array, require_shared, waitable"]
+    B --> C["js_atomics_validate_index"]
+    C --> D["__atomic_load_n compare to expected"]
+    D -- "not equal" --> E["return 'not-equal'"]
+    D -- "equal" --> F{"host can suspend? __lambda_can_block"}
+    F -- "no" --> G["throw TypeError"]
+    F -- "yes" --> H{"js_262_agent_current_slot_for_atomics >= 0?"}
+    H -- "no, main agent" --> I["return 'timed-out'"]
+    H -- "yes" --> J["js_atomics_record_waiter into js_atomics_waiters[]"]
+    J --> K{"finite timeout and <= 200ms?"}
+    K -- "yes" --> L["advance virtual clock, resolve due waiters, return 'timed-out'"]
+    K -- "no" --> M["return 'ok'"]
+    N["Atomics.notify(ta, i, count)"] --> O["scan waiters for matching buffer+index"]
+    O --> P["js_atomics_set_waiter_status OK, fulfil pending promise for waitAsync"]

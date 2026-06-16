@@ -293,6 +293,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                                       |
 | [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | Polyglot runtime build — Python, Bash, Ruby, and legacy C2MIR transpiler               |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
+| [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |
 
 ## Platform Support
 

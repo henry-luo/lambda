@@ -1,0 +1,29 @@
+flowchart TD
+    SRC["JS source text (const char*, length)"]
+    NORM["js_normalize_source_for_parser<br/>CR/CRLF, Unicode WS, &lt;!-- comment,<br/>soft await/yield rename, tagged-template escapes"]
+    U180E{"unescaped U+180E<br/>code char?"}
+    REJECT["return false (reject)"]
+    PARSE["ts_parser_parse_string<br/>(tree_sitter_javascript)"]
+    ERRCHK{"ts_node_has_error<br/>on root?"}
+    DIAG["walk to deepest ERROR/MISSING node,<br/>log line:col + source snippet"]
+    ROOT["TSNode root = program"]
+    PROG["build_js_program<br/>scan named children, skip comment/empty,<br/>link JsAstNode via base.next"]
+    DISP["build_js_statement / build_js_expression<br/>strcmp on ts_node_type, field-name child access"]
+    LIT["build_js_literal<br/>number/string/bool/null decode"]
+    ID["build_js_identifier<br/>js_decode_identifier_name + js_scope_lookup"]
+    FORIN["build_js_for_in_statement<br/>operator field 'in' vs 'of'"]
+    AST["typed JsAstNode tree"]
+    EE["js_check_early_errors"]
+
+    SRC --> NORM --> U180E
+    U180E -- yes --> REJECT
+    U180E -- no --> PARSE --> ERRCHK
+    ERRCHK -- yes --> DIAG --> REJECT
+    ERRCHK -- no --> ROOT --> PROG --> DISP
+    DISP --> LIT
+    DISP --> ID
+    DISP --> FORIN
+    LIT --> AST
+    ID --> AST
+    FORIN --> AST
+    AST --> EE

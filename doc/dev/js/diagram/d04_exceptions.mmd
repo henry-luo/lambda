@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph state["exception state (js_runtime_state.cpp, thread-global)"]
+    SV["js_throw_value(v):<br/>js_exception_pending = true<br/>js_exception_value = v<br/>cache message buffer"]
+    CK["js_check_exception → 0/1"]
+    CL["js_clear_exception → returns value, clears flag"]
+  end
+
+  subgraph emit["per-call propagation (jm_emit_exc_propagate_check)"]
+    P{"topmost non-yield try ctx?"}
+    PT["MIR_BT to catch_label / finally_label"]
+    PF["MIR_BT to func_except_label<br/>(return null from function)"]
+  end
+
+  subgraph trycf["try / catch / finally lowering"]
+    PUSH["push JsTryContext on try_ctx_stack[16]:<br/>catch_label, finally_label, end_label,<br/>return_val_reg, has_return_reg"]
+    TRY["try body: after each stmt,<br/>MIR_BT to catch/finally if pending"]
+    CATCH["catch: js_args_restore + js_with_restore,<br/>thrown = js_clear_exception,<br/>bind param, run body"]
+    FIN["finally: save+clear pending exc,<br/>run body, re-throw saved via js_throw_value<br/>unless body threw a new one"]
+  end
+
+  subgraph so["stack overflow (lambda-stack.cpp)"]
+    ARM["sigsetjmp(_lambda_recovery_point);<br/>_lambda_recovery_armed = 1"]
+    SIG["SIGSEGV on alt stack → if armed,<br/>siglongjmp back"]
+    RNG["js_throw_range_error('Maximum call stack size exceeded')"]
+  end
+
+  SV --> CK
+  P -->|inside try| PT
+  P -->|outside| PF
+  PUSH --> TRY --> CATCH
+  TRY --> FIN
+  ARM --> SIG --> RNG --> SV

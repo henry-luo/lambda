@@ -1,0 +1,39 @@
+flowchart TD
+    ENTRY["js_check_early_errors(tp, ast)"]
+    CTX["EarlyErrorCtx: in_strict, in_generator, in_async,<br/>in_class_body, in_formal_parameters, label stacks"]
+    PROG{"ast is PROGRAM?"}
+    DIR["in_strict |= prog-&gt;has_use_strict_directive"]
+    BLOCK["check_block_redeclarations<br/>(hashmap of let/const/class names)"]
+    WALKS["walk_statements -&gt; walk_statement"]
+    WALKE["walk_expression"]
+
+    P1["Phase 1: assignment / update target<br/>is_valid_assignment_target"]
+    P2["Phase 2: reserved word as identifier<br/>is_reserved_word, await/yield by context"]
+    P3["Phase 3: destructuring pattern<br/>rest-element position rules"]
+    P4["Phase 4: block-scope redeclaration"]
+    P5["Phase 5: strict mode<br/>octal literals/escapes, with, dup params,<br/>non-simple-param 'use strict', delete name"]
+    P6["Phase 6: context checks<br/>yield/await in params, labels,<br/>private name declared"]
+
+    COUNT["error_count; each ee_error -&gt; js_error -&gt; tp-&gt;has_errors"]
+    RET["return error_count (&gt; 0 aborts pipeline)"]
+
+    ENTRY --> CTX --> PROG
+    PROG -- yes --> DIR --> BLOCK --> WALKS
+    PROG -- no --> WALKS
+    WALKS --> WALKE
+    WALKS --> P1
+    WALKS --> P2
+    WALKS --> P3
+    WALKS --> P4
+    WALKS --> P5
+    WALKS --> P6
+    WALKE --> P1
+    WALKE --> P2
+    WALKE --> P5
+    P1 --> COUNT
+    P2 --> COUNT
+    P3 --> COUNT
+    P4 --> COUNT
+    P5 --> COUNT
+    P6 --> COUNT
+    COUNT --> RET

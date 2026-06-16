@@ -1,0 +1,26 @@
+flowchart TB
+  A["jm_transpile_binary(bin)"]
+  F{"jm_try_fold_const succeeds<br/>AND const-fold enabled?"}
+  FE["jm_emit_folded_at_value_site:<br/>native const or boxed Item"]
+  S{"op is &amp;&amp; / || / ?? ?"}
+  SC["short-circuit:<br/>eval left, jm_emit_is_truthy / js_is_nullish,<br/>MIR_BT/BF to l_right, else MOV left"]
+  N{"both operands typed INT/FLOAT<br/>AND not ** / &amp;&amp; / || ?"}
+  NA["native fast path:<br/>jm_transpile_as_native(left/right),<br/>MIR_ADD/DADD/SUB/DMUL/DDIV/LTS/DLT...<br/>returns RAW reg (I64 or D)"]
+  STR{"op is + AND both STRING?"}
+  SCAT["js_string_concat(l, r)"]
+  BOX["boxed runtime path:<br/>jm_transpile_box_item(left/right),<br/>jm_call js_add / js_compare(op) / js_strict_equal...<br/>returns boxed Item"]
+  CALLER{"caller wants native?<br/>(jm_transpile_as_native)"}
+  UB["box via jm_box_native(reg, type)<br/>or unbox via jm_emit_unbox_int / _float"]
+  OUT["MIR_reg_t result"]
+
+  A --> F
+  F -->|yes| FE --> OUT
+  F -->|no| STR
+  STR -->|yes| SCAT --> OUT
+  STR -->|no| N
+  N -->|yes| NA --> CALLER
+  N -->|no| S
+  S -->|yes| SC --> OUT
+  S -->|no| BOX --> OUT
+  CALLER -->|native wanted| OUT
+  CALLER -->|boxed wanted| UB --> OUT

@@ -1,0 +1,22 @@
+flowchart TB
+  V["a value op in lowering<br/>jm_get_effective_type(node)"]
+  T{"both operand and consumer<br/>statically INT/FLOAT/BOOL?<br/>(jm_is_native_type)"}
+  NAT["native tier:<br/>MIR_ADD/DADD/DMUL/DDIV/LTS/DLT<br/>raw I64 or D register, no box"]
+  FOLD{"all-literal subtree?<br/>(jm_try_fold_const)"}
+  FE["fold tier:<br/>jm_emit_folded_at_value_site<br/>native const or boxed Item, no runtime op"]
+  SHAPE{"member read on a known<br/>class instance with cached shape?"}
+  SLOT["shaped-slot tier:<br/>inline shape-ptr guard, then<br/>js_get_slot_f / js_get_slot_i<br/>direct data + byte_offset load"]
+  BOX["boxed tier (default):<br/>tagged Item in I64 reg,<br/>jm_call js_add / js_compare(op) / js_property_get"]
+  BND{"crosses a boxed sink?<br/>(call arg, property store, return)"}
+  ADAPT["jm_box_native / jm_ensure_native_*<br/>box or unbox at the boundary"]
+  OUT["result register"]
+
+  V --> FOLD
+  FOLD -->|yes| FE --> OUT
+  FOLD -->|no| T
+  T -->|yes| NAT --> BND
+  T -->|no| SHAPE
+  SHAPE -->|yes| SLOT --> BND
+  SHAPE -->|no| BOX --> OUT
+  BND -->|stays native| OUT
+  BND -->|needs Item| ADAPT --> OUT

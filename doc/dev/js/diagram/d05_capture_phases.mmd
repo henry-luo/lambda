@@ -1,0 +1,20 @@
+flowchart TB
+  IN["Phase 1.0 collected func_entries (innermost-first)<br/>parent_index set, ctor fields scanned"]
+  subgraph p15["Phase 1.5 — free-variable detection (jm_analyze_captures)"]
+    REFS["collect refs / params / locals / param-default refs"]
+    FREE["free = refs - params - locals<br/>minus module_consts (unless shadowed)"]
+    EXTRA["append synthetic captures:<br/>NFE self, _js_this, _js_new.target, _js_arguments"]
+    REFS --> FREE --> EXTRA
+  end
+  subgraph p16["Phase 1.6 — transitive propagation (fixed-point)"]
+    PROP["for each parent: pull child captures it does not bind<br/>up to 10 rounds until no change"]
+  end
+  subgraph p17["Phase 1.7 family — scope-env layout"]
+    L17["1.7 union of direct-child captures per parent<br/>NFE self-captures get dedicated trailing slots"]
+    L175["1.7.5 module-level scope env (Track A)<br/>top-level let/const captured by closures"]
+    L17B["1.7b parent-env reuse (reuse_parent_env)<br/>pure-transitive parents skip allocation"]
+    L17C["1.7c grandparent / parent-env link slot"]
+    L17 --> L175 --> L17B --> L17C
+  end
+  IN --> p15 --> p16 --> p17
+  p17 --> OUT["fc.has_scope_env, scope_env_names[], capture[].scope_env_slot"]

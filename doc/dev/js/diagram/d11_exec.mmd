@@ -1,0 +1,16 @@
+flowchart TD
+    EX["js_regex_exec(regex, str) — js_runtime.cpp:15961"] --> RD["js_get_regex_data → JsRegexData"]
+    RD --> STR["ToString(str); compute UTF-16 unit basis if non-ASCII"]
+    STR --> LI["read lastIndex; ToLength; clamp"]
+    LI --> GS{"global or sticky?"}
+    GS -->|"yes"| USEIDX["start_pos = lastIndex (else reset 0 if out of range)"]
+    GS -->|"no"| ZERO["start_pos = 0"]
+    USEIDX --> MATCH["js_regex_match_internal: dispatch on JsRegexData<br/>(special / literal / bt / wrapper / RE2)"]
+    ZERO --> MATCH
+    MATCH -->|"no match"| FAIL["reset lastIndex (g/y); return null"]
+    MATCH -->|"match"| UPD["update lastIndex (g/y);<br/>js_regexp_update_last_match ($1–$9, lastMatch)"]
+    UPD --> ARR["build result Array: index, input, groups"]
+    ARR --> IDX{"has_indices (/d flag)?"}
+    IDX -->|"yes"| ATTACH["js_regex_attach_indices: indices[] + named groups"]
+    IDX -->|"no"| DONE["return result"]
+    ATTACH --> DONE

@@ -1,0 +1,17 @@
+flowchart TD
+    A["ta[k] read or write"] --> B{"key is INT and plain TA?"}
+    B -- "yes, inline" --> C["js_array_get_int / js_array_set_int"]
+    C --> D["js_typed_array_get / js_typed_array_set"]
+    B -- "no" --> E["js_property_get / js_property_set"]
+    E --> F{"map_kind != PLAIN and not private key?"}
+    F -- "no" --> G["ordinary Map path, see JS_06"]
+    F -- "yes" --> H["js_try_exotic_property_get / set"]
+    H --> I{"MAP_KIND_TYPED_ARRAY?"}
+    I -- "set path" --> J["js_upgrade_native_backed_map_for_properties, return false"]
+    J --> G
+    I -- "get path" --> K{"js_ta_key_canonical_numeric?"}
+    K -- "yes" --> L{"js_ta_numeric_index_valid?"}
+    L -- "yes" --> D
+    L -- "no, OOB or -0" --> M["return undefined"]
+    K -- "no" --> N["length / byteLength / buffer / proto walk"]
+    D --> O["switch on element_type, read/write raw lane"]

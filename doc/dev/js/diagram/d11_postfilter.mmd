@@ -1,0 +1,19 @@
+flowchart TD
+    IN["rewrite_pattern(original, flags) — js_regex_wrapper.cpp:1322"] --> PREPASS["prepass: empty-class, [^], `.` → ES class, \\b in class"]
+    PREPASS --> SCAN["scan_assertions: collect lookaheads, lookbehinds, backrefs (right→left)"]
+    SCAN --> NONE{"any assertion?"}
+    NONE -->|"no"| PASS["pass-through: pattern = original, 0 filters"]
+    NONE -->|"yes"| KIND{"assertion kind"}
+    KIND -->|"X(?=Y) trailing positive"| TRIM["rewrite X(Y); filter JS_PF_TRIM_GROUP[Y]<br/>(absorb, trim group from match end)"]
+    KIND -->|"(?=Y) zero-width positive"| MARK["insert () marker; filter JS_PF_ASSERT_AT_MARKER[Y]"]
+    KIND -->|"(?!Y) / X(?!Y) negative"| REJ["insert () marker; filter JS_PF_REJECT_MATCH[Y]<br/>(reject if Y matches at boundary)"]
+    KIND -->|"(?&lt;=Y) / (?&lt;!Y) lookbehind"| LB["compile lookbehind RE2; insert () marker;<br/>filter JS_PF_LOOKBEHIND (lb_negative)"]
+    KIND -->|"\\N backreference"| EQ["rewrite to (.+) capture; filter JS_PF_GROUP_EQUALITY[a,b]"]
+    TRIM --> REMAP["fix filter group indices via group_remap"]
+    MARK --> REMAP
+    REJ --> REMAP
+    LB --> REMAP
+    EQ --> REMAP
+    REMAP --> RE2C["re2::RE2(rewritten pattern)"]
+    PASS --> RE2C
+    RE2C --> EXEC["js_regex_wrapper_exec: RE2.Match → verify each filter<br/>(backref → two-pass retry loop)"]

@@ -1,0 +1,25 @@
+flowchart TB
+  A["js_builtin_eval(code, flags)"]
+  NS{"code is a String?"}
+  RET["return argument unchanged"]
+  WS{"whitespace / comment only?"}
+  UND["return undefined"]
+  RX{"single RegExp literal /.../flags ?"}
+  RXC["js_create_regexp_from_source<br/>(no parse/AST/JIT)"]
+  EX{"single expression?<br/>(no leading keyword, no ';')"}
+  EXC["wrap 'return ( code )' as IIFE<br/>js_new_function_from_string,<br/>js_call_function"]
+  SCRIPT["Phase C: parse + build_js_ast +<br/>js_check_early_errors,<br/>jit_init(0), jm_create_mir_transpiler,<br/>transpile_js_mir_ast, MIR_link, run js_main"]
+  OUT["completion value Item"]
+
+  A --> NS
+  NS -->|no| RET
+  NS -->|yes| WS
+  WS -->|yes| UND
+  WS -->|no| RX
+  RX -->|yes| RXC --> OUT
+  RX -->|no| EX
+  EX -->|yes| EXC
+  EXC -->|succeeded| OUT
+  EXC -->|fn build failed| SCRIPT
+  EX -->|no| SCRIPT
+  SCRIPT --> OUT

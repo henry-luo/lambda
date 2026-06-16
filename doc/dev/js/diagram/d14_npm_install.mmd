@@ -1,0 +1,14 @@
+flowchart TD
+    cli(["lambda node install [pkg]"]) --> parse["npm_package_json_parse(package.json)"]
+    parse --> collect["collect dependencies + devDependencies"]
+    collect --> resolve["npm_resolve_dependencies: BFS queue"]
+    resolve --> lock{"lambda-node.lock entry satisfies range?"}
+    lock -->|"yes"| pin["use locked version, enqueue its deps"]
+    lock -->|"no"| reg["npm_registry_resolve_version: fetch metadata, semver_satisfies"]
+    pin --> flat["flat list of NpmResolvedPackage"]
+    reg --> flat
+    flat --> dl["install_one_package: download tarball, npm_extract_tarball into node_modules/.lambda/&lt;name&gt;@&lt;ver&gt;"]
+    dl --> linkdeps["link_store_deps: inter-package symlinks inside store"]
+    linkdeps --> linktop["link_package: top-level node_modules/&lt;name&gt; symlink into store"]
+    linktop --> write["npm_lockfile_write(lambda-node.lock)"]
+    write --> done(["installed"])

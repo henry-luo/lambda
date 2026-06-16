@@ -1,0 +1,23 @@
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant async_start
+    participant async_drive
+    participant state_machine
+    participant result_promise
+    participant awaited_promise
+    Caller->>async_start: js_async_context_create then start
+    async_start->>async_drive: drive idx, undefined, state 0
+    async_drive->>state_machine: state_fn env, input, state
+    state_machine->>state_machine: run to first await, js_async_must_suspend
+    alt awaited pending
+        state_machine-->>async_drive: yield awaited and next_state
+        async_drive->>awaited_promise: js_promise_then resume and reject
+        async_drive-->>Caller: return pending promise
+        awaited_promise->>async_drive: microtask js_async_resume_handler
+        async_drive->>state_machine: re-enter at next_state with value
+    else awaited settled
+        state_machine->>state_machine: js_async_get_resolved inline
+    end
+    state_machine-->>async_drive: yield value and state -1
+    async_drive->>result_promise: js_promise_resolve_with_value

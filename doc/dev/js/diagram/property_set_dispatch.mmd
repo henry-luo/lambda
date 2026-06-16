@@ -1,0 +1,27 @@
+flowchart TB
+  S["js_property_set(object, key, value)"]
+  FAST["dense array INT-index fast path"]
+  M1["js_intercept_accessor_marker<br/>__get_/__set_ to JsAccessorPair"]
+  M2["js_dual_write_marker_flags<br/>__nw_/__ne_/__nc_ to shape flags"]
+  PROTOK{"key == __proto__?"}
+  SETPROTO["js_reflect_set_prototype_of"]
+  FROZEN{"__frozen__?"}
+  REJ["reject (strict: TypeError)"]
+  NW{"non-writable?<br/>__nw_ / shape flag"}
+  EX{"map_kind != PLAIN?"}
+  EXO["js_try_exotic_property_set"]
+  ACC{"own/proto setter?<br/>JSPD_IS_ACCESSOR"}
+  CALLS["call setter with receiver"]
+  DATA["data write<br/>fn_map_set (existing) or map_put (new)<br/>+ extensible/sealed checks"]
+  OK["done"]
+  S --> FAST --> M1 --> M2 --> PROTOK
+  PROTOK -->|yes| SETPROTO --> OK
+  PROTOK -->|no| FROZEN
+  FROZEN -->|yes| REJ
+  FROZEN -->|no| NW
+  NW -->|yes| REJ
+  NW -->|no| EX
+  EX -->|yes| EXO --> OK
+  EX -->|no| ACC
+  ACC -->|yes| CALLS --> OK
+  ACC -->|no| DATA --> OK

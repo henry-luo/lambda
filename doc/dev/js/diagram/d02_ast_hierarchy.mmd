@@ -1,0 +1,52 @@
+classDiagram
+    class JsAstNode {
+        JsAstNodeType node_type
+        Type* type
+        JsAstNode* next
+        TSNode node
+    }
+    class JsProgramNode {
+        JsAstNode* body
+        bool has_use_strict_directive
+    }
+    class JsLiteralNode {
+        JsLiteralType literal_type
+        bool has_decimal
+        bool is_bigint
+        union value
+        String* bigint_str
+    }
+    class JsIdentifierNode {
+        String* name
+        NameEntry* entry
+    }
+    class JsBinaryNode {
+        JsOperator op
+        JsAstNode* left
+        JsAstNode* right
+    }
+    class JsFunctionNode {
+        String* name
+        JsAstNode* params
+        JsAstNode* body
+        bool is_arrow
+        bool is_async
+        bool is_generator
+        bool has_use_strict_directive
+    }
+    class JsForOfNode {
+        JsAstNode* left
+        JsAstNode* right
+        JsAstNode* body
+        int kind
+        bool is_await
+    }
+    JsAstNode <|-- JsProgramNode
+    JsAstNode <|-- JsLiteralNode
+    JsAstNode <|-- JsIdentifierNode
+    JsAstNode <|-- JsBinaryNode
+    JsAstNode <|-- JsFunctionNode
+    JsAstNode <|-- JsForOfNode
+    JsProgramNode o-- JsAstNode : body (linked list)
+    JsBinaryNode o-- JsAstNode : left / right
+    JsIdentifierNode ..> NameEntry : scope lookup

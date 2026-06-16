@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant Code as JIT code / executor
+    participant P as JsPromise (js_promises[idx])
+    participant Settle as js_promise_settle
+    participant MQ as microtask ring
+    participant Run as js_promise_microtask_run
+    participant Next as next promise
+
+    Code->>P: resolve(value)
+    P->>Settle: js_promise_resolve_with_value
+    Note over Settle: thenable? enqueue PromiseResolveThenableJob
+    Settle->>P: state = FULFILLED, result = value
+    loop each registered reaction i
+        Settle->>MQ: js_enqueue_promise_job(bound thunk)
+    end
+    Note over MQ: returns to caller (async)
+    MQ->>Run: js_microtask_flush pops thunk
+    Run->>Run: handler_result = handler(result)
+    Run->>Next: js_promise_resolve_with_value(handler_result)
+    Note over Next: chains the next reaction

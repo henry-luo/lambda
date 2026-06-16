@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph EvalCtx["EvalContext (shared Lambda runtime)"]
+    direction TB
+    GC["GC heap (gc_heap_t)<br/>dual-zone non-moving mark-and-sweep"]
+    NUR["Nursery (gc_nursery_t)<br/>bump-pointer, 32 KB blocks"]
+    NP["Name pool<br/>interned String, identity-comparable"]
+    POOL["Input.pool (mempool)<br/>module-lifetime objects"]
+  end
+  OBJZONE["Object zone<br/>size-class free lists<br/>Map / List / String / JsAccessorPair"]
+  DATAZONE["Data zone (bump)<br/>variable-size buffers, Map.data"]
+  NUMS["boxed numerics<br/>int64 / double / DateTime"]
+  JSFN["JsFunction structs<br/>pool_calloc, not GC-collected"]
+  ARGS["Call-argument stack<br/>js_args_stack, 256K Items, malloc"]
+  MODV["js_module_vars[2048]<br/>active_module_vars pointer"]
+
+  GC --> OBJZONE
+  GC --> DATAZONE
+  NUR --> NUMS
+  POOL --> JSFN
+  JSFN -. "env / module_vars / args reachable only via" .-> ROOTS["heap_register_gc_root_range"]
+  ARGS -. "registered once" .-> ROOTS
+  MODV -. "registered range" .-> ROOTS
+  ROOTS --> GC

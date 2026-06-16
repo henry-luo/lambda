@@ -1,0 +1,21 @@
+flowchart TB
+  subgraph collect["Collection &amp; analysis"]
+    P1["1.0 jm_collect_functions<br/>functions + classes (innermost-first)"]
+    P10b["1.0b strict-mode per function"]
+    P11["1.1 module_consts + module-var indices"]
+    P15["1.5 capture analysis<br/>jm_analyze_captures"]
+    P16["1.6 transitive capture propagation"]
+    P17["1.7 / 1.7.5 / 1.7b / 1.7c scope-env computation"]
+  end
+  subgraph infer["Type inference"]
+    P175["1.75 param + return type inference"]
+    P176["1.76 callsite widening (revoke native)"]
+    P177["1.77 P6 callsite narrowing"]
+    P178["1.78 P4b ctor field-type propagation"]
+  end
+  subgraph emit["Emission"]
+    P19["1.9 MIR_new_forward (+ _n native forwards)"]
+    P2["2 jm_define_function (per function)"]
+    P3["3 js_main body + exception landing pad"]
+  end
+  P1 --> P10b --> P11 --> P15 --> P16 --> P17 --> P175 --> P176 --> P177 --> P178 --> P19 --> P2 --> P3

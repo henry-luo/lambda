@@ -1,0 +1,23 @@
+flowchart TB
+    SUP["super(args) in derived constructor"]
+    NAT["js_super_call_native(callee, this, args)"]
+    ISC{"IsConstructor(callee)?"}
+    THROW["throw TypeError<br/>not a constructor"]
+    TA{"resolves to TypedArray type?"}
+    BLT{"builtin constructs via [[Construct]]?<br/>Boolean/String/Array/Map/ArrayBuffer/...]"}
+    CONS["js_new_from_class_object(callee, args)<br/>honors pending new.target prototype"]
+    PLAIN["js_call_function(callee, this, args)"]
+    MERGE{"parent returned a fresh object?"}
+    ASSIGN["js_object_assign(this, result)<br/>merge own enumerable fields"]
+    RET["return this (receiver JIT holds)"]
+    SUP --> NAT --> ISC
+    ISC -- no --> THROW
+    ISC -- yes --> TA
+    TA -- yes --> CONS
+    TA -- no --> BLT
+    BLT -- yes --> CONS
+    BLT -- no --> PLAIN
+    PLAIN --> MERGE
+    MERGE -- yes --> ASSIGN --> RET
+    MERGE -- no --> RET
+    CONS --> RET

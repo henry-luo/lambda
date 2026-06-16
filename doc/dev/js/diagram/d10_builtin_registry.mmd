@@ -1,0 +1,16 @@
+flowchart TD
+    SPEC["Per-class static spec tables<br/>JsBuiltinMethodSpec[] (name,len,builtin_id,param_count,display_name)"]
+
+    SPEC -->|"install: js_install_builtin_method_specs"| INSTALL["For each spec: js_get_or_create_builtin(builtin_id)<br/>js_property_set + js_mark_non_enumerable"]
+    SPEC -->|"lookup: js_find_builtin_method_spec"| LOOKUP["linear strncmp scan over table"]
+
+    LOOKUP -->|"hit"| CACHE["js_get_or_create_builtin: singleton JsFunction cached by builtin_id"]
+    LOOKUP -->|"miss"| UNDEF["ItemNull / undefined"]
+
+    CACHE --> DISPATCH["js_dispatch_builtin(builtin_id, this, args, argc)<br/>switch on builtin_id"]
+
+    GET["GET path tail (JS_06): js_lookup_builtin_method(type/class, name, len)"] --> RESOLVE["js_get_prototype_method_specs_for_class_or_type"]
+    RESOLVE --> LOOKUP
+
+    STATIC["constructor.staticMethod: js_lookup_constructor_static"] --> RESOLVE2["js_get_constructor_static_method_specs"]
+    RESOLVE2 --> LOOKUP

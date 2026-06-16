@@ -1,0 +1,19 @@
+flowchart TB
+  P0["discover tests: language_cats, builtin_cats, annexB<br/>skip _FIXTURE.js helpers"]
+  P1["Phase 1: parse YAML frontmatter, partition<br/>CLEAN tests (plus previous t262_partial entries)"]
+  ADMIT{"admission: flags async/module/raw,<br/>UNSUPPORTED_FEATURES, intentional exceptions"}
+  SKIP["mark T262_SKIP"]
+  P2["Phase 2: execute CLEAN in batched workers<br/>slowest-batch-first dispatch from timing TSV"]
+  P2B["Phase 2b: retry batch-lost tests individually<br/>(rescue bystanders co-batched with a crash)"]
+  P3["Phase 3: evaluate vs expected<br/>negative tests, async $DONE, diagnose fast-path"]
+  P4["Phase 4 (--batch-only): retry regressions individually;<br/>recovered => classify PARTIAL, rewrite t262_partial.txt"]
+  GATE{"--update-baseline gate:<br/>batch-lost=0 AND crash-exits=0 AND<br/>regressions=0 AND passing &gt;= STABLE_BASELINE_MIN"}
+  WRITE["write test262_baseline.txt; clean partial list"]
+  HOLD["baseline NOT updated"]
+
+  P0 --> P1 --> ADMIT
+  ADMIT -->|"admissible"| P2
+  ADMIT -->|"rejected"| SKIP
+  P2 --> P2B --> P3 --> P4 --> GATE
+  GATE -->|"all pass"| WRITE
+  GATE -->|"any fail"| HOLD

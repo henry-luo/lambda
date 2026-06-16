@@ -1,0 +1,19 @@
+flowchart TD
+    A["js_get_iterator(iterable)"] --> B{"exception?"}
+    B -->|yes| ERR["l_iter_err: propagate"]
+    B -->|no| PUSH["push synthetic try-ctx, push to for_of_iterators stack"]
+    PUSH --> TEST["l_test: js_iterator_step"]
+    TEST --> DONE{"== JS_ITER_DONE_SENTINEL?"}
+    DONE -->|yes| ENDLBL["l_end"]
+    DONE -->|no| BIND["fresh per-iteration binding, assign loop var, TDZ exit"]
+    BIND --> BODY["body (catch_label = l_iter_exc)"]
+    BODY --> UPD["l_update: jump l_test"]
+    UPD --> TEST
+    BODY -.->|"throw"| EXC["l_iter_exc: save exc, js_iterator_close, rethrow"]
+    BODY -.->|"break"| BRK["l_break: js_iterator_close"]
+    BODY -.->|"return"| RET["l_forit_ret: js_iterator_close, propagate return"]
+    BRK --> ENDLBL
+    ENDLBL --> ERR
+    EXC --> ERR
+    ERR --> OUT["exit loop, pop for_of_depth"]
+    RET --> OUT

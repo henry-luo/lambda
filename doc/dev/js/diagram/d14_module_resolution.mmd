@@ -1,0 +1,24 @@
+flowchart TD
+    start(["jm_resolve_module_path(base_file, specifier)"]) --> kind{specifier shape}
+    kind -->|"starts with ./ or ../ or /"| rel["relative: join against base dir"]
+    kind -->|"node: prefix OR name in builtin_names[]"| builtin["built-in: keep as-is, no .js suffix"]
+    kind -->|"bare: lodash, @scope/pkg, lodash/fp"| bare["bare specifier"]
+
+    rel --> ext{"try_file_extensions: '' .js .mjs .cjs .json"}
+    ext -->|"hit"| done(["resolved absolute path"])
+    ext -->|"miss"| dir["try_directory: package.json exports/module/main, then index.*"]
+    dir --> done
+
+    builtin --> dispatch(["runtime: js_module_get dispatches to native namespace"])
+
+    bare --> split["split into pkg_name + subpath"]
+    split --> walk["npm_resolve_module: walk up dirs for node_modules/&lt;pkg_name&gt;"]
+    walk --> found{"dir or symlink found?"}
+    found -->|"yes, has subpath"| subp["resolve_package_subpath: exports then direct file"]
+    found -->|"yes, no subpath"| root["try_directory: package root entry"]
+    found -->|"no"| up{"reached filesystem root?"}
+    up -->|"no"| walk
+    up -->|"yes"| fallback["fall back: use specifier as-is"]
+    subp --> done
+    root --> done
+    fallback --> dispatch

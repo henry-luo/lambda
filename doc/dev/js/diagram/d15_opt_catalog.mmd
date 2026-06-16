@@ -1,0 +1,32 @@
+flowchart TB
+  ROOT["LambdaJS optimization catalog"]
+
+  CALL["Call &amp; dispatch tier"]
+  C1["transient call-arg stack<br/>js_args_push / save / restore"]
+  C2["const-bound static dispatch<br/>direct MIR call, no args buffer"]
+  C3["direct method dispatch<br/>known class -> MIR_CALL"]
+
+  VAL["Value &amp; codegen tier"]
+  V1["constant folding<br/>jm_try_fold_const"]
+  V2["native arithmetic + dual _n versions<br/>jm_is_native_type, has_native_version"]
+  V3["1-char ASCII interning<br/>js_intern_ascii_char"]
+
+  OBJ["Object &amp; property tier"]
+  O1["MapKind dispatch<br/>map_kind != PLAIN guard"]
+  O2["constructor shape pre-alloc<br/>js_constructor_create_object_shaped_cached"]
+  O3["fast map lookup<br/>js_map_get_fast hash + slot_entries"]
+
+  RT["Runtime builtin tier"]
+  R1["TypedArray raw bulk paths<br/>memcpy / memmove, LAMBDA_JS_TA_RAW_FAST"]
+  R2["regex property-walk cursor<br/>js_regex_sorted_range_contains_cursor"]
+  R3["sys-func registry reduction<br/>smaller JIT import table"]
+
+  ENG["Engine selection tier"]
+  E1["interpreter for large/cold modules"]
+  E2["JIT for hot compute"]
+
+  ROOT --> CALL --> C1 & C2 & C3
+  ROOT --> VAL --> V1 & V2 & V3
+  ROOT --> OBJ --> O1 & O2 & O3
+  ROOT --> RT --> R1 & R2 & R3
+  ROOT --> ENG --> E1 & E2

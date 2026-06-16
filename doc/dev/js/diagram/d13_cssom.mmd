@@ -1,0 +1,23 @@
+flowchart TD
+    DOC["document.styleSheets"]
+    SS["js_cssom_wrap_stylesheet: Map map_kind=MAP_KIND_CSSOM, type=js_stylesheet_marker, data=CssStylesheet*"]
+    RULES["sheet.cssRules"]
+    RULE["js_cssom_wrap_rule: Map map_kind=MAP_KIND_CSSOM, type=js_css_rule_marker, data=CssRule*, data_cap=Pool*"]
+    DECL["rule.style"]
+    DECLW["CSSStyleDeclaration: map_kind=MAP_KIND_CSSOM, type=js_rule_decl_marker"]
+    GATE["js_try_exotic_property_get / set switch MAP_KIND_CSSOM"]
+    ROUTE{"marker?"}
+    SSGET["js_cssom_stylesheet_get_property / _method"]
+    RGET["js_cssom_rule_get_property / _set_property"]
+    DGET["js_cssom_rule_decl_get_property / _set_property camelCase to CSS, re-parse value"]
+    CSSNS["CSS.supports / CSS.escape: map_kind=MAP_KIND_CSS_NAMESPACE, ordinary shape preserved, method specs via registry"]
+
+    DOC --> SS --> RULES --> RULE --> DECL --> DECLW
+    SS --> GATE
+    RULE --> GATE
+    DECLW --> GATE
+    GATE --> ROUTE
+    ROUTE -- "js_is_stylesheet" --> SSGET
+    ROUTE -- "js_is_css_rule" --> RGET
+    ROUTE -- "else" --> DGET
+    CSSNS -. "separate map kind" .-> GATE

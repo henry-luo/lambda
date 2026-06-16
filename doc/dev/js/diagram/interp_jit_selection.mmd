@@ -1,0 +1,21 @@
+flowchart TB
+  A["after transpile_js_mir_ast:<br/>count total_insns"]
+  B{"g_mir_interp_mode?<br/>(CLI --mir-interp / JS_MIR_INTERP)"}
+  C{"opt==0 AND source &gt;= LAMBDA_JS_LARGE_INTERP_BYTES (15000)?"}
+  D{"total_insns &gt; 100k<br/>OR (document AND (force OR &gt; 20k))?"}
+  E{"JIT AND opt&gt;=2 AND insns &gt; 100k?"}
+  F["MIR_gen_set_optimize_level(ctx, 0)"]
+  G["interface = MIR_set_interp_interface<br/>(link-interface interp)"]
+  H["interface = MIR_set_gen_interface<br/>(or lazy if JS_LAZY_MIR)"]
+  L["MIR_link(ctx, interface, import_resolver)"]
+  A --> B
+  B -->|yes| G
+  B -->|no| C
+  C -->|yes| G
+  C -->|no| D
+  D -->|yes| G
+  D -->|no| E
+  E -->|yes| F --> H
+  E -->|no| H
+  G --> L
+  H --> L

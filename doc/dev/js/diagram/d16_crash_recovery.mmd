@@ -1,0 +1,39 @@
+flowchart TB
+  subgraph worker["worker process: per-test protected region (main.cpp)"]
+    ARM["arm guards: batch_crash_active=1<br/>sigsetjmp(batch_crash_jmp)<br/>setjmp(mir_error_jmp); sigsetjmp(batch_timeout_jmp)<br/>alarm(batch_timeout)"]
+    RUN["run transpile_js_to_mir_with_preamble_len"]
+    OK["result 0 / Test262Error in stdout"]
+  end
+
+  subgraph L1["layer 1: hardware fault (SIGSEGV / SIGBUS)"]
+    SEGV["batch_crash_handler on alt stack (sigaltstack)<br/>siglongjmp(batch_crash_jmp, sig)"]
+    R1["result = 128 + sig"]
+  end
+  subgraph L2["layer 2: MIR codegen error"]
+    MIRE["batch_mir_error_handler<br/>longjmp(mir_error_jmp, 1)"]
+    R2["result = 1"]
+  end
+  subgraph L3["layer 3: per-test timeout (SIGALRM)"]
+    ALRM["batch_alarm_handler<br/>siglongjmp(batch_timeout_jmp, 1)"]
+    R3["result = 124"]
+  end
+  subgraph PW["layer 4: parent watchdog"]
+    WD["GTest watchdog thread:<br/>SIGKILL worker past hard timeout<br/>then retry lost tests one-per-batch"]
+  end
+
+  ARM --> RUN --> OK
+  RUN -.SIGSEGV/SIGBUS.-> SEGV --> R1
+  RUN -.MIR error.-> MIRE --> R2
+  RUN -.alarm fires.-> ALRM --> R3
+  R1 --> POST["post-test cleanup"]
+  R2 --> POST
+  R3 --> POST
+  OK --> POST
+  POST --> CHK{"result is crash/timeout?"}
+  CHK -->|"yes"| HEAVY["batch_crash_count++; js_batch_reset;<br/>heap_destroy; jm_cleanup_deferred/active_mir;<br/>recompile preamble"]
+  CHK -->|"no"| LIGHT["js_batch_reset_to(checkpoint)"]
+  HEAVY --> CAP{"crash_count &gt;= 10 or RSS &gt; 4GB?"}
+  CAP -->|"yes"| EXIT["BATCH_EXIT; parent retries rest individually"]
+  CAP -->|"no"| NEXT["next test"]
+  LIGHT --> NEXT
+  WD -.kills hung worker.-> EXIT

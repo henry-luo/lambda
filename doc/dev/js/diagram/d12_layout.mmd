@@ -1,0 +1,38 @@
+classDiagram
+    class Map {
+        +TypeId type_id
+        +uint8_t map_kind
+        +void* type
+        +void* data
+        +int data_cap
+    }
+    class JsArrayBuffer {
+        +void* data
+        +int byte_length
+        +int max_byte_length
+        +bool detached
+        +bool is_shared
+        +bool resizable
+    }
+    class JsTypedArray {
+        +JsTypedArrayType element_type
+        +int length
+        +int byte_length
+        +int byte_offset
+        +void* data
+        +uint64_t buffer_item
+        +bool length_tracking
+        +bool is_buffer
+    }
+    class JsDataView {
+        +int byte_offset
+        +int byte_length
+        +uint64_t buffer_item
+        +bool length_tracking
+    }
+    Map "MAP_KIND_TYPED_ARRAY" --> JsTypedArray : data when data_cap==0
+    Map "MAP_KIND_ARRAYBUFFER" --> JsArrayBuffer : data when data_cap==0
+    Map "MAP_KIND_DATAVIEW" --> JsDataView : data when data_cap==0
+    JsTypedArray --> JsArrayBuffer : buffer, NULL if standalone
+    JsDataView --> JsArrayBuffer : buffer
+    note for Map "data_cap==0 means native-backed. First user property write upgrades to a real shape and stows the native pointer under __ta__ / __ab__ / __dv__."

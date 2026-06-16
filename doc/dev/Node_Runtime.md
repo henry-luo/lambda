@@ -10,7 +10,7 @@ Lambda includes a Node.js compatibility layer that enables running Node.js-style
 
 All Node.js APIs are implemented as native C++ functions that operate on Lambda `Item` values — the same runtime representation used by JavaScript and Lambda scripts. There is no separate Node.js binary; everything runs inside `lambda.exe`.
 
-> For the core JavaScript engine design (type system, JIT compilation, closures, classes, generators, etc.), see [dev/JS_Runtime.md](dev/JS_Runtime.md).
+> For the core JavaScript engine design (type system, JIT compilation, closures, classes, generators, etc.), see the LambdaJS design set starting at [js/JS_00_Overview.md](js/JS_00_Overview.md); the detailed design of this Node.js layer is [js/JS_14_Node_Compat.md](js/JS_14_Node_Compat.md).
 
 ---
 

@@ -1,0 +1,28 @@
+flowchart TB
+  K["js_property_get(object, key)"]
+  SYM["symbol key to __sym_N<br/>js_symbol_to_key"]
+  T{"type_id?"}
+  EX{"map_kind != PLAIN?"}
+  EXO["js_try_exotic_property_get<br/>TypedArray / DOM / Proxy / ..."]
+  OWN["js_ordinary_get_own<br/>js_map_get_fast + shape entry"]
+  ACC{"JSPD_IS_ACCESSOR?"}
+  CALLG["call getter with receiver"]
+  FOUND{"own found?"}
+  PROTO["js_prototype_lookup_ex<br/>walk __proto__ (depth &lt;= 32)"]
+  BUILT["builtin fallback<br/>js_class_id + js_proto_class_method_dispatch<br/>js_lookup_builtin_method"]
+  UND["make_js_undefined()"]
+  RETV["return value"]
+  K --> SYM --> T
+  T -->|MAP| EX
+  T -->|ARRAY / ELEMENT| OWN
+  EX -->|yes| EXO --> RETV
+  EX -->|no| OWN
+  OWN --> ACC
+  ACC -->|yes| CALLG --> RETV
+  ACC -->|no| FOUND
+  FOUND -->|yes| RETV
+  FOUND -->|no| PROTO
+  PROTO -->|found| RETV
+  PROTO -->|not found| BUILT
+  BUILT -->|found| RETV
+  BUILT -->|not found| UND

@@ -1,0 +1,19 @@
+flowchart TB
+  CALL["call expression f(args...)"]
+  RESOLVE{"callee statically resolvable?<br/>function decl direct binding, or<br/>const-bound fn/arrow declared before call"}
+  SHADOW{"shadowed by param / capture /<br/>nested hoist?"}
+  NATIVE{"fc.has_native_version<br/>and args coercible to native?"}
+  INLINE{"jm_should_inline?<br/>single return, <= 4 simple params,<br/>no captures"}
+  EMITINLINE["inline body at call site<br/>(jm_transpile_inline_native)"]
+  EMITNATIVE["direct MIR_CALL to f_n<br/>native int/float args + result"]
+  EMITBOXED["direct boxed call to f<br/>save/restore this + new.target"]
+  DYN["js_call_function / js_invoke_fn<br/>(closure env, arguments, dynamic this)"]
+  CALL --> RESOLVE
+  RESOLVE -->|no| DYN
+  RESOLVE -->|yes| SHADOW
+  SHADOW -->|yes| DYN
+  SHADOW -->|no| NATIVE
+  NATIVE -->|no| EMITBOXED
+  NATIVE -->|yes| INLINE
+  INLINE -->|yes| EMITINLINE
+  INLINE -->|no| EMITNATIVE

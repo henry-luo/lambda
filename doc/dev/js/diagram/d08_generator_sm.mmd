@@ -1,0 +1,19 @@
+stateDiagram-v2
+    direction LR
+    [*] --> State0 : "js_generator_create (eager)"
+    State0 : "State 0 — param binding"
+    State0 : "destructure params, save env"
+    State1 : "State 1 — body start"
+    StateN : "State k — after k-th yield"
+    Done : "Done (state = -1)"
+
+    State0 --> State1 : "implicit yield [undefined, 1]"
+    State1 --> StateN : "yield save locals, return [val, k]"
+    StateN --> StateN : ".next(v) reload locals, resume"
+    StateN --> Done : "fall off body or return [val, -1]"
+    State1 --> Done : "return signal or end"
+    StateN --> Delegate : "yield* return [iterable, k, 1]"
+    Delegate : "Delegate active (yield*)"
+    Delegate --> Delegate : "step delegate iterator"
+    Delegate --> StateN : "delegate done, resume at k"
+    Done --> [*]

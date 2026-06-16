@@ -1,0 +1,21 @@
+flowchart TD
+    Start(["require or import specifier"]) --> Cache{"js_module_get hit?"}
+    Cache -->|yes| Ret["return cached namespace or default export"]
+    Cache -->|no| Read["read_text_file path"]
+    Read --> Kind{"CJS file? js_is_cjs_file"}
+    Kind -->|cjs / js| Wrap["js_wrap_cjs_source: prefix module/exports, suffix export default"]
+    Kind -->|mjs / esm| Raw["use source as-is"]
+    Wrap --> Mod["transpile_js_module_to_mir"]
+    Raw --> Mod
+    Mod --> Enter["js_tla_enter_module depth++"]
+    Enter --> Reg["register placeholder namespace"]
+    Reg --> Imports["jm_load_imports: recurse deps first"]
+    Imports --> Compile["jit_init, transpile_js_mir_ast, MIR_link"]
+    Compile --> Vars["js_alloc_module_vars, set active namespace/vars"]
+    Vars --> Pending{"pending_async_deps &gt; 0?"}
+    Pending -->|yes| Defer["stash deferred_main_ptr; wait for AEO drain"]
+    Pending -->|no| RunBody["js_main returns namespace object"]
+    RunBody --> DrainE["js_event_loop_drain, restore _lambda_rt"]
+    Defer --> Exit
+    DrainE --> Exit["js_tla_exit_module depth--; defer MIR cleanup"]
+    Exit --> Ret

@@ -1,0 +1,25 @@
+flowchart TB
+  M["MIR module lowered<br/>count total_insns post-lowering"]
+  D{"document context?<br/>(runtime dom_doc != NULL)"}
+  RF{"render command<br/>(layout/render/view)?<br/>g_js_force_document_interp"}
+  RB{"total_insns &gt; 20k<br/>(JM_RADIANT_INTERP_INSN_THRESHOLD)?"}
+  LB{"total_insns &gt; 100k<br/>(JM_LARGE_MODULE_INSN_THRESHOLD)?"}
+  ESC{"LAMBDA_JS_LARGE_INTERP=0?"}
+  INTERP["MIR_set_interp_interface at link<br/>no native codegen, builds icode<br/>link cost near-zero, per-insn exec slower"]
+  JIT["MIR_set_gen_interface at link<br/>per-function MIR_gen (codegen+regalloc)<br/>link cost = sum of MIR_gen, native exec"]
+  NOTE["why large/cold modules interpret:<br/>link is eager per-function codegen,<br/>vendor JS is mostly never called,<br/>so paying codegen never amortizes"]
+  HOT["why hot compute JITs:<br/>50M-iter loop ~1.65x slower interpreted;<br/>native pays off once amortized"]
+
+  M --> D
+  D -->|yes| RF
+  D -->|no| LB
+  RF -->|yes| ESC
+  RF -->|no| RB
+  RB -->|yes| ESC
+  RB -->|no| JIT
+  LB -->|yes| ESC
+  LB -->|no| JIT
+  ESC -->|set| JIT
+  ESC -->|unset| INTERP
+  INTERP -.-> NOTE
+  JIT -.-> HOT

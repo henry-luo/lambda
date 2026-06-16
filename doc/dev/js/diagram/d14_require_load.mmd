@@ -1,0 +1,20 @@
+flowchart TD
+    req(["js_require(specifier)"]) --> cache{"js_module_get: in cache or built-in?"}
+    cache -->|"built-in namespace"| bi["return native namespace .default"]
+    cache -->|"already-registered module"| hit["return cached namespace .default"]
+    cache -->|"miss"| read["read_text_file(path); fallback path/index.js"]
+    read --> exists{"source found?"}
+    exists -->|"no, internal/* "| empty["return empty object"]
+    exists -->|"no"| null["return ItemNull"]
+    exists -->|"yes"| cjs{"js_is_cjs_file: .cjs/.js -> CJS, .mjs -> ESM"}
+
+    cjs -->|"CJS"| wrap["js_wrap_cjs_source: inject __cjs_module__, exports, module, __filename, __dirname; append export default module.exports"]
+    cjs -->|"ESM"| asis["use source as-is"]
+    wrap --> compile["transpile_js_module_to_mir"]
+    asis --> compile
+    compile --> register["js_module_register: store namespace in js_modules[]"]
+    register --> extract{"CJS?"}
+    extract -->|"yes"| def["extract default export = module.exports"]
+    extract -->|"no"| ns["return namespace object"]
+    def --> out(["module value"])
+    ns --> out

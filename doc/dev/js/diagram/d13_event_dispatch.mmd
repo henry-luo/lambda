@@ -1,0 +1,27 @@
+flowchart TD
+    START["js_dom_dispatch_event(target, event)"]
+    GUARD{"event is null / non-Event ?"}
+    THROW["throw TypeError"]
+    ACT["click pre-activation: toggle checkbox/radio checkedness"]
+    REENT{"__dispatch_flag set ?"}
+    THROW2["throw InvalidStateError"]
+    PATH["build_path: target then ancestors then document then window into path 0..n-1"]
+    WEV["set window.event = event"]
+    CAP["Phase 1 CAPTURING: fire_listeners path n-1 down to 1, capture listeners only"]
+    TGT["Phase 2 AT_TARGET: fire_listeners path 0 capture then bubble, reported phase 2"]
+    BUB["Phase 3 BUBBLING: if bubbles, fire_listeners path 1..n-1, non-capture only"]
+    FIRE["fire_listeners: snapshot non-tombstoned matching-phase listeners, run on-handler first then each callback"]
+    STOP{"stopPropagation or stopImmediatePropagation ?"}
+    DONE["clear currentTarget, eventPhase=0, reset stop flags; run default action"]
+
+    START --> GUARD
+    GUARD -- "yes" --> THROW
+    GUARD -- "no" --> ACT --> REENT
+    REENT -- "yes" --> THROW2
+    REENT -- "no" --> PATH --> WEV --> CAP --> TGT --> BUB --> DONE
+    CAP -.-> FIRE
+    TGT -.-> FIRE
+    BUB -.-> FIRE
+    FIRE --> STOP
+    STOP -- "immediate" --> DONE
+    STOP -- "propagation" --> DONE

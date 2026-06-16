@@ -1,0 +1,19 @@
+flowchart TD
+    START["Operation on a MAP_KIND_PROXY object"] --> PD["js_get_proxy_data: JsProxyData {target, handler, private_slots, revoked}"]
+    PD -->|"revoked"| THROW["throw TypeError"]
+    PD --> TRAP["js_proxy_get_trap(handler, trapName)"]
+    TRAP -->|"trap absent"| FWD["forward to target<br/>(ScopedProxyReceiver preserves receiver)"]
+    TRAP -->|"trap present"| CALL["js_call_function(trap, handler, [target, key, ...])"]
+    CALL --> INV["ES2020 invariant checks vs target own descriptor"]
+    INV -->|"violated"| THROW
+    INV -->|"ok"| RESULT["return trap result"]
+    FWD --> RESULT
+
+    subgraph traps["13 trap handlers (js_proxy_trap_*)"]
+      direction LR
+      T1["get / set / has / delete"]
+      T2["ownKeys / getOwnPropertyDescriptor / defineProperty"]
+      T3["getPrototypeOf / setPrototypeOf"]
+      T4["isExtensible / preventExtensions"]
+      T5["apply / construct"]
+    end

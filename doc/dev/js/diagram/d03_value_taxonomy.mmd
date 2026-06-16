@@ -1,0 +1,44 @@
+classDiagram
+  class Item {
+    +uint64 item
+    +int64 int_val_56
+    +uint8 bool_val
+    +ptr_56 tagged_pointer
+    +type_id() TypeId
+  }
+  class PackedScalar {
+    +ITEM_NULL
+    +ITEM_TRUE_FALSE
+    +ITEM_INT int56
+    +ITEM_JS_UNDEFINED
+    +ITEM_JS_TDZ
+    +NUM_SIZED i8..u32 f16 f32
+  }
+  class TaggedPointerScalar {
+    +LMD_TYPE_INT64 heap int64
+    +LMD_TYPE_FLOAT heap double
+    +LMD_TYPE_DECIMAL Decimal or BigInt
+    +LMD_TYPE_STRING String
+    +LMD_TYPE_SYMBOL Symbol
+    +LMD_TYPE_DTIME DateTime
+  }
+  class Container {
+    +TypeId type_id
+    +uint8 flags
+    +map_kind 4 bits
+  }
+  class Map_LMD_TYPE_MAP {
+    +TypeMap type
+    +void data
+    +int data_cap
+  }
+  class List_LMD_TYPE_ARRAY {
+    +Item items
+    +int64 length
+  }
+  Item <|.. PackedScalar : high byte _type_id
+  Item <|.. TaggedPointerScalar : high byte tag plus 56-bit ptr
+  Item <|.. Container : raw pointer, type_id at offset 0
+  Container <|-- Map_LMD_TYPE_MAP
+  Container <|-- List_LMD_TYPE_ARRAY
+  Map_LMD_TYPE_MAP ..> TypeMap : "shape (owned by JS_06)"

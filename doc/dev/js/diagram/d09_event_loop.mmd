@@ -1,0 +1,28 @@
+sequenceDiagram
+    autonumber
+    participant Main as transpile core
+    participant JsMain as js_main (JIT)
+    participant Drain as js_event_loop_drain
+    participant Uv as libuv uv_run
+    participant Prep as uv_prepare / uv_check
+    participant MQ as js_microtask_flush
+    participant Timer as timer_fire_cb
+    participant Fin as MIR_finish
+
+    Main->>JsMain: call js_main(Context)
+    JsMain-->>Main: completion value (sync body done)
+    Main->>Drain: js_event_loop_drain()
+    Drain->>MQ: flush nextTick + microtasks first
+    Drain->>Uv: lambda_uv_run (UV_RUN_DEFAULT)
+    loop until no active handles or watchdog 5000 ms
+        Uv->>Prep: prepare_cb before poll
+        Prep->>MQ: drain_task_checkpoint
+        Uv->>Timer: fire due setTimeout/setInterval
+        Timer->>JsMain: js_call_function(callback)
+        Uv->>Prep: check_cb after poll
+        Prep->>MQ: drain_task_checkpoint
+    end
+    Drain->>MQ: final flush after loop exits
+    Drain-->>Main: return
+    Note over Main: restore _lambda_rt AFTER drain
+    Main->>Fin: MIR_finish (or defer for modules)

@@ -1,0 +1,30 @@
+flowchart TB
+    START["new C(args) — static callee, jm_transpile_new_expr"]
+    UNIQ{"class name unique in module?"}
+    DYN["jm_emit_dynamic_new_expr<br/>js_new_from_class_object (runtime dispatch)"]
+    CTOR{"ctor has this.prop assigns?<br/>(ctor_prop_count &gt; 0)"}
+    SHAPED["js_constructor_create_object_shaped[_cached]<br/>pre-alloc TypeMap from ctor_prop names; cache TypeMap*"]
+    EXT{"extends builtin Array?"}
+    ARR["js_array_new(0)"]
+    PLAIN["js_new_object()"]
+    PROTO["set __class_name__, length<br/>js_set_prototype(obj, C.prototype)"]
+    FIELDS["run instance-field initializers<br/>(base-first, this bound to obj)"]
+    HAS{"active constructor?"}
+    CALL["js_set_new_target(C)<br/>js_call_function(ctor, obj, args)"]
+    CHK["js_new_check_constructor_return<br/>object return overrides obj"]
+    IMPL["implicit super(...args):<br/>js_new_from_class_object(superCtor)<br/>then js_set_prototype"]
+    OUT["instance Item"]
+    START --> UNIQ
+    UNIQ -- no --> DYN
+    UNIQ -- yes --> CTOR
+    CTOR -- yes --> SHAPED
+    CTOR -- no --> EXT
+    EXT -- yes --> ARR
+    EXT -- no --> PLAIN
+    SHAPED --> PROTO
+    ARR --> PROTO
+    PLAIN --> PROTO
+    PROTO --> FIELDS --> HAS
+    HAS -- yes --> CALL --> CHK --> OUT
+    HAS -- no --> IMPL --> OUT
+    DYN --> OUT

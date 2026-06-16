@@ -1,0 +1,25 @@
+flowchart TD
+    JS["JS code: 'el.offsetWidth' or 'el.appendChild(x)'"]
+    GET["js_property_get / js_map_method"]
+    GATE{"map_kind != PLAIN ?"}
+    EXO["js_try_exotic_property_get switch on map_kind"]
+    DOMK{"MAP_KIND_DOM ?"}
+    UNW["js_dom_unwrap_element reads Map::data as DomNode*"]
+    DISP["js_dom_get_property / js_dom_element_method strcmp dispatch on prop name"]
+    METRIC{"layout metric? offsetWidth / getBoundingClientRect"}
+    FIELD["read DomElement fields x / y / width / height"]
+    MUT["DOM mutation: appendChild / innerHTML setter"]
+    DIRTY["js_dom_mark_dirty_subtree + js_dom_mark_dirty_ancestors set layout_dirty"]
+    RAD["Radiant layout_html_doc populates DomElement geometry on next layout pass"]
+    WRAP["js_dom_wrap_element heap_calloc Map, map_kind=MAP_KIND_DOM, type=js_dom_type_marker, data=DomNode*, data_cap=0"]
+    CACHE["DomWrapperCacheChunk identity cache O(n) scan"]
+
+    JS --> GET --> GATE
+    GATE -- "no" --> PLAIN["ordinary shape-backed path"]
+    GATE -- "yes" --> EXO --> DOMK
+    DOMK -- "yes" --> UNW --> DISP
+    DISP --> METRIC
+    METRIC -- "yes" --> FIELD
+    DISP --> MUT --> DIRTY --> RAD
+    RAD -. "geometry consumed by" .-> FIELD
+    DISP --> WRAP --> CACHE

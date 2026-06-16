@@ -1,0 +1,23 @@
+flowchart TD
+    START{"pattern kind"}
+    START -->|array| ARR["jm_emit_array_destructure"]
+    START -->|object| OBJ["jm_emit_object_destructure"]
+
+    ARR --> AGI["js_get_iterator_lazy(src)"]
+    AGI --> ATRY["push synthetic try-ctx, iter_done = 0"]
+    ATRY --> AELEM{"element type"}
+    AELEM -->|"target"| ASTEP["js_iterator_step, bind target, close-on-exception-if-open"]
+    AELEM -->|"default"| ADEF["step then apply default if undefined"]
+    AELEM -->|"rest ...r"| AREST["js_iterator_collect_rest into array"]
+    ASTEP --> AELEM
+    ADEF --> AELEM
+    AREST --> ACLOSE["IteratorClose if not exhausted"]
+    AELEM -->|"done"| ACLOSE
+
+    OBJ --> OPRE["pre-init targets to undefined (assignment mode)"]
+    OPRE --> OCO["js_require_object_coercible(src)"]
+    OCO --> OPROP{"property type"}
+    OPROP -->|"key: target"| OGET["js_property_get, bind target"]
+    OPROP -->|"...rest"| OREST["collect exclude keys, js_object_rest (own enumerable, key order)"]
+    OGET --> OPROP
+    OREST --> OPROP

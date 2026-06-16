@@ -1,0 +1,30 @@
+classDiagram
+    class Map {
+        TypeId type_id = LMD_TYPE_MAP
+        map_kind = PLAIN
+        void* data
+        note "owns __cd string-keyed slot"
+    }
+    class JsCollectionData {
+        HashMap* hmap
+        int type
+        bool is_weak
+        JsCollectionOrderNode* order_head
+        JsCollectionOrderNode* order_tail
+    }
+    class JsCollectionOrderNode {
+        Item key
+        Item value
+        JsCollectionOrderNode* next
+        JsCollectionOrderNode* prev
+        bool deleted
+    }
+    class JsCollectionEntry {
+        Item key
+        Item value
+        note "hashmap element; SameValueZero compare"
+    }
+
+    Map --> JsCollectionData : data ptr via __cd slot
+    JsCollectionData --> JsCollectionOrderNode : insertion-order doubly-linked list
+    JsCollectionData --> JsCollectionEntry : hmap stores by canonical key
