@@ -47,6 +47,16 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:         return "formatStrikeThrough";
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:             return "formatSubscript";
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:           return "formatSuperscript";
+        case INPUT_INTENT_FORMAT_BLOCK:                 return "formatBlock";
+        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:          return "formatJustifyLeft";
+        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:        return "formatJustifyCenter";
+        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:         return "formatJustifyRight";
+        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:          return "formatJustifyFull";
+        case INPUT_INTENT_FORMAT_ORDERED_LIST:          return "insertOrderedList";
+        case INPUT_INTENT_FORMAT_UNORDERED_LIST:        return "insertUnorderedList";
         case INPUT_INTENT_FORMAT_INDENT:                return "formatIndent";
         case INPUT_INTENT_FORMAT_OUTDENT:               return "formatOutdent";
         case INPUT_INTENT_SELECT_ALL:                   return "selectAll";
@@ -62,6 +72,16 @@ bool input_intent_is_dispatchable(InputIntentType type) {
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+        case INPUT_INTENT_FORMAT_BLOCK:
+        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
+        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
+        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
+        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
+        case INPUT_INTENT_FORMAT_ORDERED_LIST:
+        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
         case INPUT_INTENT_FORMAT_INDENT:
         case INPUT_INTENT_FORMAT_OUTDENT:
         case INPUT_INTENT_SELECT_ALL:

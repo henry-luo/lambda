@@ -1,0 +1,10 @@
+strikethrough supported=true enabled=true ok=true state=true html=a<s>bc</s>d expected=true stateExpected=true
+subscript supported=true enabled=true ok=true state=true html=a<sub>bc</sub>d expected=true stateExpected=true
+superscript supported=true enabled=true ok=true state=true html=a<sup>bc</sup>d expected=true stateExpected=true
+bold-state state=true expected=true
+italic-state state=true expected=true
+strikethrough-state state=true expected=true
+bold supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
+bold supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
+italic supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true
+strikethrough supported=true enabled=true ok=true state=false html=bc expected=true stateExpected=true

@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2a selected-range inline formatting started.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, and single-block ordered/unordered list insertion.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -692,6 +692,175 @@ LANDED (2026-06-17).**
 **Global gate note:** EC-2a's local WPT guards and `test_js_gtest` are green.
 The full `make test262-baseline` gate still needs to run before declaring the
 whole EC-2 tier complete.
+
+**EC-2b — strikethrough/subscript/superscript wrapper + alias query state:
+LANDED (2026-06-17).**
+
+- Extended the EC-2 native inline format surface from bold/italic/underline to
+  include `execCommand("strikethrough"|"subscript"|"superscript")`. These
+  commands map to new consumer-issued format intents and reuse the same
+  `editing_rich_default_format(...)` surround-contents mutator, producing
+  `<s>`, `<sub>`, and `<sup>` wrappers for the current selected rich DOM range.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  three added format commands, and `queryCommandState(...)` recognizes them
+  when the focus boundary is inside the matching wrapper.
+- Inline query state now also treats semantic aliases as active state:
+  `bold` matches `<strong>`, `italic` matches `<em>`, and `strikethrough`
+  matches `<strike>`.
+- Scope remains the same as EC-2a: selected-range `Range.surroundContents()`
+  shapes only. Collapsed typing-state toggles, unwrap/toggle-off behavior,
+  partial non-text-node formatting, wrapper normalization, and undo history for
+  format commands remain future EC-2 work.
+
+**Current EC verification after EC-2b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `execCommand("strikethrough"|"subscript"|"superscript")` DOM regression | all commands supported/enabled; selected `bc` wraps as `<s>bc</s>`, `<sub>bc</sub>`, `<sup>bc</sup>`; query state true |
+| Inline alias query-state regression | `bold` in `<strong>`, `italic` in `<em>`, and `strikethrough` in `<strike>` all return true |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_inline_format' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 202 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-2b's local WPT guards and `test_js_gtest` are green.
+The full `make test262-baseline` gate still needs to run before declaring the
+whole EC-2 tier complete.
+
+**EC-2c — whole-wrapper inline format toggle-off: LANDED (2026-06-17).**
+
+- Repeated inline `execCommand(...)` now unwraps a fully selected matching
+  wrapper instead of nesting a second wrapper. This covers direct selections
+  of the wrapper contents and full selections of a wrapper's single text child.
+- The matcher accepts the canonical and semantic alias forms used by query
+  state: `bold` unwraps `<b>` / `<strong>`, `italic` unwraps `<i>` / `<em>`,
+  `strikethrough` unwraps `<s>` / `<strike>`, and subscript/superscript unwrap
+  `<sub>` / `<sup>`.
+- The unwrap path preserves the selected contents after moving the children out
+  of the wrapper and logs the transaction as `format-toggle`.
+- Scope remains conservative: only whole-wrapper selections are toggled off.
+  Collapsed typing-state toggles, partial non-text-node formatting, wrapper
+  splitting/normalization, and undo history for format commands remain future
+  EC-2 work.
+
+**Current EC verification after EC-2c (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct inline toggle-off DOM regression | `bold` over `<b>bc</b>` and `<strong>bc</strong>`, `italic` over `<em>bc</em>`, and `strikethrough` over `<strike>bc</strike>` all unwrap to `bc`; query state false |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_inline_format' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 202 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-2c's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-2 tier complete.
+
+**EC-3a — single-block `formatBlock`: LANDED (2026-06-17).**
+
+- Added `document.execCommand("formatBlock", false, value)` to the native EC
+  command surface. The command maps to a new consumer-issued
+  `INPUT_INTENT_FORMAT_BLOCK` intent and runs through the same
+  `editing_run_transaction(...)` envelope as EC-1/EC-2.
+- Added `editing_rich_default_format_block(...)` for the conservative first
+  block-structure mutation: when the selection focus is inside one supported
+  block, replace that block's tag while preserving its children and restoring
+  the selected text range. Supported values are `p`, `div`, `h1`-`h6`,
+  `blockquote`, and `pre`, accepting both bare names and angle-bracket input
+  such as `<blockquote>`.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include
+  `formatBlock`; `queryCommandValue("formatBlock")` returns the current
+  supported block tag at the focus boundary.
+- Scope remains intentionally narrow: no multi-block selection transform, no
+  implicit wrapping of bare text under the editing host, no list conversion,
+  no indent/outdent, no justify commands, and no undo history for block format
+  commands yet.
+
+**Current EC verification after EC-3a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `formatBlock` DOM regression | `p -> h1` and `div -> blockquote` both preserve text and update `queryCommandValue`; unsupported `span` returns false without mutation |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_format_block' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 203 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
+
+**EC-3b — current-block justify commands: LANDED (2026-06-17).**
+
+- Added native `execCommand("justifyLeft"|"justifyCenter"|"justifyRight"|
+  "justifyFull")` support. The commands map to new consumer-issued justify
+  intents and run through the same editing transaction envelope as the rest of
+  EC-3.
+- Added `editing_rich_default_justify(...)` for the conservative first justify
+  mutation: find the supported block containing the selection focus and set its
+  legacy HTML `align` attribute to `left`, `center`, `right`, or `justify`.
+  Radiant's existing HTML resolver already maps this attribute into
+  `text-align`, so the DOM mutation connects to layout without inventing a
+  parallel style path.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  four justify commands. `queryCommandState(...)` returns true when the current
+  block's `align` attribute matches the queried command.
+- Scope remains single-current-block only. Multi-block justification, implicit
+  wrapping of bare host text, style-attribute normalization, list commands,
+  indent/outdent, and undo history remain future EC-3 work.
+
+**Current EC verification after EC-3b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct justify DOM regression | all four justify commands supported/enabled; `<p>` gains the expected `align` value; exactly one matching justify query state is true |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_justify' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 204 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3b's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
+
+**EC-3c — single-block ordered/unordered list insertion: LANDED (2026-06-17).**
+
+- Added native `execCommand("insertOrderedList"|"insertUnorderedList")`
+  support. The commands map to new non-dispatchable, non-recordable list
+  intents and run through the same transaction envelope as the other EC-3
+  block commands.
+- Added `editing_rich_default_list(...)` for the conservative first list
+  mutation: replace one focused supported block with
+  `<ol><li>...</li></ol>` or `<ul><li>...</li></ul>`, moving the original
+  block children into the list item and restoring the selected text range when
+  possible.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  two list commands. `queryCommandState(...)` returns true when the selection
+  focus is inside a matching ancestor list.
+- Scope remains intentionally narrow: no existing-list toggle, no adjacent
+  list merge, no list split, no multi-block list conversion, no list-item
+  indent/outdent, no undo history, and the raw DOM list nodes are not
+  MarkEditor-backed for later attribute edits yet.
+
+**Current EC verification after EC-3c (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct list DOM regression | `insertOrderedList` converts `<p>abc</p>` to `<ol><li>abc</li></ol>` and reports ordered state true; `insertUnorderedList` converts it to `<ul><li>abc</li></ul>` and reports unordered state true |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_list' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 205 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3c's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
 
 ---
 

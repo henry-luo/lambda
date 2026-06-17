@@ -157,6 +157,27 @@ static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
     return false;
 }
 
+static bool jm_find_unique_ctor_prop_slot(JsMirTranspiler* mt, String* prop_name, int* out_slot) {
+    if (out_slot) *out_slot = -1;
+    if (!mt || !prop_name || prop_name->len <= 0) return false;
+
+    int found_slot = -1;
+    bool found = false;
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        JsFuncCollected* fc = &mt->func_entries[fi];
+        if (!fc || fc->ctor_prop_count <= 0) continue;
+        int slot = jm_ctor_prop_slot(fc, prop_name->chars, (int)prop_name->len);
+        if (slot < 0) continue;
+        if (found && slot != found_slot) return false;
+        found = true;
+        found_slot = slot;
+    }
+
+    if (!found) return false;
+    if (out_slot) *out_slot = found_slot;
+    return true;
+}
+
 static void jm_emit_global_var_property_sync(JsMirTranspiler* mt, JsModuleConstEntry* mc,
                                              String* name, MIR_reg_t value) {
     if (!mt || !mc || !name || name->len <= 0 || value == 0) return;
@@ -5188,6 +5209,106 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     log_debug("P3: constructor this.%.*s → slot %d",
                               (int)prop_id->name->len, prop_id->name->chars, p3_slot);
                     return new_val;
+                }
+            }
+        }
+
+        // P3p: Plain function constructors with A5 pre-shaped objects can use
+        // the same slot write as class constructors, but only after runtime
+        // checks prove this call is a construction and this object has the
+        // expected own data slot. Normal Function.call/apply invocations fall
+        // back to the full property setter.
+        if (!member->computed && asgn->op == JS_OP_ASSIGN &&
+            mt->current_fc && !mt->current_fc->is_constructor &&
+            (!mt->current_fc->node || !mt->current_fc->node->is_arrow) &&
+            mt->current_fc->ctor_prop_count > 0 &&
+            member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
+            JsIdentifierNode* prop_id = (JsIdentifierNode*)member->property;
+            if (obj_id->name && prop_id->name && !jm_is_private_name(prop_id->name) &&
+                obj_id->name->len == 4 &&
+                strncmp(obj_id->name->chars, "this", 4) == 0) {
+                int p3p_slot = jm_ctor_prop_slot(mt->current_fc,
+                    prop_id->name->chars, (int)prop_id->name->len);
+                if (p3p_slot >= 0) {
+                    MIR_reg_t this_reg = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_label_t l_fast = jm_new_label(mt);
+                    MIR_label_t l_slow = jm_new_label(mt);
+                    MIR_label_t l_end = jm_new_label(mt);
+                    MIR_reg_t result = jm_new_reg(mt, "p3p", MIR_T_I64);
+
+                    MIR_reg_t new_target = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
+                    MIR_reg_t nt_is_undef = jm_new_reg(mt, "p3pu", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, nt_is_undef),
+                        MIR_new_reg_op(mt->ctx, new_target),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, nt_is_undef)));
+
+                    MIR_reg_t nt_is_null = jm_new_reg(mt, "p3pn", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, nt_is_null),
+                        MIR_new_reg_op(mt->ctx, new_target),
+                        MIR_new_int_op(mt->ctx, (int64_t)ItemNull.item)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, nt_is_null)));
+
+                    MIR_reg_t nt_is_zero = jm_new_reg(mt, "p3pz", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                        MIR_new_reg_op(mt->ctx, nt_is_zero),
+                        MIR_new_reg_op(mt->ctx, new_target),
+                        MIR_new_int_op(mt->ctx, 0)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, nt_is_zero)));
+
+                    int64_t byte_offset = (int64_t)p3p_slot * (int64_t)sizeof(void*);
+                    MIR_reg_t shape_ok = jm_call_4(mt, "js_shape_slot_guard", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)prop_id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)prop_id->name->len),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_fast),
+                        MIR_new_reg_op(mt->ctx, shape_ok)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_slow)));
+
+                    jm_emit_label(mt, l_fast);
+                    MIR_reg_t fast_val = jm_transpile_box_item(mt, asgn->right);
+                    jm_call_void_3(mt, "js_set_shaped_slot",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p3p_slot),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fast_val));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, fast_val)));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_end)));
+
+                    jm_emit_label(mt, l_slow);
+                    MIR_reg_t slow_key = jm_box_string_literal(mt,
+                        prop_id->name->chars, (int)prop_id->name->len);
+                    MIR_reg_t slow_val = jm_transpile_box_item(mt, asgn->right);
+                    bool strict_set = mt->is_global_strict || mt->is_module ||
+                        (mt->current_fc && mt->current_fc->is_strict);
+                    MIR_reg_t slow_result = jm_call_4(mt, "js_property_set_v", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, slow_key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, slow_val),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, strict_set ? 1 : 0));
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, slow_result)));
+
+                    jm_emit_label(mt, l_end);
+                    log_debug("P3p: guarded plain constructor this.%.*s -> slot %d",
+                              (int)prop_id->name->len, prop_id->name->chars, p3p_slot);
+                    return result;
                 }
             }
         }
@@ -10902,18 +11023,16 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
             }
-            // Ordinary JS Arrays are exotic: sparse indices, companion-map
-            // descriptors, prototype numeric accessors, and backing-store growth
-            // all affect reads. Keep their reads on the runtime path; typed
-            // arrays retain direct memory access above because their storage is
-            // fixed and integer-indexed.
+            // Ordinary JS Arrays can still be exotic: sparse indices,
+            // companion-map descriptors, prototype numeric accessors, and
+            // backing-store growth all affect reads. The inline helper checks
+            // the dense-array invariants first and falls back to the runtime.
             JsMirVarEntry* arr_var = jm_get_js_array_var(mt, mem->object);
             if (arr_var) {
-                return jm_call_2(mt, "js_array_get_int", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_var->reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+                return jm_transpile_array_get_inline(mt, arr_var->reg, idx_native,
+                    arr_var->hoisted_data_reg, arr_var->hoisted_len_reg);
             }
-            // A4: Unknown array type — use js_array_get_int runtime call
+            // A4: Unknown array type — use js_array_get_int runtime call.
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
             return jm_call_2(mt, "js_array_get_int", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
@@ -11129,6 +11248,60 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
             }
+        }
+    }
+
+    if (!p4_skip_constructor && !mem->computed && !mem->optional &&
+        mem->object && mem->object->node_type != JS_AST_NODE_IDENTIFIER &&
+        !jm_has_optional_chain(mem->object) &&
+        mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+        String* key_name = jm_resolve_private_name(mt, (JsAstNode*)mem->property, prop->name);
+        int ctor_slot = -1;
+        if (key_name && !jm_is_private_name(key_name) &&
+            jm_find_unique_ctor_prop_slot(mt, key_name, &ctor_slot)) {
+            MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+            jm_emit_exc_propagate_check(mt);
+
+            MIR_label_t l_fast = jm_new_label(mt);
+            MIR_label_t l_slow = jm_new_label(mt);
+            MIR_label_t l_end = jm_new_label(mt);
+            MIR_reg_t result = jm_new_reg(mt, "gsl", MIR_T_I64);
+            int64_t byte_offset = (int64_t)ctor_slot * (int64_t)sizeof(void*);
+            MIR_reg_t match = jm_call_4(mt, "js_shape_slot_guard", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)key_name->len),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_fast),
+                MIR_new_reg_op(mt->ctx, match)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_slow)));
+
+            jm_emit_label(mt, l_fast);
+            MIR_reg_t fast = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ctor_slot));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, fast)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_end)));
+
+            jm_emit_label(mt, l_slow);
+            MIR_reg_t key = jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
+            MIR_reg_t slow = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, slow)));
+
+            jm_emit_label(mt, l_end);
+            log_debug("P4g: guarded shaped load expr.%.*s -> slot %d",
+                      (int)key_name->len, key_name->chars, ctor_slot);
+            return result;
         }
     }
 

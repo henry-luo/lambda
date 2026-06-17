@@ -741,9 +741,155 @@ static const char* rich_format_tag_name(const EditingIntent* intent) {
             return "i";
         case INPUT_INTENT_FORMAT_UNDERLINE:
             return "u";
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+            return "s";
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+            return "sub";
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+            return "sup";
         default:
             return nullptr;
     }
+}
+
+static bool rich_format_tag_matches(const EditingIntent* intent,
+                                    uintptr_t tag) {
+    if (!intent || !tag) return false;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_BOLD:
+            return tag == HTM_TAG_B || tag == HTM_TAG_STRONG;
+        case INPUT_INTENT_FORMAT_ITALIC:
+            return tag == HTM_TAG_I || tag == HTM_TAG_EM;
+        case INPUT_INTENT_FORMAT_UNDERLINE:
+            return tag == HTM_TAG_U;
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+            return tag == HTM_TAG_S || tag == HTM_TAG_STRIKE;
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+            return tag == HTM_TAG_SUB;
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+            return tag == HTM_TAG_SUP;
+        default:
+            return false;
+    }
+}
+
+static bool rich_format_range_selects_all_children(DomRange* range,
+                                                   DomElement* wrapper) {
+    if (!range || !wrapper) return false;
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    return range->start.node == wrapper_node &&
+        range->start.offset == 0 &&
+        range->end.node == wrapper_node &&
+        range->end.offset == dom_node_boundary_length(wrapper_node);
+}
+
+static bool rich_format_range_selects_only_text_child(DomRange* range,
+                                                      DomElement* wrapper,
+                                                      DomText** out_text) {
+    if (out_text) *out_text = nullptr;
+    if (!range || !wrapper || !wrapper->first_child ||
+        wrapper->first_child->next_sibling ||
+        !wrapper->first_child->is_text()) {
+        return false;
+    }
+    DomText* text = lam::dom_require_text(wrapper->first_child);
+    if (!text || range->start.node != static_cast<DomNode*>(text) ||
+        range->end.node != static_cast<DomNode*>(text) ||
+        range->start.offset != 0 ||
+        range->end.offset != dom_text_utf16_length(text)) {
+        return false;
+    }
+    if (out_text) *out_text = text;
+    return true;
+}
+
+static DomElement* rich_format_toggle_wrapper_for_range(
+        DomRange* range,
+        const EditingIntent* intent) {
+    if (!range || !intent || !range->start.node || !range->end.node) {
+        return nullptr;
+    }
+    if (range->start.node == range->end.node &&
+        range->start.node->is_element()) {
+        DomElement* elem = lam::dom_require_element(range->start.node);
+        if (elem && rich_format_tag_matches(intent, elem->tag()) &&
+            rich_format_range_selects_all_children(range, elem)) {
+            return elem;
+        }
+    }
+
+    if (!range->start.node->is_text() ||
+        range->start.node != range->end.node ||
+        !range->start.node->parent ||
+        !range->start.node->parent->is_element()) {
+        return nullptr;
+    }
+    DomElement* parent = lam::dom_require_element(range->start.node->parent);
+    if (!parent || !rich_format_tag_matches(intent, parent->tag())) {
+        return nullptr;
+    }
+    DomText* text = nullptr;
+    return rich_format_range_selects_only_text_child(range, parent, &text)
+        ? parent
+        : nullptr;
+}
+
+static bool rich_format_unwrap_element(DocState* state,
+                                       const EditingSurface* surface,
+                                       const EditingIntent* intent,
+                                       DomElement* wrapper,
+                                       EditingRichMutationLogFn log_mutation,
+                                       void* log_user) {
+    if (!state || !surface || !intent || !wrapper ||
+        !wrapper->parent || !wrapper->parent->is_element()) {
+        return false;
+    }
+
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    DomNode* parent_node = wrapper_node->parent;
+    uint32_t wrapper_idx = dom_node_child_index(wrapper_node);
+    if (wrapper_idx == (uint32_t)-1) return false;
+
+    DomNode* first_moved = nullptr;
+    DomNode* last_moved = nullptr;
+    uint32_t moved_count = 0;
+    DomNode* child = wrapper->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!wrapper_node->remove_child(child)) return false;
+        if (!parent_node->insert_before(child, wrapper_node)) return false;
+        dom_mutation_post_insert(state, parent_node, child);
+        if (!first_moved) first_moved = child;
+        last_moved = child;
+        moved_count++;
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, wrapper_node);
+    if (!parent_node->remove_child(wrapper_node)) return false;
+
+    const char* exc = nullptr;
+    DomBoundary start = { parent_node, wrapper_idx };
+    DomBoundary end = { parent_node, wrapper_idx + moved_count };
+    if (first_moved && first_moved == last_moved && first_moved->is_text()) {
+        DomText* text = lam::dom_require_text(first_moved);
+        start = { first_moved, 0 };
+        end = { first_moved, dom_text_utf16_length(text) };
+    }
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_format: unwrap selection restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "format-toggle",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_format: unwrapped <%s>", wrapper->node_name());
+    return true;
 }
 
 bool editing_rich_default_format(DocState* state,
@@ -766,6 +912,14 @@ bool editing_rich_default_format(DocState* state,
     DomRange* range = state->dom_selection->ranges[0];
     if (dom_range_collapsed(range)) {
         return false;
+    }
+
+    DomElement* toggle_wrapper =
+        rich_format_toggle_wrapper_for_range(range, intent);
+    if (toggle_wrapper) {
+        return rich_format_unwrap_element(state, surface, intent,
+                                          toggle_wrapper, log_mutation,
+                                          log_user);
     }
 
     DomElement* wrapper = dom_element_create(surface->owner->doc,
@@ -799,6 +953,344 @@ bool editing_rich_default_format(DocState* state,
                      0, 0, start.offset, end.offset, log_user);
     }
     log_debug("editing_rich_default_format: wrapped selection in <%s>", tag_name);
+    return true;
+}
+
+static bool rich_format_block_supported_tag(const char* tag_name) {
+    if (!tag_name || !tag_name[0]) return false;
+    return strcasecmp(tag_name, "p") == 0 ||
+        strcasecmp(tag_name, "div") == 0 ||
+        strcasecmp(tag_name, "h1") == 0 ||
+        strcasecmp(tag_name, "h2") == 0 ||
+        strcasecmp(tag_name, "h3") == 0 ||
+        strcasecmp(tag_name, "h4") == 0 ||
+        strcasecmp(tag_name, "h5") == 0 ||
+        strcasecmp(tag_name, "h6") == 0 ||
+        strcasecmp(tag_name, "blockquote") == 0 ||
+        strcasecmp(tag_name, "pre") == 0;
+}
+
+static const char* rich_format_block_normalize_tag(DomDocument* doc,
+                                                   const char* value) {
+    if (!doc || !value) return nullptr;
+    while (*value == ' ' || *value == '\t' ||
+           *value == '\n' || *value == '\r') {
+        value++;
+    }
+    if (*value == '<') value++;
+
+    char tag_buf[16];
+    uint32_t len = 0;
+    while (value[len] && value[len] != '>' &&
+           value[len] != ' ' && value[len] != '\t' &&
+           value[len] != '\n' && value[len] != '\r' &&
+           len + 1 < sizeof(tag_buf)) {
+        char c = value[len];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        tag_buf[len] = c;
+        len++;
+    }
+    tag_buf[len] = '\0';
+    if (!rich_format_block_supported_tag(tag_buf)) return nullptr;
+
+    lam::PoolPtr<char> tag_copy = lam::promote_to_arena(doc->arena, tag_buf);
+    return tag_copy ? tag_copy.get() : nullptr;
+}
+
+static bool rich_format_block_tag(uintptr_t tag) {
+    return tag == HTM_TAG_P ||
+        tag == HTM_TAG_DIV ||
+        tag == HTM_TAG_H1 ||
+        tag == HTM_TAG_H2 ||
+        tag == HTM_TAG_H3 ||
+        tag == HTM_TAG_H4 ||
+        tag == HTM_TAG_H5 ||
+        tag == HTM_TAG_H6 ||
+        tag == HTM_TAG_BLOCKQUOTE ||
+        tag == HTM_TAG_PRE;
+}
+
+static bool rich_node_contains(DomNode* ancestor, DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == ancestor) return true;
+    }
+    return false;
+}
+
+static DomElement* rich_format_block_target(const EditingSurface* surface,
+                                            DomRange* range) {
+    if (!surface || !surface->owner || !range) return nullptr;
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    DomBoundary boundary = range->end.node ? range->end : range->start;
+    DomNode* node = boundary.node;
+    if (!node) return nullptr;
+
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(cur);
+        if (elem && rich_format_block_tag(elem->tag())) {
+            return elem;
+        }
+    }
+    return nullptr;
+}
+
+bool editing_rich_default_format_block(DocState* state,
+                                       const EditingSurface* surface,
+                                       const EditingIntent* intent,
+                                       EditingRichMutationLogFn log_mutation,
+                                       void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+
+    const char* tag_name =
+        rich_format_block_normalize_tag(surface->owner->doc, intent->data);
+    if (!tag_name) {
+        log_debug("editing_rich_default_format_block: unsupported tag value %s",
+                  intent->data ? intent->data : "?");
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* old_block = rich_format_block_target(surface, range);
+    if (!old_block || !old_block->parent || !old_block->parent->is_element()) {
+        log_debug("editing_rich_default_format_block: no single block target");
+        return false;
+    }
+    if (strcasecmp(old_block->node_name(), tag_name) == 0) {
+        return true;
+    }
+
+    DomElement* new_block = dom_element_create(surface->owner->doc,
+                                               tag_name, nullptr);
+    if (!new_block) {
+        log_debug("editing_rich_default_format_block: failed to create <%s>",
+                  tag_name);
+        return false;
+    }
+
+    DomNode* old_node = static_cast<DomNode*>(old_block);
+    DomNode* new_node = static_cast<DomNode*>(new_block);
+    DomNode* parent_node = old_node->parent;
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    bool start_in_old = rich_node_contains(old_node, restore_start.node);
+    bool end_in_old = rich_node_contains(old_node, restore_end.node);
+
+    if (!parent_node->insert_before(new_node, old_node)) return false;
+    dom_mutation_post_insert(state, parent_node, new_node);
+
+    DomNode* child = old_block->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!old_node->remove_child(child)) return false;
+        if (!new_node->append_child(child)) return false;
+        dom_mutation_post_insert(state, new_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, old_node);
+    if (!parent_node->remove_child(old_node)) return false;
+
+    if (restore_start.node == old_node) restore_start.node = new_node;
+    if (restore_end.node == old_node) restore_end.node = new_node;
+    if (!start_in_old) {
+        restore_start.node = new_node;
+        restore_start.offset = 0;
+    }
+    if (!end_in_old) {
+        restore_end.node = new_node;
+        restore_end.offset = dom_node_boundary_length(new_node);
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { new_node, 0 };
+        DomBoundary end = { new_node, dom_node_boundary_length(new_node) };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_format_block: selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "format-block",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_format_block: changed <%s> to <%s>",
+              old_block->node_name(), tag_name);
+    return true;
+}
+
+static const char* rich_justify_align_value(const EditingIntent* intent) {
+    if (!intent) return nullptr;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
+            return "left";
+        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
+            return "center";
+        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
+            return "right";
+        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
+            return "justify";
+        default:
+            return nullptr;
+    }
+}
+
+bool editing_rich_default_justify(DocState* state,
+                                  const EditingSurface* surface,
+                                  const EditingIntent* intent,
+                                  EditingRichMutationLogFn log_mutation,
+                                  void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner) {
+        return false;
+    }
+
+    const char* align_value = rich_justify_align_value(intent);
+    if (!align_value) return false;
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* block = rich_format_block_target(surface, range);
+    if (!block) {
+        log_debug("editing_rich_default_justify: no single block target");
+        return false;
+    }
+    if (!dom_element_set_attribute(block, "align", align_value)) {
+        log_debug("editing_rich_default_justify: failed to set align=%s on <%s>",
+                  align_value, block->node_name());
+        return false;
+    }
+
+    const char* exc = nullptr;
+    DomBoundary start = range->start;
+    DomBoundary end = range->end;
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_justify: selection restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "justify",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_justify: set <%s> align=%s",
+              block->node_name(), align_value);
+    return true;
+}
+
+static const char* rich_list_tag_name(const EditingIntent* intent) {
+    if (!intent) return nullptr;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_ORDERED_LIST:
+            return "ol";
+        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
+            return "ul";
+        default:
+            return nullptr;
+    }
+}
+
+bool editing_rich_default_list(DocState* state,
+                               const EditingSurface* surface,
+                               const EditingIntent* intent,
+                               EditingRichMutationLogFn log_mutation,
+                               void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+
+    const char* list_tag = rich_list_tag_name(intent);
+    if (!list_tag) return false;
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* old_block = rich_format_block_target(surface, range);
+    if (!old_block || !old_block->parent || !old_block->parent->is_element()) {
+        log_debug("editing_rich_default_list: no single block target");
+        return false;
+    }
+
+    DomElement* list = dom_element_create(surface->owner->doc, list_tag, nullptr);
+    DomElement* item = dom_element_create(surface->owner->doc, "li", nullptr);
+    if (!list || !item) {
+        log_debug("editing_rich_default_list: failed to create <%s><li>",
+                  list_tag);
+        return false;
+    }
+
+    DomNode* old_node = static_cast<DomNode*>(old_block);
+    DomNode* list_node = static_cast<DomNode*>(list);
+    DomNode* item_node = static_cast<DomNode*>(item);
+    DomNode* parent_node = old_node->parent;
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    bool start_in_old = rich_node_contains(old_node, restore_start.node);
+    bool end_in_old = rich_node_contains(old_node, restore_end.node);
+
+    if (!list_node->append_child(item_node)) return false;
+    if (!parent_node->insert_before(list_node, old_node)) return false;
+    dom_mutation_post_insert(state, parent_node, list_node);
+
+    DomNode* child = old_block->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!old_node->remove_child(child)) return false;
+        if (!item_node->append_child(child)) return false;
+        dom_mutation_post_insert(state, item_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, old_node);
+    if (!parent_node->remove_child(old_node)) return false;
+
+    if (restore_start.node == old_node) restore_start.node = item_node;
+    if (restore_end.node == old_node) restore_end.node = item_node;
+    if (!start_in_old) {
+        restore_start.node = item_node;
+        restore_start.offset = 0;
+    }
+    if (!end_in_old) {
+        restore_end.node = item_node;
+        restore_end.offset = dom_node_boundary_length(item_node);
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { item_node, 0 };
+        DomBoundary end = { item_node, dom_node_boundary_length(item_node) };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_list: selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "list",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_list: changed <%s> to <%s><li>",
+              old_block->node_name(), list_tag);
     return true;
 }
 

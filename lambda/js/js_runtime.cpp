@@ -2747,6 +2747,9 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     case LMD_TYPE_NULL:
         *(void**)field_ptr = NULL;
         break;
+    case LMD_TYPE_UNDEFINED:
+        *(void**)field_ptr = NULL;
+        break;
     default:
         // Unexpected type: skip to prevent slot corruption
         log_debug("js_set_shaped_slot: unhandled type %d at slot %d", (int)value_type, (int)slot);
