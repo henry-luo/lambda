@@ -472,6 +472,10 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
+    if (intent && intent->type == INPUT_INTENT_FORMAT_BLOCK) {
+        return editing_rich_default_format_block(state, surface, intent,
+                                                 nullptr, nullptr);
+    }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
     int fallback_offset = 0;
@@ -589,9 +593,15 @@ static bool js_dom_exec_command_is_inline_format(const char* cmd) {
         strcasecmp(cmd, "superscript") == 0;
 }
 
+static bool js_dom_exec_command_is_block_structure(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "formatBlock") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
-        js_dom_exec_command_is_inline_format(cmd);
+        js_dom_exec_command_is_inline_format(cmd) ||
+        js_dom_exec_command_is_block_structure(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -659,6 +669,11 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "superscript") == 0) {
         out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "formatBlock") == 0) {
+        out->type = INPUT_INTENT_FORMAT_BLOCK;
+        out->data = value ? value : "";
         return true;
     }
     return false;
@@ -808,6 +823,49 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
         if (cur == static_cast<DomNode*>(surface.owner)) break;
     }
     return false;
+}
+
+static bool js_dom_exec_command_block_tag(uintptr_t tag) {
+    return tag == HTM_TAG_P ||
+        tag == HTM_TAG_DIV ||
+        tag == HTM_TAG_H1 ||
+        tag == HTM_TAG_H2 ||
+        tag == HTM_TAG_H3 ||
+        tag == HTM_TAG_H4 ||
+        tag == HTM_TAG_H5 ||
+        tag == HTM_TAG_H6 ||
+        tag == HTM_TAG_BLOCKQUOTE ||
+        tag == HTM_TAG_PRE;
+}
+
+static const char* js_dom_exec_command_query_format_block_value(void) {
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return "";
+    }
+
+    DomBoundary boundary =
+        dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return "";
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return "";
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem && js_dom_exec_command_block_tag(elem->tag())) {
+            return elem->tag_name ? elem->tag_name : "";
+        }
+    }
+    return "";
 }
 
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
@@ -4193,6 +4251,11 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandValue") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (cmd && strcasecmp(cmd, "formatBlock") == 0) {
+            const char* value = js_dom_exec_command_query_format_block_value();
+            return (Item){.item = s2it(heap_create_name(value))};
+        }
         return (Item){.item = s2it(heap_create_name(""))};
     }
     // document.contains(node) — true iff node is document or a descendant.

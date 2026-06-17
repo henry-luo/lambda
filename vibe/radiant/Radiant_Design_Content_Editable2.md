@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off expanding.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -758,6 +758,41 @@ whole EC-2 tier complete.
 **Global gate note:** EC-2c's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-2 tier complete.
+
+**EC-3a — single-block `formatBlock`: LANDED (2026-06-17).**
+
+- Added `document.execCommand("formatBlock", false, value)` to the native EC
+  command surface. The command maps to a new consumer-issued
+  `INPUT_INTENT_FORMAT_BLOCK` intent and runs through the same
+  `editing_run_transaction(...)` envelope as EC-1/EC-2.
+- Added `editing_rich_default_format_block(...)` for the conservative first
+  block-structure mutation: when the selection focus is inside one supported
+  block, replace that block's tag while preserving its children and restoring
+  the selected text range. Supported values are `p`, `div`, `h1`-`h6`,
+  `blockquote`, and `pre`, accepting both bare names and angle-bracket input
+  such as `<blockquote>`.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include
+  `formatBlock`; `queryCommandValue("formatBlock")` returns the current
+  supported block tag at the focus boundary.
+- Scope remains intentionally narrow: no multi-block selection transform, no
+  implicit wrapping of bare text under the editing host, no list conversion,
+  no indent/outdent, no justify commands, and no undo history for block format
+  commands yet.
+
+**Current EC verification after EC-3a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `formatBlock` DOM regression | `p -> h1` and `div -> blockquote` both preserve text and update `queryCommandValue`; unsupported `span` returns false without mutation |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_format_block' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 203 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
 
 ---
 

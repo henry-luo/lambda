@@ -956,6 +956,181 @@ bool editing_rich_default_format(DocState* state,
     return true;
 }
 
+static bool rich_format_block_supported_tag(const char* tag_name) {
+    if (!tag_name || !tag_name[0]) return false;
+    return strcasecmp(tag_name, "p") == 0 ||
+        strcasecmp(tag_name, "div") == 0 ||
+        strcasecmp(tag_name, "h1") == 0 ||
+        strcasecmp(tag_name, "h2") == 0 ||
+        strcasecmp(tag_name, "h3") == 0 ||
+        strcasecmp(tag_name, "h4") == 0 ||
+        strcasecmp(tag_name, "h5") == 0 ||
+        strcasecmp(tag_name, "h6") == 0 ||
+        strcasecmp(tag_name, "blockquote") == 0 ||
+        strcasecmp(tag_name, "pre") == 0;
+}
+
+static const char* rich_format_block_normalize_tag(DomDocument* doc,
+                                                   const char* value) {
+    if (!doc || !value) return nullptr;
+    while (*value == ' ' || *value == '\t' ||
+           *value == '\n' || *value == '\r') {
+        value++;
+    }
+    if (*value == '<') value++;
+
+    char tag_buf[16];
+    uint32_t len = 0;
+    while (value[len] && value[len] != '>' &&
+           value[len] != ' ' && value[len] != '\t' &&
+           value[len] != '\n' && value[len] != '\r' &&
+           len + 1 < sizeof(tag_buf)) {
+        char c = value[len];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        tag_buf[len] = c;
+        len++;
+    }
+    tag_buf[len] = '\0';
+    if (!rich_format_block_supported_tag(tag_buf)) return nullptr;
+
+    lam::PoolPtr<char> tag_copy = lam::promote_to_arena(doc->arena, tag_buf);
+    return tag_copy ? tag_copy.get() : nullptr;
+}
+
+static bool rich_format_block_tag(uintptr_t tag) {
+    return tag == HTM_TAG_P ||
+        tag == HTM_TAG_DIV ||
+        tag == HTM_TAG_H1 ||
+        tag == HTM_TAG_H2 ||
+        tag == HTM_TAG_H3 ||
+        tag == HTM_TAG_H4 ||
+        tag == HTM_TAG_H5 ||
+        tag == HTM_TAG_H6 ||
+        tag == HTM_TAG_BLOCKQUOTE ||
+        tag == HTM_TAG_PRE;
+}
+
+static bool rich_node_contains(DomNode* ancestor, DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur == ancestor) return true;
+    }
+    return false;
+}
+
+static DomElement* rich_format_block_target(const EditingSurface* surface,
+                                            DomRange* range) {
+    if (!surface || !surface->owner || !range) return nullptr;
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    DomBoundary boundary = range->end.node ? range->end : range->start;
+    DomNode* node = boundary.node;
+    if (!node) return nullptr;
+
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(cur);
+        if (elem && rich_format_block_tag(elem->tag())) {
+            return elem;
+        }
+    }
+    return nullptr;
+}
+
+bool editing_rich_default_format_block(DocState* state,
+                                       const EditingSurface* surface,
+                                       const EditingIntent* intent,
+                                       EditingRichMutationLogFn log_mutation,
+                                       void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+
+    const char* tag_name =
+        rich_format_block_normalize_tag(surface->owner->doc, intent->data);
+    if (!tag_name) {
+        log_debug("editing_rich_default_format_block: unsupported tag value %s",
+                  intent->data ? intent->data : "?");
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* old_block = rich_format_block_target(surface, range);
+    if (!old_block || !old_block->parent || !old_block->parent->is_element()) {
+        log_debug("editing_rich_default_format_block: no single block target");
+        return false;
+    }
+    if (strcasecmp(old_block->node_name(), tag_name) == 0) {
+        return true;
+    }
+
+    DomElement* new_block = dom_element_create(surface->owner->doc,
+                                               tag_name, nullptr);
+    if (!new_block) {
+        log_debug("editing_rich_default_format_block: failed to create <%s>",
+                  tag_name);
+        return false;
+    }
+
+    DomNode* old_node = static_cast<DomNode*>(old_block);
+    DomNode* new_node = static_cast<DomNode*>(new_block);
+    DomNode* parent_node = old_node->parent;
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    bool start_in_old = rich_node_contains(old_node, restore_start.node);
+    bool end_in_old = rich_node_contains(old_node, restore_end.node);
+
+    if (!parent_node->insert_before(new_node, old_node)) return false;
+    dom_mutation_post_insert(state, parent_node, new_node);
+
+    DomNode* child = old_block->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!old_node->remove_child(child)) return false;
+        if (!new_node->append_child(child)) return false;
+        dom_mutation_post_insert(state, new_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, old_node);
+    if (!parent_node->remove_child(old_node)) return false;
+
+    if (restore_start.node == old_node) restore_start.node = new_node;
+    if (restore_end.node == old_node) restore_end.node = new_node;
+    if (!start_in_old) {
+        restore_start.node = new_node;
+        restore_start.offset = 0;
+    }
+    if (!end_in_old) {
+        restore_end.node = new_node;
+        restore_end.offset = dom_node_boundary_length(new_node);
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { new_node, 0 };
+        DomBoundary end = { new_node, dom_node_boundary_length(new_node) };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_format_block: selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "format-block",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_format_block: changed <%s> to <%s>",
+              old_block->node_name(), tag_name);
+    return true;
+}
+
 bool editing_rich_default_replace(DocState* state,
                                   const EditingIntent* intent,
                                   View* fallback_view,
