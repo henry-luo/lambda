@@ -829,6 +829,31 @@ Net gain from proposal landing    +176 cases (+19.0 percentage points)
 Upstream baseline                 206 / 206  (100%)  — held throughout
 ```
 
+### Superscript-structure rewrite — formula-driven derivation
+
+After the sub_only rewrite, a parallel push restructured `render_sup_only` to derive `vlist_height` from `sup_box.height_raw * font_scale` instead of hardcoded values per content classifier.
+
+**Workflow probe** ([sup-only-formula-derivation](.claude/projects/-Users-henryluo-Projects-Lambda/06e73d5b-133a-4d33-bf08-c01620a12298/subagents/workflows/wf_89dc3035-db9)): 15 representative sup cases (digits, single letters, descenders, compound, nested, tall bases) ran in parallel through MathLive's SSR bundle. Returned a uniform pattern:
+- `sup_top = -3.41` (constant for inline math; in_fraction_child branches keep prior tuning).
+- `vlist_height = -sup_top - 3 + ceil2(sup.h_raw * font_scale) = 0.41 + ceil2(sup.h_raw * font_scale)`.
+- `child_h = ceil2((sup.h_raw + sup.d_raw) * font_scale)` for descender atoms; `ceil2(sup.h_raw * font_scale)` otherwise.
+
+**Implementation** ([scripts.ls:579](lambda/package/math/atoms/scripts.ls:579) `render_sup_only`):
+- Added derived path with the above formulas. Returns `height_raw = 0.41 + sup.h_raw * font_scale` (pre-ceil) so the outer strut emits via CEIL@2 of (h_raw + d_raw) — closes the 0.01em drift in expressions where the sup pairs with a descender sibling (e.g., `x^n+y^n`).
+- Gated `use_derived` to skip tall_script / tall_base / fraction-child contexts which retain hardcoded values.
+- Legacy path returns `height_raw = null` so the outer strut falls back to fmt_em on the rounded value — preserves previous emission for tall_script cases like `x^{2-\frac{1}{2}}`.
+- Removed the `numeric_x_script` exclusion: italic-letter base + digit sup (e.g., `p^2`, `q^2`) now flows through derived path, fixing precision in compounds like `p^2 + q^2 = r^2`.
+
+**Result**: 604 → 614 (+10 corpus cases, zero baseline regressions).
+
+### Current total project state
+
+```
+Corpus pass rate                  614 / 921  (66.7%)
+Net gain from proposal landing    +186 cases (+20.2 percentage points)
+Upstream baseline                 206 / 206  (100%)  — held throughout
+```
+
 ### Remaining gaps in subscript rendering
 
 - **Compound sup-only** (`x^{a+b}`, `x^{a^b}`): sup_only currently uses hardcoded `vlist_height` per content-classifier. Compound and nested cases need formula `vlist_height = -top - 3 + child_h` where `child_h` reflects the SUP's full emitted extent. Patterns observed:

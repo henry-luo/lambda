@@ -577,22 +577,52 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
 // ============================================================
 
 fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font_scale) {
-    let tall_script = sup_box.height > 0.72
-    let tall_base = base_box.height > 0.72
     let in_fraction_child = context.fraction_child == true
     let compound_fraction_script = in_fraction_child and sup_box.width > 0.8
+    // Fraction-child contexts use their own (previously tuned) hardcoded
+    // values; non-fraction-child contexts use the metric-driven formula
+    // derived from MathLive's emission:
+    //   top = -3.41 (constant for inline math)
+    //   vlist_height = -top - 3 + ceil2(sup_h_raw * font_scale)
+    //                = 0.41 + ceil2(sup_h_raw * font_scale)
+    //   child_h     = ceil2((h_raw + d_raw) * font_scale) for descender,
+    //                 ceil2(h_raw * font_scale) otherwise
+    let sup_h_raw = if (sup_box.height_raw != null) sup_box.height_raw else sup_box.height
+    let sup_d_raw = if (sup_box.depth_raw != null) sup_box.depth_raw else sup_box.depth
+    let has_descender = sup_d_raw > 0.0
+    let sup_h_only = ceil_em2(sup_h_raw * font_scale)
+    let child_h = if (has_descender) ceil_em2((sup_h_raw + sup_d_raw) * font_scale)
+                  else sup_h_only
+    // Legacy values for fraction-child paths (preserved to avoid regression)
+    let tall_script = sup_box.height > 0.72
+    let tall_base = base_box.height > 0.72
     let numeric_x_script = is_mathit_x_box(base_box) and is_numeric_script_box(sup_box)
-    let script_height = script_inner_height(sup_box, tall_script, in_fraction_child)
-    let vlist_height = if (compound_fraction_script and context.cramped == true) 0.76
+    let legacy_vlist = if (compound_fraction_script and context.cramped == true) 0.76
         else if (in_fraction_child and context.cramped == true) 0.75
         else if (in_fraction_child) 0.82
         else if (tall_script) 1.16 else if (tall_base) 0.94
         else if (numeric_x_script) 0.87
         else 0.72
-    let top = if (in_fraction_child and context.cramped == true) -3.28
+    let legacy_top = if (in_fraction_child and context.cramped == true) -3.28
         else if (in_fraction_child) -3.36
         else 0.0 - (3.0 + if (tall_script) 0.48 else if (tall_base) 0.47 else 0.41)
-    let inner_style = "height:" ++ util.fmt_em(script_height) ++ ";display:inline-block;font-size: 70%"
+    let legacy_child_h = script_inner_height(sup_box, tall_script, in_fraction_child)
+    // Derived (metric-driven) values for non-fraction-child contexts.
+    // derived_vlist is the EMIT value (ceil2). derived_vlist_raw keeps the
+    // pre-ceil precision so the outer strut's CEIL@2 of (h_raw + d_raw)
+    // produces the right output for sibling descenders (e.g. y in x^n+y^n).
+    let derived_top = 0.0 - 3.41
+    let derived_vlist = 0.41 + sup_h_only
+    let derived_vlist_raw = 0.41 + sup_h_raw * font_scale
+    // Pick formula vs legacy: use derived formula for non-tall contexts.
+    // numeric_x_script (italic-letter base + digit sup like p^2) is INCLUDED
+    // in the derived path — formula produces the same emit value (0.87) but
+    // with proper raw precision (0.86111) for strut-emit consistency.
+    let use_derived = not in_fraction_child and not tall_script and not tall_base
+    let vlist_height = if (use_derived) derived_vlist else legacy_vlist
+    let top = if (use_derived) derived_top else legacy_top
+    let inner_h = if (use_derived) child_h else legacy_child_h
+    let inner_style = "height:" ++ util.fmt_em(inner_h) ++ ";display:inline-block;font-size: 70%"
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
     let el = <span class: css.VLIST_T;
         <span class: css.VLIST_R;
@@ -606,10 +636,18 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
             >
         >
     >
+    // Only set height_raw on the derived path. Legacy returns null to
+    // signal "no full-precision tracking" — outer strut falls back to
+    // fmt_em on the rounded value (preserves previous emission behavior
+    // for tall_script / tall_base / fraction-child cases).
+    let height_raw_out = if (use_derived) derived_vlist_raw else null
+    let depth_raw_out = if (use_derived) 0.0 else null
     {
         element: el,
         height: vlist_height,
         depth: 0.0,
+        height_raw: height_raw_out,
+        depth_raw: depth_raw_out,
         render_height: if (in_fraction_child) vlist_height else null,
         render_depth: if (in_fraction_child) 0.0 else null,
         render_total: if (in_fraction_child)
