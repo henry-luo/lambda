@@ -804,6 +804,41 @@ Net gain from proposal landing    +164 cases (+17.8 percentage points)
 Upstream baseline                 206 / 206  (100%)  — held throughout
 ```
 
+### Subscript-structure rewrite — substantial corpus unlock
+
+A subsequent push focused on the actual structural mismatch in subscripts: Lambda's `render_sub_only` emitted a simple `<span style="display:inline-block;vertical-align:Xem;font-size:70%">` wrapper around the subscript content, while MathLive emits the proper `lm_vlist-t lm_vlist-t2 > lm_vlist-r > lm_vlist > ...` structure for ALL subscripts (not just complex ones).
+
+**Changes in [scripts.ls](lambda/package/math/atoms/scripts.ls) `render_sub_only`**:
+- Rewrote the wrapper to emit MathLive's vlist structure: `lm_vlist-t2 > lm_vlist-r > lm_vlist > [span > pstrut + content] > lm_vlist-s > lm_vlist-r > lm_vlist (depth_holder)`.
+- `sub_shift` now uses `sub_box.height * font_scale` (script-style scaled) rather than the parent-scale height, matching MathLive's metric semantics. Previously Lambda over-estimated sub_shift for compound subs.
+- `child_h` (wrapper height) derives from `ceil2((sub.height_raw + sub.depth_raw) * font_scale)` for descender atoms, `ceil2(sub.height_raw * font_scale)` otherwise. Matches MathLive's per-content sizing.
+- `vlist_height` uses h-only portion (no descent) — the descent is accounted for separately by depth_holder.
+- `depth_holder` = `ceil2(sub_shift + sub.depth_raw * font_scale)` — extends below baseline to wrap descender content.
+- Compound subs (e.g., `_{i+1}`, `_{i,j}`) strip the inner `lm_base` wrapper to match MathLive's flat content layout.
+- Returns `height_raw`/`depth_raw` so the outer strut emits via the use_raw path.
+
+**Updated `script_pair`** to propagate `height_raw`/`depth_raw` from both base and script through max — enables strut precision for any subscripted expression.
+
+**Result**: 592 → 604 (+12 corpus cases). `a_x`, `a_y`, `a_n`, `a_{i+1}`, `a_{i,j}` and many similar patterns now pass cleanly.
+
+### Current total project state
+
+```
+Corpus pass rate                  604 / 921  (65.6%)
+Net gain from proposal landing    +176 cases (+19.0 percentage points)
+Upstream baseline                 206 / 206  (100%)  — held throughout
+```
+
+### Remaining gaps in subscript rendering
+
+- **Compound sup-only** (`x^{a+b}`, `x^{a^b}`): sup_only currently uses hardcoded `vlist_height` per content-classifier. Compound and nested cases need formula `vlist_height = -top - 3 + child_h` where `child_h` reflects the SUP's full emitted extent. Patterns observed:
+  - `x^2`: vlist=0.72 ✓
+  - `x^{a+b}`: vlist=0.9 (Lambda 0.72, 0.18 short) — child_h should be 0.49 not 0.31.
+  - `x^{a^b}`: vlist=1.07 — nested sup case, child_h depends on inner script's emitted height.
+- **Fraction-as-script** (`a_{\frac{x}{y}}`): the inner fraction at script style needs its own dispatch tuning (B1-B8 branches in fraction.ls).
+
+Estimated remaining work for full subscript/superscript parity: 20–40h.
+
 **Empirical observation from the port attempt**: The TeXBook Rule 15d formulas (`numerShift + numerBox.height`) give RESULTS that don't match MathLive's emitted box heights. For `\frac{a}{b}` Rule 15d predicts frac.height = 0.394 + 0.30 (scaled) = 0.694, but MathLive emits 0.94. The extra ~0.25em is presumably MathLive's math-axis shift applied during VBox layout, but the exact transformation isn't documented in the source we have access to. Without recovering that math, per-branch empirical tuning (looking at MathLive's actual output and adjusting Lambda's spec to match) remains the only proven path.
 
 **Remaining 15 / 27 branches** require empirical tuning. Most follow recognizable patterns:

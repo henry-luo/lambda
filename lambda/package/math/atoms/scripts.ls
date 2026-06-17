@@ -441,11 +441,19 @@ fn script_pair(base_box, script_box) {
         max(base_box.height, script_box.render_height) else null
     let render_d = if (script_box.render_depth != null)
         max(base_box.depth, script_box.render_depth) else null
+    // Propagate raw values when BOTH boxes expose them. Use the max for
+    // each (the outer extent visible to the strut wrapper).
+    let h_raw_pair = if (base_box.height_raw != null and script_box.height_raw != null)
+        max(base_box.height_raw, script_box.height_raw) else null
+    let d_raw_pair = if (base_box.depth_raw != null and script_box.depth_raw != null)
+        max(base_box.depth_raw, script_box.depth_raw) else null
     {
         element: box.hbox([base_box, script_box]).element,
         elements: [base_box.element, script_box.element],
         height: max(base_box.height, script_box.height),
         depth: max(base_box.depth, script_box.depth),
+        height_raw: h_raw_pair,
+        depth_raw: d_raw_pair,
         render_height: render_h,
         render_depth: render_d,
         render_total: script_box.render_total,
@@ -511,15 +519,52 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
 // ============================================================
 
 fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scale) {
-    let sub_shift = max(init_sub, max(met.at(met.sub1, si), sub_box.height - 0.8 * x_height))
-    let scale_str = util.fmt_pct(font_scale)
-    let style = "display:inline-block;vertical-align:" ++ util.fmt_em(0.0 - sub_shift) ++ ";font-size:" ++ scale_str
-    let inner = sub_box.element
-    let el = <span style: style; inner>
+    // MathLive's sub_shift uses the SCALED sub_box height (script-style),
+    // not the parent-scale height. Lambda's sub_box reports parent-scale
+    // dimensions, so we scale here before applying the formula.
+    let sub_h_for_shift = sub_box.height * font_scale
+    let sub_shift = max(init_sub, max(met.at(met.sub1, si), sub_h_for_shift - 0.8 * x_height))
+    // child_h is the WRAPPER height — includes descent so the wrapper
+    // accommodates descender content like y. CEIL@2 at script-style scale.
+    // vlist_height uses the H-ONLY portion (no descent) — the descent is
+    // accounted for separately by depth_holder.
+    let sub_h_src = if (sub_box.height_raw != null) sub_box.height_raw else sub_box.height
+    let sub_d_src = if (sub_box.depth_raw != null) sub_box.depth_raw else sub_box.depth
+    let has_descender = sub_d_src > 0.0
+    let child_h_raw = if (has_descender) (sub_h_src + sub_d_src) * font_scale
+                     else sub_h_src * font_scale
+    let child_h = ceil_em2(child_h_raw)
+    let vlist_h_only = ceil_em2(sub_h_src * font_scale)
+    let depth_holder_raw = sub_shift + sub_d_src * font_scale
+    let depth_holder = ceil_em2(depth_holder_raw)
+    let top = sub_shift - 3.0
+    let vlist_height = vlist_h_only - sub_shift
+    let inner_style = "height:" ++ util.fmt_em(child_h) ++ ";display:inline-block;font-size: " ++ util.fmt_pct(font_scale)
+    // For compound sub_boxes (groups via hbox), strip the lm_base wrapper
+    // so the inner span contains the atoms directly — matches MathLive.
+    let inner_elements = box.elements_of(sub_box)
+    let el = <span class: css.VLIST_T2;
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
+                <span style: "top:" ++ util.fmt_em(top) ++ ";margin-right:0.05em";
+                    <span class: css.PSTRUT, style: "height:3em">
+                    <span style: inner_style;
+                        for (e in inner_elements) e
+                    >
+                >
+            >
+            <span class: css.VLIST_S; "​">
+        >
+        <span class: css.VLIST_R;
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
+        >
+    >
     {
         element: el,
         height: 0.0,
-        depth: sub_shift + sub_box.depth * font_scale,
+        depth: depth_holder_raw,
+        height_raw: 0.0,
+        depth_raw: depth_holder_raw,
         width: sub_box.width * font_scale,
         type: "ord",
         italic: 0.0,
