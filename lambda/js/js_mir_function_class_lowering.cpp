@@ -1940,7 +1940,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // Use it2i (runtime type-checking unbox) instead of jm_emit_unbox_int
                 // because callers may pass FLOAT Items for INT-typed params (e.g. 36e5).
                 // it2i handles INT, INT64, FLOAT → int64_t conversion correctly.
-                MIR_reg_t unboxed = jm_call_1(mt, "it2i", MIR_T_I64,
+                MIR_reg_t unboxed = jm_call_1(mt, "js_profiled_it2i", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
                 ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             }

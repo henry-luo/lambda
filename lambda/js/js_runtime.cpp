@@ -23,6 +23,9 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" Item push_d(double dval);
+extern "C" double it2d(Item item);
+extern "C" int64_t it2i(Item item);
 // Tune8 §2.2: js_private_property_set now takes a strict flag (0 = sloppy,
 // 1 = strict with proxy-throw); js_private_property_set_strict removed.
 extern "C" Item js_private_property_set(Item object, Item key, Item value, int64_t strict);
@@ -36,6 +39,21 @@ extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int 
 extern "C" Item js_get_constructor(Item name_item);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
+
+extern "C" Item js_profiled_push_d(double dval) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_BOX_FLOAT);
+    return push_d(dval);
+}
+
+extern "C" double js_profiled_it2d(Item item) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_UNBOX_FLOAT);
+    return it2d(item);
+}
+
+extern "C" int64_t js_profiled_it2i(Item item) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_UNBOX_INT);
+    return it2i(item);
+}
 
 static ArrayList* g_js_array_runtime_item_buffers = NULL;
 
