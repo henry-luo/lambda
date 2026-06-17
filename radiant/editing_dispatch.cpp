@@ -77,6 +77,7 @@ static bool editing_history_intent_is_recordable(const EditingIntent* intent) {
         case INPUT_INTENT_FORMAT_HILITE_COLOR:
         case INPUT_INTENT_FORMAT_FONT_NAME:
         case INPUT_INTENT_FORMAT_FONT_SIZE:
+        case INPUT_INTENT_FORMAT_REMOVE:
         case INPUT_INTENT_FORMAT_BLOCK:
         case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:

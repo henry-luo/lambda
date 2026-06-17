@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup started with rich-host `selectAll` and conservative selected-wrapper `removeFormat`.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1096,6 +1096,43 @@ before declaring the whole EC-5 tier complete.
 **Global gate note:** EC-5c's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-5 tier complete.
+
+**EC-6a — rich-host selectAll / selected-wrapper removeFormat: LANDED (2026-06-17).**
+
+- Added native `execCommand("selectAll")` and
+  `execCommand("removeFormat")` support. `selectAll` reuses the existing
+  `INPUT_INTENT_SELECT_ALL` command-only intent; `removeFormat` maps to the
+  new command-only `INPUT_INTENT_FORMAT_REMOVE` intent with
+  `input_intent_type_name(...) == "formatRemove"`. Both are non-dispatchable
+  and non-recordable in the current command-only EC shape.
+- `editing_rich_default_select_all(...)` selects the active rich editing host
+  from child offset `0` to `dom_node_boundary_length(owner)` via
+  `state_store_set_selection(...)`, then lets the existing native transaction
+  path queue `selectionchange`.
+- `editing_rich_default_remove_format(...)` conservatively unwraps fully
+  selected inline cleanup/style wrappers using the existing cleanup inline tag
+  list and `rich_format_unwrap_element(...)`. It repeats the unwrap pass so a
+  selected nested wrapper such as `<b><i>bc</i></b>` can collapse back to
+  plain text.
+- Scope remains conservative: no collapsed typing state, no partial-range
+  split/strip, no arbitrary descendant sweeping inside a mixed range, no
+  inline style declaration editing in place, no legacy font/color
+  normalization, no undo/redo yet, and no clipboard cut/copy/paste changes.
+
+**Current EC verification after EC-6a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct selectAll/removeFormat DOM regression | `selectAll` reports supported/enabled/ok and selects the rich host boundary from child offset `0` to child count; selected nested wrappers and selected style wrappers unwrap to `abcd`; collapsed `removeFormat` returns false and leaves `a<b>bc</b>d` unchanged |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_select_all_remove_format' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 216 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-6a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run,
+and the remaining EC-6 cleanup/history/clipboard commands are not complete.
 
 ---
 

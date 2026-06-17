@@ -1044,6 +1044,111 @@ bool editing_rich_default_style(DocState* state,
     return true;
 }
 
+static DomElement* rich_remove_format_wrapper_for_range(
+        DomRange* range,
+        const EditingSurface* surface) {
+    if (!range || !range->start.node || !range->end.node) return nullptr;
+
+    if (range->start.node == range->end.node &&
+        range->start.node->is_element()) {
+        DomElement* elem = lam::dom_require_element(range->start.node);
+        if (elem && elem != surface->owner &&
+            rich_transaction_is_cleanup_inline_tag(elem->tag()) &&
+            !dom_element_has_attribute(elem, "contenteditable") &&
+            rich_format_range_selects_all_children(range, elem)) {
+            return elem;
+        }
+    }
+
+    if (!range->start.node->is_text() ||
+        range->start.node != range->end.node ||
+        !range->start.node->parent ||
+        !range->start.node->parent->is_element()) {
+        return nullptr;
+    }
+
+    DomElement* parent = lam::dom_require_element(range->start.node->parent);
+    if (!parent || parent == surface->owner ||
+        !rich_transaction_is_cleanup_inline_tag(parent->tag()) ||
+        dom_element_has_attribute(parent, "contenteditable")) {
+        return nullptr;
+    }
+
+    DomText* text = nullptr;
+    return rich_format_range_selects_only_text_child(range, parent, &text)
+        ? parent
+        : nullptr;
+}
+
+bool editing_rich_default_remove_format(DocState* state,
+                                        const EditingSurface* surface,
+                                        const EditingIntent* intent,
+                                        EditingRichMutationLogFn log_mutation,
+                                        void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0]) {
+        return false;
+    }
+    if (!editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc || intent->type != INPUT_INTENT_FORMAT_REMOVE) {
+        return false;
+    }
+    if (dom_range_collapsed(state->dom_selection->ranges[0])) {
+        return false;
+    }
+
+    bool unwrapped = false;
+    for (uint32_t pass = 0; pass < 64; pass++) {
+        DomRange* range = state->dom_selection->ranges[0];
+        DomElement* wrapper =
+            rich_remove_format_wrapper_for_range(range, surface);
+        if (!wrapper) break;
+        if (!rich_format_unwrap_element(state, surface, intent, wrapper,
+                                        log_mutation, log_user)) {
+            return false;
+        }
+        unwrapped = true;
+    }
+
+    if (unwrapped) {
+        log_debug("editing_rich_default_remove_format: unwrapped selected inline formatting");
+    }
+    return unwrapped;
+}
+
+bool editing_rich_default_select_all(DocState* state,
+                                     const EditingSurface* surface,
+                                     const EditingIntent* intent,
+                                     EditingRichMutationLogFn log_mutation,
+                                     void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        intent->type != INPUT_INTENT_SELECT_ALL) {
+        return false;
+    }
+    if (!editing_surface_is_rich(surface) || !surface->owner) {
+        return false;
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    DomBoundary start = { owner_node, 0 };
+    DomBoundary end = { owner_node, dom_node_boundary_length(owner_node) };
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_select_all: selection rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "selectAll",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_select_all: selected %u children",
+              end.offset);
+    return true;
+}
+
 static DomElement* rich_create_native_element(DomDocument* doc,
                                               const char* tag_name) {
     if (!doc || !doc->input || !tag_name) return nullptr;

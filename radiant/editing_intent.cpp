@@ -57,6 +57,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_HILITE_COLOR:          return "formatHiliteColor";
         case INPUT_INTENT_FORMAT_FONT_NAME:             return "formatFontName";
         case INPUT_INTENT_FORMAT_FONT_SIZE:             return "formatFontSize";
+        case INPUT_INTENT_FORMAT_REMOVE:                return "formatRemove";
         case INPUT_INTENT_FORMAT_BLOCK:                 return "formatBlock";
         case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:          return "formatJustifyLeft";
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:        return "formatJustifyCenter";
@@ -89,6 +90,7 @@ bool input_intent_is_dispatchable(InputIntentType type) {
         case INPUT_INTENT_FORMAT_HILITE_COLOR:
         case INPUT_INTENT_FORMAT_FONT_NAME:
         case INPUT_INTENT_FORMAT_FONT_SIZE:
+        case INPUT_INTENT_FORMAT_REMOVE:
         case INPUT_INTENT_FORMAT_BLOCK:
         case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:

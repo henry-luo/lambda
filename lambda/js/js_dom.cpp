@@ -480,6 +480,14 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_style(state, surface, intent,
                                           nullptr, nullptr);
     }
+    if (intent && intent->type == INPUT_INTENT_FORMAT_REMOVE) {
+        return editing_rich_default_remove_format(state, surface, intent,
+                                                  nullptr, nullptr);
+    }
+    if (intent && intent->type == INPUT_INTENT_SELECT_ALL) {
+        return editing_rich_default_select_all(state, surface, intent,
+                                               nullptr, nullptr);
+    }
     if (intent && (intent->type == INPUT_INTENT_INSERT_LINK ||
                    intent->type == INPUT_INTENT_FORMAT_UNLINK)) {
         return editing_rich_default_link(state, surface, intent,
@@ -658,12 +666,19 @@ static bool js_dom_exec_command_is_color_font(const char* cmd) {
         strcasecmp(cmd, "fontSize") == 0;
 }
 
+static bool js_dom_exec_command_is_cleanup_selection(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "removeFormat") == 0 ||
+        strcasecmp(cmd, "selectAll") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
         js_dom_exec_command_is_block_structure(cmd) ||
         js_dom_exec_command_is_link_object(cmd) ||
-        js_dom_exec_command_is_color_font(cmd);
+        js_dom_exec_command_is_color_font(cmd) ||
+        js_dom_exec_command_is_cleanup_selection(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -756,6 +771,14 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     if (strcasecmp(cmd, "fontSize") == 0) {
         out->type = INPUT_INTENT_FORMAT_FONT_SIZE;
         out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "removeFormat") == 0) {
+        out->type = INPUT_INTENT_FORMAT_REMOVE;
+        return true;
+    }
+    if (strcasecmp(cmd, "selectAll") == 0) {
+        out->type = INPUT_INTENT_SELECT_ALL;
         return true;
     }
     if (strcasecmp(cmd, "createLink") == 0) {
