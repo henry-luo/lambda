@@ -168,7 +168,9 @@ fn render_punct(node, context) {
 }
 
 fn operator_display_text(text) {
-    if (text == "-") "−" else text
+    if (text == "-") "−"
+    else if (text == "*") "∗"
+    else text
 }
 
 fn punct_display_text(text) {
@@ -2322,6 +2324,8 @@ fn box_with_type(bx, atom_type) => {
     element: bx.element,
     height: bx.height,
     depth: bx.depth,
+    height_raw: bx.height_raw,
+    depth_raw: bx.depth_raw,
     render_height: bx.render_height,
     render_depth: bx.render_depth,
     render_total: bx.render_total,

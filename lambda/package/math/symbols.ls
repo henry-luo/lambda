@@ -276,6 +276,8 @@ let font_class_map = {
     subseteq: "lm_cmr", supseteq: "lm_cmr",
     'in': "lm_cmr", ni: "lm_cmr", notin: "lm_cmr",
     odot: "lm_cmr", oplus: "lm_cmr", otimes: "lm_cmr",
+    ominus: "lm_cmr", oslash: "lm_cmr",
+    boxplus: "lm_cmr", boxminus: "lm_cmr", boxtimes: "lm_cmr", boxdot: "lm_cmr",
     // Arrows rendered upright in MathLive
     rightarrow: "lm_cmr", leftarrow: "lm_cmr",
     Rightarrow: "lm_cmr", Leftarrow: "lm_cmr",

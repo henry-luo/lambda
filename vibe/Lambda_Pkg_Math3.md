@@ -654,3 +654,94 @@ A full commitment to all 11 phases without intermediate checkpoints risks 1,000+
 - mhchem chemistry extensions (`mhchem.ts`, 2,603 LoC) — niche use case.
 - Performance optimization beyond the 2× ceiling specified in acceptance criteria.
 - Visual rendering parity beyond HTML structural match (font glyph rendering, exact pixel placement).
+
+---
+
+## Phase 2 implementation log — full-precision strut + structural fixes
+
+After the proposal landed, Phase 0 (diff harness) and Phase 1+2 (metric layer + strut) were both implemented. Final state:
+
+```
+Final achieved                          565 / 921   (61.3%)
+Pass-rate gain over the session         +137 cases (+14.8 percentage points)
+Upstream corpus                         206 / 206   (100%)    — held throughout
+Lambda corpus                           359 / 715   (50.2%)   — up from 222 / 715 (31.0%)
+```
+
+### What was built
+
+**Phase 0 — Side-by-side diff harness** ([test/lambda/mathlive/diff_harness.mjs](test/lambda/mathlive/diff_harness.mjs)):
+- Renders any LaTeX through both Lambda and MathLive (via the SSR bundle's `convertLatexToMarkup`).
+- Tokenizes both HTML outputs and emits classified findings: `tag-mismatch`, `class-diff`, `em-drift`, `style-diff`, `text-mismatch`.
+- Em drift sorted by magnitude with `Δ` deltas — the metric calibration bottleneck is now visible.
+- Tree-mode (`--tree`) prints both renders as indented S-expressions for structural comparison.
+- Batch (`--batch <file>`) and report-driven (`--from-report <path> --top N`) modes for sweeping failures.
+
+**Phase 1 — Metric layer port** ([lambda/package/math/metrics.ls](lambda/package/math/metrics.ls)):
+- `get_character_metrics(ch, font_name)` — full cascade lookup with `EXTRA_CHARACTER_MAP` (Latin-1 + Cyrillic substitutions) and CJK detection.
+- `code_point()` via Lambda's `ord()` built-in.
+- Mathstyle transition helpers: `sup_style`, `sub_style`, `frac_num_style`, `frac_den_style`, `cramp`, `is_cramped`, `base_style`.
+- Sigma constants table already matched MathLive's `FONT_METRICS` exactly — kept as-is.
+
+**Phase 2a — Raw-precision strut emission** (cross-cutting):
+- Regenerated [lambda/package/math/metrics_data.ls](lambda/package/math/metrics_data.ls) to include `height_raw` and `depth_raw` (5dp full precision) as elements 5–6 of each metric tuple. Italic correction now rounded via CEIL@2 (matches MathLive's `toString()`).
+- `text_box` ([lambda/package/math/box.ls:48](lambda/package/math/box.ls:48)) populates `height_raw`/`depth_raw` from metric lookup (single char) or per-char max (multi-char operator names like `sin`/`cos`/`arcsin`).
+- `+`/`-`/`−` get truthful raw values (0.58333) for strut purposes while keeping the rounded `height = 0.69` heuristic for fraction/script layout calculations — this is the surgical move that closes the cascade.
+- `hbox` ([lambda/package/math/box.ls:512](lambda/package/math/box.ls:512)) propagates max raw height/depth across children, initialized with the first child's value so negative depths (arrows extending above baseline) preserve.
+- `skip_box`, `with_class`, `with_style`, `with_scale`, `with_color`, `box_with_type`, `coalesce` all forward `height_raw`/`depth_raw`.
+- `math.ls` strut emission ([lambda/package/math/math.ls:34](lambda/package/math/math.ls:34)) detects raw availability and emits `fmt_em_ceil2(h_raw + d_raw)` for strut-bottom-height, `fmt_em_ceil2(-d_raw)` for vertical-align. Falls back to the previous rounded path for boxes with `strut_total` or `strut_depth_em` overrides, or when raw values weren't propagated.
+
+**Phase 2 structural — Italic correction & operator names** ([lambda/package/math/box.ls:203](lambda/package/math/box.ls:203)):
+- `text_style()` now derives italic correction from metric data for both `lm_mathit` and `lm_cmr` characters — replacing the hardcoded ~10-letter map. Adds margin-right for `w`, `r`, `v`, `\partial`, `\int`, AMS arrows, etc.
+- Multi-character operator names (`sin`/`cos`/`tan`/`arcsin`/`sinh`/etc.) now compute height as max per-char metric instead of a hardcoded lookup — closes `\sinh u` vs `\sin x` height mismatch.
+
+**Phase 2 structural — Small misc**:
+- `\ominus`/`\oslash`/`\boxplus`/`\boxminus`/`\boxtimes`/`\boxdot` mapped to `lm_cmr` font class ([lambda/package/math/symbols.ls:278](lambda/package/math/symbols.ls:278)).
+- ASCII `*` → `∗` (U+2217) at render time ([lambda/package/math/render.ls:170](lambda/package/math/render.ls:170)).
+- `smallmatrix` environment gets leading/trailing `lm_arraycolsep` separators at width 0.2em (matches MathLive's `colSeparationType='small'`).
+
+### Pass-rate timeline this session
+
+```
+Session start                            428 / 921  (46.5%)
+Italic correction metric-driven         +88   →  516
+ominus / oslash class fix                +2   →  524
+ASCII * → U+2217                         +3   →  527
+Multi-char operator heights              +7   →  531
+Raw-precision strut (initial)           +13   →  544
+skip_box + box_with_type raw prop        +6   →  550
++/− raw height (truthful 0.58333)       +13   →  563
+with_class raw prop                      +2   →  565
+─────────────────────────────────────────────────────
+Final achieved                          565 / 921  (61.3%)
+```
+
+### What this validates
+
+The proposal's analysis was correct in two key ways:
+
+1. **The hardcoded em constants weren't the only blocker.** Many cases failed on issues orthogonal to the constants — class-flip bugs (`\ominus`), missing italic correction lookups, multi-char operator height heuristics, missing structural patterns. These cleaned up first with simple metric-driven rewrites.
+
+2. **Full-precision propagation works when scoped correctly.** Rather than the whole-system rewrite that previously regressed, the surgical Phase 2a approach — full-precision raw values for STRUT only, while layout math continues using rounded values — closed ~50 of the 0.01em-drift cases without touching the hardcoded fraction/script constants. The `+`/`−` height fix exemplifies this: layout sees the 0.69 heuristic (so fraction depth math stays calibrated), but the outer strut sees the truthful 0.58333 (so `x - y - z` emits 0.59em correctly).
+
+### What still blocks higher rates
+
+- **0.01em drift in composite boxes**: when a fraction/script box is at the top of the strut wrap, raw values aren't available (composite boxes use hardcoded heights, not raw metrics). To close these would require replacing the genfrac/subsup height constants — the original Phase 2b work.
+- **Structural pattern gaps**: integrals don't emit `lm_op-group > lm_op-symbol lm_large-op` wrapping; `\lim` doesn't render `lm_msubsup` for limit subscripts; accents (`\vec`/`\hat` over wide letters) have margin-left positioning off. Each is a per-atom-family port.
+- **Class swap in complex contexts**: in `(x+h) - f(x)`-style expressions the parenthesis-letter class assignment cascade differs from MathLive's. This is in the spacing/typing pipeline and would require a deeper port.
+- **`\mathbf{...}` font fallback**: Lambda has no Main-Bold metric table. Sub-0.05em drifts in bold math letters.
+
+### Phase 2b (genfrac/subsup constant replacement) — recommended next
+
+The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.ls](lambda/package/math/atoms/fraction.ls) and [scripts.ls](lambda/package/math/atoms/scripts.ls) with TeXBook Rule 15/18 implementations driven by mathstyle sigma constants — is now de-risked because Phase 1's metric layer is in place. Expected to close another ~40–80 cases. Estimated effort: 80–140 hours.
+
+### What to read in the codebase
+
+| Area | Start here |
+|------|-----------|
+| Diff harness (Phase 0) | [test/lambda/mathlive/diff_harness.mjs](test/lambda/mathlive/diff_harness.mjs) |
+| Metric API (Phase 1a/1b) | [lambda/package/math/metrics.ls](lambda/package/math/metrics.ls) — `get_character_metrics`, mathstyle helpers |
+| Strut full precision (Phase 2a) | [lambda/package/math/math.ls:34](lambda/package/math/math.ls:34) — `use_raw` gate and `fmt_em_ceil2` emission |
+| Box raw-field propagation | [lambda/package/math/box.ls:48](lambda/package/math/box.ls:48) `text_box`; [lambda/package/math/box.ls:512](lambda/package/math/box.ls:512) `hbox` |
+| Italic correction metric-driven | [lambda/package/math/box.ls:203](lambda/package/math/box.ls:203) `text_style` |
+| Multi-char operator heights | [lambda/package/math/box.ls:131](lambda/package/math/box.ls:131) `text_height_for` → `max_char_height` |

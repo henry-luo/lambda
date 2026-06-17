@@ -35,17 +35,33 @@ pub fn render_math(ast, options) {
     let d = if (result_box.render_depth != null) result_box.render_depth else result_box.depth
     let raw_total = if (result_box.render_total != null) result_box.render_total else h + d
     let total = if (result_box.strut_total != null) result_box.strut_total else max(raw_total, h + d)
+    // Full-precision values: only used when the box's whole subtree exposed
+    // raw metrics (no fractions/scripts/composite layout boxes inside). The
+    // strut then emits CEIL@2 of the raw sum, matching MathLive's toString()
+    // emission rule and closing the 0.01em drift cluster. Skip the path when
+    // an explicit strut_total override is present (set by left/right
+    // delimiters and similar wrappers that compute their own strut height).
+    let h_raw = result_box.height_raw
+    let d_raw = result_box.depth_raw
+    let use_raw = h_raw != null and d_raw != null and
+                  result_box.strut_total == null and
+                  result_box.strut_depth_em == null
+    let h_em = if (use_raw) util.fmt_em_ceil2(h_raw) else util.fmt_em(h)
     let latex_el = if (d == 0.0) {
         <span class: css.LATEX;
-            <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
+            <span class: css.STRUT, style: "height:" ++ h_em>
             result_box.element
         >
     } else {
-        let total_em = if (result_box.strut_total != null)
+        let total_em = if (use_raw)
+            util.fmt_em_ceil2(h_raw + d_raw)
+        else if (result_box.strut_total != null)
             util.fmt_fixed(total, 2) ++ "em"
         else
             util.fmt_em(total)
-        let depth_em = if (result_box.strut_depth_em != null)
+        let depth_em = if (use_raw)
+            util.fmt_em_ceil2(0.0 - d_raw)
+        else if (result_box.strut_depth_em != null)
             result_box.strut_depth_em
         else if (abs(total - 1.21) < 0.001 and abs(d - 0.345) < 0.001)
             "-0.35em"
@@ -53,7 +69,7 @@ pub fn render_math(ast, options) {
             util.fmt_em(0.0 - d)
         let strut_bottom_style = "height:" ++ total_em ++ ";vertical-align:" ++ depth_em
         <span class: css.LATEX;
-            <span class: css.STRUT, style: "height:" ++ util.fmt_em(h)>
+            <span class: css.STRUT, style: "height:" ++ h_em>
             <span class: css.STRUT_BOTTOM, style: strut_bottom_style>
             result_box.element
         >

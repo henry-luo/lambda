@@ -80,14 +80,32 @@ function escapeCharForKey(ch) {
 //   - height (always positive): CEIL to 2 decimals
 //   - depth (positive = descender, below baseline): FLOOR to 2 decimals
 //   - depth (negative = above-baseline like →): CEIL of magnitude, negated
-//   - other (italic, skew, width): half-up to 2 decimals
+//   - italic: CEIL to 2 decimals (MathLive emits italic correction as
+//     margin-right via toString() which CEILs at 2 decimals)
+//   - skew, width: half-up to 2 decimals (consumed only for layout math,
+//     not for direct emission)
 function roundCeil2(x) { return Math.ceil(x * 100) / 100; }
 function roundHalfUp2(x) { return Math.round(x * 100) / 100; }
 function roundFloor2(x) { return Math.floor(x * 100) / 100; }
+// Depth rounding is asymmetric: for descenders (positive d) FLOOR pairs
+// well with the h+d CEIL@2 emission. For negative depths (glyphs extending
+// above baseline like arrows), we keep the CEIL-of-magnitude rule because
+// the `-d` vertical-align matters more visually than the h+d strut. A
+// future full-precision propagation would resolve both at the emit site.
 function roundDepth(d) {
   if (d >= 0) return roundFloor2(d);
   return -roundCeil2(-d);
 }
+function roundItalic(it) {
+  // Italic correction is emitted directly as margin-right via CEIL@2
+  return roundCeil2(it);
+}
+
+// Round to 5 decimals for storage as the "raw" full-precision value the
+// strut emission needs. 5 decimals preserves enough fidelity that CEIL@2
+// of any sum gives the same result as CEIL@2 of the floating-point sum,
+// while keeping the metrics_data file small.
+function round5(x) { return Math.round(x * 1e5) / 1e5; }
 
 function emitMap(name, entries) {
   const lines = [];
@@ -103,10 +121,14 @@ function emitMap(name, entries) {
     const [d, h, it, sk, w] = entries[cp];
     const rd = roundDepth(d);
     const rh = roundCeil2(h);
-    const rit = roundHalfUp2(it);
+    const rit = roundItalic(it);
     const rsk = roundHalfUp2(sk);
     const rw = roundHalfUp2(w);
-    out.push(`    '${escaped}': [${rd}, ${rh}, ${rit}, ${rsk}, ${rw}]`);
+    // Raw (un-rounded-to-2) height/depth for strut emission. Keep at 5
+    // decimals to match MathLive's font-metrics-data.ts precision.
+    const hRaw = round5(h);
+    const dRaw = round5(d);
+    out.push(`    '${escaped}': [${rd}, ${rh}, ${rit}, ${rsk}, ${rw}, ${hRaw}, ${dRaw}]`);
   }
   lines.push(out.join(',\n'));
   lines.push(`}`);
@@ -118,7 +140,13 @@ const header = `// math/metrics_data.ls — Per-character font metrics ported fr
 // test/lambda/mathlive/generate_metrics_data.mjs — do not edit by hand.
 //
 // Each entry is keyed by character (string) and has value
-// [depth, height, italic, skew, width] in em units.
+// [depth, height, italic, skew, width, height_raw, depth_raw] in em units.
+//   depth      — round-toward-baseline rounded to 2dp (used by layout math)
+//   height     — CEIL@2 (matches MathLive's emit-side rounding)
+//   italic     — CEIL@2 (margin-right emission)
+//   skew, width— half-up to 2dp (consumed by layout, not direct emission)
+//   height_raw — 5dp (used by strut emission: max(h_raw) → CEIL@2 at emit)
+//   depth_raw  — 5dp (used by strut emission: max(d_raw) → CEIL@2 at emit)
 
 `;
 
@@ -153,7 +181,10 @@ const content = header +
   'pub fn height_of(metrics) { if (metrics == null) null else metrics[1] }\n' +
   'pub fn italic_of(metrics) { if (metrics == null) null else metrics[2] }\n' +
   'pub fn skew_of(metrics)   { if (metrics == null) null else metrics[3] }\n' +
-  'pub fn width_of(metrics)  { if (metrics == null) null else metrics[4] }\n';
+  'pub fn width_of(metrics)  { if (metrics == null) null else metrics[4] }\n' +
+  '// Full-precision (5dp) values — for strut emission only.\n' +
+  'pub fn height_raw_of(metrics) { if (metrics == null) null else metrics[5] }\n' +
+  'pub fn depth_raw_of(metrics)  { if (metrics == null) null else metrics[6] }\n';
 
 fs.writeFileSync(OUT, content, 'utf8');
 const sizeKb = (content.length / 1024).toFixed(1);

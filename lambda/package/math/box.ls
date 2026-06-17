@@ -49,10 +49,73 @@ pub fn text_box(text, cls, box_type) => {
     element: text_element(text, cls),
     height: text_height_for(text, cls),
     depth: text_depth_for(text, cls),
+    height_raw: text_height_raw_for(text, cls),
+    depth_raw: text_depth_raw_for(text, cls),
     width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
     type: box_type,
     italic: 0.0,
     skew: 0.0
+}
+
+// Full-precision (5dp) height for strut emission. Looks up the metric
+// table for both single-char and multi-char text. For +/−/-/ı/ȷ we still
+// keep the rounded `height` at 0.69 to avoid cascading into fraction
+// constants, but we ALSO expose the truthful 0.58333 here so the outer
+// strut can emit the correct h+d sum.
+fn text_height_raw_for(text, cls) {
+    let normalized = if (text == "-") "−" else text
+    if (len(normalized) == 1) {
+        let font = font_from_class(cls)
+        let m = if (font != null) metrics_data.lookup(normalized, font) else null
+        if (m != null) metrics_data.height_raw_of(m) else null
+    }
+    else if (is_alpha_multi(normalized) and font_from_class(cls) != null)
+        max_char_height_raw(normalized, font_from_class(cls))
+    else null
+}
+
+fn text_depth_raw_for(text, cls) {
+    let normalized = if (text == "-") "−" else text
+    if (len(normalized) == 1) {
+        let font = font_from_class(cls)
+        let m = if (font != null) metrics_data.lookup(normalized, font) else null
+        if (m != null) metrics_data.depth_raw_of(m) else null
+    }
+    else if (is_alpha_multi(normalized) and font_from_class(cls) != null)
+        max_char_depth_raw(normalized, font_from_class(cls))
+    else null
+}
+
+fn max_char_height_raw(text, font) {
+    max_char_h_raw_loop(text, font, 0, 0.0, true)
+}
+
+fn max_char_h_raw_loop(text, font, i, acc, found_any) {
+    if (i >= len(text)) {
+        if (found_any) acc else null
+    } else {
+        let m = metrics_data.lookup(text[i], font)
+        let h = if (m != null) metrics_data.height_raw_of(m) else null
+        if (h == null) null
+        else if (h > acc) max_char_h_raw_loop(text, font, i + 1, h, true)
+        else max_char_h_raw_loop(text, font, i + 1, acc, true)
+    }
+}
+
+fn max_char_depth_raw(text, font) {
+    max_char_d_raw_loop(text, font, 0, 0.0, true)
+}
+
+fn max_char_d_raw_loop(text, font, i, acc, found_any) {
+    if (i >= len(text)) {
+        if (found_any) acc else null
+    } else {
+        let m = metrics_data.lookup(text[i], font)
+        let d = if (m != null) metrics_data.depth_raw_of(m) else null
+        if (d == null) null
+        else if (d > acc) max_char_d_raw_loop(text, font, i + 1, d, true)
+        else max_char_d_raw_loop(text, font, i + 1, acc, true)
+    }
 }
 
 // Look up metrics from MathLive's character metrics table when possible,
@@ -77,7 +140,42 @@ fn text_height_for(text, cls) {
         let m = if (font != null) metrics_data.lookup(text, font) else null
         let h = if (m != null) metrics_data.height_of(m) else null
         if (h != null and h > 0.0) h else text_height(text)
-    } else text_height(text)
+    } else if (is_alpha_multi(text) and font_from_class(cls) != null)
+        // Multi-char alpha (operator names like sin/cos/arcsin/sinh): take
+        // the max per-character height from the font metric table. Falls
+        // back to the heuristic if any char is unknown.
+        max_char_height(text, font_from_class(cls), text_height(text))
+    else text_height(text)
+}
+
+fn is_alpha_multi(text) {
+    if (len(text) > 1) is_alpha_chars(text, 0) else false
+}
+
+fn is_alpha_chars(text, i) {
+    if (i >= len(text)) true
+    else {
+        let ch = text[i]
+        let lo = (ch >= "a") and (ch <= "z")
+        let up = (ch >= "A") and (ch <= "Z")
+        if (lo or up) is_alpha_chars(text, i + 1) else false
+    }
+}
+
+fn max_char_height(text, font, fallback) {
+    max_char_height_loop(text, font, 0, 0.0, fallback)
+}
+
+fn max_char_height_loop(text, font, i, acc, fallback) {
+    if (i >= len(text)) acc
+    else {
+        let ch = text[i]
+        let m = metrics_data.lookup(ch, font)
+        let h = if (m != null) metrics_data.height_of(m) else null
+        if (h == null) fallback
+        else if (h > acc) max_char_height_loop(text, font, i + 1, h, fallback)
+        else max_char_height_loop(text, font, i + 1, acc, fallback)
+    }
 }
 
 fn text_depth_for(text, cls) {
@@ -103,15 +201,23 @@ fn text_element(text, cls) {
 }
 
 fn text_style(text, cls) {
-    if (cls == "lcGreek lm_mathit" and text == "α") "margin-right:0.01em"
-    else if (cls == css.MATHIT and text == "f") "margin-right:0.11em"
-    else if (cls == css.MATHIT and text == "g") "margin-right:0.04em"
-    else if (cls == css.MATHIT and text == "j") "margin-right:0.06em"
-    else if (cls == css.MATHIT and text == "q") "margin-right:0.04em"
-    else if (cls == css.MATHIT and text == "y") "margin-right:0.04em"
-    else if (cls == css.MATHIT and text == "k") "margin-right:0.04em"
-    else if (cls == css.MATHIT and text == "z") "margin-right:0.05em"
-    else if (cls == css.CMR and text == "_") "margin-right:0.03em"
+    // Derive italic correction (margin-right) from metrics_data for single
+    // characters. metrics_data stores italic values already rounded to
+    // CEIL@2, matching MathLive's toString() emission rule. Italic correction
+    // applies based on the SOURCE FONT — both mathit (cmmi) letters and a
+    // small set of cmr symbols (∂, ∫, V/W/Y, _, f/g/v/w/y) carry italic
+    // metadata. Greek letters that ship under the compound class go through
+    // the mathit table.
+    if (len(text) == 1 and (cls == css.MATHIT or cls == "lcGreek lm_mathit")) {
+        let m = metrics_data.lookup(text, "mathit")
+        let it = if (m != null) metrics_data.italic_of(m) else null
+        if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
+    }
+    else if (len(text) == 1 and cls == css.CMR) {
+        let m = metrics_data.lookup(text, "cmr")
+        let it = if (m != null) metrics_data.italic_of(m) else null
+        if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
+    }
     else null
 }
 
@@ -377,6 +483,8 @@ pub fn skip_box(width_em) => {
     element: <span style: "display:inline-block;width:" ++ util.fmt_em(width_em)>,
     height: 0.0,
     depth: 0.0,
+    height_raw: 0.0,
+    depth_raw: 0.0,
     width: width_em,
     type: "skip",
     italic: 0.0,
@@ -428,12 +536,28 @@ pub fn hbox(boxes) {
             else hbox_render_height_of(v, suppress_operator_height) +
                  hbox_render_depth_of(v, suppress_text_depth)))
     let strut_depth_em = first_strut_depth_em(valid, 0)
+    // Full-precision raw max: propagated for strut emission only. If ANY
+    // child lacks a raw value (e.g. composite boxes from fractions/scripts),
+    // we conservatively skip propagation and fall back to rounded values
+    // at strut time. Initialize with the first child's value so negative
+    // raw depths (arrows extending above baseline) propagate correctly.
+    let raw_max_h = if (len(valid) == 0) null
+        else (let h0 = valid[0].height_raw,
+              if (h0 == null) null else max_raw_h(valid, 1, h0))
+    let raw_max_d = if (len(valid) == 0) null
+        else (let bx0 = valid[0],
+              let d0 = if (suppress_text_depth and is_depthless_text_box(bx0)) 0.0
+                       else bx0.depth_raw,
+              if (d0 == null) null
+              else max_raw_d(valid, 1, d0, suppress_text_depth))
     {
         element: <span class: css.BASE;
             for (child in children) child
         >,
         height: max_height,
         depth: max_depth,
+        height_raw: raw_max_h,
+        depth_raw: raw_max_d,
         render_height: max_render_height,
         render_depth: max_render_depth,
         render_total: max_render_total,
@@ -447,6 +571,31 @@ pub fn hbox(boxes) {
         strut_depth_em: strut_depth_em,
         is_fraction: if (len(valid) == 1) valid[0].is_fraction else null,
         is_script_radical: has_script_radical(valid, 0)
+    }
+}
+
+// Maximum full-precision height across children. Returns null if any
+// child lacks a height_raw entry (so the strut emission falls back to
+// the rounded `height` field).
+fn max_raw_h(valid, i, acc) {
+    if (i >= len(valid)) acc
+    else {
+        let h = valid[i].height_raw
+        if (h == null) null
+        else if (h > acc) max_raw_h(valid, i + 1, h)
+        else max_raw_h(valid, i + 1, acc)
+    }
+}
+
+fn max_raw_d(valid, i, acc, suppress_text_depth) {
+    if (i >= len(valid)) acc
+    else {
+        let bx = valid[i]
+        let d = if (suppress_text_depth and is_depthless_text_box(bx)) 0.0
+                else bx.depth_raw
+        if (d == null) null
+        else if (d > acc) max_raw_d(valid, i + 1, d, suppress_text_depth)
+        else max_raw_d(valid, i + 1, acc, suppress_text_depth)
     }
 }
 
@@ -621,6 +770,8 @@ pub fn with_class(bx, cls) => {
     element: <span class: cls; bx.element>,
     height: bx.height,
     depth: bx.depth,
+    height_raw: bx.height_raw,
+    depth_raw: bx.depth_raw,
     render_height: bx.render_height,
     render_depth: bx.render_depth,
     render_total: bx.render_total,
@@ -639,6 +790,8 @@ pub fn with_style(bx, style_str) => {
     element: <span style: style_str; bx.element>,
     height: bx.height,
     depth: bx.depth,
+    height_raw: bx.height_raw,
+    depth_raw: bx.depth_raw,
     width: bx.width,
     type: bx.type,
     italic: bx.italic,
@@ -654,6 +807,8 @@ pub fn with_scale(bx, scale) {
             element: <span style: "font-size:" ++ pct; bx.element>,
             height: bx.height * scale,
             depth: bx.depth * scale,
+            height_raw: if (bx.height_raw != null) bx.height_raw * scale else null,
+            depth_raw: if (bx.depth_raw != null) bx.depth_raw * scale else null,
             width: bx.width * scale,
             type: bx.type,
             italic: bx.italic * scale,
@@ -672,6 +827,8 @@ pub fn with_color(bx, color) {
         >,
         height: bx.height,
         depth: bx.depth,
+        height_raw: bx.height_raw,
+        depth_raw: bx.depth_raw,
         render_height: bx.render_height,
         render_depth: bx.render_depth,
         render_total: bx.render_total,

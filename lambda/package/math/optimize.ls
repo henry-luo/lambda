@@ -75,6 +75,8 @@ pub fn coalesce(bx) {
         element: merge_children(bx.element),
         height: bx.height,
         depth: bx.depth,
+        height_raw: bx.height_raw,
+        depth_raw: bx.depth_raw,
         render_height: bx.render_height,
         render_depth: bx.render_depth,
         render_total: bx.render_total,

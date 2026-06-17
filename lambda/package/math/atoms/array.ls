@@ -235,11 +235,14 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
     else {
         let with_leading = if (col == 0 and env_name == "array")
             acc ++ [array_col_sep(0.5)]
+        else if (col == 0 and env_name == "smallmatrix")
+            acc ++ [array_col_sep(0.2)]
         else acc
         let col_el = build_column(row_boxes, col, get_align_char(aligns, col), metrics)
         let with_col = with_leading ++ [col_el]
+        let between_w = if (env_name == "smallmatrix") 0.39 else 1.0
         let with_sep = if (col < ncols - 1)
-            with_col ++ [array_col_sep(1.0)]
+            with_col ++ [array_col_sep(between_w)]
         else with_col
         build_table_children(row_boxes, ncols, aligns, metrics, env_name, col + 1, with_sep)
     }
@@ -248,6 +251,7 @@ fn build_table_children(row_boxes, ncols, aligns, metrics, env_name, col, acc) {
 fn add_trailing_array_sep(acc, env_name) {
     if (env_name == "array") acc ++ [array_col_sep(0.5)]
     else if (env_name == "cases" or env_name == "dcases") acc ++ [array_col_sep(1.0)]
+    else if (env_name == "smallmatrix") acc ++ [array_col_sep(0.2)]
     else acc
 }
 
