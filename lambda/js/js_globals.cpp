@@ -305,8 +305,8 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
     if (get_type_id(obj) == LMD_TYPE_ARRAY && !is_arguments_exotic && get_type_id(name) == LMD_TYPE_STRING) {
         String* ns = it2s(name);
         // J39-7: ES §9.4.2.1 step 3.f.iii — for an array index P >= length,
-        // if length is non-writable (__nw_length marker on companion map),
-        // throw TypeError. Index names are decimal digit strings.
+        // if length is non-writable, throw TypeError. Index names are decimal
+        // digit strings.
         if (ns && ns->len > 0 && ns->len <= 10 &&
             (ns->len == 1 || ns->chars[0] != '0')) {
             bool _is_idx = true;
@@ -317,13 +317,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                 _idx = _idx * 10 + (uint64_t)(_c - '0');
             }
             if (_is_idx && _idx <= 0xFFFFFFFEULL) {
-                bool _nw_len = false;
-                if (obj.array && obj.array->extra != 0) {
-                    Map* _pm = (Map*)(uintptr_t)obj.array->extra;
-                    bool _f = false;
-                    Item _v = js_map_get_fast_ext(_pm, "__nw_length", 11, &_f);
-                    if (_f && _v.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_v)) _nw_len = true;
-                }
+                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
                 if (_nw_len && obj.array && (uint64_t)obj.array->length <= _idx) {
                     Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
                     Item msg = (Item){.item = s2it(heap_create_name("Cannot add property: array length is non-writable"))};
@@ -365,16 +359,10 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
                     return obj;
                 }
                 // J39-7: ES §9.4.2.4 ArraySetLength step 16/17 — if existing
-                // length is non-writable (__nw_length marker on companion map),
-                // reject any value change. Writable→non-writable is allowed
+                // length is non-writable, reject any value change.
+                // Writable→non-writable is allowed
                 // (handled by step-7d below for the writable attribute).
-                bool _nw_len = false;
-                if (obj.array && obj.array->extra != 0) {
-                    Map* _pm = (Map*)(uintptr_t)obj.array->extra;
-                    bool _nw_found = false;
-                    Item _nwv = js_map_get_fast_ext(_pm, "__nw_length", 11, &_nw_found);
-                    if (_nw_found && _nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_nwv)) _nw_len = true;
-                }
+                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
                 if (_nw_len && (uint32_t)obj.array->length != u32) {
                     js_define_property_reject_false_type_error("Cannot redefine property: length");
                     return obj;
@@ -409,13 +397,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
             }
             Item wri_key = (Item){.item = s2it(heap_create_name("writable", 8))};
             if (it2b(js_in(wri_key, descriptor)) && js_is_truthy(js_property_get(descriptor, wri_key))) {
-                bool _nw_len = false;
-                if (obj.array && obj.array->extra != 0) {
-                    Map* _pm = (Map*)(uintptr_t)obj.array->extra;
-                    bool _nw_found = false;
-                    Item _nwv = js_map_get_fast_ext(_pm, "__nw_length", 11, &_nw_found);
-                    if (_nw_found && _nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(_nwv)) _nw_len = true;
-                }
+                bool _nw_len = !js_props_obj_query_writable(obj, "length", 6);
                 if (_nw_len) {
                     js_define_property_reject_false_type_error("Cannot redefine property: length writable");
                     return obj;
@@ -572,8 +554,7 @@ static Item ValidateAndApplyPropertyDescriptor(Item obj, Item name, Item descrip
         if (get_type_id(name_str_check) == LMD_TYPE_STRING) {
             String* ns_check = it2s(name_str_check);
             if (ns_check && ns_check->len > 0 && ns_check->len < 200) {
-                // Stage A3.3: shape-flag-first attribute query (falls back to
-                // legacy __nc_/__ne_/__nw_ marker probe).
+                // Stage A3.3: shape-flag-first attribute query.
                 bool is_non_configurable = has_existing_desc_for_define
                     ? !existing_desc_configurable
                     : !js_props_obj_query_configurable(
@@ -1026,29 +1007,6 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
 }
 
 static bool js_is_engine_internal_enumeration_key(const char* name, int name_len);
-
-static bool js_is_array_attr_fallback_name(const char* name, int name_len) {
-    if (!name || name_len <= 0) return false;
-    if (name_len == 6 && memcmp(name, "length", 6) == 0) return true;
-    if (name_len > 10) return false;
-    if (name_len > 1 && name[0] == '0') return false;
-    for (int i = 0; i < name_len; i++) {
-        if (name[i] < '0' || name[i] > '9') return false;
-    }
-    return true;
-}
-
-static bool js_is_legacy_array_attr_marker_key(const char* name, int name_len) {
-    if (!name || name_len <= 5) return false;
-    if (memcmp(name, "__nw_", 5) != 0 &&
-        memcmp(name, "__ne_", 5) != 0 &&
-        memcmp(name, "__nc_", 5) != 0) {
-        return false;
-    }
-    const char* suffix = name + 5;
-    int suffix_len = name_len - 5;
-    return js_is_array_attr_fallback_name(suffix, suffix_len);
-}
 
 static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
     if (!name || name_len < 2 || name[0] != '_' || name[1] != '_') return false;
@@ -7049,15 +7007,7 @@ extern "C" Item js_reflect_set(Item target, Item key, Item value, Item receiver)
                 js_throw_value(js_new_error_with_name(tn, msg));
                 return ItemNull;
             }
-            bool nw_len = false;
-            if (target.array && target.array->extra != 0) {
-                Map* pm = (Map*)(uintptr_t)target.array->extra;
-                bool found = false;
-                Item marker = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
-                if (found && marker.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(marker)) {
-                    nw_len = true;
-                }
-            }
+            bool nw_len = !js_props_obj_query_writable(target, "length", 6);
             if (nw_len && target.array && (uint32_t)target.array->length != u32_len) {
                 return (Item){.item = b2it(false)};
             }
@@ -7698,14 +7648,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                     return desc;
                 }
             }
-            // J39-7: honor __nw_length marker (set by defineProperty(arr, "length", {writable:false}))
-            bool writable = true;
-            if (obj.array && obj.array->extra != 0) {
-                Map* pm = (Map*)(uintptr_t)obj.array->extra;
-                bool nw_found = false;
-                Item nwv = js_map_get_fast_ext(pm, "__nw_length", 11, &nw_found);
-                if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) writable = false;
-            }
+            bool writable = js_props_obj_query_writable(obj, "length", 6);
             Item desc = js_new_object();
             js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(obj.array->length)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(writable)});
@@ -7749,6 +7692,31 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             if (idx >= 0 && idx < obj.array->length && idx < obj.array->capacity) {
                 // v25: deleted elements (holes) have no descriptor
                 if (obj.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
+                    if (obj.array->extra != 0) {
+                        Map* pm = (Map*)(uintptr_t)obj.array->extra;
+                        Item pm_item = (Item){.map = pm};
+                        JsPropertyDescriptor pd = {};
+                        if (js_get_own_property_descriptor(pm_item, name_str->chars,
+                                                            (int)name_str->len, &pd)) {
+                            Item desc = js_new_object();
+                            if (js_pd_is_accessor(&pd)) {
+                                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))},
+                                                (pd.flags & JS_PD_HAS_GET) ? pd.getter : make_js_undefined());
+                                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))},
+                                                (pd.flags & JS_PD_HAS_SET) ? pd.setter : make_js_undefined());
+                            } else {
+                                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))},
+                                                (pd.flags & JS_PD_HAS_VALUE) ? pd.value : make_js_undefined());
+                                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))},
+                                                (Item){.item = b2it((pd.flags & JS_PD_WRITABLE) != 0)});
+                            }
+                            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))},
+                                            (Item){.item = b2it((pd.flags & JS_PD_ENUMERABLE) != 0)});
+                            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))},
+                                            (Item){.item = b2it(js_pd_is_configurable(&pd))});
+                            return desc;
+                        }
+                    }
                     return make_js_undefined();
                 }
                 Item desc = js_new_object();
@@ -8062,8 +8030,9 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
 
 // =============================================================================
 // Array companion property map (stored in arr->extra)
-// Arrays don't have Map storage for arbitrary string keys, so attribute markers
-// (__nw_, __nc_, __ne_, __get_, __set_) are stored in a lazily-created companion Map.
+// Arrays don't have inline Map storage for arbitrary string keys. Descriptor-
+// special indices, `length` flags, accessors, and custom properties live in a
+// lazily-created companion Map with normal ShapeEntry metadata.
 // =============================================================================
 
 static Map* js_array_props_map(Array* arr) {
@@ -8074,21 +8043,17 @@ static Map* js_array_props_map(Array* arr) {
 static Map* js_array_ensure_props_map(Array* arr) {
     if (arr->extra == 0) {
         Item obj = js_new_object();
-        // Tag as companion map so the Phase 4 accessor-marker intercept skips
-        // it and lets legacy __get_N/__set_N keys land literally — the array
-        // index reader looks them up by literal key in the companion map.
+        // Tag as companion storage so array helpers can distinguish descriptor
+        // entries from ordinary objects.
         obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
         arr->extra = (int64_t)(uintptr_t)obj.map;
     }
     return (Map*)(uintptr_t)arr->extra;
 }
 
-// store a marker (__nw_, __nc_, __ne_, __get_, __set_) on an object
-// for arrays, routes to companion map instead of js_property_set
-//
-// Phase 2a: ShapeEntry::flags dual-write is now handled centrally by
-// `js_dual_write_marker_flags` invoked at the top of `js_property_set` —
-// no per-callsite mirroring needed here.
+// Legacy marker compatibility helper. P1-P3 no longer use this for accessor or
+// array attribute metadata; remaining callers still route array keys through
+// the companion map instead of public array element writes.
 extern "C" void js_defprop_set_marker(Item obj, Item key, Item value) {
     if (get_type_id(obj) == LMD_TYPE_ARRAY) {
         Map* m = js_array_ensure_props_map(obj.array);
@@ -8478,22 +8443,49 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         int len = object.array->length;
         // v26: use push approach to skip deleted sentinel elements
         Item result = js_array_new(0);
-        for (int i = 0; i < len; i++) {
-            if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%d", i);
-            js_array_push(result, (Item){.item = s2it(heap_create_name(buf))});
-        }
-        js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
-        // v25: also include custom properties from companion map
         Map* pm = js_array_props_map(object.array);
+        int dense_lim = len;
+        if ((int)object.array->capacity < dense_lim) dense_lim = (int)object.array->capacity;
+        for (int i = 0; i < dense_lim; i++) {
+            bool present = object.array->items[i].item != JS_DELETED_SENTINEL_VAL;
+            char buf[16];
+            int blen = snprintf(buf, sizeof(buf), "%d", i);
+            if (!present && pm) {
+                bool found = false;
+                Item val = js_map_get_fast_ext(pm, buf, blen, &found);
+                present = found && val.item != JS_DELETED_SENTINEL_VAL;
+            }
+            if (!present) continue;
+            js_array_push(result, (Item){.item = s2it(heap_create_name(buf, blen))});
+        }
         if (pm && pm->type) {
             TypeMap* pmt = (TypeMap*)pm->type;
             ShapeEntry* e = pmt->shape;
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (js_is_legacy_array_attr_marker_key(s, slen) ||
+                int64_t idx = js_parse_array_index(s, slen);
+                if (idx < dense_lim) { e = e->next; continue; }
+                if (idx >= 0) {
+                    Item val = _map_read_field(e, pm->data);
+                    if (val.item != JS_DELETED_SENTINEL_VAL) {
+                        Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
+                        js_array_push(result, key_item);
+                    }
+                }
+                e = e->next;
+            }
+        }
+        js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
+        // v25: also include custom properties from companion map
+        if (pm && pm->type) {
+            TypeMap* pmt = (TypeMap*)pm->type;
+            ShapeEntry* e = pmt->shape;
+            while (e) {
+                const char* s = e->name->str;
+                int slen = (int)e->name->length;
+                if (slen == 6 && memcmp(s, "length", 6) == 0) { e = e->next; continue; }
+                if (js_parse_array_index(s, slen) >= 0 ||
                     js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8964,7 +8956,7 @@ extern "C" Item js_object_keys(Item object) {
             // is registered for this index in the companion map (Object.defineProperty
             // on an array index installs the data slot as a hole and stores get/set in pm).
             if (object.array->items[i].item == JS_DELETED_SENTINEL_VAL) {
-                bool has_accessor = false;
+                bool has_companion_index = false;
                 if (pm) {
                     // AT-3: IS_ACCESSOR shape-flag probe under digit-string name
                     // (post-AT-1 the intercept routes accessor writes here).
@@ -8972,23 +8964,15 @@ extern "C" Item js_object_keys(Item object) {
                     int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", i);
                     Item pm_item = (Item){.map = pm};
                     ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-                    if (_se_idx && jspd_is_accessor(_se_idx)) {
-                        bool slot_found = false;
-                        Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
-                        has_accessor = slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL;
-                    }
+                    bool slot_found = false;
+                    Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
+                    has_companion_index = _se_idx && slot_found &&
+                        slot_val.item != JS_DELETED_SENTINEL_VAL;
                 }
-                if (!has_accessor) continue;
+                if (!has_companion_index) continue;
             }
             // v27: skip non-enumerable elements (defineProperty with enumerable: false)
             if (pm) {
-                char ne_buf[32];
-                snprintf(ne_buf, sizeof(ne_buf), "__ne_%d", i);
-                bool ne_found = false;
-                Item ne_val = js_map_get_fast_ext(pm, ne_buf, (int)strlen(ne_buf), &ne_found);
-                if (ne_found && js_is_truthy(ne_val)) continue;
-                // AT-1: accessor descriptors with enumerable=false store the bit
-                // directly on the digit-string shape entry (not as __ne_<idx> marker).
                 char idx_buf[32];
                 int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", i);
                 Item pm_item = (Item){.map = pm};
@@ -9009,7 +8993,9 @@ extern "C" Item js_object_keys(Item object) {
                 int slen = (int)e->name->length;
                 // skip engine markers only; user-visible names may also start
                 // with "__" and still must enumerate.
-                if (js_is_legacy_array_attr_marker_key(s, slen) ||
+                int64_t idx = js_parse_array_index(s, slen);
+                if ((slen == 6 && memcmp(s, "length", 6) == 0) ||
+                    (idx >= 0 && idx < dense_lim) ||
                     js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -11016,12 +11002,10 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
                         Item pm_item = (Item){.map = pm};
                         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
-                        if (_se_idx && jspd_is_accessor(_se_idx)) {
-                            bool slot_found = false;
-                            Item slot_val = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &slot_found);
-                            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
-                                return (Item){.item = b2it(true)};
-                            }
+                        bool slot_found = false;
+                        Item slot_val = js_map_get_fast_ext(pm, ks->chars, (int)ks->len, &slot_found);
+                        if (_se_idx && slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                            return (Item){.item = b2it(true)};
                         }
                         // AT-3: legacy __get_X/__set_X marker fallback retired
                         // (post-AT-1 IS_ACCESSOR shape probe above always succeeds).
@@ -13064,8 +13048,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     (Item){.item = s2it(heap_create_name(marker_key, strlen(marker_key)))},
                     (Item){.item = b2it(true)});
             }
-            // also clear any descriptor markers/accessors in companion map so the
-            // index is no longer treated as an own property after delete.
+            // Clear descriptor state in the companion map so the index is no
+            // longer treated as an own property after delete.
             if (arr->extra != 0) {
                 // Stage A1: ToPropertyKey — uniform stringification.
                 Item k_str = js_to_property_key(key);
@@ -13073,13 +13057,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     String* ks = it2s(k_str);
                     if (ks && ks->len > 0 && ks->len < 200) {
                         Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                        const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
-                        for (int pi = 0; pi < 3; pi++) {
-                            char mk[256];
-                            snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)ks->len, ks->chars);
-                            Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
-                            js_property_set(pm_item, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
-                        }
                         // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
                         // bare-key slot (which holds JsAccessorPair*) before
                         // tombstoning, so reads no longer dispatch to the
@@ -13089,6 +13066,10 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                         ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
                         if (_se && jspd_is_accessor(_se)) {
                             js_shape_entry_set_accessor(pm_item, ks->chars, (int)ks->len, /*is_accessor=*/false);
+                        }
+                        if (_se) {
+                            js_shape_entry_update_flags(pm_item, ks->chars, (int)ks->len, 0,
+                                (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
                         }
                         Item bare_k = (Item){.item = s2it(heap_create_name(ks->chars, ks->len))};
                         js_property_set(pm_item, bare_k, (Item){.item = JS_DELETED_SENTINEL_VAL});
@@ -13171,15 +13152,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             bool is_nc = false;
             if (fp == 0) {
                 is_nc = true;
-            } else if (fp == -1 &&
-                       obj.map && obj.map->map_kind == MAP_KIND_ARRAY_PROPS &&
-                       js_is_array_attr_fallback_name(str_key->chars, (int)str_key->len)) {
-                char nc_key[256];
-                snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str_key->len, str_key->chars);
-                bool nc_found = false;
-                Item nc_val = js_map_get_fast_ext(obj.map, nc_key, (int)strlen(nc_key), &nc_found);
-                if (nc_found && nc_val.item == JS_DELETED_SENTINEL_VAL) nc_found = false;
-                if (nc_found && js_is_truthy(nc_val)) is_nc = true;
             }
             if (is_nc) {
                 if (js_strict_mode) {
@@ -13197,29 +13169,20 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     // Mark property as deleted using sentinel value.
     // Object.keys, hasOwnProperty, in, and JSON.stringify skip sentinel entries.
     //
-    // v24: Clear __nw_/__nc_/__ne_ markers BEFORE setting sentinel.
+    // Clear descriptor shape flags before setting the sentinel.
     // js_property_set enforces non-writable checks, which would silently reject
     // the sentinel write for properties defined via Object.defineProperty with
-    // writable:false (the default). We clear markers to false first, then
+    // writable:false (the default). We clear the flags first, then
     // use js_property_set for the sentinel (which may trigger shape rebuild).
     //
-    // Phase 5 fix: route the marker clears through js_property_set so that
-    // js_dual_write_marker_flags clears the corresponding shape-entry attribute
-    // flag (NON_WRITABLE/NON_ENUMERABLE/NON_CONFIGURABLE) on the target property.
-    // fn_map_set bypasses dual-write, leaving stale flags that cause the
-    // subsequent sentinel write to be rejected by the non-writable fast path.
+    // The attr helpers route through the per-Map shape clone, so sibling Maps
+    // sharing an older TypeMap keep their descriptor flags untouched.
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
         if (str_key && str_key->len > 0 && str_key->len < 200) {
-            // Probe-then-clear pattern. Pre-A2-T5: probed marker map entry only.
-            // Post-A2-T5: `js_attr_set_*` may set the shape flag without writing
-            // a marker entry, so we must consult the shape flag too. The
-            // unified `js_props_query_*` helpers check shape-flag-first then
-            // marker-fallback, matching the reader semantics. If the property
-            // is currently non-writable / non-configurable / non-enumerable
-            // (from either source), clear via the A2.6 helper which now goes
-            // through the per-Map shape clone (and falls back to a marker
-            // write only if no shape entry exists).
+            // Probe-then-clear pattern. `js_props_query_*` is shape-first, so
+            // clear each non-default flag only when the current descriptor
+            // state requires it.
             int kl = (int)str_key->len;
             const char* kc = str_key->chars;
             ShapeEntry* _se = js_find_shape_entry(obj, kc, kl);
@@ -13232,13 +13195,6 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             // Clear non-enumerable
             if (!js_props_query_enumerable(obj.map, _se, kc, kl))
                 js_attr_set_enumerable(obj, kc, kl, /*enumerable=*/true);
-            // Clear getter/setter markers via js_property_set with the deleted sentinel.
-            // Using js_property_set ensures the slot type can be rebuilt (FUNC→INT) even
-            // when the original marker was a function — fn_map_set may reject that
-            // narrowing. Writing the sentinel (rather than `false_val`) lets all readers
-            // (js_has_own_property, js_in, accessor dispatch) treat the marker as absent
-            // via the existing JS_DELETED_SENTINEL_VAL probe. The `__get_/__set_` key
-            // prefix already bypasses accessor dispatch in js_property_set.
             // AT-3: legacy __get_<name>/__set_<name> sentinel write retired.
             // Post-AT-1 accessors are stored as IS_ACCESSOR shape entry under
             // the property name; the IS_ACCESSOR flag is cleared and the slot

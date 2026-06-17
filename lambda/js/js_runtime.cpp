@@ -5173,23 +5173,6 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     return true;
 }
 
-static inline bool js_runtime_array_attr_marker_name(Map* map, const char* name, int name_len) {
-    if (!map || map->map_kind != MAP_KIND_ARRAY_PROPS || !name || name_len <= 0) return false;
-    if (name_len == 6 && memcmp(name, "length", 6) == 0) return true;
-    int64_t index = -1;
-    return js_array_parse_index_name(name, name_len, &index);
-}
-
-static inline bool js_runtime_array_attr_marker_key(Map* map, const char* name, int name_len) {
-    if (!map || map->map_kind != MAP_KIND_ARRAY_PROPS || !name || name_len <= 5) return false;
-    if (memcmp(name, "__nw_", 5) != 0 &&
-        memcmp(name, "__ne_", 5) != 0 &&
-        memcmp(name, "__nc_", 5) != 0) {
-        return false;
-    }
-    return js_runtime_array_attr_marker_name(map, name + 5, name_len - 5);
-}
-
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_SET);
     // Fast path: result[i] = v where i is an existing own dense element of a
@@ -5217,16 +5200,6 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
     }
 
     TypeId type = get_type_id(object);
-    // Temporary array transition hook: only array companion-map marker writes
-    // may mirror into indexed/length attributes. On ordinary objects, a user
-    // key named "__nw_x" / "__ne_x" / "__nc_x" is now plain data.
-    if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
-        String* marker_key = it2s(key);
-        if (marker_key && js_runtime_array_attr_marker_key(object.map,
-                marker_key->chars, (int)marker_key->len)) {
-            js_dual_write_marker_flags(object, key, value);
-        }
-    }
 
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
@@ -5300,18 +5273,11 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if ((double)u32_len != new_len_num) {
                     return js_throw_range_error("Invalid array length");
                 }
-                // J39-7: honor __nw_length marker (defineProperty made length non-writable).
-                Array* arr_chk = object.array;
-                if (arr_chk && arr_chk->extra != 0) {
-                    Map* pm_chk = (Map*)(uintptr_t)arr_chk->extra;
-                    bool nw_found = false;
-                    Item nwv = js_map_get_fast_ext(pm_chk, "__nw_length", 11, &nw_found);
-                    if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) {
-                        if (js_strict_mode) {
-                            return js_throw_type_error("Cannot assign to read only property 'length' of array");
-                        }
-                        return value;
+                if (!js_props_obj_query_writable(object, "length", 6)) {
+                    if (js_strict_mode) {
+                        return js_throw_type_error("Cannot assign to read only property 'length' of array");
                     }
+                    return value;
                 }
                 int64_t new_len = (int64_t)u32_len;
                 Array* arr = object.array;
@@ -5429,10 +5395,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
                 Item pm_item = (Item){.map = props};
                 ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-                if (_se_idx && jspd_is_accessor(_se_idx)) {
-                    bool slot_found = false;
-                    Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
-                    if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(props, idx_buf, idx_len, &slot_found);
+                if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    if (_se_idx && jspd_is_accessor(_se_idx)) {
                         JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                         if (pair && pair->setter.item != ItemNull.item) {
                             Item args[1] = { value };
@@ -5444,20 +5410,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                                                        idx_buf, idx_len);
                         return value;
                     }
+                    if (_se_idx) {
+                        Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+                        js_property_set(pm_item, idx_key, value);
+                        return value;
+                    }
                 }
                 // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1
                 // intercept routes companion-map accessor writes through the
                 // IS_ACCESSOR shape path probed above).
-                // check non-writable for data property with accessor
-                char nw_buf[64];
-                snprintf(nw_buf, sizeof(nw_buf), "__nw_%d", idx);
-                bool nw_found = false;
-                Item nw_val = js_map_get_fast(props, nw_buf, (int)strlen(nw_buf), &nw_found);
-                // Tombstoned marker (cleared by delete) is treated as absent.
-                if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-                if (nw_found && js_is_truthy(nw_val)) {
-                    return value; // silently ignore assignment to non-writable
-                }
             }
         }
         // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
@@ -5677,29 +5638,15 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // causing reads to dereference the integer as a JsAccessorPair* and crash.
         if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len > 0 && str_key->len < 200 &&
-                !js_runtime_array_attr_marker_key(m, str_key->chars, (int)str_key->len)) {
+            if (str_key && str_key->len > 0 && str_key->len < 200) {
                 // Phase 2b fast path: consult ShapeEntry::flags first.
                 // 1 → entry exists & writable → allow write.
                 // 0 → entry exists & non-writable → throw immediately.
-                // -1 → no entry on this map; only array companion index/length
-                //      names still use the temporary legacy marker probe.
+                // -1 → no entry on this map; default writable.
                 int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
                 if (fp == 0) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
-                }
-                if (fp == -1 && js_runtime_array_attr_marker_name(m, str_key->chars, (int)str_key->len)) {
-                    char nw_key[256];
-                    snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
-                    bool nw_found = false;
-                    Item nw_val = js_map_get_fast(m, nw_key, (int)strlen(nw_key), &nw_found);
-                    // Tombstoned marker (cleared by delete) is treated as absent.
-                    if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-                    if (nw_found && js_is_truthy(nw_val)) {
-                        js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
-                        return value; // silently reject write to non-writable property
-                    }
                 }
                 // fp == 1 → fast skip, fall through to write
             }
@@ -6951,10 +6898,6 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
     if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || arguments.array->extra == 0) {
         return current_value;
     }
-    if (index >= 0 && index < arguments.array->length && index < arguments.array->capacity &&
-        arguments.array->items[index].item == JS_DELETED_SENTINEL_VAL) {
-        return current_value;
-    }
     Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
@@ -7194,6 +7137,8 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
 }
 
 // P10e: Fast array set with native int index
+static bool js_array_length_is_non_writable(Item arr);
+
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_ARRAY_SET_INT);
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
@@ -7218,6 +7163,12 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     bool ta_proto_no_op = false;
     bool ta_proto_bypass_accessor = js_array_ta_proto_numeric_set(array, index_key, &ta_proto_no_op);
     if (ta_proto_no_op) return value;
+    if (index >= arr->length && js_array_length_is_non_writable(array)) {
+        if (js_strict_mode) {
+            return js_throw_type_error("Cannot assign to read only property 'length' of array");
+        }
+        return value;
+    }
     // check companion map for accessor/non-writable markers — must check even when idx >= length
     if (arr->extra != 0 && index >= 0) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
@@ -7226,10 +7177,10 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
         Item pm_item = (Item){.map = pm};
         ShapeEntry* _se_idx = js_find_shape_entry(pm_item, idx_buf, idx_len);
-        if (_se_idx && jspd_is_accessor(_se_idx)) {
-            bool slot_found = false;
-            Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
-            if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+        bool slot_found = false;
+        Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
+        if (slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            if (_se_idx && jspd_is_accessor(_se_idx)) {
                 JsAccessorPair* pair = js_item_to_accessor_pair(slot_val);
                 if (pair && pair->setter.item != ItemNull.item) {
                     js_call_function(pair->setter, array, &value, 1);
@@ -7240,21 +7191,17 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
                                                idx_buf, idx_len);
                 return value;
             }
+            if (_se_idx) {
+                Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+                js_property_set(pm_item, str_key, value);
+                return value;
+            }
         }
         // AT-3: legacy __set_<idx> marker fallback retired (post-AT-1 the
         // intercept routes companion-map accessor writes through the
         // IS_ACCESSOR shape path above).
         if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
             return value;
-        }
-        // check non-writable
-        char nw_buf[32];
-        snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)index);
-        bool nw_found = false;
-        Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
-        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-        if (nw_found && js_is_truthy(nw_val)) {
-            return value; // silently fail for non-writable properties (sloppy mode)
         }
     }
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
@@ -7401,8 +7348,14 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     bool ta_proto_no_op = false;
     js_array_ta_proto_numeric_set(array, index, &ta_proto_no_op);
     if (ta_proto_no_op) return value;
+    if (idx >= arr->length && js_array_length_is_non_writable(array)) {
+        if (js_strict_mode) {
+            return js_throw_type_error("Cannot assign to read only property 'length' of array");
+        }
+        return value;
+    }
 
-    // v27: check __nw_ (non-writable) marker from companion map before writing
+    // Check companion-map descriptor state before writing.
     if (arr->extra != 0 && idx >= 0 && idx < arr->length) {
         Map* pm = (Map*)(uintptr_t)arr->extra;
         char idx_buf[32];
@@ -7412,14 +7365,13 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         if (!js_props_query_writable(pm, _se_idx, idx_buf, idx_len)) {
             return value;
         }
-        char nw_buf[32];
-        snprintf(nw_buf, sizeof(nw_buf), "__nw_%lld", (long long)idx);
-        bool nw_found = false;
-        Item nw_val = js_map_get_fast_ext(pm, nw_buf, (int)strlen(nw_buf), &nw_found);
-        // Tombstoned marker (cleared by delete) is treated as absent.
-        if (nw_found && nw_val.item == JS_DELETED_SENTINEL_VAL) nw_found = false;
-        if (nw_found && js_is_truthy(nw_val)) {
-            return value; // silently fail for non-writable properties (sloppy mode)
+        bool slot_found = false;
+        Item slot_val = js_map_get_fast_ext(pm, idx_buf, idx_len, &slot_found);
+        if (_se_idx && !jspd_is_accessor(_se_idx) &&
+            slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+            Item str_key = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+            js_property_set(pm_item, str_key, value);
+            return value;
         }
     }
 
@@ -8199,8 +8151,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             }
             return (Item){.item = ITEM_TRUE};
         }
-        // Check if the property exists and is enumerable
-        // v27: Handle arrays — check __ne_ marker from companion map
+        // Check if the property exists and is enumerable.
         if (get_type_id(property_object) == LMD_TYPE_ARRAY) {
             if (!it2b(js_has_own_property(property_object, arg0))) return (Item){.item = ITEM_FALSE};
             Item k;
@@ -8219,17 +8170,11 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 if (ks && ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)
                     return (Item){.item = ITEM_FALSE};
                 if (ks && property_object.array->extra != 0) {
-                    // Phase 2c fast path: consult ShapeEntry::flags first.
-                    int fp = js_prop_attrs_fast_path(property_object, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
-                    if (fp == 0) return (Item){.item = ITEM_FALSE};
-                    if (fp == -1) {
-                        Map* pm = (Map*)(uintptr_t)property_object.array->extra;
-                        char ne_buf[256];
-                        snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
-                        bool ne_found = false;
-                        Item ne_val = js_map_get_fast_ext(pm, ne_buf, (int)strlen(ne_buf), &ne_found);
-                        if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
-                    }
+                    ShapeEntry* se = js_find_shape_entry(property_object,
+                        ks->chars, (int)ks->len);
+                    Map* pm = (Map*)(uintptr_t)property_object.array->extra;
+                    if (!js_props_query_enumerable(pm, se, ks->chars, (int)ks->len))
+                        return (Item){.item = ITEM_FALSE};
                 }
             }
             return (Item){.item = ITEM_TRUE};
@@ -21892,7 +21837,8 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
                 char buf[24];
                 snprintf(buf, sizeof(buf), "%lld", (long long)index);
                 int blen = (int)strlen(buf);
-                ShapeEntry* _se = js_find_shape_entry(object, buf, blen);
+                Item pm_item = (Item){.map = props};
+                ShapeEntry* _se = js_find_shape_entry(pm_item, buf, blen);
                 bool is_configurable = js_props_query_configurable(props, _se, buf, blen);
                 bool is_writable     = js_props_query_writable(props, _se, buf, blen);
                 bool is_enumerable   = js_props_query_enumerable(props, _se, buf, blen);
@@ -21902,6 +21848,13 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
                 }
                 if (!is_writable)   js_attr_set_writable(object, buf, blen, /*writable=*/true);
                 if (!is_enumerable) js_attr_set_enumerable(object, buf, blen, /*enumerable=*/true);
+                bool slot_found = false;
+                Item slot_val = js_map_get_fast_ext(props, buf, blen, &slot_found);
+                if (_se && slot_found && slot_val.item != JS_DELETED_SENTINEL_VAL) {
+                    Item key = (Item){.item = s2it(heap_create_name(buf, blen))};
+                    js_property_set(pm_item, key, value);
+                    return;
+                }
             }
             arr->items[index] = value;
         }
@@ -22500,13 +22453,10 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
 }
 
 // J39-7: returns true if length is non-writable (frozen array or
-// defineProperty(arr, "length", {writable:false}) wrote __nw_length marker).
+// defineProperty(arr, "length", {writable:false}) set the length ShapeEntry flag).
 static bool js_array_length_is_non_writable(Item arr) {
-    if (get_type_id(arr) != LMD_TYPE_ARRAY || arr.array->extra == 0) return false;
-    Map* pm = (Map*)(uintptr_t)arr.array->extra;
-    bool found = false;
-    Item v = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
-    return found && v.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(v);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) return false;
+    return !js_props_obj_query_writable(arr, "length", 6);
 }
 
 static double js_array_to_integer_or_infinity(Item value) {
@@ -23779,7 +23729,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
 
     // J39-7: mutating Array.prototype methods on a frozen real Array must throw
     // TypeError per ES spec — Set(O, "length", ...) fails on frozen receiver.
-    // Same applies if length is explicitly non-writable (__nw_length marker).
+    // Same applies if length is explicitly non-writable.
     // Only ops that *unconditionally* Set length: push/pop/shift/unshift/splice.
     // sort/reverse/fill/copyWithin are no-ops on small/empty arrays so do NOT
     // throw eagerly here (spec only fails when an actual write occurs).
@@ -23795,14 +23745,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (it2b(js_object_is_frozen(arr))) {
                 return js_throw_type_error("Cannot modify frozen array");
             }
-            // Check __nw_length marker on companion map.
-            if (arr.array && arr.array->extra != 0) {
-                Map* pm = (Map*)(uintptr_t)arr.array->extra;
-                bool nw_found = false;
-                Item nwv = js_map_get_fast_ext(pm, "__nw_length", 11, &nw_found);
-                if (nw_found && nwv.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nwv)) {
-                    return js_throw_type_error("Cannot assign to read only property 'length' of array");
-                }
+            if (js_array_length_is_non_writable(arr)) {
+                return js_throw_type_error("Cannot assign to read only property 'length' of array");
             }
         }
     }
@@ -23911,7 +23855,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         // J39-7: spec-compliant push — Set(O, ToString(len+i), v) for each
         // item, then Set(O, "length", len+argc) with Throw=true. Walks
         // Array.prototype chain so inherited accessors fire (ES §23.1.3.21).
-        // Final length Set throws TypeError if frozen/__nw_length even in
+        // Final length Set throws TypeError if frozen/non-writable length even in
         // sloppy mode (Set with Throw=true).
         int64_t length = arr.array->length;
         int64_t new_len = length + (int64_t)argc;

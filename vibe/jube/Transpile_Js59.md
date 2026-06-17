@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: proposal with P1/P2 landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: proposal with P1/P2/P3 landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -14,17 +14,25 @@ Landed on 2026-06-17:
 - Object-literal getter/setter AST keys now keep the visible property name instead of synthesizing `__get_` / `__set_`.
 - MIR object/class accessor lowering routes bare keys through `js_install_user_accessor` and no longer strips accessor-marker prefixes.
 - `js_property_set` no longer intercepts `__get_` / `__set_` writes; those names are ordinary user properties.
-- Ordinary delete and array companion-map delete tombstone only the remaining attribute markers (`__nw_`, `__ne_`, `__nc_`).
+- At the P1 boundary, ordinary delete and array companion-map delete tombstoned only the then-remaining attribute markers (`__nw_`, `__ne_`, `__nc_`).
 - `Symbol.prototype.description` is installed through `js_install_native_accessor`, not the old `__get_description` marker.
 - `Object.getOwnPropertyNames` preserves the legacy broad hide for other `__*` metadata but explicitly allows user-visible `__get_` / `__set_` names. This keeps existing bundled-library behavior stable while removing accessor-marker dependence.
 - Added `test/js/props/metadata_accessor_storage.{js,txt}` and documented it in `test/js/props/README.md`.
 - P2 named attribute-marker fallback removal is implemented.
-- `js_attr_set_*` now mutates `ShapeEntry::flags` for named properties; legacy marker fallback remains only for array companion-map numeric index / `length` transition paths.
+- At the P2 boundary, `js_attr_set_*` mutated `ShapeEntry::flags` for named properties while array companion-map numeric index / `length` marker fallback remained P3-scoped.
 - `js_property_set` no longer runs `js_dual_write_marker_flags` for ordinary named objects, so user keys like `__nw_x`, `__ne_x`, and `__nc_x` store ordinary data.
 - Named descriptor synthesis, property-set writability checks, delete non-configurable checks, and ordinary delete no longer read named `__nw_` / `__ne_` / `__nc_` marker slots. Ordinary delete clears shape flags directly before writing the delete sentinel.
 - Built-in named marker writes for Error message/name/stack, class instance `constructor`, native accessor configurability, and `@@unscopables` were replaced with direct attr helpers after the target property exists.
-- `Object.keys` / `Object.getOwnPropertyNames` now allow user-visible `__nw_` / `__ne_` / `__nc_` names on ordinary objects. Array companion-map enumeration still hides only the remaining `__nw_length` / `__ne_5` / `__nc_5` transition metadata.
+- `Object.keys` / `Object.getOwnPropertyNames` now allow user-visible `__nw_` / `__ne_` / `__nc_` names on ordinary objects. The remaining array companion-map transition metadata was removed in P3.
 - Added `test/js/props/metadata_named_attr_flags.{js,txt}` and `test/js/props/metadata_user_attribute_keys.{js,txt}`.
+- P3 array index and length attribute-marker retirement is implemented.
+- `js_attr_set_*` now materializes array digit-string indices and `length` into companion-map shape entries before mutating `ShapeEntry::flags`; it no longer writes `__nw_` / `__ne_` / `__nc_` marker slots for those properties.
+- Descriptor-special array indices keep one authoritative value source: the companion-map slot owns data/accessor descriptors and the dense slot is tombstoned only after companion-map materialization succeeds. This preserves `Object.freeze` / `preventExtensions` cases where descriptor bookkeeping is internal even though public extension is closed.
+- Array `length` writability checks now read the `length` shape entry flags, and growth paths reject non-writable length through that shape-backed state.
+- Array descriptor synthesis, `Object.keys`, `Object.getOwnPropertyNames`, `propertyIsEnumerable`, `delete`, `hasOwnProperty`, and dense-hole lookups now consult companion-map digit entries instead of marker fallback slots.
+- Mapped arguments reads now consult promoted companion descriptor slots before falling back to mapped parameter storage, preserving Test262 `Object.defineProperty(arguments, "0", ...)` behavior after dense argument slots are tombstoned.
+- User keys that look like array metadata, such as `__nw_0` and `__nw_length`, are ordinary own properties.
+- Added `test/js/props/metadata_array_index_attrs.{js,txt}` and `test/js/props/metadata_array_length_attrs.{js,txt}`.
 
 Verified gates:
 
@@ -33,7 +41,9 @@ make build-test
 ./test/test_js_gtest.exe --gtest_filter='*metadata_accessor_storage*:*delete_then_define_accessor*:*delete_accessor_then_define_data*:*proto_accessor_redef_safe*:*super_property_set_finds_inherited_setter*' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata*' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*super_property_set_finds_inherited_setter' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*sparse*:JavaScriptTests/JsFileTest.Run/*property_descriptors*:JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/lib_immer:JavaScriptTests/JsFileTest.Run/v20_tagged_templates' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_brief=1
+./test/test_js_test262_gtest.exe --batch-only --run-async --batch-file=temp/js59_p3_regressions.txt --jobs=1 --batch-chunk-size=1 --async-chunk-size=1 --write-failures=temp/js59_p3_regressions_failures.tsv
 make test262-baseline
 ```
 
@@ -42,12 +52,14 @@ Results:
 - Focused JS gtest: 5/5 passed.
 - Focused metadata shard: 3/3 passed.
 - Focused delete/metadata/super shard: 8/8 passed.
-- Full JS gtest: 210/210 passed.
-- test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
+- Focused P3 metadata/sparse/descriptors/delete/freeze/tagged-template shard: 23/23 passed.
+- Targeted P3 Test262 regression rerun: 19/19 passed, failed 0.
+- Full JS gtest: 214/214 passed.
+- test262 baseline: first full P3 run fully passed 40261 / 40261, failed 0, regressions 0.
+- Final post-cleanup test262 baseline: fully passed 40260 / 40261; 1 retry-only non-fully-passing slow test (`built_ins_decodeURI_S15_1_3_1_A2_5_T1_js`); failed 0; regressions 0.
 
 Remaining work:
 
-- P3 still owns `__nw_` / `__ne_` / `__nc_` retirement for array index and array `length` attributes.
 - P4 still owns `__class_name__` retirement in favor of `TypeMap::js_class` and explicit prototype identity.
 - P5/P6 still own deleted-state cleanup and final documentation.
 
@@ -216,6 +228,15 @@ Acceptance:
 - `metadata_array_index_attrs`, `metadata_array_length_attrs`, `test/js/sparse_*`, and `property_descriptors` pass.
 - `make test262-baseline` keeps 0 regressions.
 - Dense-array timing can be smoke-checked with `./test/test_js_transpile_timing_gtest.exe --gtest_brief=1`; do not claim a formal perf delta unless a release-mode before/after baseline exists in `temp/js59_perf/`.
+
+Landed evidence:
+
+- `metadata_array_index_attrs` confirms descriptor-special indices store attributes in `ShapeEntry::flags`, preserve data values through companion-map reads, hide no engine marker own names, keep marker-looking user keys ordinary, and enforce non-configurable delete/redefine behavior.
+- `metadata_array_length_attrs` confirms `length` writability is shape-backed, no `__nw_length` own name is produced, marker-looking user keys are ordinary, and the descriptor remains non-enumerable/non-configurable.
+- `Object.freeze` / `preventExtensions` regressions in `lib_immer` and `v20_tagged_templates` were fixed by materializing companion-map descriptor slots with the internal map writer before tombstoning dense values.
+- A 19-test Test262 mapped-arguments regression cluster was fixed by letting mapped argument reads consult promoted companion descriptor slots before falling back to parameter storage.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 214/214.
+- `make test262-baseline` reported failed 0 and regressions 0. The first full P3 run fully passed 40261 / 40261; the final post-cleanup run recovered one slow `decodeURI` test in Phase 4 and reported 40260 / 40261 fully passing plus 1 retry-only non-fully-passing test.
 
 ### P4 - Finish Built-In Class Identity Migration
 

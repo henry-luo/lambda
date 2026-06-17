@@ -27,3 +27,5 @@ part of `test_js_gtest.exe` in batch mode and complete in <1s collectively.
 | `metadata_accessor_storage.js` | accessor names beginning `__get_`/`__set_` remain user-visible keys after marker removal | §10.1.7 OrdinaryOwnPropertyKeys |
 | `metadata_named_attr_flags.js` | named descriptor attributes live in `ShapeEntry::flags` without `__nw_`/`__ne_`/`__nc_` own slots | §10.1.6 OrdinaryDefineOwnProperty |
 | `metadata_user_attribute_keys.js` | user properties named `__nw_x`/`__ne_x`/`__nc_x` are ordinary enumerable data keys | §10.1.7 OrdinaryOwnPropertyKeys |
+| `metadata_array_index_attrs.js` | array index descriptor attributes live on the companion-map digit `ShapeEntry`, not `__nw_`/`__ne_`/`__nc_` marker slots | §10.4.2.1 Array Exotic Objects |
+| `metadata_array_length_attrs.js` | array `length` writability is a companion-map `ShapeEntry` flag and marker-looking user keys stay ordinary | §10.4.2.4 ArraySetLength |
