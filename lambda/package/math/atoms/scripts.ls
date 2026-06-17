@@ -20,16 +20,141 @@ pub fn render(node, context, render_fn) {
     let base = node.base
     let is_big_op = base != null and base is element and name(base) == 'command' and
         base.name != null and sym.is_limit_op(string(base.name))
+    // Integral-family operators (\int, \oint, \iint, etc.) use SIDE limits
+    // (lm_msubsup as a sibling of the symbol) in inline mode, matching
+    // MathLive's subsupPlacement='adjacent' rule. Display mode would stack
+    // them (TODO).
+    let cmd_name = if (is_big_op) string(base.name) else ""
+    let is_integral = is_integral_op(cmd_name)
 
-    // MathLive uses limit-style (above/below) for big operators in both
-    // display and inline math contexts. Only script/scriptscript contexts
-    // (e.g. inside fractions/cases environments) demote to inline scripts.
-    if (is_big_op and not ctx.is_script(context))
+    if (is_big_op and is_integral and not ctx.is_display(context))
+        render_integral_inline_scripts(base, node, context, render_fn)
+    else if (is_big_op and not ctx.is_script(context))
         render_big_op_limits(base, node, context, render_fn)
     else if (is_big_op and node.sub != null and node.sup != null)
         render_inline_big_op_scripts(base, node, context, render_fn)
     else
         render_scripts(node, context, render_fn)
+}
+
+// Compute the height to use for the sub-script wrapper. MathLive uses
+// CEIL@2(sub_box.height_raw * 0.7) when raw is available, else falls back
+// to a content-based approximation (0.46 default for short / digit content,
+// 0.48 for uppercase-letter content).
+fn sub_height_for(sub_box) {
+    let raw = if (sub_box != null) sub_box.height_raw else null
+    if (raw != null) {
+        let scaled = raw * 0.7
+        let scaled_100 = scaled * 100.0
+        let i = int(scaled_100)
+        let f = float(i)
+        let ceil_int = if (f >= scaled_100) i else i + 1
+        float(ceil_int) / 100.0
+    } else 0.46
+}
+
+fn is_integral_op(cmd_name) {
+    cmd_name == "int" or cmd_name == "oint" or cmd_name == "iint" or
+    cmd_name == "iiint" or cmd_name == "iiiint" or cmd_name == "oiint" or
+    cmd_name == "oiiint" or cmd_name == "idotsint" or cmd_name == "ointclockwise" or
+    cmd_name == "ointctrclockwise"
+}
+
+// Render integral with sub/sup limits to the SIDE (msubsup), matching
+// MathLive's textstyle integral layout. Wraps in lm_op-group with
+// large-op size3 symbol + adjacent lm_msubsup vlist.
+fn render_integral_inline_scripts(base, node, context, render_fn) {
+    let cmd = string(base.name)
+    let unicode = sym.lookup_symbol("\\" ++ cmd)
+    let display_text = if (unicode != null) unicode else cmd
+    let sub_box = if (node.sub != null)
+        render_fn(node.sub, ctx.sub_context(context)) else null
+    let sup_box = if (node.sup != null)
+        render_fn(node.sup, ctx.sup_context(context)) else null
+    let sub_elements = if (sub_box != null) box.elements_of(sub_box) else []
+    let sup_elements = if (sup_box != null) box.elements_of(sup_box) else []
+    let has_sub = sub_box != null
+    let has_sup = sup_box != null
+
+    // MathLive integral metrics (Size2): h=1.36, d=0.86, italic=0.45
+    // The msubsup vlist height/depth-holder differ by limit configuration:
+    //   sub+sup:    vlist=1.55, depth_holder=0.9, sub uses margin-left:-italic
+    //   sub-only:   vlist=-0.41 (negative — content only above its origin),
+    //               depth_holder=0.9, sub uses margin-right:+0.05em
+    //   sup-only:   vlist=1.55, depth_holder=0 (sup-only TODO)
+    let vlist_height = if (has_sup) 1.55 else (0.0 - 0.41)
+    let depth_holder = 0.9
+    let sub_top = -2.1
+    let sup_top = -4.08
+    // Sub margin behavior: when paired with sup, nestle into the integral's
+    // italic correction (negative left margin). When sub alone, MathLive
+    // offsets slightly to the right.
+    let sub_margin_attr = if (has_sup)
+        "margin-left:-0.44em"
+        else "margin-right:0.05em"
+
+    // Sub box height depends on its content's actual height. MathLive
+    // uses CEIL@2(sub_box.height * 0.7). For digits 0.46em, uppercase 0.48em.
+    let sub_inner_h = if (sub_box != null) sub_height_for(sub_box) else 0.46
+    let sub_span = if (has_sub) [
+        <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr;
+            <span class: css.PSTRUT, style: "height:3em">
+            <span style: "height:" ++ util.fmt_em(sub_inner_h) ++ ";display:inline-block;font-size: 70%";
+                for (el in sub_elements) el
+            >
+        >
+    ] else []
+    let sup_span = if (has_sup) [
+        <span style: "top:" ++ util.fmt_em(sup_top);
+            <span class: css.PSTRUT, style: "height:3em">
+            <span style: "height:0.46em;display:inline-block;font-size: 70%";
+                for (el in sup_elements) el
+            >
+        >
+    ] else []
+
+    let int_symbol_style = "margin-right:0.45em"
+    let el = <span class: css.OP_GROUP;
+        <span class: "lm_op-symbol lm_large-op", style: int_symbol_style; display_text>
+        <span class: css.MSUBSUP;
+            <span class: css.VLIST_T2;
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
+                        for (el in sub_span) el
+                        for (el in sup_span) el
+                    >
+                    <span class: css.VLIST_S; "​">
+                >
+                <span class: css.VLIST_R;
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
+                >
+            >
+        >
+    >
+    // Box height/depth follow MathLive's effective extents. With both
+    // limits the box reaches up to the sup and the strut-bottom drops to
+    // accommodate the sub. The raw fields use slightly-higher precision so
+    // CEIL@2 of (h_raw + d_raw) matches MathLive's emitted strut-bottom.
+    let box_h = if (has_sup) 1.55 else 1.36
+    let box_d = if (has_sub) 0.89 else 0.86
+    let box_h_raw = if (has_sup) 1.55 else 1.36
+    let box_d_raw = if (has_sub and has_sup) 0.89
+        else if (has_sub) 0.89222
+        else 0.86225
+    {
+        element: el,
+        height: box_h,
+        depth: box_d,
+        height_raw: box_h_raw,
+        depth_raw: box_d_raw,
+        render_height: box_h,
+        render_depth: box_d,
+        render_total: box_h + box_d,
+        width: 0.55556,
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 fn render_inline_big_op_scripts(base, node, context, render_fn) {

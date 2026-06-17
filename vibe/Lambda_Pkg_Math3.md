@@ -745,3 +745,76 @@ The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.
 | Box raw-field propagation | [lambda/package/math/box.ls:48](lambda/package/math/box.ls:48) `text_box`; [lambda/package/math/box.ls:512](lambda/package/math/box.ls:512) `hbox` |
 | Italic correction metric-driven | [lambda/package/math/box.ls:203](lambda/package/math/box.ls:203) `text_style` |
 | Multi-char operator heights | [lambda/package/math/box.ls:131](lambda/package/math/box.ls:131) `text_height_for` → `max_char_height` |
+| Per-symbol big-op metrics | [lambda/package/math/render.ls:251](lambda/package/math/render.ls:251) `render_limit_operator_symbol` + `large_op_metrics`/`small_op_metrics` |
+| Integral inline-limits (side msubsup) | [lambda/package/math/atoms/scripts.ls:50](lambda/package/math/atoms/scripts.ls:50) `render_integral_inline_scripts` |
+| Tall-base accent positioning | [lambda/package/math/render.ls:1143](lambda/package/math/render.ls:1143) `render_simple_accent` |
+| Prime as msubsup script | [lambda/package/math/render.ls:171](lambda/package/math/render.ls:171) `render_prime_script` |
+
+---
+
+## Phase 2b implementation log — structural patterns
+
+After Phase 2a landed at 565/921, Phase 2b shifted from "replace fraction Rule 15 constants wholesale" to "add the specific structural patterns the diff harness identified." Fraction-constant replacement was DEFERRED because the dispatch table is heavily tuned for nested contexts (each branch represents a calibrated case); wholesale replacement is the cascade trap that previous attempts ran into. The structural pattern approach delivered +16 cases in one session without touching fraction.ls or scripts.ls's hardcoded specs.
+
+### Pass-rate timeline
+
+```
+Session 2 start                          565 / 921  (61.3%)
+Per-symbol big-op metrics (Size2 port)   +3   →  568
+Integral inline side-limits              +8   →  576
+Sub-only integral height                 +4   →  580
+Tall-base accent positioning (vec{F})    +0   →  580 (one-finding gain, no count)
+Prime-as-msubsup structure (x', f'(x))   +1   →  581
+─────────────────────────────────────────────────────
+Final achieved                           581 / 921  (63.1%)
+Upstream baseline                        206 / 206  (100%)
+```
+
+### What was built (Phase 2b)
+
+**Per-symbol big-op metrics** ([lambda/package/math/render.ls:285](lambda/package/math/render.ls:285)):
+- Ported MathLive's font-metrics-data.ts Size2/Size1 tables for `\int`, `\sum`, `\prod`, `\oint`, `\bigcap`, `\bigcup`, etc.
+- Replaced the previous one-size-fits-all heuristic (h=1.61, d=0.2) with truthful per-symbol metrics:
+  - `\int` Size2: h=1.36, d=0.86, italic=0.45 → emits the `margin-right:0.45em` MathLive does.
+  - `\sum`/`\prod`/`\bigcup`/etc. Size2: h=1.05, d=0.55, no italic.
+- The italic correction is emitted as inline style on the operator symbol span.
+
+**Integral inline side-limits** ([lambda/package/math/atoms/scripts.ls:50](lambda/package/math/atoms/scripts.ls:50) `render_integral_inline_scripts`):
+- New render path for `\int_X^Y` (and `\oint`, `\iint`, `\iiint`, etc.) in textstyle: emits `lm_op-group > lm_op-symbol[margin-right] + lm_msubsup` SIBLING (not stacked vlist), matching MathLive's `subsupPlacement: 'adjacent'`.
+- Sub/sup positioning differs by configuration:
+  - Both limits: sub `margin-left:-0.44em` (nestle into italic gap).
+  - Sub-only: sub `margin-right:0.05em` (slight right kerning).
+- Sub-script wrapper height derived via `sub_height_for()` = CEIL@2(sub_box.height_raw * 0.7).
+- Box h/d differ per configuration: both → 1.55/0.89, sub-only → 1.36/0.89222 (the slightly-higher d_raw makes CEIL@2(h+d) produce MathLive's 2.26).
+- `\sum`, `\prod`, etc. keep the existing stacked-limits behavior (matches MathLive's auto-placement, which keeps them above/below in display/text style).
+
+**Tall-base accent positioning** ([lambda/package/math/render.ls:1143](lambda/package/math/render.ls:1143) `render_simple_accent`):
+- Previously hardcoded `height:0.44em` for the base wrapper inside `\hat`/`\vec`/`\bar` accents — this over-shrank uppercase letter bases (`\vec{F}` rendered F at 0.44em instead of its actual 0.69em).
+- Now uses `base_box.height` for the wrapper; accent_top shifts up by `(base.height - 0.44)` so taller bases push the accent up; vlist height grows accordingly.
+
+**Prime as msubsup** ([lambda/package/math/render.ls:171](lambda/package/math/render.ls:171) `render_prime_script`):
+- ASCII `'` (apostrophe) at the AST punctuation level is now rendered as a `lm_msubsup` containing the Unicode prime `′` (U+2032) in a 70%-scaled superscript-style vlist — matches MathLive's behavior for `x'`, `f'(x)`, etc.
+- Closes a structural mismatch where Lambda emitted `<span class="lm_cmr">'</span>` as a flat sibling.
+
+### What was DEFERRED in Phase 2b
+
+The original Phase 2b — replace the ~30 hardcoded em-constant branches in [fraction.ls](lambda/package/math/atoms/fraction.ls) with TeXBook Rule 15d formulas — was attempted but deferred. The dispatch table contains per-context tuning (e.g., specific branches for colorbox-content fractions, script-style nested fractions, mixed numerator descender cases). Replacing branches wholesale produced significant regressions because adjacent branches depend on neighboring constants.
+
+A FUTURE Phase 2b refactor should:
+1. Build a per-branch test fixture: take each of the ~30 dispatch keys, generate 3-5 representative test cases, and gate the refactor on them passing.
+2. Replace ONE branch at a time, verifying against the fixture.
+3. Use Phase 1's mathstyle sigma constants (`met.num1`/`met.denom1`/`met.defaultRuleThickness`) and `metrics.AXIS_HEIGHT` to derive Rule 15d shifts.
+4. Estimated effort: 80–140 hours given the per-branch verification cycle.
+
+### Remaining failure clusters (post Phase 2b)
+
+| Cluster | Approx count | Pattern |
+|---|---:|---|
+| Composite-box 0.01em drift | ~50 | Fractions/scripts at top of strut wrap; raw values not propagated through composite boxes |
+| `\lim` operator-name with limits | ~10–15 | Lambda doesn't yet emit `lm_vlist` wrap for multi-char operator-name bases when limits attach |
+| Accent margin-left precision | ~15 | Per-glyph skew-based margin-left calculation differs |
+| Class-flip in complex contexts | ~30 | Paren/letter class assignments differ in cascading expressions like `(x+h) - f(x)` |
+| Prime in script context | ~3 | `'` inside script context needs further size reduction |
+| `\mathbf{...}` font fallback | ~8 | No Main-Bold metric table |
+| Matrix smallmatrix em drift | ~5 | Cell heights wrong in smallmatrix (needs script-style scaling for cells) |
+| Display-mode integrals | ~5–10 | Display style integrals (large `∫`) need different stacking behavior |

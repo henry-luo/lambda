@@ -161,10 +161,45 @@ fn render_relation(node, context) {
 
 fn render_punct(node, context) {
     let text = get_text(node)
-    let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
-        else if (text == ")" or text == "]" or text == "}") "mclose"
-        else "mpunct"
-    box.text_box(punct_display_text(text), css.CMR, atom_type)
+    if (text == "'") render_prime_script()
+    else {
+        let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
+            else if (text == ")" or text == "]" or text == "}") "mclose"
+            else "mpunct"
+        box.text_box(punct_display_text(text), css.CMR, atom_type)
+    }
+}
+
+// Render ASCII apostrophe `'` as MathLive's prime structure: a lm_msubsup
+// containing the Unicode prime ′ (U+2032) shifted up like a superscript.
+// This produces visual parity with MathLive's `\prime` shortcut and lets
+// the outer strut wrap include the prime's height.
+fn render_prime_script() {
+    let el = <span class: css.MSUBSUP;
+        <span class: css.VLIST_T;
+            <span class: css.VLIST_R;
+                <span class: css.VLIST, style: "height:0.81em";
+                    <span style: "top:-3.41em;margin-right:0.05em";
+                        <span class: css.PSTRUT, style: "height:3em">
+                        <span style: "height:0.39em;display:inline-block;font-size: 70%";
+                            <span class: css.CMR; "′">
+                        >
+                    >
+                >
+            >
+        >
+    >
+    {
+        element: el,
+        height: 0.81,
+        depth: 0.0,
+        height_raw: 0.81,
+        depth_raw: 0.0,
+        width: 0.4,
+        type: "mord",
+        italic: 0.0,
+        skew: 0.0
+    }
 }
 
 fn operator_display_text(text) {
@@ -255,19 +290,60 @@ fn render_limit_operator_symbol(text, context) {
     let use_large = ctx.is_display(context) or not ctx.is_script(context)
     let op_size = if (use_large) "lm_large-op" else "lm_small-op"
     let op_cls = css.classes(["lm_op-symbol", op_size])
+    let metrics = if (use_large) large_op_metrics(text) else small_op_metrics(text)
+    // Italic correction (mostly \\int with italic=0.44445 → margin-right:0.45em)
+    let op_el = if (metrics.italic > 0.0)
+        <span class: op_cls, style: "margin-right:" ++ util.fmt_em_ceil2(metrics.italic); text>
+        else <span class: op_cls; text>
     {
         element: <span class: css.OP_GROUP;
-            <span class: op_cls; text>
+            op_el
         >,
-        height: if (use_large) 1.61 else 0.9,
-        depth: if (use_large) 0.2 else 0.1,
-        render_height: if (use_large) 1.61 else 0.9,
-        render_depth: if (use_large) 0.2 else 0.1,
-        render_total: if (use_large) 1.81 else 1.0,
-        width: 0.6,
+        height: metrics.h,
+        depth: metrics.d,
+        height_raw: metrics.h_raw,
+        depth_raw: metrics.d_raw,
+        render_height: metrics.h,
+        render_depth: metrics.d,
+        render_total: metrics.h + metrics.d,
+        width: metrics.width,
         type: "mop",
         italic: 0.0,
         skew: 0.0
+    }
+}
+
+// Per-symbol Size2 (large-op) metrics ported from MathLive's
+// font-metrics-data.ts. Values are CEIL@2-rounded for h, FLOOR@2 for d
+// (positive), italic CEIL@2. The h_raw/d_raw fields carry 5dp full
+// precision so the outer strut can emit CEIL@2 of the raw sum.
+fn large_op_metrics(text) {
+    let is_integral = text == "∫" or text == "∮" or text == "∯" or text == "∰"
+    let is_summation = text == "∑" or text == "∏" or text == "⋂" or text == "⋃" or
+        text == "⨀" or text == "⨁" or text == "⨂" or text == "⨃" or
+        text == "⨄" or text == "⨆" or text == "⨅" or text == "⨇" or
+        text == "⨈" or text == "⨉" or text == "⨊" or text == "⨋" or
+        text == "∐"
+    if (is_integral) {
+        {h: 1.36, d: 0.86, h_raw: 1.36, d_raw: 0.86225, italic: 0.45, width: 0.55556}
+    } else if (is_summation) {
+        {h: 1.05, d: 0.55, h_raw: 1.05, d_raw: 0.55001, italic: 0.0, width: 1.05}
+    } else {
+        {h: 1.61, d: 0.2, h_raw: 1.61, d_raw: 0.2, italic: 0.0, width: 0.6}
+    }
+}
+
+fn small_op_metrics(text) {
+    let is_integral = text == "∫" or text == "∮"
+    let is_summation = text == "∑" or text == "∏" or text == "⋂" or text == "⋃" or
+        text == "⨀" or text == "⨁" or text == "⨂" or text == "⨃" or
+        text == "⨄" or text == "⨆"
+    if (is_integral) {
+        {h: 0.81, d: 0.3, h_raw: 0.805, d_raw: 0.30612, italic: 0.2, width: 0.47222}
+    } else if (is_summation) {
+        {h: 0.75, d: 0.25, h_raw: 0.75, d_raw: 0.25001, italic: 0.0, width: 0.94445}
+    } else {
+        {h: 0.9, d: 0.1, h_raw: 0.9, d_raw: 0.1, italic: 0.0, width: 0.6}
     }
 }
 
@@ -1101,14 +1177,27 @@ fn render_accent_base(base_node, context) {
 
 fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
     let base_elements = box.elements_of(base_box)
-    let accent_top = if (accent_key == "tilde") -3.35 else -3.0
+    // Use the base box's actual height for the inner wrapper. For tall
+    // bases (uppercase letters with cmmi h=0.69), the wrapper needs to
+    // reflect the real glyph height — Lambda previously hardcoded 0.44em
+    // (short-letter height) which over-shrinks tall bases.
+    let base_wrap_h = if (base_box.height > 0.5) base_box.height else 0.44
+    // The accent is shifted UP by the difference between base height and
+    // the short-letter reference (0.44em) so taller bases sit lower
+    // relative to the accent glyph.
+    let tall_extra = if (base_box.height > 0.5) base_box.height - 0.44 else 0.0
+    let accent_top = if (accent_key == "tilde") (0.0 - 3.35 - tall_extra)
+        else (0.0 - 3.0 - tall_extra)
+    // Vlist height grows by the same delta so the bounding box wraps both
+    // the taller base and the accent above.
+    let vlist_h = accent_height + tall_extra
     let margin_left = if (accent_key == "dot") 0.15 else 0.04
     let el = <span class: css.VLIST_T;
         <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(accent_height);
+            <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vlist_h);
                 <span style: "top:-3em";
                     <span class: css.PSTRUT, style: "height:3em">
-                    <span style: "height:0.44em;display:inline-block";
+                    <span style: "height:" ++ fmt_accent_em(base_wrap_h) ++ ";display:inline-block";
                         for (el in base_elements) el
                     >
                 >
@@ -1119,7 +1208,7 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
             >
         >
     >
-    accent_box(el, accent_height, 0.0, base_box.width)
+    accent_box(el, vlist_h, 0.0, base_box.width)
 }
 
 fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
