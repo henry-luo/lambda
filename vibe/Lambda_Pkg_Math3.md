@@ -735,6 +735,25 @@ The proposal's analysis was correct in two key ways:
 
 The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.ls](lambda/package/math/atoms/fraction.ls) and [scripts.ls](lambda/package/math/atoms/scripts.ls) with TeXBook Rule 15/18 implementations driven by mathstyle sigma constants — is now de-risked because Phase 1's metric layer is in place. Expected to close another ~40–80 cases. Estimated effort: 80–140 hours.
 
+### Phase 2b — composite-box raw propagation post-mortem
+
+After Phase 2b on structural patterns landed, an attempt was made to close the ~50-case "composite-box 0.01em drift" cluster by propagating `height_raw`/`depth_raw` through fraction outputs (so the outer strut would emit `fmt_em_ceil2(h+d)` instead of `fmt_em(render_total)`).
+
+**Result: no net pass-rate change.** The diff harness revealed that the 0.01em drift cluster isn't a uniform precision issue — each fraction case has a DIFFERENT per-content gap from MathLive (varying from 0.01em to 0.20em). Patterns observed:
+
+- `\frac{x}{y}`: depth 0.685 emit, MathLive 0.88. (+0.20em)
+- `\frac{numerator}{denominator}`: height 1.15 emit, MathLive 1.12. (-0.03em — Lambda OVER-estimates)
+- `\frac{d}{dx}`: height 1.15 emit, MathLive 1.2. (+0.05em — Lambda UNDER-estimates)
+- `\frac{1}{p+q}`: depth 0.77 emit, MathLive 0.88. (+0.11em)
+
+These gaps come from Lambda's hardcoded per-branch spec table (each branch returns a fixed `height` and `depth`) versus MathLive's per-content computation via TeXBook Rule 15d (`height = numerShift + numerBox.height`, `depth = denomShift + denomBox.depth`).
+
+**Targeted descender-aware fixes** were applied to three fraction.ls branches (short-body, compound-denom, default), bumping depth/depth_holder/denom_child_height when the denominator has a real descender. These corrected `\frac{x}{y}`, `\frac{1}{y}`, `\frac{1}{p+q}` when tested directly — but the corpus pass count stayed at 581 because those exact expressions don't appear in the corpus standalone. They DO appear as sub-expressions in larger formulas, but the outer formulas have other unrelated failure modes that dominate.
+
+**Conclusion**: simple raw-value propagation through composite boxes is INSUFFICIENT. To close the remaining 0.01em drifts, the fraction layout itself must be metric-driven (TeXBook Rule 15d), as the original proposal called out. Lambda's current approach — branch dispatch into a hand-tuned spec table — cannot match MathLive's per-content output without per-branch tuning equivalent in scope to a full reimplementation.
+
+The post-mortem confirms the proposal's estimate: a faithful Phase 2b fraction port is ~80–140 hours and likely the single biggest unlock for the remaining 340 failures.
+
 ### What to read in the codebase
 
 | Area | Start here |
@@ -749,6 +768,7 @@ The proposal's Phase 2b — replace the ~30 hardcoded em constants in [fraction.
 | Integral inline-limits (side msubsup) | [lambda/package/math/atoms/scripts.ls:50](lambda/package/math/atoms/scripts.ls:50) `render_integral_inline_scripts` |
 | Tall-base accent positioning | [lambda/package/math/render.ls:1143](lambda/package/math/render.ls:1143) `render_simple_accent` |
 | Prime as msubsup script | [lambda/package/math/render.ls:171](lambda/package/math/render.ls:171) `render_prime_script` |
+| Fraction descender-aware depth/depth_holder | [lambda/package/math/atoms/fraction.ls:577](lambda/package/math/atoms/fraction.ls:577) short-body / [:526](lambda/package/math/atoms/fraction.ls:526) compound-denom / [:633](lambda/package/math/atoms/fraction.ls:633) default branches with `ceil2()` helper |
 
 ---
 
@@ -810,7 +830,7 @@ A FUTURE Phase 2b refactor should:
 
 | Cluster | Approx count | Pattern |
 |---|---:|---|
-| Composite-box 0.01em drift | ~50 | Fractions/scripts at top of strut wrap; raw values not propagated through composite boxes |
+| Composite-box 0.01em drift | ~50 | Fractions/scripts at top of strut wrap; per-content drift exceeds simple raw-value propagation (see post-mortem below) |
 | `\lim` operator-name with limits | ~10–15 | Lambda doesn't yet emit `lm_vlist` wrap for multi-char operator-name bases when limits attach |
 | Accent margin-left precision | ~15 | Per-glyph skew-based margin-left calculation differs |
 | Class-flip in complex contexts | ~30 | Paren/letter class assignments differ in cascading expressions like `(x+h) - f(x)` |

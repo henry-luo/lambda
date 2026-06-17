@@ -106,6 +106,15 @@ pub fn render_boxes(numer_box, denom_box, context) {
 }
 
 // Rule 15c: no bar line (binomial)
+// CEIL@2 helper for spec computations that need MathLive-compatible rounding
+fn ceil2(x) {
+    let scaled = x * 100.0
+    let i = int(scaled)
+    let f = float(i)
+    let ceil_int = if (f >= scaled) i else i + 1
+    float(ceil_int) / 100.0
+}
+
 fn build_frac_nobar(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric) {
     build_frac_nobar_vlist(numer_box, denom_box, frac_ctx, cmd, unbraced_numeric)
 }
@@ -515,18 +524,25 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     } else if (denom_total >= 0.75 and numer_total < 0.75) {
+        // Compound denominator with potential descender (e.g. p+q below 1).
+        // When the denom has a substantial descender, MathLive's effective
+        // depth reflects the full descent extent, not the hardcoded 0.77.
+        let has_descender = denom_box.depth > 0.15
+        let frac_d = if (has_descender) 0.68 + denom_box.depth + 0.01 else 0.77
+        let frac_total = if (has_descender) 1.15 + frac_d else 1.92
+        let frac_dh = if (has_descender) frac_d + 0.01 else 0.77
         {
             height: 1.15,
-            depth: 0.77,
+            depth: frac_d,
             render_height: 1.15,
-            render_depth: 0.77,
-            render_total: 1.92,
-            depth_holder: 0.77,
+            render_depth: frac_d,
+            render_total: frac_total,
+            depth_holder: frac_dh,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: -3.5,
             numer_child_height: 0.65,
-            denom_child_height: 0.73,
+            denom_child_height: if (has_descender) 0.78 else 0.73,
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -568,17 +584,26 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
         // Short-body numerator (a single letter like a, m, x with cmmi
         // height 0.44 and no descender). MathLive uses fraction height 0.94
         // instead of the default 1.15 for these.
-        let denom_h = if (denom_box.height < 0.7) denom_box.height else 0.7
-        let extra_depth = if (denom_box.depth > 0.0) denom_box.depth else 0.0
-        let frac_depth = 0.68 + extra_depth
+        // When the denominator has a descender, MathLive's effective depth
+        // rounds up by 0.01em (CEIL@2 emission semantics). Lambda emits
+        // render_depth/render_total directly, so we bake the +0.01 in. The
+        // denom_child_height also accounts for the full descender extent.
+        let has_descender = denom_box.depth > 0.0
+        let denom_full_h = denom_box.height + denom_box.depth
+        let denom_h = if (has_descender) ceil2(denom_full_h)
+            else if (denom_box.height < 0.7) denom_box.height else 0.7
+        let extra_depth = if (has_descender) denom_box.depth else 0.0
+        let frac_depth_base = 0.68 + extra_depth
+        let frac_depth = if (has_descender) frac_depth_base + 0.01 else frac_depth_base
         let total = 0.94 + frac_depth
+        let dh = if (has_descender) frac_depth + 0.01 else 0.69
         {
             height: 0.94,
             depth: frac_depth + 0.005,
             render_height: 0.94,
             render_depth: frac_depth,
             render_total: total,
-            depth_holder: 0.69,
+            depth_holder: dh,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: -3.5,
@@ -613,13 +638,25 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     } else {
+        // Default fraction layout (digits, mixed content of moderate height).
+        // When denominator has a descender, bump depth/depth_holder so the
+        // strut-bottom and inner vlist reflect the full descender extent.
+        // render_total is bumped by 0.01 to match MathLive's CEIL@2 emission
+        // (the hardcoded prior value was 1.84 even though render_depth was 0.68).
+        let has_descender = denom_box.depth > 0.005
+        let extra_d = if (has_descender) denom_box.depth + 0.01 else 0.0
+        let base_depth_render = 0.68 + extra_d
+        let base_depth = base_depth_render + 0.005
+        let base_total = if (has_descender) 1.15 + base_depth_render
+            else 1.15 + base_depth_render + 0.01
+        let base_dh = if (has_descender) base_depth_render + 0.01 else 0.69
         {
             height: 1.15,
-            depth: 0.685,
+            depth: base_depth,
             render_height: 1.15,
-            render_depth: 0.68,
-            render_total: 1.84,
-            depth_holder: 0.69,
+            render_depth: base_depth_render,
+            render_total: base_total,
+            depth_holder: base_dh,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: -3.5,
@@ -641,7 +678,12 @@ fn script_frac_child_height(child_box, fallback) {
 // capped at typical TeX baseline alignment.
 fn denom_child_for_default(denom_box) {
     let total = denom_box.height + denom_box.depth
+    let has_descender = denom_box.depth > 0.005
+    // When the denominator has a descender, MathLive uses CEIL@2 of the
+    // full h+d extent for the wrapper, even when h+d < 0.65. This makes
+    // the wrapper match the visible glyph rather than padding to a default.
     if (denom_box.height < 0.65 and denom_box.depth < 0.01) denom_box.height
+    else if (has_descender) ceil2(total)
     else if (total > 0.65) total
     else 0.65
 }
