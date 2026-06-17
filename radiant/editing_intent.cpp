@@ -52,6 +52,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_STRIKETHROUGH:         return "formatStrikeThrough";
         case INPUT_INTENT_FORMAT_SUBSCRIPT:             return "formatSubscript";
         case INPUT_INTENT_FORMAT_SUPERSCRIPT:           return "formatSuperscript";
+        case INPUT_INTENT_FORMAT_FORE_COLOR:            return "formatForeColor";
         case INPUT_INTENT_FORMAT_BLOCK:                 return "formatBlock";
         case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:          return "formatJustifyLeft";
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:        return "formatJustifyCenter";
@@ -79,6 +80,7 @@ bool input_intent_is_dispatchable(InputIntentType type) {
         case INPUT_INTENT_FORMAT_STRIKETHROUGH:
         case INPUT_INTENT_FORMAT_SUBSCRIPT:
         case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+        case INPUT_INTENT_FORMAT_FORE_COLOR:
         case INPUT_INTENT_FORMAT_BLOCK:
         case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:

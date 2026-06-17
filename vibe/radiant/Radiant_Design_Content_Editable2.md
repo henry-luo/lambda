@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 color/font started with selected-range `foreColor`.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -990,6 +990,41 @@ before declaring the whole EC-4 tier complete.
 **Global gate note:** EC-4c's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-4 tier complete.
+
+**EC-5a — selected-range foreColor: LANDED (2026-06-17).**
+
+- Added native `execCommand("foreColor", false, value)` support. The command
+  maps to a new `INPUT_INTENT_FORMAT_FORE_COLOR` intent, which is command-only,
+  non-dispatchable, and non-recordable for now because it is not one of the
+  standardized Input Events `inputType` values.
+- Added `editing_rich_default_style(...)` for selected-range inline style
+  mutations. It wraps a non-collapsed selected range in a native-backed
+  `<span style="color: ...">...</span>`, sets the style through
+  `dom_element_set_attribute(...)` so the backing Lambda element and inline CSS
+  parsing stay in sync, and restores selection to the wrapper contents.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include
+  `foreColor`; `queryCommandValue("foreColor")` walks the nearest ancestor
+  inline style declaration and returns the exact `color` value when present.
+- Scope remains conservative: no collapsed typing state, no multi-range
+  handling, no partial non-text node shapes beyond `Range.surroundContents`,
+  no color normalization or sanitization, no merge/normalization of adjacent
+  spans, no toggle/removal behavior, and no `backColor`/`hiliteColor`/
+  `fontName`/`fontSize` yet.
+
+**Current EC verification after EC-5a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct foreColor DOM regression | selected `bc` in `abcd` becomes `a<span style="color: #123456">bc</span>d`; `queryCommandValue("foreColor")` returns `#123456`; empty value returns false and leaves `abcd` unchanged |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_fore_color' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 211 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-5a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-5 tier complete.
 
 ---
 

@@ -472,6 +472,10 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
+    if (intent && intent->type == INPUT_INTENT_FORMAT_FORE_COLOR) {
+        return editing_rich_default_style(state, surface, intent,
+                                          nullptr, nullptr);
+    }
     if (intent && (intent->type == INPUT_INTENT_INSERT_LINK ||
                    intent->type == INPUT_INTENT_FORMAT_UNLINK)) {
         return editing_rich_default_link(state, surface, intent,
@@ -641,11 +645,17 @@ static bool js_dom_exec_command_is_link_object(const char* cmd) {
         strcasecmp(cmd, "insertImage") == 0;
 }
 
+static bool js_dom_exec_command_is_color_font(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "foreColor") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
         js_dom_exec_command_is_block_structure(cmd) ||
-        js_dom_exec_command_is_link_object(cmd);
+        js_dom_exec_command_is_link_object(cmd) ||
+        js_dom_exec_command_is_color_font(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -713,6 +723,11 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "superscript") == 0) {
         out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "foreColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FORE_COLOR;
+        out->data = value ? value : "";
         return true;
     }
     if (strcasecmp(cmd, "createLink") == 0) {
@@ -917,6 +932,110 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
         if (cur == static_cast<DomNode*>(surface.owner)) break;
     }
     return false;
+}
+
+static const char* js_dom_exec_command_style_property(const char* cmd) {
+    if (!cmd) return nullptr;
+    if (strcasecmp(cmd, "foreColor") == 0) return "color";
+    return nullptr;
+}
+
+static bool js_dom_ascii_space(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool js_dom_style_decl_value(const char* style_text,
+                                    const char* prop_name,
+                                    char* out,
+                                    size_t out_size) {
+    if (out && out_size > 0) out[0] = '\0';
+    if (!style_text || !prop_name || !out || out_size == 0) return false;
+
+    const char* seg = style_text;
+    while (*seg) {
+        const char* end = strchr(seg, ';');
+        if (!end) end = seg + strlen(seg);
+
+        const char* colon = nullptr;
+        for (const char* p = seg; p < end; p++) {
+            if (*p == ':') {
+                colon = p;
+                break;
+            }
+        }
+        if (colon) {
+            const char* name_start = seg;
+            const char* name_end = colon;
+            while (name_start < name_end && js_dom_ascii_space(*name_start)) {
+                name_start++;
+            }
+            while (name_end > name_start && js_dom_ascii_space(name_end[-1])) {
+                name_end--;
+            }
+
+            size_t name_len = (size_t)(name_end - name_start);
+            if (strlen(prop_name) == name_len &&
+                strncasecmp(name_start, prop_name, name_len) == 0) {
+                const char* value_start = colon + 1;
+                const char* value_end = end;
+                while (value_start < value_end &&
+                       js_dom_ascii_space(*value_start)) {
+                    value_start++;
+                }
+                while (value_end > value_start &&
+                       js_dom_ascii_space(value_end[-1])) {
+                    value_end--;
+                }
+
+                size_t value_len = (size_t)(value_end - value_start);
+                if (value_len >= out_size) value_len = out_size - 1;
+                memcpy(out, value_start, value_len);
+                out[value_len] = '\0';
+                return true;
+            }
+        }
+
+        seg = *end ? end + 1 : end;
+    }
+    return false;
+}
+
+static const char* js_dom_exec_command_query_style_value(const char* cmd,
+                                                        char* out,
+                                                        size_t out_size) {
+    if (out && out_size > 0) out[0] = '\0';
+    const char* prop_name = js_dom_exec_command_style_property(cmd);
+    if (!prop_name || !out || out_size == 0) return "";
+
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return "";
+    }
+
+    DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return "";
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return "";
+    }
+
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element()) {
+            DomElement* elem = cur->as_element();
+            const char* style_text =
+                elem ? dom_element_get_attribute(elem, "style") : nullptr;
+            if (js_dom_style_decl_value(style_text, prop_name, out, out_size)) {
+                return out;
+            }
+        }
+        if (cur == static_cast<DomNode*>(surface.owner)) break;
+    }
+    return "";
 }
 
 static bool js_dom_exec_command_block_tag(uintptr_t tag) {
@@ -4416,6 +4535,13 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         if (cmd && strcasecmp(cmd, "formatBlock") == 0) {
             const char* value = js_dom_exec_command_query_format_block_value();
+            return (Item){.item = s2it(heap_create_name(value))};
+        }
+        if (cmd && js_dom_exec_command_style_property(cmd)) {
+            char value_buf[512];
+            const char* value =
+                js_dom_exec_command_query_style_value(cmd, value_buf,
+                                                      sizeof(value_buf));
             return (Item){.item = s2it(heap_create_name(value))};
         }
         return (Item){.item = s2it(heap_create_name(""))};
