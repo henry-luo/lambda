@@ -247,17 +247,33 @@ fn ceil_em2(x) {
     float(ceil_int) / 100.0
 }
 
-fn large_op_symbol_box(text) => {
-    element: <span class: "lm_op-symbol lm_large-op"; text>,
-    height: 1.61,
-    depth: 0.0,
-    render_height: 1.61,
-    render_depth: 0.0,
-    render_total: 1.61,
-    width: 0.6,
-    type: "mop",
-    italic: 0.0,
-    skew: 0.0
+fn large_op_symbol_box(text) {
+    // Per-symbol Size2 metric: bigodot/oplus/otimes/etc have shorter descent
+    // than sum/prod, so the surrounding depth_holder formula needs to know.
+    // h+d typically ~1.61em but split differs.
+    let d = large_op_symbol_depth(text)
+    {
+        element: <span class: "lm_op-symbol lm_large-op"; text>,
+        height: 1.61,
+        depth: d,
+        render_height: 1.61,
+        render_depth: d,
+        render_total: 1.61 + d,
+        width: 0.6,
+        type: "mop",
+        italic: 0.0,
+        skew: 0.0
+    }
+}
+
+fn large_op_symbol_depth(text) {
+    // ⨁/⨂/⨀/⨄/⨆/⨃/⋃/⋂/⋁/⋀ — small-descent (Size2 d≈0.42-0.45). Closes
+    // vlist depth_holder mismatch for `\bigoplus`/`\bigotimes`/`\bigodot`/
+    // `\biguplus`/`\bigcup`/`\bigcap`/`\bigvee`/`\bigwedge`.
+    if (text == "⨁" or text == "⨂" or text == "⨀" or text == "⨃" or
+        text == "⨄" or text == "⨆" or text == "⋃" or text == "⋂" or
+        text == "⋁" or text == "⋀") 0.42
+    else 0.0
 }
 
 fn sub_box_has_descender(sub_box) {
@@ -323,13 +339,18 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
     //   sub+sup with descender:   0.82 / 0.81
     //   sub+sup (default):        0.81 / 0.80
     //   sub-only (large-op):      0.95 / 0.94
+    // bigodot/oplus/otimes/etc have shorter descent than sum/prod — their
+    // sub-only depth_holder offset is ~0.13em shorter.
+    let op_short_descent = op_box.depth > 0.0 and op_box.depth < 0.5
     let dh_offset = if (is_text_op and has_sub) 0.26
                     else if (sub_has_descender) 0.82
                     else if (has_sub and has_sup) 0.81
+                    else if (op_short_descent and has_sub) 0.82
                     else 0.95
     let bd_offset = if (is_text_op and has_sub) 0.25
                     else if (sub_has_descender) 0.81
                     else if (has_sub and has_sup) 0.80
+                    else if (op_short_descent and has_sub) 0.81
                     else 0.94
     // For sup-only large ops (no sub), MathLive emits a 0.56em depth_holder
     // and 0.55em box_depth — the inherent op-symbol descent (Size2 d=0.55).
@@ -611,7 +632,12 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
                   else sup_h_only
     // Legacy values for fraction-child paths (preserved to avoid regression)
     let tall_script = sup_box.height > 0.72
-    let tall_base = base_box.height > 0.72
+    // Treat the base as "tall" when it's either a high-glyph base (h > 0.9,
+    // e.g. fractions/radicals) OR a delimiter-group atom (`\left...\right`)
+    // — MathLive shifts the script higher in both cases. Plain text-line
+    // glyphs like cmr `|` (h=0.75) follow the derived formula instead.
+    let base_is_inner = base_box.type == "minner"
+    let tall_base = base_box.height > 0.9 or base_is_inner
     let numeric_x_script = is_mathit_x_box(base_box) and is_numeric_script_box(sup_box)
     let legacy_vlist = if (compound_fraction_script and context.cramped == true) 0.76
         else if (in_fraction_child and context.cramped == true) 0.75

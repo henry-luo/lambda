@@ -1027,10 +1027,36 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
 
 static bool js_is_engine_internal_enumeration_key(const char* name, int name_len);
 
+static bool js_is_array_attr_fallback_name(const char* name, int name_len) {
+    if (!name || name_len <= 0) return false;
+    if (name_len == 6 && memcmp(name, "length", 6) == 0) return true;
+    if (name_len > 10) return false;
+    if (name_len > 1 && name[0] == '0') return false;
+    for (int i = 0; i < name_len; i++) {
+        if (name[i] < '0' || name[i] > '9') return false;
+    }
+    return true;
+}
+
+static bool js_is_legacy_array_attr_marker_key(const char* name, int name_len) {
+    if (!name || name_len <= 5) return false;
+    if (memcmp(name, "__nw_", 5) != 0 &&
+        memcmp(name, "__ne_", 5) != 0 &&
+        memcmp(name, "__nc_", 5) != 0) {
+        return false;
+    }
+    const char* suffix = name + 5;
+    int suffix_len = name_len - 5;
+    return js_is_array_attr_fallback_name(suffix, suffix_len);
+}
+
 static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
     if (!name || name_len < 2 || name[0] != '_' || name[1] != '_') return false;
     if ((name_len >= 6 && memcmp(name, "__get_", 6) == 0) ||
-        (name_len >= 6 && memcmp(name, "__set_", 6) == 0)) {
+        (name_len >= 6 && memcmp(name, "__set_", 6) == 0) ||
+        (name_len >= 5 && memcmp(name, "__nw_", 5) == 0) ||
+        (name_len >= 5 && memcmp(name, "__ne_", 5) == 0) ||
+        (name_len >= 5 && memcmp(name, "__nc_", 5) == 0)) {
         return false;
     }
     return true;
@@ -8467,7 +8493,8 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
+                if (js_is_legacy_array_attr_marker_key(s, slen) ||
+                    js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8779,10 +8806,7 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
     // User code may declare globals such as `__declared__var`; only suppress
     // keys that the runtime itself synthesizes for attributes, symbols, slots,
     // and class/private metadata. A blanket `__*` skip hides real JS properties.
-    if (js_name_starts_with(name, name_len, "__nw_", 5) ||
-        js_name_starts_with(name, name_len, "__ne_", 5) ||
-        js_name_starts_with(name, name_len, "__nc_", 5) ||
-        js_name_starts_with(name, name_len, "__sym_", 6) ||
+    if (js_name_starts_with(name, name_len, "__sym_", 6) ||
         js_name_starts_with(name, name_len, "__private_", 10) ||
         js_name_starts_with(name, name_len, "__brand_", 8) ||
         js_name_starts_with(name, name_len, "__if_", 5)) {
@@ -8985,7 +9009,8 @@ extern "C" Item js_object_keys(Item object) {
                 int slen = (int)e->name->length;
                 // skip engine markers only; user-visible names may also start
                 // with "__" and still must enumerate.
-                if (js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
+                if (js_is_legacy_array_attr_marker_key(s, slen) ||
+                    js_is_engine_internal_enumeration_key(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 // skip non-enumerable (Stage A3: shape-flag-first)
@@ -13146,7 +13171,9 @@ extern "C" Item js_delete_property(Item obj, Item key) {
             bool is_nc = false;
             if (fp == 0) {
                 is_nc = true;
-            } else if (fp == -1) {
+            } else if (fp == -1 &&
+                       obj.map && obj.map->map_kind == MAP_KIND_ARRAY_PROPS &&
+                       js_is_array_attr_fallback_name(str_key->chars, (int)str_key->len)) {
                 char nc_key[256];
                 snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str_key->len, str_key->chars);
                 bool nc_found = false;

@@ -291,6 +291,23 @@ static inline bool js_attrs_name_is_digits(const char* name, int name_len) {
     return true;
 }
 
+static inline bool js_attrs_name_is_length(const char* name, int name_len) {
+    return name && name_len == 6 && memcmp(name, "length", 6) == 0;
+}
+
+static inline bool js_attr_marker_fallback_allowed(Item obj, const char* name, int name_len) {
+    if (!js_attrs_name_is_digits(name, name_len) &&
+        !js_attrs_name_is_length(name, name_len)) {
+        return false;
+    }
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_ARRAY) return true;
+    if (type == LMD_TYPE_MAP && obj.map && obj.map->map_kind == MAP_KIND_ARRAY_PROPS) {
+        return true;
+    }
+    return false;
+}
+
 extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
                                           const char* name, int name_len) {
     // Shape flag is authoritative when it indicates non-enumerable.
@@ -393,7 +410,7 @@ extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int 
 }
 
 // =============================================================================
-// Stage A2.6 / A2-T5: attribute write helpers — shape-first, marker-fallback.
+// Stage A2.6 / A2-T5: attribute write helpers — shape-first, array fallback.
 // =============================================================================
 //
 // Pre-A2-T5: each helper unconditionally wrote a `__nw_/__ne_/__nc_<name>`
@@ -405,12 +422,10 @@ extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int 
 //
 // Post-A2-T5: with `js_shape_entry_update_flags` going through the Map-local
 // TypeMap clone (A2-T1+T2), shape flags are reliably per-Map. Helpers now
-// prefer the shape-flag path. The marker write is retained ONLY as a
-// fallback for the case where no ShapeEntry exists yet for the property
-// (e.g. attribute set ahead of property definition, or array indexed
-// properties without a named shape slot). The marker reader fallback in
-// `js_props_query_*` covers reads of those entries; full marker retirement
-// (T6+) requires migrating those callers to ensure-shape-entry first.
+// prefer the shape-flag path. Marker writes are retained ONLY for the array
+// companion-map transition cases that still have no ShapeEntry for dense
+// numeric indices or the virtual length property. Named properties no longer
+// get a synthetic `__nw_` / `__ne_` / `__nc_` slot when a shape entry is absent.
 extern "C" void js_defprop_set_marker(Item obj, Item key, Item value);
 
 static inline void js_attr_apply_or_marker(Item obj, const char* name, int name_len,
@@ -423,9 +438,9 @@ static inline void js_attr_apply_or_marker(Item obj, const char* name, int name_
         js_shape_entry_update_flags(obj, name, name_len, set_mask, clear_mask);
         return;
     }
-    // Fallback: no shape entry yet — write the legacy marker so the
-    // attribute applies once the property is later defined and the marker
-    // reader fallback in js_props_query_* picks it up.
+    // Temporary fallback: array dense indices and virtual length still use
+    // companion-map markers until the indexed/length phase creates real slots.
+    if (!js_attr_marker_fallback_allowed(obj, name, name_len)) return;
     if (name_len <= 0 || name_len >= 240) return;
     char buf[256];
     int n = snprintf(buf, sizeof(buf), "%s%.*s", prefix5, name_len, name);
@@ -502,9 +517,8 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
     String* ns = it2s(name);
     if (!ns || ns->len == 0) return;
 
-    char buf[256];
     int nl = (int)ns->len;
-    if (nl > (int)sizeof(buf) - 8) return; // defensive: overflow guard
+    if (nl > 248) return; // defensive bound retained for the transition helpers.
 
     // Allocate pair and store under name X. Use ItemNull as the slot for
     // missing getter/setter (per ES spec — absent half is undefined).
@@ -521,14 +535,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         js_shape_entry_update_flags(obj, ns->chars, nl, set_mask, 0);
     }
 
-    // Apply legacy NON_CONFIGURABLE marker if requested (separate magic key
-    // scheme, unrelated to __get_X/__set_X). NON_ENUMERABLE is already encoded
-    // in the shape entry flags above.
-    if (attrs & JSPD_NON_CONFIGURABLE) {
-        int len = snprintf(buf, sizeof(buf), "__nc_%.*s", nl, ns->chars);
-        Item nck = (Item){.item = s2it(heap_create_name(buf, len))};
-        js_property_set(obj, nck, (Item){.item = b2it(BOOL_TRUE)});
-    }
+    // NON_CONFIGURABLE is encoded in the shape entry flags above.
     // JSPD_NON_WRITABLE is meaningless for accessors (ES spec); ignored.
 }
 

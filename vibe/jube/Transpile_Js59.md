@@ -2,7 +2,7 @@
 
 Date: 2026-06-17
 
-Status: proposal with P1 landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
+Status: proposal with P1/P2 landed. Js58 closed the sparse-array work with a clean ES2024 baseline. Js59 finishes the object/property metadata migration described in `doc/dev/js/JS_06_Objects_Properties_Prototypes.md`: retire engine dependence on string-marker metadata (`__nw_` / `__ne_` / `__nc_` / `__get_` / `__set_` / `__class_name__`) and make `ShapeEntry::flags`, `JsAccessorPair`, and `TypeMap::js_class` the only ordinary metadata sources.
 
 This is a correctness and maintainability proposal, not a performance-tuning proposal. The rule for every phase is: no hard-coded workaround, no MIR patch, no parser regeneration, and no broad refactor unless the phase root cause requires it.
 
@@ -18,12 +18,21 @@ Landed on 2026-06-17:
 - `Symbol.prototype.description` is installed through `js_install_native_accessor`, not the old `__get_description` marker.
 - `Object.getOwnPropertyNames` preserves the legacy broad hide for other `__*` metadata but explicitly allows user-visible `__get_` / `__set_` names. This keeps existing bundled-library behavior stable while removing accessor-marker dependence.
 - Added `test/js/props/metadata_accessor_storage.{js,txt}` and documented it in `test/js/props/README.md`.
+- P2 named attribute-marker fallback removal is implemented.
+- `js_attr_set_*` now mutates `ShapeEntry::flags` for named properties; legacy marker fallback remains only for array companion-map numeric index / `length` transition paths.
+- `js_property_set` no longer runs `js_dual_write_marker_flags` for ordinary named objects, so user keys like `__nw_x`, `__ne_x`, and `__nc_x` store ordinary data.
+- Named descriptor synthesis, property-set writability checks, delete non-configurable checks, and ordinary delete no longer read named `__nw_` / `__ne_` / `__nc_` marker slots. Ordinary delete clears shape flags directly before writing the delete sentinel.
+- Built-in named marker writes for Error message/name/stack, class instance `constructor`, native accessor configurability, and `@@unscopables` were replaced with direct attr helpers after the target property exists.
+- `Object.keys` / `Object.getOwnPropertyNames` now allow user-visible `__nw_` / `__ne_` / `__nc_` names on ordinary objects. Array companion-map enumeration still hides only the remaining `__nw_length` / `__ne_5` / `__nc_5` transition metadata.
+- Added `test/js/props/metadata_named_attr_flags.{js,txt}` and `test/js/props/metadata_user_attribute_keys.{js,txt}`.
 
 Verified gates:
 
 ```text
 make build-test
 ./test/test_js_gtest.exe --gtest_filter='*metadata_accessor_storage*:*delete_then_define_accessor*:*delete_accessor_then_define_data*:*proto_accessor_redef_safe*:*super_property_set_finds_inherited_setter*' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*metadata*' --gtest_brief=1
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/*delete*:JavaScriptTests/JsFileTest.Run/*metadata*:JavaScriptTests/JsFileTest.Run/*super_property_set_finds_inherited_setter' --gtest_brief=1
 ./test/test_js_gtest.exe --gtest_brief=1
 make test262-baseline
 ```
@@ -31,12 +40,14 @@ make test262-baseline
 Results:
 
 - Focused JS gtest: 5/5 passed.
-- Full JS gtest: 206/206 passed.
+- Focused metadata shard: 3/3 passed.
+- Focused delete/metadata/super shard: 8/8 passed.
+- Full JS gtest: 210/210 passed.
 - test262 baseline: fully passed 40261 / 40261, failed 0, regressions 0.
 
 Remaining work:
 
-- P2/P3 still own `__nw_` / `__ne_` / `__nc_` retirement for named and array/length attributes.
+- P3 still owns `__nw_` / `__ne_` / `__nc_` retirement for array index and array `length` attributes.
 - P4 still owns `__class_name__` retirement in favor of `TypeMap::js_class` and explicit prototype identity.
 - P5/P6 still own deleted-state cleanup and final documentation.
 
@@ -102,9 +113,9 @@ make test262-baseline
 
 | Fixture | What it pins |
 |---|---|
-| `metadata_user_double_underscore_keys` | User properties named `__get_x`, `__set_x`, `__nw_x`, `__ne_x`, `__nc_x`, and `__class_name__` are ordinary properties when written by user JS. |
-| `metadata_accessor_storage` | Object literal, class, static, computed, numeric, and symbol accessors dispatch through `JsAccessorPair`; no marker keys appear in own names. |
-| `metadata_named_attrs` | `Object.defineProperty` for named data/accessor props survives get/set/delete/redefine/freeze/seal without marker slots. |
+| `metadata_accessor_storage` | User properties named `__get_x` / `__set_x` are ordinary properties, and object/class/static accessors still dispatch through `JsAccessorPair` with no marker keys in own names. |
+| `metadata_user_attribute_keys` | User properties named `__nw_x`, `__ne_x`, and `__nc_x` are ordinary enumerable data properties when written by user JS. |
+| `metadata_named_attr_flags` | `Object.defineProperty` for named data props survives get/set/delete/redefine without marker slots. |
 | `metadata_array_index_attrs` | `Object.defineProperty(arr, "5", ...)` preserves value, writable/enumerable/configurable, delete behavior, and sparse/dense reads. |
 | `metadata_array_length_attrs` | `Object.defineProperty(arr, "length", { writable:false })` blocks growth/shrink correctly without `__nw_length`. |
 | `metadata_class_identity` | Built-in wrappers, errors, promises, typed arrays, streams, DOM/CSS wrappers, and util/assert type checks resolve through `JsClass` or explicit prototype links. |
@@ -160,9 +171,16 @@ Do not fold array `length` or numeric array indices into this phase. They are no
 
 Acceptance:
 
-- `metadata_user_double_underscore_keys`, `metadata_named_attrs`, `property_descriptors`, and the full props fixture set pass.
+- `metadata_user_attribute_keys`, `metadata_named_attr_flags`, property descriptors, and the full props fixture set pass.
 - `Object.getOwnPropertyNames` no longer needs to suppress `__nw_` / `__ne_` / `__nc_` for named objects because engine code no longer creates those slots.
 - Full `./test/test_js_gtest.exe --gtest_brief=1` and `make test262-baseline` pass.
+
+Landed evidence:
+
+- `metadata_named_attr_flags` confirms named descriptor attributes are shape flags and no `__nw_locked` / `__ne_locked` / `__nc_locked` own names are produced.
+- `metadata_user_attribute_keys` confirms user-authored `__nw_` / `__ne_` / `__nc_` names enumerate and do not mutate another property's descriptor bits.
+- Full `./test/test_js_gtest.exe --gtest_brief=1` passed 210/210.
+- `make test262-baseline` passed 40261 / 40261 with failed 0 and regressions 0.
 
 ### P3 - Migrate Array Index And Length Attributes
 

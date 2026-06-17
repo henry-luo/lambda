@@ -317,7 +317,7 @@ let font_class_map = {
     cup: "lm_cmr", cap: "lm_cmr", setminus: "lm_cmr",
     pm: "lm_cmr", mp: "lm_cmr",
     // More AMS symbols
-    emptyset: "lm_ams", varnothing: "lm_ams",
+    emptyset: "lm_cmr", varnothing: "lm_ams",
     beth: "lm_ams", gimel: "lm_ams", daleth: "lm_ams",
     neg: "lm_ams", lnot: "lm_ams",
 

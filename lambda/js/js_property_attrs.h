@@ -180,21 +180,15 @@ bool js_props_obj_query_configurable(Item obj, const char* name, int name_len);
 // Stage A2.6: attribute marker write helpers
 // =============================================================================
 //
-// Centralize the repeated `snprintf("__nw_%.*s") + heap_create_name +
-// js_defprop_set_marker(obj, k, b2it(<bool>))` pattern. Each helper writes
-// the inverse marker (`__nw_X`/`__ne_X`/`__nc_X`) on `obj`:
-//   - `writable=true`  → marker value FALSE  (writable; default)
-//   - `writable=false` → marker value TRUE   (non-writable)
+// Centralize attribute mutation. Each helper sets/clears the inverse
+// ShapeEntry flag for `name`:
+//   - `writable=true`  → clear NON_WRITABLE  (writable; default)
+//   - `writable=false` → set NON_WRITABLE    (non-writable)
 //   - same inverse semantics for enumerable / configurable.
 //
-// All three route through `js_defprop_set_marker`, which handles the
-// MAP / FUNC / ARRAY companion-map dispatch and triggers
-// `js_dual_write_marker_flags` to keep the JSPD_NON_* shape bit in sync.
-//
-// Routes ~30 raw snprintf sites in js_runtime.cpp / js_globals.cpp /
-// js_props.cpp / js_property_attrs.cpp through one chokepoint, eliminating
-// the "one more place forgot to inverse-encode the marker" bug class. Use
-// these everywhere a non-* marker is being written or cleared.
+// Named properties must already have a ShapeEntry. During the array migration,
+// dense numeric indices and the virtual array `length` may still fall back to
+// the temporary companion-map marker slots.
 //
 // Property name length must satisfy 0 < name_len < 240 (defensive bound for
 // the 256-byte stack buffer including the 5-byte prefix and NUL).
@@ -206,8 +200,8 @@ void js_attr_set_configurable(Item obj, const char* name, int name_len, bool con
 // Phase 2a: Universal dual-write hook
 // =============================================================================
 //
-// Inspect a property write `(obj, key, value)`. If `key` is an attribute marker key
-// (`__nw_X` / `__ne_X` / `__nc_X`), extract the
+// Inspect an array companion-map property write `(obj, key, value)`. If `key`
+// is an attribute marker key (`__nw_X` / `__ne_X` / `__nc_X`), extract the
 // underlying property name X and update the corresponding bit on the X
 // ShapeEntry::flags. Truthy `value` sets the bit; tombstoned-or-falsy clears it
 // (except for accessor markers, which are sticky once set — Phase 2 readers
@@ -217,10 +211,8 @@ void js_attr_set_configurable(Item obj, const char* name, int name_len, bool con
 // to know that a flag mutation occurred). No-op (returns false) for any
 // non-marker key, non-string key, or unknown prefix.
 //
-// This is installed at the top of `js_property_set` so that ALL writers —
-// `js_defprop_set_marker`, builtin prototype installers, mark_builder JS
-// construction, etc. — populate flags without
-// requiring per-callsite changes.
+// This is still used only for the array companion-map transition path. Public
+// writes to marker-looking names on ordinary objects are plain JS properties.
 bool js_dual_write_marker_flags(Item obj, Item key, Item value);
 
 // =============================================================================

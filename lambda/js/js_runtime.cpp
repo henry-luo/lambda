@@ -2221,8 +2221,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
             }
             Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
             js_property_set(result, ctor_key, callee);
-            Item ne_ctor_key = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
-            js_property_set(result, ne_ctor_key, (Item){.item = b2it(true)});
+            js_mark_non_enumerable(result, ctor_key);
             js_init_class_instance_fields(callee, result);
             return result;
         }
@@ -2235,8 +2234,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
         js_property_set(obj, ctor_key, callee);
         // Mark constructor as non-enumerable (per ES spec)
-        Item ne_ctor_key = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
-        js_property_set(obj, ne_ctor_key, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(obj, ctor_key);
         // Set __proto__ so instance methods are accessible via prototype chain
         if (construction_proto.item != ItemNull.item && get_type_id(construction_proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, construction_proto);
@@ -4320,10 +4318,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item lk = (Item){.item = s2it(heap_create_name("length", 6))};
                             js_property_set(fn->prototype, lk, js_make_number(0));
                             // ES spec: length is {writable:true, enumerable:false, configurable:false}
-                            Item ne_k = (Item){.item = s2it(heap_create_name("__ne_length", 11))};
-                            js_property_set(fn->prototype, ne_k, (Item){.item = b2it(true)});
-                            Item nc_k = (Item){.item = s2it(heap_create_name("__nc_length", 11))};
-                            js_property_set(fn->prototype, nc_k, (Item){.item = b2it(true)});
+                            js_mark_non_enumerable(fn->prototype, lk);
+                            js_mark_non_configurable(fn->prototype, lk);
                             // ES spec 23.1.3.34: Array.prototype[@@unscopables]
                             // {writable:false, enumerable:false, configurable:true}
                             // Value: object with boolean true for each scoped-out method
@@ -4342,9 +4338,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item us_k = (Item){.item = s2it(heap_create_name("__sym_11", 8))};
                             js_property_set(fn->prototype, us_k, unscopal_val);
                             js_mark_non_enumerable(fn->prototype, us_k);
-                            // mark as non-writable: __nw___sym_11
-                            Item nw_k = (Item){.item = s2it(heap_create_name("__nw___sym_11", 13))};
-                            js_property_set(fn->prototype, nw_k, (Item){.item = b2it(true)});
+                            js_mark_non_writable(fn->prototype, us_k);
                         }
                         // Boolean.prototype.[[BooleanData]] = false (ES spec 20.3.4)
                         if (nl == 7 && strncmp(nm, "Boolean", 7) == 0) {
@@ -5179,6 +5173,23 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     return true;
 }
 
+static inline bool js_runtime_array_attr_marker_name(Map* map, const char* name, int name_len) {
+    if (!map || map->map_kind != MAP_KIND_ARRAY_PROPS || !name || name_len <= 0) return false;
+    if (name_len == 6 && memcmp(name, "length", 6) == 0) return true;
+    int64_t index = -1;
+    return js_array_parse_index_name(name, name_len, &index);
+}
+
+static inline bool js_runtime_array_attr_marker_key(Map* map, const char* name, int name_len) {
+    if (!map || map->map_kind != MAP_KIND_ARRAY_PROPS || !name || name_len <= 5) return false;
+    if (memcmp(name, "__nw_", 5) != 0 &&
+        memcmp(name, "__ne_", 5) != 0 &&
+        memcmp(name, "__nc_", 5) != 0) {
+        return false;
+    }
+    return js_runtime_array_attr_marker_name(map, name + 5, name_len - 5);
+}
+
 extern "C" Item js_property_set(Item object, Item key, Item value) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_PROPERTY_SET);
     // Fast path: result[i] = v where i is an existing own dense element of a
@@ -5205,13 +5216,18 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         }
     }
 
-    // Phase 2a dual-write: if `key` is an attribute marker key
-    // (__nw_X / __ne_X / __nc_X), mirror the information into ShapeEntry::flags on the
-    // underlying property X. Idempotent and safe for any code path. The legacy
-    // magic-key write below remains authoritative until Phase 2b reader migration.
-    js_dual_write_marker_flags(object, key, value);
-
     TypeId type = get_type_id(object);
+    // Temporary array transition hook: only array companion-map marker writes
+    // may mirror into indexed/length attributes. On ordinary objects, a user
+    // key named "__nw_x" / "__ne_x" / "__nc_x" is now plain data.
+    if (type == LMD_TYPE_MAP && get_type_id(key) == LMD_TYPE_STRING) {
+        String* marker_key = it2s(key);
+        if (marker_key && js_runtime_array_attr_marker_key(object.map,
+                marker_key->chars, (int)marker_key->len)) {
+            js_dual_write_marker_flags(object, key, value);
+        }
+    }
+
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
     }
@@ -5652,7 +5668,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 }
             }
         }
-        // v16: Enforce non-writable properties via __nw_<name> marker.
+        // v16: Enforce non-writable properties via shape flags.
         // Phase 4: skip when js_skip_accessor_dispatch is set — that flag indicates
         // the caller is installing engine-internal accessor storage (e.g.
         // js_define_accessor_partial writing a JsAccessorPair* to the slot during
@@ -5662,19 +5678,18 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (get_type_id(key) == LMD_TYPE_STRING && !js_skip_accessor_dispatch) {
             String* str_key = it2s(key);
             if (str_key && str_key->len > 0 && str_key->len < 200 &&
-                !(str_key->len >= 5 && strncmp(str_key->chars, "__nw_", 5) == 0) &&
-                !(str_key->len >= 5 && strncmp(str_key->chars, "__nc_", 5) == 0) &&
-                !(str_key->len >= 5 && strncmp(str_key->chars, "__ne_", 5) == 0)) {
+                !js_runtime_array_attr_marker_key(m, str_key->chars, (int)str_key->len)) {
                 // Phase 2b fast path: consult ShapeEntry::flags first.
-                // 1 → entry exists & writable → __nw_X provably absent on this map; skip probe.
+                // 1 → entry exists & writable → allow write.
                 // 0 → entry exists & non-writable → throw immediately.
-                // -1 → no entry on this map → fall through to legacy probe.
+                // -1 → no entry on this map; only array companion index/length
+                //      names still use the temporary legacy marker probe.
                 int fp = js_prop_attrs_fast_path(object, str_key->chars, (int)str_key->len, JSPD_NON_WRITABLE);
                 if (fp == 0) {
                     js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value;
                 }
-                if (fp == -1) {
+                if (fp == -1 && js_runtime_array_attr_marker_name(m, str_key->chars, (int)str_key->len)) {
                     char nw_key[256];
                     snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
                     bool nw_found = false;
@@ -26244,7 +26259,7 @@ extern "C" Item js_to_object(Item value) {
     return js_new_object();
 }
 
-// Mark a property as non-enumerable by setting __ne_<name> marker
+// Mark a property as non-enumerable through ShapeEntry flags.
 extern "C" void js_mark_non_enumerable(Item object, Item name) {
     TypeId tid = get_type_id(object);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
@@ -26253,7 +26268,7 @@ extern "C" void js_mark_non_enumerable(Item object, Item name) {
     js_attr_set_enumerable(object, str->chars, (int)str->len, /*enumerable=*/false);
 }
 
-// Mark a property as non-writable by setting __nw_<name> marker
+// Mark a property as non-writable through ShapeEntry flags.
 extern "C" void js_mark_non_writable(Item object, Item name) {
     TypeId tid = get_type_id(object);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;
@@ -26269,10 +26284,7 @@ extern "C" void js_mark_private_method_non_writable(Item object, Item name) {
     js_mark_non_writable(object, name);
 }
 
-// Mark a property as non-configurable by setting __nc_<name> marker.
-// Stage A4: writer-side API symmetry with js_mark_non_writable /
-// js_mark_non_enumerable. Dual-write at js_property_set top mirrors the
-// JSPD_NON_CONFIGURABLE bit onto the ShapeEntry::flags.
+// Mark a property as non-configurable through ShapeEntry flags.
 extern "C" void js_mark_non_configurable(Item object, Item name) {
     TypeId tid = get_type_id(object);
     if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_FUNC && tid != LMD_TYPE_ARRAY) return;

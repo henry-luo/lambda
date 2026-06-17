@@ -701,11 +701,22 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
         let base_depth = base_depth_render + 0.005
         // numer wrapper height: when numer is a plain low-letter word (max
         // height ~ 0.43-0.61, no descender) use its actual content height so
-        // MathLive's compact 0.62em emit matches. Tall numers (uppercase or
-        // with t/f/k ascenders) take the hardcoded 0.65 default.
+        // MathLive's compact 0.62em emit matches. Tall numers without
+        // descenders (like `n!` h=0.7) bump frac_height to 1.2. Other
+        // cases take the hardcoded 0.65/1.15 defaults.
+        // numer wrapper height: when numer has no descender, use its actual
+        // content height (CEIL@2) rather than the hardcoded 0.65 default.
+        // Operator-name numers (`\sin x` h=0.67) and digit-only numers (`2`
+        // h=0.65) both get their true heights; full-letter words still use
+        // 0.65 to match MathLive's default fraction sizing.
         let numer_h = if (numer_box.depth < 0.005 and numer_box.height < 0.65 and numer_box.height > 0.0)
-            ceil2(numer_box.height) else 0.65
-        let frac_height = if (numer_h < 0.65) 1.12 else 1.15
+            ceil2(numer_box.height)
+            else if (numer_box.depth < 0.005 and numer_box.height > 0.65 and numer_box.height <= 0.68)
+                ceil2(numer_box.height)
+            else 0.65
+        let frac_height = if (numer_h < 0.65) 1.12
+            else if (numer_h > 0.65 and numer_h <= 0.68) 1.17
+            else 1.15
         let frac_top_numer = -3.5
         let base_total = if (has_descender) frac_height + base_depth_render
             else frac_height + base_depth_render + 0.01
@@ -775,7 +786,14 @@ fn script_fraction_descender_child_height(child_box) {
 
 fn text_fraction_numer_child_height(child_box) {
     if (script_fraction_has_descender(child_box)) {
-        if (script_fraction_has_digit(child_box)) 0.84 else 0.78
+        // When the numerator has a clearly tall non-operator atom (h >= 0.7
+        // from a letter like `\partial` paired with a descender like `f`),
+        // prefer the full extent (rounded up). Compound numerators with
+        // operator signs use Lambda's 0.69em `+`/`-` heuristic and would
+        // otherwise trip this branch — exclude them by requiring h > 0.69.
+        let full = ceil2(child_box.height + child_box.depth)
+        if (child_box.height > 0.69 and full > 0.85) full
+        else if (script_fraction_has_digit(child_box)) 0.84 else 0.78
     } else 0.73
 }
 
@@ -837,7 +855,10 @@ fn text_has_descender(text, i) {
     if (i >= len(text)) false
     else {
         let ch = slice(text, i, i + 1)
+        // f in cmmi italic has depth 0.19444 — counted as a descender for
+        // fraction sizing so `\frac{\partial f}{...}` emits a taller wrapper.
         ch == "g" or ch == "j" or ch == "p" or ch == "q" or ch == "y" or
+            ch == "f" or
             text_has_descender(text, i + 1)
     }
 }
