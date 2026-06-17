@@ -465,9 +465,28 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
     (void)evcon;
     if (intent && (intent->type == INPUT_INTENT_FORMAT_BOLD ||
                    intent->type == INPUT_INTENT_FORMAT_ITALIC ||
-                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE)) {
+                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE ||
+                   intent->type == INPUT_INTENT_FORMAT_STRIKETHROUGH ||
+                   intent->type == INPUT_INTENT_FORMAT_SUBSCRIPT ||
+                   intent->type == INPUT_INTENT_FORMAT_SUPERSCRIPT)) {
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
+    }
+    if (intent && intent->type == INPUT_INTENT_FORMAT_BLOCK) {
+        return editing_rich_default_format_block(state, surface, intent,
+                                                 nullptr, nullptr);
+    }
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_JUSTIFY_LEFT ||
+                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_CENTER ||
+                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_RIGHT ||
+                   intent->type == INPUT_INTENT_FORMAT_JUSTIFY_FULL)) {
+        return editing_rich_default_justify(state, surface, intent,
+                                            nullptr, nullptr);
+    }
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_ORDERED_LIST ||
+                   intent->type == INPUT_INTENT_FORMAT_UNORDERED_LIST)) {
+        return editing_rich_default_list(state, surface, intent,
+                                         nullptr, nullptr);
     }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
@@ -580,12 +599,27 @@ static bool js_dom_exec_command_is_inline_format(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "bold") == 0 ||
         strcasecmp(cmd, "italic") == 0 ||
-        strcasecmp(cmd, "underline") == 0;
+        strcasecmp(cmd, "underline") == 0 ||
+        strcasecmp(cmd, "strikethrough") == 0 ||
+        strcasecmp(cmd, "subscript") == 0 ||
+        strcasecmp(cmd, "superscript") == 0;
+}
+
+static bool js_dom_exec_command_is_block_structure(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "formatBlock") == 0 ||
+        strcasecmp(cmd, "insertOrderedList") == 0 ||
+        strcasecmp(cmd, "insertUnorderedList") == 0 ||
+        strcasecmp(cmd, "justifyLeft") == 0 ||
+        strcasecmp(cmd, "justifyCenter") == 0 ||
+        strcasecmp(cmd, "justifyRight") == 0 ||
+        strcasecmp(cmd, "justifyFull") == 0;
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
-        js_dom_exec_command_is_inline_format(cmd);
+        js_dom_exec_command_is_inline_format(cmd) ||
+        js_dom_exec_command_is_block_structure(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -641,6 +675,47 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "underline") == 0) {
         out->type = INPUT_INTENT_FORMAT_UNDERLINE;
+        return true;
+    }
+    if (strcasecmp(cmd, "strikethrough") == 0) {
+        out->type = INPUT_INTENT_FORMAT_STRIKETHROUGH;
+        return true;
+    }
+    if (strcasecmp(cmd, "subscript") == 0) {
+        out->type = INPUT_INTENT_FORMAT_SUBSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "superscript") == 0) {
+        out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "formatBlock") == 0) {
+        out->type = INPUT_INTENT_FORMAT_BLOCK;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "insertOrderedList") == 0) {
+        out->type = INPUT_INTENT_FORMAT_ORDERED_LIST;
+        return true;
+    }
+    if (strcasecmp(cmd, "insertUnorderedList") == 0) {
+        out->type = INPUT_INTENT_FORMAT_UNORDERED_LIST;
+        return true;
+    }
+    if (strcasecmp(cmd, "justifyLeft") == 0) {
+        out->type = INPUT_INTENT_FORMAT_JUSTIFY_LEFT;
+        return true;
+    }
+    if (strcasecmp(cmd, "justifyCenter") == 0) {
+        out->type = INPUT_INTENT_FORMAT_JUSTIFY_CENTER;
+        return true;
+    }
+    if (strcasecmp(cmd, "justifyRight") == 0) {
+        out->type = INPUT_INTENT_FORMAT_JUSTIFY_RIGHT;
+        return true;
+    }
+    if (strcasecmp(cmd, "justifyFull") == 0) {
+        out->type = INPUT_INTENT_FORMAT_JUSTIFY_FULL;
         return true;
     }
     return false;
@@ -730,7 +805,34 @@ static uintptr_t js_dom_exec_command_inline_tag(const char* cmd) {
     if (strcasecmp(cmd, "bold") == 0) return HTM_TAG_B;
     if (strcasecmp(cmd, "italic") == 0) return HTM_TAG_I;
     if (strcasecmp(cmd, "underline") == 0) return HTM_TAG_U;
+    if (strcasecmp(cmd, "strikethrough") == 0) return HTM_TAG_S;
+    if (strcasecmp(cmd, "subscript") == 0) return HTM_TAG_SUB;
+    if (strcasecmp(cmd, "superscript") == 0) return HTM_TAG_SUP;
     return 0;
+}
+
+static bool js_dom_exec_command_inline_tag_matches(const char* cmd,
+                                                   uintptr_t tag) {
+    if (!cmd || !tag) return false;
+    if (strcasecmp(cmd, "bold") == 0) {
+        return tag == HTM_TAG_B || tag == HTM_TAG_STRONG;
+    }
+    if (strcasecmp(cmd, "italic") == 0) {
+        return tag == HTM_TAG_I || tag == HTM_TAG_EM;
+    }
+    if (strcasecmp(cmd, "underline") == 0) {
+        return tag == HTM_TAG_U;
+    }
+    if (strcasecmp(cmd, "strikethrough") == 0) {
+        return tag == HTM_TAG_S || tag == HTM_TAG_STRIKE;
+    }
+    if (strcasecmp(cmd, "subscript") == 0) {
+        return tag == HTM_TAG_SUB;
+    }
+    if (strcasecmp(cmd, "superscript") == 0) {
+        return tag == HTM_TAG_SUP;
+    }
+    return false;
 }
 
 static bool js_dom_exec_command_query_inline_state(const char* cmd) {
@@ -756,9 +858,114 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur->is_element()) {
             DomElement* elem = cur->as_element();
-            if (elem && elem->tag() == tag) return true;
+            if (elem && js_dom_exec_command_inline_tag_matches(cmd, elem->tag())) {
+                return true;
+            }
         }
         if (cur == static_cast<DomNode*>(surface.owner)) break;
+    }
+    return false;
+}
+
+static bool js_dom_exec_command_block_tag(uintptr_t tag) {
+    return tag == HTM_TAG_P ||
+        tag == HTM_TAG_DIV ||
+        tag == HTM_TAG_H1 ||
+        tag == HTM_TAG_H2 ||
+        tag == HTM_TAG_H3 ||
+        tag == HTM_TAG_H4 ||
+        tag == HTM_TAG_H5 ||
+        tag == HTM_TAG_H6 ||
+        tag == HTM_TAG_BLOCKQUOTE ||
+        tag == HTM_TAG_PRE;
+}
+
+static const char* js_dom_exec_command_justify_value(const char* cmd) {
+    if (!cmd) return nullptr;
+    if (strcasecmp(cmd, "justifyLeft") == 0) return "left";
+    if (strcasecmp(cmd, "justifyCenter") == 0) return "center";
+    if (strcasecmp(cmd, "justifyRight") == 0) return "right";
+    if (strcasecmp(cmd, "justifyFull") == 0) return "justify";
+    return nullptr;
+}
+
+static DomElement* js_dom_exec_command_query_block_element(void) {
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return nullptr;
+    }
+
+    DomBoundary boundary =
+        dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return nullptr;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return nullptr;
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem && js_dom_exec_command_block_tag(elem->tag())) {
+            return elem;
+        }
+    }
+    return nullptr;
+}
+
+static const char* js_dom_exec_command_query_format_block_value(void) {
+    DomElement* elem = js_dom_exec_command_query_block_element();
+    return elem && elem->tag_name ? elem->tag_name : "";
+}
+
+static bool js_dom_exec_command_query_justify_state(const char* cmd) {
+    const char* expected = js_dom_exec_command_justify_value(cmd);
+    DomElement* elem = js_dom_exec_command_query_block_element();
+    if (!expected || !elem) return false;
+    const char* align = dom_element_get_attribute(elem, "align");
+    return align && strcasecmp(align, expected) == 0;
+}
+
+static uintptr_t js_dom_exec_command_list_tag(const char* cmd) {
+    if (!cmd) return 0;
+    if (strcasecmp(cmd, "insertOrderedList") == 0) return HTM_TAG_OL;
+    if (strcasecmp(cmd, "insertUnorderedList") == 0) return HTM_TAG_UL;
+    return 0;
+}
+
+static bool js_dom_exec_command_query_list_state(const char* cmd) {
+    uintptr_t list_tag = js_dom_exec_command_list_tag(cmd);
+    if (!list_tag) return false;
+
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return false;
+    }
+
+    DomBoundary boundary =
+        dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem && elem->tag() == list_tag) return true;
     }
     return false;
 }
@@ -4143,9 +4350,22 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             js_dom_exec_command_is_inline_format(cmd)) {
             return (Item){.item = b2it(js_dom_exec_command_query_inline_state(cmd))};
         }
+        if (strcmp(method, "queryCommandState") == 0 &&
+            js_dom_exec_command_justify_value(cmd)) {
+            return (Item){.item = b2it(js_dom_exec_command_query_justify_state(cmd))};
+        }
+        if (strcmp(method, "queryCommandState") == 0 &&
+            js_dom_exec_command_list_tag(cmd)) {
+            return (Item){.item = b2it(js_dom_exec_command_query_list_state(cmd))};
+        }
         return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandValue") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (cmd && strcasecmp(cmd, "formatBlock") == 0) {
+            const char* value = js_dom_exec_command_query_format_block_value();
+            return (Item){.item = s2it(heap_create_name(value))};
+        }
         return (Item){.item = s2it(heap_create_name(""))};
     }
     // document.contains(node) — true iff node is document or a descendant.

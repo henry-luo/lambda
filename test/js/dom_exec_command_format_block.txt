@@ -1,0 +1,3 @@
+formatBlock value=h1 supported=true enabled=true before=p ok=true after=h1 html=<h1>abc</h1><p>def</p> expected=true valueExpected=true
+formatBlock value=<blockquote> supported=true enabled=true before=div ok=true after=blockquote html=<blockquote>abc</blockquote> expected=true valueExpected=true
+formatBlock unsupported=span ok=false html=<p>abc</p> expected=true
