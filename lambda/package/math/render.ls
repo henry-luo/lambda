@@ -158,7 +158,10 @@ fn render_relation(node, context) {
         let unicode = sym.lookup_symbol(text)
         if (unicode != null) unicode else text
     } else text
-    box.text_box(display, css.CMR, "mrel")
+    // ASCII `!` is mclose in TeX math, not mrel — `n!` should typeset
+    // without thickspace between the letter and the factorial.
+    let atom_type = if (text == "!") "mclose" else "mrel"
+    box.text_box(display, css.CMR, atom_type)
 }
 
 fn render_punct(node, context) {
@@ -261,6 +264,8 @@ fn render_command(node, context) {
         render_pmod_command(node, context)
     } else if (name_str == "bmod") {
         render_bmod_command(node, context)
+    } else if (name_str == "boldsymbol") {
+        render_boldsymbol_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -647,6 +652,18 @@ fn render_bmod_command(node, context) {
     } else mod_box
 }
 
+// `\boldsymbol{...}` renders the body in mathbf font — handle by deriving a
+// new context with font="mathbf" and rendering the argument under it. The
+// font-class infrastructure already maps `mathbf` → `lm_mathbf`; letters and
+// Greek pick up the right class via `font_class(context.font)`.
+fn render_boldsymbol_command(node, context) {
+    if (len(node) == 0) box.text_box("", null, "mord")
+    else {
+        let new_ctx = ctx.derive(context, {font: "mathbf"})
+        render_node(node[0], new_ctx)
+    }
+}
+
 fn render_pdiff(node, context) {
     let n = len(node)
     let func_node = if (n > 0) node[0] else null
@@ -673,7 +690,14 @@ fn symbol_font_class(cmd_text, context) {
     // Centralized lookup in symbols.font_class_map; falls back to the
     // current rendering context's font (typically lm_mathit) when the
     // command is not registered.
-    sym.font_class_of(name_str) or css.font_class(context.font)
+    let mapped = sym.font_class_of(name_str)
+    // Bold context override: `\boldsymbol{...}` and `\mathbf{...}` should
+    // swap any `lm_mathit` in a mapped class for `lm_mathbf` so Greek and
+    // letters render bold under the bold scope. Preserves marker classes
+    // like `lcGreek` and `lm_it`.
+    if (context.font == "mathbf" and mapped != null and contains(mapped, "lm_mathit"))
+        replace(mapped, "lm_mathit", "lm_mathbf")
+    else (mapped or css.font_class(context.font))
 }
 
 fn render_colorbox_content(content_arg, context) {
@@ -1332,7 +1356,8 @@ fn accent_box(el, h, d, w) => {
     width: w,
     type: "mord",
     italic: 0.0,
-    skew: 0.0
+    skew: 0.0,
+    no_left_bin_space: true
 }
 
 fn accent_display_text(key) {

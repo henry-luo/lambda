@@ -1013,8 +1013,17 @@ Short-denom fraction uses denom_box.height    +3   →  684
 Short-numer fraction uses numer_box.height    +3   →  687
 "..." multi-char repeated-char metric         +2   →  689
 Large-op sup_only vlist_h = sup_child + 1.35  +1   →  690
+\left(...)^2 — tall_base check via minner     +1   →  694
+ASCII `!` mclose (not mrel)                   +1   →  695
+\bigoplus/\bigotimes/\bigcup short descent    +0   →  695 (improved findings)
+\boldsymbol + mathbf Greek font cascade       +0   →  695
+\frac{\partial f}{\partial x} descender(f)    +3   →  698
+\mathbf{v/w} italic via cmr metric            +1   →  699
+ı/ȷ height via "lm_cmr lm_it" → mathit font   +2   →  701
+\frac{\sin x}{x} 0.67em numer wrapper         +0   →  701 (improved)
+Digit-string "3.14" → cmr per-char height     +6   →  707
 ─────────────────────────────────────────────────────
-Final achieved                              690 / 921  (74.9%)
+Final achieved                              707 / 921  (76.8%)
 Upstream baseline                           206 / 206  (100%)*
 ```
 
