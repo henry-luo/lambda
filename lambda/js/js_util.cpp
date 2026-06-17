@@ -572,6 +572,92 @@ extern "C" Item js_util_promisify(Item fn_item) {
 }
 
 // =============================================================================
+// util.callbackify(original) — Promise API to callback-last wrapper
+// =============================================================================
+
+static Item js_util_callbackify_make_falsy_error(Item reason) {
+    Item error = js_new_error(make_string_item("Promise was rejected with a falsy value"));
+    js_property_set(error, make_string_item("code"), make_string_item("ERR_FALSY_VALUE_REJECTION"));
+    js_property_set(error, make_string_item("reason"), reason);
+    return error;
+}
+
+static Item js_util_callbackify_on_fulfilled(Item env_item, Item value) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item callback = env[0];
+    Item callback_args[2] = {ItemNull, value};
+    js_call_function(callback, make_js_undefined(), callback_args, 2);
+    return make_js_undefined();
+}
+
+static Item js_util_callbackify_on_rejected(Item env_item, Item reason) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item callback = env[0];
+    Item error = js_is_truthy(reason) ? reason : js_util_callbackify_make_falsy_error(reason);
+    Item callback_args[1] = {error};
+    js_call_function(callback, make_js_undefined(), callback_args, 1);
+    return make_js_undefined();
+}
+
+static Item js_util_callbackified_function(Item env_item, Item rest_args) {
+    Item* env = (Item*)(uintptr_t)env_item.item;
+    if (!env) return make_js_undefined();
+
+    Item original = env[0];
+    int64_t argc64 = js_array_length(rest_args);
+    if (argc64 <= 0) {
+        return js_throw_invalid_arg_type("callback", "function", make_js_undefined());
+    }
+
+    Item callback = js_array_get_int(rest_args, argc64 - 1);
+    if (get_type_id(callback) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("callback", "function", callback);
+    }
+
+    int argc = (int)argc64 - 1;
+    Item* call_args = argc > 0 ? (Item*)alloca((size_t)argc * sizeof(Item)) : NULL;
+    for (int i = 0; i < argc; i++) {
+        call_args[i] = js_array_get_int(rest_args, i);
+    }
+
+    Item result = js_call_function(original, js_get_this(), call_args, argc);
+    Item promise = ItemNull;
+    if (js_check_exception()) {
+        Item error = js_clear_exception();
+        promise = js_promise_reject(error);
+    } else {
+        promise = js_promise_resolve(result);
+        if (js_check_exception()) {
+            Item error = js_clear_exception();
+            promise = js_promise_reject(error);
+        }
+    }
+
+    Item* cb_env = js_alloc_env(1);
+    cb_env[0] = callback;
+    Item on_fulfilled = js_new_closure((void*)js_util_callbackify_on_fulfilled, 1, cb_env, 1);
+    Item on_rejected = js_new_closure((void*)js_util_callbackify_on_rejected, 1, cb_env, 1);
+    js_promise_then(promise, on_fulfilled, on_rejected);
+    return make_js_undefined();
+}
+
+extern "C" Item js_util_callbackify(Item fn) {
+    if (get_type_id(fn) != LMD_TYPE_FUNC) {
+        return js_throw_invalid_arg_type("original", "function", fn);
+    }
+
+    Item* env = js_alloc_env(1);
+    env[0] = fn;
+    Item wrapper = js_new_closure((void*)js_util_callbackified_function, -1, env, 1);
+    js_set_function_name(wrapper, make_string_item("callbackified"));
+    return wrapper;
+}
+
+// =============================================================================
 // util.deprecate(fn, msg) — returns fn (warning stub)
 // =============================================================================
 
@@ -723,14 +809,6 @@ extern "C" Item js_util_isDeepStrictEqual(Item a, Item b) {
     }
 
     return (Item){.item = b2it(false)};
-}
-
-// util.callbackify(fn) — convert async/promise fn to callback style
-// simplified: wraps fn so the last arg is a callback called with (err, result)
-extern "C" Item js_util_callbackify(Item fn) {
-    // return fn unchanged (simplified stub — proper impl needs closure wrapping)
-    if (get_type_id(fn) != LMD_TYPE_FUNC) return fn;
-    return fn;
 }
 
 // additional util.types.* functions
