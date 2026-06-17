@@ -956,6 +956,160 @@ bool editing_rich_default_format(DocState* state,
     return true;
 }
 
+static DomElement* rich_create_native_element(DomDocument* doc,
+                                              const char* tag_name) {
+    if (!doc || !doc->input || !tag_name) return nullptr;
+    MarkBuilder builder(doc->input);
+    Item item = builder.createElement(tag_name);
+    if (get_type_id(item) != LMD_TYPE_ELEMENT || !item.element) {
+        log_debug("rich_create_native_element: failed to create <%s>", tag_name);
+        return nullptr;
+    }
+    return dom_element_create(doc, tag_name, item.element);
+}
+
+static DomElement* rich_nearest_anchor(const EditingSurface* surface,
+                                       DomRange* range) {
+    if (!surface || !surface->owner || !range) return nullptr;
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    DomBoundary boundary = range->end.node ? range->end : range->start;
+    DomNode* node = boundary.node;
+    if (!node) return nullptr;
+
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(cur);
+        if (elem && elem->tag() == HTM_TAG_A) return elem;
+    }
+    return nullptr;
+}
+
+static bool rich_unwrap_anchor(DocState* state,
+                               const EditingSurface* surface,
+                               const EditingIntent* intent,
+                               DomElement* anchor,
+                               DomRange* range,
+                               EditingRichMutationLogFn log_mutation,
+                               void* log_user) {
+    if (!state || !surface || !intent || !anchor || !range ||
+        !anchor->parent || !anchor->parent->is_element()) {
+        return false;
+    }
+
+    DomNode* anchor_node = static_cast<DomNode*>(anchor);
+    DomNode* parent_node = anchor_node->parent;
+    uint32_t anchor_idx = dom_node_child_index(anchor_node);
+    if (anchor_idx == (uint32_t)-1) return false;
+
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    DomNode* child = anchor->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!anchor_node->remove_child(child)) return false;
+        if (!parent_node->insert_before(child, anchor_node)) return false;
+        dom_mutation_post_insert(state, parent_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, anchor_node);
+    if (!parent_node->remove_child(anchor_node)) return false;
+
+    if (restore_start.node == anchor_node) {
+        restore_start.node = parent_node;
+        restore_start.offset = anchor_idx;
+    }
+    if (restore_end.node == anchor_node) {
+        restore_end.node = parent_node;
+        restore_end.offset = anchor_idx;
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { parent_node, anchor_idx };
+        DomBoundary end = { parent_node, anchor_idx };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_link: unlink selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "unlink",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_link: unwrapped <a>");
+    return true;
+}
+
+bool editing_rich_default_link(DocState* state,
+                               const EditingSurface* surface,
+                               const EditingIntent* intent,
+                               EditingRichMutationLogFn log_mutation,
+                               void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    if (intent->type == INPUT_INTENT_FORMAT_UNLINK) {
+        DomElement* anchor = rich_nearest_anchor(surface, range);
+        if (!anchor) {
+            log_debug("editing_rich_default_link: no anchor to unlink");
+            return false;
+        }
+        return rich_unwrap_anchor(state, surface, intent, anchor, range,
+                                  log_mutation, log_user);
+    }
+
+    if (intent->type != INPUT_INTENT_INSERT_LINK ||
+        !intent->data || !intent->data[0] || dom_range_collapsed(range)) {
+        return false;
+    }
+
+    DomElement* anchor =
+        rich_create_native_element(surface->owner->doc, "a");
+    if (!anchor) return false;
+    if (!dom_element_set_attribute(anchor, "href", intent->data)) {
+        log_debug("editing_rich_default_link: failed to set href");
+        return false;
+    }
+
+    const char* exc = nullptr;
+    if (!dom_range_surround_contents(range, static_cast<DomNode*>(anchor), &exc)) {
+        log_debug("editing_rich_default_link: surround <a> rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    DomBoundary start = { static_cast<DomNode*>(anchor), 0 };
+    DomBoundary end = {
+        static_cast<DomNode*>(anchor),
+        dom_node_boundary_length(static_cast<DomNode*>(anchor))
+    };
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_link: selection restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "create-link",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_link: wrapped selection in <a>");
+    return true;
+}
+
 static bool rich_format_block_supported_tag(const char* tag_name) {
     if (!tag_name || !tag_name[0]) return false;
     return strcasecmp(tag_name, "p") == 0 ||

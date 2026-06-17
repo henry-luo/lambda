@@ -472,6 +472,11 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_INSERT_LINK ||
+                   intent->type == INPUT_INTENT_FORMAT_UNLINK)) {
+        return editing_rich_default_link(state, surface, intent,
+                                         nullptr, nullptr);
+    }
     if (intent && intent->type == INPUT_INTENT_FORMAT_BLOCK) {
         return editing_rich_default_format_block(state, surface, intent,
                                                  nullptr, nullptr);
@@ -623,10 +628,17 @@ static bool js_dom_exec_command_is_block_structure(const char* cmd) {
         strcasecmp(cmd, "justifyFull") == 0;
 }
 
+static bool js_dom_exec_command_is_link_object(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "createLink") == 0 ||
+        strcasecmp(cmd, "unlink") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
-        js_dom_exec_command_is_block_structure(cmd);
+        js_dom_exec_command_is_block_structure(cmd) ||
+        js_dom_exec_command_is_link_object(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
@@ -694,6 +706,15 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "superscript") == 0) {
         out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "createLink") == 0) {
+        out->type = INPUT_INTENT_INSERT_LINK;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "unlink") == 0) {
+        out->type = INPUT_INTENT_FORMAT_UNLINK;
         return true;
     }
     if (strcasecmp(cmd, "formatBlock") == 0) {
