@@ -754,6 +754,36 @@ These gaps come from Lambda's hardcoded per-branch spec table (each branch retur
 
 The post-mortem confirms the proposal's estimate: a faithful Phase 2b fraction port is ~80–140 hours and likely the single biggest unlock for the remaining 340 failures.
 
+### Phase 2b — per-branch fixture and incremental tuning
+
+A subsequent attempt at the full Phase 2b port took the proposal's recommended approach: build a per-branch test fixture, then replace branches one at a time gated on the fixture. The fixture lives at [test/lambda/mathlive/fraction_branch_fixture.mjs](test/lambda/mathlive/fraction_branch_fixture.mjs) — 27 LaTeX expressions, each chosen to exercise a unique dispatch path through `frac_bar_spec()`.
+
+**Starting state**: 8 / 27 branches pass (the cases tuned during Phase 2a structural work).
+
+**Branches reworked** in the session:
+- B19 (compound denom + numer < 0.75): added `numer_is_tall` detection — `\frac{abc}{def}` now correct (frac.height bumps to 1.20 for tall numerator).
+- B21 (denom < 0.75 + numer ≥ 0.7): added `numer_is_tall` height bump (1.15 → 1.20), denom_child_height derives from `ceil2(denom.height + denom.depth)` rather than hardcoded 0.65 for tall numerators.
+- B23 (tall numer, no descender): corrected from 1.20/0.69 to 1.19/0.68 (MathLive emits 1.19 for cmmi tall-body atoms; the prior 1.20 was off by 0.01em).
+- Default branch: descender-aware depth/depth_holder/render_total split, with `+0.01` bump only when denom has no descender (matches MathLive's CEIL@2 vs prior hardcoded 1.84).
+
+**Result**: 12 / 27 branches pass (+4), and **+9 corpus tests pass (581 → 590)**.
+
+**Subsequent session extended Phase 2b to script/limit derivations**:
+- `sub_child_height` in [scripts.ls](lambda/package/math/atoms/scripts.ls) `render_large_op_limits_vlist` now derives from `ceil2(sub_box.height_raw * 0.7)` — matches MathLive's emission rule for the script-style sub wrapper.
+- `depth_holder` and `box_depth` now derive from `sub_child_height + offset` (offset varies by has-descender / both-limits vs sub-only).
+- Added support for SUB-ONLY and SUP-ONLY big-op limits (e.g., `\sum_n a_n`) — Lambda previously dispatched these to a flat vbox structure; now routes through `render_large_op_limits_vlist` with conditional sub/sup span emission, matching MathLive's stacked-vlist output for inline sum with single limit.
+- Integral inline-script (`render_integral_inline_scripts`): `sup_inner_h` now derives from `ceil2(sup_box.height_raw * 0.7)` (previously hardcoded 0.46em). `vlist_height` and `box_h` scale with `sup_inner_h` (1.09 + sup_inner_h pattern). Closes `\int_a^b`, `\int_0^\infty`, and similar cases where the sup is a tall letter or symbol.
+
+**Empirical observation from the port attempt**: The TeXBook Rule 15d formulas (`numerShift + numerBox.height`) give RESULTS that don't match MathLive's emitted box heights. For `\frac{a}{b}` Rule 15d predicts frac.height = 0.394 + 0.30 (scaled) = 0.694, but MathLive emits 0.94. The extra ~0.25em is presumably MathLive's math-axis shift applied during VBox layout, but the exact transformation isn't documented in the source we have access to. Without recovering that math, per-branch empirical tuning (looking at MathLive's actual output and adjusting Lambda's spec to match) remains the only proven path.
+
+**Remaining 15 / 27 branches** require empirical tuning. Most follow recognizable patterns:
+- Script-style branches (B1, B3-B8): need scriptscript or script-context tuning.
+- Compound numer/denom branches (B12-B18): variations of numer/denom dimension combinations.
+- Colorbox branches (B10, B11): nested in `\colorbox{...}`, distinct metric set.
+- B24c default for compound names: needs height to scale with numer.height max letter (digit vs alpha).
+
+Estimated remaining work: **60–100 hours** for full Phase 2b completion. The fixture is now the gate — every fix is validated by running [test/lambda/mathlive/fraction_branch_fixture.mjs](test/lambda/mathlive/fraction_branch_fixture.mjs) (and re-running [test/lambda/mathlive/run_lambda_mathlive_markup.mjs](test/lambda/mathlive/run_lambda_mathlive_markup.mjs) for the upstream baseline).
+
 ### What to read in the codebase
 
 | Area | Start here |

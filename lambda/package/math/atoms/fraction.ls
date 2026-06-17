@@ -527,22 +527,32 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
         // Compound denominator with potential descender (e.g. p+q below 1).
         // When the denom has a substantial descender, MathLive's effective
         // depth reflects the full descent extent, not the hardcoded 0.77.
+        // When the numerator has a tall letter (height >= 0.7), MathLive
+        // emits a taller fraction (height 1.2 not 1.15).
         let has_descender = denom_box.depth > 0.15
+        let numer_is_tall = numer_box.height >= 0.7
+        let frac_h = if (numer_is_tall) 1.2 else 1.15
         let frac_d = if (has_descender) 0.68 + denom_box.depth + 0.01 else 0.77
-        let frac_total = if (has_descender) 1.15 + frac_d else 1.92
+        let frac_total = if (has_descender) frac_h + frac_d
+            else if (numer_is_tall) frac_h + frac_d
+            else 1.92
         let frac_dh = if (has_descender) frac_d + 0.01 else 0.77
+        let denom_ch = if (has_descender and numer_is_tall) ceil2(denom_box.height + denom_box.depth)
+            else if (has_descender) 0.78
+            else if (numer_is_tall) ceil2(denom_box.height + denom_box.depth)
+            else 0.73
         {
-            height: 1.15,
+            height: frac_h,
             depth: frac_d,
-            render_height: 1.15,
+            render_height: frac_h,
             render_depth: frac_d,
             render_total: frac_total,
             depth_holder: frac_dh,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: -3.5,
-            numer_child_height: 0.65,
-            denom_child_height: if (has_descender) 0.78 else 0.73,
+            numer_child_height: ceil2(numer_box.height + numer_box.depth),
+            denom_child_height: denom_ch,
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -563,20 +573,40 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     } else if (denom_total < 0.75 and numer_total >= 0.7) {
+        // Tall numerator with short denom. When numerator has a tall letter
+        // (height >= 0.7), MathLive emits a taller fraction (height 1.2 not
+        // 1.15) to make room for the ascender.
         let numer_child_height = text_fraction_numer_child_height(numer_box)
         let has_descender = script_fraction_has_descender(numer_box)
+        let numer_is_tall = numer_box.height >= 0.7
+        let base_h = if (numer_is_tall) 1.2 else 1.15
+        let base_d = 0.68
+        // MathLive sizes the denom wrapper to the letter's actual height
+        // (ceil@2 of h+d) rather than padding to 0.65. For tall numerators
+        // this matters most when the denom is single-char or compound with
+        // a tall letter.
+        let denom_full = ceil2(denom_box.height + denom_box.depth)
+        let denom_ch = if (numer_is_tall) denom_full
+            else if (denom_box.height < 0.5 and denom_box.depth < 0.01) denom_full
+            else 0.65
+        // For tall numerators, MathLive emits the numerator wrapper at
+        // its actual full extent.
+        let numer_ch = if (numer_is_tall and not has_descender) ceil2(numer_box.height + numer_box.depth)
+            else numer_child_height
         {
-            height: if (has_descender) numer_child_height + 0.39 else 1.15,
-            depth: 0.685,
-            render_height: if (has_descender) numer_child_height + 0.39 else 1.15,
-            render_depth: 0.68,
-            render_total: if (has_descender) numer_child_height + 1.08 else 1.84,
+            height: if (has_descender) numer_child_height + 0.39 else base_h,
+            depth: if (has_descender) 0.685 else base_d + 0.005,
+            render_height: if (has_descender) numer_child_height + 0.39 else base_h,
+            render_depth: if (has_descender) 0.68 else base_d,
+            render_total: if (has_descender) numer_child_height + 1.08
+                else if (numer_is_tall) base_h + base_d + 0.01
+                else 1.84,
             depth_holder: 0.69,
             denom_top: -2.31,
             line_top: -3.23,
             numer_top: if (has_descender) 0.0 - 3.58 else 0.0 - 3.5,
-            numer_child_height: numer_child_height,
-            denom_child_height: 0.65,
+            numer_child_height: numer_ch,
+            denom_child_height: denom_ch,
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -616,16 +646,21 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
                not (numer_box.height >= 0.6 and numer_box.height < 0.68) and
                not (numer_box.height >= 0.6 and numer_box.height < 0.66)) {
         // Tall-body numerator OR compound (letters and operators) with no
-        // significant descender (>0.15). MathLive uses height 1.2 for these.
+        // significant descender (>0.15). MathLive uses height 1.19 for clean
+        // tall-only fractions, 1.20 when descenders are present. The
+        // hardcoded 1.2 was off by 0.01em on pure cmmi tall-body atoms.
         // Excludes the i-like case (height ~0.66) which uses 1.16.
-        let denom_h = if (denom_box.height < 0.7) denom_box.height else 0.7
+        let has_any_descender = numer_box.depth > 0.05 or denom_box.depth > 0.05
+        let denom_full = denom_box.height + denom_box.depth
+        let denom_h = if (denom_box.height < 0.7) ceil2(denom_full) else 0.7
         let extra_depth = if (denom_box.depth > 0.0) denom_box.depth else 0.0
-        let frac_depth = 0.69 + extra_depth
-        let total = 1.2 + frac_depth
+        let frac_depth = 0.68 + extra_depth
+        let frac_h = if (has_any_descender) 1.2 else 1.19
+        let total = frac_h + frac_depth
         {
-            height: 1.2,
+            height: frac_h,
             depth: frac_depth,
-            render_height: 1.2,
+            render_height: frac_h,
             render_depth: frac_depth,
             render_total: total,
             depth_holder: 0.69,

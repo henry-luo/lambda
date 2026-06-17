@@ -82,10 +82,6 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     //   sub-only:   vlist=-0.41 (negative — content only above its origin),
     //               depth_holder=0.9, sub uses margin-right:+0.05em
     //   sup-only:   vlist=1.55, depth_holder=0 (sup-only TODO)
-    let vlist_height = if (has_sup) 1.55 else (0.0 - 0.41)
-    let depth_holder = 0.9
-    let sub_top = -2.1
-    let sup_top = -4.08
     // Sub margin behavior: when paired with sup, nestle into the integral's
     // italic correction (negative left margin). When sub alone, MathLive
     // offsets slightly to the right.
@@ -93,9 +89,17 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
         "margin-left:-0.44em"
         else "margin-right:0.05em"
 
-    // Sub box height depends on its content's actual height. MathLive
-    // uses CEIL@2(sub_box.height * 0.7). For digits 0.46em, uppercase 0.48em.
+    // Sub/sup heights derive from content's actual height scaled to script
+    // style (×0.7) then CEIL@2 to match MathLive's emission.
     let sub_inner_h = if (sub_box != null) sub_height_for(sub_box) else 0.46
+    let sup_inner_h = if (sup_box != null) sub_height_for(sup_box) else 0.46
+    // Vlist height tracks the sup's extent + a fixed offset of 1.09em (the
+    // gap between baseline and sup top). With only sub, vlist is negative
+    // (-0.41) since content is below origin.
+    let vlist_height = if (has_sup) (1.09 + sup_inner_h) else (0.0 - 0.41)
+    let depth_holder = 0.9
+    let sub_top = -2.1
+    let sup_top = -4.08
     let sub_span = if (has_sub) [
         <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr;
             <span class: css.PSTRUT, style: "height:3em">
@@ -107,7 +111,7 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     let sup_span = if (has_sup) [
         <span style: "top:" ++ util.fmt_em(sup_top);
             <span class: css.PSTRUT, style: "height:3em">
-            <span style: "height:0.46em;display:inline-block;font-size: 70%";
+            <span style: "height:" ++ util.fmt_em(sup_inner_h) ++ ";display:inline-block;font-size: 70%";
                 for (el in sup_elements) el
             >
         >
@@ -135,9 +139,9 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // limits the box reaches up to the sup and the strut-bottom drops to
     // accommodate the sub. The raw fields use slightly-higher precision so
     // CEIL@2 of (h_raw + d_raw) matches MathLive's emitted strut-bottom.
-    let box_h = if (has_sup) 1.55 else 1.36
+    let box_h = if (has_sup) vlist_height else 1.36
     let box_d = if (has_sub) 0.89 else 0.86
-    let box_h_raw = if (has_sup) 1.55 else 1.36
+    let box_h_raw = box_h
     let box_d_raw = if (has_sub and has_sup) 0.89
         else if (has_sub) 0.89222
         else 0.86225
@@ -226,7 +230,7 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
     let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
 
-    if (is_text_op == null and has_sub and has_sup)
+    if (is_text_op == null and (has_sub or has_sup))
         render_large_op_limits_vlist(op_box, sub_box, sup_box)
     else
         (let scaled_op = if (is_text_op != null) op_box else box.with_scale(op_box, 1.5),
@@ -238,6 +242,16 @@ fn render_big_op_limits(base, node, context, render_fn) {
              parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
          else parts2,
          box.vbox(parts3))
+}
+
+// CEIL@2 helper — returns a 2-decimal CEIL of the input em value. Mirrors
+// MathLive's toString rounding rule for emit-side dimensions.
+fn ceil_em2(x) {
+    let scaled = x * 100.0
+    let i = int(scaled)
+    let f = float(i)
+    let ceil_int = if (f >= scaled) i else i + 1
+    float(ceil_int) / 100.0
 }
 
 fn large_op_symbol_box(text) => {
@@ -262,48 +276,81 @@ fn sub_box_has_descender(sub_box) {
 
 fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let op_elements = box.elements_of(op_box)
-    let sub_elements = box.elements_of(sub_box)
-    let sup_elements = box.elements_of(sup_box)
-    let compact_limits = sub_box.width <= 1.0 and sup_box.width > 1.0
-    let sub_has_descender = sub_box_has_descender(sub_box)
-    let vlist_height = if (compact_limits) 1.81 else 1.66
-    let sub_top = if (compact_limits) 0.0 - 1.89 else 0.0 - 1.87
-    // sub_child_height differs based on whether the sub has a descender:
-    //   compact: 0.31
-    //   sub with descender (j/p/q/y/g/f): 0.6
-    //   sub without descender: 0.47
+    let has_sub = sub_box != null
+    let has_sup = sup_box != null
+    let sub_elements = if (has_sub) box.elements_of(sub_box) else []
+    let sup_elements = if (has_sup) box.elements_of(sup_box) else []
+    let sub_w = if (has_sub) sub_box.width else 0.0
+    let sup_w = if (has_sup) sup_box.width else 0.0
+    let compact_limits = has_sub and has_sup and sub_w <= 1.0 and sup_w > 1.0
+    let sub_has_descender = has_sub and sub_box_has_descender(sub_box)
+    // vlist_height varies by which limits are present:
+    //   sub+sup compact: 1.81
+    //   sub+sup default: 1.66
+    //   sup only:        1.06 (sym + sup)
+    //   sub only:        1.06 (sym + tiny space)
+    let vlist_height = if (compact_limits) 1.81
+                       else if (has_sub and has_sup) 1.66
+                       else 1.06
+    let sub_h_raw = if (has_sub and sub_box.height_raw != null) sub_box.height_raw
+                    else if (has_sub) sub_box.height
+                    else 0.0
+    let sub_scaled = ceil_em2(sub_h_raw * 0.7)
     let sub_child_height = if (compact_limits) 0.31
-                           else if (sub_has_descender) 0.6 else 0.47
-    let sup_child_height = if (compact_limits) 0.46 else 0.31
-    // depth_holder controls inner vlist height; box_depth controls reported
-    // box.depth (visible as bottom strut va). MathLive uses slightly different
-    // values: depth_holder = 1.28/1.42, box_depth = 1.27/1.41 (off by 0.01).
+                           else if (sub_has_descender) 0.6
+                           else if (has_sub) sub_scaled else 0.0
+    let sup_h_raw = if (has_sup and sup_box.height_raw != null) sup_box.height_raw
+                    else if (has_sup) sup_box.height
+                    else 0.0
+    let sup_scaled = ceil_em2(sup_h_raw * 0.7)
+    let sup_child_height = if (compact_limits) 0.46
+                           else if (has_sup) sup_scaled else 0.0
+    // Offset depends on configuration: sub+sup uses tighter offset since
+    // the op symbol sits between, sub-only has a wider gap.
+    let dh_offset = if (sub_has_descender) 0.82
+                    else if (has_sub and has_sup) 0.81
+                    else 0.95
+    let bd_offset = if (sub_has_descender) 0.81
+                    else if (has_sub and has_sup) 0.80
+                    else 0.94
     let depth_holder = if (compact_limits) 1.26
-                       else if (sub_has_descender) 1.42 else 1.28
+                       else if (has_sub) sub_child_height + dh_offset
+                       else 0.0
     let box_depth = if (compact_limits) 1.26
-                    else if (sub_has_descender) 1.41 else 1.27
+                    else if (has_sub) sub_child_height + bd_offset
+                    else 0.0
+    // For sub-only, sub_top is slightly more negative (-1.89 vs -1.87).
+    let sub_top = if (compact_limits) 0.0 - 1.89
+                  else if (has_sub and has_sup) 0.0 - 1.87
+                  else 0.0 - 1.89
+    let sub_span = if (has_sub) [
+        <span class: css.CENTER, style: "top:" ++ util.fmt_em(sub_top);
+            <span class: css.PSTRUT, style: "height:3.05em">
+            <span style: "height:" ++ util.fmt_em(sub_child_height) ++ ";display:inline-block;font-size: 70%";
+                for (el in sub_elements) el
+            >
+        >
+    ] else []
+    let sup_span = if (has_sup) [
+        <span class: css.CENTER, style: "top:-4.3em";
+            <span class: css.PSTRUT, style: "height:3.05em">
+            <span style: "height:" ++ util.fmt_em(sup_child_height) ++ ";display:inline-block;font-size: 70%";
+                for (el in sup_elements) el
+            >
+        >
+    ] else []
     let el = <span class: css.OP_GROUP;
         <span class: css.VLIST_T2;
             <span class: css.VLIST_R;
                 <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
-                    <span class: css.CENTER, style: "top:" ++ util.fmt_em(sub_top);
-                        <span class: css.PSTRUT, style: "height:3.05em">
-                        <span style: "height:" ++ util.fmt_em(sub_child_height) ++ ";display:inline-block;font-size: 70%";
-                            for (el in sub_elements) el
-                        >
-                    >
+                    for (el in sub_span) el
                     <span class: css.CENTER, style: "top:-3.05em";
                         <span class: css.PSTRUT, style: "height:3.05em">
                         <span style: "height:1.61em;display:inline-block";
                             for (el in op_elements) el
                         >
                     >
-                    <span class: css.CENTER, style: "top:-4.3em";
-                        <span class: css.PSTRUT, style: "height:3.05em">
-                        <span style: "height:" ++ util.fmt_em(sup_child_height) ++ ";display:inline-block;font-size: 70%";
-                            for (el in sup_elements) el
-                        >
-                    >
+                    for (el in sup_span) el
                 >
                 <span class: css.VLIST_S; "\u200B">
             >
@@ -319,7 +366,7 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
         render_height: vlist_height,
         render_depth: box_depth,
         render_total: vlist_height + box_depth,
-        width: max(max(op_box.width, sub_box.width), sup_box.width),
+        width: max(max(op_box.width, sub_w), sup_w),
         type: "mop",
         italic: 0.0,
         skew: 0.0
