@@ -1,0 +1,9 @@
+type: function
+nonfunction original: ERR_INVALID_ARG_TYPE
+nonfunction callback: ERR_INVALID_ARG_TYPE
+resolved: true 6 async
+rejected: bad
+falsy: ERR_FALSY_VALUE_REJECTION true
+plain: true 7
+thrown: boom
+this: true 14

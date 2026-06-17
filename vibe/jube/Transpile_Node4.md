@@ -46,7 +46,7 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | **10 — Process & OS** | +40 | 🟢 **Done** | `process.binding`, `allowedNodeEnvironmentFlags`, `report`, `setuid/setgid` all at `js_globals.cpp:3270–3330`. `os.cpus/networkInterfaces/userInfo/constants` complete (`js_os.cpp`). |
 | **11 — child_process & REPL** | +40 | 🟡 **exec/spawn yes, fork/IPC no** | `exec/execSync/spawn` in `js_child_process.cpp` (693 LOC). No `fork()`, no IPC channel, hardcoded stdio, **3 spawn-error crashers**. |
 | **12 — zlib streaming** | +35 | 🔴 **Blocked on Phase 7** | `js_zlib.cpp` (463 LOC): sync only (`gzipSync` etc.). No `createGzip/createDeflate` Transform classes, no async-callback form, brotli stubbed (`:320` returns error), no zstd. |
-| **13 — Buffer & util** | +30 | 🟢 **Buffer done; util partial** | `js_buffer.cpp` now 2,459 LOC (isAscii/isUtf8/copyBytesFrom/of/SlowBuffer/poolSize/BigInt64 all present). `assert` 1,176 LOC (throws/rejects/match/AssertionError/mock.fn). **But `util.promisify` is a literal stub** (`js_util.cpp:462` `return fn_item`), and `util.inspect` lacks depth/colors/showHidden. |
+| **13 — Buffer & util** | +30 | 🟢 **Buffer done; util partial** | `js_buffer.cpp` now 2,459 LOC (isAscii/isUtf8/copyBytesFrom/of/SlowBuffer/poolSize/BigInt64 all present). `assert` 1,176 LOC (throws/rejects/match/AssertionError/mock.fn). `util.promisify` has a callback-last Promise wrapper and `util.promisify.custom`; `util.callbackify` has a Promise-to-callback wrapper and official `test-util-callbackify.js` now passes (Node4 C.2 partials, 2026-06-17). Remaining: official `test-util-promisify.js` fidelity and `util.inspect` depth/colors/showHidden. |
 | **14 — Test infra** | +25 | 🟡 **skip-list yes, common shims partial** | External skip-list (26 entries) + GTest loading done. `common/{index,tmpdir,fixtures}` shimmed (`lambda/js/test_shim/`). Missing: `common/internet`, `common/wpt`, `common/crypto`, `common/dns`. |
 
 **New since Node3, not in the plan:** a **real mbedTLS-backed `tls`** module — `tls.connect`, `tls.createServer`, `createSecureContext`, `TLSSocket` with an actual handshake (`js_tls.cpp:302` `tls_handshake(...)`, 623 LOC). This is significant and is the reason https *could* be made real cheaply (see Track C).
@@ -74,7 +74,7 @@ Node3 proposed Phases 6–14. Here is what the code actually shows today.
 | child_process | 97 | 26 | 27% | **3** | fork/IPC missing; spawn-error crashers |
 | tls | 214 | 52 | 24% | **3** | real handshake but many API gaps; abort crashers |
 | stream | 213 | 50 | 23% | 0 | **the linchpin — 163 failing** |
-| util | 27 | 5 | 19% | 0 | promisify stub + inspect gaps |
+| util | 27 | 7 | 26% | 0 | promisify fidelity + inspect gaps; callbackify official pass |
 | assert | 14 | 2 | 14% | 0 | **code complete — gap is AssertionError message fidelity** |
 | crypto | 120 | 15 | 12% | 0 | asymmetric gap (sign/verify/keygen/KeyObject) |
 | zlib | 61 | 8 | 13% | 0 | **streaming gap — blocked on stream core** |
@@ -110,10 +110,10 @@ These confirm the baseline drifted because of unrelated language-conformance wor
 
 ### 3.4 The "complete code, low pass-rate" anomaly
 
-`buffer` (37%), `assert` (14%), and `util` (19%) have substantially complete implementations (2,459 / 1,176 / 1,178 LOC) yet score low. Their failures are not missing methods — they are:
+`buffer` (37%), `assert` (14%), and `util` (26%) have substantially complete implementations (2,459 / 1,176 / 1,401 LOC) yet score low. Their failures are not missing methods — they are:
 - exact `AssertionError` / `TypeError` **message strings** and `.code` properties,
 - `util.inspect` output format (depth, colors, circular markers),
-- `util.promisify`/`callbackify` being stubs that many tests depend on as a *utility*.
+- `util.promisify` only having a basic callback-last Promise wrapper, while `util.inspect` still lacks Node's formatting fidelity.
 
 **Implication:** for these modules, a "fidelity sweep" (Track C/F) yields more than new features.
 
@@ -148,7 +148,7 @@ Consequence: nothing composes (`req.pipe(gunzip).pipe(res)` is impossible), and 
 
 Two high-value capabilities exist but aren't wired:
 - **https has no TLS.** `js_https.cpp:39–43` delegates to `js_http_createServer()` on port 443; the comment itself says *"In a full implementation, this would pipe TLS sockets into HTTP parsing."* Meanwhile `js_tls.cpp` is a **real** mbedTLS handshake. Connecting them is wiring, not new crypto.
-- **`util.promisify` is a stub** (`return fn_item`) even though `JsPromise` is fully functional. Many `fs`/`dns`/`stream` tests promisify a callback API and then `await` it; the stub makes those `await` a non-thenable.
+- **`util.promisify` is only partially real.** A Node4 C.2 slice replaced the literal `return fn_item` stub with a callback-last Promise wrapper and `util.promisify.custom`; local module coverage now passes, but the official `test-util-promisify.js` still fails on deeper Node semantics/fidelity. `callbackify` now has a Promise-to-callback wrapper and official `test-util-callbackify.js` passes, so the remaining utility gap is mostly promisify fidelity plus `util.inspect`.
 
 ### RC4 — Stability: null-deref crashers on error paths
 
@@ -244,6 +244,10 @@ High return for low effort; none depend on the stream rewrite.
 C.1 **Wire https → TLS (+10–15).** Replace the `js_https.cpp:39` delegation with `js_tls_createServer` for the server and `tls.connect` for the client, feeding decrypted bytes into the existing HTTP parser. The TLS layer already works (`js_tls.cpp:302`); this is plumbing. Also fixes 3 https regressions.
 
 C.2 **Real `util.promisify` + `callbackify` (+15).** Implement the Node algorithm (last-arg callback `(err, value)` → resolve/reject; honor `util.promisify.custom`). `JsPromise` is fully available. Widely depended upon across fs/dns/stream/timers tests.
+
+**2026-06-17 partial landing:** `js_util.cpp` now has a callback-last Promise wrapper, preserves the caller `this`, rejects on callback errors or synchronous throws, supports multi-value callbacks as an array, and exposes `util.promisify.custom = Symbol.for('nodejs.util.promisify.custom')`. Added `test/node/util_promisify.js` + `.txt`. Verification: `make build-test`; `./lambda.exe js test/node/util_promisify.js --no-log`; `./test/test_node_module_gtest.exe '--gtest_filter=NodeModuleTests/NodeFileTest.Run/util_basic:NodeModuleTests/NodeFileTest.Run/util_extended:NodeModuleTests/NodeFileTest.Run/util_promisify'`; `./test/test_js_gtest.exe --gtest_brief=1`; `./test/test_node_gtest.exe --modules=util --timeout=15000 --gtest_brief=1` → util official subset **6/27 pass, 21 fail, 0 regressions, 1 improvement**.
+
+**2026-06-17 callbackify landing:** `js_util.cpp` now has a real `util.callbackify` wrapper: validates `original` and trailing callback, preserves `this`, routes fulfilled values to `(null, value)`, routes rejected promises to `(err)`, wraps falsy rejections as `ERR_FALSY_VALUE_REJECTION` with `.reason`, and routes synchronous throws through the same asynchronous rejection path. Added `test/node/util_callbackify.js` + `.txt`. Verification: `make build-test`; `./lambda.exe js test/node/util_callbackify.js --no-log`; `./lambda.exe js test/node/util_promisify.js --no-log`; `./test/test_node_module_gtest.exe '--gtest_filter=NodeModuleTests/NodeFileTest.Run/util_basic:NodeModuleTests/NodeFileTest.Run/util_extended:NodeModuleTests/NodeFileTest.Run/util_promisify:NodeModuleTests/NodeFileTest.Run/util_callbackify'`; `./test/test_node_gtest.exe --modules=util --timeout=15000 --gtest_brief=1` → util official subset **7/27 pass, 20 fail, 0 regressions, 2 improvements** (`test-util-callbackify.js`, `test-util-stripvtcontrolcharacters.js`). Remaining C.2 work: full `test-util-promisify.js` fidelity.
 
 C.3 **`Buffer[Symbol.iterator]` + `keys/values/entries` (+3).** Only missing piece of an otherwise-complete Buffer.
 
@@ -368,6 +372,8 @@ Uncaught SyntaxError: Invalid eval source       # shared engine regression (also
 #   "In a full implementation, this would pipe TLS sockets into HTTP parsing"
 #   → https currently delegates to plain HTTP on :443
 
-# js_util.cpp:462 — util.promisify:
-#   return fn_item;   // stub — returns the function as-is
+# js_util.cpp — util.promisify / callbackify:
+#   Node4 C.2 partial: callback-last Promise wrapper exists, but official
+#   test-util-promisify.js still fails. callbackify wrapper exists and
+#   official test-util-callbackify.js now passes.
 ```

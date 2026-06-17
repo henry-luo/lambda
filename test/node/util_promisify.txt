@@ -1,0 +1,9 @@
+custom symbol: true
+custom function: true
+idempotent: true
+nonfunction code: ERR_INVALID_ARG_TYPE
+resolved: 5
+rejected: bad
+multi: true 2 left/right
+thrown: boom
+this: 12
