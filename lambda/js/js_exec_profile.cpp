@@ -1,5 +1,7 @@
 #include "js_exec_profile.h"
 
+#ifdef LAMBDA_JS_EXEC_PROFILE
+
 #include "../../lib/file.h"
 #include "../../lib/file_utils.h"
 #include "../../lib/strbuf.h"
@@ -405,3 +407,5 @@ void js_exec_profile_dump(void) {
     }
     strbuf_free(buf);
 }
+
+#endif // LAMBDA_JS_EXEC_PROFILE

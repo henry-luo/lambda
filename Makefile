@@ -14,6 +14,7 @@ BUILD_LINUX_DIR = build_linux
 
 # Output executables
 LAMBDA_EXE = lambda.exe
+LAMBDA_PROFILE_EXE = lambda-profile.exe
 LAMBDA_CLI_EXE = lambda-cli.exe
 LAMBDA_JUBE_EXE = lambda-jube.exe
 
@@ -414,10 +415,11 @@ endef
 
 # Checking DLL dependencies on Windows (avoid Universal CRT)
 define windows_dll_check
-	@if [ -f "lambda.exe" ]; then \
-		ldd lambda.exe 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
+	@target="$(if $(1),$(1),lambda.exe)"; \
+	if [ -f "$$target" ]; then \
+		ldd "$$target" 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
 	else \
-		echo "⚠️  lambda.exe not found, skipping DLL check"; \
+		echo "⚠️  $$target not found, skipping DLL check"; \
 	fi
 endef
 
@@ -494,11 +496,12 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check check-tag-or check-raw-alloc check-state-store check-state-machine check-radiant-casts check-radiant-ownership check-string-scan docs intellisense analyze-binary \
-	    build-debug build-release clean-all distclean \
+	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
+	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
 	    node-baseline node-update-baseline
 
@@ -512,6 +515,7 @@ help:
 	@echo "                  All platforms use Clang as the default compiler"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  build-release - Build optimized release version using Premake"
+	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
 	@echo "  build-mir     - Build MIR JIT library (clone, patch, compile)"
@@ -682,7 +686,10 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 #   3. Symbol visibility control (-fvisibility=hidden)
 #   4. Debug symbols stripped (-s linker flag + post-build strip)
 #   5. LTO enabled (-flto)
-release: build-release prepare-release
+# build-release compiles the optimized lambda.exe.
+# prepare-release packages an existing release binary plus assets/docs into ./release/.
+release: build-release
+	@$(MAKE) prepare-release
 
 prepare-release:
 	@bash utils/prepare_release.sh
@@ -712,6 +719,20 @@ endif
 	@ls -lh lambda_release.exe 2>/dev/null || ls -lh lambda.exe 2>/dev/null || true
 	@touch .lambda_release_build
 	$(call windows_dll_check)
+
+build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+	@echo "Building release_profile version using Premake build system..."
+	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
+	$(call toolchain_verify)
+	@echo "Generating Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@echo "Building lambda executable (release_profile) with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=release_profile_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	@echo "Release profile build completed."
+	@ls -lh lambda-profile.exe 2>/dev/null || true
+	$(call windows_dll_check,lambda-profile.exe)
 
 # Headless CLI build (no Radiant layout engine or GUI support)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
@@ -820,6 +841,7 @@ clean:
 	@rm -f $(BUILD_LINUX_DIR)/*.compile_status 2>/dev/null || true
 	@echo "Cleaning executables..."
 	@rm -f $(LAMBDA_EXE)
+	@rm -f $(LAMBDA_PROFILE_EXE)
 	@rm -f lambda_debug.exe
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
@@ -892,6 +914,7 @@ clean-all: clean-premake clean-test
 distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup..."
 	@rm -f $(LAMBDA_EXE)
+	@rm -f $(LAMBDA_PROFILE_EXE)
 	@rm -f lambda_debug.exe
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
@@ -939,15 +962,27 @@ test-c2mir: build-test
 	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
 	@LAMBDA_USE_C2MIR=1 LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
+# Build only the js262 gtest runner if it is missing; full build-test is too broad here.
+ensure-test262-gtest:
+	@if [ ! -x ./test/test_js_test262_gtest.exe ]; then \
+		echo "test/test_js_test262_gtest.exe not found; building js262 gtest runner only..."; \
+		mkdir -p build/premake; \
+		$(MAKE) generate-premake; \
+		PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE); \
+		PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native test_js_test262_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
+	else \
+		echo "Using existing test/test_js_test262_gtest.exe"; \
+	fi
+
 # test262 baseline: run only tests in baseline, must pass 100%
-test262-baseline:
+test262-baseline: ensure-test262-gtest
 	@echo "Running test262 baseline ($(shell wc -l < test/js262/test262_baseline.txt | tr -d ' ') entries)..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt
 
 # test262 full: run all discovered test262 tests (slow, ~5min)
-test262-full: build-test
+test262-full: ensure-test262-gtest
 	@echo "Running full test262 suite..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile

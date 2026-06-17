@@ -32,6 +32,12 @@ typedef enum JsExecProfileEvent {
     JS_EXEC_PROF_EVENT_COUNT
 } JsExecProfileEvent;
 
+#ifdef LAMBDA_JS_EXEC_PROFILE
+#define JS_EXEC_PROFILE_ENABLED 1
+#define JS_PROFILED_PUSH_D_NAME "js_profiled_push_d"
+#define JS_PROFILED_IT2D_NAME "js_profiled_it2d"
+#define JS_PROFILED_IT2I_NAME "js_profiled_it2i"
+
 extern int g_js_exec_profile_mode;
 
 int js_exec_profile_mode(void);
@@ -42,10 +48,32 @@ void js_exec_profile_count(JsExecProfileEvent event);
 void js_exec_profile_note_mir_call(const char* fn_name);
 void js_exec_profile_dump(void);
 void js_profile_property_set_site(const char* label);
+#else
+#define JS_EXEC_PROFILE_ENABLED 0
+#define JS_PROFILED_PUSH_D_NAME "push_d"
+#define JS_PROFILED_IT2D_NAME "it2d"
+#define JS_PROFILED_IT2I_NAME "it2i"
+
+static inline int js_exec_profile_mode(void) { return 0; }
+static inline void js_exec_profile_reset(void) {}
+static inline uint64_t js_exec_profile_enter(JsExecProfileEvent event) {
+    (void)event;
+    return 0;
+}
+static inline void js_exec_profile_leave(JsExecProfileEvent event, uint64_t token) {
+    (void)event;
+    (void)token;
+}
+static inline void js_exec_profile_count(JsExecProfileEvent event) { (void)event; }
+static inline void js_exec_profile_note_mir_call(const char* fn_name) { (void)fn_name; }
+static inline void js_exec_profile_dump(void) {}
+static inline void js_profile_property_set_site(const char* label) { (void)label; }
+#endif
 
 #ifdef __cplusplus
 }
 
+#ifdef LAMBDA_JS_EXEC_PROFILE
 struct JsExecProfileScope {
     JsExecProfileEvent event;
     uint64_t token;
@@ -66,5 +94,8 @@ struct JsExecProfileScope {
 #define JS_EXEC_PROFILE_CONCAT(a, b) JS_EXEC_PROFILE_CONCAT_INNER(a, b)
 #define JS_EXEC_PROFILE_SCOPE(event_id) \
     JsExecProfileScope JS_EXEC_PROFILE_CONCAT(_js_exec_profile_scope_, __LINE__)(event_id)
+#else
+#define JS_EXEC_PROFILE_SCOPE(event_id) ((void)0)
+#endif
 
 #endif

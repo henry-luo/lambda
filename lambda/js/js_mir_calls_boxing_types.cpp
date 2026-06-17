@@ -346,7 +346,8 @@ MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value) {
         MIR_reg_t d = jm_new_reg(mt, "boxid", MIR_T_D);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
             MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, (double)value)));
-        return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+        return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+            MIR_new_reg_op(mt->ctx, d));
     }
     // Inline i2it: result = ITEM_INT_TAG | (value & MASK56)
     MIR_reg_t r = jm_new_reg(mt, "boxi", MIR_T_I64);
@@ -404,7 +405,7 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     MIR_reg_t d_ovf = jm_new_reg(mt, "i2d_ovf", MIR_T_D);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
-    MIR_reg_t float_boxed = jm_call_1(mt, "js_profiled_push_d", MIR_T_I64,
+    MIR_reg_t float_boxed = jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64,
         MIR_T_D, MIR_new_reg_op(mt->ctx, d_ovf));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_reg_op(mt->ctx, float_boxed)));
@@ -418,7 +419,8 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
 
 // Box double -> Item via push_d
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
-    return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, d_reg));
+    return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+        MIR_new_reg_op(mt->ctx, d_reg));
 }
 
 // Box string via s2it tagging: result = ptr ? (STR_TAG | ptr) : ITEM_NULL
@@ -741,7 +743,8 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
             MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, item)));
         return d;
     }
-    return jm_call_1(mt, "js_profiled_it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item));
+    return jm_call_1(mt, JS_PROFILED_IT2D_NAME, MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, item));
 }
 
 // Convert native int64_t → native double
@@ -766,7 +769,8 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
     if (src_type == LMD_TYPE_FLOAT) return jm_emit_double_to_int(mt, reg);
     // boxed Item of unknown type → call it2i for safe conversion
     // (handles INT, FLOAT, INT64, BOOL items correctly)
-    return jm_call_1(mt, "js_profiled_it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+    return jm_call_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, reg));
 }
 
 // Ensure a register is native double, converting from int or boxed if needed

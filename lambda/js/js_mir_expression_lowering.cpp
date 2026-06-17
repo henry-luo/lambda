@@ -64,7 +64,7 @@ static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNo
 }
 
 static void jm_emit_profile_property_set_site(JsMirTranspiler* mt, JsMemberNode* member) {
-    if (js_exec_profile_mode() <= 0 || !member || member->computed ||
+    if (!JS_EXEC_PROFILE_ENABLED || js_exec_profile_mode() <= 0 || !member || member->computed ||
             !member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) {
         return;
     }
@@ -5837,13 +5837,15 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
             MIR_reg_t r = jm_new_reg(mt, "inf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, INFINITY)));
-            return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+            return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+                MIR_new_reg_op(mt->ctx, r));
         }
         if (MATH_MATCH("max", 3)) {
             MIR_reg_t r = jm_new_reg(mt, "ninf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, -INFINITY)));
-            return jm_call_1(mt, "js_profiled_push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, r));
+            return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
+                MIR_new_reg_op(mt->ctx, r));
         }
     }
     // Math.min(x) / Math.max(x) with 1 arg → js_to_number(x)
@@ -10876,7 +10878,8 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                             idx_native2 = jm_emit_double_to_int(mt, idx_f);
                         } else {
                             MIR_reg_t idx_b = jm_transpile_box_item(mt, mem->property);
-                            idx_native2 = jm_call_1(mt, "js_profiled_it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
+                            idx_native2 = jm_call_1(mt, JS_PROFILED_IT2I_NAME,
+                                MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
                         }
                         log_debug("P9b: inline this.%.*s[idx] as typed array type %d",
                                   (int)prop_id->name->len, prop_id->name->chars, ta_type);
@@ -10967,7 +10970,8 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_label_t l_slow = jm_new_label(mt);
                     MIR_label_t l_end = jm_new_label(mt);
                     MIR_reg_t result = jm_new_reg(mt, "p4r", MIR_T_I64);
-                    bool profile_shape_guard = js_exec_profile_mode() > 0;
+                    bool profile_shape_guard =
+                        JS_EXEC_PROFILE_ENABLED && js_exec_profile_mode() > 0;
                     const char* profile_shape_label = NULL;
                     MIR_reg_t profile_shape_reg = 0;
                     MIR_reg_t profile_expected_reg = 0;

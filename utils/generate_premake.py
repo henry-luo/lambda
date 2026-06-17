@@ -505,7 +505,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
-            '    configurations { "debug", "release" }',
+            '    configurations { "debug", "release", "release_profile" }',
             f'    platforms {{ {platform_str} }}',
             f'    location "{location}"',
             f'    startproject "{startup_project}"',
@@ -520,7 +520,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             '    filter "configurations:debug"',
-            '        defines { "DEBUG" }',
+            '        defines { "DEBUG", "LAMBDA_JS_EXEC_PROFILE" }',
             '        symbols "On"',
             '        optimize "Off"',
         ])
@@ -583,6 +583,65 @@ class PremakeGenerator:
         # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
         linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
         lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
+
+        def add_release_link_options():
+            # Platform-specific linker flags for dead code stripping
+            if self.use_macos_config:
+                self.premake_content.extend([
+                    '        -- macOS: strip dead code and symbols with ThinLTO',
+                    '        linkoptions {',
+                    '            "-flto=thin",',
+                    '            "-Wl,-dead_strip",',
+                    '            "-Wl,-x",  -- Strip local symbols',
+                    '        }',
+                ])
+            elif self.use_linux_config:
+                if base_compiler == 'clang':
+                    # check if lld is available for ThinLTO
+                    import shutil
+                    has_lld = shutil.which('lld') is not None or shutil.which('ld.lld') is not None
+                    if has_lld:
+                        self.premake_content.extend([
+                            '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
+                            '        linkoptions {',
+                            '            "-flto=thin",',
+                            '            "-fuse-ld=lld",',
+                            '            "-Wl,--gc-sections",',
+                            '            "-Wl,--strip-all",',
+                            '        }',
+                        ])
+                    else:
+                        self.premake_content.extend([
+                            '        -- Linux/Clang: strip dead code and symbols (lld not available, using default linker)',
+                            '        linkoptions {',
+                            '            "-flto",',
+                            '            "-Wl,--gc-sections",',
+                            '            "-Wl,--strip-all",',
+                            '        }',
+                        ])
+                else:
+                    self.premake_content.extend([
+                        '        -- Linux/GCC: strip dead code and symbols with LTO',
+                        '        linkoptions {',
+                        '            "-flto",',
+                        '            "-Wl,--gc-sections",',
+                        '            "-Wl,--strip-all",',
+                        '        }',
+                    ])
+            elif self.use_windows_config:
+                self.premake_content.extend([
+                    '        -- Windows: strip dead code with LTO + platform flags',
+                    '        linkoptions {',
+                    '            "-flto",',
+                    '            "-Wl,--gc-sections",',
+                    '            "-s",  -- Strip symbols',
+                    '            "-Wl,--stack,8388608",  -- 8 MB stack (match debug config)',
+                    '            "-Wl,--subsystem,console",',
+                    '            "-static-libgcc",',
+                    '            "-static-libstdc++",',
+                    '        }',
+                ])
+
         self.premake_content.extend([
             '    filter "configurations:release"',
             '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE" }',
@@ -598,70 +657,33 @@ class PremakeGenerator:
             '            "-fvisibility-inlines-hidden",',
             '        }',
         ])
+        add_release_link_options()
 
-        # Platform-specific linker flags for dead code stripping
-        if self.use_macos_config:
-            self.premake_content.extend([
-                '        -- macOS: strip dead code and symbols with ThinLTO',
-                '        linkoptions {',
-                '            "-flto=thin",',
-                '            "-Wl,-dead_strip",',
-                '            "-Wl,-x",  -- Strip local symbols',
-                '        }',
-            ])
-        elif self.use_linux_config:
-            if base_compiler == 'clang':
-                # check if lld is available for ThinLTO
-                import shutil
-                has_lld = shutil.which('lld') is not None or shutil.which('ld.lld') is not None
-                if has_lld:
-                    self.premake_content.extend([
-                        '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
-                        '        linkoptions {',
-                        '            "-flto=thin",',
-                        '            "-fuse-ld=lld",',
-                        '            "-Wl,--gc-sections",',
-                        '            "-Wl,--strip-all",',
-                        '        }',
-                    ])
-                else:
-                    self.premake_content.extend([
-                        '        -- Linux/Clang: strip dead code and symbols (lld not available, using default linker)',
-                        '        linkoptions {',
-                        '            "-flto",',
-                        '            "-Wl,--gc-sections",',
-                        '            "-Wl,--strip-all",',
-                        '        }',
-                    ])
-            else:
-                self.premake_content.extend([
-                    '        -- Linux/GCC: strip dead code and symbols with LTO',
-                    '        linkoptions {',
-                    '            "-flto",',
-                    '            "-Wl,--gc-sections",',
-                    '            "-Wl,--strip-all",',
-                    '        }',
-                ])
-        elif self.use_windows_config:
-            self.premake_content.extend([
-                '        -- Windows: strip dead code with LTO + platform flags',
-                '        linkoptions {',
-                '            "-flto",',
-                '            "-Wl,--gc-sections",',
-                '            "-s",  -- Strip symbols',
-                '            "-Wl,--stack,8388608",  -- 8 MB stack (match debug config)',
-                '            "-Wl,--subsystem,console",',
-                '            "-static-libgcc",',
-                '            "-static-libstdc++",',
-                '        }',
-            ])
+        self.premake_content.extend([
+            '    ',
+            '    filter "configurations:release_profile"',
+            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE", "LAMBDA_JS_EXEC_PROFILE" }',
+            '        -- LAMBDA_JS_EXEC_PROFILE: keep JS execution instrumentation in an optimized build',
+            '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
+            '        symbols "Off"',
+            '        optimize "On"',
+            f'        -- Dead code elimination and LTO',
+            '        buildoptions {',
+            f'            {lto_flag},',
+            '            "-ffunction-sections",',
+            '            "-fdata-sections",',
+            '            "-fvisibility=hidden",',
+            '            "-fvisibility-inlines-hidden",',
+            '        }',
+        ])
+        add_release_link_options()
 
         self.premake_content.extend([
             '    ',
         ])
 
         # Note: Windows linker flags are now added to Debug configuration above, not globally
-        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++', 'clang']:
+        if self.use_linux_config or platform_config == 'Linux_x64' or 'linux' in output.lower():
             self.premake_content.extend([
                 '    -- Native Linux build settings',
                 f'    toolset "{toolset}"',
@@ -2614,6 +2636,9 @@ class PremakeGenerator:
             '    objdir "build/obj/%{prj.name}"',
             f'    targetname "{target_name}"',
             f'    targetextension "{target_extension}"',
+            '    filter "configurations:release_profile"',
+            f'        targetname "{target_name}-profile"',
+            '    filter {}',
             '    ',
             '    files {',
         ])

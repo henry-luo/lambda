@@ -46,15 +46,17 @@ extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_async_iterator_step_result(Item iterator);
 extern int64_t js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
+extern int64_t js_shape_slot_guard(Item object, const char* name, int64_t name_len, int64_t byte_offset);
+#ifdef LAMBDA_JS_EXEC_PROFILE
 extern Item js_profiled_push_d(double dval);
 extern double js_profiled_it2d(Item item);
 extern int64_t js_profiled_it2i(Item item);
-extern int64_t js_shape_slot_guard(Item object, const char* name, int64_t name_len, int64_t byte_offset);
 extern void js_profile_shape_guard_hit(void);
 extern void js_profile_shape_guard_miss(void);
 extern void js_profile_shape_guard_hit_site(const char* label, void* expected_shape, void* actual_shape);
 extern void js_profile_shape_guard_miss_site(const char* label, void* expected_shape, void* actual_shape);
 extern void js_profile_property_set_site(const char* label);
+#endif
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1090,12 +1092,14 @@ JitImport jit_runtime_imports[] = {
     {"is_truthy", FPTR(is_truthy)},
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d)},
+#ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_push_d", FPTR(js_profiled_push_d)},
     {"js_profile_shape_guard_hit", FPTR(js_profile_shape_guard_hit)},
     {"js_profile_shape_guard_miss", FPTR(js_profile_shape_guard_miss)},
     {"js_profile_shape_guard_hit_site", FPTR(js_profile_shape_guard_hit_site)},
     {"js_profile_shape_guard_miss_site", FPTR(js_profile_shape_guard_miss_site)},
     {"js_profile_property_set_site", FPTR(js_profile_property_set_site)},
+#endif
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},
@@ -1109,9 +1113,13 @@ JitImport jit_runtime_imports[] = {
     {"item_at", FPTR(item_at)},
     {"it2l", FPTR(it2l)},
     {"it2d", FPTR(it2d)},
+#ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_it2d", FPTR(js_profiled_it2d)},
+#endif
     {"it2i", FPTR(it2i)},
+#ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_it2i", FPTR(js_profiled_it2i)},
+#endif
     {"it2b", FPTR(it2b)},
     {"it2s", FPTR(it2s)},
     {"fn_to_cstr", FPTR(fn_to_cstr)},

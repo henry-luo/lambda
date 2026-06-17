@@ -153,9 +153,12 @@ while IFS= read -r -d '' file; do
     echo "    Copied doc/$relpath"
 done < <(find ./doc -type f \( -name "*.md" -o -name "*.pdf" -o -name "*.svg" \) -print0)
 
-# Step 4: Build release binary
-echo "==> Building release binary..."
-make build-release
+# Step 4: Require a release binary built by make build-release
+if [ ! -x ./lambda.exe ]; then
+    echo "Error: lambda.exe not found or not executable."
+    echo "Run 'make build-release' before 'make prepare-release', or run 'make release'."
+    exit 1
+fi
 
 # Step 5: Copy lambda.exe to release directory
 # On macOS and Linux rename to 'lambda' (no .exe) to follow POSIX convention and

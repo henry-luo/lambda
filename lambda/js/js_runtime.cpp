@@ -40,6 +40,7 @@ extern "C" Item js_get_constructor(Item name_item);
 extern void js_double_to_string(double d, char* out, int out_size);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
+#ifdef LAMBDA_JS_EXEC_PROFILE
 extern "C" Item js_profiled_push_d(double dval) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_BOX_FLOAT);
     return push_d(dval);
@@ -54,6 +55,7 @@ extern "C" int64_t js_profiled_it2i(Item item) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_UNBOX_INT);
     return it2i(item);
 }
+#endif
 
 static ArrayList* g_js_array_runtime_item_buffers = NULL;
 
