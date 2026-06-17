@@ -15,6 +15,7 @@
 extern "C" void* heap_calloc(size_t size, TypeId type);
 String* heap_create_name(const char* name, size_t len);
 extern "C" Item js_object_is(Item left, Item right);
+extern void map_put(Map* mp, String* key, Item value, Input* input);
 
 // Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — only used here to
 // reach `properties_map`. Layout MUST stay in sync with the canonical definitions.
@@ -265,22 +266,9 @@ extern "C" void js_shape_entry_set_deleted(Item obj, const char* name, int name_
 // Stage A3: shape-flag-first attribute query helpers
 // =============================================================================
 //
-// Prefer ShapeEntry::flags (kept in sync with legacy markers via dual-write).
-// Fall back to a __ne_X / __nw_X / __nc_X marker probe only when no shape entry
-// exists for X (e.g. companion-map indexed properties on arrays).
-//
-// AT-4 (Option B): the marker-fallback probe is now scoped to **digit-string
-// names only**. Rationale: every js_attr_set_* write site for a named property
-// in current code first writes the data slot (via js_property_set or via the
-// descriptor kernel before reaching the attribute-write tail), so the shape
-// entry exists by the time the attribute write happens. Therefore, for a
-// named property, if the shape flag is unset, the property's attribute is the
-// default (writable/enumerable/configurable). For digit-string names on
-// MAP_KIND_ARRAY_PROPS companion maps, indexed values live in arr->items[idx]
-// and the companion map has no shape entry for "5" — the legacy
-// __nw_<idx>/__ne_<idx>/__nc_<idx> marker scheme remains the source of truth
-// for indexed-property attributes (full migration would require AT-4 Option A:
-// placeholder-sentinel scheme on companion-map digit-string slots).
+// Prefer ShapeEntry::flags for every ordinary property. Array indices and the
+// virtual array `length` are materialized in the companion map before flags are
+// changed, so marker fallback is no longer needed for attribute queries.
 static inline bool js_attrs_name_is_digits(const char* name, int name_len) {
     if (!name || name_len <= 0 || name_len > 10) return false;
     // Reject leading-zero numerics (per ES CanonicalNumericIndexString).
@@ -291,51 +279,102 @@ static inline bool js_attrs_name_is_digits(const char* name, int name_len) {
     return true;
 }
 
+static inline bool js_attrs_name_is_length(const char* name, int name_len) {
+    return name && name_len == 6 && memcmp(name, "length", 6) == 0;
+}
+
+static int64_t js_attrs_parse_index_name(const char* name, int name_len) {
+    if (!js_attrs_name_is_digits(name, name_len)) return -1;
+    int64_t index = 0;
+    for (int i = 0; i < name_len; i++) {
+        index = index * 10 + (int64_t)(name[i] - '0');
+    }
+    if (index > 0xFFFFFFFELL) return -1;
+    return index;
+}
+
+static Map* js_attr_ensure_array_props_map(Array* arr) {
+    if (!arr) return nullptr;
+    if (arr->extra == 0) {
+        Item obj = js_new_object();
+        obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
+        arr->extra = (int64_t)(uintptr_t)obj.map;
+    }
+    return (Map*)(uintptr_t)arr->extra;
+}
+
+static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int name_len) {
+    if (!name || name_len <= 0 || name_len >= 240) return false;
+    if (!js_attrs_name_is_digits(name, name_len) &&
+        !js_attrs_name_is_length(name, name_len)) return false;
+
+    Item target = ItemNull;
+    Array* arr = nullptr;
+    TypeId type = get_type_id(obj);
+    if (type == LMD_TYPE_ARRAY) {
+        arr = obj.array;
+        Map* pm = js_attr_ensure_array_props_map(arr);
+        if (!pm) return false;
+        target = (Item){.map = pm};
+    } else if (type == LMD_TYPE_MAP && obj.map &&
+               obj.map->map_kind == MAP_KIND_ARRAY_PROPS) {
+        target = obj;
+    } else {
+        return false;
+    }
+
+    if (js_find_shape_entry(target, name, name_len)) return true;
+
+    Item name_item = (Item){.item = s2it(heap_create_name(name, (size_t)name_len))};
+    Item slot_value = (Item){.item = ITEM_JS_UNDEFINED};
+    bool slot_found = false;
+    if (get_type_id(target) == LMD_TYPE_MAP) {
+        slot_value = js_map_get_fast_ext(target.map, name, name_len, &slot_found);
+        if (slot_found && slot_value.item == JS_DELETED_SENTINEL_VAL) slot_found = false;
+    }
+    if (!slot_found && arr && js_attrs_name_is_digits(name, name_len)) {
+        int64_t idx = js_attrs_parse_index_name(name, name_len);
+        if (idx >= 0 && idx < arr->length && idx < arr->capacity &&
+            arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
+            slot_value = arr->items[idx];
+            slot_found = true;
+        }
+    }
+
+    if (get_type_id(target) == LMD_TYPE_MAP && js_input) {
+        map_put(target.map, it2s(name_item), slot_value, js_input);
+    } else {
+        js_property_set(target, name_item, slot_value);
+    }
+    if (!js_find_shape_entry(target, name, name_len)) return false;
+    if (arr && js_attrs_name_is_digits(name, name_len)) {
+        int64_t idx = js_attrs_parse_index_name(name, name_len);
+        if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+            arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
+        }
+    }
+    return true;
+}
+
 extern "C" bool js_props_query_enumerable(Map* m, ShapeEntry* se,
                                           const char* name, int name_len) {
-    // Shape flag is authoritative when it indicates non-enumerable.
+    (void)m; (void)name; (void)name_len;
     if (se && !jspd_is_enumerable(se)) return false;
-    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
-    // Named properties: shape is authoritative; default is enumerable.
-    if (!js_attrs_name_is_digits(name, name_len)) return true;
-    if (!m || name_len >= 240) return true;
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
-    if (n <= 0 || n >= (int)sizeof(buf)) return true;
-    bool found = false;
-    Item v = js_map_get_fast_ext(m, buf, n, &found);
-    if (found && v.item == JS_DELETED_SENTINEL_VAL) return true;
-    return !(found && js_is_truthy(v));
+    return true;
 }
 
 extern "C" bool js_props_query_writable(Map* m, ShapeEntry* se,
                                         const char* name, int name_len) {
+    (void)m; (void)name; (void)name_len;
     if (se && !jspd_is_writable(se)) return false;
-    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
-    if (!js_attrs_name_is_digits(name, name_len)) return true;
-    if (!m || name_len >= 240) return true;
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "__nw_%.*s", name_len, name);
-    if (n <= 0 || n >= (int)sizeof(buf)) return true;
-    bool found = false;
-    Item v = js_map_get_fast_ext(m, buf, n, &found);
-    if (found && v.item == JS_DELETED_SENTINEL_VAL) return true;
-    return !(found && js_is_truthy(v));
+    return true;
 }
 
 extern "C" bool js_props_query_configurable(Map* m, ShapeEntry* se,
                                             const char* name, int name_len) {
+    (void)m; (void)name; (void)name_len;
     if (se && !jspd_is_configurable(se)) return false;
-    // AT-4 Option B: marker fallback only for digit-string (indexed) names.
-    if (!js_attrs_name_is_digits(name, name_len)) return true;
-    if (!m || name_len >= 240) return true;
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
-    if (n <= 0 || n >= (int)sizeof(buf)) return true;
-    bool found = false;
-    Item v = js_map_get_fast_ext(m, buf, n, &found);
-    if (found && v.item == JS_DELETED_SENTINEL_VAL) return true;
-    return !(found && js_is_truthy(v));
+    return true;
 }
 
 // Resolve the underlying Map* for an object: MAP → obj.map; FUNC →
@@ -371,11 +410,9 @@ extern "C" bool js_props_obj_query_enumerable(Item obj, const char* name, int na
 extern "C" bool js_props_obj_query_writable(Item obj, const char* name, int name_len) {
     if (get_type_id(obj) == LMD_TYPE_ARRAY && name_len == 6 &&
         strncmp(name, "length", 6) == 0) {
-        Map* pm = js_obj_resolve_map(obj);
-        if (!pm) return true;
-        bool found = false;
-        Item nw = js_map_get_fast_ext(pm, "__nw_length", 11, &found);
-        return !(found && nw.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw));
+        ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
+        Map* m = js_obj_resolve_map(obj);
+        return js_props_query_writable(m, se, name, name_len);
     }
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
     Map* m = js_obj_resolve_map(obj);
@@ -393,7 +430,7 @@ extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int 
 }
 
 // =============================================================================
-// Stage A2.6 / A2-T5: attribute write helpers — shape-first, marker-fallback.
+// Stage A2.6 / A2-T5: attribute write helpers — shape-first, array fallback.
 // =============================================================================
 //
 // Pre-A2-T5: each helper unconditionally wrote a `__nw_/__ne_/__nc_<name>`
@@ -404,18 +441,12 @@ extern "C" bool js_props_obj_query_configurable(Item obj, const char* name, int 
 // mutation would corrupt them all.
 //
 // Post-A2-T5: with `js_shape_entry_update_flags` going through the Map-local
-// TypeMap clone (A2-T1+T2), shape flags are reliably per-Map. Helpers now
-// prefer the shape-flag path. The marker write is retained ONLY as a
-// fallback for the case where no ShapeEntry exists yet for the property
-// (e.g. attribute set ahead of property definition, or array indexed
-// properties without a named shape slot). The marker reader fallback in
-// `js_props_query_*` covers reads of those entries; full marker retirement
-// (T6+) requires migrating those callers to ensure-shape-entry first.
-extern "C" void js_defprop_set_marker(Item obj, Item key, Item value);
-
-static inline void js_attr_apply_or_marker(Item obj, const char* name, int name_len,
-                                            uint8_t set_mask, uint8_t clear_mask,
-                                            const char* prefix5, bool non_default) {
+// TypeMap clone (A2-T1+T2), shape flags are reliably per-Map. Js59 P3 also
+// materializes array numeric indices and `length` into companion-map
+// ShapeEntry records before the flags are mutated. No helper writes
+// `__nw_` / `__ne_` / `__nc_` marker slots.
+static inline void js_attr_apply_shape_flags(Item obj, const char* name, int name_len,
+                                             uint8_t set_mask, uint8_t clear_mask) {
     // Probe-first: if a shape entry exists, the clone-aware shape-flag path
     // is authoritative (and preferred — no map slot needed).
     ShapeEntry* se = js_find_shape_entry(obj, name, name_len);
@@ -423,30 +454,24 @@ static inline void js_attr_apply_or_marker(Item obj, const char* name, int name_
         js_shape_entry_update_flags(obj, name, name_len, set_mask, clear_mask);
         return;
     }
-    // Fallback: no shape entry yet — write the legacy marker so the
-    // attribute applies once the property is later defined and the marker
-    // reader fallback in js_props_query_* picks it up.
-    if (name_len <= 0 || name_len >= 240) return;
-    char buf[256];
-    int n = snprintf(buf, sizeof(buf), "%s%.*s", prefix5, name_len, name);
-    if (n <= 0 || n >= (int)sizeof(buf)) return;
-    Item k = (Item){.item = s2it(heap_create_name(buf, n))};
-    js_defprop_set_marker(obj, k, (Item){.item = b2it(non_default ? BOOL_TRUE : BOOL_FALSE)});
+    if (js_attr_ensure_array_shape_entry(obj, name, name_len)) {
+        js_shape_entry_update_flags(obj, name, name_len, set_mask, clear_mask);
+    }
 }
 
 extern "C" void js_attr_set_writable(Item obj, const char* name, int name_len, bool writable) {
-    if (writable) js_attr_apply_or_marker(obj, name, name_len, 0, JSPD_NON_WRITABLE,     "__nw_", false);
-    else          js_attr_apply_or_marker(obj, name, name_len, JSPD_NON_WRITABLE, 0,     "__nw_", true);
+    if (writable) js_attr_apply_shape_flags(obj, name, name_len, 0, JSPD_NON_WRITABLE);
+    else          js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_WRITABLE, 0);
 }
 
 extern "C" void js_attr_set_enumerable(Item obj, const char* name, int name_len, bool enumerable) {
-    if (enumerable) js_attr_apply_or_marker(obj, name, name_len, 0, JSPD_NON_ENUMERABLE, "__ne_", false);
-    else            js_attr_apply_or_marker(obj, name, name_len, JSPD_NON_ENUMERABLE, 0, "__ne_", true);
+    if (enumerable) js_attr_apply_shape_flags(obj, name, name_len, 0, JSPD_NON_ENUMERABLE);
+    else            js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_ENUMERABLE, 0);
 }
 
 extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_len, bool configurable) {
-    if (configurable) js_attr_apply_or_marker(obj, name, name_len, 0, JSPD_NON_CONFIGURABLE, "__nc_", false);
-    else              js_attr_apply_or_marker(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0, "__nc_", true);
+    if (configurable) js_attr_apply_shape_flags(obj, name, name_len, 0, JSPD_NON_CONFIGURABLE);
+    else              js_attr_apply_shape_flags(obj, name, name_len, JSPD_NON_CONFIGURABLE, 0);
 }
 
 extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
@@ -502,9 +527,8 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
     String* ns = it2s(name);
     if (!ns || ns->len == 0) return;
 
-    char buf[256];
     int nl = (int)ns->len;
-    if (nl > (int)sizeof(buf) - 8) return; // defensive: overflow guard
+    if (nl > 248) return; // defensive bound retained for the transition helpers.
 
     // Allocate pair and store under name X. Use ItemNull as the slot for
     // missing getter/setter (per ES spec — absent half is undefined).
@@ -521,14 +545,7 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
         js_shape_entry_update_flags(obj, ns->chars, nl, set_mask, 0);
     }
 
-    // Apply legacy NON_CONFIGURABLE marker if requested (separate magic key
-    // scheme, unrelated to __get_X/__set_X). NON_ENUMERABLE is already encoded
-    // in the shape entry flags above.
-    if (attrs & JSPD_NON_CONFIGURABLE) {
-        int len = snprintf(buf, sizeof(buf), "__nc_%.*s", nl, ns->chars);
-        Item nck = (Item){.item = s2it(heap_create_name(buf, len))};
-        js_property_set(obj, nck, (Item){.item = b2it(BOOL_TRUE)});
-    }
+    // NON_CONFIGURABLE is encoded in the shape entry flags above.
     // JSPD_NON_WRITABLE is meaningless for accessors (ES spec); ignored.
 }
 

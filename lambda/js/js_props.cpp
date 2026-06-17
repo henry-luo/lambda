@@ -288,17 +288,13 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
         js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
     }
 
-    // Tombstone legacy attribute markers FIRST so the subsequent sentinel
-    // write to the data slot is not blocked by __nw_X non-writable guard.
-    if (name_len > 0 && name_len < 200) {
-        const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
-        for (int pi = 0; pi < 3; pi++) {
-            char mk[256];
-            snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], name_len, name);
-            Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
-            js_property_set(object, mk_item, (Item){.item = JS_DELETED_SENTINEL_VAL});
-        }
+    // Clear shape-backed attributes first so the subsequent sentinel write is
+    // not blocked by the non-writable guard.
+    if (se) {
+        js_shape_entry_update_flags(object, name, name_len, 0,
+            (uint8_t)(JSPD_NON_WRITABLE | JSPD_NON_ENUMERABLE | JSPD_NON_CONFIGURABLE));
     }
+
     Item bare = (Item){.item = s2it(heap_create_name(name, name_len))};
     js_property_set(object, bare, (Item){.item = JS_DELETED_SENTINEL_VAL});
     // A2-T8c dual-write: stamp JSPD_DELETED on the shape entry so readers can
@@ -399,18 +395,6 @@ static bool js_props_desc_from_storage(Item obj, Map* m,
         if (jspd_is_writable(se))     out->flags |= JS_PD_WRITABLE;
         if (jspd_is_enumerable(se))   out->flags |= JS_PD_ENUMERABLE;
         if (jspd_is_configurable(se)) out->flags2 |= 0x01u;
-    } else if (name_len > 0 && name_len < 240) {
-        char buf[256];
-        bool nw_f = false, nc_f = false, ne_f = false;
-        snprintf(buf, sizeof(buf), "__nw_%.*s", name_len, name);
-        Item nw_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &nw_f);
-        snprintf(buf, sizeof(buf), "__nc_%.*s", name_len, name);
-        Item nc_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &nc_f);
-        snprintf(buf, sizeof(buf), "__ne_%.*s", name_len, name);
-        Item ne_v = js_map_get_fast_ext(m, buf, (int)strlen(buf), &ne_f);
-        if (!(nw_f && js_is_truthy(nw_v))) out->flags  |= JS_PD_WRITABLE;
-        if (!(ne_f && js_is_truthy(ne_v))) out->flags  |= JS_PD_ENUMERABLE;
-        if (!(nc_f && js_is_truthy(nc_v))) out->flags2 |= 0x01u;
     } else {
         out->flags |= JS_PD_WRITABLE | JS_PD_ENUMERABLE;
         out->flags2 |= 0x01u;
@@ -460,8 +444,6 @@ extern "C" bool js_get_own_property_descriptor(Item object,
 // =============================================================================
 
 extern "C" void js_func_init_property(Item fn, Item key, Item value);
-extern "C" void  js_defprop_set_marker(Item obj, Item key, Item value);
-extern "C" bool js_defprop_has_marker(Item obj, Item key);
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here to avoid pulling the heavy transpiler header.
@@ -572,11 +554,8 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
 
     // Generic descriptor (no value, no get/set) — pre-create the property
     // with `undefined` if it doesn't already exist. This MUST happen before
-    // the attribute markers section runs so that `js_dual_write_marker_flags`
-    // can find the shape entry and update JSPD_NON_* flags on it. If we wrote
-    // markers first, the marker→shape dual-write would no-op (no entry), and
-    // a subsequent value write would create the entry with default flags,
-    // losing the attribute settings.
+    // the attribute section runs so that js_attr_set_* can find or materialize
+    // the shape entry and update JSPD_NON_* flags on it.
     bool is_data_desc = (pd->flags & JS_PD_HAS_VALUE) != 0;
     if (!is_accessor_desc && !is_data_desc) {
         if (!it2b(js_has_own_property(object, name_item))) {
@@ -586,10 +565,6 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
 
     // ----- Accessor descriptor: install via the IS_ACCESSOR chokepoint.
     if (is_accessor_desc) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "__nw_%.*s", name_len, name);
-        Item nw_k = js_props_str(buf, (int)strlen(buf));
-
         // Detect array exotic: arrays don't carry shape entries for indexed
         // slots, so Scheme B (IS_ACCESSOR shape flag) cannot apply. Use legacy
         // __get_X/__set_X companion-map markers instead — readers for array
@@ -670,10 +645,6 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
                 js_define_accessor_partial(object, name_item, pd->setter, /*is_setter*/1, /*attrs*/0);
             }
         }
-        // Conditional clear of stale __nw_ marker.
-        if (js_defprop_has_marker(object, nw_k)) {
-            js_defprop_set_marker(object, nw_k, (Item){.item = b2it(false)});
-        }
     } else if (pd->flags & JS_PD_HAS_VALUE) {
         // ----- Data descriptor: write the value, clearing IS_ACCESSOR if
         //       the previous slot held an accessor pair.
@@ -686,13 +657,10 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             }
         }
 
-        // Temporarily clear __nw_ so js_property_set's writable guard does
-        // not block the [[DefineOwnProperty]] write (validation already
-        // performed by caller). Probe + clear via the A2.6 helper; restore
-        // after the value write only if the marker was originally set.
-        char nw_buf[256];
-        snprintf(nw_buf, sizeof(nw_buf), "__nw_%.*s", name_len, name);
-        Item nw_k = js_props_str(nw_buf, (int)strlen(nw_buf));
+        // Temporarily clear non-writable so js_property_set's writable guard
+        // does not block the [[DefineOwnProperty]] write (validation already
+        // performed by caller). Probe + clear via the flag helper; restore
+        // after the value write only if it was originally set.
         bool had_nw = false;
         if (!is_new_property &&
                 js_prop_attrs_fast_path(object, name, name_len, JSPD_NON_WRITABLE) == 0) {
@@ -702,10 +670,6 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             // descriptor kernel must clear the shape bit before writing the value.
             had_nw = true;
             js_attr_set_writable(object, name, name_len, /*writable=*/true);
-        } else if (!is_new_property && it2b(js_has_own_property(object, nw_k))) {
-            Item nv = js_property_get(object, nw_k);
-            had_nw = js_is_truthy(nv);
-            if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/true);
         }
 
         ShapeEntry* value_se = !is_new_property ? js_find_shape_entry(object, name, name_len) : NULL;
@@ -729,9 +693,9 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
         if (had_nw) js_attr_set_writable(object, name, name_len, /*writable=*/false);
     }
 
-    // ----- Attribute markers: __nw_, __nc_, __ne_ (inverse "non-*" bits).
-    // Routed through js_attr_set_* helpers (Stage A2.6) — single chokepoint
-    // for the snprintf + heap_create_name + js_defprop_set_marker pattern.
+    // ----- Attribute flags: inverse "non-*" bits on ShapeEntry.
+    // Routed through js_attr_set_* helpers. Array index/length attributes are
+    // materialized in the companion map before the ShapeEntry flags are set.
 
     // writable — only for data descriptors (accessor descriptors have no writable bit).
     if (!is_accessor_desc) {

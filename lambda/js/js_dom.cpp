@@ -24,6 +24,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
@@ -44,6 +45,7 @@
 #include "../../radiant/editing_intent.hpp"
 #include "../../radiant/editing_rich_transaction.hpp"
 #include "../../radiant/editing_target_range.hpp"
+#include "../../radiant/clipboard.hpp"
 #include "../../radiant/handler.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -472,6 +474,22 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_FORE_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_BACK_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_HILITE_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_FONT_NAME ||
+                   intent->type == INPUT_INTENT_FORMAT_FONT_SIZE)) {
+        return editing_rich_default_style(state, surface, intent,
+                                          nullptr, nullptr);
+    }
+    if (intent && intent->type == INPUT_INTENT_FORMAT_REMOVE) {
+        return editing_rich_default_remove_format(state, surface, intent,
+                                                  nullptr, nullptr);
+    }
+    if (intent && intent->type == INPUT_INTENT_SELECT_ALL) {
+        return editing_rich_default_select_all(state, surface, intent,
+                                               nullptr, nullptr);
+    }
     if (intent && (intent->type == INPUT_INTENT_INSERT_LINK ||
                    intent->type == INPUT_INTENT_FORMAT_UNLINK)) {
         return editing_rich_default_link(state, surface, intent,
@@ -641,19 +659,41 @@ static bool js_dom_exec_command_is_link_object(const char* cmd) {
         strcasecmp(cmd, "insertImage") == 0;
 }
 
+static bool js_dom_exec_command_is_color_font(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "foreColor") == 0 ||
+        strcasecmp(cmd, "backColor") == 0 ||
+        strcasecmp(cmd, "hiliteColor") == 0 ||
+        strcasecmp(cmd, "fontName") == 0 ||
+        strcasecmp(cmd, "fontSize") == 0;
+}
+
+static bool js_dom_exec_command_is_cleanup_selection(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "removeFormat") == 0 ||
+        strcasecmp(cmd, "selectAll") == 0;
+}
+
+static bool js_dom_exec_command_is_clipboard(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "copy") == 0 ||
+        strcasecmp(cmd, "cut") == 0 ||
+        strcasecmp(cmd, "paste") == 0;
+}
+
 static bool js_dom_exec_command_is_native(const char* cmd) {
     return js_dom_exec_command_is_core_text(cmd) ||
         js_dom_exec_command_is_inline_format(cmd) ||
         js_dom_exec_command_is_block_structure(cmd) ||
-        js_dom_exec_command_is_link_object(cmd);
+        js_dom_exec_command_is_link_object(cmd) ||
+        js_dom_exec_command_is_color_font(cmd) ||
+        js_dom_exec_command_is_cleanup_selection(cmd) ||
+        js_dom_exec_command_is_clipboard(cmd);
 }
 
 static bool js_dom_exec_command_is_supported(const char* cmd) {
     if (!cmd) return false;
-    if (js_dom_exec_command_is_native(cmd)) return true;
-    return strcasecmp(cmd, "copy") == 0 ||
-        strcasecmp(cmd, "cut") == 0 ||
-        strcasecmp(cmd, "paste") == 0;
+    return js_dom_exec_command_is_native(cmd);
 }
 
 static bool js_dom_exec_command_map_intent(const char* cmd,
@@ -713,6 +753,79 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "superscript") == 0) {
         out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "foreColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FORE_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "backColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_BACK_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "hiliteColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_HILITE_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "fontName") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FONT_NAME;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "fontSize") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FONT_SIZE;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "removeFormat") == 0) {
+        out->type = INPUT_INTENT_FORMAT_REMOVE;
+        return true;
+    }
+    if (strcasecmp(cmd, "selectAll") == 0) {
+        out->type = INPUT_INTENT_SELECT_ALL;
+        return true;
+    }
+    if (strcasecmp(cmd, "cut") == 0) {
+        out->type = INPUT_INTENT_DELETE_BY_CUT;
+        return true;
+    }
+    if (strcasecmp(cmd, "paste") == 0) {
+        const char* text_read = clipboard_store_read_text();
+        char* text_copy = text_read ? mem_strdup(text_read, MEM_CAT_TEMP) : nullptr;
+        const char* html_read = clipboard_store_read_mime("text/html");
+        char* html_copy = html_read ? mem_strdup(html_read, MEM_CAT_TEMP) : nullptr;
+        if ((!text_copy || !text_copy[0]) && (!html_copy || !html_copy[0])) {
+            mem_free(text_copy);
+            mem_free(html_copy);
+            return false;
+        }
+        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
+        if (text_copy && text_copy[0]) {
+            out->owned_data = text_copy;
+            out->data = text_copy;
+        } else if (html_copy) {
+            mem_free(text_copy);
+            out->owned_data = mem_strdup(html_copy, MEM_CAT_TEMP);
+            out->data = out->owned_data;
+        } else {
+            mem_free(text_copy);
+        }
+        if (html_copy && html_copy[0]) {
+            out->owned_html_data = html_copy;
+            out->html_data = html_copy;
+        } else {
+            mem_free(html_copy);
+        }
+        out->data_mime = (out->html_data && out->html_data[0])
+            ? "text/html"
+            : "text/plain";
+        if (!out->data) {
+            input_intent_dispose(out);
+            return false;
+        }
         return true;
     }
     if (strcasecmp(cmd, "createLink") == 0) {
@@ -783,6 +896,47 @@ static bool js_dom_exec_command_has_rich_target(void) {
     return js_dom_testdriver_rich_surface(target, &surface);
 }
 
+static bool js_dom_exec_command_copy_selection_to_clipboard(DocState* state,
+                                                            const char* prefix) {
+    if (!state) return false;
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "js.execCommand.clipboard");
+    if (!temp_pool) return false;
+    Arena* temp_arena = mem_arena_create(NULL, temp_pool, MEM_ROLE_TEMP,
+                                         "js.execCommand.clipboard.arena");
+    if (!temp_arena) {
+        mem_pool_destroy(temp_pool);
+        return false;
+    }
+
+    char* text = state_store_extract_selection_text(state, temp_arena);
+    char* html = state_store_extract_selection_html(state, temp_arena);
+    bool copied = false;
+    if (html && html[0] && text) {
+        clipboard_store_write_html(html, text);
+        copied = true;
+        log_debug("%s: copied rich selection html=%zu text=%zu",
+                  prefix ? prefix : "js_dom_exec_command_copy",
+                  strlen(html), strlen(text));
+    } else if (text && text[0]) {
+        clipboard_store_write_text(text);
+        copied = true;
+        log_debug("%s: copied plain selection text=%zu",
+                  prefix ? prefix : "js_dom_exec_command_copy",
+                  strlen(text));
+    }
+
+    arena_destroy(temp_arena);
+    mem_pool_destroy(temp_pool);
+    return copied;
+}
+
+static bool js_dom_exec_command_copy_selection_hook(DocState* state,
+                                                    const char* prefix,
+                                                    void* user) {
+    (void)user;
+    return js_dom_exec_command_copy_selection_to_clipboard(state, prefix);
+}
+
 static Item js_dom_exec_command_native(Item* args, int argc) {
     if (!_js_current_document || !args || argc < 1) {
         return (Item){.item = ITEM_FALSE};
@@ -795,18 +949,24 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     DocState* state = js_dom_testdriver_state();
     if (!state) return (Item){.item = ITEM_FALSE};
 
-    const char* value = argc >= 3 ? fn_to_cstr(args[2]) : "";
-    InputIntent intent;
-    if (!js_dom_exec_command_map_intent(cmd, value, &intent)) {
-        return (Item){.item = ITEM_FALSE};
-    }
-
     int fallback_offset = 0;
     View* target = js_dom_testdriver_current_target(state, &fallback_offset);
     if (!target) return (Item){.item = ITEM_FALSE};
 
     EditingSurface surface;
     if (!js_dom_testdriver_rich_surface(target, &surface)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+
+    if (cmd && strcasecmp(cmd, "copy") == 0) {
+        bool copied = js_dom_exec_command_copy_selection_to_clipboard(
+            state, "js_dom_exec_command_copy");
+        return (Item){.item = b2it(copied)};
+    }
+
+    const char* value = argc >= 3 ? fn_to_cstr(args[2]) : "";
+    InputIntent intent;
+    if (!js_dom_exec_command_map_intent(cmd, value, &intent)) {
         return (Item){.item = ITEM_FALSE};
     }
 
@@ -820,7 +980,7 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     EditingDispatchHooks hooks;
     hooks.dispatch_input_event = js_dom_testdriver_dispatch_input_event;
     hooks.dispatch_lambda_event = nullptr;
-    hooks.copy_selection = nullptr;
+    hooks.copy_selection = js_dom_exec_command_copy_selection_hook;
     hooks.user = nullptr;
 
     JsDomTestdriverMutationArgs mutate_args;
@@ -842,6 +1002,7 @@ static Item js_dom_exec_command_native(Item* args, int argc) {
     bool prevented = false;
     bool mutated = false;
     bool ok = editing_run_transaction(&evcon, &tx, &prevented, &mutated, nullptr);
+    input_intent_dispose(&intent);
     if (ok && mutated && _js_current_document) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
         js_dom_queue_selectionchange(state->dom_selection);
@@ -917,6 +1078,116 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
         if (cur == static_cast<DomNode*>(surface.owner)) break;
     }
     return false;
+}
+
+static const char* js_dom_exec_command_style_property(const char* cmd) {
+    if (!cmd) return nullptr;
+    if (strcasecmp(cmd, "foreColor") == 0) return "color";
+    if (strcasecmp(cmd, "backColor") == 0 ||
+        strcasecmp(cmd, "hiliteColor") == 0) {
+        return "background-color";
+    }
+    if (strcasecmp(cmd, "fontName") == 0) return "font-family";
+    if (strcasecmp(cmd, "fontSize") == 0) return "font-size";
+    return nullptr;
+}
+
+static bool js_dom_ascii_space(char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static bool js_dom_style_decl_value(const char* style_text,
+                                    const char* prop_name,
+                                    char* out,
+                                    size_t out_size) {
+    if (out && out_size > 0) out[0] = '\0';
+    if (!style_text || !prop_name || !out || out_size == 0) return false;
+
+    const char* seg = style_text;
+    while (*seg) {
+        const char* end = strchr(seg, ';');
+        if (!end) end = seg + strlen(seg);
+
+        const char* colon = nullptr;
+        for (const char* p = seg; p < end; p++) {
+            if (*p == ':') {
+                colon = p;
+                break;
+            }
+        }
+        if (colon) {
+            const char* name_start = seg;
+            const char* name_end = colon;
+            while (name_start < name_end && js_dom_ascii_space(*name_start)) {
+                name_start++;
+            }
+            while (name_end > name_start && js_dom_ascii_space(name_end[-1])) {
+                name_end--;
+            }
+
+            size_t name_len = (size_t)(name_end - name_start);
+            if (strlen(prop_name) == name_len &&
+                strncasecmp(name_start, prop_name, name_len) == 0) {
+                const char* value_start = colon + 1;
+                const char* value_end = end;
+                while (value_start < value_end &&
+                       js_dom_ascii_space(*value_start)) {
+                    value_start++;
+                }
+                while (value_end > value_start &&
+                       js_dom_ascii_space(value_end[-1])) {
+                    value_end--;
+                }
+
+                size_t value_len = (size_t)(value_end - value_start);
+                if (value_len >= out_size) value_len = out_size - 1;
+                memcpy(out, value_start, value_len);
+                out[value_len] = '\0';
+                return true;
+            }
+        }
+
+        seg = *end ? end + 1 : end;
+    }
+    return false;
+}
+
+static const char* js_dom_exec_command_query_style_value(const char* cmd,
+                                                        char* out,
+                                                        size_t out_size) {
+    if (out && out_size > 0) out[0] = '\0';
+    const char* prop_name = js_dom_exec_command_style_property(cmd);
+    if (!prop_name || !out || out_size == 0) return "";
+
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return "";
+    }
+
+    DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return "";
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return "";
+    }
+
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element()) {
+            DomElement* elem = cur->as_element();
+            const char* style_text =
+                elem ? dom_element_get_attribute(elem, "style") : nullptr;
+            if (js_dom_style_decl_value(style_text, prop_name, out, out_size)) {
+                return out;
+            }
+        }
+        if (cur == static_cast<DomNode*>(surface.owner)) break;
+    }
+    return "";
 }
 
 static bool js_dom_exec_command_block_tag(uintptr_t tag) {
@@ -4355,9 +4626,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
     // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
     // Native EC commands run through the same rich editing transaction
-    // envelope as synthetic key input. Clipboard commands still delegate to a
-    // JS-side helper installed by the WPT shim so page clipboard handlers can
-    // populate the synthetic clipboard store.
+    // envelope as synthetic key input.
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         if (js_dom_exec_command_is_native(cmd)) {
@@ -4388,10 +4657,6 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (cmd && js_dom_exec_command_is_native(cmd)) {
             enabled = js_document_design_mode ||
                 js_dom_exec_command_has_rich_target();
-        } else if (cmd && (strcasecmp(cmd, "copy") == 0 ||
-                          strcasecmp(cmd, "cut") == 0 ||
-                          strcasecmp(cmd, "paste") == 0)) {
-            enabled = true;
         }
         return (Item){.item = b2it(enabled)};
     }
@@ -4416,6 +4681,13 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         if (cmd && strcasecmp(cmd, "formatBlock") == 0) {
             const char* value = js_dom_exec_command_query_format_block_value();
+            return (Item){.item = s2it(heap_create_name(value))};
+        }
+        if (cmd && js_dom_exec_command_style_property(cmd)) {
+            char value_buf[512];
+            const char* value =
+                js_dom_exec_command_query_style_value(cmd, value_buf,
+                                                      sizeof(value_buf));
             return (Item){.item = s2it(heap_create_name(value))};
         }
         return (Item){.item = s2it(heap_create_name(""))};

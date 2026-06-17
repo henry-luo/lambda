@@ -35,6 +35,24 @@ bool editing_rich_default_format(DocState* state,
                                  EditingRichMutationLogFn log_mutation,
                                  void* log_user);
 
+bool editing_rich_default_style(DocState* state,
+                                const EditingSurface* surface,
+                                const EditingIntent* intent,
+                                EditingRichMutationLogFn log_mutation,
+                                void* log_user);
+
+bool editing_rich_default_remove_format(DocState* state,
+                                        const EditingSurface* surface,
+                                        const EditingIntent* intent,
+                                        EditingRichMutationLogFn log_mutation,
+                                        void* log_user);
+
+bool editing_rich_default_select_all(DocState* state,
+                                     const EditingSurface* surface,
+                                     const EditingIntent* intent,
+                                     EditingRichMutationLogFn log_mutation,
+                                     void* log_user);
+
 bool editing_rich_default_link(DocState* state,
                                const EditingSurface* surface,
                                const EditingIntent* intent,

@@ -1,0 +1,9 @@
+values:1,2,3
+keys:__nw_alpha,__ne_alpha,__nc_alpha
+names:true,true,true
+locked:10,false,false,false
+marker:11,12,13,true,true,true
+markerReadonly:21
+arrayNamed:3,2,foo,__nw_foo
+deleteUser:false,true
+OK
