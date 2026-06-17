@@ -20,6 +20,7 @@
 // forward declarations
 extern "C" Item js_util_inspect(Item obj_item, Item options_item);
 extern "C" Item js_symbol_for(Item desc);
+extern "C" Item js_process_emit(Item event_name, Item arg1);
 
 // Helper: make JS undefined
 static inline Item make_js_undefined() {
@@ -460,12 +461,17 @@ extern "C" Item js_util_types_isSet(Item value) {
 // util.promisify(original) — callback-last API to Promise wrapper
 // =============================================================================
 
+static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args);
+static bool js_util_is_promise_like(Item value);
+static void js_util_emit_promisify_promise_warning(void);
+
 static Item js_util_promisify_callback(Item env_item, Item rest_args) {
     Item* env = (Item*)(uintptr_t)env_item.item;
     if (!env) return make_js_undefined();
 
     Item resolve = env[0];
     Item reject = env[1];
+    Item custom_args = env[2];
     int64_t argc = js_array_length(rest_args);
     Item err = (argc > 0) ? js_array_get_int(rest_args, 0) : make_js_undefined();
 
@@ -475,16 +481,7 @@ static Item js_util_promisify_callback(Item env_item, Item rest_args) {
         return make_js_undefined();
     }
 
-    Item value = make_js_undefined();
-    if (argc == 2) {
-        value = js_array_get_int(rest_args, 1);
-    } else if (argc > 2) {
-        value = js_array_new(0);
-        for (int64_t i = 1; i < argc; i++) {
-            js_array_push(value, js_array_get_int(rest_args, i));
-        }
-    }
-
+    Item value = js_util_promisify_result_from_args(custom_args, rest_args);
     Item resolve_args[1] = {value};
     js_call_function(resolve, make_js_undefined(), resolve_args, 1);
     return make_js_undefined();
@@ -497,13 +494,15 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     Item original = env[0];
     Item this_arg = env[1];
     Item call_args_array = env[2];
+    Item custom_args = env[3];
     int64_t argc64 = js_array_length(call_args_array);
     if (argc64 < 0) argc64 = 0;
 
-    Item* cb_env = js_alloc_env(2);
+    Item* cb_env = js_alloc_env(3);
     cb_env[0] = resolve;
     cb_env[1] = reject;
-    Item callback = js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 2);
+    cb_env[2] = custom_args;
+    Item callback = js_new_closure((void*)js_util_promisify_callback, -1, cb_env, 3);
 
     int argc = (int)argc64 + 1;
     Item* call_args = (Item*)alloca((size_t)argc * sizeof(Item));
@@ -512,12 +511,14 @@ static Item js_util_promisify_executor(Item env_item, Item resolve, Item reject)
     }
     call_args[argc - 1] = callback;
 
-    js_call_function(original, this_arg, call_args, argc);
+    Item call_result = js_call_function(original, this_arg, call_args, argc);
     if (js_check_exception()) {
         Item error = js_clear_exception();
         Item reject_args[1] = {error};
         js_call_function(reject, make_js_undefined(), reject_args, 1);
         if (js_check_exception()) js_clear_exception();
+    } else if (js_util_is_promise_like(call_result)) {
+        js_util_emit_promisify_promise_warning();
     }
     return make_js_undefined();
 }
@@ -527,6 +528,7 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
     if (!env) return js_promise_reject(make_string_item("promisified function missing target"));
 
     Item original = env[0];
+    Item custom_args = env[1];
     Item this_arg = js_get_this();
 
     Item call_args_array = js_array_new(0);
@@ -535,16 +537,66 @@ static Item js_util_promisified_function(Item env_item, Item rest_args) {
         js_array_push(call_args_array, js_array_get_int(rest_args, i));
     }
 
-    Item* exec_env = js_alloc_env(3);
+    Item* exec_env = js_alloc_env(4);
     exec_env[0] = original;
     exec_env[1] = this_arg;
     exec_env[2] = call_args_array;
-    Item executor = js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 3);
+    exec_env[3] = custom_args;
+    Item executor = js_new_closure((void*)js_util_promisify_executor, 2, exec_env, 4);
     return js_promise_create(executor);
 }
 
 static Item js_util_promisify_custom_symbol(void) {
     return js_symbol_for(make_string_item("nodejs.util.promisify.custom"));
+}
+
+extern "C" Item js_util_custom_promisify_args_symbol(void) {
+    return js_symbol_for(make_string_item("nodejs.util.promisify.customArgs"));
+}
+
+static bool js_util_is_promise_like(Item value) {
+    if (js_class_id(value) == JS_CLASS_PROMISE) return true;
+    TypeId type = get_type_id(value);
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_FUNC) return false;
+    Item then_fn = js_property_get(value, make_string_item("then"));
+    if (js_check_exception()) {
+        js_clear_exception();
+        return false;
+    }
+    return get_type_id(then_fn) == LMD_TYPE_FUNC;
+}
+
+static void js_util_emit_promisify_promise_warning(void) {
+    Item warning = js_new_object();
+    js_property_set(warning, make_string_item("name"), make_string_item("DeprecationWarning"));
+    js_property_set(warning, make_string_item("message"),
+        make_string_item("Calling promisify on a function that returns a Promise is likely a mistake."));
+    js_property_set(warning, make_string_item("code"), make_string_item("DEP0174"));
+    js_process_emit(make_string_item("warning"), warning);
+    if (js_check_exception()) js_clear_exception();
+}
+
+static Item js_util_promisify_result_from_args(Item custom_args, Item rest_args) {
+    int64_t argc = js_array_length(rest_args);
+    if (argc <= 1) return make_js_undefined();
+
+    if (get_type_id(custom_args) == LMD_TYPE_ARRAY) {
+        int64_t names_len = js_array_length(custom_args);
+        if (names_len > 0) {
+            Item obj = js_new_object();
+            int64_t value_count = argc - 1;
+            int64_t count = names_len < value_count ? names_len : value_count;
+            for (int64_t i = 0; i < count; i++) {
+                Item name = js_array_get_int(custom_args, i);
+                if (get_type_id(name) == LMD_TYPE_STRING) {
+                    js_property_set(obj, name, js_array_get_int(rest_args, i + 1));
+                }
+            }
+            return obj;
+        }
+    }
+
+    return js_array_get_int(rest_args, 1);
 }
 
 extern "C" Item js_util_promisify(Item fn_item) {
@@ -563,9 +615,13 @@ extern "C" Item js_util_promisify(Item fn_item) {
         return custom;
     }
 
-    Item* env = js_alloc_env(1);
+    Item custom_args = js_property_get(fn_item, js_util_custom_promisify_args_symbol());
+    if (js_check_exception()) return ItemNull;
+
+    Item* env = js_alloc_env(2);
     env[0] = fn_item;
-    Item wrapper = js_new_closure((void*)js_util_promisified_function, -1, env, 1);
+    env[1] = custom_args;
+    Item wrapper = js_new_closure((void*)js_util_promisified_function, -1, env, 2);
     js_property_set(wrapper, custom_key, wrapper);
     js_set_function_name(wrapper, make_string_item("promisified"));
     return wrapper;

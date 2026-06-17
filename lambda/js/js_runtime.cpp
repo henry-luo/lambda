@@ -23,6 +23,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name);
 extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item push_d(double dval);
 extern "C" double it2d(Item item);
 extern "C" int64_t it2i(Item item);
@@ -32338,8 +32339,27 @@ extern "C" Item js_module_get(Item specifier) {
         // dns/promises uses the same namespace — lookup/resolve already work
         return js_get_dns_namespace();
     }
+    // internal/util — selected internal symbols used by official Node.js tests
+    if ((spec->len == 13 && memcmp(spec->chars, "internal/util", 13) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "internal/util.js", 16) == 0)) {
+        static Item internal_util_ns = {0};
+        static uint64_t internal_util_epoch = (uint64_t)-1;
+        if (internal_util_ns.item == 0 || internal_util_epoch != js_heap_epoch) {
+            internal_util_epoch = js_heap_epoch;
+            internal_util_ns = js_new_object();
+            heap_register_gc_root(&internal_util_ns.item);
+            js_property_set(internal_util_ns,
+                (Item){.item = s2it(heap_create_name("customPromisifyArgs", 19))},
+                js_util_custom_promisify_args_symbol());
+            js_property_set(internal_util_ns,
+                (Item){.item = s2it(heap_create_name("default", 7))},
+                internal_util_ns);
+        }
+        return internal_util_ns;
+    }
     // internal/test/binding — provides internalBinding() for Node.js tests
-    if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0)) {
+    if ((spec->len == 21 && memcmp(spec->chars, "internal/test/binding", 21) == 0) ||
+        (spec->len == 24 && memcmp(spec->chars, "internal/test/binding.js", 24) == 0)) {
         static Item itb_ns = {0};
         static uint64_t itb_epoch = (uint64_t)-1;
         if (itb_ns.item == 0 || itb_epoch != js_heap_epoch) {
