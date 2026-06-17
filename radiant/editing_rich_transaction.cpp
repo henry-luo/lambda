@@ -1294,6 +1294,173 @@ bool editing_rich_default_list(DocState* state,
     return true;
 }
 
+static DomElement* rich_nearest_blockquote(const EditingSurface* surface,
+                                           DomElement* block) {
+    if (!surface || !surface->owner || !block) return nullptr;
+    DomNode* owner_node = static_cast<DomNode*>(surface->owner);
+    DomNode* node = static_cast<DomNode*>(block);
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(cur);
+        if (elem && elem->tag() == HTM_TAG_BLOCKQUOTE) return elem;
+    }
+    return nullptr;
+}
+
+static bool rich_indent_block(DocState* state,
+                              const EditingSurface* surface,
+                              const EditingIntent* intent,
+                              DomElement* block,
+                              DomRange* range,
+                              EditingRichMutationLogFn log_mutation,
+                              void* log_user) {
+    if (!state || !surface || !surface->owner || !surface->owner->doc ||
+        !intent || !block || !range || !block->parent ||
+        !block->parent->is_element()) {
+        return false;
+    }
+
+    DomElement* quote =
+        dom_element_create(surface->owner->doc, "blockquote", nullptr);
+    if (!quote) {
+        log_debug("editing_rich_default_indent: failed to create <blockquote>");
+        return false;
+    }
+
+    DomNode* block_node = static_cast<DomNode*>(block);
+    DomNode* quote_node = static_cast<DomNode*>(quote);
+    DomNode* parent_node = block_node->parent;
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+
+    if (!parent_node->insert_before(quote_node, block_node)) return false;
+    dom_mutation_post_insert(state, parent_node, quote_node);
+
+    dom_mutation_pre_remove(state, block_node);
+    if (!parent_node->remove_child(block_node)) return false;
+    if (!quote_node->append_child(block_node)) return false;
+    dom_mutation_post_insert(state, quote_node, block_node);
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { block_node, 0 };
+        DomBoundary end = { block_node, dom_node_boundary_length(block_node) };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_indent: selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "indent",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_indent: wrapped <%s> in <blockquote>",
+              block->node_name());
+    return true;
+}
+
+static bool rich_outdent_blockquote(DocState* state,
+                                    const EditingSurface* surface,
+                                    const EditingIntent* intent,
+                                    DomElement* quote,
+                                    DomRange* range,
+                                    EditingRichMutationLogFn log_mutation,
+                                    void* log_user) {
+    if (!state || !surface || !intent || !quote || !range ||
+        !quote->parent || !quote->parent->is_element()) {
+        return false;
+    }
+
+    DomNode* quote_node = static_cast<DomNode*>(quote);
+    DomNode* parent_node = quote_node->parent;
+    uint32_t quote_idx = dom_node_child_index(quote_node);
+    if (quote_idx == (uint32_t)-1) return false;
+
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    DomNode* child = quote->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!quote_node->remove_child(child)) return false;
+        if (!parent_node->insert_before(child, quote_node)) return false;
+        dom_mutation_post_insert(state, parent_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, quote_node);
+    if (!parent_node->remove_child(quote_node)) return false;
+
+    if (restore_start.node == quote_node) {
+        restore_start.node = parent_node;
+        restore_start.offset = quote_idx;
+    }
+    if (restore_end.node == quote_node) {
+        restore_end.node = parent_node;
+        restore_end.offset = quote_idx;
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { parent_node, quote_idx };
+        DomBoundary end = { parent_node, quote_idx };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_indent: outdent selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "outdent",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_indent: unwrapped <blockquote>");
+    return true;
+}
+
+bool editing_rich_default_indent(DocState* state,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent,
+                                 EditingRichMutationLogFn log_mutation,
+                                 void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner) {
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* block = rich_format_block_target(surface, range);
+    if (!block) {
+        log_debug("editing_rich_default_indent: no single block target");
+        return false;
+    }
+
+    if (intent->type == INPUT_INTENT_FORMAT_INDENT) {
+        return rich_indent_block(state, surface, intent, block, range,
+                                 log_mutation, log_user);
+    }
+    if (intent->type == INPUT_INTENT_FORMAT_OUTDENT) {
+        DomElement* quote = rich_nearest_blockquote(surface, block);
+        if (!quote) {
+            log_debug("editing_rich_default_indent: no blockquote to outdent");
+            return false;
+        }
+        return rich_outdent_blockquote(state, surface, intent, quote, range,
+                                       log_mutation, log_user);
+    }
+    return false;
+}
+
 bool editing_rich_default_replace(DocState* state,
                                   const EditingIntent* intent,
                                   View* fallback_view,

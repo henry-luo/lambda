@@ -488,6 +488,11 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_list(state, surface, intent,
                                          nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_INDENT ||
+                   intent->type == INPUT_INTENT_FORMAT_OUTDENT)) {
+        return editing_rich_default_indent(state, surface, intent,
+                                           nullptr, nullptr);
+    }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
     int fallback_offset = 0;
@@ -608,6 +613,8 @@ static bool js_dom_exec_command_is_inline_format(const char* cmd) {
 static bool js_dom_exec_command_is_block_structure(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "formatBlock") == 0 ||
+        strcasecmp(cmd, "indent") == 0 ||
+        strcasecmp(cmd, "outdent") == 0 ||
         strcasecmp(cmd, "insertOrderedList") == 0 ||
         strcasecmp(cmd, "insertUnorderedList") == 0 ||
         strcasecmp(cmd, "justifyLeft") == 0 ||
@@ -692,6 +699,14 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     if (strcasecmp(cmd, "formatBlock") == 0) {
         out->type = INPUT_INTENT_FORMAT_BLOCK;
         out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "indent") == 0) {
+        out->type = INPUT_INTENT_FORMAT_INDENT;
+        return true;
+    }
+    if (strcasecmp(cmd, "outdent") == 0) {
+        out->type = INPUT_INTENT_FORMAT_OUTDENT;
         return true;
     }
     if (strcasecmp(cmd, "insertOrderedList") == 0) {

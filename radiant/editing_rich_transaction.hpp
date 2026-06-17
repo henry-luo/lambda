@@ -53,4 +53,10 @@ bool editing_rich_default_list(DocState* state,
                                EditingRichMutationLogFn log_mutation,
                                void* log_user);
 
+bool editing_rich_default_indent(DocState* state,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent,
+                                 EditingRichMutationLogFn log_mutation,
+                                 void* log_user);
+
 #endif // RADIANT_EDITING_RICH_TRANSACTION_HPP
