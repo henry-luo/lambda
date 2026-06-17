@@ -1,6 +1,34 @@
 #include "js_mir_internal.hpp"
+#include "js_exec_profile.h"
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key);
+
+static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
+        JsClassEntry* ce, JsIdentifierNode* prop, int slot, JsMemberNode* mem) {
+    if (!mt || !ce || !prop || !prop->name) return "unknown";
+    const char* class_name = "anonymous";
+    int class_len = 9;
+    if (ce->name && ce->name->len > 0) {
+        class_name = ce->name->chars;
+        class_len = (int)ce->name->len;
+    } else if (ce->alias_name && ce->alias_name->len > 0) {
+        class_name = ce->alias_name->chars;
+        class_len = (int)ce->alias_name->len;
+    }
+    TSPoint point = ts_node_start_point(mem->base.node);
+    char label[192];
+    int len = snprintf(label, sizeof(label), "%.*s.%.*s#%d@%u:%u",
+        class_len, class_name,
+        (int)prop->name->len, prop->name->chars,
+        slot, point.row + 1, point.column + 1);
+    if (len < 0) return "unknown";
+    if (len >= (int)sizeof(label)) len = (int)sizeof(label) - 1;
+    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+    if (!np) return "unknown";
+    String* interned = name_pool_create_len(np, label, len);
+    if (!interned) return "unknown";
+    return interned->chars;
+}
 
 // True when this variable declarator was introduced by a `const` lexical
 // declaration. A `const` binding is immutable, so once the initializer has
@@ -10894,11 +10922,20 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     MIR_label_t l_slow = jm_new_label(mt);
                     MIR_label_t l_end = jm_new_label(mt);
                     MIR_reg_t result = jm_new_reg(mt, "p4r", MIR_T_I64);
+                    bool profile_shape_guard = js_exec_profile_mode() > 0;
+                    const char* profile_shape_label = NULL;
+                    MIR_reg_t profile_shape_reg = 0;
+                    MIR_reg_t profile_expected_reg = 0;
 
                     if (p1_ce->shape_cache_ptr) {
-                        // §7: Inline shape guard — shape match implies plain object
+                        if (profile_shape_guard) {
+                            profile_shape_label = jm_profile_shape_guard_label(mt, p1_ce, p4_prop, p4_slot, mem);
+                        }
+                        // §7: Shape guard — pointer match is cheapest; pointer mismatch
+                        // can still be a structurally equivalent same-class instance.
                         // Load obj->type (offset 8)
                         MIR_reg_t shape_reg = jm_new_reg(mt, "s7s", MIR_T_I64);
+                        profile_shape_reg = shape_reg;
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, shape_reg),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, obj_reg, 0, 1)));
@@ -10908,6 +10945,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                             MIR_new_reg_op(mt->ctx, cache_addr_reg),
                             MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p1_ce->shape_cache_ptr)));
                         MIR_reg_t expected_reg = jm_new_reg(mt, "s7e", MIR_T_I64);
+                        profile_expected_reg = expected_reg;
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, expected_reg),
                             MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, cache_addr_reg, 0, 1)));
@@ -10920,6 +10958,14 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
                             MIR_new_label_op(mt->ctx, l_fast),
                             MIR_new_reg_op(mt->ctx, match_reg)));
+                        MIR_reg_t structural_match = jm_call_4(mt, "js_shape_slot_guard", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)p4_prop->name->chars),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_prop->name->len),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, l_fast),
+                            MIR_new_reg_op(mt->ctx, structural_match)));
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                             MIR_new_label_op(mt->ctx, l_slow)));
 
@@ -10929,6 +10975,12 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                         // (AWFY bounce). use the type-guarded slot helper, which coerces by
                         // the slot's runtime entry->type.
                         jm_emit_label(mt, l_fast);
+                        if (profile_shape_guard) {
+                            jm_call_void_3(mt, "js_profile_shape_guard_hit_site",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)profile_shape_label),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, profile_expected_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, profile_shape_reg));
+                        }
                         if (field_type == LMD_TYPE_INT) {
                             MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
@@ -10946,7 +10998,7 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                                 MIR_new_reg_op(mt->ctx, result),
                                 MIR_new_reg_op(mt->ctx, boxed)));
                         }
-                        log_debug("P4b§7: shape guard + guarded slot load %.*s.%.*s → slot %d type %s",
+                        log_debug("P4b§7: structural shape guard + guarded slot load %.*s.%.*s → slot %d type %s",
                                   (int)p4_obj->name->len, p4_obj->name->chars,
                                   (int)p4_prop->name->len, p4_prop->name->chars,
                                   p4_slot, get_type_name(field_type));
@@ -11001,6 +11053,12 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
 
                     // Slow path: full property access for exotic objects
                     jm_emit_label(mt, l_slow);
+                    if (p1_ce->shape_cache_ptr && profile_shape_guard) {
+                        jm_call_void_3(mt, "js_profile_shape_guard_miss_site",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)profile_shape_label),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, profile_expected_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, profile_shape_reg));
+                    }
                     MIR_reg_t key = jm_box_string_literal(mt,
                         p4_prop->name->chars, (int)p4_prop->name->len);
                     MIR_reg_t slow = jm_call_2(mt, "js_property_get", MIR_T_I64,

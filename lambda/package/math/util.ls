@@ -25,14 +25,28 @@ fn pad_left(s, width, ch) {
 }
 
 // format a number as em units: "0.5em".
-// Uses 5-decimal precision to preserve exact CSS values used by Lambda's
-// existing layout. MathLive trims to 2 decimals; for values like 0.23744,
-// MathLive would emit "0.24em" (round-up) while Lambda's fmt_num gives
-// "0.23744em". The 0.01em precision mismatch is part of the strut-formula
-// gap that's intentional architectural difference.
+// Uses 5-decimal precision — for high-precision sites (sqrt, left-right
+// wrapper) that mirror MathLive's raw toString leak.
 pub fn fmt_em(x) {
     if (abs(x) >= 100000.0) fmt_large_em(x)
     else fmt_num(x, 5) ++ "em"
+}
+
+// format a number as em units with MathLive-compatible 2-decimal CEIL
+// rounding applied to the SIGNED value:
+//   - 0.23374  -> "0.24em"   (positive non-integer, ceil up)
+//   - -0.13313 -> "-0.13em"  (negative non-integer, ceil toward zero)
+//   - 0.08333  -> "0.09em"   ← top strut height path
+//   - -0.08333 -> "-0.08em"  ← vertical-align path (-d for d > 0)
+// This matches MathLive's `value.toFixed(2)` via the CEIL semantics observed
+// in its emission across hundreds of test cases.
+pub fn fmt_em_ceil2(x) {
+    let scaled = x * 100.0
+    let i = int(scaled)
+    let f = float(i)
+    let ceil_int = if (f >= scaled) i else i + 1
+    let v = float(ceil_int) / 100.0
+    fmt_num(v, 2) ++ "em"
 }
 
 fn fmt_large_em(x) {

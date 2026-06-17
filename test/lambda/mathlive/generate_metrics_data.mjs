@@ -76,19 +76,14 @@ function escapeCharForKey(ch) {
   return ch;
 }
 
-// Rounding rules matching observed MathLive emission precision:
+// Pre-rounded to 2 decimals matching MathLive's emission rules:
 //   - height (always positive): CEIL to 2 decimals
 //   - depth (positive = descender, below baseline): FLOOR to 2 decimals
-//   - depth (negative = above-baseline like →): CEIL of magnitude, then negate
-function roundCeil2(x) {
-  return Math.ceil(x * 100) / 100;
-}
-function roundHalfUp2(x) {
-  return Math.round(x * 100) / 100;
-}
-function roundFloor2(x) {
-  return Math.floor(x * 100) / 100;
-}
+//   - depth (negative = above-baseline like →): CEIL of magnitude, negated
+//   - other (italic, skew, width): half-up to 2 decimals
+function roundCeil2(x) { return Math.ceil(x * 100) / 100; }
+function roundHalfUp2(x) { return Math.round(x * 100) / 100; }
+function roundFloor2(x) { return Math.floor(x * 100) / 100; }
 function roundDepth(d) {
   if (d >= 0) return roundFloor2(d);
   return -roundCeil2(-d);
