@@ -8190,14 +8190,17 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 if (m && m->type) {
                     // Check if property exists in actual map shape
                     bool found_in_shape = false;
+                    ShapeEntry* found_entry = NULL;
                     TypeMap* tm = (TypeMap*)m->type;
                     ShapeEntry* e = tm->shape;
                     while (e) {
                         if (e->name && e->name->length == (size_t)ks->len &&
                             strncmp(e->name->str, ks->chars, ks->len) == 0) {
                             Item val = _map_read_field(e, m->data);
-                            if (val.item != JS_DELETED_SENTINEL_VAL)
+                            if (val.item != JS_DELETED_SENTINEL_VAL) {
                                 found_in_shape = true;
+                                found_entry = e;
+                            }
                             break;
                         }
                         e = e->next;
@@ -8209,17 +8212,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                     // (MAP_KIND_ARRAY_PROPS) bypass intercept and still use markers,
                     // but propertyIsEnumerable on those goes through a different path.
                     if (!found_in_shape) return (Item){.item = ITEM_FALSE};
-                    // Phase 2c fast path: consult ShapeEntry::flags first.
-                    int fp = js_prop_attrs_fast_path(property_object, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
-                    if (fp == 0) return (Item){.item = ITEM_FALSE};
-                    if (fp == -1) {
-                        char ne_buf[256];
-                        snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
-                        bool ne_found = false;
-                        Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
-                        if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
-                    }
-                    return (Item){.item = ITEM_TRUE};
+                    return (Item){.item = b2it(js_props_query_enumerable(m, found_entry,
+                        ks->chars, (int)ks->len))};
                 }
             }
         }
@@ -8236,24 +8230,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                            (ks->len == 6 && strncmp(ks->chars, "caller", 6) == 0))) {
                     return (Item){.item = ITEM_FALSE};
                 }
-                // Check __ne_ marker in properties_map for custom properties
                 JsFunction* fn = (JsFunction*)property_object.function;
                 if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
                     // First check if property exists in properties_map
                     bool has_key = false;
-                    js_map_get_fast_ext(fn->properties_map.map, ks->chars, (int)ks->len, &has_key);
-                    if (has_key) {
-                        // Phase 2c fast path: consult ShapeEntry::flags first.
-                        int fp = js_prop_attrs_fast_path(this_val, ks->chars, (int)ks->len, JSPD_NON_ENUMERABLE);
-                        if (fp == 0) return (Item){.item = ITEM_FALSE};
-                        if (fp == -1) {
-                            char ne_buf[256];
-                            snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
-                            bool ne_found = false;
-                            Item ne_val = js_map_get_fast_ext(fn->properties_map.map, ne_buf, (int)strlen(ne_buf), &ne_found);
-                            if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
-                        }
-                        return (Item){.item = ITEM_TRUE};
+                    Item slot = js_map_get_fast_ext(fn->properties_map.map, ks->chars, (int)ks->len, &has_key);
+                    if (has_key && slot.item != JS_DELETED_SENTINEL_VAL) {
+                        ShapeEntry* se = js_find_shape_entry(fn->properties_map,
+                            ks->chars, (int)ks->len);
+                        return (Item){.item = b2it(js_props_query_enumerable(fn->properties_map.map,
+                            se, ks->chars, (int)ks->len))};
                     }
                 }
             }
@@ -10774,13 +10760,8 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         // Reset lastIndex to 0. RegExpInitialize uses Throw=true here, so this
         // must fail even when the caller's source is sloppy mode.
         Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
-        bool last_index_non_writable = js_prop_attrs_fast_path(this_val, "lastIndex", 9, JSPD_NON_WRITABLE) == 0;
-        if (!last_index_non_writable) {
-            bool nw_found = false;
-            Item nw_val = js_map_get_fast(this_val.map, "__nw_lastIndex", 14, &nw_found);
-            last_index_non_writable = nw_found && nw_val.item != JS_DELETED_SENTINEL_VAL && js_is_truthy(nw_val);
-        }
-        if (last_index_non_writable) {
+        ShapeEntry* li_se = js_find_shape_entry(this_val, "lastIndex", 9);
+        if (!js_props_query_writable(this_val.map, li_se, "lastIndex", 9)) {
             js_throw_type_error("Cannot assign to read only property 'lastIndex' of object");
             return make_js_undefined();
         }
