@@ -564,6 +564,54 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: null,
             rule_height: 0.04
         }
+    } else if (numer_box.height < 0.5 and numer_box.depth < 0.01) {
+        // Short-body numerator (a single letter like a, m, x with cmmi
+        // height 0.44 and no descender). MathLive uses fraction height 0.94
+        // instead of the default 1.15 for these.
+        let denom_h = if (denom_box.height < 0.7) denom_box.height else 0.7
+        let extra_depth = if (denom_box.depth > 0.0) denom_box.depth else 0.0
+        let frac_depth = 0.68 + extra_depth
+        let total = 0.94 + frac_depth
+        {
+            height: 0.94,
+            depth: frac_depth + 0.005,
+            render_height: 0.94,
+            render_depth: frac_depth,
+            render_total: total,
+            depth_holder: 0.69,
+            denom_top: -2.31,
+            line_top: -3.23,
+            numer_top: -3.5,
+            numer_child_height: numer_box.height,
+            denom_child_height: denom_h,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
+    } else if (numer_box.height < 0.75 and numer_box.depth < 0.15 and
+               not (numer_box.height >= 0.6 and numer_box.height < 0.68) and
+               not (numer_box.height >= 0.6 and numer_box.height < 0.66)) {
+        // Tall-body numerator OR compound (letters and operators) with no
+        // significant descender (>0.15). MathLive uses height 1.2 for these.
+        // Excludes the i-like case (height ~0.66) which uses 1.16.
+        let denom_h = if (denom_box.height < 0.7) denom_box.height else 0.7
+        let extra_depth = if (denom_box.depth > 0.0) denom_box.depth else 0.0
+        let frac_depth = 0.69 + extra_depth
+        let total = 1.2 + frac_depth
+        {
+            height: 1.2,
+            depth: frac_depth,
+            render_height: 1.2,
+            render_depth: frac_depth,
+            render_total: total,
+            depth_holder: 0.69,
+            denom_top: -2.31,
+            line_top: -3.23,
+            numer_top: -3.5,
+            numer_child_height: numer_box.height,
+            denom_child_height: denom_h,
+            child_font_pct: null,
+            rule_height: 0.04
+        }
     } else {
         {
             height: 1.15,
@@ -604,6 +652,36 @@ fn script_fraction_has_descender(child_box) {
 
 fn script_fraction_has_digit(child_box) {
     items_have_digit(box.elements_of(child_box), 0)
+}
+
+// Returns true when the box contains ONLY digit/numeric content
+// (no letters or operators). Used to distinguish digit-only numerators
+// from compound expressions in frac_bar_spec.
+fn is_numeric_text_box(child_box) {
+    let els = box.elements_of(child_box)
+    is_all_numeric(els, 0)
+}
+
+fn is_all_numeric(items, i) {
+    if (i >= len(items)) true
+    else if (item_is_numeric(items[i])) is_all_numeric(items, i + 1)
+    else false
+}
+
+fn item_is_numeric(item) {
+    if (item is string) is_digit_only_text(string(item), 0)
+    else if (item is element and len(item) > 0 and item[0] is string)
+        is_digit_only_text(string(item[0]), 0)
+    else false
+}
+
+fn is_digit_only_text(s, i) {
+    if (i >= len(s)) i > 0
+    else
+        (let ch = slice(s, i, i + 1),
+         if ((ch >= "0" and ch <= "9") or ch == ".")
+             is_digit_only_text(s, i + 1)
+         else false)
 }
 
 fn items_have_descender(items, i) {
