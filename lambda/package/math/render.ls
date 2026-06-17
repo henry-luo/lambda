@@ -1175,6 +1175,23 @@ fn render_accent_base(base_node, context) {
     }
 }
 
+// Accent glyph widths from MathLive's Main-Regular font-metrics-data.ts.
+// Used to derive accent margin-left: (base.width - accent.width)/2 + 2*skew.
+fn accent_glyph_width(key) {
+    if (key == "hat" or key == "widehat") 0.5
+    else if (key == "tilde" or key == "widetilde") 0.5
+    else if (key == "bar" or key == "overline") 0.5
+    else if (key == "vec" or key == "overrightarrow") 0.5
+    else if (key == "breve") 0.5
+    else if (key == "dot") 0.28
+    else if (key == "ddot") 0.5
+    else if (key == "check") 0.5
+    else if (key == "acute") 0.5
+    else if (key == "grave") 0.5
+    else if (key == "mathring") 0.75
+    else 0.5
+}
+
 fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
     let base_elements = box.elements_of(base_box)
     // Use the base box's actual height for the inner wrapper. For tall

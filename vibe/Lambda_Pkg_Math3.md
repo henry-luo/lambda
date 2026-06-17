@@ -774,6 +774,36 @@ A subsequent attempt at the full Phase 2b port took the proposal's recommended a
 - Added support for SUB-ONLY and SUP-ONLY big-op limits (e.g., `\sum_n a_n`) — Lambda previously dispatched these to a flat vbox structure; now routes through `render_large_op_limits_vlist` with conditional sub/sup span emission, matching MathLive's stacked-vlist output for inline sum with single limit.
 - Integral inline-script (`render_integral_inline_scripts`): `sup_inner_h` now derives from `ceil2(sup_box.height_raw * 0.7)` (previously hardcoded 0.46em). `vlist_height` and `box_h` scale with `sup_inner_h` (1.09 + sup_inner_h pattern). Closes `\int_a^b`, `\int_0^\infty`, and similar cases where the sup is a tall letter or symbol.
 
+**Final Phase 2b session — text-op limits + further refinement**:
+- `\lim`-family operators (`\lim`, `\sup`, `\inf`, etc.) now route through the stacked-vlist path (`render_large_op_limits_vlist` with `is_text_op=true` flag) instead of the flat vbox previously used. Text-op specific: pstrut height = 3em (not 3.05em), op-top = -3em (not -3.05em), depth_holder/box_depth offsets 0.26/0.25 (much smaller than large-op 0.81/0.80).
+- Closes `\lim_{x\to 0} f(x)` (single-finding case).
+- Pass count: 581 (session start) → 590 (intermediate) → **592** (final), +11 net.
+
+### Attempted but reverted in Phase 2b
+
+- **Tree-sitter grammar fix for `\bigcap`/`\bigcup`** — Lambda's grammar matches `\big` greedily as sized-delim prefix, leaving `cap` as a stray token. Two regex approaches attempted:
+  - `\b` word boundary in `_sized_delim_cmd`: tree-sitter regex doesn't support assertions.
+  - Raising `command_name` prec from -1 to 1: caused massive cascade (365/921, 155 baseline regressions).
+  - **Resolution**: requires either explicit `\bigXxxx` tokens in the lexer with higher precedence, or an AST-builder post-process pass to recover `\big` + `cap` → `\bigcap`. Estimated effort: 5–10h.
+
+- **Accent margin-left derivation from MathLive formula** — Implemented `accentMargin = (base.width - accent.width)/2 + 2*skew` with per-accent width table (ported from Main-Regular metric data). Caused 2-case regression because Lambda's `base.skew` isn't always populated correctly and the formula's `base.left` term (italic correction handling) wasn't accounted for. Reverted.
+  - **Resolution**: requires proper skew propagation from text_box to render_accent, plus MathLive's exact base.left semantics. Estimated effort: 8–15h.
+
+### Phase 2b — final fixture status
+
+```
+12 / 27 dispatch branches pass (started at 8/27).
+Remaining 15 branches require per-content tuning, estimated 60–100 hours.
+```
+
+### Total project state after Phase 2b push
+
+```
+Corpus pass rate                  592 / 921  (64.3%)
+Net gain from proposal landing    +164 cases (+17.8 percentage points)
+Upstream baseline                 206 / 206  (100%)  — held throughout
+```
+
 **Empirical observation from the port attempt**: The TeXBook Rule 15d formulas (`numerShift + numerBox.height`) give RESULTS that don't match MathLive's emitted box heights. For `\frac{a}{b}` Rule 15d predicts frac.height = 0.394 + 0.30 (scaled) = 0.694, but MathLive emits 0.94. The extra ~0.25em is presumably MathLive's math-axis shift applied during VBox layout, but the exact transformation isn't documented in the source we have access to. Without recovering that math, per-branch empirical tuning (looking at MathLive's actual output and adjusting Lambda's spec to match) remains the only proven path.
 
 **Remaining 15 / 27 branches** require empirical tuning. Most follow recognizable patterns:

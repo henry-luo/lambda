@@ -230,18 +230,11 @@ fn render_big_op_limits(base, node, context, render_fn) {
     let sub_box = if (has_sub) render_fn(node.sub, ctx.sub_context(context)) else null
     let sup_box = if (has_sup) render_fn(node.sup, ctx.sup_context(context)) else null
 
-    if (is_text_op == null and (has_sub or has_sup))
-        render_large_op_limits_vlist(op_box, sub_box, sup_box)
+    if (has_sub or has_sup)
+        render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op != null)
     else
         (let scaled_op = if (is_text_op != null) op_box else box.with_scale(op_box, 1.5),
-         let parts = [{box: scaled_op, shift: 0.0}],
-         let parts2 = if (has_sup)
-             [{box: sup_box, shift: 0.0 - scaled_op.height - 0.1}] ++ parts
-         else parts,
-         let parts3 = if (has_sub)
-             parts2 ++ [{box: sub_box, shift: scaled_op.depth + 0.1}]
-         else parts2,
-         box.vbox(parts3))
+         box.vbox([{box: scaled_op, shift: 0.0}]))
 }
 
 // CEIL@2 helper — returns a 2-decimal CEIL of the input em value. Mirrors
@@ -274,7 +267,7 @@ fn sub_box_has_descender(sub_box) {
     else false
 }
 
-fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
+fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
     let op_elements = box.elements_of(op_box)
     let has_sub = sub_box != null
     let has_sup = sup_box != null
@@ -284,12 +277,18 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let sup_w = if (has_sup) sup_box.width else 0.0
     let compact_limits = has_sub and has_sup and sub_w <= 1.0 and sup_w > 1.0
     let sub_has_descender = has_sub and sub_box_has_descender(sub_box)
+    // Op-symbol wrapper height: large ops (sym) are at Size3 scale = 1.61em;
+    // text ops (\\lim, \\sup, etc.) emit at the actual letter heights.
+    let op_wrap_h = if (is_text_op) 0.7 else 1.61
     // vlist_height varies by which limits are present:
-    //   sub+sup compact: 1.81
-    //   sub+sup default: 1.66
-    //   sup only:        1.06 (sym + sup)
-    //   sub only:        1.06 (sym + tiny space)
-    let vlist_height = if (compact_limits) 1.81
+    //   text op + sub+sup:        0.94 (op + sub stacked)
+    //   text op + single limit:   0.7  (op + tiny limit)
+    //   large op + compact:       1.81
+    //   large op + sub+sup:       1.66
+    //   large op + single limit:  1.06
+    let vlist_height = if (is_text_op and has_sub and has_sup) 0.94
+                       else if (is_text_op) 0.7
+                       else if (compact_limits) 1.81
                        else if (has_sub and has_sup) 1.66
                        else 1.06
     let sub_h_raw = if (has_sub and sub_box.height_raw != null) sub_box.height_raw
@@ -305,12 +304,21 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let sup_scaled = ceil_em2(sup_h_raw * 0.7)
     let sup_child_height = if (compact_limits) 0.46
                            else if (has_sup) sup_scaled else 0.0
-    // Offset depends on configuration: sub+sup uses tighter offset since
-    // the op symbol sits between, sub-only has a wider gap.
-    let dh_offset = if (sub_has_descender) 0.82
+    // pstrut & op_top differ by op kind: large-op uses 3.05em pstrut and
+    // top:-3.05em; text-op uses 3em pstrut and top:-3em.
+    let pstrut_em = if (is_text_op) "3em" else "3.05em"
+    let op_top_em = if (is_text_op) "-3em" else "-3.05em"
+    // Offsets for depth_holder and box_depth differ by configuration:
+    //   text-op + sub-only:       offsets 0.26 / 0.25 (small op, tight stack)
+    //   sub+sup with descender:   0.82 / 0.81
+    //   sub+sup (default):        0.81 / 0.80
+    //   sub-only (large-op):      0.95 / 0.94
+    let dh_offset = if (is_text_op and has_sub) 0.26
+                    else if (sub_has_descender) 0.82
                     else if (has_sub and has_sup) 0.81
                     else 0.95
-    let bd_offset = if (sub_has_descender) 0.81
+    let bd_offset = if (is_text_op and has_sub) 0.25
+                    else if (sub_has_descender) 0.81
                     else if (has_sub and has_sup) 0.80
                     else 0.94
     let depth_holder = if (compact_limits) 1.26
@@ -319,21 +327,24 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let box_depth = if (compact_limits) 1.26
                     else if (has_sub) sub_child_height + bd_offset
                     else 0.0
-    // For sub-only, sub_top is slightly more negative (-1.89 vs -1.87).
-    let sub_top = if (compact_limits) 0.0 - 1.89
+    // sub_top positioning differs by op kind too. Text-op uses
+    // -(2.38) for sub_child=0.46 (formula: -1.92 - sub_child).
+    let sub_top = if (is_text_op and has_sub) (0.0 - 1.92 - sub_child_height)
+                  else if (compact_limits) 0.0 - 1.89
                   else if (has_sub and has_sup) 0.0 - 1.87
                   else 0.0 - 1.89
     let sub_span = if (has_sub) [
         <span class: css.CENTER, style: "top:" ++ util.fmt_em(sub_top);
-            <span class: css.PSTRUT, style: "height:3.05em">
+            <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
             <span style: "height:" ++ util.fmt_em(sub_child_height) ++ ";display:inline-block;font-size: 70%";
                 for (el in sub_elements) el
             >
         >
     ] else []
+    let sup_top_em = if (is_text_op) "-3.7em" else "-4.3em"
     let sup_span = if (has_sup) [
-        <span class: css.CENTER, style: "top:-4.3em";
-            <span class: css.PSTRUT, style: "height:3.05em">
+        <span class: css.CENTER, style: "top:" ++ sup_top_em;
+            <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
             <span style: "height:" ++ util.fmt_em(sup_child_height) ++ ";display:inline-block;font-size: 70%";
                 for (el in sup_elements) el
             >
@@ -344,9 +355,9 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
             <span class: css.VLIST_R;
                 <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
                     for (el in sub_span) el
-                    <span class: css.CENTER, style: "top:-3.05em";
-                        <span class: css.PSTRUT, style: "height:3.05em">
-                        <span style: "height:1.61em;display:inline-block";
+                    <span class: css.CENTER, style: "top:" ++ op_top_em;
+                        <span class: css.PSTRUT, style: "height:" ++ pstrut_em>
+                        <span style: "height:" ++ util.fmt_em(op_wrap_h) ++ ";display:inline-block";
                             for (el in op_elements) el
                         >
                     >
@@ -359,13 +370,22 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
             >
         >
     >
+    // Text-op strut height includes the op's natural ascent (0.75 for "lim")
+    // — slightly more than vlist_height (0.7) because the strut covers the
+    // unscaled letter heights. depth_raw is set slightly below the rounded
+    // depth so CEIL@2(-d_raw) emits "-0.71em" not "-0.72em" (matches MathLive).
+    let out_h = if (is_text_op) 0.75 else vlist_height
+    let out_d = if (is_text_op and has_sub) 0.72 else box_depth
+    let out_d_raw = if (is_text_op and has_sub) 0.715 else box_depth
     {
         element: el,
-        height: vlist_height,
-        depth: box_depth,
-        render_height: vlist_height,
-        render_depth: box_depth,
-        render_total: vlist_height + box_depth,
+        height: out_h,
+        depth: out_d,
+        height_raw: out_h,
+        depth_raw: out_d_raw,
+        render_height: out_h,
+        render_depth: out_d,
+        render_total: out_h + out_d,
         width: max(max(op_box.width, sub_w), sup_w),
         type: "mop",
         italic: 0.0,
