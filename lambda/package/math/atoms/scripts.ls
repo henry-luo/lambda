@@ -366,9 +366,13 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
 }
 
 fn is_mathit_x_box(bx) {
+    // Any single italic Latin letter base. MathLive's 0.87 vlist_height
+    // applies to all letter+digit superscript pairs, not only "x".
     let els = box.elements_of(bx)
     len(els) == 1 and els[0] is element and els[0].class == css.MATHIT and
-    len(els[0]) == 1 and els[0][0] is string and string(els[0][0]) == "x"
+    len(els[0]) == 1 and els[0][0] is string and
+    (let ch = string(els[0][0]),
+     len(ch) == 1 and ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")))
 }
 
 fn is_numeric_script_box(bx) {
