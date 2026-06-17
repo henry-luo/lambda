@@ -38,6 +38,126 @@ Implementation update, 2026-06-17:
   `unbox_float` with `2` runtime calls / `2` MIR sites; the MIR helper section
   records `js_profiled_push_d` and `js_profiled_it2d`.
 
+P1 measurement update, 2026-06-17:
+
+- Fresh release baselines after P0-C still show `property_get` as the dominant
+  P1 target:
+  - `richards`: `14,168,107` `property_get` calls, `3,840.617 ms` self time,
+    `164,922` `get_slot_i` calls, `__TIMING__ 5231.581667 ms`.
+  - `deltablue`: `7,807,150` `property_get` calls, `1,361.917 ms` self time,
+    `6,384` `get_slot_i` calls, `__TIMING__ 3407.041166 ms`.
+- A static field-use inference experiment was tried and rejected rather than
+  kept. It tagged params/locals by matching field names against unique
+  constructor shapes, then guarded untyped reads with a shape-cache fallback.
+- The broad version increased `richards` to `16,444,959` `property_get` calls
+  and `__TIMING__ 5465.490541 ms`; the narrowed param/alias-only version still
+  increased `richards` to `16,760,627` `property_get` calls and
+  `__TIMING__ 5631.947834 ms`.
+- `deltablue` also regressed in the narrowed run:
+  `7,983,337` `property_get` calls and `__TIMING__ 3622.883833 ms`.
+- No P1 code from that experiment was retained. The failure mode is useful:
+  field-name matching alone creates too many guard misses and slow
+  `js_property_get()` fallbacks. The next P1 slice should first add shape
+  guard hit/miss evidence or propagate receiver class from actual call sites,
+  not from body field names alone.
+
+P1 shape-guard evidence update, 2026-06-17:
+
+- Added profiler-only `shape_guard_hit` and `shape_guard_miss` counters for the
+  existing §7 shape-cache guard in typed class-field reads. The helper calls are
+  emitted only when `JS_EXEC_PROFILE` is active, so normal non-profile MIR keeps
+  the same generated read path.
+- Release profile commands:
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_richards_p1_shape_guard.tsv ./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log`
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_deltablue_p1_shape_guard.tsv ./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log`
+- `richards` profile result: `property_get` stayed at `14,168,107` calls,
+  `get_slot_i` stayed at `164,922` calls, and the new shape counters showed
+  only `2,322` hits versus `113,778` misses across `2` guarded MIR sites
+  (`__TIMING__ 5421.833583 ms`).
+- `deltablue` profile result: `property_get` stayed at `7,807,150` calls,
+  `get_slot_i` stayed at `6,384` calls, and the new shape counters showed only
+  `104` hits versus `6,176` misses across `2` guarded MIR sites
+  (`__TIMING__ 3552.085708 ms`).
+- Validation run: `make build-test`, `./test/test_js_gtest.exe --gtest_brief=1`,
+  and `make test262-baseline` completed successfully. The js262 baseline
+  finished at `40261 / 40261` fully passing with `0` regressions.
+- Interpretation: the current §7 guard is not yet proving enough real reads to
+  justify widening P1 reads. The safer next step is to explain why those two
+  actual guarded sites mostly see a different shape than the cached constructor
+  shape, or to propagate receiver class/shape facts from concrete allocation and
+  call sites before adding another read-fast-path patch.
+
+P1 shape-root-cause trace, 2026-06-17:
+
+- Extended the profiler with a `# Shape guard sites` detail section. Each row
+  records the guarded member site as `Class.field#slot@line:column`, the cached
+  expected shape pointer, hit/miss counts, and sampled actual miss-shape
+  pointers.
+- Fresh release profiles:
+  - `richards`: the only guarded site is
+    `Scheduler.currentTaskIdentity#6@436:23`; it recorded `2,322` hits and
+    `113,778` misses. The misses are exactly `49 * 2,322`, which matches the
+    same hot read running across later same-class scheduler instances after the
+    first cached instance.
+  - `deltablue`: the only guarded site is `Planner.currentMark#0@1010:12`; it
+    recorded `104` hits and `6,176` misses, again with many actual miss-shape
+    pointers for the same source-level receiver class and field.
+- Root cause: the static receiver class is not the main problem for these two
+  sites. The current §7 guard caches the first instance's `TypeMap*` in
+  `js_constructor_create_object_shaped_cached`, but `js_new_object_with_shape`
+  creates a fresh `TypeMap` for each later instance. Class construction then
+  writes instance metadata such as `__class_name__` and prototype storage
+  (`__json_own_proto__`, `__proto__`) with `js_property_set`/`map_put`, which
+  extends each instance's `TypeMap` independently. The result is many
+  structurally equivalent same-class shapes with different pointers, so a
+  pointer-identity shape guard mostly misses.
+- Validation after the detailed trace: `make build-test`,
+  `./test/test_js_gtest.exe --gtest_brief=1`, and `make test262-baseline`
+  passed. The js262 gate finished at `40261 / 40261` fully passing with `0`
+  regressions.
+- Safer next implementation choices:
+  - Deduplicate or reuse a finalized constructor-instance shape only after the
+    mandatory class metadata/prototype own slots are accounted for.
+  - Or replace the pointer-identity guard with a structural slot guard that
+    proves the same property name and byte offset at the requested slot before
+    calling `js_get_slot_i/f`.
+  - Do not widen P1 reads from class names alone; the evidence says the next
+    patch should preserve exact receiver/shape proof.
+
+P1 structural slot-guard update, 2026-06-17:
+
+- Implemented the structural guard choice above for the existing cached-shape
+  typed field read path. A pointer shape match still jumps straight to the slot
+  read. Pointer mismatch now calls `js_shape_slot_guard(object, name, len,
+  byte_offset)` and only falls back to `js_property_get()` if the actual
+  receiver shape does not have the requested data slot.
+- The guard is deliberately narrow: it requires a plain map with live data,
+  verifies the slot byte offset and property name, and rejects accessor or
+  deleted slots so the fast path does not bypass JS property semantics.
+- Release profile commands:
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_richards_p1_struct_slot.tsv ./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log`
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_deltablue_p1_struct_slot.tsv ./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log`
+- `richards` result: the previously-missing
+  `Scheduler.currentTaskIdentity#6@436:23` site moved to `116,100` hits and
+  `0` misses. `property_get` dropped from `14,168,107` to `14,054,329`, while
+  `get_slot_i` rose from `164,922` to `278,700`; the delta is exactly the old
+  `113,778` guard misses now taking the guarded slot read. The structural guard
+  itself ran `113,778` times and cost `2.107 ms` self time in the profile.
+- `deltablue` result: `Planner.currentMark#0@1010:12` moved to `6,280` hits
+  and `0` misses. `property_get` dropped from `7,807,150` to `7,800,974`, while
+  `get_slot_i` rose from `6,384` to `12,560`; again the delta is exactly the
+  old `6,176` guard misses. The structural guard ran `6,176` times and cost
+  `0.120 ms` self time.
+- Non-profile release smoke runs passed: `richards` reported
+  `__TIMING__ 4785.136166 ms`, and `deltablue` reported
+  `__TIMING__ 3189.934417 ms`. Treat these as targeted smoke evidence rather
+  than a broad benchmark claim; the important proof for this slice is that the
+  same-class fresh-shape receivers now stay on the guarded slot path.
+- Validation after the structural guard: `make build-test`,
+  `./test/test_js_gtest.exe --gtest_brief=1`, and `make test262-baseline`
+  passed. The JS gtest gate ran `198 / 198`, and js262 finished
+  `40261 / 40261` fully passing with `0` regressions.
+
 The Tune10 goal is to stop tuning from aggregate benchmark wall time alone and
 move to a per-mechanism loop: profile a benchmark, choose the hottest runtime or
 MIR helper family, implement one targeted optimization, then reprofile the same

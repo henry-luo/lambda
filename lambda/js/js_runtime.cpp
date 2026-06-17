@@ -2772,6 +2772,32 @@ static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t
     return NULL;
 }
 
+extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
+        int64_t name_len, int64_t byte_offset) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SHAPE_SLOT_GUARD);
+    if (!name || name_len <= 0 || byte_offset < 0) return 0;
+    if ((byte_offset % (int64_t)sizeof(void*)) != 0) return 0;
+    if (get_type_id(object) != LMD_TYPE_MAP) return 0;
+
+    Map* m = (Map*)object.map;
+    if (!m || m->map_kind != MAP_KIND_PLAIN || !m->data) return 0;
+    if (byte_offset > (int64_t)m->data_cap - (int64_t)sizeof(void*)) return 0;
+
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || tm == &EmptyMap || !tm->shape) return 0;
+
+    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
+    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
+    if (!entry || entry->byte_offset != byte_offset || !entry->name ||
+            !entry->name->str) {
+        return 0;
+    }
+    if (jspd_is_accessor(entry) || jspd_is_deleted(entry)) return 0;
+    if (entry->name->length != (size_t)name_len) return 0;
+    if (entry->name->str == name) return 1;
+    return memcmp(entry->name->str, name, (size_t)name_len) == 0 ? 1 : 0;
+}
+
 extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_F);
     Map* m = (Map*)object.map;

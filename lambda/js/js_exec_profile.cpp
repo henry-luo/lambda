@@ -37,6 +37,15 @@ typedef struct JsExecProfileMirCall {
     uint64_t sites;
 } JsExecProfileMirCall;
 
+typedef struct JsExecProfileShapeGuardSite {
+    char label[96];
+    uintptr_t expected_shape;
+    uint64_t hits;
+    uint64_t misses;
+    uintptr_t miss_shapes[4];
+    uint64_t miss_counts[4];
+} JsExecProfileShapeGuardSite;
+
 int g_js_exec_profile_mode = -1;
 
 static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
@@ -54,6 +63,9 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
     {"get_slot_i", 0, 0, 0, 0},
     {"set_slot_f", 0, 0, 0, 0},
     {"set_slot_i", 0, 0, 0, 0},
+    {"shape_slot_guard", 0, 0, 0, 0},
+    {"shape_guard_hit", 0, 0, 0, 0},
+    {"shape_guard_miss", 0, 0, 0, 0},
     {"box_float", 0, 0, 0, 0},
     {"unbox_int", 0, 0, 0, 0},
     {"unbox_float", 0, 0, 0, 0},
@@ -63,8 +75,10 @@ static JsExecProfileSlot g_js_exec_profile_slots[JS_EXEC_PROF_EVENT_COUNT] = {
 
 static JsExecProfileFrame g_js_exec_profile_stack[4096];
 static JsExecProfileMirCall g_js_exec_profile_mir_calls[1024];
+static JsExecProfileShapeGuardSite g_js_exec_profile_shape_guard_sites[128];
 static int g_js_exec_profile_stack_depth = 0;
 static int g_js_exec_profile_mir_call_count = 0;
+static int g_js_exec_profile_shape_guard_site_count = 0;
 static int g_js_exec_profile_registered = 0;
 
 static int js_exec_profile_truthy(const char* s) {
@@ -97,6 +111,7 @@ void js_exec_profile_reset(void) {
     }
     g_js_exec_profile_stack_depth = 0;
     g_js_exec_profile_mir_call_count = 0;
+    g_js_exec_profile_shape_guard_site_count = 0;
 }
 
 static void js_exec_profile_note_mir_call_name(const char* fn_name) {
@@ -156,6 +171,68 @@ void js_exec_profile_count(JsExecProfileEvent event) {
     g_js_exec_profile_slots[event].calls++;
 }
 
+extern "C" void js_profile_shape_guard_hit(void) {
+    js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_HIT);
+}
+
+extern "C" void js_profile_shape_guard_miss(void) {
+    js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_MISS);
+}
+
+static JsExecProfileShapeGuardSite* js_exec_profile_shape_guard_site(const char* label,
+        void* expected_shape) {
+    const char* safe_label = (label && label[0]) ? label : "unknown";
+    uintptr_t expected = (uintptr_t)expected_shape;
+    for (int i = 0; i < g_js_exec_profile_shape_guard_site_count; i++) {
+        JsExecProfileShapeGuardSite* site = &g_js_exec_profile_shape_guard_sites[i];
+        if (site->expected_shape == expected && strcmp(site->label, safe_label) == 0) return site;
+    }
+    if (g_js_exec_profile_shape_guard_site_count >=
+            (int)(sizeof(g_js_exec_profile_shape_guard_sites) / sizeof(g_js_exec_profile_shape_guard_sites[0]))) {
+        return NULL;
+    }
+    JsExecProfileShapeGuardSite* site =
+        &g_js_exec_profile_shape_guard_sites[g_js_exec_profile_shape_guard_site_count++];
+    memset(site, 0, sizeof(*site));
+    strncpy(site->label, safe_label, sizeof(site->label) - 1);
+    site->expected_shape = expected;
+    return site;
+}
+
+static void js_exec_profile_shape_guard_note(const char* label, void* expected_shape,
+        void* actual_shape, bool hit) {
+    int mode = g_js_exec_profile_mode >= 0 ? g_js_exec_profile_mode : js_exec_profile_mode();
+    if (mode <= 0) return;
+    JsExecProfileShapeGuardSite* site =
+        js_exec_profile_shape_guard_site(label, expected_shape);
+    if (!site) return;
+    if (hit) {
+        site->hits++;
+        return;
+    }
+    site->misses++;
+    uintptr_t actual = (uintptr_t)actual_shape;
+    for (int i = 0; i < (int)(sizeof(site->miss_shapes) / sizeof(site->miss_shapes[0])); i++) {
+        if (site->miss_counts[i] == 0 || site->miss_shapes[i] == actual) {
+            site->miss_shapes[i] = actual;
+            site->miss_counts[i]++;
+            return;
+        }
+    }
+}
+
+extern "C" void js_profile_shape_guard_hit_site(const char* label,
+        void* expected_shape, void* actual_shape) {
+    js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_HIT);
+    js_exec_profile_shape_guard_note(label, expected_shape, actual_shape, true);
+}
+
+extern "C" void js_profile_shape_guard_miss_site(const char* label,
+        void* expected_shape, void* actual_shape) {
+    js_exec_profile_count(JS_EXEC_PROF_SHAPE_GUARD_MISS);
+    js_exec_profile_shape_guard_note(label, expected_shape, actual_shape, false);
+}
+
 static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_name) {
     if (!fn_name) return JS_EXEC_PROF_OTHER_RUNTIME_CALL;
     if (strcmp(fn_name, "js_property_get") == 0 ||
@@ -181,6 +258,11 @@ static JsExecProfileEvent js_exec_profile_event_for_runtime_call(const char* fn_
     if (strcmp(fn_name, "js_get_slot_i") == 0) return JS_EXEC_PROF_GET_SLOT_I;
     if (strcmp(fn_name, "js_set_slot_f") == 0) return JS_EXEC_PROF_SET_SLOT_F;
     if (strcmp(fn_name, "js_set_slot_i") == 0) return JS_EXEC_PROF_SET_SLOT_I;
+    if (strcmp(fn_name, "js_shape_slot_guard") == 0) return JS_EXEC_PROF_SHAPE_SLOT_GUARD;
+    if (strcmp(fn_name, "js_profile_shape_guard_hit") == 0) return JS_EXEC_PROF_SHAPE_GUARD_HIT;
+    if (strcmp(fn_name, "js_profile_shape_guard_miss") == 0) return JS_EXEC_PROF_SHAPE_GUARD_MISS;
+    if (strcmp(fn_name, "js_profile_shape_guard_hit_site") == 0) return JS_EXEC_PROF_SHAPE_GUARD_HIT;
+    if (strcmp(fn_name, "js_profile_shape_guard_miss_site") == 0) return JS_EXEC_PROF_SHAPE_GUARD_MISS;
     if (strcmp(fn_name, "push_d") == 0 ||
         strcmp(fn_name, "js_profiled_push_d") == 0) {
         return JS_EXEC_PROF_BOX_FLOAT;
@@ -247,6 +329,32 @@ void js_exec_profile_dump(void) {
             strbuf_append_str(buf, g_js_exec_profile_mir_calls[i].name);
             strbuf_append_char(buf, '\t');
             strbuf_append_uint64(buf, g_js_exec_profile_mir_calls[i].sites);
+            strbuf_append_char(buf, '\n');
+        }
+    }
+    if (g_js_exec_profile_shape_guard_site_count > 0) {
+        strbuf_append_str(buf, "\n# Shape guard sites\n");
+        strbuf_append_str(buf,
+            "shape_guard_site\thits\tmisses\texpected_shape\tmiss_shape_1\tmiss_count_1\tmiss_shape_2\tmiss_count_2\tmiss_shape_3\tmiss_count_3\tmiss_shape_4\tmiss_count_4\n");
+        for (int i = 0; i < g_js_exec_profile_shape_guard_site_count; i++) {
+            JsExecProfileShapeGuardSite* site = &g_js_exec_profile_shape_guard_sites[i];
+            strbuf_append_str(buf, site->label);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, site->hits);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_uint64(buf, site->misses);
+            strbuf_append_char(buf, '\t');
+            strbuf_append_format(buf, "0x%llx", (unsigned long long)site->expected_shape);
+            for (int j = 0; j < (int)(sizeof(site->miss_shapes) / sizeof(site->miss_shapes[0])); j++) {
+                strbuf_append_char(buf, '\t');
+                if (site->miss_counts[j] == 0) {
+                    strbuf_append_str(buf, "0x0");
+                } else {
+                    strbuf_append_format(buf, "0x%llx", (unsigned long long)site->miss_shapes[j]);
+                }
+                strbuf_append_char(buf, '\t');
+                strbuf_append_uint64(buf, site->miss_counts[j]);
+            }
             strbuf_append_char(buf, '\n');
         }
     }

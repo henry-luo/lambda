@@ -49,6 +49,11 @@ extern Item js_iterator_result_value(Item result);
 extern Item js_profiled_push_d(double dval);
 extern double js_profiled_it2d(Item item);
 extern int64_t js_profiled_it2i(Item item);
+extern int64_t js_shape_slot_guard(Item object, const char* name, int64_t name_len, int64_t byte_offset);
+extern void js_profile_shape_guard_hit(void);
+extern void js_profile_shape_guard_miss(void);
+extern void js_profile_shape_guard_hit_site(const char* label, void* expected_shape, void* actual_shape);
+extern void js_profile_shape_guard_miss_site(const char* label, void* expected_shape, void* actual_shape);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1085,6 +1090,10 @@ JitImport jit_runtime_imports[] = {
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d)},
     {"js_profiled_push_d", FPTR(js_profiled_push_d)},
+    {"js_profile_shape_guard_hit", FPTR(js_profile_shape_guard_hit)},
+    {"js_profile_shape_guard_miss", FPTR(js_profile_shape_guard_miss)},
+    {"js_profile_shape_guard_hit_site", FPTR(js_profile_shape_guard_hit_site)},
+    {"js_profile_shape_guard_miss_site", FPTR(js_profile_shape_guard_miss_site)},
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},
@@ -1494,6 +1503,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
     {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
+    {"js_shape_slot_guard", FPTR(js_shape_slot_guard)},
     {"js_get_slot_f", FPTR(js_get_slot_f)},
     {"js_get_slot_i", FPTR(js_get_slot_i)},
     {"js_set_slot_f", FPTR(js_set_slot_f)},
