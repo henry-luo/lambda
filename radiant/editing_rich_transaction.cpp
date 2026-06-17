@@ -1131,6 +1131,67 @@ bool editing_rich_default_format_block(DocState* state,
     return true;
 }
 
+static const char* rich_justify_align_value(const EditingIntent* intent) {
+    if (!intent) return nullptr;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
+            return "left";
+        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
+            return "center";
+        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
+            return "right";
+        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
+            return "justify";
+        default:
+            return nullptr;
+    }
+}
+
+bool editing_rich_default_justify(DocState* state,
+                                  const EditingSurface* surface,
+                                  const EditingIntent* intent,
+                                  EditingRichMutationLogFn log_mutation,
+                                  void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner) {
+        return false;
+    }
+
+    const char* align_value = rich_justify_align_value(intent);
+    if (!align_value) return false;
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* block = rich_format_block_target(surface, range);
+    if (!block) {
+        log_debug("editing_rich_default_justify: no single block target");
+        return false;
+    }
+    if (!dom_element_set_attribute(block, "align", align_value)) {
+        log_debug("editing_rich_default_justify: failed to set align=%s on <%s>",
+                  align_value, block->node_name());
+        return false;
+    }
+
+    const char* exc = nullptr;
+    DomBoundary start = range->start;
+    DomBoundary end = range->end;
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_justify: selection restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "justify",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_justify: set <%s> align=%s",
+              block->node_name(), align_value);
+    return true;
+}
+
 bool editing_rich_default_replace(DocState* state,
                                   const EditingIntent* intent,
                                   View* fallback_view,

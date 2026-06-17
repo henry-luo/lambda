@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock` and current-block justify commands.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -791,6 +791,40 @@ before declaring the whole EC-2 tier complete.
 | `test_js_gtest --gtest_brief=1` | 203 passed / 0 failed; existing memtrack leak diagnostics printed |
 
 **Global gate note:** EC-3a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
+
+**EC-3b — current-block justify commands: LANDED (2026-06-17).**
+
+- Added native `execCommand("justifyLeft"|"justifyCenter"|"justifyRight"|
+  "justifyFull")` support. The commands map to new consumer-issued justify
+  intents and run through the same editing transaction envelope as the rest of
+  EC-3.
+- Added `editing_rich_default_justify(...)` for the conservative first justify
+  mutation: find the supported block containing the selection focus and set its
+  legacy HTML `align` attribute to `left`, `center`, `right`, or `justify`.
+  Radiant's existing HTML resolver already maps this attribute into
+  `text-align`, so the DOM mutation connects to layout without inventing a
+  parallel style path.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  four justify commands. `queryCommandState(...)` returns true when the current
+  block's `align` attribute matches the queried command.
+- Scope remains single-current-block only. Multi-block justification, implicit
+  wrapping of bare host text, style-attribute normalization, list commands,
+  indent/outdent, and undo history remain future EC-3 work.
+
+**Current EC verification after EC-3b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct justify DOM regression | all four justify commands supported/enabled; `<p>` gains the expected `align` value; exactly one matching justify query state is true |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_justify' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 204 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3b's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-3 tier complete.
 
