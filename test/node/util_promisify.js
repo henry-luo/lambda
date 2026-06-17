@@ -1,4 +1,5 @@
 var util = require('node:util');
+var internalUtil = require('internal/util');
 
 function add(a, b, callback) {
     callback(null, a + b);
@@ -11,6 +12,11 @@ function fail(callback) {
 function multi(callback) {
     callback(null, 'left', 'right');
 }
+
+function named(callback) {
+    callback(null, 'left', 'right');
+}
+named[internalUtil.customPromisifyArgs] = ['first', 'second'];
 
 function throws(callback) {
     throw new Error('boom');
@@ -50,8 +56,12 @@ util.promisify(fail)().catch(function(err) {
     console.log('rejected:', err.message);
 });
 
-util.promisify(multi)().then(function(values) {
-    console.log('multi:', Array.isArray(values), values.length, values[0] + '/' + values[1]);
+util.promisify(multi)().then(function(value) {
+    console.log('multi first:', value);
+});
+
+util.promisify(named)().then(function(value) {
+    console.log('named:', value.first + '/' + value.second);
 });
 
 util.promisify(throws)().catch(function(err) {
@@ -60,4 +70,21 @@ util.promisify(throws)().catch(function(err) {
 
 util.promisify(target.method).call(target, 5).then(function(value) {
     console.log('this:', value);
+});
+
+var warnings = 0;
+function removedWarning() {
+    console.log('removed warning called');
+}
+function warningHandler(warning) {
+    if (warning.code === 'DEP0174') warnings++;
+}
+process.on('warning', removedWarning);
+process.off('warning', removedWarning);
+process.on('warning', warningHandler);
+util.promisify(async function(callback) {
+    callback(null, 'async-return');
+    return 'ignored';
+})().then(function(value) {
+    console.log('async warning:', value, warnings);
 });

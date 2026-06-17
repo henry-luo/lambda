@@ -2953,8 +2953,59 @@ extern "C" Item js_process_once(Item event_name, Item listener) {
     return js_process_on(event_name, listener);
 }
 
-// process.removeListener(event, listener) — no-op for now
+static void js_process_update_events_count(void) {
+    js_property_set(js_process_object,
+        (Item){.item = s2it(heap_create_name("_eventsCount", 12))},
+        (Item){.item = i2it((int64_t)process_total_listener_count)});
+}
+
+static void js_process_remove_from_fixed_list(Item* listeners, int* count, Item listener) {
+    int write = 0;
+    for (int read = 0; read < *count; read++) {
+        if (listeners[read].item == listener.item) continue;
+        listeners[write++] = listeners[read];
+    }
+    *count = write;
+}
+
+// process.removeListener(event, listener)
 extern "C" Item js_process_removeListener(Item event_name, Item listener) {
+    TypeId etype = get_type_id(event_name);
+    bool is_sym = js_key_is_symbol_c(event_name);
+    if (etype != LMD_TYPE_STRING && !is_sym) return js_process_object;
+    if (get_type_id(listener) != LMD_TYPE_FUNC) return js_process_object;
+
+    if (etype == LMD_TYPE_STRING) {
+        String* ev = it2s(event_name);
+        if (ev->len == 4 && memcmp(ev->chars, "exit", 4) == 0) {
+            js_process_remove_from_fixed_list(process_exit_listeners, &process_exit_listener_count, listener);
+        } else if (ev->len == 18 && memcmp(ev->chars, "uncaughtException", 18) == 0) {
+            js_process_remove_from_fixed_list(process_uncaught_listeners, &process_uncaught_listener_count, listener);
+        }
+    }
+
+    Item map = get_process_listener_map();
+    Item arr = js_property_get(map, event_name);
+    if (get_type_id(arr) != LMD_TYPE_ARRAY || !arr.array) return js_process_object;
+
+    int64_t len = js_array_length(arr);
+    int64_t write = 0;
+    int64_t removed = 0;
+    for (int64_t read = 0; read < len; read++) {
+        Item current = js_array_get_int(arr, read);
+        if (current.item == listener.item) {
+            removed++;
+            continue;
+        }
+        if (write != read) arr.array->items[write] = current;
+        write++;
+    }
+    arr.array->length = write;
+    if (removed > 0) {
+        process_total_listener_count -= (int)removed;
+        if (process_total_listener_count < 0) process_total_listener_count = 0;
+        js_process_update_events_count();
+    }
     return js_process_object;
 }
 
