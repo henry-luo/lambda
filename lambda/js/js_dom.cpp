@@ -465,7 +465,10 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
     (void)evcon;
     if (intent && (intent->type == INPUT_INTENT_FORMAT_BOLD ||
                    intent->type == INPUT_INTENT_FORMAT_ITALIC ||
-                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE)) {
+                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE ||
+                   intent->type == INPUT_INTENT_FORMAT_STRIKETHROUGH ||
+                   intent->type == INPUT_INTENT_FORMAT_SUBSCRIPT ||
+                   intent->type == INPUT_INTENT_FORMAT_SUPERSCRIPT)) {
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
@@ -580,7 +583,10 @@ static bool js_dom_exec_command_is_inline_format(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "bold") == 0 ||
         strcasecmp(cmd, "italic") == 0 ||
-        strcasecmp(cmd, "underline") == 0;
+        strcasecmp(cmd, "underline") == 0 ||
+        strcasecmp(cmd, "strikethrough") == 0 ||
+        strcasecmp(cmd, "subscript") == 0 ||
+        strcasecmp(cmd, "superscript") == 0;
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
@@ -641,6 +647,18 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "underline") == 0) {
         out->type = INPUT_INTENT_FORMAT_UNDERLINE;
+        return true;
+    }
+    if (strcasecmp(cmd, "strikethrough") == 0) {
+        out->type = INPUT_INTENT_FORMAT_STRIKETHROUGH;
+        return true;
+    }
+    if (strcasecmp(cmd, "subscript") == 0) {
+        out->type = INPUT_INTENT_FORMAT_SUBSCRIPT;
+        return true;
+    }
+    if (strcasecmp(cmd, "superscript") == 0) {
+        out->type = INPUT_INTENT_FORMAT_SUPERSCRIPT;
         return true;
     }
     return false;
@@ -730,7 +748,34 @@ static uintptr_t js_dom_exec_command_inline_tag(const char* cmd) {
     if (strcasecmp(cmd, "bold") == 0) return HTM_TAG_B;
     if (strcasecmp(cmd, "italic") == 0) return HTM_TAG_I;
     if (strcasecmp(cmd, "underline") == 0) return HTM_TAG_U;
+    if (strcasecmp(cmd, "strikethrough") == 0) return HTM_TAG_S;
+    if (strcasecmp(cmd, "subscript") == 0) return HTM_TAG_SUB;
+    if (strcasecmp(cmd, "superscript") == 0) return HTM_TAG_SUP;
     return 0;
+}
+
+static bool js_dom_exec_command_inline_tag_matches(const char* cmd,
+                                                   uintptr_t tag) {
+    if (!cmd || !tag) return false;
+    if (strcasecmp(cmd, "bold") == 0) {
+        return tag == HTM_TAG_B || tag == HTM_TAG_STRONG;
+    }
+    if (strcasecmp(cmd, "italic") == 0) {
+        return tag == HTM_TAG_I || tag == HTM_TAG_EM;
+    }
+    if (strcasecmp(cmd, "underline") == 0) {
+        return tag == HTM_TAG_U;
+    }
+    if (strcasecmp(cmd, "strikethrough") == 0) {
+        return tag == HTM_TAG_S || tag == HTM_TAG_STRIKE;
+    }
+    if (strcasecmp(cmd, "subscript") == 0) {
+        return tag == HTM_TAG_SUB;
+    }
+    if (strcasecmp(cmd, "superscript") == 0) {
+        return tag == HTM_TAG_SUP;
+    }
+    return false;
 }
 
 static bool js_dom_exec_command_query_inline_state(const char* cmd) {
@@ -756,7 +801,9 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         if (cur->is_element()) {
             DomElement* elem = cur->as_element();
-            if (elem && elem->tag() == tag) return true;
+            if (elem && js_dom_exec_command_inline_tag_matches(cmd, elem->tag())) {
+                return true;
+            }
         }
         if (cur == static_cast<DomNode*>(surface.owner)) break;
     }

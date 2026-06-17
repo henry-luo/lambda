@@ -741,9 +741,155 @@ static const char* rich_format_tag_name(const EditingIntent* intent) {
             return "i";
         case INPUT_INTENT_FORMAT_UNDERLINE:
             return "u";
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+            return "s";
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+            return "sub";
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+            return "sup";
         default:
             return nullptr;
     }
+}
+
+static bool rich_format_tag_matches(const EditingIntent* intent,
+                                    uintptr_t tag) {
+    if (!intent || !tag) return false;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_BOLD:
+            return tag == HTM_TAG_B || tag == HTM_TAG_STRONG;
+        case INPUT_INTENT_FORMAT_ITALIC:
+            return tag == HTM_TAG_I || tag == HTM_TAG_EM;
+        case INPUT_INTENT_FORMAT_UNDERLINE:
+            return tag == HTM_TAG_U;
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+            return tag == HTM_TAG_S || tag == HTM_TAG_STRIKE;
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+            return tag == HTM_TAG_SUB;
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
+            return tag == HTM_TAG_SUP;
+        default:
+            return false;
+    }
+}
+
+static bool rich_format_range_selects_all_children(DomRange* range,
+                                                   DomElement* wrapper) {
+    if (!range || !wrapper) return false;
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    return range->start.node == wrapper_node &&
+        range->start.offset == 0 &&
+        range->end.node == wrapper_node &&
+        range->end.offset == dom_node_boundary_length(wrapper_node);
+}
+
+static bool rich_format_range_selects_only_text_child(DomRange* range,
+                                                      DomElement* wrapper,
+                                                      DomText** out_text) {
+    if (out_text) *out_text = nullptr;
+    if (!range || !wrapper || !wrapper->first_child ||
+        wrapper->first_child->next_sibling ||
+        !wrapper->first_child->is_text()) {
+        return false;
+    }
+    DomText* text = lam::dom_require_text(wrapper->first_child);
+    if (!text || range->start.node != static_cast<DomNode*>(text) ||
+        range->end.node != static_cast<DomNode*>(text) ||
+        range->start.offset != 0 ||
+        range->end.offset != dom_text_utf16_length(text)) {
+        return false;
+    }
+    if (out_text) *out_text = text;
+    return true;
+}
+
+static DomElement* rich_format_toggle_wrapper_for_range(
+        DomRange* range,
+        const EditingIntent* intent) {
+    if (!range || !intent || !range->start.node || !range->end.node) {
+        return nullptr;
+    }
+    if (range->start.node == range->end.node &&
+        range->start.node->is_element()) {
+        DomElement* elem = lam::dom_require_element(range->start.node);
+        if (elem && rich_format_tag_matches(intent, elem->tag()) &&
+            rich_format_range_selects_all_children(range, elem)) {
+            return elem;
+        }
+    }
+
+    if (!range->start.node->is_text() ||
+        range->start.node != range->end.node ||
+        !range->start.node->parent ||
+        !range->start.node->parent->is_element()) {
+        return nullptr;
+    }
+    DomElement* parent = lam::dom_require_element(range->start.node->parent);
+    if (!parent || !rich_format_tag_matches(intent, parent->tag())) {
+        return nullptr;
+    }
+    DomText* text = nullptr;
+    return rich_format_range_selects_only_text_child(range, parent, &text)
+        ? parent
+        : nullptr;
+}
+
+static bool rich_format_unwrap_element(DocState* state,
+                                       const EditingSurface* surface,
+                                       const EditingIntent* intent,
+                                       DomElement* wrapper,
+                                       EditingRichMutationLogFn log_mutation,
+                                       void* log_user) {
+    if (!state || !surface || !intent || !wrapper ||
+        !wrapper->parent || !wrapper->parent->is_element()) {
+        return false;
+    }
+
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    DomNode* parent_node = wrapper_node->parent;
+    uint32_t wrapper_idx = dom_node_child_index(wrapper_node);
+    if (wrapper_idx == (uint32_t)-1) return false;
+
+    DomNode* first_moved = nullptr;
+    DomNode* last_moved = nullptr;
+    uint32_t moved_count = 0;
+    DomNode* child = wrapper->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!wrapper_node->remove_child(child)) return false;
+        if (!parent_node->insert_before(child, wrapper_node)) return false;
+        dom_mutation_post_insert(state, parent_node, child);
+        if (!first_moved) first_moved = child;
+        last_moved = child;
+        moved_count++;
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, wrapper_node);
+    if (!parent_node->remove_child(wrapper_node)) return false;
+
+    const char* exc = nullptr;
+    DomBoundary start = { parent_node, wrapper_idx };
+    DomBoundary end = { parent_node, wrapper_idx + moved_count };
+    if (first_moved && first_moved == last_moved && first_moved->is_text()) {
+        DomText* text = lam::dom_require_text(first_moved);
+        start = { first_moved, 0 };
+        end = { first_moved, dom_text_utf16_length(text) };
+    }
+    if (!state_store_set_selection(state, &start, &end, &exc)) {
+        log_debug("editing_rich_default_format: unwrap selection restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "format-toggle",
+                     0, 0, start.offset, end.offset, log_user);
+    }
+    log_debug("editing_rich_default_format: unwrapped <%s>", wrapper->node_name());
+    return true;
 }
 
 bool editing_rich_default_format(DocState* state,
@@ -766,6 +912,14 @@ bool editing_rich_default_format(DocState* state,
     DomRange* range = state->dom_selection->ranges[0];
     if (dom_range_collapsed(range)) {
         return false;
+    }
+
+    DomElement* toggle_wrapper =
+        rich_format_toggle_wrapper_for_range(range, intent);
+    if (toggle_wrapper) {
+        return rich_format_unwrap_element(state, surface, intent,
+                                          toggle_wrapper, log_mutation,
+                                          log_user);
     }
 
     DomElement* wrapper = dom_element_create(surface->owner->doc,

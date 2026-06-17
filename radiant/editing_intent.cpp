@@ -47,6 +47,9 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:         return "formatStrikeThrough";
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:             return "formatSubscript";
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:           return "formatSuperscript";
         case INPUT_INTENT_FORMAT_INDENT:                return "formatIndent";
         case INPUT_INTENT_FORMAT_OUTDENT:               return "formatOutdent";
         case INPUT_INTENT_SELECT_ALL:                   return "selectAll";
@@ -62,6 +65,9 @@ bool input_intent_is_dispatchable(InputIntentType type) {
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:
+        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
+        case INPUT_INTENT_FORMAT_SUBSCRIPT:
+        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
         case INPUT_INTENT_FORMAT_INDENT:
         case INPUT_INTENT_FORMAT_OUTDENT:
         case INPUT_INTENT_SELECT_ALL:
