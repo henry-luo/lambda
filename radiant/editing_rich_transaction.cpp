@@ -4,6 +4,7 @@
 #include "state_store.hpp"
 #include "text_edit.hpp"
 #include "view.hpp"
+#include "../lambda/mark_editor.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
@@ -107,6 +108,20 @@ static bool rich_transaction_collapse_text_caret(DocState* state,
     return true;
 }
 
+static bool rich_transaction_collapse_dom_caret(DocState* state,
+                                                DomNode* node,
+                                                uint32_t offset) {
+    if (!state || !node) return false;
+    DomBoundary caret = { node, offset };
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+        log_debug("rich_transaction_collapse_dom_caret: collapse rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+    return true;
+}
+
 static bool rich_transaction_caret_from_state(DocState* state,
                                               DomText** out_text,
                                               uint32_t* out_byte_offset) {
@@ -130,6 +145,140 @@ static bool rich_transaction_caret_from_state(DocState* state,
     if (out_byte_offset) {
         *out_byte_offset = dom_text_utf16_to_utf8(text, range->start.offset);
     }
+    return true;
+}
+
+static bool rich_transaction_is_text_deletion_intent(
+        const EditingIntent* intent) {
+    if (!intent) return false;
+    return intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
+        intent->type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
+        intent->type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
+        intent->type == INPUT_INTENT_DELETE_WORD_FORWARD;
+}
+
+static bool rich_transaction_is_cleanup_inline_tag(uintptr_t tag_id) {
+    switch (tag_id) {
+        case HTM_TAG_A:
+        case HTM_TAG_ABBR:
+        case HTM_TAG_B:
+        case HTM_TAG_BDI:
+        case HTM_TAG_BDO:
+        case HTM_TAG_BIG:
+        case HTM_TAG_CITE:
+        case HTM_TAG_CODE:
+        case HTM_TAG_DEL:
+        case HTM_TAG_DFN:
+        case HTM_TAG_EM:
+        case HTM_TAG_FONT:
+        case HTM_TAG_I:
+        case HTM_TAG_INS:
+        case HTM_TAG_KBD:
+        case HTM_TAG_MARK:
+        case HTM_TAG_Q:
+        case HTM_TAG_S:
+        case HTM_TAG_SAMP:
+        case HTM_TAG_SMALL:
+        case HTM_TAG_SPAN:
+        case HTM_TAG_STRIKE:
+        case HTM_TAG_STRONG:
+        case HTM_TAG_SUB:
+        case HTM_TAG_SUP:
+        case HTM_TAG_TIME:
+        case HTM_TAG_TT:
+        case HTM_TAG_U:
+        case HTM_TAG_VAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static bool rich_transaction_inline_wrapper_is_empty(DomElement* elem) {
+    if (!elem) return false;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_text()) return false;
+        DomText* text = lam::dom_require_text(child);
+        if (text && text->length > 0) return false;
+    }
+    return true;
+}
+
+static bool rich_transaction_can_cleanup_empty_inline(
+        DomElement* elem,
+        const EditingSurface* surface) {
+    if (!elem || !elem->parent || !elem->parent->is_element()) return false;
+    if (surface && surface->owner == elem) return false;
+    if (dom_element_has_attribute(elem, "contenteditable")) return false;
+    if (!rich_transaction_is_cleanup_inline_tag(elem->tag())) return false;
+    return rich_transaction_inline_wrapper_is_empty(elem);
+}
+
+static bool rich_transaction_remove_child_for_edit(DomElement* parent,
+                                                   DomNode* child) {
+    if (!parent || !child || child->parent != static_cast<DomNode*>(parent)) {
+        return false;
+    }
+
+    uint32_t child_idx = dom_node_child_index(child);
+    if (child_idx == (uint32_t)-1) return false;
+
+    if (parent->native_element && parent->doc && parent->doc->input) {
+        if (child_idx > 0x7fffffffu) return false;
+        MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+        Item result = editor.elmt_delete_child(
+            {.element = parent->native_element},
+            (int)child_idx // INT_CAST_OK: MarkEditor child index API is int.
+        );
+        if (!result.element) {
+            log_debug("rich_transaction_remove_child_for_edit: backing delete rejected");
+            return false;
+        }
+        parent->native_element = result.element;
+        if (parent->doc->input->ui_mode) {
+            child->parent = nullptr;
+            child->prev_sibling = nullptr;
+            child->next_sibling = nullptr;
+            return true;
+        }
+    }
+
+    return parent->remove_child(child);
+}
+
+static bool rich_transaction_cleanup_empty_inline_after_delete(
+        DocState* state,
+        DomText* text,
+        const EditingSurface* surface,
+        DomNode** out_caret_node,
+        uint32_t* out_caret_offset) {
+    if (out_caret_node) *out_caret_node = nullptr;
+    if (out_caret_offset) *out_caret_offset = 0;
+    if (!state || !text || !text->parent || !text->parent->is_element()) {
+        return false;
+    }
+
+    DomElement* inline_elem = lam::dom_require_element(text->parent);
+    if (!rich_transaction_can_cleanup_empty_inline(inline_elem, surface)) {
+        return false;
+    }
+
+    DomNode* inline_node = static_cast<DomNode*>(inline_elem);
+    DomElement* parent = lam::dom_require_element(inline_node->parent);
+    if (!parent) return false;
+
+    uint32_t inline_idx = dom_node_child_index(inline_node);
+    if (inline_idx == (uint32_t)-1) return false;
+
+    dom_mutation_pre_remove(state, inline_node);
+    if (!rich_transaction_remove_child_for_edit(parent, inline_node)) {
+        return false;
+    }
+
+    if (out_caret_node) *out_caret_node = static_cast<DomNode*>(parent);
+    if (out_caret_offset) *out_caret_offset = inline_idx;
+    log_debug("rich_transaction_cleanup_empty_inline_after_delete: removed empty %s at index %u",
+              inline_elem->node_name(), inline_idx);
     return true;
 }
 
@@ -460,7 +609,29 @@ bool editing_rich_default_replace(DocState* state,
             data, data_len, intent->composition_caret);
         caret_offset = start + caret_in_preedit;
     }
-    if (!rich_transaction_collapse_text_caret(state, live_text, caret_offset)) {
+
+    DomNode* caret_node = static_cast<DomNode*>(live_text);
+    uint32_t caret_boundary_offset = caret_offset;
+    bool caret_is_text = true;
+    if (rich_transaction_is_text_deletion_intent(intent) &&
+        data_len == 0 && new_len == 0) {
+        DomNode* cleanup_caret_node = nullptr;
+        uint32_t cleanup_caret_offset = 0;
+        if (rich_transaction_cleanup_empty_inline_after_delete(state, live_text,
+                fallback_surface_ptr, &cleanup_caret_node, &cleanup_caret_offset)) {
+            live_text = nullptr;
+            caret_node = cleanup_caret_node;
+            caret_boundary_offset = cleanup_caret_offset;
+            caret_is_text = false;
+        }
+    }
+
+    if (caret_is_text) {
+        if (!rich_transaction_collapse_text_caret(state, live_text, caret_offset)) {
+            return false;
+        }
+    } else if (!rich_transaction_collapse_dom_caret(state, caret_node,
+            caret_boundary_offset)) {
         return false;
     }
     if (composition_range) {
@@ -473,16 +644,26 @@ bool editing_rich_default_replace(DocState* state,
                 : 0;
     }
     EditingSurface live_surface;
-    if (editing_surface_from_target(static_cast<View*>(live_text), &live_surface) &&
+    View* live_surface_target = live_text
+        ? static_cast<View*>(live_text)
+        : static_cast<View*>(caret_node);
+    if (live_surface_target &&
+        editing_surface_from_target(live_surface_target, &live_surface) &&
         editing_surface_is_rich(&live_surface)) {
         editing_interaction_set_active_surface(state, &live_surface);
-        uint32_t new_text_len = live_text->length > 0
-            ? (uint32_t)live_text->length
-            : (uint32_t)strlen(live_text->text ? live_text->text : "");
+        uint32_t new_text_len = live_text
+            ? (live_text->length > 0
+                ? (uint32_t)live_text->length
+                : (uint32_t)strlen(live_text->text ? live_text->text : ""))
+            : 0;
+        uint32_t log_selection_offset = caret_is_text
+            ? caret_offset
+            : caret_boundary_offset;
         if (log_mutation) {
             log_mutation(state, &live_surface, intent,
                          rich_text_default_mutation_operation(intent),
-                         old_len, new_text_len, caret_offset, caret_offset,
+                         old_len, new_text_len,
+                         log_selection_offset, log_selection_offset,
                          log_user);
         }
     }
