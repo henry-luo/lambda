@@ -44,6 +44,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_INSERT_COMPOSITION_TEXT:      return "insertCompositionText";
         case INPUT_INTENT_INSERT_FROM_COMPOSITION:      return "insertFromComposition";
         case INPUT_INTENT_DELETE_COMPOSITION_TEXT:      return "deleteCompositionText";
+        case INPUT_INTENT_FORMAT_UNLINK:                return "unlink";
         case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
@@ -69,6 +70,7 @@ const char* input_intent_type_name(InputIntentType type) {
 bool input_intent_is_dispatchable(InputIntentType type) {
     switch (type) {
         case INPUT_INTENT_COMPOSITION_START:
+        case INPUT_INTENT_FORMAT_UNLINK:
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:
