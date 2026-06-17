@@ -41,6 +41,7 @@ void js_exec_profile_leave(JsExecProfileEvent event, uint64_t token);
 void js_exec_profile_count(JsExecProfileEvent event);
 void js_exec_profile_note_mir_call(const char* fn_name);
 void js_exec_profile_dump(void);
+void js_profile_property_set_site(const char* label);
 
 #ifdef __cplusplus
 }

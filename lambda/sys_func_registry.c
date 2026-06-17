@@ -54,6 +54,7 @@ extern void js_profile_shape_guard_hit(void);
 extern void js_profile_shape_guard_miss(void);
 extern void js_profile_shape_guard_hit_site(const char* label, void* expected_shape, void* actual_shape);
 extern void js_profile_shape_guard_miss_site(const char* label, void* expected_shape, void* actual_shape);
+extern void js_profile_property_set_site(const char* label);
 
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
 extern Item js_super_call_class(Item callee, Item this_val, Item* args, int argc);
@@ -1094,6 +1095,7 @@ JitImport jit_runtime_imports[] = {
     {"js_profile_shape_guard_miss", FPTR(js_profile_shape_guard_miss)},
     {"js_profile_shape_guard_hit_site", FPTR(js_profile_shape_guard_hit_site)},
     {"js_profile_shape_guard_miss_site", FPTR(js_profile_shape_guard_miss_site)},
+    {"js_profile_property_set_site", FPTR(js_profile_property_set_site)},
     {"push_l", FPTR(push_l)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},

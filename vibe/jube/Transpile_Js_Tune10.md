@@ -158,6 +158,68 @@ P1 structural slot-guard update, 2026-06-17:
   passed. The JS gtest gate ran `198 / 198`, and js262 finished
   `40261 / 40261` fully passing with `0` regressions.
 
+P2 rejected broad own-slot set guard, 2026-06-17:
+
+- Tried a runtime-backed P2 write guard for simple `obj.field = value` stores:
+  MIR would call a helper that only succeeded for an existing writable own data
+  slot on a plain map, otherwise falling back to the full `js_property_set`
+  path. A second refinement moved the guard before boxed key creation for fast
+  hits.
+- The profile counters looked tempting but were not enough. In the broad
+  profile, `richards` moved about `1,558,300` stores through the guard and
+  reduced `property_set` calls from `1,739,504` to `181,204`; `deltablue` moved
+  `374,000` stores and reduced `property_set` calls from `798,674` to
+  `424,674`.
+- Non-profile release smoke rejected the change after the key-boxing
+  refinement: `richards` reported `__TIMING__ 5101.645625 ms` versus the
+  structural-read-only smoke of `4785.136166 ms`, and `deltablue` reported
+  `__TIMING__ 3514.612209 ms` versus `3189.934417 ms`. The broad P2 guard was
+  therefore reverted and is not retained in code.
+- Next safer P2 direction: add write-site evidence or propagate concrete
+  receiver class/slot facts before emitting a write fast path. Do not add a
+  generic dynamic own-slot setter just because the aggregate `property_set`
+  call count drops; the wall-time evidence says that is too broad.
+
+P2 write-site evidence retained, 2026-06-17:
+
+- Added profiler-only property-set site counting for simple named member writes.
+  Normal MIR is unchanged when `JS_EXEC_PROFILE` is unset; the extra
+  `js_profile_property_set_site` calls are emitted only in profile mode.
+- Release profile commands:
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_richards_p2_sites.tsv ./lambda.exe js test/benchmark/awfy/richards2_bundle.js --no-log`
+  - `JS_EXEC_PROFILE=time JS_EXEC_PROFILE_OUT=temp/js_exec_profile_deltablue_p2_sites.tsv ./lambda.exe js test/benchmark/awfy/deltablue2_bundle.js --no-log`
+- Current counters with structural read guard plus write-site evidence:
+  - `richards`: `PASS`, profiled `__TIMING__ 7081.003375 ms`,
+    `property_set 1,739,504`, `property_set self 409.533 ms`,
+    `js_property_set` MIR sites `152`.
+  - `deltablue`: `PASS`, profiled `__TIMING__ 4415.454459 ms`,
+    `property_set 798,674`, `property_set self 885.135 ms`,
+    `js_property_set` MIR sites `353`.
+- Hottest retained `richards` write sites:
+  - `this.taskWaiting_@111:23`: `116,500`
+  - `this.input@237:7`: `116,300`
+  - `packet.link@435:5`: `116,100`
+  - `packet.identity@436:5`: `116,100`
+  - `packet.link@79:5`: `100,400`
+- Hottest retained `deltablue` write sites:
+  - `expr.value@901:7`: `204,000`
+  - `this.lastIdx@126:5`: `50,968`
+  - `expr.value@935:7`: `46,260`
+  - `this.firstIdx@162:5`: `28,540`
+  - `this.storage@80:5`: `18,801`
+- Interpretation: the next write fast path should not be a generic dynamic
+  own-slot setter. The biggest `deltablue` stores are `this.v1.value` /
+  `this.v2.value`, where the receiver is itself loaded from a class field
+  initialized in a superclass constructor (`BinaryConstraint`). The safer
+  implementation is to propagate receiver class/shape facts for constructor
+  parameter-assigned fields, including superclass fields, then reuse guarded
+  slot writes for those concrete receivers.
+- Next implementation candidate: add class-valued constructor-field metadata
+  beside `ctor_prop_types`, propagate it from `new ClassName(...)` and `super`
+  call sites when there is consensus, teach P2/P4 lookup to find inherited
+  constructor slots, and only then emit the write slot path for nested member
+  receivers such as `this.v1.value`.
+
 The Tune10 goal is to stop tuning from aggregate benchmark wall time alone and
 move to a per-mechanism loop: profile a benchmark, choose the hottest runtime or
 MIR helper family, implement one targeted optimization, then reprofile the same
@@ -202,6 +264,17 @@ runtime_call    mir_sites
 That second section is important because aggregate `other_runtime_call` is too
 coarse. It identifies which native helpers the generated MIR still depends on,
 even when the helper is not directly timed yet.
+
+For property-write tuning, profile-mode builds also include:
+
+```text
+# Property set sites
+property_set_site    count
+```
+
+This site table is intentionally profile-only and should be used to pick the
+next narrow write fast path. It is not a benchmark timing mode; the additional
+profile calls make profiled wall time slower than normal release execution.
 
 ---
 

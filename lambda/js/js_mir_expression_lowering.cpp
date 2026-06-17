@@ -30,6 +30,49 @@ static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
     return interned->chars;
 }
 
+static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNode* mem) {
+    if (!mt || !mem || mem->computed ||
+            !mem->property || mem->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return "unknown";
+    }
+    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+    if (!prop->name) return "unknown";
+
+    const char* object_name = "expr";
+    int object_len = 4;
+    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* obj = (JsIdentifierNode*)mem->object;
+        if (obj->name && obj->name->len > 0) {
+            object_name = obj->name->chars;
+            object_len = (int)obj->name->len;
+        }
+    }
+
+    TSPoint point = ts_node_start_point(mem->base.node);
+    char label[192];
+    int len = snprintf(label, sizeof(label), "%.*s.%.*s@%u:%u",
+        object_len, object_name,
+        (int)prop->name->len, prop->name->chars,
+        point.row + 1, point.column + 1);
+    if (len < 0) return "unknown";
+    if (len >= (int)sizeof(label)) len = (int)sizeof(label) - 1;
+    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+    if (!np) return "unknown";
+    String* interned = name_pool_create_len(np, label, len);
+    if (!interned) return "unknown";
+    return interned->chars;
+}
+
+static void jm_emit_profile_property_set_site(JsMirTranspiler* mt, JsMemberNode* member) {
+    if (js_exec_profile_mode() <= 0 || !member || member->computed ||
+            !member->property || member->property->node_type != JS_AST_NODE_IDENTIFIER) {
+        return;
+    }
+    const char* label = jm_profile_property_set_label(mt, member);
+    jm_call_void_1(mt, "js_profile_property_set_site",
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)label));
+}
+
 // True when this variable declarator was introduced by a `const` lexical
 // declaration. A `const` binding is immutable, so once the initializer has
 // executed the binding is permanently the value produced by that initializer —
@@ -5408,6 +5451,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             // Evaluate RHS, set property, return RHS
             jm_emit_label(mt, l_assign);
             new_val = jm_transpile_box_item(mt, asgn->right);
+            jm_emit_profile_property_set_site(mt, member);
             jm_emit_put_value(mt, &ref, new_val);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, result),
@@ -5424,6 +5468,7 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
         }
 
+        jm_emit_profile_property_set_site(mt, member);
         MIR_reg_t result = jm_emit_put_value(mt, &ref, new_val);
 
         // v20: arguments[i] → param aliasing
