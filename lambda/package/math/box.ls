@@ -124,6 +124,7 @@ fn font_from_class(cls) {
     if (cls == css.CMR) "cmr"
     else if (cls == css.MATHIT) "mathit"
     else if (cls == css.AMS) "ams"
+    else if (cls == css.BB) "ams"
     else if (cls == "lcGreek lm_mathit") "mathit"
     else null
 }
@@ -145,7 +146,24 @@ fn text_height_for(text, cls) {
         // the max per-character height from the font metric table. Falls
         // back to the heuristic if any char is unknown.
         max_char_height(text, font_from_class(cls), text_height(text))
-    else text_height(text)
+    else if (is_repeated_char(text) and font_from_class(cls) != null) {
+        // Repeated identical char like "..." or "---": use that char's metric.
+        let font = font_from_class(cls)
+        let m = metrics_data.lookup(text[0], font)
+        let h = if (m != null) metrics_data.height_of(m) else null
+        if (h != null and h > 0.0) h else text_height(text)
+    } else text_height(text)
+}
+
+fn is_repeated_char(text) {
+    if (len(text) <= 1) false
+    else is_repeated_char_at(text, 1, text[0])
+}
+
+fn is_repeated_char_at(text, i, ch) {
+    if (i >= len(text)) true
+    else if (text[i] == ch) is_repeated_char_at(text, i + 1, ch)
+    else false
 }
 
 fn is_alpha_multi(text) {
