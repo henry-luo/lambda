@@ -166,7 +166,7 @@ fn render_relation(node, context) {
 
 fn render_punct(node, context) {
     let text = get_text(node)
-    if (text == "'") render_prime_script()
+    if (text == "'") render_prime_script(context)
     else {
         let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
             else if (text == ")" or text == "]" or text == "}") "mclose"
@@ -181,12 +181,18 @@ fn render_punct(node, context) {
 // containing the Unicode prime ′ (U+2032) shifted up like a superscript.
 // This produces visual parity with MathLive's `\prime` shortcut and lets
 // the outer strut wrap include the prime's height.
-fn render_prime_script() {
+fn render_prime_script(context) {
+    // In display style the superscript shift is slightly smaller: top -3.36
+    // and vlist height 0.76 (vs inline -3.41 / 0.81). Matches MathLive's
+    // mathstyle-dependent script positioning for `'`.
+    let is_disp = ctx.is_display(context)
+    let vlist_h = if (is_disp) 0.76 else 0.81
+    let top_em = if (is_disp) "-3.36em" else "-3.41em"
     let el = <span class: css.MSUBSUP;
         <span class: css.VLIST_T;
             <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:0.81em";
-                    <span style: "top:-3.41em;margin-right:0.05em";
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_h);
+                    <span style: "top:" ++ top_em ++ ";margin-right:0.05em";
                         <span class: css.PSTRUT, style: "height:3em">
                         <span style: "height:0.39em;display:inline-block;font-size: 70%";
                             <span class: css.CMR; "′">
@@ -198,9 +204,9 @@ fn render_prime_script() {
     >
     {
         element: el,
-        height: 0.81,
+        height: vlist_h,
         depth: 0.0,
-        height_raw: 0.81,
+        height_raw: vlist_h,
         depth_raw: 0.0,
         width: 0.4,
         type: "mord",
@@ -1056,7 +1062,7 @@ fn render_glyph_accent(node, context, accent_key) {
     else
         (let base_box = render_accent_base(node.base, context),
          if (base_box.width <= 0.8)
-            render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height)
+            render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height, node.base)
          else
             render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height))
 }
@@ -1238,22 +1244,38 @@ fn render_accent_base(base_node, context) {
 
 // Accent glyph widths from MathLive's Main-Regular font-metrics-data.ts.
 // Used to derive accent margin-left: (base.width - accent.width)/2 + 2*skew.
+// Accent glyph widths in Main-Regular (from MathLive font-metrics-data.ts).
+// Most accents are 0.5em wide; the single dot (˙, U+02D9) is 0.27778.
 fn accent_glyph_width(key) {
-    if (key == "hat" or key == "widehat") 0.5
-    else if (key == "tilde" or key == "widetilde") 0.5
-    else if (key == "bar" or key == "overline") 0.5
-    else if (key == "vec" or key == "overrightarrow") 0.5
-    else if (key == "breve") 0.5
-    else if (key == "dot") 0.28
-    else if (key == "ddot") 0.5
-    else if (key == "check") 0.5
-    else if (key == "acute") 0.5
-    else if (key == "grave") 0.5
+    if (key == "dot") 0.27778
     else if (key == "mathring") 0.75
     else 0.5
 }
 
-fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
+// Compute the accent margin-left per MathLive's accent.ts:
+//   margin = (base.width - accent.width) / 2  (+ 2*skew, but skew only
+//   applies to multi-atom bodies, which don't reach this path).
+// Uses the REAL Math-Italic glyph width of the base char (not Lambda's
+// approximate box width). Emitted via CEIL@2 to match MathLive's toString.
+fn accent_margin_left(accent_key, base_node, base_box) {
+    let base_text = plain_text(base_node)
+    let base_w = accent_base_width(base_text, base_box)
+    let acc_w = accent_glyph_width(accent_key)
+    util.ceil_em2((base_w - acc_w) / 2.0)
+}
+
+// Full-precision base glyph width for accent centering. MathLive divides the
+// unrounded Math-Italic width by 2, so the 2dp-rounded width can flip the
+// ceil by 0.01em (e.g. v: 0.48472 -> 0 vs rounded 0.48 -> -0.01).
+fn accent_base_width(base_text, base_box) {
+    if (len(base_text) != 1) base_box.width
+    else (let m = met.get_character_metrics(base_text, "Math-Italic"),
+          if (m == null or m.default) base_box.width
+          else if (m.width_raw != null) m.width_raw
+          else m.width)
+}
+
+fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_height, base_node) {
     let base_elements = box.elements_of(base_box)
     // Use the base box's actual height for the inner wrapper. For tall
     // bases (uppercase letters with cmmi h=0.69), the wrapper needs to
@@ -1266,10 +1288,17 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
     let tall_extra = if (base_box.height > 0.5) base_box.height - 0.44 else 0.0
     let accent_top = if (accent_key == "tilde") (0.0 - 3.35 - tall_extra)
         else (0.0 - 3.0 - tall_extra)
-    // Vlist height grows by the same delta so the bounding box wraps both
-    // the taller base and the accent above.
-    let vlist_h = accent_height + tall_extra
-    let margin_left = if (accent_key == "dot") 0.15 else 0.04
+    // Vlist height per MathLive's accent VBox:
+    //   height = base.height - clearance + accent.height  (CEIL@2)
+    //   clearance = min(base.height, X_HEIGHT=0.43056)
+    // For short bases (a/x, height ≤ X_HEIGHT) this reduces to accent.height;
+    // for tall bases (b/d/A/F) the base lifts the accent by its overshoot.
+    let base_h_raw = if (base_box.height_raw != null) base_box.height_raw else base_box.height
+    let clearance = if (base_h_raw < 0.43056) base_h_raw else 0.43056
+    let accent_h_raw = accent_body_height_raw(accent_key)
+    let vlist_h = util.ceil_em2(base_h_raw - clearance + accent_h_raw)
+    // Centering margin per MathLive: (base.width - accent.width)/2.
+    let margin_left = accent_margin_left(accent_key, base_node, base_box)
     let el = <span class: css.VLIST_T;
         <span class: css.VLIST_R;
             <span class: css.VLIST, style: "height:" ++ fmt_accent_em(vlist_h);
@@ -1279,7 +1308,7 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
                         for (el in base_elements) el
                     >
                 >
-                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_em(margin_left);
+                <span class: css.CENTER, style: "top:" ++ fmt_accent_em(accent_top) ++ ";margin-left:" ++ fmt_accent_margin(margin_left);
                     <span class: css.PSTRUT, style: "height:3em">
                     <span class: accent_cls, style: "height:" ++ fmt_accent_em(accent_height) ++ ";display:inline-block"; accent_text>
                 >
@@ -1287,6 +1316,12 @@ fn render_simple_accent(accent_key, base_box, accent_text, accent_cls, accent_he
         >
     >
     accent_box(el, vlist_h, 0.0, base_box.width)
+}
+
+// Format an accent margin: MathLive emits a bare "0" (no unit) for zero,
+// otherwise the em value.
+fn fmt_accent_margin(v) {
+    if (v == 0.0) "0" else fmt_accent_em(v)
 }
 
 fn render_wide_accent(accent_key, base_box, accent_text, accent_cls, accent_height) {
@@ -1385,6 +1420,22 @@ fn accent_body_height(key) {
     else if (key == "bar") 0.57
     else if (key == "check") 0.63
     else 0.7
+}
+
+// Raw (5dp) accent glyph height in Main-Regular (from MathLive
+// font-metrics-data.ts). Used to compute the accent VBox height precisely.
+fn accent_body_height_raw(key) {
+    if (key == "vec" or key == "overrightarrow") 0.71444
+    else if (key == "dot") 0.66786
+    else if (key == "ddot") 0.66786
+    else if (key == "tilde" or key == "widetilde") 0.66786
+    else if (key == "bar" or key == "overline") 0.56778
+    else if (key == "check") 0.62847
+    else if (key == "breve") 0.69444
+    else if (key == "acute") 0.69444
+    else if (key == "grave") 0.69444
+    else if (key == "hat" or key == "widehat") 0.69444
+    else 0.69444
 }
 
 fn fmt_accent_em(v) {

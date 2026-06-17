@@ -1022,10 +1022,32 @@ ASCII `!` mclose (not mrel)                   +1   →  695
 ı/ȷ height via "lm_cmr lm_it" → mathit font   +2   →  701
 \frac{\sin x}{x} 0.67em numer wrapper         +0   →  701 (improved)
 Digit-string "3.14" → cmr per-char height     +6   →  707
+Accent margin (base.width-acc.width)/2        +11  →  718
+Accent vlist = base.h - clearance + acc.h     +3   →  721
+\frac{e}{f} short-numer 0.94 (guard branch)   +0   →  721 (frac{e}{f} not in corpus)
+\cfrac omits closing nulldelimiter            +3   →  724
+Prime `'` display-style top/height            +2   →  726
+Accent base width_raw (vec{v} 0-margin)       +3   →  729
+box_cls raw h/d (qquad strut propagation)     +3   →  732
 ─────────────────────────────────────────────────────
-Final achieved                              707 / 921  (76.8%)
+Final achieved                              732 / 921  (79.5%)
 Upstream baseline                           206 / 206  (100%)*
 ```
+
+`\int_{-\infty}^{\infty} x` (standalone) was also fixed (the sub minus's
+0.08333 depth now feeds `sub_height_for` via `(h+d)*0.7`, and `depth_holder`/
+box depth bump by `ceil2(depth_raw*0.7)`), but the corpus instances embed it in
+`\int_{-\infty}^{\infty} e^{-x^2} dx` whose `e^{-x^2}` nested-superscript
+height is still over-computed (see residuals).
+
+### Phase 3 round 2 additions
+
+After the first Phase 3 batch landed at 707/921, a follow-up targeted accents and continued fractions:
+
+- **Accent centering margin** ([render.ls](lambda/package/math/render.ls) `accent_margin_left`): ported MathLive's formula `(base.width − accent.width)/2` (accent.ts:120). Accent glyph widths from Main-Regular (0.5 for most, 0.27778 for the single dot). The base width uses a new full-precision `width_raw` metric field (regenerated via [generate_metrics_data.mjs](test/lambda/mathlive/generate_metrics_data.mjs)) so the ÷2 doesn't lose a half-pixel — `\vec{v}` now emits margin-left:0 (not -0.01). **+11 cases** (replaced the hardcoded 0.04/0.15 margins).
+- **Accent VBox height** ([render.ls](lambda/package/math/render.ls) `render_simple_accent`): `vlist = ceil2(base.height_raw − clearance + accent.height_raw)`, `clearance = min(base.height, X_HEIGHT)`. Uses raw accent metric heights (hat 0.69444, ddot 0.66786, check 0.62847, etc.). Closes `\ddot{b}`/`\hat{A}` strut drift. **+3 cases**.
+- **`\cfrac`** ([fraction.ls](lambda/package/math/atoms/fraction.ls) `wrap_cfrac_fraction`): emits only the opening nulldelimiter (continued-fraction left-alignment). Also guarded the `denom≥0.75, numer<0.75` branch so short single-letter numerators (`\frac{e}{f}`) fall through to the 0.94-height short-numer branch. **+3 cases**.
+- **Prime `'` display style** ([render.ls](lambda/package/math/render.ls) `render_prime_script`): display-mode primes use top -3.36 / vlist 0.76 (vs inline -3.41 / 0.81). Closes `\begin{bmatrix} x' \\ y' \end{bmatrix}`. **+2 cases**.
 
 \* The single failure flagged as `NOT 14/15` is a stale snap-vs-live mismatch: the local snap files escape `>` as `&gt;` for `a\not{<>} b`, but live MathLive emits the raw `>`. Lambda now matches live MathLive; the snap should be regenerated.
 

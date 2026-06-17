@@ -27,6 +27,12 @@ pub fn box_cls(cls, height, depth, width, box_type) => {
     element: <span class: cls>,
     height: height,
     depth: depth,
+    // Carry raw height/depth so strut raw-propagation continues through
+    // spacing boxes (quad/qquad/thinspace etc are all 0/0). Without these,
+    // a spacer between two atoms aborts raw propagation, forcing the rounded
+    // strut path (e.g. `i\qquad j` emitted 0.85 instead of 0.86).
+    height_raw: height,
+    depth_raw: depth,
     width: width,
     type: box_type,
     italic: 0.0,
