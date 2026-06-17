@@ -1,0 +1,4 @@
+copy supported=true enabled=true ok=true plain=bc html=<b>bc</b> expected=true
+cut supported=true enabled=true ok=true plain=bc html=bc editor=ad expected=true
+paste-text supported=true enabled=true ok=true editor=aXYd expected=true
+paste-empty ok=false editor=ad expected=true

@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup started with rich-host `selectAll` and conservative selected-wrapper `removeFormat`.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`; EC-5 selected-range color/font commands landed for `foreColor`, `backColor`, `hiliteColor`, `fontName`, and `fontSize`; EC-6 cleanup/clipboard started with rich-host `selectAll`, conservative selected-wrapper `removeFormat`, and native rich-host `copy`/`cut`/`paste`.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -1133,6 +1133,42 @@ before declaring the whole EC-5 tier complete.
 **Global gate note:** EC-6a's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run,
 and the remaining EC-6 cleanup/history/clipboard commands are not complete.
+
+**EC-6b — native rich-host copy / cut / paste: LANDED (2026-06-17).**
+
+- Added native `execCommand("copy"|"cut"|"paste")` support to the EC command
+  registry. `queryCommandSupported(...)` and `queryCommandEnabled(...)` now
+  treat the clipboard trio as native commands when a rich editing target is
+  active.
+- `copy` serializes the current non-collapsed rich selection through the
+  existing `state_store_extract_selection_text(...)` /
+  `state_store_extract_selection_html(...)` helpers and writes to the canonical
+  Radiant `ClipboardStore` as `text/plain` plus `text/html` when available.
+- `cut` maps to the existing `INPUT_INTENT_DELETE_BY_CUT` path and installs the
+  same copy-selection hook before the default deletion, so the clipboard write
+  and selection deletion stay in one editing transaction.
+- `paste` maps to `INPUT_INTENT_INSERT_FROM_PASTE`, reads `text/plain` and
+  `text/html` from the canonical `ClipboardStore`, owns those strings on the
+  intent for transaction lifetime safety, and lets the current rich default
+  paste action insert the plain-text representation.
+- Scope remains conservative: no ClipboardEvent dispatch/defaultOverride yet,
+  no permission/user-activation policy, no rich-fragment HTML insertion on
+  paste, no text-control execCommand clipboard path, and no undo/redo history.
+
+**Current EC verification after EC-6b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct clipboard DOM regression | `copy` stores selected `<b>bc</b>` as `text/html` with `bc` plain text; `cut` stores `bc` and mutates `abcd` to `ad`; `paste` inserts `text/plain` `XY` into `ad` as `aXYd`; empty clipboard paste returns false |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_clipboard' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 217 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-6b's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run,
+and EC-6 history `undo`/`redo` remains incomplete.
 
 ---
 
