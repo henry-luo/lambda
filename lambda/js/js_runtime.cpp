@@ -4415,11 +4415,9 @@ extern "C" Item js_property_get(Item object, Item key) {
                         }
                         // v87: Symbol.prototype.description getter (ES2019)
                         if (nl == 6 && strncmp(nm, "Symbol", 6) == 0) {
-                            Item desc_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_DESCRIPTION_GETTER, "get description", 0);
-                            Item gk = (Item){.item = s2it(heap_create_name("__get_description", 17))};
-                            js_property_set(fn->prototype, gk, desc_fn);
                             Item dk = (Item){.item = s2it(heap_create_name("description", 11))};
-                            js_mark_non_enumerable(fn->prototype, dk);
+                            Item desc_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_DESCRIPTION_GETTER, "get description", 0);
+                            js_install_native_accessor(fn->prototype, dk, desc_fn, ItemNull, JSPD_NON_ENUMERABLE);
                             // Install toString on Symbol.prototype
                             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
                             Item ts_fn = js_get_or_create_builtin(JS_BUILTIN_SYM_TO_STRING, "toString", 0);
@@ -5207,14 +5205,8 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         }
     }
 
-    // Phase 4 intercept: if `key` matches __get_X / __set_X marker pattern,
-    // route through `js_define_accessor_partial` to merge into a JsAccessorPair
-    // stored under name X. Skips the legacy magic-key store entirely so no
-    // __get_X/__set_X slots accumulate on the shape.
-    if (js_intercept_accessor_marker(object, key, value)) return value;
-
-    // Phase 2a dual-write: if `key` is a marker key (__nw_X / __ne_X / __nc_X /
-    // __get_X / __set_X), mirror the information into ShapeEntry::flags on the
+    // Phase 2a dual-write: if `key` is an attribute marker key
+    // (__nw_X / __ne_X / __nc_X), mirror the information into ShapeEntry::flags on the
     // underlying property X. Idempotent and safe for any code path. The legacy
     // magic-key write below remains authoritative until Phase 2b reader migration.
     js_dual_write_marker_flags(object, key, value);
@@ -5702,15 +5694,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             Item exotic_result = ItemNull;
             if (js_try_exotic_property_set(object, key, &value, &exotic_result)) return exotic_result;
         }
-        // Setter property dispatch: check for __set_<propName> on object or prototype
-        // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion).
-        // Also skip when writing the deleted sentinel (used by js_delete_property to
-        // tombstone a slot — must not trigger accessor / TypeError-on-no-setter logic).
+        // Setter property dispatch. Skip when writing the deleted sentinel
+        // (used by js_delete_property to tombstone a slot — must not trigger
+        // accessor / TypeError-on-no-setter logic).
         if (!js_skip_accessor_dispatch && !js_is_deleted_sentinel(value) && get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len < 64 &&
-                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
-                                        strncmp(str_key->chars, "__set_", 6) == 0))) {
+            if (str_key && str_key->len < 64) {
                 // ES §9.5.9: Proxy in prototype chain forwards [[Set]] through
                 // the proxy's set trap with the original receiver. Without this,
                 // setter dispatch silently bypasses the proxy.
