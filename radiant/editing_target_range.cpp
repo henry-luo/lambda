@@ -156,11 +156,81 @@ static DomElement* target_range_text_block_parent(DomText* text) {
     return elem;
 }
 
-static bool target_range_block_has_only_text(DomElement* block,
-                                             DomText* text) {
-    if (!block || !text) return false;
-    return block->first_child == static_cast<DomNode*>(text) &&
-        block->last_child == static_cast<DomNode*>(text);
+static bool target_range_is_simple_inline_tag(uintptr_t tag_id) {
+    switch (tag_id) {
+        case HTM_TAG_A:
+        case HTM_TAG_ABBR:
+        case HTM_TAG_B:
+        case HTM_TAG_BDI:
+        case HTM_TAG_BDO:
+        case HTM_TAG_BIG:
+        case HTM_TAG_CITE:
+        case HTM_TAG_CODE:
+        case HTM_TAG_DEL:
+        case HTM_TAG_DFN:
+        case HTM_TAG_EM:
+        case HTM_TAG_FONT:
+        case HTM_TAG_I:
+        case HTM_TAG_INS:
+        case HTM_TAG_KBD:
+        case HTM_TAG_MARK:
+        case HTM_TAG_Q:
+        case HTM_TAG_S:
+        case HTM_TAG_SAMP:
+        case HTM_TAG_SMALL:
+        case HTM_TAG_SPAN:
+        case HTM_TAG_STRIKE:
+        case HTM_TAG_STRONG:
+        case HTM_TAG_SUB:
+        case HTM_TAG_SUP:
+        case HTM_TAG_TIME:
+        case HTM_TAG_TT:
+        case HTM_TAG_U:
+        case HTM_TAG_VAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+struct TargetRangeJoinContent {
+    DomText* text;
+    bool direct_text;
+};
+
+static bool target_range_simple_text_content(DomElement* block,
+                                             DomText* text,
+                                             TargetRangeJoinContent* out) {
+    if (out) {
+        out->text = nullptr;
+        out->direct_text = false;
+    }
+    if (!block || !text || !block->first_child ||
+        block->first_child != block->last_child) {
+        return false;
+    }
+
+    DomNode* child = block->first_child;
+    if (child == static_cast<DomNode*>(text)) {
+        if (out) {
+            out->text = text;
+            out->direct_text = true;
+        }
+        return true;
+    }
+    if (!child->is_element()) return false;
+
+    DomElement* inline_elem = child->as_element();
+    if (!inline_elem || !target_range_is_simple_inline_tag(inline_elem->tag()) ||
+        inline_elem->first_child != static_cast<DomNode*>(text) ||
+        inline_elem->last_child != static_cast<DomNode*>(text)) {
+        return false;
+    }
+    if (out) {
+        out->text = text;
+        out->direct_text = false;
+    }
+    return true;
 }
 
 static bool target_range_collapsible_space(unsigned char ch) {
@@ -210,7 +280,10 @@ static bool target_range_backspace_block_join(DomBoundary caret,
 
     DomText* text = caret.node->as_text();
     DomElement* current_block = target_range_text_block_parent(text);
-    if (!current_block || !target_range_block_has_only_text(current_block, text)) {
+    TargetRangeJoinContent current_content;
+    if (!current_block ||
+        !target_range_simple_text_content(current_block, text,
+            &current_content)) {
         return false;
     }
 
@@ -223,13 +296,19 @@ static bool target_range_backspace_block_join(DomBoundary caret,
     }
 
     DomText* prev_text = target_range_find_text_descendant(prev_node, true);
-    if (!prev_text || !target_range_block_has_only_text(prev_block, prev_text)) {
+    TargetRangeJoinContent prev_content;
+    if (!prev_text ||
+        !target_range_simple_text_content(prev_block, prev_text,
+            &prev_content)) {
         return false;
     }
 
     uint32_t start_offset = dom_text_utf16_length(prev_text);
     uint32_t end_offset = 0;
-    if (prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+    bool direct_text_join =
+        prev_content.direct_text && current_content.direct_text;
+    if (direct_text_join &&
+        prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
         const char* prev_data = prev_text->text ? prev_text->text : "";
         const char* current_data = text->text ? text->text : "";
         uint32_t prev_len = prev_text->length > 0
@@ -241,6 +320,8 @@ static bool target_range_backspace_block_join(DomBoundary caret,
         start_offset = target_range_trim_trailing_space(prev_data, prev_len);
         end_offset = target_range_leading_space_len(current_data, current_len);
         if (caret.offset > end_offset) return false;
+    } else if (!direct_text_join) {
+        if (caret.offset != 0) return false;
     } else if (caret.offset != 0) {
         return false;
     }

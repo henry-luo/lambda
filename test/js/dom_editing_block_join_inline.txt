@@ -1,0 +1,3 @@
+text-bold ok=true html=<p>abc<b>def</b></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
+bold-bold ok=true html=<p><b>abc</b><b>def</b></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
+italic-bold ok=true html=<p><i>abc</i><b>def</b></p> expected=true before=deleteContentBackward:1:true,3,true,0 input=deleteContentBackward:0 focus=true:3
