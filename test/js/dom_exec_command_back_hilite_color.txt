@@ -1,0 +1,4 @@
+backColor supported=true enabled=true ok=true value=#fedcba html=a<span style="background-color: #fedcba">bc</span>d expected=true
+backColor-empty ok=false html=abcd expected=true
+hiliteColor supported=true enabled=true ok=true value=#fedcba html=a<span style="background-color: #fedcba">bc</span>d expected=true
+hiliteColor-empty ok=false html=abcd expected=true
