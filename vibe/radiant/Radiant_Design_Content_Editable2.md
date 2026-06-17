@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary slices landed; EC-1 native core-text execCommand bridge landed; EC-2a selected-range inline formatting started.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2a selected-range inline formatting started.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -409,6 +409,28 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   content, whitespace-only block boundaries, nested inline wrappers, and
   modifier variants remain in the skipped Backspace matrix.
 
+**SI-13 — simple inline Backspace block-join target range + mutation: LANDED
+(2026-06-17).**
+
+- Extended the SI-12 block join from direct text-only blocks to the next
+  intentionally narrow WPT shape: adjacent `div`/`p`/`pre` blocks whose sole
+  child is either a text node or a simple inline formatting wrapper containing
+  one text node.
+- The current block's inline wrapper is moved into the previous block rather
+  than string-concatenated. This preserves wrapper identity/attributes and
+  matches the WPT-accepted outputs:
+  `<p>abc</p><p><b>[]def</b></p>` becomes
+  `<p>abc<b>def</b></p>`, while
+  `<p><b>abc</b></p><p><b>[]def</b></p>` becomes
+  `<p><b>abc</b><b>def</b></p>`.
+- `beforeinput.getTargetRanges()` mirrors the mutation path: it starts at the
+  end of the previous block's last text leaf and ends at offset `0` in the
+  current block's inline text leaf. The follow-up `input` event still returns
+  an empty range list.
+- Scope is still deliberately conservative. Arbitrary nested inline fragments,
+  list/table joins, atomic nodes, modifier variants, and the rest of the broad
+  skipped Backspace matrix remain future SI work.
+
 **Current SI verification (2026-06-17):**
 
 | Check | Result |
@@ -435,16 +457,17 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `select-event-drag-remove` | 1/1 passed |
 | Direct simple block-join DOM regression | `ok=true`, `html=<p>abcdef</p>`, `before=deleteContentBackward:1:true,3,true,0`, `input=deleteContentBackward:0` |
 | Direct whitespace block-join DOM regression | offsets 3/2/1/0 all join to `<p>abcdef</p>` with `before=deleteContentBackward:1:true,3,true,3` and `input=deleteContentBackward:0` |
-| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12; remains skipped |
+| Direct inline block-join DOM regression | text/bold, bold/bold, and italic/bold WPT shapes all pass with matching HTML and `before=deleteContentBackward:1:true,3,true,0` |
+| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12/SI-13; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
 | `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 198 passed / 0 failed; existing memtrack leak diagnostics printed |
-| `make test262-baseline` | not rerun for SI-12; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+| `test_js_gtest` | 199 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for SI-13; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-12's local WPT guards and `test_js_gtest` are green.
+**Global gate note:** SI-13's local WPT guards and `test_js_gtest` are green.
 The full `make test262-baseline` gate was not rerun for this block-join slice,
 so the broader SI phase should still run the mandatory §1.1 gate before being
 closed. The phase can keep advancing from the remaining skipped
@@ -453,7 +476,8 @@ deletion/pointer matrices without carrying a local WPT blocker.
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
 subset: remaining `getTargetRanges` deletion matrices (in-inline target ranges,
-atomic deletion, list/table joins, whitespace semantics, and modifier variants),
+deeper inline fragments, atomic deletion, list/table joins, whitespace
+semantics, and modifier variants),
 broader text-control delete coverage, and richer pointer drag/hit-test
 injection outside the newly enabled text-control and contenteditable
 mouse-button files.

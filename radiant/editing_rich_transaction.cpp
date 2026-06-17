@@ -328,11 +328,48 @@ static DomText* rich_transaction_live_text_at_index(DomElement* parent,
     return fallback;
 }
 
-static bool rich_transaction_block_has_only_text(DomElement* block,
-                                                 DomText* text) {
-    if (!block || !text) return false;
-    return block->first_child == static_cast<DomNode*>(text) &&
-        block->last_child == static_cast<DomNode*>(text);
+struct RichJoinBlockContent {
+    DomNode* child;
+    DomText* text;
+    bool direct_text;
+};
+
+static bool rich_transaction_simple_text_content(DomElement* block,
+                                                 DomText* text,
+                                                 RichJoinBlockContent* out) {
+    if (out) {
+        out->child = nullptr;
+        out->text = nullptr;
+        out->direct_text = false;
+    }
+    if (!block || !text || !block->first_child ||
+        block->first_child != block->last_child) {
+        return false;
+    }
+
+    DomNode* child = block->first_child;
+    if (child == static_cast<DomNode*>(text)) {
+        if (out) {
+            out->child = child;
+            out->text = text;
+            out->direct_text = true;
+        }
+        return true;
+    }
+    if (!child->is_element()) return false;
+
+    DomElement* inline_elem = lam::dom_require_element(child);
+    if (!inline_elem || !rich_transaction_is_cleanup_inline_tag(inline_elem->tag()) ||
+        inline_elem->first_child != static_cast<DomNode*>(text) ||
+        inline_elem->last_child != static_cast<DomNode*>(text)) {
+        return false;
+    }
+    if (out) {
+        out->child = child;
+        out->text = text;
+        out->direct_text = false;
+    }
+    return true;
 }
 
 static bool rich_transaction_collapsible_space(unsigned char ch) {
@@ -358,7 +395,50 @@ static uint32_t rich_transaction_leading_space_len(const char* text,
     return count;
 }
 
-static bool rich_transaction_join_previous_text_block(
+static bool rich_transaction_item_for_child(DomNode* child, Item* out) {
+    if (out) *out = ItemNull;
+    if (!child || !out) return false;
+    if (child->is_text()) {
+        DomText* text = lam::dom_require_text(child);
+        if (!text || !text->native_string) return false;
+        *out = (Item){.item = s2it(text->native_string)};
+        return true;
+    }
+    if (child->is_element()) {
+        DomElement* elem = lam::dom_require_element(child);
+        if (!elem || !elem->native_element) return false;
+        *out = (Item){.element = elem->native_element};
+        return true;
+    }
+    return false;
+}
+
+static bool rich_transaction_append_child_for_edit(DomElement* parent,
+                                                   DomNode* child) {
+    if (!parent || !child || child->parent) return false;
+    if (parent->native_element && parent->doc && parent->doc->input) {
+        Item child_item;
+        if (!rich_transaction_item_for_child(child, &child_item)) {
+            return false;
+        }
+        MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+        Item result = editor.elmt_append_child(
+            {.element = parent->native_element},
+            child_item
+        );
+        if (!result.element) {
+            log_debug("rich_transaction_append_child_for_edit: backing append rejected");
+            return false;
+        }
+        parent->native_element = result.element;
+        if (parent->doc->input->ui_mode) {
+            return true;
+        }
+    }
+    return static_cast<DomNode*>(parent)->append_child(child);
+}
+
+static bool rich_transaction_join_previous_block(
         DocState* state,
         const EditingSurface* surface,
         DomText* text,
@@ -369,7 +449,10 @@ static bool rich_transaction_join_previous_text_block(
     if (!state || !text) return false;
 
     DomElement* current_block = rich_transaction_text_block_parent(text);
-    if (!current_block || !rich_transaction_block_has_only_text(current_block, text)) {
+    RichJoinBlockContent current_content;
+    if (!current_block ||
+        !rich_transaction_simple_text_content(current_block, text,
+            &current_content)) {
         return false;
     }
     DomNode* current_node = static_cast<DomNode*>(current_block);
@@ -381,7 +464,10 @@ static bool rich_transaction_join_previous_text_block(
         return false;
     }
     DomText* prev_text = editing_rich_find_text_descendant(prev_node, true);
-    if (!prev_text || !rich_transaction_block_has_only_text(prev_block, prev_text)) {
+    RichJoinBlockContent prev_content;
+    if (!prev_text ||
+        !rich_transaction_simple_text_content(prev_block, prev_text,
+            &prev_content)) {
         return false;
     }
     DomElement* parent = current_node->parent && current_node->parent->is_element()
@@ -399,11 +485,47 @@ static bool rich_transaction_join_previous_text_block(
         : (uint32_t)strlen(current_data);
     uint32_t prev_keep_len = prev_len;
     uint32_t current_skip_len = 0;
-    if (prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+    bool direct_text_join =
+        prev_content.direct_text && current_content.direct_text;
+    if (direct_text_join &&
+        prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
         prev_keep_len = rich_transaction_trim_trailing_space(prev_data, prev_len);
         current_skip_len = rich_transaction_leading_space_len(current_data, current_len);
     }
     if (caret_offset > current_skip_len) return false;
+
+    if (!direct_text_join) {
+        if (caret_offset != 0) return false;
+        DomNode* moving_child = current_content.child;
+        if (!moving_child || !current_node->remove_child(moving_child)) {
+            return false;
+        }
+        if (!rich_transaction_append_child_for_edit(prev_block, moving_child)) {
+            current_node->append_child(moving_child);
+            return false;
+        }
+        dom_mutation_pre_remove(state, current_node);
+        if (!rich_transaction_remove_child_for_edit(parent, current_node)) {
+            return false;
+        }
+        if (!rich_transaction_collapse_text_caret(state, prev_text, prev_len)) {
+            return false;
+        }
+        EditingSurface live_surface;
+        if (editing_surface_from_target(static_cast<View*>(prev_text),
+                &live_surface) && editing_surface_is_rich(&live_surface)) {
+            editing_interaction_set_active_surface(state, &live_surface);
+            if (log_mutation) {
+                log_mutation(state, &live_surface, intent, "block-join",
+                             prev_len, prev_len, prev_len, prev_len, log_user);
+            }
+        } else if (surface) {
+            editing_interaction_set_active_surface(state, surface);
+        }
+        log_debug("rich_transaction_join_previous_block: moved inline child at offset %u",
+                  prev_len);
+        return true;
+    }
 
     size_t joined_len =
         (size_t)prev_keep_len + (size_t)(current_len - current_skip_len);
@@ -445,7 +567,7 @@ static bool rich_transaction_join_previous_text_block(
     } else if (surface) {
         editing_interaction_set_active_surface(state, surface);
     }
-    log_debug("rich_transaction_join_previous_text_block: joined %u/%u + %u/%u bytes",
+    log_debug("rich_transaction_join_previous_block: joined %u/%u + %u/%u bytes",
               prev_keep_len, prev_len, current_len - current_skip_len,
               current_len);
     return true;
@@ -771,7 +893,7 @@ bool editing_rich_default_replace(DocState* state,
         data = "";
         if (start == end) {
             if (intent->type == INPUT_INTENT_DELETE_CONTENT_BACKWARD) {
-                if (rich_transaction_join_previous_text_block(
+                if (rich_transaction_join_previous_block(
                         state, fallback_surface_ptr, text, start,
                         log_mutation, intent, log_user)) {
                     return true;
