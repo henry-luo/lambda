@@ -576,6 +576,31 @@ hooks}, each unlocking a slice of the Chrome corpus (§7):
 The full `make test262-baseline` gate still needs to run before declaring the
 whole EC-1 tier complete.
 
+**EC-1b — rich transfer payload parity for execCommand/testdriver events:
+LANDED (2026-06-17).**
+
+- The DOM-backed JS dispatch path used by native `execCommand` and headless
+  synthetic editing input now matches the main Radiant UI dispatcher for
+  transfer-shaped rich editing intents. `insertFromPaste`,
+  `insertFromPasteAsQuotation`, `insertFromDrop`, `deleteByDrag`, and
+  `deleteByCut` expose a populated `InputEvent.dataTransfer` and keep
+  `InputEvent.data` null for rich editing surfaces.
+- This directly strengthens `execCommand("insertHTML", false, html)`, which
+  maps to `insertFromPaste`: both `beforeinput` and `input` now carry
+  `text/plain` and `text/html` entries through `DataTransfer`.
+- The broad WPT `input-events-exec-command.html` remains skipped. It tests the
+  whole legacy command surface (`insertOrderedList`, formatting, color/font,
+  block justification, clipboard, links) and also expects no `beforeinput`,
+  whereas this design intentionally routes execCommand through the cancelable
+  `beforeinput` transaction envelope described in §2.3/§6.2.
+
+**Current EC verification after EC-1b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `execCommand("insertHTML")` DOM smoke | `ok=true`, `inputType=insertFromPaste`, `data=null`, `dataTransfer text/plain=<b>X</b>`, `dataTransfer text/html=<b>X</b>` |
+| `make -C build/premake config=debug_native lambda -j10 ...` | passed; existing macOS-version linker warnings printed |
+
 ---
 
 ## 7. Direction 2 — Import the Chrome `editing/` corpus

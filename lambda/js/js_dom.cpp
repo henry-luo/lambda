@@ -78,6 +78,8 @@ static const char* js_dom_to_attr_cstr(Item value) {
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts);
 extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts);
+extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
+                                                  const char* text_html);
 extern "C" Item js_eventtarget_dispatch(Item event_item);
 extern "C" Item js_new_error_with_name(Item error_name, Item message);
 extern "C" void js_throw_value(Item error);
@@ -398,6 +400,19 @@ static DomElement* js_dom_testdriver_input_event_target(View* target) {
     return node ? node->as_element() : nullptr;
 }
 
+static bool js_dom_input_intent_uses_transfer_payload(InputIntentType type) {
+    switch (type) {
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION:
+        case INPUT_INTENT_INSERT_FROM_DROP:
+        case INPUT_INTENT_DELETE_BY_DRAG:
+        case INPUT_INTENT_DELETE_BY_CUT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static bool js_dom_testdriver_dispatch_input_event(EventContext* evcon,
                                                    View* target,
                                                    const char* type,
@@ -415,11 +430,20 @@ static bool js_dom_testdriver_dispatch_input_event(EventContext* evcon,
         }
     }
 
+    EditingSurface surface;
+    bool has_surface = editing_surface_from_target(target, &surface);
+    bool rich_transfer = has_surface && editing_surface_is_rich(&surface) &&
+        js_dom_input_intent_uses_transfer_payload(intent->type);
+    const char* data = rich_transfer ? nullptr : intent->data;
+    Item data_transfer = rich_transfer
+        ? js_data_transfer_new_with_strings(intent->data, intent->html_data)
+        : ItemNull;
+
     Item ev = js_create_native_input_event(type,
         input_intent_type_name(intent->type),
-        intent->data,
+        data,
         intent->is_composing,
-        ItemNull,
+        data_transfer,
         ranges_arr);
     Item target_item = js_dom_wrap_element(dom_target);
     js_dom_dispatch_event(target_item, ev);
