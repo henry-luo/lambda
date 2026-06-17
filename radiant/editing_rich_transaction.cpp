@@ -962,6 +962,13 @@ static const char* rich_style_property_name(const EditingIntent* intent) {
     switch (intent->type) {
         case INPUT_INTENT_FORMAT_FORE_COLOR:
             return "color";
+        case INPUT_INTENT_FORMAT_BACK_COLOR:
+        case INPUT_INTENT_FORMAT_HILITE_COLOR:
+            return "background-color";
+        case INPUT_INTENT_FORMAT_FONT_NAME:
+            return "font-family";
+        case INPUT_INTENT_FORMAT_FONT_SIZE:
+            return "font-size";
         default:
             return nullptr;
     }

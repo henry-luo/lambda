@@ -1,0 +1,4 @@
+fontName supported=true enabled=true ok=true value=serif html=a<span style="font-family: serif">bc</span>d expected=true
+fontName-empty ok=false html=abcd expected=true
+fontSize supported=true enabled=true ok=true value=18px html=a<span style="font-size: 18px">bc</span>d expected=true
+fontSize-empty ok=false html=abcd expected=true

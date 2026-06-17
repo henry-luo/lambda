@@ -472,7 +472,11 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_format(state, surface, intent,
                                            nullptr, nullptr);
     }
-    if (intent && intent->type == INPUT_INTENT_FORMAT_FORE_COLOR) {
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_FORE_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_BACK_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_HILITE_COLOR ||
+                   intent->type == INPUT_INTENT_FORMAT_FONT_NAME ||
+                   intent->type == INPUT_INTENT_FORMAT_FONT_SIZE)) {
         return editing_rich_default_style(state, surface, intent,
                                           nullptr, nullptr);
     }
@@ -647,7 +651,11 @@ static bool js_dom_exec_command_is_link_object(const char* cmd) {
 
 static bool js_dom_exec_command_is_color_font(const char* cmd) {
     if (!cmd) return false;
-    return strcasecmp(cmd, "foreColor") == 0;
+    return strcasecmp(cmd, "foreColor") == 0 ||
+        strcasecmp(cmd, "backColor") == 0 ||
+        strcasecmp(cmd, "hiliteColor") == 0 ||
+        strcasecmp(cmd, "fontName") == 0 ||
+        strcasecmp(cmd, "fontSize") == 0;
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
@@ -727,6 +735,26 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "foreColor") == 0) {
         out->type = INPUT_INTENT_FORMAT_FORE_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "backColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_BACK_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "hiliteColor") == 0) {
+        out->type = INPUT_INTENT_FORMAT_HILITE_COLOR;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "fontName") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FONT_NAME;
+        out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "fontSize") == 0) {
+        out->type = INPUT_INTENT_FORMAT_FONT_SIZE;
         out->data = value ? value : "";
         return true;
     }
@@ -937,6 +965,12 @@ static bool js_dom_exec_command_query_inline_state(const char* cmd) {
 static const char* js_dom_exec_command_style_property(const char* cmd) {
     if (!cmd) return nullptr;
     if (strcasecmp(cmd, "foreColor") == 0) return "color";
+    if (strcasecmp(cmd, "backColor") == 0 ||
+        strcasecmp(cmd, "hiliteColor") == 0) {
+        return "background-color";
+    }
+    if (strcasecmp(cmd, "fontName") == 0) return "font-family";
+    if (strcasecmp(cmd, "fontSize") == 0) return "font-size";
     return nullptr;
 }
 
