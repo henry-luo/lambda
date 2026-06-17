@@ -206,8 +206,8 @@ void js_attr_set_configurable(Item obj, const char* name, int name_len, bool con
 // Phase 2a: Universal dual-write hook
 // =============================================================================
 //
-// Inspect a property write `(obj, key, value)`. If `key` is a marker key
-// (`__nw_X` / `__ne_X` / `__nc_X` / `__get_X` / `__set_X`), extract the
+// Inspect a property write `(obj, key, value)`. If `key` is an attribute marker key
+// (`__nw_X` / `__ne_X` / `__nc_X`), extract the
 // underlying property name X and update the corresponding bit on the X
 // ShapeEntry::flags. Truthy `value` sets the bit; tombstoned-or-falsy clears it
 // (except for accessor markers, which are sticky once set — Phase 2 readers
@@ -218,8 +218,8 @@ void js_attr_set_configurable(Item obj, const char* name, int name_len, bool con
 // non-marker key, non-string key, or unknown prefix.
 //
 // This is installed at the top of `js_property_set` so that ALL writers —
-// `js_defprop_set_marker`, transpiler-emitted accessors, builtin prototype
-// installers, mark_builder JS construction, etc. — populate flags without
+// `js_defprop_set_marker`, builtin prototype installers, mark_builder JS
+// construction, etc. — populate flags without
 // requiring per-callsite changes.
 bool js_dual_write_marker_flags(Item obj, Item key, Item value);
 
@@ -298,19 +298,6 @@ void js_define_accessor_partial(Item obj, Item name, Item fn, int is_setter,
 Item js_install_user_accessor(Item obj, Item name, Item fn, int is_setter);
 
 // =============================================================================
-// Phase 4: js_property_set intercept for legacy __get_X/__set_X writes
-// =============================================================================
-//
-// `js_intercept_accessor_marker` is called at the top of `js_property_set`.
-// If `key` matches the `__get_X`/`__set_X` magic-key pattern (transpiler
-// fallback, computed accessor literals, or any other legacy emitter), it
-// extracts X and routes the write through `js_define_accessor_partial`,
-// merging the half into the existing pair (or allocating a fresh one).
-//
-// Returns true if intercepted (caller MUST skip the normal store path).
-// Returns false for any non-marker key.
-bool js_intercept_accessor_marker(Item obj, Item key, Item value);
-
 // Walk own + prototype chain for an accessor pair on `name`. Returns the pair
 // pointer (without invoking getter/setter) for the first shape entry along
 // the chain that has JSPD_IS_ACCESSOR set. Used by setter dispatch in

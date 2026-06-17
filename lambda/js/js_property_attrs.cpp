@@ -465,9 +465,8 @@ extern "C" bool js_dual_write_marker_flags(Item obj, Item key, Item value) {
     if      (klen >= 5 && memcmp(k, "__nw_", 5) == 0) { flag = JSPD_NON_WRITABLE;     prefix_len = 5; }
     else if (klen >= 5 && memcmp(k, "__ne_", 5) == 0) { flag = JSPD_NON_ENUMERABLE;   prefix_len = 5; }
     else if (klen >= 5 && memcmp(k, "__nc_", 5) == 0) { flag = JSPD_NON_CONFIGURABLE; prefix_len = 5; }
-    // Phase 5: __get_ / __set_ branch removed. js_intercept_accessor_marker
-    // (called before dual_write in js_property_set) routes accessor writes
-    // through JsAccessorPair storage and never falls through to dual_write.
+    // Phase 5: __get_ / __set_ branches are gone. Accessors are installed
+    // through JsAccessorPair storage under the visible property name.
     else return false;
 
     const char* prop = k + prefix_len;
@@ -656,41 +655,6 @@ extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
     name = js_to_property_key(name);
     js_define_accessor_partial(obj, name, fn, is_setter, 0);
     return obj;
-}
-
-// =============================================================================
-// Phase 4: js_property_set intercept for legacy __get_X/__set_X writes
-// =============================================================================
-
-extern "C" bool js_intercept_accessor_marker(Item obj, Item key, Item value) {
-    // AT-1 (was: companion-map bypass for MAP_KIND_ARRAY_PROPS). Phase 5D
-    // added IS_ACCESSOR shape-entry support on companion maps under digit-
-    // string names, so the bypass is no longer required: js_define_accessor_partial
-    // → js_install_native_accessor stores the JsAccessorPair* under the actual
-    // property name X (e.g. "5") with IS_ACCESSOR + NON_ENUMERABLE shape flags,
-    // which the Phase 5D readers in js_property_get / js_object_get_own_property_descriptor
-    // / propertyIsEnumerable / etc. already detect and dispatch correctly.
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* ks = it2s(key);
-    if (!ks || ks->len < 7) return false;  // need __get_X / __set_X minimum
-    const char* k = ks->chars;
-    if (k[0] != '_' || k[1] != '_') return false;
-    int is_setter;
-    if      (memcmp(k, "__get_", 6) == 0) is_setter = 0;
-    else if (memcmp(k, "__set_", 6) == 0) is_setter = 1;
-    else return false;
-    int prop_len = (int)ks->len - 6;
-    if (prop_len <= 0) return false;
-    // Tombstone (delete __get_X) — fall through to normal path so the marker
-    // entry is properly cleared. Stage C will revisit if needed.
-    if (value.item == JS_DELETED_SENTINEL_VAL) return false;
-    // Build the underlying property name X as an interned String Item.
-    Item name = (Item){.item = s2it(heap_create_name(k + 6, prop_len))};
-    // Class methods are non-enumerable per ES spec; final attrs get applied by
-    // js_mark_all_non_enumerable batch call after class body emission. Pass 0
-    // here so user-side object literal accessors stay enumerable per spec.
-    js_define_accessor_partial(obj, name, value, is_setter, 0);
-    return true;
 }
 
 extern "C" Item js_get_prototype(Item object);

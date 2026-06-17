@@ -1,0 +1,8 @@
+user:41,42
+userKeys:__get_alpha,__set_alpha
+setter:7,false
+obj:3,9,gg,ss
+objNames:true,true,true,false,false
+class:cg,10,sg
+classNames:true,true,true
+OK

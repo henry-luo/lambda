@@ -920,14 +920,14 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     property->computed = true;
                     property->key = build_js_expression(tp, name_node);
                 } else {
-                    // Static getter/setter: store as __get_<name> or __set_<name> key
+                    // Static getter/setter: store the bare property key; lowering
+                    // uses is_getter/is_setter to install the accessor pair.
                     StrView accessor_name = js_node_source(tp, name_node);
                     // Strip quotes from string literal keys (e.g., "test" → test)
                     if (strcmp(name_type, "string") == 0 && accessor_name.length >= 2) {
                         accessor_name.str++;
                         accessor_name.length -= 2;
                     }
-                    char acc_key[256];
                     // Normalize numeric literal keys (e.g., 0x10 → "16", 1e2 → "100")
                     char num_buf[64];
                     if (strcmp(name_type, "number") == 0) {
@@ -978,10 +978,8 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                         acc_str = dec_acc;
                         acc_len = oi;
                     }
-                    snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
-                             acc_len, acc_str);
                     JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                    key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
+                    key_id->name = name_pool_create_len(tp->name_pool, acc_str, acc_len);
                     property->key = (JsAstNode*)key_id;
                 }
 
