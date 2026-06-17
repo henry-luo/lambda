@@ -425,7 +425,7 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             line_top: -3.58,
             numer_top: -4.08,
             numer_child_height: 1.7,
-            denom_child_height: if (denom_box.height < 0.65) denom_box.height else 0.65,
+            denom_child_height: denom_child_for_default(denom_box),
             child_font_pct: null,
             rule_height: 0.04,
             pstrut: 3.36
@@ -624,7 +624,7 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             line_top: -3.23,
             numer_top: -3.5,
             numer_child_height: 0.65,
-            denom_child_height: if (denom_box.height < 0.65) denom_box.height else 0.65,
+            denom_child_height: denom_child_for_default(denom_box),
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -634,6 +634,16 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
 fn script_frac_child_height(child_box, fallback) {
     let total = render_total_of(child_box)
     if (total >= 0.7) fallback else 0.46
+}
+
+// For default fraction spec: denom wrapper height should accommodate
+// content with operators (which have descent). Use max(height + depth, 0.65)
+// capped at typical TeX baseline alignment.
+fn denom_child_for_default(denom_box) {
+    let total = denom_box.height + denom_box.depth
+    if (denom_box.height < 0.65 and denom_box.depth < 0.01) denom_box.height
+    else if (total > 0.65) total
+    else 0.65
 }
 
 fn script_fraction_descender_child_height(child_box) {

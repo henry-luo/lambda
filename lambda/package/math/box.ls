@@ -5,6 +5,7 @@
 import css: .css
 import util: .util
 import met: .metrics
+import metrics_data: .metrics_data
 
 // ============================================================
 // Box constructors
@@ -46,12 +47,46 @@ pub fn box_styled(cls, style, height, depth, width, box_type) => {
 // create a box from a text string (leaf node)
 pub fn text_box(text, cls, box_type) => {
     element: text_element(text, cls),
-    height: text_height(text),
-    depth: text_depth(text),
+    height: text_height_for(text, cls),
+    depth: text_depth_for(text, cls),
     width: met.DEFAULT_CHAR_WIDTH * float(len(text)),
     type: box_type,
     italic: 0.0,
     skew: 0.0
+}
+
+// Look up metrics from MathLive's character metrics table when possible,
+// falling back to the heuristic text_height/text_depth.
+fn font_from_class(cls) {
+    if (cls == css.CMR) "cmr"
+    else if (cls == css.MATHIT) "mathit"
+    else if (cls == css.AMS) "ams"
+    else if (cls == "lcGreek lm_mathit") "mathit"
+    else null
+}
+
+fn text_height_for(text, cls) {
+    // Operators (+/−) cascade into nested fraction/box height calcs that
+    // were calibrated against Lambda's old 0.69 height. Some symbols (ı, ȷ)
+    // are rendered with compound classes that MathLive picks from a font
+    // we don't have metrics for. Skip lookup for these.
+    if (text == "+" or text == "−" or text == "-" or
+        text == "ı" or text == "ȷ") text_height(text)
+    else if (len(text) == 1) {
+        let font = font_from_class(cls)
+        let m = if (font != null) metrics_data.lookup(text, font) else null
+        let h = if (m != null) metrics_data.height_of(m) else null
+        if (h != null and h > 0.0) h else text_height(text)
+    } else text_height(text)
+}
+
+fn text_depth_for(text, cls) {
+    if (len(text) == 1) {
+        let font = font_from_class(cls)
+        let m = if (font != null) metrics_data.lookup(text, font) else null
+        let d = if (m != null) metrics_data.depth_of(m) else null
+        if (d != null) d else text_depth(text)
+    } else text_depth(text)
 }
 
 fn text_element(text, cls) {
