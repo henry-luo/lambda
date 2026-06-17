@@ -477,6 +477,11 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_link(state, surface, intent,
                                          nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_INSERT_HORIZONTAL_RULE ||
+                   intent->type == INPUT_INTENT_INSERT_IMAGE)) {
+        return editing_rich_default_object(state, surface, intent,
+                                           nullptr, nullptr);
+    }
     if (intent && intent->type == INPUT_INTENT_FORMAT_BLOCK) {
         return editing_rich_default_format_block(state, surface, intent,
                                                  nullptr, nullptr);
@@ -631,7 +636,9 @@ static bool js_dom_exec_command_is_block_structure(const char* cmd) {
 static bool js_dom_exec_command_is_link_object(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "createLink") == 0 ||
-        strcasecmp(cmd, "unlink") == 0;
+        strcasecmp(cmd, "unlink") == 0 ||
+        strcasecmp(cmd, "insertHorizontalRule") == 0 ||
+        strcasecmp(cmd, "insertImage") == 0;
 }
 
 static bool js_dom_exec_command_is_native(const char* cmd) {
@@ -715,6 +722,15 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     }
     if (strcasecmp(cmd, "unlink") == 0) {
         out->type = INPUT_INTENT_FORMAT_UNLINK;
+        return true;
+    }
+    if (strcasecmp(cmd, "insertHorizontalRule") == 0) {
+        out->type = INPUT_INTENT_INSERT_HORIZONTAL_RULE;
+        return true;
+    }
+    if (strcasecmp(cmd, "insertImage") == 0) {
+        out->type = INPUT_INTENT_INSERT_IMAGE;
+        out->data = value ? value : "";
         return true;
     }
     if (strcasecmp(cmd, "formatBlock") == 0) {

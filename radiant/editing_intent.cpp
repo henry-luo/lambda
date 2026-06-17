@@ -25,6 +25,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_INSERT_PARAGRAPH:             return "insertParagraph";
         case INPUT_INTENT_INSERT_LINE_BREAK:            return "insertLineBreak";
         case INPUT_INTENT_INSERT_HORIZONTAL_RULE:       return "insertHorizontalRule";
+        case INPUT_INTENT_INSERT_IMAGE:                 return "insertImage";
         case INPUT_INTENT_INSERT_LINK:                  return "insertLink";
         case INPUT_INTENT_INSERT_FROM_PASTE:            return "insertFromPaste";
         case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION: return "insertFromPasteAsQuotation";
@@ -70,6 +71,7 @@ const char* input_intent_type_name(InputIntentType type) {
 bool input_intent_is_dispatchable(InputIntentType type) {
     switch (type) {
         case INPUT_INTENT_COMPOSITION_START:
+        case INPUT_INTENT_INSERT_IMAGE:
         case INPUT_INTENT_FORMAT_UNLINK:
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:

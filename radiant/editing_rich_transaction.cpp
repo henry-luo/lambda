@@ -1110,6 +1110,75 @@ bool editing_rich_default_link(DocState* state,
     return true;
 }
 
+bool editing_rich_default_object(DocState* state,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent,
+                                 EditingRichMutationLogFn log_mutation,
+                                 void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+    bool is_horizontal_rule =
+        intent->type == INPUT_INTENT_INSERT_HORIZONTAL_RULE;
+    bool is_image = intent->type == INPUT_INTENT_INSERT_IMAGE;
+    if (!is_horizontal_rule && !is_image) {
+        return false;
+    }
+    if (is_image && (!intent->data || !intent->data[0])) {
+        return false;
+    }
+
+    DomRange* range = state->dom_selection->ranges[0];
+    const char* exc = nullptr;
+    if (!dom_range_collapsed(range) &&
+        !dom_range_delete_contents(range, &exc)) {
+        log_debug("editing_rich_default_object: delete selection rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    const char* tag_name = is_image ? "img" : "hr";
+    DomElement* object = rich_create_native_element(surface->owner->doc, tag_name);
+    if (!object) return false;
+    if (is_image && !dom_element_set_attribute(object, "src", intent->data)) {
+        log_debug("editing_rich_default_object: failed to set image src");
+        return false;
+    }
+
+    DomNode* object_node = static_cast<DomNode*>(object);
+    if (!dom_range_insert_node(range, object_node, &exc)) {
+        log_debug("editing_rich_default_object: insert <%s> rejected: %s",
+                  tag_name,
+                  exc ? exc : "?");
+        return false;
+    }
+
+    DomNode* parent = object_node->parent;
+    uint32_t index = dom_node_child_index(object_node);
+    if (!parent || index == (uint32_t)-1) {
+        return false;
+    }
+
+    DomBoundary caret = { parent, index + 1 };
+    if (!state_store_set_selection(state, &caret, &caret, &exc)) {
+        log_debug("editing_rich_default_object: caret restore rejected: %s",
+                  exc ? exc : "?");
+        return false;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent,
+                     is_image ? "insert-image" : "insert-horizontal-rule",
+                     0, 0, caret.offset, caret.offset, log_user);
+    }
+    log_debug("editing_rich_default_object: inserted <%s>", tag_name);
+    return true;
+}
+
 static bool rich_format_block_supported_tag(const char* tag_name) {
     if (!tag_name || !tag_name[0]) return false;
     return strcasecmp(tag_name, "p") == 0 ||

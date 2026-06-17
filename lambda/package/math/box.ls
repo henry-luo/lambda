@@ -126,6 +126,7 @@ fn font_from_class(cls) {
     else if (cls == css.AMS) "ams"
     else if (cls == css.BB) "ams"
     else if (cls == "lcGreek lm_mathit") "mathit"
+    else if (cls == "lm_cmr lm_it") "mathit"
     else null
 }
 
@@ -146,13 +147,35 @@ fn text_height_for(text, cls) {
         // the max per-character height from the font metric table. Falls
         // back to the heuristic if any char is unknown.
         max_char_height(text, font_from_class(cls), text_height(text))
+    else if (is_alpha_multi(text) and font_from_class(cls) == null)
+        // No font metric (e.g., mathtt/mathfrak/mathsf/mathcal/mathscr).
+        // Approximate with cmr letter metrics — much closer than the 0.7em
+        // heuristic fallback. Lowercase "code" yields ~0.62em, matches MathLive.
+        max_char_height(text, "cmr", text_height(text))
     else if (is_repeated_char(text) and font_from_class(cls) != null) {
         // Repeated identical char like "..." or "---": use that char's metric.
         let font = font_from_class(cls)
         let m = metrics_data.lookup(text[0], font)
         let h = if (m != null) metrics_data.height_of(m) else null
         if (h != null and h > 0.0) h else text_height(text)
+    } else if (is_digit_text_full(text) and font_from_class(cls) != null) {
+        // Numeric strings like "3.14" or "1000": max per-char height. Digits
+        // share a 0.65em cap-height in cmr; the `.` and `,` are short, so the
+        // overall max ≈ 0.65 — much closer to MathLive than the 0.7 heuristic.
+        max_char_height(text, font_from_class(cls), text_height(text))
     } else text_height(text)
+}
+
+fn is_digit_text_full(text) {
+    if (len(text) <= 1) false
+    else is_digit_chars(text, 0)
+}
+
+fn is_digit_chars(text, i) {
+    if (i >= len(text)) true
+    else (let ch = text[i],
+        if ((ch >= "0" and ch <= "9") or ch == "." or ch == ",") is_digit_chars(text, i + 1)
+        else false)
 }
 
 fn is_repeated_char(text) {
@@ -231,7 +254,7 @@ fn text_style(text, cls) {
         let it = if (m != null) metrics_data.italic_of(m) else null
         if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
     }
-    else if (len(text) == 1 and cls == css.CMR) {
+    else if (len(text) == 1 and (cls == css.CMR or cls == css.MATHBF)) {
         let m = metrics_data.lookup(text, "cmr")
         let it = if (m != null) metrics_data.italic_of(m) else null
         if (it != null and it > 0.0) "margin-right:" ++ util.fmt_em(it) else null
