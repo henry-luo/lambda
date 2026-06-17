@@ -1,0 +1,7 @@
+locked:1,false
+flags:false,false,false
+markers:false,false,false
+afterAssign:1
+redefine:3,true,true
+delete:true,false
+OK

@@ -523,8 +523,7 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
             js_property_set(obj, msg_key, message);
         }
         // mark message as non-enumerable per spec §19.5.1.1
-        Item ne_msg = (Item){.item = s2it(heap_create_name("__ne_message", 12))};
-        js_property_set(obj, ne_msg, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(obj, msg_key);
     }
     // Set stack property from compile-time stack trace
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
@@ -585,8 +584,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
             js_property_set(obj, msg_key, message);
         }
         // mark message as non-enumerable per spec §20.5.1.1
-        Item ne_msg = (Item){.item = s2it(heap_create_name("__ne_message", 12))};
-        js_property_set(obj, ne_msg, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(obj, msg_key);
     }
     // Set stack property
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
@@ -634,8 +632,7 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
         js_property_set(obj, ctor_key, ctor_fn);
         // Mark constructor as non-enumerable
-        Item ne_ctor = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
-        js_property_set(obj, ne_ctor, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(obj, ctor_key);
         // Set __proto__ to ErrorType.prototype so prototype methods (toString) are found
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
         Item proto = js_property_get(ctor_fn, proto_key);
@@ -649,12 +646,9 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
         // DOMException spec, .name is a per-instance own property.
         Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
         js_property_set(obj, name_key, error_name);
-        Item ne_name = (Item){.item = s2it(heap_create_name("__ne_name", 9))};
-        js_property_set(obj, ne_name, (Item){.item = b2it(true)});
+        js_mark_non_enumerable(obj, name_key);
     }
     // Mark stack as non-enumerable (per ES spec)
-    Item ne_stack = (Item){.item = s2it(heap_create_name("__ne_stack", 10))};
-    js_property_set(obj, ne_stack, (Item){.item = b2it(true)});
     js_runtime_make_non_enumerable(obj, stack_key);
     return obj;
 }
