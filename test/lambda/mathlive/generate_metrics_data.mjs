@@ -128,7 +128,10 @@ function emitMap(name, entries) {
     // decimals to match MathLive's font-metrics-data.ts precision.
     const hRaw = round5(h);
     const dRaw = round5(d);
-    out.push(`    '${escaped}': [${rd}, ${rh}, ${rit}, ${rsk}, ${rw}, ${hRaw}, ${dRaw}]`);
+    // Raw width (5dp) — used for accent centering, where MathLive divides
+    // the full-precision width by 2 (rounding to 2dp loses the half-pixel).
+    const wRaw = round5(w);
+    out.push(`    '${escaped}': [${rd}, ${rh}, ${rit}, ${rsk}, ${rw}, ${hRaw}, ${dRaw}, ${wRaw}]`);
   }
   lines.push(out.join(',\n'));
   lines.push(`}`);

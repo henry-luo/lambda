@@ -38,19 +38,16 @@ pub fn render(node, context, render_fn) {
 }
 
 // Compute the height to use for the sub-script wrapper. MathLive uses
-// CEIL@2(sub_box.height_raw * 0.7) when raw is available, else falls back
-// to a content-based approximation (0.46 default for short / digit content,
-// 0.48 for uppercase-letter content).
+// CEIL@2((sub_box.height_raw + sub_box.depth_raw) * 0.7) — the full glyph
+// extent scaled to script style. The depth term matters for atoms whose box
+// dips below the baseline, e.g. the minus sign in `\int_{-\infty}` (depth
+// 0.08333 → 0.47 instead of 0.41). Falls back to 0.46 without raw metrics.
 fn sub_height_for(sub_box) {
     let raw = if (sub_box != null) sub_box.height_raw else null
-    if (raw != null) {
-        let scaled = raw * 0.7
-        let scaled_100 = scaled * 100.0
-        let i = int(scaled_100)
-        let f = float(i)
-        let ceil_int = if (f >= scaled_100) i else i + 1
-        float(ceil_int) / 100.0
-    } else 0.46
+    let draw = if (sub_box != null and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
+        sub_box.depth_raw else 0.0
+    if (raw != null) ceil_em2((raw + draw) * 0.7)
+    else 0.46
 }
 
 fn is_integral_op(cmd_name) {
@@ -97,7 +94,11 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // gap between baseline and sup top). With only sub, vlist is negative
     // (-0.41) since content is below origin.
     let vlist_height = if (has_sup) (1.09 + sup_inner_h) else (0.0 - 0.41)
-    let depth_holder = 0.9
+    // A sub whose box dips below the baseline (e.g. the minus in
+    // `\int_{-\infty}`) pushes the descent down by depth×0.7 (CEIL@2).
+    let sub_extra_d = if (has_sub and sub_box.depth_raw != null and sub_box.depth_raw > 0.0)
+        ceil_em2(sub_box.depth_raw * 0.7) else 0.0
+    let depth_holder = 0.9 + sub_extra_d
     let sub_top = -2.1
     let sup_top = -4.08
     let sub_span = if (has_sub) [
@@ -140,10 +141,10 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // accommodate the sub. The raw fields use slightly-higher precision so
     // CEIL@2 of (h_raw + d_raw) matches MathLive's emitted strut-bottom.
     let box_h = if (has_sup) vlist_height else 1.36
-    let box_d = if (has_sub) 0.89 else 0.86
+    let box_d = if (has_sub) 0.89 + sub_extra_d else 0.86
     let box_h_raw = box_h
-    let box_d_raw = if (has_sub and has_sup) 0.89
-        else if (has_sub) 0.89222
+    let box_d_raw = if (has_sub and has_sup) 0.89 + sub_extra_d
+        else if (has_sub) 0.89222 + sub_extra_d
         else 0.86225
     {
         element: el,

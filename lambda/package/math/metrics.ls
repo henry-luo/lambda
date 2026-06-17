@@ -198,7 +198,9 @@ fn _metrics_record(m, is_default) {
         height: m[1],
         italic: m[2],
         skew: m[3],
-        width: m[4]
+        width: m[4],
+        // full-precision (5dp) width for accent centering; null for default
+        width_raw: metrics_data.width_raw_of(m)
     }
 }
 

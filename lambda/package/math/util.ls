@@ -41,12 +41,16 @@ pub fn fmt_em(x) {
 // This matches MathLive's `value.toFixed(2)` via the CEIL semantics observed
 // in its emission across hundreds of test cases.
 pub fn fmt_em_ceil2(x) {
+    fmt_num(ceil_em2(x), 2) ++ "em"
+}
+
+// numeric CEIL@2 of a signed em value (MathLive's Math.ceil(v*100)/100).
+pub fn ceil_em2(x) {
     let scaled = x * 100.0
     let i = int(scaled)
     let f = float(i)
     let ceil_int = if (f >= scaled) i else i + 1
-    let v = float(ceil_int) / 100.0
-    fmt_num(v, 2) ++ "em"
+    float(ceil_int) / 100.0
 }
 
 fn fmt_large_em(x) {

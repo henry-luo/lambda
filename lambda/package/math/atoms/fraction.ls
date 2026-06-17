@@ -94,8 +94,33 @@ pub fn render(node, context, render_fn) {
     // wrap with delimiters if present
     if (left_delim != null or right_delim != null)
         wrap_delimited_fraction(frac_box, left_delim, right_delim)
+    else if (cmd == "\\cfrac")
+        // \cfrac (continued fraction) emits only the opening nulldelimiter —
+        // matches MathLive's left-aligned continued-fraction layout.
+        wrap_cfrac_fraction(frac_box)
     else
         wrap_default_fraction(frac_box)
+}
+
+fn wrap_cfrac_fraction(frac_box) {
+    {
+        element: <span class: css.MFRAC;
+            null_delim_el(css.OPEN)
+            frac_box.element
+        >,
+        height: frac_box.height,
+        depth: frac_box.depth,
+        render_height: frac_box.render_height,
+        render_depth: frac_box.render_depth,
+        render_total: frac_box.render_total,
+        left_right_render_depth: frac_box.left_right_render_depth,
+        left_right_render_total: frac_box.left_right_render_total,
+        width: frac_box.width + 0.12,
+        type: "minner",
+        italic: 0.0,
+        skew: 0.0,
+        is_fraction: true
+    }
 }
 
 pub fn render_boxes(numer_box, denom_box, context) {
@@ -540,8 +565,12 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             child_font_pct: null,
             rule_height: 0.04
         }
-    } else if (denom_total >= 0.75 and numer_total < 0.75) {
+    } else if (denom_total >= 0.75 and numer_total < 0.75 and
+               not (numer_box.height < 0.5 and numer_box.depth < 0.01)) {
         // Compound denominator with potential descender (e.g. p+q below 1).
+        // Short single-letter numerators (e/x, height < 0.5) are excluded so
+        // they fall through to the short-numer branch (frac height 0.94),
+        // matching MathLive's `\frac{e}{f}` / `\cfrac{e}{f}` output.
         // When the denom has a substantial descender, MathLive's effective
         // depth reflects the full descent extent, not the hardcoded 0.77.
         // When the numerator has a tall letter (height >= 0.7), MathLive
