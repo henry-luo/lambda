@@ -35,6 +35,18 @@ bool editing_rich_default_format(DocState* state,
                                  EditingRichMutationLogFn log_mutation,
                                  void* log_user);
 
+bool editing_rich_default_link(DocState* state,
+                               const EditingSurface* surface,
+                               const EditingIntent* intent,
+                               EditingRichMutationLogFn log_mutation,
+                               void* log_user);
+
+bool editing_rich_default_object(DocState* state,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent,
+                                 EditingRichMutationLogFn log_mutation,
+                                 void* log_user);
+
 bool editing_rich_default_format_block(DocState* state,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
@@ -52,5 +64,11 @@ bool editing_rich_default_list(DocState* state,
                                const EditingIntent* intent,
                                EditingRichMutationLogFn log_mutation,
                                void* log_user);
+
+bool editing_rich_default_indent(DocState* state,
+                                 const EditingSurface* surface,
+                                 const EditingIntent* intent,
+                                 EditingRichMutationLogFn log_mutation,
+                                 void* log_user);
 
 #endif // RADIANT_EDITING_RICH_TRANSACTION_HPP

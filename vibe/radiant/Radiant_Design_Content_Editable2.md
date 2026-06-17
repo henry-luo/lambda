@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, and single-block ordered/unordered list insertion.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, single-block ordered/unordered list insertion, and current-block indent/outdent; EC-4 links/objects started with selected-range `createLink`, nearest-anchor `unlink`, collapsed/selected-range `insertHorizontalRule`, and command-only `insertImage`.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -861,6 +861,135 @@ before declaring the whole EC-3 tier complete.
 **Global gate note:** EC-3c's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-3 tier complete.
+
+**EC-3d — current-block indent/outdent: LANDED (2026-06-17).**
+
+- Added native `execCommand("indent"|"outdent")` support. The commands map to
+  the existing non-dispatchable, non-recordable indent/outdent intents and run
+  through the same EC-3 transaction envelope.
+- Added `editing_rich_default_indent(...)` for the conservative first
+  indentation mutation. `indent` wraps the focused supported block in a
+  `<blockquote>` and restores the current selection; `outdent` unwraps the
+  nearest ancestor `<blockquote>`.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include both
+  commands. `queryCommandState(...)` remains false for these command-style
+  operations.
+- Scope remains current-block only: no multi-block indentation, no list item
+  nesting/outdenting, no margin/style-based indentation, no adjacent
+  blockquote normalization, and no undo history for block structure commands
+  yet.
+
+**Current EC verification after EC-3d (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct indent/outdent DOM regression | `indent` converts `<p>abc</p><p>def</p>` to `<blockquote><p>abc</p></blockquote><p>def</p>`; `outdent` unwraps it back to `<p>abc</p><p>def</p>` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_indent' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 206 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3d's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
+
+**EC-4a — selected-range createLink + nearest-anchor unlink: LANDED (2026-06-17).**
+
+- Added native `execCommand("createLink"|"unlink")` support. `createLink`
+  maps to the existing dispatchable and recordable `INPUT_INTENT_INSERT_LINK`
+  path (`inputType="insertLink"`) and wraps a non-collapsed selected range in
+  `<a href="...">...</a>`.
+- Added `INPUT_INTENT_FORMAT_UNLINK` for the command-only unlink operation.
+  It is non-dispatchable and non-recordable, and unwraps the nearest ancestor
+  `<a>` at the selection focus.
+- Link creation uses a native-backed `MarkBuilder::createElement("a")`
+  element before setting `href`, so `dom_element_set_attribute(...)` updates
+  the backing element and HTML serialization.
+- Scope remains intentionally narrow: no collapsed-link insertion, no
+  multi-range support, no partial non-text node shapes beyond the existing
+  `Range.surroundContents(...)` constraints, no URL normalization or
+  sanitization, no unlink of multiple anchors across a selection, no undo
+  history for command-only unlink, and no `insertImage` or
+  `insertHorizontalRule` yet.
+
+**Current EC verification after EC-4a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct link DOM regression | `createLink` converts selected `bc` in `abcd` to `a<a href="https://example.test/">bc</a>d`; `unlink` unwraps `<a href="https://example.test/">bc</a>` back to `bc` |
+| `make -C build/premake config=debug_native lambda -B -j10` | passed; forced rebuild cleared a stale `js_exec_profile.o` profile-define mismatch; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_link' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 207 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-4a's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-4 tier complete.
+
+**EC-4b — collapsed/selected-range insertHorizontalRule: LANDED (2026-06-17).**
+
+- Added native `execCommand("insertHorizontalRule")` support. The command maps
+  to the existing dispatchable and recordable
+  `INPUT_INTENT_INSERT_HORIZONTAL_RULE` path
+  (`inputType="insertHorizontalRule"`) and runs through the same
+  `beforeinput`/default-action/`input` transaction envelope as EC-1 link-like
+  insertions.
+- Added `editing_rich_default_object(...)` for the first object insertion
+  mutation. It creates a native-backed `<hr>` with
+  `MarkBuilder::createElement("hr")`, deletes the selected range when the
+  selection is non-collapsed, inserts the element with
+  `Range.insertNode(...)`, and restores the caret immediately after the `<hr>`.
+- Scope remains conservative: no block-level normalization around the rule, no
+  special list/table replacement behavior, no multi-range handling, no
+  generated paragraph insertion before/after the rule, and no `insertImage`
+  yet.
+
+**Current EC verification after EC-4b (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct horizontal-rule DOM regression | collapsed insertion converts `abcd` at offset 2 to `ab<hr>cd`; selected `bc` replacement converts `abcd` to `a<hr>d` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_horizontal_rule' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 208 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-4b's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-4 tier complete.
+
+**EC-4c — collapsed/selected-range insertImage: LANDED (2026-06-17).**
+
+- Added native `execCommand("insertImage", false, src)` support. The command
+  maps to a new `INPUT_INTENT_INSERT_IMAGE` intent, which is command-only,
+  non-dispatchable, and non-recordable for now because it is not one of the
+  standardized Input Events `inputType` values.
+- Extended `editing_rich_default_object(...)` to create a native-backed
+  `<img>` with `MarkBuilder::createElement("img")`, set the `src` attribute,
+  delete a non-collapsed selected range, insert the image with
+  `Range.insertNode(...)`, and restore the caret immediately after the image.
+- Empty `src` is rejected without mutation. Scope remains conservative: no URL
+  normalization or sanitization, no `alt`/dimension/default style handling, no
+  block/list/table normalization, no multi-range handling, and no image load
+  validation in the editing command itself.
+
+**Current EC verification after EC-4c (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct image DOM regression | collapsed insertion converts `abcd` at offset 2 to `ab<img src="https://example.test/image.png">cd`; selected `bc` replacement converts `abcd` to `a<img src="https://example.test/image.png">d`; empty `src` returns false and leaves `abcd` unchanged |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_insert_image' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 209 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-4c's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-4 tier complete.
 
 ---
 

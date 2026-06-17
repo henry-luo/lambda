@@ -25,6 +25,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_INSERT_PARAGRAPH:             return "insertParagraph";
         case INPUT_INTENT_INSERT_LINE_BREAK:            return "insertLineBreak";
         case INPUT_INTENT_INSERT_HORIZONTAL_RULE:       return "insertHorizontalRule";
+        case INPUT_INTENT_INSERT_IMAGE:                 return "insertImage";
         case INPUT_INTENT_INSERT_LINK:                  return "insertLink";
         case INPUT_INTENT_INSERT_FROM_PASTE:            return "insertFromPaste";
         case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION: return "insertFromPasteAsQuotation";
@@ -44,6 +45,7 @@ const char* input_intent_type_name(InputIntentType type) {
         case INPUT_INTENT_INSERT_COMPOSITION_TEXT:      return "insertCompositionText";
         case INPUT_INTENT_INSERT_FROM_COMPOSITION:      return "insertFromComposition";
         case INPUT_INTENT_DELETE_COMPOSITION_TEXT:      return "deleteCompositionText";
+        case INPUT_INTENT_FORMAT_UNLINK:                return "unlink";
         case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
         case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
         case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
@@ -69,6 +71,8 @@ const char* input_intent_type_name(InputIntentType type) {
 bool input_intent_is_dispatchable(InputIntentType type) {
     switch (type) {
         case INPUT_INTENT_COMPOSITION_START:
+        case INPUT_INTENT_INSERT_IMAGE:
+        case INPUT_INTENT_FORMAT_UNLINK:
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:

@@ -1025,6 +1025,17 @@ static bool js_try_exotic_delete_property(Item obj, Item key, Item* out_result) 
     return false;
 }
 
+static bool js_is_engine_internal_enumeration_key(const char* name, int name_len);
+
+static bool js_hide_legacy_dunder_own_name(const char* name, int name_len) {
+    if (!name || name_len < 2 || name[0] != '_' || name[1] != '_') return false;
+    if ((name_len >= 6 && memcmp(name, "__get_", 6) == 0) ||
+        (name_len >= 6 && memcmp(name, "__set_", 6) == 0)) {
+        return false;
+    }
+    return true;
+}
+
 static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
     if (js_is_proxy(object)) {
         *out_result = js_proxy_trap_own_keys(object);
@@ -1045,7 +1056,7 @@ static bool js_try_exotic_own_property_names(Item object, Item* out_result) {
         while (e) {
             const char* s = e->name->str;
             int slen = (int)e->name->length;
-            if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+            if (js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
             Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8456,7 +8467,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             while (e) {
                 const char* s = e->name->str;
                 int slen = (int)e->name->length;
-                if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                if (js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
                 Item val = _map_read_field(e, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
                 Item key_item = (Item){.item = s2it(heap_create_name(s, slen))};
@@ -8487,8 +8498,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                     if ((slen == 6 && strncmp(s, "length", 6) == 0) ||
                         (slen == 4 && strncmp(s, "name", 4) == 0) ||
                         (slen == 9 && strncmp(s, "prototype", 9) == 0)) { e = e->next; continue; }
-                    // skip internal markers (__ne_, __nw_, __nc_, etc.)
-                    if (slen >= 2 && s[0] == '_' && s[1] == '_') { e = e->next; continue; }
+                    if (js_hide_legacy_dunder_own_name(s, slen)) { e = e->next; continue; }
                     // skip deleted sentinels
                     Item val = _map_read_field(e, pm->data);
                     if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
@@ -8576,7 +8586,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
                         while (se) {
                             const char* s = se->name->str;
                             int len = (int)se->name->length;
-                            bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+                            bool skip = js_hide_legacy_dunder_own_name(s, len);
                             // skip "length" (already added) and numeric-only names
                             if (!skip && len == 6 && memcmp(s, "length", 6) == 0) skip = true;
                             if (!skip && len > 0 && s[0] >= '0' && s[0] <= '9') {
@@ -8625,7 +8635,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_hide_legacy_dunder_own_name(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip) {
             Item val = _map_read_field(e, m->data);
@@ -8669,7 +8679,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
     while (e) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
-        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        bool skip = js_hide_legacy_dunder_own_name(s, len);
         if (!skip && is_regexp_obj && js_regexp_virtual_prop_name(s, len)) skip = true;
         if (!skip && js_parse_array_index(s, len) >= 0) skip = true;
         if (!skip && is_class_ctor) {
@@ -8772,8 +8782,6 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
     if (js_name_starts_with(name, name_len, "__nw_", 5) ||
         js_name_starts_with(name, name_len, "__ne_", 5) ||
         js_name_starts_with(name, name_len, "__nc_", 5) ||
-        js_name_starts_with(name, name_len, "__get_", 6) ||
-        js_name_starts_with(name, name_len, "__set_", 6) ||
         js_name_starts_with(name, name_len, "__sym_", 6) ||
         js_name_starts_with(name, name_len, "__private_", 10) ||
         js_name_starts_with(name, name_len, "__brand_", 8) ||
@@ -13040,8 +13048,8 @@ extern "C" Item js_delete_property(Item obj, Item key) {
                     String* ks = it2s(k_str);
                     if (ks && ks->len > 0 && ks->len < 200) {
                         Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
-                        const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
-                        for (int pi = 0; pi < 5; pi++) {
+                        const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
+                        for (int pi = 0; pi < 3; pi++) {
                             char mk[256];
                             snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], (int)ks->len, ks->chars);
                             Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};

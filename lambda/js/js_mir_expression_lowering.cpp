@@ -11617,16 +11617,8 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 // js_install_user_accessor below using the bare key.
             } else if (p->key->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* id = (JsIdentifierNode*)p->key;
-                // Phase-5C: AST builder bakes "__get_X"/"__set_X" into the
-                // identifier name for non-computed accessors. Strip the
-                // 6-char prefix here so the runtime sees the bare property
-                // name X and routes through `js_install_user_accessor`.
                 const char* kchars = id->name->chars;
                 int klen = (int)id->name->len;
-                if ((p->is_getter || p->is_setter) && klen > 6 &&
-                    (memcmp(kchars, "__get_", 6) == 0 || memcmp(kchars, "__set_", 6) == 0)) {
-                    kchars += 6; klen -= 6;
-                }
                 key = jm_box_string_literal(mt, kchars, klen);
             } else {
                 key = jm_transpile_box_item(mt, p->key);

@@ -64,6 +64,8 @@ static bool editing_history_intent_is_recordable(const EditingIntent* intent) {
         case INPUT_INTENT_NONE:
         case INPUT_INTENT_COMPOSITION_START:
         case INPUT_INTENT_INSERT_COMPOSITION_TEXT:
+        case INPUT_INTENT_INSERT_IMAGE:
+        case INPUT_INTENT_FORMAT_UNLINK:
         case INPUT_INTENT_FORMAT_BOLD:
         case INPUT_INTENT_FORMAT_ITALIC:
         case INPUT_INTENT_FORMAT_UNDERLINE:

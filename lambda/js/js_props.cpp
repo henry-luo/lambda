@@ -288,11 +288,11 @@ extern "C" bool js_ordinary_delete(Item object, const char* name, int name_len) 
         js_shape_entry_set_accessor(object, name, name_len, /*is_accessor=*/false);
     }
 
-    // Tombstone legacy descriptor markers FIRST so the subsequent sentinel
+    // Tombstone legacy attribute markers FIRST so the subsequent sentinel
     // write to the data slot is not blocked by __nw_X non-writable guard.
     if (name_len > 0 && name_len < 200) {
-        const char* prefixes[] = {"__get_", "__set_", "__nw_", "__ne_", "__nc_"};
-        for (int pi = 0; pi < 5; pi++) {
+        const char* prefixes[] = {"__nw_", "__ne_", "__nc_"};
+        for (int pi = 0; pi < 3; pi++) {
             char mk[256];
             snprintf(mk, sizeof(mk), "%s%.*s", prefixes[pi], name_len, name);
             Item mk_item = (Item){.item = s2it(heap_create_name(mk, strlen(mk)))};
