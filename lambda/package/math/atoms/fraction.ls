@@ -471,6 +471,10 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             rule_height: 0.04
         }
     } else if (numer_total >= 0.95 and denom_total < 0.95) {
+        // Short-denom: use the actual denom height so digit denoms emit
+        // 0.65 (matches MathLive) and letter denoms still emit ~0.7.
+        let denom_h = ceil2(max(0.7, denom_box.height))
+        let denom_h_final = if (denom_h <= 0.7 and denom_box.depth == 0.0) ceil2(denom_box.height) else denom_h
         {
             height: 1.39,
             depth: 0.685,
@@ -482,7 +486,7 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
             line_top: -3.23,
             numer_top: -3.64,
             numer_child_height: 1.0,
-            denom_child_height: 0.7,
+            denom_child_height: denom_h_final,
             child_font_pct: null,
             rule_height: 0.04
         }
@@ -695,20 +699,28 @@ fn frac_bar_spec(frac_ctx, numer_box, denom_box) {
         let extra_d = if (has_descender) denom_box.depth + 0.01 else 0.0
         let base_depth_render = 0.68 + extra_d
         let base_depth = base_depth_render + 0.005
-        let base_total = if (has_descender) 1.15 + base_depth_render
-            else 1.15 + base_depth_render + 0.01
+        // numer wrapper height: when numer is a plain low-letter word (max
+        // height ~ 0.43-0.61, no descender) use its actual content height so
+        // MathLive's compact 0.62em emit matches. Tall numers (uppercase or
+        // with t/f/k ascenders) take the hardcoded 0.65 default.
+        let numer_h = if (numer_box.depth < 0.005 and numer_box.height < 0.65 and numer_box.height > 0.0)
+            ceil2(numer_box.height) else 0.65
+        let frac_height = if (numer_h < 0.65) 1.12 else 1.15
+        let frac_top_numer = -3.5
+        let base_total = if (has_descender) frac_height + base_depth_render
+            else frac_height + base_depth_render + 0.01
         let base_dh = if (has_descender) base_depth_render + 0.01 else 0.69
         {
-            height: 1.15,
+            height: frac_height,
             depth: base_depth,
-            render_height: 1.15,
+            render_height: frac_height,
             render_depth: base_depth_render,
             render_total: base_total,
             depth_holder: base_dh,
             denom_top: -2.31,
             line_top: -3.23,
-            numer_top: -3.5,
-            numer_child_height: 0.65,
+            numer_top: frac_top_numer,
+            numer_child_height: numer_h,
             denom_child_height: denom_child_for_default(denom_box),
             child_font_pct: null,
             rule_height: 0.04

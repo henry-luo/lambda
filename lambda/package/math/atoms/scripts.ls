@@ -286,10 +286,20 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
     //   large op + compact:       1.81
     //   large op + sub+sup:       1.66
     //   large op + single limit:  1.06
+    // Large-op vlist height: when a sup is present (sub+sup OR sup-only), the
+    // height grows with the sup's scaled height — matches MathLive's emit:
+    // vlist_h = sup_child_h + 1.35 (CEIL@2). The hardcoded 1.66 historically
+    // assumed sup_child=0.31 (n/a sized). Taller sups (digits, uppercase,
+    // descenders) lift vlist accordingly. Sub-only keeps the 1.06 default.
+    let sup_h_raw_pre = if (has_sup and sup_box.height_raw != null) sup_box.height_raw
+                        else if (has_sup) sup_box.height
+                        else 0.0
+    let sup_scaled_pre = ceil_em2(sup_h_raw_pre * 0.7)
     let vlist_height = if (is_text_op and has_sub and has_sup) 0.94
                        else if (is_text_op) 0.7
                        else if (compact_limits) 1.81
-                       else if (has_sub and has_sup) 1.66
+                       else if (has_sub and has_sup) ceil_em2(sup_scaled_pre + 1.35)
+                       else if (has_sup) ceil_em2(sup_scaled_pre + 1.35)
                        else 1.06
     let sub_h_raw = if (has_sub and sub_box.height_raw != null) sub_box.height_raw
                     else if (has_sub) sub_box.height
@@ -321,11 +331,17 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box, is_text_op) {
                     else if (sub_has_descender) 0.81
                     else if (has_sub and has_sup) 0.80
                     else 0.94
+    // For sup-only large ops (no sub), MathLive emits a 0.56em depth_holder
+    // and 0.55em box_depth — the inherent op-symbol descent (Size2 d=0.55).
+    // Text-op sup-only (like `\lim` with sup only) doesn't appear in tests
+    // yet; keep at 0 there.
     let depth_holder = if (compact_limits) 1.26
                        else if (has_sub) sub_child_height + dh_offset
+                       else if (has_sup and not is_text_op) 0.56
                        else 0.0
     let box_depth = if (compact_limits) 1.26
                     else if (has_sub) sub_child_height + bd_offset
+                    else if (has_sup and not is_text_op) 0.55
                     else 0.0
     // sub_top positioning differs by op kind too. Text-op uses
     // -(2.38) for sub_child=0.46 (formula: -1.92 - sub_child).

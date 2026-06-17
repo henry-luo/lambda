@@ -988,3 +988,87 @@ A FUTURE Phase 2b refactor should:
 | `\mathbf{...}` font fallback | ~8 | No Main-Bold metric table |
 | Matrix smallmatrix em drift | ~5 | Cell heights wrong in smallmatrix (needs script-style scaling for cells) |
 | Display-mode integrals | ~5–10 | Display style integrals (large `∫`) need different stacking behavior |
+
+---
+
+## Phase 3 session — class-table + structural-pattern sweep
+
+After Phase 2b left the corpus at 614/921 (66.7%), a follow-up session targeted the highest-leverage gaps surfaced by `diff_harness.mjs --from-report`: missing font-class entries, atom-type misclassifications, brace leakage from `text_group`, the `\pmod`/`\bmod` gap, the still-unresolved sized-delim word-reconstruction (`\bigcup`, `\leftarrow`), and a few content-aware fraction/script formulas.
+
+### Pass-rate timeline
+
+```
+Session start                                614 / 921  (66.7%)
+ASCII `|` → ∣ mord punctuation                +6   →  620
+ASCII `/` mord (not mbin)                     +2   →  622
+\big + alpha word → \bigcup synthesis        +3   →  625
+ERROR + alpha word → \leftarrow synthesis    +7   →  632
+text_group brace strip + \mathit→lm_cmr lm_it +9   →  643 (incl pmod/bmod)
+\triangle as mrel (cmr)                       +6   →  649
+ASCII `:` as mrel in math mode                +3   →  652
+langle/rangle/lceil/rfloor etc → lm_cmr       +7   →  659
+circ/bullet/star/ast/oplus/cup/cap etc → cmr +13   →  672
+\mathbb (bb font) → ams metric lookup         +9   →  681
+Short-denom fraction uses denom_box.height    +3   →  684
+Short-numer fraction uses numer_box.height    +3   →  687
+"..." multi-char repeated-char metric         +2   →  689
+Large-op sup_only vlist_h = sup_child + 1.35  +1   →  690
+─────────────────────────────────────────────────────
+Final achieved                              690 / 921  (74.9%)
+Upstream baseline                           206 / 206  (100%)*
+```
+
+\* The single failure flagged as `NOT 14/15` is a stale snap-vs-live mismatch: the local snap files escape `>` as `&gt;` for `a\not{<>} b`, but live MathLive emits the raw `>`. Lambda now matches live MathLive; the snap should be regenerated.
+
+### What was built (Phase 3)
+
+**Sized-delim word reconstruction** ([lambda/package/math/render.ls](lambda/package/math/render.ls) `try_sized_delim_word_combine`):
+- The tree-sitter math grammar greedily matches `\big` as a sized-delim prefix, leaving `cup`/`oplus`/etc. as plain symbols/strings. The render-children scan now walks forward from `sized_delimiter(\big|\Big|\bigg|\Bigg)` collecting alpha letters from both bare strings and `symbol`/`word` elements (Lambda's AST emits the suffix letters as raw strings). It tries progressively shorter prefixes against `sym.lookup_symbol("\\big" + prefix)` and constructs a synthetic `<command name: ...>` element so the existing big-op renderer reuses its lm_op-group + limits structure.
+- When the reconstructed command is followed by a `subsup` whose base is the missing final letter (e.g., `\bigcup_{i\in I}` parses as `... p_{i\in I}` — the `_` attaches to `p`), the helper steals the base letter and emits a synthetic `<subsup base: bigcup_cmd, sub:..., sup:...>`, then dispatches through `scripts.render` so limits stack correctly.
+
+**ERROR-prefix word reconstruction** (`try_error_prefix_word_combine`):
+- The grammar matches `\left` and `\Left` as truncated `ERROR` nodes followed by `arrow`/`rightarrow`/etc. as plain letters. The same approach reconstructs `\leftarrow`, `\rightarrow`, `\leftrightarrow`, `\Leftarrow`, `\Leftrightarrow`, etc.
+
+**`\pmod{n}` / `\bmod` rendering** (`render_pmod_command`/`render_bmod_command` in render.ls):
+- New renderers emit the exact MathLive sequence: `lm_quad + "(" + lm_op-group(mod) + " " + 0.17em thinspace + arg + ")"` for pmod; `lm_op-group(mod) + 0.17em + arg` for bmod.
+
+**`text_group` brace strip** (`render_text_group` dispatch case):
+- AST elements like `<text_group "{", "text", "}">` (used as argument to `\mathit`, `\mathbf`, etc.) had their literal `{`/`}` strings leaking into the rendered output. The new handler filters them.
+
+**Font-class table updates** ([lambda/package/math/symbols.ls](lambda/package/math/symbols.ls)):
+- Added ~25 new `font_class_map` entries to match MathLive's upright rendering: `circ`, `bullet`, `star`, `ast`, `oplus`, `otimes`, `odot`, `oslash`, `cap`, `cup`, `sqcap`, `sqcup`, `vee`, `wedge`, `setminus`, `Re`, `Im`, `wp`, `flat`, `natural`, `sharp`, `clubsuit`, `diamondsuit`, `heartsuit`, `spadesuit`, `degree`, `langle`, `rangle`, `lceil`, `rceil`, `lfloor`, `rfloor`, `lbrace`, `rbrace`, `backslash`, `surd`, `ll`, `gg`, `prec`, `succ`, `lor`, `land`, `sqsubseteq`, `sqsupseteq`, `bowtie`, `models`, `vdash`, `dashv`, `doteq`, `trianglelefteq`, `trianglerighteq`.
+- `\imath`/`\jmath` switched from `lm_cmr` to `lm_cmr lm_it` (matches MathLive's italic dotless-i/j rendering).
+- `\preceq`/`\succeq` moved from `lm_ams` to `lm_cmr` (MathLive uses Main-Regular for these in math mode).
+- `\triangle` moved from `misc_symbols` (mord) to `relations` (mrel) so it gets thickspace before following atoms.
+
+**ASCII punctuation classification** ([render.ls](lambda/package/math/render.ls) `render_punct`/`render_operator`):
+- ASCII `|` → `∣` (U+2223) classified as `mord` instead of `mpunct`, eliminating the unwanted 0.17em punct gap in `|x|`.
+- ASCII `/` classified as `mord` instead of `mbin` — MathLive treats `/` as ordinary, so spacing in `\frac{a}{b} / c` matches.
+- ASCII `:` in math mode classified as `mrel` (TeX default for colon in math) so `f: A \mapsto B` gets thickspace.
+
+**`\mathbb` metric lookup** ([box.ls](lambda/package/math/box.ls) `font_from_class`):
+- Mapped `lm_bb` to the AMS-Regular font table — MathLive's blackboard letters come from AMS-Regular and have slightly different depth (0.16) than Main-Regular (0.19). Closes the strut depth drift on `\mathbb{N}`/`\mathbb{Q}`/etc.
+
+**Short-fraction content-aware sizing** ([atoms/fraction.ls](lambda/package/math/atoms/fraction.ls)):
+- The `numer_total >= 0.95 and denom_total < 0.95` branch previously hardcoded `denom_child_height: 0.7`. Now uses `denom_box.height` for descender-less short denoms — closes `\frac{n(n+1)}{2}` style cases where the denom is a digit (0.65em emit).
+- The default branch (`else`) previously hardcoded `numer_child_height: 0.65` and `height: 1.15`. Now derives them from `numer_box.height` when the numer has no descender and max char height < 0.65 — closes `\frac{numerator}{denominator}` (lowercase-word numer renders at 0.62 not 0.65, frac height 1.12 not 1.15).
+
+**Multi-char repeated-char metric** ([box.ls](lambda/package/math/box.ls) `text_height_for`):
+- For text consisting of one repeated character (e.g., `...`, `---`, `,,`), look up that character's actual metric instead of falling through to the 0.7em heuristic. Closes `...` rendering (0.11em strut).
+
+**Large-op vlist formula** ([atoms/scripts.ls](lambda/package/math/atoms/scripts.ls) `render_large_op_limits_vlist`):
+- The sub+sup vlist height was hardcoded 1.66em (calibrated for short letter sups like `n`). For taller sups (uppercase `X`, digit `2`), MathLive uses `CEIL@2(sup_child + 1.35)`. The formula now matches MathLive across all sup heights.
+- The sup-only large-op case (e.g., `\sum^{X}`) previously emitted depth=0 with no bottom strut, while MathLive emits 0.55em op-symbol descent. Added a sup-only branch in `depth_holder`/`box_depth`.
+
+### What's still open after Phase 3
+
+Categorized residuals (231 failing cases, mostly em-drift):
+
+| Cluster | Approx count | Pattern |
+|---|---:|---|
+| Composite-box 0.01-0.05em drift | ~120 | Fractions/scripts/accents in deeply nested contexts; per-content per-branch tuning |
+| Big-op limits depth/sub-top per symbol | ~30 | `\bigoplus`/`\bigotimes` use 0.82em dh_offset vs `\sum`'s 0.95em; symbol-specific |
+| Accent margin-left | ~15 | Per-base skew + accent-width formula not ported |
+| `\widehat`/`\widetilde`/`\overrightarrow` SVG | ~10 | Stretchy accents emit SVG paths; Lambda uses Unicode glyphs |
+| Matrix smallmatrix em drift | ~5 | Cell heights not at scriptstyle |
+| Pre-existing structural gaps | ~50 | `\overline`/`\overbrace`/equation environments still missing pieces |
