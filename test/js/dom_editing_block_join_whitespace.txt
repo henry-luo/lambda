@@ -1,0 +1,4 @@
+offset=3 ok=true html=<p>abcdef</p> before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3
+offset=2 ok=true html=<p>abcdef</p> before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3
+offset=1 ok=true html=<p>abcdef</p> before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3
+offset=0 ok=true html=<p>abcdef</p> before=deleteContentBackward:1:true,3,true,3 input=deleteContentBackward:0 focus=true:3

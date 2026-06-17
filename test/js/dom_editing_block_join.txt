@@ -1,0 +1,5 @@
+ok=true
+html=<p>abcdef</p>
+before=deleteContentBackward:1:true,3,true,0
+input=deleteContentBackward:0
+focus=true:3

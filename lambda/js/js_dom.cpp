@@ -342,6 +342,7 @@ static bool js_dom_testdriver_rich_surface(View* target,
     if (!target || !surface) return false;
     if (editing_surface_from_target(target, surface) &&
         editing_surface_is_rich(surface)) {
+        if (surface->owner) surface->view = static_cast<View*>(surface->owner);
         return true;
     }
     DomNode* node = static_cast<DomNode*>(target);
@@ -349,6 +350,7 @@ static bool js_dom_testdriver_rich_surface(View* target,
         if (!cur->is_element()) continue;
         if (editing_surface_from_target(static_cast<View*>(cur), surface) &&
             editing_surface_is_rich(surface)) {
+            if (surface->owner) surface->view = static_cast<View*>(surface->owner);
             return true;
         }
     }
@@ -461,7 +463,12 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
                                           const EditingIntent* intent,
                                           void* user) {
     (void)evcon;
-    (void)surface;
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_BOLD ||
+                   intent->type == INPUT_INTENT_FORMAT_ITALIC ||
+                   intent->type == INPUT_INTENT_FORMAT_UNDERLINE)) {
+        return editing_rich_default_format(state, surface, intent,
+                                           nullptr, nullptr);
+    }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
     int fallback_offset = 0;
@@ -569,9 +576,21 @@ static bool js_dom_exec_command_is_core_text(const char* cmd) {
         strcasecmp(cmd, "forwardDelete") == 0;
 }
 
+static bool js_dom_exec_command_is_inline_format(const char* cmd) {
+    if (!cmd) return false;
+    return strcasecmp(cmd, "bold") == 0 ||
+        strcasecmp(cmd, "italic") == 0 ||
+        strcasecmp(cmd, "underline") == 0;
+}
+
+static bool js_dom_exec_command_is_native(const char* cmd) {
+    return js_dom_exec_command_is_core_text(cmd) ||
+        js_dom_exec_command_is_inline_format(cmd);
+}
+
 static bool js_dom_exec_command_is_supported(const char* cmd) {
     if (!cmd) return false;
-    if (js_dom_exec_command_is_core_text(cmd)) return true;
+    if (js_dom_exec_command_is_native(cmd)) return true;
     return strcasecmp(cmd, "copy") == 0 ||
         strcasecmp(cmd, "cut") == 0 ||
         strcasecmp(cmd, "paste") == 0;
@@ -612,6 +631,18 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
         out->key = RDT_KEY_DELETE;
         return true;
     }
+    if (strcasecmp(cmd, "bold") == 0) {
+        out->type = INPUT_INTENT_FORMAT_BOLD;
+        return true;
+    }
+    if (strcasecmp(cmd, "italic") == 0) {
+        out->type = INPUT_INTENT_FORMAT_ITALIC;
+        return true;
+    }
+    if (strcasecmp(cmd, "underline") == 0) {
+        out->type = INPUT_INTENT_FORMAT_UNDERLINE;
+        return true;
+    }
     return false;
 }
 
@@ -625,12 +656,12 @@ static bool js_dom_exec_command_has_rich_target(void) {
     return js_dom_testdriver_rich_surface(target, &surface);
 }
 
-static Item js_dom_exec_command_core_text(Item* args, int argc) {
+static Item js_dom_exec_command_native(Item* args, int argc) {
     if (!_js_current_document || !args || argc < 1) {
         return (Item){.item = ITEM_FALSE};
     }
     const char* cmd = fn_to_cstr(args[0]);
-    if (!js_dom_exec_command_is_core_text(cmd)) {
+    if (!js_dom_exec_command_is_native(cmd)) {
         return (Item){.item = ITEM_FALSE};
     }
 
@@ -688,10 +719,48 @@ static Item js_dom_exec_command_core_text(Item* args, int argc) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, surface.owner, surface.owner);
         js_dom_queue_selectionchange(state->dom_selection);
     }
-    log_debug("js_dom_exec_command_core_text: command=%s inputType=%s ok=%d prevented=%d mutated=%d",
+    log_debug("js_dom_exec_command_native: command=%s inputType=%s ok=%d prevented=%d mutated=%d",
               cmd ? cmd : "?", input_intent_type_name(intent.type),
               ok ? 1 : 0, prevented ? 1 : 0, mutated ? 1 : 0);
     return (Item){.item = b2it(ok && (prevented || mutated))};
+}
+
+static uintptr_t js_dom_exec_command_inline_tag(const char* cmd) {
+    if (!cmd) return 0;
+    if (strcasecmp(cmd, "bold") == 0) return HTM_TAG_B;
+    if (strcasecmp(cmd, "italic") == 0) return HTM_TAG_I;
+    if (strcasecmp(cmd, "underline") == 0) return HTM_TAG_U;
+    return 0;
+}
+
+static bool js_dom_exec_command_query_inline_state(const char* cmd) {
+    uintptr_t tag = js_dom_exec_command_inline_tag(cmd);
+    if (!tag) return false;
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return false;
+    }
+
+    DomBoundary boundary = dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element()) {
+            DomElement* elem = cur->as_element();
+            if (elem && elem->tag() == tag) return true;
+        }
+        if (cur == static_cast<DomNode*>(surface.owner)) break;
+    }
+    return false;
 }
 
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
@@ -4026,14 +4095,14 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
 
     // document.execCommand(cmd, [showUI], [value]) — legacy editing API.
-    // EC-1 core text commands run through the same rich editing transaction
+    // Native EC commands run through the same rich editing transaction
     // envelope as synthetic key input. Clipboard commands still delegate to a
     // JS-side helper installed by the WPT shim so page clipboard handlers can
     // populate the synthetic clipboard store.
     if (strcmp(method, "execCommand") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
-        if (js_dom_exec_command_is_core_text(cmd)) {
-            return js_dom_exec_command_core_text(args, argc);
+        if (js_dom_exec_command_is_native(cmd)) {
+            return js_dom_exec_command_native(args, argc);
         }
         Item helper_key = (Item){.item = s2it(heap_create_name("__lambda_execCommand_handler"))};
         Item helper = js_get_global_property(helper_key);
@@ -4047,8 +4116,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
         return (Item){.item = ITEM_FALSE};
     }
-    // queryCommand* reports the native EC-1 command surface plus clipboard
-    // commands. State/value/indeterm grow in later EC tiers.
+    // queryCommand* reports the native EC command surface plus clipboard
+    // commands. State/value/indeterm grow with the EC tiers.
     if (strcmp(method, "queryCommandSupported") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         bool supported = js_dom_exec_command_is_supported(cmd);
@@ -4057,7 +4126,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     if (strcmp(method, "queryCommandEnabled") == 0) {
         const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
         bool enabled = false;
-        if (cmd && js_dom_exec_command_is_core_text(cmd)) {
+        if (cmd && js_dom_exec_command_is_native(cmd)) {
             enabled = js_document_design_mode ||
                 js_dom_exec_command_has_rich_target();
         } else if (cmd && (strcasecmp(cmd, "copy") == 0 ||
@@ -4069,6 +4138,11 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     }
     if (strcmp(method, "queryCommandIndeterm") == 0 ||
         strcmp(method, "queryCommandState") == 0) {
+        const char* cmd = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (strcmp(method, "queryCommandState") == 0 &&
+            js_dom_exec_command_is_inline_format(cmd)) {
+            return (Item){.item = b2it(js_dom_exec_command_query_inline_state(cmd))};
+        }
         return (Item){.item = ITEM_FALSE};
     }
     if (strcmp(method, "queryCommandValue") == 0) {

@@ -135,6 +135,124 @@ static uint32_t compute_rich_composition_target_ranges(
     return 1;
 }
 
+static bool target_range_is_join_block_tag(uintptr_t tag_id) {
+    switch (tag_id) {
+        case HTM_TAG_DIV:
+        case HTM_TAG_P:
+        case HTM_TAG_PRE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static DomElement* target_range_text_block_parent(DomText* text) {
+    if (!text || !text->parent || !text->parent->is_element()) return nullptr;
+    DomElement* elem = text->parent->as_element();
+    while (elem && !target_range_is_join_block_tag(elem->tag())) {
+        DomNode* parent = elem->parent;
+        elem = parent && parent->is_element() ? parent->as_element() : nullptr;
+    }
+    return elem;
+}
+
+static bool target_range_block_has_only_text(DomElement* block,
+                                             DomText* text) {
+    if (!block || !text) return false;
+    return block->first_child == static_cast<DomNode*>(text) &&
+        block->last_child == static_cast<DomNode*>(text);
+}
+
+static bool target_range_collapsible_space(unsigned char ch) {
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
+}
+
+static uint32_t target_range_trim_trailing_space(const char* text,
+                                                 uint32_t length) {
+    while (length > 0 &&
+           target_range_collapsible_space((unsigned char)text[length - 1])) {
+        length--;
+    }
+    return length;
+}
+
+static uint32_t target_range_leading_space_len(const char* text,
+                                               uint32_t length) {
+    uint32_t count = 0;
+    while (count < length &&
+           target_range_collapsible_space((unsigned char)text[count])) {
+        count++;
+    }
+    return count;
+}
+
+static DomText* target_range_find_text_descendant(DomNode* node, bool last) {
+    if (!node) return nullptr;
+    if (node->is_text()) return node->as_text();
+    if (!node->is_element()) return nullptr;
+
+    DomElement* elem = node->as_element();
+    DomText* found = nullptr;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        DomText* text = target_range_find_text_descendant(child, last);
+        if (!text) continue;
+        if (!last) return text;
+        found = text;
+    }
+    return found;
+}
+
+static bool target_range_backspace_block_join(DomBoundary caret,
+                                              EditingTargetRange* out) {
+    if (!out || !caret.node || !caret.node->is_text()) {
+        return false;
+    }
+
+    DomText* text = caret.node->as_text();
+    DomElement* current_block = target_range_text_block_parent(text);
+    if (!current_block || !target_range_block_has_only_text(current_block, text)) {
+        return false;
+    }
+
+    DomNode* current_node = static_cast<DomNode*>(current_block);
+    DomNode* prev_node = current_node->prev_sibling;
+    if (!prev_node || !prev_node->is_element()) return false;
+    DomElement* prev_block = prev_node->as_element();
+    if (!prev_block || !target_range_is_join_block_tag(prev_block->tag())) {
+        return false;
+    }
+
+    DomText* prev_text = target_range_find_text_descendant(prev_node, true);
+    if (!prev_text || !target_range_block_has_only_text(prev_block, prev_text)) {
+        return false;
+    }
+
+    uint32_t start_offset = dom_text_utf16_length(prev_text);
+    uint32_t end_offset = 0;
+    if (prev_block->tag() != HTM_TAG_PRE && current_block->tag() != HTM_TAG_PRE) {
+        const char* prev_data = prev_text->text ? prev_text->text : "";
+        const char* current_data = text->text ? text->text : "";
+        uint32_t prev_len = prev_text->length > 0
+            ? (uint32_t)prev_text->length
+            : (uint32_t)strlen(prev_data);
+        uint32_t current_len = text->length > 0
+            ? (uint32_t)text->length
+            : (uint32_t)strlen(current_data);
+        start_offset = target_range_trim_trailing_space(prev_data, prev_len);
+        end_offset = target_range_leading_space_len(current_data, current_len);
+        if (caret.offset > end_offset) return false;
+    } else if (caret.offset != 0) {
+        return false;
+    }
+
+    out[0].start = {
+        static_cast<DomNode*>(prev_text),
+        start_offset
+    };
+    out[0].end = { static_cast<DomNode*>(text), end_offset };
+    return true;
+}
+
 uint32_t editing_compute_target_ranges(DocState* state,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
@@ -186,6 +304,9 @@ uint32_t editing_compute_target_ranges(DocState* state,
 
     switch (intent->type) {
         case INPUT_INTENT_DELETE_CONTENT_BACKWARD: {
+            if (target_range_backspace_block_join(start, out)) {
+                return 1;
+            }
             DomBoundary prev = dom_boundary_move(start, DOM_MOD_CHARACTER, -1);
             out[0].start = prev;
             out[0].end = end;

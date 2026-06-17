@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button slices landed; EC-1 native core-text execCommand bridge started.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary slices landed; EC-1 native core-text execCommand bridge landed; EC-2a selected-range inline formatting started.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -382,6 +382,33 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
   atomic element deletion, table-cell selections, whitespace semantics, and
   modifier behavior.
 
+**SI-12 — simple Backspace block-join target range + mutation: LANDED
+(2026-06-17).**
+
+- Added the first native structural Backspace join for adjacent simple text
+  blocks. In the intentionally narrow shape
+  `<p>abc</p><p>[]def</p>`, Backspace now runs through the normal
+  `beforeinput` transaction and mutates the host to `<p>abcdef</p>`, collapsing
+  the caret to offset `3` in the surviving text node.
+- Extended that join to the WPT collapsible-whitespace boundary shape:
+  `<p>abc   </p><p>   def</p>` now joins to `<p>abcdef</p>` when the caret is
+  anywhere in the second block's leading whitespace. The target range covers
+  the trailing whitespace in the previous block and the leading whitespace in
+  the current block.
+- `beforeinput.getTargetRanges()` now reports the cross-block deletion range:
+  for the plain join it starts at the end of the previous block's text node
+  and ends at the start of the current block's text node; for the whitespace
+  join it starts after the previous block's visible text and ends after the
+  current block's leading whitespace. The post-mutation `input` event keeps
+  the Input Events Level 2 contract and returns an empty target-range list.
+- The native headless rich-edit surface is pinned to the editing host before
+  the transaction runs. This keeps `input` dispatch stable after the originally
+  focused block is removed by the join.
+- Scope remains deliberately conservative: only adjacent `div`/`p`/`pre`
+  blocks whose sole child is a text node are joined. Lists, tables, atomic
+  content, whitespace-only block boundaries, nested inline wrappers, and
+  modifier variants remain in the skipped Backspace matrix.
+
 **Current SI verification (2026-06-17):**
 
 | Check | Result |
@@ -406,27 +433,30 @@ Sequencing SI early is high-leverage: it is the single capability that most of D
 | `input-events-spin-button-click-on-number-input-prevent-default` | 1/1 passed |
 | `input-events-spin-button-click-on-number-input-delete-document` | 1/1 passed |
 | `select-event-drag-remove` | 1/1 passed |
-| `input-events-get-target-ranges-backspace.tentative` | measured 45/163; remains skipped |
+| Direct simple block-join DOM regression | `ok=true`, `html=<p>abcdef</p>`, `before=deleteContentBackward:1:true,3,true,0`, `input=deleteContentBackward:0` |
+| Direct whitespace block-join DOM regression | offsets 3/2/1/0 all join to `<p>abcdef</p>` with `before=deleteContentBackward:1:true,3,true,3` and `input=deleteContentBackward:0` |
+| `input-events-get-target-ranges-backspace.tentative` | last measured 45/163 before SI-12; remains skipped |
 | `DomText_EmptyString_Backed` | passed |
 | focused WPT test rebuilds | `test_wpt_contenteditable_gtest` rebuilt |
 | `test_wpt_contenteditable_gtest` | 194 cases: 163 pass / 31 skip / 0 fail |
 | `test_wpt_selection_gtest` | 159 cases: 97 pass / 62 skip / 0 fail |
 | `test_wpt_dom_events_gtest` | 96 cases: 43 pass / 53 skip / 0 fail |
-| `test_js_gtest` | 196 passed / 0 failed; existing memtrack leak diagnostics printed |
-| `make test262-baseline` | not rerun for SI-11; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+| `test_js_gtest` | 198 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for SI-12; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
 
-**Global gate note:** SI-11's local WPT guards and `test_js_gtest` are green.
-The full `make test262-baseline` gate was not rerun for this deletion-cleanup slice,
+**Global gate note:** SI-12's local WPT guards and `test_js_gtest` are green.
+The full `make test262-baseline` gate was not rerun for this block-join slice,
 so the broader SI phase should still run the mandatory §1.1 gate before being
 closed. The phase can keep advancing from the remaining skipped
 deletion/pointer matrices without carrying a local WPT blocker.
 
 **Next SI slice:** broaden synthetic input beyond the enabled Backspace/Delete,
 number spin-key, number spin-button, and text-control drag-select pointer
-subset: remaining `getTargetRanges` deletion matrices (starting with the
-measured Backspace blockers), broader text-control delete coverage, and richer
-pointer drag/hit-test injection outside the newly enabled text-control and
-contenteditable mouse-button files.
+subset: remaining `getTargetRanges` deletion matrices (in-inline target ranges,
+atomic deletion, list/table joins, whitespace semantics, and modifier variants),
+broader text-control delete coverage, and richer pointer drag/hit-test
+injection outside the newly enabled text-control and contenteditable
+mouse-button files.
 
 ---
 
@@ -600,6 +630,44 @@ LANDED (2026-06-17).**
 |---|---|
 | Direct `execCommand("insertHTML")` DOM smoke | `ok=true`, `inputType=insertFromPaste`, `data=null`, `dataTransfer text/plain=<b>X</b>`, `dataTransfer text/html=<b>X</b>` |
 | `make -C build/premake config=debug_native lambda -j10 ...` | passed; existing macOS-version linker warnings printed |
+
+**EC-2a — selected-range bold/italic/underline wrapper: LANDED (2026-06-17).**
+
+- `document.execCommand("bold"|"italic"|"underline", ...)` now maps to the
+  existing consumer-issued `INPUT_INTENT_FORMAT_*` intents and runs through
+  `editing_run_transaction`, sharing the same eventstore transaction log and
+  state-machine envelope as EC-1. As designed in `editing_dispatch.cpp`,
+  these format intents are non-`InputEvent` commands: they log the editing
+  intent/transaction but do not synthesize `beforeinput {formatBold}` or
+  `input`.
+- Added the first native rich formatting mutator:
+  `editing_rich_default_format(...)`. The initial scope is deliberately narrow:
+  a non-collapsed rich DOM selection whose contents can be handled by
+  `Range.surroundContents()` is wrapped in `<b>`, `<i>`, or `<u>`, and the
+  canonical selection is restored to the wrapper's contents.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  three inline format commands. `queryCommandState(...)` returns true for
+  bold/italic/underline when the focus boundary sits inside the matching
+  inline wrapper.
+- Still out of scope for this slice: collapsed typing-state toggles,
+  unwrap/toggle-off behavior, partial non-text node formatting, normalization
+  of nested/sibling wrappers, `strong`/`em` alias state checks,
+  strikethrough/subscript/superscript, and undo history for format commands.
+
+**Current EC verification after EC-2a (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct `execCommand("bold")` DOM smoke | `supported=true`, `enabled=true`, `ok=true`, `state=true`, `innerHTML=a<b>bc</b>d` |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 196 passed / 0 failed; existing memtrack leak diagnostics printed |
+| `make test262-baseline` | not rerun for EC-2a; previous SI-9 result was regressions 0; 40261 / 40261 fully passing; retry 0.0s |
+
+**Global gate note:** EC-2a's local WPT guards and `test_js_gtest` are green.
+The full `make test262-baseline` gate still needs to run before declaring the
+whole EC-2 tier complete.
 
 ---
 
