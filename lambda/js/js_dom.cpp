@@ -483,6 +483,11 @@ static bool js_dom_testdriver_rich_mutate(EventContext* evcon,
         return editing_rich_default_justify(state, surface, intent,
                                             nullptr, nullptr);
     }
+    if (intent && (intent->type == INPUT_INTENT_FORMAT_ORDERED_LIST ||
+                   intent->type == INPUT_INTENT_FORMAT_UNORDERED_LIST)) {
+        return editing_rich_default_list(state, surface, intent,
+                                         nullptr, nullptr);
+    }
     JsDomTestdriverMutationArgs* args = (JsDomTestdriverMutationArgs*)user;
     View* fallback_view = nullptr;
     int fallback_offset = 0;
@@ -603,6 +608,8 @@ static bool js_dom_exec_command_is_inline_format(const char* cmd) {
 static bool js_dom_exec_command_is_block_structure(const char* cmd) {
     if (!cmd) return false;
     return strcasecmp(cmd, "formatBlock") == 0 ||
+        strcasecmp(cmd, "insertOrderedList") == 0 ||
+        strcasecmp(cmd, "insertUnorderedList") == 0 ||
         strcasecmp(cmd, "justifyLeft") == 0 ||
         strcasecmp(cmd, "justifyCenter") == 0 ||
         strcasecmp(cmd, "justifyRight") == 0 ||
@@ -685,6 +692,14 @@ static bool js_dom_exec_command_map_intent(const char* cmd,
     if (strcasecmp(cmd, "formatBlock") == 0) {
         out->type = INPUT_INTENT_FORMAT_BLOCK;
         out->data = value ? value : "";
+        return true;
+    }
+    if (strcasecmp(cmd, "insertOrderedList") == 0) {
+        out->type = INPUT_INTENT_FORMAT_ORDERED_LIST;
+        return true;
+    }
+    if (strcasecmp(cmd, "insertUnorderedList") == 0) {
+        out->type = INPUT_INTENT_FORMAT_UNORDERED_LIST;
         return true;
     }
     if (strcasecmp(cmd, "justifyLeft") == 0) {
@@ -915,6 +930,44 @@ static bool js_dom_exec_command_query_justify_state(const char* cmd) {
     if (!expected || !elem) return false;
     const char* align = dom_element_get_attribute(elem, "align");
     return align && strcasecmp(align, expected) == 0;
+}
+
+static uintptr_t js_dom_exec_command_list_tag(const char* cmd) {
+    if (!cmd) return 0;
+    if (strcasecmp(cmd, "insertOrderedList") == 0) return HTM_TAG_OL;
+    if (strcasecmp(cmd, "insertUnorderedList") == 0) return HTM_TAG_UL;
+    return 0;
+}
+
+static bool js_dom_exec_command_query_list_state(const char* cmd) {
+    uintptr_t list_tag = js_dom_exec_command_list_tag(cmd);
+    if (!list_tag) return false;
+
+    DocState* state = js_dom_testdriver_state();
+    if (!state || !state->dom_selection ||
+        state->dom_selection->range_count == 0 ||
+        !state->dom_selection->ranges[0]) {
+        return false;
+    }
+
+    DomBoundary boundary =
+        dom_selection_focus_boundary(state->dom_selection);
+    DomNode* node = boundary.node;
+    if (!node) return false;
+
+    EditingSurface surface;
+    if (!editing_surface_from_target(static_cast<View*>(node), &surface) ||
+        !editing_surface_is_rich(&surface)) {
+        return false;
+    }
+
+    DomNode* owner_node = static_cast<DomNode*>(surface.owner);
+    for (DomNode* cur = node; cur && cur != owner_node; cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem && elem->tag() == list_tag) return true;
+    }
+    return false;
 }
 
 static bool js_dom_node_contains(DomNode* ancestor, DomNode* node) {
@@ -4300,6 +4353,10 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (strcmp(method, "queryCommandState") == 0 &&
             js_dom_exec_command_justify_value(cmd)) {
             return (Item){.item = b2it(js_dom_exec_command_query_justify_state(cmd))};
+        }
+        if (strcmp(method, "queryCommandState") == 0 &&
+            js_dom_exec_command_list_tag(cmd)) {
+            return (Item){.item = b2it(js_dom_exec_command_query_list_state(cmd))};
         }
         return (Item){.item = ITEM_FALSE};
     }

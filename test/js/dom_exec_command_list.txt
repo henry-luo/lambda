@@ -1,0 +1,2 @@
+insertOrderedList supported=true enabled=true before=false ok=true after=true html=<ol><li>abc</li></ol><p>def</p> expected=true states=true,false stateExpected=true
+insertUnorderedList supported=true enabled=true before=false ok=true after=true html=<ul><li>abc</li></ul><p>def</p> expected=true states=false,true stateExpected=true

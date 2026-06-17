@@ -1,7 +1,7 @@
 # Radiant `contenteditable` 2 — execCommand, the Chrome editing corpus, and a green WPT baseline
 
 **Date:** 2026-06-15
-**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock` and current-block justify commands.
+**Status:** Active implementation — P0 complete; Phase SI keyboard insert/delete/selectionchange/click-direction/mouse-button/number-spin-button/simple-block-join/whitespace-boundary/inline-block-join slices landed; EC-1 native core-text execCommand bridge landed; EC-2 selected-range inline formatting and conservative whole-wrapper toggle-off landed; EC-3 block structure started with single-block `formatBlock`, current-block justify commands, and single-block ordered/unordered list insertion.
 **Layer:** DOM editing host + a new built-in editing-command engine on top of it.
 **Builds on:** [Radiant_Design_Content_Editable.md](Radiant_Design_Content_Editable.md) (the editing-host / `InputEvent` / focus / selection foundation, phases CE-1…CE-7). This document **extends and partially revises** it.
 **Revises:** [Content_Editable.md §9](Radiant_Design_Content_Editable.md) — the "execCommand is rejected and never implemented" line. execCommand is now **in scope** (see §2). The rest of the original contract stands.
@@ -825,6 +825,40 @@ before declaring the whole EC-3 tier complete.
 | `test_js_gtest --gtest_brief=1` | 204 passed / 0 failed; existing memtrack leak diagnostics printed |
 
 **Global gate note:** EC-3b's focused JS regression, full JS suite, and local
+WPT guards are green. The full `make test262-baseline` gate still needs to run
+before declaring the whole EC-3 tier complete.
+
+**EC-3c — single-block ordered/unordered list insertion: LANDED (2026-06-17).**
+
+- Added native `execCommand("insertOrderedList"|"insertUnorderedList")`
+  support. The commands map to new non-dispatchable, non-recordable list
+  intents and run through the same transaction envelope as the other EC-3
+  block commands.
+- Added `editing_rich_default_list(...)` for the conservative first list
+  mutation: replace one focused supported block with
+  `<ol><li>...</li></ol>` or `<ul><li>...</li></ul>`, moving the original
+  block children into the list item and restoring the selected text range when
+  possible.
+- `queryCommandSupported(...)` and `queryCommandEnabled(...)` now include the
+  two list commands. `queryCommandState(...)` returns true when the selection
+  focus is inside a matching ancestor list.
+- Scope remains intentionally narrow: no existing-list toggle, no adjacent
+  list merge, no list split, no multi-block list conversion, no list-item
+  indent/outdent, no undo history, and the raw DOM list nodes are not
+  MarkEditor-backed for later attribute edits yet.
+
+**Current EC verification after EC-3c (2026-06-17):**
+
+| Check | Result |
+|---|---|
+| Direct list DOM regression | `insertOrderedList` converts `<p>abc</p>` to `<ol><li>abc</li></ol>` and reports ordered state true; `insertUnorderedList` converts it to `<ul><li>abc</li></ul>` and reports unordered state true |
+| `make -C build/premake config=debug_native lambda -j10` | passed; existing warnings only |
+| `test_js_gtest --gtest_filter='JavaScriptTests/JsFileTest.Run/dom_exec_command_list' --gtest_brief=1` | passed; existing memtrack leak diagnostics printed |
+| `test_wpt_contenteditable_gtest --gtest_brief=1` | 194 cases: 163 pass / 31 skip / 0 fail |
+| `test_wpt_selection_gtest --gtest_brief=1` | 159 cases: 97 pass / 62 skip / 0 fail |
+| `test_js_gtest --gtest_brief=1` | 205 passed / 0 failed; existing memtrack leak diagnostics printed |
+
+**Global gate note:** EC-3c's focused JS regression, full JS suite, and local
 WPT guards are green. The full `make test262-baseline` gate still needs to run
 before declaring the whole EC-3 tier complete.
 

@@ -75,6 +75,8 @@ static bool editing_history_intent_is_recordable(const EditingIntent* intent) {
         case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
         case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
         case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
+        case INPUT_INTENT_FORMAT_ORDERED_LIST:
+        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
         case INPUT_INTENT_FORMAT_INDENT:
         case INPUT_INTENT_FORMAT_OUTDENT:
         case INPUT_INTENT_SELECT_ALL:

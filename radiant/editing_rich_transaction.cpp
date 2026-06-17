@@ -1192,6 +1192,108 @@ bool editing_rich_default_justify(DocState* state,
     return true;
 }
 
+static const char* rich_list_tag_name(const EditingIntent* intent) {
+    if (!intent) return nullptr;
+    switch (intent->type) {
+        case INPUT_INTENT_FORMAT_ORDERED_LIST:
+            return "ol";
+        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
+            return "ul";
+        default:
+            return nullptr;
+    }
+}
+
+bool editing_rich_default_list(DocState* state,
+                               const EditingSurface* surface,
+                               const EditingIntent* intent,
+                               EditingRichMutationLogFn log_mutation,
+                               void* log_user) {
+    if (!state || !surface || !intent || !state->dom_selection ||
+        state->dom_selection->range_count == 0 || !state->dom_selection->ranges[0] ||
+        !editing_surface_is_rich(surface) || !surface->owner ||
+        !surface->owner->doc) {
+        return false;
+    }
+
+    const char* list_tag = rich_list_tag_name(intent);
+    if (!list_tag) return false;
+
+    DomRange* range = state->dom_selection->ranges[0];
+    DomElement* old_block = rich_format_block_target(surface, range);
+    if (!old_block || !old_block->parent || !old_block->parent->is_element()) {
+        log_debug("editing_rich_default_list: no single block target");
+        return false;
+    }
+
+    DomElement* list = dom_element_create(surface->owner->doc, list_tag, nullptr);
+    DomElement* item = dom_element_create(surface->owner->doc, "li", nullptr);
+    if (!list || !item) {
+        log_debug("editing_rich_default_list: failed to create <%s><li>",
+                  list_tag);
+        return false;
+    }
+
+    DomNode* old_node = static_cast<DomNode*>(old_block);
+    DomNode* list_node = static_cast<DomNode*>(list);
+    DomNode* item_node = static_cast<DomNode*>(item);
+    DomNode* parent_node = old_node->parent;
+    DomBoundary restore_start = range->start;
+    DomBoundary restore_end = range->end;
+    bool start_in_old = rich_node_contains(old_node, restore_start.node);
+    bool end_in_old = rich_node_contains(old_node, restore_end.node);
+
+    if (!list_node->append_child(item_node)) return false;
+    if (!parent_node->insert_before(list_node, old_node)) return false;
+    dom_mutation_post_insert(state, parent_node, list_node);
+
+    DomNode* child = old_block->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        dom_mutation_pre_remove(state, child);
+        if (!old_node->remove_child(child)) return false;
+        if (!item_node->append_child(child)) return false;
+        dom_mutation_post_insert(state, item_node, child);
+        child = next;
+    }
+
+    dom_mutation_pre_remove(state, old_node);
+    if (!parent_node->remove_child(old_node)) return false;
+
+    if (restore_start.node == old_node) restore_start.node = item_node;
+    if (restore_end.node == old_node) restore_end.node = item_node;
+    if (!start_in_old) {
+        restore_start.node = item_node;
+        restore_start.offset = 0;
+    }
+    if (!end_in_old) {
+        restore_end.node = item_node;
+        restore_end.offset = dom_node_boundary_length(item_node);
+    }
+
+    const char* exc = nullptr;
+    if (!state_store_set_selection(state, &restore_start, &restore_end, &exc)) {
+        DomBoundary start = { item_node, 0 };
+        DomBoundary end = { item_node, dom_node_boundary_length(item_node) };
+        if (!state_store_set_selection(state, &start, &end, &exc)) {
+            log_debug("editing_rich_default_list: selection restore rejected: %s",
+                      exc ? exc : "?");
+            return false;
+        }
+        restore_start = start;
+        restore_end = end;
+    }
+
+    editing_interaction_set_active_surface(state, surface);
+    if (log_mutation) {
+        log_mutation(state, surface, intent, "list",
+                     0, 0, restore_start.offset, restore_end.offset, log_user);
+    }
+    log_debug("editing_rich_default_list: changed <%s> to <%s><li>",
+              old_block->node_name(), list_tag);
+    return true;
+}
+
 bool editing_rich_default_replace(DocState* state,
                                   const EditingIntent* intent,
                                   View* fallback_view,
