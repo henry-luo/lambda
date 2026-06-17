@@ -21,7 +21,10 @@ pub fn render(node, context, render_fn) {
     let is_big_op = base != null and base is element and name(base) == 'command' and
         base.name != null and sym.is_limit_op(string(base.name))
 
-    if (is_big_op and ctx.is_display(context))
+    // MathLive uses limit-style (above/below) for big operators in both
+    // display and inline math contexts. Only script/scriptscript contexts
+    // (e.g. inside fractions/cases environments) demote to inline scripts.
+    if (is_big_op and not ctx.is_script(context))
         render_big_op_limits(base, node, context, render_fn)
     else if (is_big_op and node.sub != null and node.sup != null)
         render_inline_big_op_scripts(base, node, context, render_fn)
@@ -125,17 +128,35 @@ fn large_op_symbol_box(text) => {
     skew: 0.0
 }
 
+fn sub_box_has_descender(sub_box) {
+    // Detect if a subscript box contains a descender letter (g/j/p/q/y/f).
+    // Used to pick proper box depth in limit-style big-ops.
+    if (sub_box.depth >= 0.18) true
+    else false
+}
+
 fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
     let op_elements = box.elements_of(op_box)
     let sub_elements = box.elements_of(sub_box)
     let sup_elements = box.elements_of(sup_box)
     let compact_limits = sub_box.width <= 1.0 and sup_box.width > 1.0
+    let sub_has_descender = sub_box_has_descender(sub_box)
     let vlist_height = if (compact_limits) 1.81 else 1.66
     let sub_top = if (compact_limits) 0.0 - 1.89 else 0.0 - 1.87
-    let sub_child_height = if (compact_limits) 0.31 else 0.6
+    // sub_child_height differs based on whether the sub has a descender:
+    //   compact: 0.31
+    //   sub with descender (j/p/q/y/g/f): 0.6
+    //   sub without descender: 0.47
+    let sub_child_height = if (compact_limits) 0.31
+                           else if (sub_has_descender) 0.6 else 0.47
     let sup_child_height = if (compact_limits) 0.46 else 0.31
-    let depth_holder = if (compact_limits) 1.26 else 1.42
-    let box_depth = if (compact_limits) 1.26 else 1.41
+    // depth_holder controls inner vlist height; box_depth controls reported
+    // box.depth (visible as bottom strut va). MathLive uses slightly different
+    // values: depth_holder = 1.28/1.42, box_depth = 1.27/1.41 (off by 0.01).
+    let depth_holder = if (compact_limits) 1.26
+                       else if (sub_has_descender) 1.42 else 1.28
+    let box_depth = if (compact_limits) 1.26
+                    else if (sub_has_descender) 1.41 else 1.27
     let el = <span class: css.OP_GROUP;
         <span class: css.VLIST_T2;
             <span class: css.VLIST_R;
@@ -172,7 +193,7 @@ fn render_large_op_limits_vlist(op_box, sub_box, sup_box) {
         depth: box_depth,
         render_height: vlist_height,
         render_depth: box_depth,
-        render_total: 3.07,
+        render_total: vlist_height + box_depth,
         width: max(max(op_box.width, sub_box.width), sup_box.width),
         type: "mop",
         italic: 0.0,
