@@ -78,6 +78,7 @@ fn dispatch_element(node, context) {
         case 'radical':         render_radical(node, context)
         case 'middle_delim':    render_middle_delim(node, context)
         case 'limits_modifier': box.text_box("", null, "ord")
+        case 'text_group':      render_text_group(node, context)
         default:                render_default(node, context)
     }
 }
@@ -143,6 +144,7 @@ fn render_operator(node, context) {
     let text = get_text(node)
     let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
         else if (text == ")" or text == "]" or text == "}") "mclose"
+        else if (text == "/") "mord"
         else "mbin"
     box.text_box(operator_display_text(text), css.CMR, atom_type)
 }
@@ -165,6 +167,8 @@ fn render_punct(node, context) {
     else {
         let atom_type = if (text == "(" or text == "[" or text == "{") "mopen"
             else if (text == ")" or text == "]" or text == "}") "mclose"
+            else if (text == "|") "mord"
+            else if (text == ":") "mrel"
             else "mpunct"
         box.text_box(punct_display_text(text), css.CMR, atom_type)
     }
@@ -211,6 +215,7 @@ fn operator_display_text(text) {
 fn punct_display_text(text) {
     if (text == "\\{") "{"
     else if (text == "\\}") "}"
+    else if (text == "|") "∣"
     else text
 }
 
@@ -252,6 +257,10 @@ fn render_command(node, context) {
         box.text_box("", null, "mord")
     } else if (name_str == "right" and len(node) == 1) {
         render_malformed_right_command(node, context)
+    } else if (name_str == "pmod") {
+        render_pmod_command(node, context)
+    } else if (name_str == "bmod") {
+        render_bmod_command(node, context)
     } else {
         let unicode = sym.lookup_symbol(cmd_text)
         if (unicode != null) {
@@ -608,6 +617,34 @@ fn generic_box_content_arg(node, name_str) {
 
 fn starts_with_math_lap(name_str) {
     name_str == "mathllap" or name_str == "mathrlap" or name_str == "mathclap"
+}
+
+// `\pmod{n}` expands to a quad space, parens around the literal "mod" plus
+// the argument. Matches MathLive's emit:
+//   <span class="lm_quad"></span><span class="lm_cmr">(</span>
+//   <span class="lm_op-group"><span class="lm_cmr">mod</span></span>
+//   <span class="lm_cmr"> </span><span style="...;width:0.17em"></span>
+//   {arg rendered}<span class="lm_cmr">)</span>
+fn render_pmod_command(node, context) {
+    let quad_box = box.box_cls(css.QUAD, 0.0, 0.0, 1.0, "skip")
+    let lparen = box.text_box("(", css.CMR, "mord")
+    let mod_box = box.with_class(box.text_box("mod", css.CMR, "mop"), css.OP_GROUP)
+    let space_box = box.text_box(" ", css.CMR, "mord")
+    let thin_box = box.skip_box(0.17)
+    let arg_box = if (len(node) > 0) render_node(node[0], context)
+        else box.text_box("", null, "mord")
+    let rparen = box.text_box(")", css.CMR, "mord")
+    box.hbox([quad_box, lparen, mod_box, space_box, thin_box, arg_box, rparen])
+}
+
+// `\bmod` is the bare "mod" operator (no parens). Same op-group structure
+// without surrounding parens or quad spacing.
+fn render_bmod_command(node, context) {
+    let mod_box = box.with_class(box.text_box("mod", css.CMR, "mop"), css.OP_GROUP)
+    if (len(node) > 0) {
+        let arg_box = render_node(node[0], context)
+        box.hbox([mod_box, box.skip_box(0.17), arg_box])
+    } else mod_box
 }
 
 fn render_pdiff(node, context) {
@@ -1520,6 +1557,162 @@ fn is_sized_delim_pair(node, i) {
          child.size != null and sized_pair_text(node[i + 1]) != null)
 }
 
+// Detect `\big` (or `Big`/`bigg`/`Bigg`) followed by 2–5 alpha letters that
+// form a known big-operator command (\bigcup, \bigcap, \bigvee, \bigwedge,
+// \bigodot, \bigoplus, \bigotimes, \bigsqcup, \biguplus). The grammar matches
+// `\big` greedily as a sized-delim prefix and leaves the suffix as plain
+// strings; this reconstructs the intended command at render time.
+//
+// Sub/sup attached to the last reconstructed letter (e.g., `\bigcup_{i\in I}`
+// parses as `... p_{...}` with the subsup base = `p`) is also recovered by
+// peeking at the trailing `subsup` and stealing its base letters.
+//
+// Returns {cmd_name: "bigcup", subsup: subsup_node | null, consumed: N} or null.
+fn try_sized_delim_word_combine(node, i) {
+    if (i + 1 >= len(node)) null
+    else (let cur = node[i],
+        if (not (cur is element)) null
+        else if (name(cur) != 'sized_delimiter') null
+        else if (cur.delim != null) null
+        else if (cur.size == null) null
+        else (let size_name = string(cur.size),
+            if (not is_plain_sized_command(size_name)) null
+            else attempt_sized_combine(node, i, size_name)))
+}
+
+fn attempt_sized_combine(node, i, size_name) {
+    // Collect per-node alpha letters following the sized-delim. Each node
+    // contributes a string of one or more letters; preserve the per-node
+    // boundary so we can match by node count and also pull a final letter
+    // out of a trailing `subsup` base.
+    let chunks = collect_letter_chunks(node, i + 1, [], 0)
+    // chunks = {parts: [str,...], count: nodes_consumed}
+    let opt_a = try_prefix_match(size_name, chunks.parts, len(chunks.parts))
+    // opt_a = {cmd_name, n_parts} or null — n_parts ≤ len(chunks.parts)
+    let next_idx = i + 1 + chunks.count
+    let sub_base_text = if (next_idx >= len(node)) null
+        else (let nxt = node[next_idx],
+            if (nxt is element and name(nxt) == 'subsup')
+                bare_letter_of(nxt.base)
+            else null)
+    // Try B: use ALL bare chunks + subsup base
+    let bare_full = concat_strings(chunks.parts, len(chunks.parts), "")
+    let opt_b = if (sub_base_text != null
+            and sym.lookup_symbol("\\" ++ size_name ++ bare_full ++ sub_base_text) != null) {
+            {cmd_name: size_name ++ bare_full ++ sub_base_text,
+             subsup: node[next_idx],
+             consumed: chunks.count + 2}
+        } else null
+    if (opt_b != null) opt_b
+    else if (opt_a != null) {
+        {cmd_name: opt_a.cmd_name, subsup: null, consumed: opt_a.n_parts + 1}
+    } else null
+}
+
+fn try_prefix_match(size_name, parts, n) {
+    if (n <= 0) null
+    else (let text = concat_strings(parts, n, ""),
+        if (sym.lookup_symbol("\\" ++ size_name ++ text) != null) {
+            {cmd_name: size_name ++ text, n_parts: n}
+        } else try_prefix_match(size_name, parts, n - 1))
+}
+
+fn concat_strings(parts, n, acc) {
+    if (n <= 0) acc
+    else concat_strings(parts, n - 1, parts[n - 1] ++ acc)
+}
+
+fn collect_letter_chunks(node, j, acc, count) {
+    if (j >= len(node)) {
+        {parts: acc, count: count}
+    } else {
+        let child = node[j]
+        let txt = bare_letter_of(child)
+        if (txt == null) {
+            {parts: acc, count: count}
+        } else collect_letter_chunks(node, j + 1, acc ++ [txt], count + 1)
+    }
+}
+
+fn collect_bare_letters(node, j, acc, count) {
+    if (j >= len(node)) {
+        {text: acc, count: count}
+    } else {
+        let child = node[j]
+        let txt = bare_letter_of(child)
+        if (txt == null) {
+            {text: acc, count: count}
+        } else collect_bare_letters(node, j + 1, acc ++ txt, count + 1)
+    }
+}
+
+fn bare_letter_of(child) {
+    if (child == null) null
+    else if (child is string) (
+        let s = string(child),
+        if (len(s) > 0 and len(s) <= 6 and is_alpha_text(s)) s
+        else null)
+    else if (child is element and (name(child) == 'symbol' or name(child) == 'word')) (
+        let s = get_text(child),
+        if (len(s) > 0 and len(s) <= 6 and is_alpha_text(s)) s
+        else null)
+    else null
+}
+
+fn render_combined_big_command(combo, context) {
+    let unicode = sym.lookup_symbol(combo.cmd_name)
+    if (unicode == null) render_unknown_command("\\\\" ++ combo.cmd_name)
+    else if (combo.subsup == null) render_limit_operator_symbol(unicode, context)
+    else (let synthetic_base = <command name: combo.cmd_name>,
+          let synthetic_subsup = <subsup base: synthetic_base, sub: combo.subsup.sub, sup: combo.subsup.sup>,
+          scripts.render(synthetic_subsup, context, render_node))
+}
+
+// Detect an ERROR node carrying a truncated command prefix (e.g., "\left",
+// "\Left", "\right") followed by alpha letters that, when concatenated, form
+// a known relation/symbol/big-op command (\leftarrow, \Leftrightarrow,
+// \rightharpoonup, etc.). The grammar matches `\left` as a delimiter prefix
+// before letting longer command tokens win, so we recover the intended token
+// at render time.
+//
+// Returns {cmd_name: "leftarrow", consumed: N} or null.
+fn try_error_prefix_word_combine(node, i) {
+    if (i + 1 >= len(node)) null
+    else (let cur = node[i],
+        if (not (cur is element)) null
+        else if (name(cur) != 'ERROR') null
+        else (let raw = plain_text(cur),
+            if (len(raw) < 2 or slice(raw, 0, 1) != "\\") null
+            else (let prefix = slice(raw, 1, len(raw)),
+                if (not is_alpha_text(prefix)) null
+                else attempt_error_prefix_combine(node, i, prefix))))
+}
+
+fn attempt_error_prefix_combine(node, i, prefix) {
+    let chunks = collect_letter_chunks(node, i + 1, [], 0)
+    let opt_a = try_error_prefix_match(prefix, chunks.parts, len(chunks.parts))
+    if (opt_a == null) null
+    else {
+        {cmd_name: opt_a.cmd_name, consumed: opt_a.n_parts + 1}
+    }
+}
+
+fn try_error_prefix_match(prefix, parts, n) {
+    if (n <= 0) null
+    else (let text = concat_strings(parts, n, ""),
+        if (sym.lookup_symbol("\\" ++ prefix ++ text) != null) {
+            {cmd_name: prefix ++ text, n_parts: n}
+        } else try_error_prefix_match(prefix, parts, n - 1))
+}
+
+fn render_combined_error_prefix_command(combo, context) {
+    let unicode = sym.lookup_symbol(combo.cmd_name)
+    if (unicode == null) render_unknown_command("\\\\" ++ combo.cmd_name)
+    else (let atom_type = sym.classify_symbol(combo.cmd_name),
+        if (sym.is_limit_op(combo.cmd_name)) render_limit_operator_symbol(unicode, context)
+        else box.text_box(unicode, symbol_font_class(combo.cmd_name, context), atom_type))
+}
+
 fn render_sized_delim_pair(cmd_node, delim_node, context) {
     let size_name = string(cmd_node.size)
     let delim_text = sized_pair_text(delim_node)
@@ -1825,6 +2018,29 @@ fn make_tall_sqrt_spec() => {
 // Default fallback
 // ============================================================
 
+// text_group elements wrap the brace tokens (`{`, `}`) into the child list
+// alongside the actual content. Strip the literal brace strings so they don't
+// appear in the rendered output (style commands like `\mathit{text}` would
+// otherwise emit `{text}`).
+fn render_text_group(node, context) {
+    let n = len(node)
+    if (n == 0) box.text_box("", null, "mord")
+    else {
+        let children = (for (i in 0 to (n - 1),
+            let child = node[i]
+            where child != null and not is_brace_string(child))
+            render_node(child, context))
+        if (len(children) == 0) box.text_box("", null, "mord")
+        else box.hbox(children)
+    }
+}
+
+fn is_brace_string(child) {
+    if (not (child is string)) false
+    else (let s = string(child),
+        s == "{" or s == "}")
+}
+
 fn render_default(node, context) {
     let children = render_children(node, context)
     if (len(children) > 0 and name(node) == '_seq') {
@@ -1917,6 +2133,14 @@ fn render_children_scan(node, context, i, acc) {
         (let rendered = render_scriptstyle_sibling(node[i + 1], context),
          let spacer = if (has_trailing_radical(acc)) [box.skip_box(0.17)] else [],
          render_children_scan(node, context, i + 2, acc ++ spacer ++ [rendered]))
+    else if (try_sized_delim_word_combine(node, i) != null)
+        (let combo = try_sized_delim_word_combine(node, i),
+         let rendered = render_combined_big_command(combo, context),
+         render_children_scan(node, context, i + combo.consumed, acc ++ [rendered]))
+    else if (try_error_prefix_word_combine(node, i) != null)
+        (let combo = try_error_prefix_word_combine(node, i),
+         let rendered = render_combined_error_prefix_command(combo, context),
+         render_children_scan(node, context, i + combo.consumed, acc ++ [rendered]))
     else if (is_sized_delim_pair(node, i))
         (let rendered = render_sized_delim_pair(node[i], node[i + 1], context),
          render_children_scan(node, context, i + 2, acc ++ [rendered]))
@@ -2413,7 +2637,7 @@ fn is_plain_number_text(text) {
 
 fn is_digit_text(text, i) {
     if (i >= len(text)) true
-    else if (contains("0123456789", slice(text, i, i + 1))) is_digit_text(text, i + 1)
+    else if (contains("0123456789.,", slice(text, i, i + 1))) is_digit_text(text, i + 1)
     else false
 }
 

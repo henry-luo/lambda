@@ -51,7 +51,7 @@ pub fn render(node, context, render_fn) {
 fn get_font_name(cmd) {
     if (cmd == "\\mathbf") "mathbf"
     else if (cmd == "\\mathrm") "cmr"
-    else if (cmd == "\\mathit") "mathit"
+    else if (cmd == "\\mathit") "it"
     else if (cmd == "\\mathbb") "bb"
     else if (cmd == "\\mathcal") "cal"
     else if (cmd == "\\mathfrak") "frak"

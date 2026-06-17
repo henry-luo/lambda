@@ -60,7 +60,8 @@ let relations = {
     trianglelefteq: "⊴", trianglerighteq: "⊵",
     // AMS relations
     preceq: "⪯", succeq: "⪰", nmid: "∤",
-    nleq: "≰", ngeq: "≱"
+    nleq: "≰", ngeq: "≱",
+    triangle: "△"
 }
 
 // ============================================================
@@ -101,7 +102,7 @@ let misc_symbols = {
     emptyset: "∅", varnothing: "∅",
     neg: "¬", lnot: "¬", surd: "√",
     top: "⊤", bot: "⊥", angle: "∠",
-    triangle: "△", backslash: "∖",
+    backslash: "∖",
     ell: "ℓ", wp: "℘", Re: "ℜ", Im: "ℑ",
     aleph: "ℵ", beth: "ℶ", gimel: "ℷ",
     hbar: "ℏ", imath: "ı", jmath: "ȷ",
@@ -263,6 +264,11 @@ let font_class_map = {
     cdot: "lm_cmr", times: "lm_cmr", div: "lm_cmr",
     vert: "lm_cmr", Vert: "lm_cmr",
     lvert: "lm_cmr", rvert: "lm_cmr", lVert: "lm_cmr", rVert: "lm_cmr",
+    langle: "lm_cmr", rangle: "lm_cmr",
+    lceil: "lm_cmr", rceil: "lm_cmr",
+    lfloor: "lm_cmr", rfloor: "lm_cmr",
+    lbrace: "lm_cmr", rbrace: "lm_cmr",
+    backslash: "lm_cmr", surd: "lm_cmr",
     dots: "lm_cmr", ldots: "lm_cmr", cdots: "lm_cmr",
     vdots: "lm_cmr", ddots: "lm_cmr",
     forall: "lm_cmr", exists: "lm_cmr",

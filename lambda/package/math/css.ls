@@ -89,6 +89,7 @@ pub fn font_class(font_name) {
         case "script": SCRIPT
         case "sans": SANS
         case "text": TEXT
+        case "it": "lm_cmr lm_it"
         default: MATHIT
     }
 }

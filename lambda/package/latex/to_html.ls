@@ -136,10 +136,11 @@ fn format_data_attrs_rec(attrs, i, n, acc) {
 // ============================================================
 
 fn escape_html(s) {
+    // HTML5 only requires `<` and `&` to be escaped in text content; literal
+    // `>` is allowed. MathLive's output emits `>` unescaped, so match it.
     let r1 = replace(s, "&", "&amp;")
     let r2 = replace(r1, "<", "&lt;")
-    let r3 = replace(r2, ">", "&gt;")
-    r3
+    r2
 }
 
 fn escape_attr(s) {
