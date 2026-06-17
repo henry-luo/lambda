@@ -220,6 +220,27 @@ P2 write-site evidence retained, 2026-06-17:
   constructor slots, and only then emit the write slot path for nested member
   receivers such as `this.v1.value`.
 
+Stashed optimization branch dropped, 2026-06-17:
+
+- The follow-up stashed Tune10 branch is being dropped because it regressed
+  js262 suite performance. Correctness alone is not enough for this tuning
+  track; js262 wall time is part of the acceptance signal.
+- The dropped optimization bundle included:
+  - class-valued constructor-parameter field propagation beside
+    `ctor_prop_types`;
+  - propagation of class facts through inherited constructor fields and
+    `super(...)` arguments;
+  - inherited constructor-slot lookup via the class chain;
+  - guarded nested receiver writes for patterns like `this.v1.value = expr`;
+  - broader `disable_ctor_shape_fast_paths` gating that preserved metadata while
+    disabling unsafe pre-shaped allocation / P2 / P3 paths.
+- The likely failure mode is that the additional compile/lowering analysis and
+  guarded-write machinery cost too much across the many short js262 scripts, and
+  the runtime guards are not yet proven hot enough to pay for themselves.
+- We will come back to these ideas with a more careful approach: measure each
+  optimization in isolation, keep compile-time cost visible, require targeted
+  benchmark wins, and only then run the broad js262 gate before retaining code.
+
 The Tune10 goal is to stop tuning from aggregate benchmark wall time alone and
 move to a per-mechanism loop: profile a benchmark, choose the hottest runtime or
 MIR helper family, implement one targeted optimization, then reprofile the same
